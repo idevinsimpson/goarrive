@@ -4,6 +4,8 @@ import { httpsCallable } from 'firebase/functions';
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { signOut } from 'firebase/auth';
+
 import { useWsfAuth } from '../src/auth';
 import { AuthFlagOffPanel } from '../src/AuthFlagOffPanel';
 import { describeCallableError } from '../src/callableErrors';
@@ -11,16 +13,22 @@ import {
   authFormStyles,
   ErrorText,
   FieldLabel,
+  FootNote,
   FormShell,
+  HelpPanel,
   SecondaryLink,
   StatusText,
   SubmitButton,
   TextField,
 } from '../src/AuthFormPrimitives';
 import { wsfAuthEnabled } from '../src/featureFlags';
-import { getFirebaseFirestore, getFirebaseFunctions } from '../src/firebase';
+import { getFirebaseAuth, getFirebaseFirestore, getFirebaseFunctions } from '../src/firebase';
 import { LegalAccordion } from '../src/LegalAccordion';
 import { WSF_PRIVACY_MARKDOWN, WSF_TERMS_MARKDOWN } from '../src/legalContent';
+import {
+  authDestinationCard,
+  readAuthDestinationKind,
+} from '../src/authDestination';
 import { nextRouteAfterAuth } from '../src/pendingJoinCode';
 
 type ExistingProfile = {
@@ -154,15 +162,51 @@ export default function ProfileSetup() {
     }
   }
 
+  const destinationKind = readAuthDestinationKind();
+
+  async function onSignOut() {
+    await signOut(getFirebaseAuth());
+    router.replace('/signin' as never);
+  }
+
   return (
     <FormShell
-      heading={existing ? 'Update your profile' : 'Complete your profile'}
+      heading={existing ? 'Update your profile' : 'What should we call you?'}
       intro={
         existing
           ? 'Change your display name or re-accept the current terms.'
           : 'One step before you can start or join a community.'
       }
       testID="wsf-profile"
+      tone="action"
+      /* No step chip for a member who already has a profile and is just
+         editing it — they are not partway through signing up. */
+      step={existing ? undefined : 'Step 3 of 3'}
+      eyebrow={existing ? undefined : 'Last step'}
+      /* THE LAST OF THE THREE GATES `nextRouteAfterAuth` IS READ AT. Still the
+         KIND only — a pending join code is opaque, and a private community's
+         name is not something a half-authorized account may read. */
+      destination={
+        destinationKind ? authDestinationCard(destinationKind, 'still') : undefined
+      }
+      foot={
+        <>
+          {user.email ? (
+            <FootNote testID="wsf-profile-account">{`Signed in as ${user.email}`}</FootNote>
+          ) : null}
+          {/* A WAY OUT OF THE LAST GATE. Without this a member who reached
+              profile setup on the wrong account had no control on the screen
+              to leave it with. `signOut` is the same one every other gate
+              uses; nothing about the auth model changes. */}
+          <SubmitButton
+            label="Sign out"
+            onPress={onSignOut}
+            submitting={false}
+            testID="wsf-profile-signout"
+            variant="tertiary"
+          />
+        </>
+      }
     >
       <FieldLabel>Display name</FieldLabel>
       <TextField
@@ -170,6 +214,28 @@ export default function ProfileSetup() {
         onChangeText={setDisplayName}
         autoCapitalize="words"
         testID="wsf-profile-displayName"
+      />
+
+      {/*
+        THE VOID IS FILLED WITH THE ONE THING THIS SCREEN OWES AN ANSWER TO.
+        A display name is one field, so this state was a name, a checkbox, a
+        button and then a third of a phone of empty cream. What belongs in it
+        is what a person is actually deciding here — who sees this name.
+
+        NARROWED TO WHAT THE SOURCE PROVES. Not "your community sees this" and
+        not "it is never shown outside your community": both are broader than
+        anything the product guarantees, in opposite directions.
+        `wsfMemberProfiles/{uid}` is owner-readable only (`allow read: if
+        request.auth.uid == uid`), every read and write of it is keyed to the
+        caller's own uid, and no callable returns another member's
+        displayName. So today this name is shown to nobody but its owner — and
+        the name that DOES go on a screen in a room is a different one, chosen
+        per turn, which is worth saying so the two are not confused.
+      */}
+      <HelpPanel
+        title="Where this name is used"
+        body="It is the name on your account, and you can change it later. If you ever go up on a screen at an event, you choose what that screen calls you then — separately, and each time."
+        testID="wsf-profile-name-use"
       />
 
       <View style={styles.legal}>
@@ -185,12 +251,26 @@ export default function ProfileSetup() {
         />
       </View>
 
+      {/*
+        `aria-checked` IS SET DIRECTLY, BECAUSE accessibilityState DID NOT
+        REACH THE DOM.
+
+        This renders a role="checkbox" whose checked state was announced to
+        nobody: react-native-web did not map `accessibilityState={{ checked }}`
+        to an attribute here, so a screen reader met a checkbox with no state
+        — on the one control in the product that records a legal consent.
+        Caught by asserting the attribute rather than assuming the prop
+        arrived.
+
+        `accessibilityState` stays for native, where it is the supported API.
+      */}
       <Pressable
         onPress={() => setAcceptedTerms((v) => !v)}
         style={authFormStyles.checkboxRow}
         testID="wsf-profile-termsCheckbox"
         accessibilityRole="checkbox"
         accessibilityState={{ checked: acceptedTerms }}
+        aria-checked={acceptedTerms}
       >
         <View style={[authFormStyles.checkbox, acceptedTerms ? authFormStyles.checkboxChecked : null]}>
           {acceptedTerms ? <Text style={authFormStyles.checkboxCheck}>{'\u2713'}</Text> : null}

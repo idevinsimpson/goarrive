@@ -214,6 +214,8 @@ export async function seedActiveGoal(opts: {
   unit: string;
   total: number;
   timezone?: string;
+  /** Defaults to a week out, which is what every caller before this wanted. */
+  endsAt?: Date;
 }): Promise<void> {
   const now = new Date();
   await firestoreWrite(`wsfGoals/${opts.goalId}`, {
@@ -224,7 +226,7 @@ export async function seedActiveGoal(opts: {
     unit: { stringValue: opts.unit },
     status: { stringValue: 'active' },
     startsAt: tsField(new Date(now.getTime() - 7 * 24 * 60 * 60_000)),
-    endsAt: tsField(new Date(now.getTime() + 7 * 24 * 60 * 60_000)),
+    endsAt: tsField(opts.endsAt ?? new Date(now.getTime() + 7 * 24 * 60 * 60_000)),
     timezone: { stringValue: opts.timezone ?? 'America/New_York' },
     createdAt: tsField(now),
     updatedAt: tsField(now),
@@ -528,7 +530,34 @@ export async function tapInView(
   spec: ElementSpec,
   name: string
 ): Promise<ElementState> {
-  const st = await elementState(run.page, spec);
+  /*
+    TAP WHERE THE CONTROL IS, NOT WHERE IT WAS.
+
+    A tap is coordinates, and these pages move under one: Community Home
+    re-renders when its presence and activity reads return, and a wheel scroll
+    can still be settling when the box is read. Either shifts the control
+    between the measurement and the tap, and the tap then lands on whatever
+    took its place — which is how `reachAndTap` could report a reachable
+    control and leave the page exactly where it was. Measured at 360x800: two
+    failures in six solo runs, always the same silent no-op.
+
+    So the box is read until it stops moving. Nothing is relaxed by this: it is
+    the same control, and the in-view and uncovered checks below are unchanged
+    and are made against the settled box.
+  */
+  let st = await elementState(run.page, spec);
+  for (let i = 0; i < 20; i += 1) {
+    await sleep(50);
+    const next = await elementState(run.page, spec);
+    const settled =
+      st.found &&
+      next.found &&
+      Math.round(st.box.x) === Math.round(next.box.x) &&
+      Math.round(st.box.y) === Math.round(next.box.y) &&
+      Math.round(st.box.h) === Math.round(next.box.h);
+    st = next;
+    if (settled) break;
+  }
   if (!st.found) throw new Error(`${name}: not found`);
   if (!st.inView) {
     throw new Error(
@@ -804,4 +833,42 @@ export async function firstViewportShare(
       vh,
     };
   }, testId);
+}
+
+/**
+ * GET PAST THE VERIFY GATE, WHICHEVER WAY THIS BUILD OFFERS.
+ *
+ * The gate has two ways through and which one applies depends on the send
+ * outcome, not on the test:
+ *
+ *   · Where a verification send was ATTEMPTED, "I have verified" is offered
+ *     and is the way on. A tap is what a person would do.
+ *   · Where email is UNCONFIGURED that control is deliberately absent — there
+ *     is no link to have followed — and the screen refreshes auth state on
+ *     its own and continues once the address is verified.
+ *
+ * Both end in the same place, so callers wait for the destination rather than
+ * insisting on a control. Call this only AFTER the account has actually been
+ * verified out of band; it does not make anything true, it just stops the
+ * test from depending on which path this build takes.
+ *
+ * Specs that exist to prove the MANUAL control still works should click it
+ * directly rather than call this — this helper deliberately cannot tell you
+ * which path it used.
+ */
+export async function clearVerifyGate(
+  page: Page,
+  destination: string,
+  timeout = 25_000
+): Promise<void> {
+  const check = page.getByTestId('wsf-verify-check');
+  // A short wait, not the full timeout: on the unconfigured path this control
+  // never appears, and the passive refresh is already running.
+  try {
+    await check.waitFor({ state: 'visible', timeout: 3_000 });
+    await check.click();
+  } catch {
+    // No control in this outcome. The screen is refreshing for itself.
+  }
+  await expect(page.getByTestId(destination)).toBeVisible({ timeout });
 }

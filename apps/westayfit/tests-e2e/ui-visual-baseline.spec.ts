@@ -2,6 +2,8 @@ import path from 'node:path';
 
 import { test, expect, type Browser } from '@playwright/test';
 
+import { CAPTURE_FRAMES } from './helpers/capture';
+
 import {
   PROJECT_ID,
   stampId,
@@ -103,21 +105,23 @@ async function shoot(browser: Browser, w: typeof WIDTHS[number], email: string, 
   await page.waitForTimeout(1500);
   await expectNoHorizontalOverflow(page, `Community Home at ${w.key}`);
   await expectNoMidWordBreak(page, `wsf-community-goal-title-${name}`, `Community Home at ${w.key}`);
-  await page.screenshot({ path: path.join(OUT, `home-${w.key}-viewport.png`) });
+  if (CAPTURE_FRAMES) await page.screenshot({ path: path.join(OUT, `home-${w.key}-viewport.png`) });
   // fullPage is USELESS here: the app is a React Native Web ScrollView, so the
   // document never grows and `fullPage: true` returns a byte-identical copy of
   // the viewport. The first run of this spec produced ten files and five
   // distinct images. What is below the fold has to be reached by scrolling the
   // inner scroller, which is also the only honest way to see it.
   const scrolled = await page.evaluate(() => {
-    const el = [...document.querySelectorAll('*')].find((e) => e.scrollHeight > e.clientHeight + 4);
+    const el = Array.from(document.querySelectorAll('*')).find(
+      (e) => e.scrollHeight > e.clientHeight + 4,
+    );
     if (!el) return null;
     el.scrollTop = el.scrollHeight;
     return { scrollHeight: el.scrollHeight, clientHeight: el.clientHeight };
   });
   if (scrolled && scrolled.scrollHeight > scrolled.clientHeight + 4) {
     await page.waitForTimeout(500);
-    await page.screenshot({ path: path.join(OUT, `home-${w.key}-scrolled-to-end.png`) });
+    if (CAPTURE_FRAMES) await page.screenshot({ path: path.join(OUT, `home-${w.key}-scrolled-to-end.png`) });
   }
   await context.close();
 }
@@ -197,7 +201,7 @@ test('the primary action is keyboard reachable and shows a visible focus state',
   });
   const hasRing = (ring.outlineStyle !== 'none' && parseFloat(ring.outlineWidth) > 0) || (ring.boxShadow !== 'none' && ring.boxShadow !== '');
   expect(hasRing, `focused primary action has no visible focus indicator: ${JSON.stringify(ring)}`).toBe(true);
-  await page.screenshot({ path: path.join(OUT, 'home-390x640-primary-focused.png') });
+  if (CAPTURE_FRAMES) await page.screenshot({ path: path.join(OUT, 'home-390x640-primary-focused.png') });
   await context.close();
 });
 
@@ -283,7 +287,9 @@ test('a long community name does not push the primary action off a short phone',
         markBottom: m ? Math.round(m.bottom) : null,
       };
     },
-    { id: `wsf-community-goal-link-${goalId}`, markId: 'wsf-community-wordmark' }
+    // The wordmark the capture must begin at is the member shell's: Community
+    // Home stopped drawing one of its own when the persistent top bar landed.
+    { id: `wsf-community-goal-link-${goalId}`, markId: 'wsf-member-topbar-wordmark' }
   );
   expect(measured, 'the primary action was not found').not.toBeNull();
   expect(
@@ -299,6 +305,6 @@ test('a long community name does not push the primary action off a short phone',
     `LONG-NAME start-moving top=${measured!.top} bottom=${measured!.bottom} wordmark=${measured!.markTop}..${measured!.markBottom} scrollers=${measured!.scrollers} moved=none viewport=640`
   );
   expect(measured!.bottom, 'the long-name case pushes the primary action off a 390x640 phone').toBeLessThanOrEqual(640);
-  await page.screenshot({ path: path.join(OUT, 'home-390x640-long-name.png') });
+  if (CAPTURE_FRAMES) await page.screenshot({ path: path.join(OUT, 'home-390x640-long-name.png') });
   await context.close();
 });

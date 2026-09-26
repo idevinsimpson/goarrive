@@ -39,6 +39,9 @@ import path from 'node:path';
 
 import { expect, test, type Browser, type Locator, type Page } from '@playwright/test';
 
+import { clearVerifyGate } from './helpers/mobile';
+import { manageOffered, openMemberManage } from './helpers/memberShell';
+
 
 // This journey was already long — two browser contexts, an enrolment, a
 // revocation — and it now also writes eighteen captures across four
@@ -127,8 +130,7 @@ async function championWithGoal(page: Page): Promise<{ groupId: string; goalId: 
   await expect(page.getByTestId('wsf-verify')).toBeVisible({ timeout: 20_000 });
   await sendSettled;
   await markEmailVerified(email);
-  await page.getByTestId('wsf-verify-check').click();
-  await expect(page.getByTestId('wsf-profile')).toBeVisible({ timeout: 20_000 });
+  await clearVerifyGate(page, 'wsf-profile', 20_000);
   await page.getByTestId('wsf-profile-termsCheckbox').click();
   await page.getByTestId('wsf-profile-submit').click();
   await expect(page.getByTestId('wsf-home-signed-in')).toBeVisible({ timeout: 20_000 });
@@ -162,7 +164,7 @@ async function championWithGoal(page: Page): Promise<{ groupId: string; goalId: 
 }
 
 async function openManage(page: Page): Promise<void> {
-  await page.getByTestId('wsf-community-manage').click();
+  await openMemberManage(page);
   await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible({ timeout: 15_000 });
 }
 
@@ -336,7 +338,10 @@ test('a Champion enrols a screen, the attendee codes grant nothing, and revoking
   await expect(scannerPage.getByTestId('wsf-event-signed-out')).toBeVisible({ timeout: 25_000 });
   await noStationCredential();
   await expect(scannerPage.getByTestId('wsf-station-screen')).toHaveCount(0);
-  await expect(scannerPage.getByTestId('wsf-community-manage')).toHaveCount(0);
+  expect(
+    await manageOffered(scannerPage),
+    'Champion tools are offered to somebody who is not a Champion',
+  ).toBe(false);
 
   // SCANNING THE NEWCOMER CODE: the ordinary join page, which still asks for
   // an account. It enrols no screen either. This context has already answered

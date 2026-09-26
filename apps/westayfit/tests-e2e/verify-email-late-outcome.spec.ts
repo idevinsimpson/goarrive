@@ -88,7 +88,13 @@ test('an unconfigured answer that lands after the screen is mounted reaches it w
   await held.release('unconfigured');
 
   await expect(page.getByTestId('wsf-verify-unconfigured')).toBeVisible({ timeout: 15_000 });
-  await expect(verify).toContainText("Email isn't switched on for this test build");
+  // The copy moved to the Batch A target's wording, which says the same two
+  // things in one sentence instead of repeating them in a panel below. The
+  // properties this test exists for are unchanged and both still asserted:
+  // the screen states plainly that nothing was sent, and it never claims a
+  // link was.
+  await expect(verify).toContainText('No message was sent');
+  await expect(verify).toContainText('until email is switched on');
   await expect(verify).not.toContainText('We sent a verification link');
 });
 

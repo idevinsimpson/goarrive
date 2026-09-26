@@ -10,7 +10,12 @@
     "capture:coach-discovery": "node scripts/capture-coach-discovery.mjs",
     "optimize:coach-discovery-images": "node scripts/optimize-coach-discovery-images.mjs",
     "preview:coach-discovery": "node scripts/serve-static-export.mjs apps/goarrive/dist",
-    "seed:staging": "node scripts/seed-staging.js"
+    "seed:staging": "node scripts/seed-staging.js",
+    "check:before-frozen": "node scripts/westayfit/check-evidence-intact.mjs --before-only",
+    "check:evidence": "node scripts/westayfit/check-evidence-intact.mjs",
+    "wsf:route-coverage": "node scripts/westayfit/route-target-coverage.mjs",
+    "check:route-index": "node scripts/westayfit/route-target-coverage.mjs --check",
+    "write:route-index": "node scripts/westayfit/route-target-coverage.mjs --write"
   },
   "repository": {
     "type": "git",

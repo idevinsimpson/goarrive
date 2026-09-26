@@ -2,6 +2,8 @@ import { randomBytes } from 'node:crypto';
 
 import { expect, test, type Page } from '@playwright/test';
 
+import { clearVerifyGate } from './helpers/mobile';
+
 /**
  * THE SCANNED EVENT SURVIVES THE AUTH ROUND TRIP — asserted of the PRODUCT.
  *
@@ -253,8 +255,7 @@ test('a NEW account is returned to the scanned event after verifying, and the sc
   await expect(page).toHaveURL(/verify-email/, { timeout: 20_000 });
 
   await markEmailVerified(email);
-  await page.getByTestId('wsf-verify-check').click();
-  await expect(page.getByTestId('wsf-profile')).toBeVisible({ timeout: 20_000 });
+  await clearVerifyGate(page, 'wsf-profile', 20_000);
   await page.getByTestId('wsf-profile-displayName').fill('New At The Event');
   await page.getByTestId('wsf-profile-termsCheckbox').click();
   await page.getByTestId('wsf-profile-submit').click();

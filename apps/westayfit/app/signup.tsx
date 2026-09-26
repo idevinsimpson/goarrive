@@ -69,7 +69,7 @@ export default function SignUp() {
   // someone the useEffect above is already about to redirect.
   if (!ready || user) {
     return (
-      <FormShell heading="Create your account" testID="wsf-signup-loading">
+      <FormShell heading="Start moving together." testID="wsf-signup-loading">
         <StatusText>Loading…</StatusText>
       </FormShell>
     );
@@ -128,9 +128,22 @@ export default function SignUp() {
 
   return (
     <FormShell
-      heading="Create your account"
-      intro="We will send a verification email before you can join a community."
+      heading="Start moving together."
+      /* CAPABILITY-NEUTRAL, BECAUSE THE SEND IS NOT GUARANTEED. The old line
+         promised "We will send a verification email", which is false on any
+         build where WSF_EMAIL_* is unset — including the one being smoke
+         tested. This states the requirement, which is true either way; the
+         outcome screen then says what actually happened. */
+      intro="You'll need to verify your email before you can join a community."
       testID="wsf-signup"
+      step="Step 1 of 3"
+      foot={
+        <SecondaryLink
+          href="/signin"
+          label="Already have an account? Sign in"
+          testID="wsf-signup-signin"
+        />
+      }
     >
       <FieldLabel>Display name</FieldLabel>
       <TextField
@@ -191,7 +204,6 @@ export default function SignUp() {
         disabled={!canSubmit}
         testID="wsf-signup-submit"
       />
-      <SecondaryLink href="/signin" label="Already have an account? Sign in" />
     </FormShell>
   );
 }

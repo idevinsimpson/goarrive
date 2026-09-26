@@ -54,6 +54,8 @@ import path from 'node:path';
 
 import { expect, test, type Page } from '@playwright/test';
 
+import { clearVerifyGate } from './helpers/mobile';
+
 test.describe.configure({ timeout: 240_000 });
 
 const AUTH_EMULATOR = 'http://127.0.0.1:9099';
@@ -344,9 +346,7 @@ test('the scanned journey: event and activity survive a real signup, and nothing
   await expect(page.getByTestId('wsf-verify')).toBeVisible({ timeout: 30_000 });
   await sendSettled;
   await markEmailVerified(email);
-  await page.getByTestId('wsf-verify-check').click();
-
-  await expect(page.getByTestId('wsf-profile')).toBeVisible({ timeout: 30_000 });
+  await clearVerifyGate(page, 'wsf-profile', 30_000);
   await page.getByTestId('wsf-profile-termsCheckbox').click();
   await page.getByTestId('wsf-profile-submit').click();
 

@@ -1,5 +1,9 @@
 import { expect, test, type Page } from '@playwright/test';
 
+import { clearVerifyGate } from './helpers/mobile';
+import { openMemberManage } from './helpers/memberShell';
+import { expectCommunityUrl } from './helpers/communityUrl';
+
 /**
  * M-U2 end-to-end: signup → verify email → profile setup → HOME → start
  * community → community page, driven through the real UI against the emulator
@@ -63,10 +67,7 @@ const KNOWN_GAPS = [
  * rows are unchanged.
  */
 async function openChampionDetails(page: Page): Promise<void> {
-  const manage = page.getByTestId('wsf-community-manage');
-  await expect(manage).toBeVisible({ timeout: 20_000 });
-  if ((await page.getByTestId('wsf-community-manage-panel').count()) === 0) await manage.click();
-  await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible({ timeout: 20_000 });
+  await openMemberManage(page);
   const toggle = page.getByTestId('wsf-community-details-toggle');
   await expect(toggle).toBeVisible({ timeout: 20_000 });
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
@@ -156,7 +157,7 @@ test('a new member signs up, verifies, builds a profile, lands on home, then sta
 
   await sendSettled;
   await markEmailVerified(email);
-  await page.getByTestId('wsf-verify-check').click();
+  await clearVerifyGate(page, 'wsf-profile');
 
   // ---- profile setup ------------------------------------------------------
   // E3.5 A4: the 18+ checkbox is gone. Only one checkbox now (terms + 13+
@@ -211,9 +212,14 @@ test('a new member signs up, verifies, builds a profile, lands on home, then sta
   await expect(page.getByTestId('wsf-community-invite-copy')).toBeVisible();
 
   const communityUrl = page.url();
-  expect(communityUrl, 'router should land on /community/<groupId>').toMatch(
-    /\/community\/[A-Za-z0-9_-]+$/
-  );
+  /*
+    The pathname is exactly /community/<id>, and the only query the cross-tab
+    migration seam may add is a redundant `groupId` carrying that same id. The
+    earlier form of this assertion was a regular expression anchored on the end
+    of the whole URL, which the seam breaks without anything being wrong: see
+    `expectCommunityUrl` and the Director's ruling `5795072805`.
+  */
+  expectCommunityUrl(communityUrl);
 
   // ---- the cold-load fix --------------------------------------------------
   const cold = await page.goto(communityUrl);
@@ -227,11 +233,23 @@ test('a new member signs up, verifies, builds a profile, lands on home, then sta
   expect(robots).toBe('noindex,nofollow');
 
   // ---- re-visit the home shows the community ------------------------------
-  // The A3/A2 combination: a signed-in member who navigates back to `/`
-  // sees Your communities populated with the new group.
+  /*
+    THE SAME STALE ASSUMPTION AS identity-account-switch, AND THE SAME FIX.
+
+    This asserted that `/` renders "Your communities" containing the new
+    group. A member with exactly ONE community is not shown that list any
+    more: `resolveCurrentCommunity` resolves a sole membership and
+    `/community/[groupId]` IS home for them, so `/` redirects straight there
+    and `wsf-home-my-list` is not in the document at all.
+
+    The property this step is really about — a signed-in member who navigates
+    back to `/` arrives at their community rather than a dead end — is
+    unchanged and still asserted, on the screen the product actually shows.
+  */
   await page.goto('/');
-  await expect(page.getByTestId('wsf-home-my-list')).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByText(communityName)).toBeVisible();
+  await expect(page.getByTestId('wsf-community-name')).toContainText(communityName, {
+    timeout: 15_000,
+  });
 
   // ---- §6.1: sign out, sign back in via /signin, verify still lands on -----
   // ---- home (not profile-setup), then that visiting /profile-setup
@@ -241,7 +259,10 @@ test('a new member signs up, verifies, builds a profile, lands on home, then sta
   // a returning member who navigates to /profile-setup on their own (deep link,
   // browser history, share sheet) must not be trapped there — profile-setup.tsx
   // detects the existing profile and hands them back to the home.
-  await page.getByTestId('wsf-home-signout').click();
+  // Sign out lives on /you for a signed-in member; the community route this
+  // member now lands on carries no such control.
+  await page.goto('/you');
+  await page.getByTestId('wsf-you-signout').click();
   await expect(page.getByTestId('wsf-home-signed-out')).toBeVisible({ timeout: 15_000 });
 
   await page.goto('/signin');
@@ -249,17 +270,24 @@ test('a new member signs up, verifies, builds a profile, lands on home, then sta
   await page.getByTestId('wsf-signin-password').fill(password);
   await page.getByTestId('wsf-signin-submit').click();
 
-  // A returning verified member with a profile lands on `/` — not verify-email,
-  // not profile-setup.
-  await expect(page.getByTestId('wsf-home-signed-in')).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByTestId('wsf-home-my-list')).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByText(communityName)).toBeVisible();
+  /*
+    THE PROPERTY IS UNCHANGED: a returning verified member with a profile is
+    sent onward, NOT back to verify-email and NOT back to profile-setup. What
+    changed is where "onward" is — a member with one community is taken to it.
+  */
+  await expect(page.getByTestId('wsf-community-name')).toContainText(communityName, {
+    timeout: 15_000,
+  });
+  await expect(page.getByTestId('wsf-verify')).toHaveCount(0);
+  await expect(page.getByTestId('wsf-profile')).toHaveCount(0);
 
   // Now the redirect assertion. Navigate to /profile-setup — the mount-time
-  // existence read should detect the profile and router.replace back to `/`.
+  // existence read should detect the profile and router.replace away from it.
   await page.goto('/profile-setup');
-  await page.waitForURL(/\/$/, { timeout: 15_000 });
-  await expect(page.getByTestId('wsf-home-signed-in')).toBeVisible();
+  await expect(page.getByTestId('wsf-community-name')).toContainText(communityName, {
+    timeout: 15_000,
+  });
+  await expect(page.getByTestId('wsf-profile')).toHaveCount(0);
 
   expect(
     errors.filter((e) => !KNOWN_GAPS.some((gap) => e.includes(gap))),

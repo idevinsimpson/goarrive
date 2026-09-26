@@ -203,6 +203,34 @@ export function formatReachedOn(iso: string, opts?: DateOptions & { now?: Date }
 }
 
 /**
+ * "Ended Aug 31" — the day a goal's window closed, in its own zone.
+ *
+ * `formatEndsAt` is deliberately FUTURE tense ("Ends Mon, Sep 21") because it
+ * describes a window still open. Putting it behind the word "Ended" produced
+ * "Ended Ends Mon, Aug 31" on the first Progress capture: doubled, and
+ * present tense for something already over. A finished goal gets its own
+ * formatter rather than a prefix glued onto the running one.
+ *
+ * Same year rule as formatReachedOn: the year appears only when it is not
+ * the current one, so a recent goal reads short and an old one is unambiguous.
+ */
+export function formatEndedOn(iso: string, opts?: DateOptions & { now?: Date }): string | null {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const zone = resolveZone(opts);
+  if (!zone.ok) return null;
+  const [dy] = ymd(d, opts?.locale, zone.timeZone).split('-');
+  const [ny] = ymd(opts?.now ?? new Date(), opts?.locale, zone.timeZone).split('-');
+  const label = new Intl.DateTimeFormat(opts?.locale, {
+    timeZone: zone.timeZone,
+    month: 'short',
+    day: 'numeric',
+    ...(dy === ny ? {} : { year: 'numeric' as const }),
+  }).format(d);
+  return `Ended ${label}`;
+}
+
+/**
  * "Counting since Sep 19" — the instant a combined goal began counting, in its
  * own zone, on exactly the rule formatReachedOn uses for the year.
  *
@@ -240,4 +268,33 @@ export function formatMonthYear(d: Date): string | null {
 /** "3:41 PM" — the reader's own clock, used for client receipt times. */
 export function formatClock(d: Date): string {
   return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(d);
+}
+
+/**
+ * How long ago something happened, in the shortest honest form.
+ *
+ * For the Community screen's recent-movement strip, beside an amount and a
+ * unit. `wsfGoalRecentAdditions` publishes an ISO instant and nothing else, so
+ * this is the only thing that turns it into words.
+ *
+ * DELIBERATELY COARSE. The tail is a sign of life, not a log: minutes up to an
+ * hour, hours up to a day, then days. A to-the-second reading would invite
+ * someone to correlate two entries with a person who was standing there.
+ *
+ * A future instant reads as "just now" rather than a negative: clocks disagree
+ * by a few seconds all the time, and "in 3m" on a record of something already
+ * recorded is a worse answer than rounding to the present.
+ */
+export function formatSinceShort(iso: string, opts?: { now?: Date }): string | null {
+  const then = new Date(iso);
+  if (Number.isNaN(then.getTime())) return null;
+  const now = opts?.now ?? new Date();
+  const ms = now.getTime() - then.getTime();
+  if (ms < 60_000) return 'just now';
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  return `${days}d`;
 }
