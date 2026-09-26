@@ -4,7 +4,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 ## CURRENT — read this first (kept ≤ 1,000 words; updated only on material change; Director #365 `5819944052` §3)
 
-**Stamp: 2026-09-26 12:22Z.** **Precedence:** newer explicit owner decisions first (latest: North-Star Operating System v1 `5841611729`; standing hardening train `5841397324`, which replaces the sprint's expiry; staging cadence `5832907406`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
+**Stamp: 2026-09-26 12:30Z.** **Precedence:** newer explicit owner decisions first (latest: North-Star Operating System v1 `5841611729`; standing hardening train `5841397324`, which replaces the sprint's expiry; staging cadence `5832907406`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
 
 **Heads.**
 
@@ -22,10 +22,10 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 | PERF-MOBILE-1 cp1 | W9 · #494 · `ad3d2f88` | served since run 51 (card `5843470410`) | H3c successor with W4 |
 | **YOU-PARITY-1 Phase A** | W6 · #500 · `02f86fc2` | **ACCEPTED** `5842638280` → integrated `993f0796`; not staged | done |
 | **PROGRESS-PARITY-1 Phase A** | W6 · #501 · `92993f09` | **ACCEPTED** `5842638626` → integrated `87997c58`; not staged | done |
-| **You / Progress Phase B** | W6 · `2f57bbca` | **SERVED** `74d19281` via run 52; hosted smoke BLOCKED from L0 (403); OWNER TEST CARD `5845904027` | owner feedback → route |
+| **You / Progress Phase B** | W6 · `2f57bbca` | **SERVED** `74d19281` via run 52 (Director checkpoint `5846190598`); hosted smoke BLOCKED from L0 (403); OWNER TEST CARD `5845904027` (step 5 corrected by W6 `5846137910`: cold-failure band is You's, not Progress's) | owner feedback → route |
 | **COMMUNITY-PARITY-1 (pure)** | W4 · #496 · `646c9579` | ACCEPTED → integrated `87a86531`; HOME-REFRESH-TRUTH-1 **closed, option A** (W7 Check 52: H3c was instrument false negative) | done |
-| COMMUNITY-SETTINGS-PARITY-1 | W9 · #506 product **`ffb517e5`** / evidence `ecd99bf2` | Check 51 PASS carried; **Director visual PASS `5846187950`**; L0 receipt `5846206550` (trial merge on `74d19281`: tsc 0, vitest 1042, guard intact; one additive `scripts/westayfit/render-banner-ring.mjs`) | W7 changed-dependency check incl. You/Progress on trial merge (`5846207843`; W7 busy) → Director product ACCEPTED → integrate → pin → stage |
-| **MEMBER-SNAPSHOT-1** | backend worker **BLOCKED**: L0 `create_session` refused by classifier; not retried (`5842376324`) | serialized `index.ts` queue (`5842015136`) waits | owner-started session or Director assigns an existing worker |
+| COMMUNITY-SETTINGS-PARITY-1 | W9 · #506 product **`ffb517e5`** / evidence `ecd99bf2` | Check 51 carried; **Director visual PASS `5846187950`**; L0 receipt `5846206550` (trial merge on `74d19281`: tsc 0, vitest 1042, guard intact); **W7 Check 54 ACKed** (`5846189645`; L0 asks You/Progress on trial merge `5846207843`) | W7 PASS → Director ACCEPTED → integrate → pin → stage immediately |
+| **PERSONAL-FIRST SCALE (snapshot)** | existing **W4** · #447 · base `74d19281` | **EXECUTING** (W4 ACK `5846196303`; no new session, no trigger); stops at the missing-index seam | product SHA + read-count / response-size receipt → L0 git → W7 → Director |
 | **PRIVACY-TOGGLE-STAGING-1** | owner as operator · harness merged `6c2e6b25` | setters SHUT (run 50); no Claude identity can do Operation 2; W7 Check 43 emulator PASS | owner Operation 2 read-back → one `social-privacy` dispatch → seven-row receipt |
 | **HARDENED-MEMBER-JOURNEY-1** | W7 · `a55046f5` | H1–H4 baselined on served; **H3c** (silent failed Home refresh) and **H4b** (no eviction after refusal) fail; H5 waits on Settings | rerun on successors |
 | SOCIAL-DEMO-SEED-MODE | W3 · #484 `4c1ac1d9` | W7 carry confirmed | Director → L0 PLAN → APPLY / VERIFY |
@@ -40,7 +40,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 **Queued Lovable references** (after current routes stabilise; Free Chat only if verified): REWARD-MOMENTS-NORTHSTAR-1 (`5841635724`), EVENT-OPS-NORTHSTAR-1 (`5841637973`, after EVENT-CAPABILITY-AUDIT-1), REP-COUNT-R&D-1. **Lovable active build owner: NONE.** Frozen: project `e15b9fa0-b2a0-4314-bc21-9c573b8eceb1`, NORTHSTAR-OVERNIGHT-1 `a15a610e` / `973e1141`.
 
-**Blocked.** W8 / W2 out of credits; L0 `create_session` refused (#365 `5840866823`). Owner: Operation 2; lab phone test (`5826104270`); MOVEMENT-VISION R&D.
+**Blocked.** W8 / W2 out of credits; L0 `create_session` refused (#365 `5840866823`; snapshot lane now on existing W4). Owner: Operation 2; lab phone test (`5826104270`); MOVEMENT-VISION R&D.
 
 **Operating rules.** One writer per file. Only L0 integrates, by merge commit, after the Director's ACCEPTED of an exact SHA. SENT ≠ ACK ≠ executing. No new or replacement worker. **L0 alone dispatches WSF staging via the workflow and skill; no production, no credential workaround, no IAM / WIF change; no secrets, no force-push.** Real comment ids only; models change only by the owner. **Worker wake:** handoff comment on the worker's PR; if unACKed and idle, **one** deduplicated one-shot `create_trigger` bound to that session; never for a busy worker, never interrupt.
 
