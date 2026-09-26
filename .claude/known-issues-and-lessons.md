@@ -1,6 +1,6 @@
 # GoArrive Known Issues & Lessons Learned
 
-_Last refreshed: 2026-08-14._
+_Last refreshed: 2026-08-18._
 
 ## Resolved Issues (Reference for Future Work)
 The following issues were encountered and resolved during development. They are documented here as institutional knowledge to prevent regression and inform future decisions.
@@ -137,6 +137,8 @@ For the record, since the mis-citation sent one investigation down the wrong pat
 
 **Three lessons.** A capability gate should record *what was observed*, not a second-hand bug summary — the summary here drifted from the bug's actual claim and aimed a whole investigation at the wrong mechanism. A UA sniff written against a platform bug needs a re-test date attached; this one silently outlived the behaviour it was written for by several major versions. And most cheaply of all: **a flag that is computed but never read is not a gate.** Before describing any code path as disabled, grep for the consumer. This entry asserted a gate that a single grep would have disproved, and asserting it made a running feature look switched off.
 
+**Status after PRs #289 and #290 (2026-08-18):** Both issues identified above are now resolved. PR #289 added the `isPiP` gate — `usePipCanvasStream` and the hidden `<video>` are now inert until the member is actually in Picture-in-Picture mode, so the 30fps rAF loop and MediaStream fan-out no longer run unconditionally. PR #290 (passes 2–22b) added `requestPictureInPicture` targeting `pipCanvasVideoRef` — the one missing call that was causing PiP to open the bare expo-av movement video instead of the canvas tile. The `hasWorkingCaptureStream` dead-code flag (`:62`) remains unused; it should be removed if the UA-sniff logic is no longer needed. The feature is still staging-gated and awaiting device QA sign-off before production activation.
+
 ### iOS Safari Web Audio Graph Suspends on App Backgrounding
 When an `HTMLAudioElement` is wrapped in the Web Audio graph via `createMediaElementSource`, iOS Safari suspends it the instant the user backgrounds the app (exits to the home screen or switches to another app). Tab-switching within Safari does not trigger the suspension. The Web Audio `AudioContext` is subject to iOS background-app suspension; the native `HTMLAudioElement` pipeline is not, because iOS keeps it alive via MediaSession. PR #258 moved voice-bus elements onto the native path. PR #259 then merged a v3 dual-element music handoff: foreground music stays on the graph for the player controls, while a gesture-blessed native shadow element takes over in the background. Exact-head staging and physical-iPhone Case D passed, but the test still observed an audible volume jump at the handoff; a fast-follow correction has not been built. Production handoff remains off by default, and the attempted production hotfix stopped on conflicts with the cherry-pick aborted and no deploy. Lesson: test continuity and perceived loudness separately across both handoff directions, and never equate a merge or physical-device proof with production activation.
 
@@ -184,6 +186,15 @@ Lesson: keeping a paused media element ready means maintaining a *buffer* around
 takeover position, not repeatedly assigning `currentTime`. Seeking on a timer defeats the
 buffering it is meant to produce. Verify warmth by reading `buffered`, never by inferring
 it from the absence of a symptom.
+
+
+
+### Canvas PiP Hook Starving Foreground Music (Resolved by PR #289)
+Verified 2026-08-15: the always-on `usePipCanvasStream` silenced `musicGain→destination` on every staging/preview environment. The hook ran unconditionally from player mount — before the member ever tapped the PiP button — and the MediaStream fan-out connected to `mediaStreamDest` caused the music gain node to stop routing to the speaker destination. The mechanism was never fully isolated (destination vs. `mediaStreamDest` contention was hypothesized but not formally proven).
+
+Fixed in PR #289 by gating the hook and its hidden `<video>` behind `isPiP`. The hook is now inert until PiP is actually active, so the fan-out only runs when it is needed.
+
+Lesson: any hook that sets up a MediaStream or Web Audio routing must be gated on the user action that activates it. An unconditional hook that attaches to the audio graph from mount can silently alter the routing for all other consumers, with no error visible in the UI. Verify fanout routing behavior against speaker output, not just against the stream output.
 
 ## Known Performance Risks
 
