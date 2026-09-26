@@ -4766,3 +4766,21 @@ Operational QA only. It was run from detached worktrees of `cf13140b` and `6be81
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0 (9 + 20). No artifacts committed.
 
 **Status:** **FAIL at `abbab755` on that C4 case.** C5, C6 and the boundary are closed, and Check 57's C1–C3 PASS is preserved. W7 merged, activated and deployed nothing.
+
+## 59 · CONTROL-PLANE-CI-1 C4a only, #513 at exact `a1f5e7a4bddaf6a749e1bceb088e81f3ba0347a3` against `abbab755` (handoff #434 `5847431269`; W7 ACK `5847432456`): **PASS**
+
+- **Delta:** one commit on `abbab755`, touching four files, all under `.github/wsf-staging/`: `cleanup-synthetic.mjs`, `owner-test-card.mjs` and two test files.
+- **Run:** locally, with synthetic receipts and results. No activation, cloud action or merge.
+
+| # | Item | Result |
+|---|---|---|
+| **1** | **Receipt before manifest deletion** | **PASS.** `finish(status, extra, exitCode, afterReceipt)` writes the receipt, and only then runs `afterReceipt`. The COMPLETE path passes `() => fs.rmSync(MANIFEST)` as `afterReceipt`, so a receipt write that throws leaves the manifest in place. **My mutant restoring delete-then-receipt is caught** by `changed-journey-drivers` ("with no receipt, the manifest must survive as the record that fixtures existed"). |
+| **2** | **When the drivers ran, a missing or unusable receipt never gives `NOT_NEEDED` or PASSED** | **PASS.** An existing but unreadable receipt → `UNKNOWN`; a receipt with an unknown status → `UNKNOWN`. With no receipt, a manifest present **or** `driversRanIn(results)` (any result that is not `blocked`) → `NOT_RUN`. `driversRan` must be a boolean, or `cleanupStatus` throws. |
+| **3** | **No receipt plus driver results** | **PASS:** `NOT_RUN`, so the card is INCOMPLETE. |
+| **4** | **A valid COMPLETE receipt** | **PASS:** `COMPLETE`, so the card is PASSED. |
+| **5** | **Check 58's exact fail-before cases** (both journeys passed, no manifest) | **On `abbab755`:** a missing receipt → `NOT_NEEDED` → **PASSED**, and an unusable receipt → `NOT_NEEDED` → **PASSED** (the failure). **On `a1f5e7a4`:** a missing receipt → **`NOT_RUN` → INCOMPLETE**, and an unusable receipt → **`UNKNOWN` → INCOMPLETE**. **Carried unchanged on both:** COMPLETE → PASSED; INCOMPLETE → INCOMPLETE; manifest present → `NOT_RUN`; unknown status → `UNKNOWN`; all journeys blocked with no files → `NOT_NEEDED`, with the card INCOMPLETE because nothing ran. |
+| **6** | **Nothing else reopened** | **PASS.** The delta touches no workflow, generator, gate, registry, driver or manifest file. `run-all`: **22 suites, exit 0.** |
+
+- **Gates:** `ts:check` 0; `check-evidence-intact` 0 (9 + 20). No artifacts committed.
+
+**Status:** **PASS at `a1f5e7a4`.** Check 58's C4 failure is closed. C1–C3 (Check 57) and C5, C6 and the boundary (Check 58) carry. W7 merged, activated and deployed nothing.
