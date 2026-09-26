@@ -4858,3 +4858,113 @@ Operational QA only. It was run from detached worktrees of `cf13140b` and `6be81
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0. Artifacts were cleaned in both trees, and none is committed.
 
 **Status:** **PASS at `6ba49f10`.** No changed-dependency finding. Next consumer: Director product acceptance → L0 integration. W7 merged, accepted and deployed nothing.
+
+## 61 · CONTROL-PLANE-ACTIVATION-1 source / security check, #516 at exact `a78b321b0765c1c6e7e831e08b2bbbb7ebb0200e` on base `d82d55fd`, prior held `92fb0f53` (handoff #434 `5847651391`; queue order `5847681355`; W7 ACK `5847746513`): **PASS on rows 1–10, one material finding (F1, test-only)**
+
+- **Method:** local and static only, in detached worktrees of `a78b321b` and `92fb0f53`.
+- **Not done:** no dispatch, merge, activation, cloud action or product suite.
+- **How the job graph was read:** parsed from the workflow YAML, not from the packet's text.
+
+| # | Item | Result |
+|---|---|---|
+| **1** | **Scope** | **PASS.** `d82d55fd..a78b321b` is two commits touching 12 files, all under `.github/`: the workflow, `CONTROL-PLANE.md`, `check-milestone-manifest.mjs`, the new `check-served-marker.mjs` and `require-activation.mjs`, and tests. `approved-candidate.json` and the drivers are unchanged, and nothing outside `.github/` changed. |
+| **2** | **Initial-marker credential boundary** | **PASS.** See the gate bullets below. |
+| **3** | **Drift check** | **PASS.** See the drift bullets below. |
+| **4** | **No-deploy path** | **PASS.** In this mode, `build`, `deploy` and `hosted-verify` are gated on `inputs.mode == 'deploy'`. `deploy` is the only job holding `firebase deploy` or `hosting:channel:deploy`. No rules, index or production path appears in the workflow, and the project is `westayfit-staging`. |
+| **5** | **Activation manifest** | **PASS.** See the manifest bullets below. |
+| **6** | **Journey truth** | **PASS.** See the verdict bullets below. |
+| **7** | **Fixtures and recovery** | **PASS.** Fixtures are `e5c…-<runTag>` only, through the unchanged fixture kit. Cleanup is blocking. On failure the manifest is kept in the evidence (the CLEANUP FAILURE test: receipt `INCOMPLETE`, manifest present, scan success so it is uploaded). The drivers press only community chips, Settings and × Close; there is no switch press, no callable and no roster assertion. |
+| **8** | **Verdict and evidence** | **PASS.** `require-activation.mjs` re-reads the manifest, results and receipt, and recomputes the card through `owner-test-card.mjs`. The upload is gated `always() && steps.scan-activation-evidence.outcome == 'success'`. |
+| **9** | **Policy carry** | **PASS.** `approved-candidate.json` and `pin-candidate.mjs` (`applies: false`) are unchanged from base, so the human pin gate is unchanged. There is no `journeys/manifest.json`. |
+| **10** | **Fail-before / pass-after, and mutants** | **PASS.** See the last two sets of bullets below. |
+
+**Row 2, the gate boundary.** The only `workflow_dispatch` jobs reachable in `journey-activation` are `gate`, `config` and `journey-activation`.
+- **`gate`:** `contents: read`, no token.
+- **`config`** and **`journey-activation`:** each has `id-token: write`. Their `if` expressions carry no status function, so the implicit `success()` over `needs` applies. `config` needs `gate`; `journey-activation` needs `[gate, config]`.
+- **The one `always()` job:** `hosted-verify`, but it also requires `inputs.mode == 'deploy'`.
+- **No escape route:** no job uses `failure()` or `cancelled()`, and no step in `gate` is `continue-on-error`.
+- **The new gate step** runs `check-served-marker.mjs`, which exits 1 on a mismatch, an unreachable page or a refusal. So a wrong or unreachable marker fails `gate`, and no token-capable job can start.
+
+**Row 3, the drift check.** In `journey-activation`, the step order is:
+1. checkout;
+2. setup;
+3. **the marker (`id: marker`)**;
+4. `npm ci --ignore-scripts` and the browser install;
+5. the config download;
+6. **the first auth**;
+7. the seed / run step.
+
+On a failure after the marker:
+- implicit `success()` skips auth and the run;
+- re-auth runs only if `steps.marker.outcome == 'success'`;
+- cleanup with no manifest exits 0 without a token;
+- the verdict fails on the marker (the DRIFT test: 0 fixtures, `ACTIVATION=FAILED`).
+
+**Row 5, the manifest.** The gate runs `check-milestone-manifest.mjs --require journeys/examples/community-settings-parity-1.json`, a non-live path. The manifest's `productSha` is `938e00d8…`, equal to the pin's `approvedAppSha`, and its journeys are exactly `community` and `settings`. Measured by W7:
+
+| Case | Output | Exit |
+|---|---|---|
+| valid | `valid` | 0 |
+| missing, with `--require` | `refused` | 1 |
+| missing, without `--require` (deploy mode) | `absent` | 0 |
+| approved SHA ≠ `productSha` | `refused` | 1 |
+| an added `roster` journey with no driver | `refused: no registered driver` | 1 |
+| an unknown flag | usage | 1 |
+
+**Row 6, the verdict.** `ACTIVATION=PASSED` needs all of:
+- `marker == success`;
+- the manifest journeys exactly `community,settings`;
+- results present;
+- cleanup `COMPLETE` or `NO_FIXTURES` by the receipt (with `driversRan` from the results);
+- the cleanup step a success;
+- the scan a success;
+- the card `PASSED`;
+- every result `passed`.
+
+The packet's tests cover driver failure, blocked / no driver, a wrong marker, drift, cleanup failure, a missing receipt (`NOT_RUN`), an unusable receipt (`UNKNOWN`), a failed scan and the wrong journey set. In each, `ACTIVATION=FAILED` and the card is not PASSED.
+
+**Row 10, A1 fail-before / pass-after:**
+- `a78b321b`'s `workflow-contract.test.mjs` run against `92fb0f53`'s workflow fails with "the gate reads the marker right after the activation manifest check".
+- It passes on `a78b321b`.
+- At `92fb0f53`, `gate` had no marker step, so `config` authenticated before any marker was read. That is the A1 defect.
+- `a78b321b`'s `journey-activation.test.mjs` passes on either tree. Its A1 cases model the gate in the test, so the binding A1 proof is the workflow contract.
+
+**Row 10, twelve mutants on `a78b321b`, all caught:**
+
+| Mutant | Caught by |
+|---|---|
+| M1 no gate marker | contract |
+| M2 `config` `always()` | contract, "config could start after a failed gate" |
+| M3 activation `always()` | contract |
+| M4 gate marker `continue-on-error` | contract, "a wrong marker must fail the gate" |
+| M5 job marker moved after auth | contract, "the marker comes before the first authentication" |
+| M6 upload on bare `always()` | contract |
+| M7 verdict ignores scan | journey-activation |
+| M8 verdict accepts NOT_RUN / UNKNOWN / NOT_NEEDED | journey-activation, "cleanup is NOT_RUN" |
+| M9 verdict ignores marker | journey-activation |
+| M10 `--require` dropped | contract |
+| M11 `build` reachable in this mode | contract |
+| M12 verdict ignores card | journey-activation |
+
+- **`run-all` on `a78b321b`:** 23 suites, all pass except as F1 below.
+- **On `92fb0f53`:** exit 0 in one run.
+
+**F1 (material, test-only; the verdict logic is correct).** `journey-activation.test.mjs`'s `node()` helper concatenates stdout and stderr as they arrive. `require-activation.mjs` prints its reasons on stderr and `ACTIVATION=…` on stdout. The assertions use `/<reason>[\s\S]*ACTIVATION=FAILED/`, which requires the stderr text to arrive first, and two pipes do not guarantee that order.
+- **Measured on unmodified `a78b321b`:**
+  - standalone `journey-activation.test.mjs` failed **15 / 30**;
+  - `run-all` failed **2 / 10**.
+- **Every failure** was a reason-before-`ACTIVATION` regex, with the correct `ACTIVATION=FAILED` and exit 1 present in the output.
+- **The same helper and assertions exist at `92fb0f53`.**
+- **With the helper changed only locally** (never pushed) to return `stderr + stdout`: 0 / 20 failures, and all verdict mutants caught deterministically.
+- **Why it matters:** the packet's own gate suite is nondeterministic. A red `run-all` would read as a verdict regression, and a mutant can hide behind a flake.
+- **Smallest fix, in W3's scope:** in `journey-activation.test.mjs`, collect the two streams separately. Either return `err + out`, or assert the reason and `ACTIVATION=FAILED` separately.
+
+**Instrument corrections, disclosed.** My first mutant pass had two errors, the same on every mutant, and both were corrected before the results above:
+- it ran outside a full tree, so `workflow-contract` could not open repo-root files;
+- M5's block move matched an earlier job's install step.
+
+A flake filter in my runner then hid real catches. The final mutant results come from the full worktree, with the race removed locally.
+
+- **Gates:** `ts:check` 0; `check-evidence-intact` 0. No e2e run, and no artifacts.
+
+**Status:** **PASS at `a78b321b` on rows 1–10, with F1** (test-only, one helper). Next consumer: Director source acceptance → L0 merge → exactly one no-app-redeploy activation run. W7 merged, dispatched, activated and deployed nothing.
