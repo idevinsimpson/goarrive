@@ -330,3 +330,65 @@ WSF_PLAYWRIGHT_BASE_URL=http://127.0.0.1:5010 \
   ./node_modules/.bin/playwright test --config=playwright.config.ts tests-e2e/sprint-w6-you-parity.spec.ts
 # evidence: prefix WSF_CAPTURE_FRAMES=1 and add -g evidence
 ```
+
+## Phase B — the real route hook (`claude/wsf-w6-you-hook-1`)
+
+**Status: delivered for W7 route QA and the Director's integration check. Not accepted, integrated
+or staged.**
+
+| | |
+|---|---|
+| Base | W9 PERF-MOBILE-1 cp1 successor **`889e9775`** (#494), exactly |
+| Product SHA | **`db6c2e2d50ec102573072cf9dac6cefeee95a1d9`** |
+| Component | You Phase A `2d71db08` merged unchanged (merge `9baf2e29`). `2d71db08` adds only the optional `pending` name and `refresh` note to `5e76a10c`, and every Phase A frame is byte-identical |
+| Route | `app/(tabs)/you.tsx`: PERF's reads, record, focus revalidation and checking / stale / Retry are kept. The only line changed inside the effect passes the already-read `goals` to `composeMember` |
+
+**What the adapter owns** (and nothing else):
+- an unanswered `sharedTotal` → `UNKNOWN_SHARED`, never 0;
+- `periodLabel` from `endsAt` in the goal's own IANA zone, via the canonical `formatEndsAt` /
+  `formatEndedOn`. An `active` goal whose end instant has passed reads "Ended …";
+- `communityName` = the goal's community;
+- `eligible` = some goal is `active`, has a target above 0 and a window that is not over.
+
+**Tests (`tests-e2e/sprint-w6-you-hook.spec.ts`, real route, emulator):**
+
+| run | result |
+|---|---|
+| on `889e9775`, without the hook (fail-first) | **4 / 4 fail** |
+| first run on the hook | 3 / 4. The Start moving test expected `/move`; W9's MOVE sends a member with one open goal straight to `/contribute/<goal>?…&mode=move`. That was a test expectation, not a product defect |
+| rerun after the expectation fix | **4 / 4** |
+| gated evidence run | 5 / 5 (4 + frames) |
+
+The four tests cover:
+- the reference order, with the period in the goal's zone: Kiritimati writes the next day, New York
+  the same day;
+- an unknown shared total: no number, no Living WE, never 0;
+- Start moving withheld when the only active goal's window is over, and offered in window;
+- a failed revalidation that is kept, labelled and retried.
+
+**Existing specs that drive `/you`, first run on the hook: 50 / 50** (plus one gated evidence
+skip). These are `you-page`, `ui-app-shell`, `identity-account-switch`,
+`sprint-w9-perf-mobile-1`, `sprint-w9-focus-return-1`, `sprint-w9-shell-production` and
+`sprint-w6-you-parity`.
+
+Focused units: goal-truth + You + memberReads 62 / 62; `ts:check` 0; evidence guard 9 / 20.
+
+### `route/` — full-viewport route frames (no crop, no alignment)
+
+These are the real shell masthead, the page and the real tab bar, beside the frozen original, at
+device pixel ratio 1:
+
+| frame | full-frame differing share |
+|---|---|
+| `route/route-you-normal-390x844.png` | 0.3965 |
+| `route/route-you-normal-390x640.png` | 0.4302 |
+
+Each has a `cmp-*-full-side-by-side.png`, and `route/manifest.json` holds the SHA-256 digests.
+
+Most of the full-frame difference is the shell, which is W9's:
+- the app has no 30 px prototype strip;
+- its top bar and tab bar are not the reference's;
+- so the whole page sits about 40 px higher.
+
+Below the masthead the page is the Phase A component. Its row sub-line is the canonical
+"Oak Grove Together · Ends Sat, Oct 3", written in the goal's zone.
