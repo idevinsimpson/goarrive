@@ -4673,3 +4673,20 @@ W7 did not re-read run 51's job log.
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0 (9 + 20). No artifacts committed. Emulators only (`demo-wsf-local`).
 
 **Status:** **PASS on `ffb517e5` for the routed changed dependencies.** Visual acceptance is the Director's. Nothing is accepted, integrated or staged.
+
+## 55 · Staging pin #511 at exact `a3f2e3c6db5341f78d8967321aa955b841ecec91`, candidate `938e00d8`, rollback `74d19281` (handoff #434 `5846630709`; W7 ACK `5846631840`): **PASS**
+
+This is the Check 53 method, run locally by git and with the real staging scripts on the pin tree. No product suite.
+
+| # | Item | Result |
+|---|---|---|
+| **1** | **Lineage** | **PASS.** The remote `refs/pull/511/head` is exactly `a3f2e3c6`, with one parent, operational `main` **`bc53a787`** (still `main`), and **one file**, `approved-candidate.json` (+8 / −5). |
+| **2** | **Fields** | **PASS.** `approvedAppSha` goes `74d19281` → **`938e00d8c985993f69becc8924d3037f18425afc`**. `expectedPriorFunctions` stays **49**; its note cites run 52 (`36238227254`, 49 → 49). **`_rollbackNote` names `74d19281`** (run 52, `main` `bc53a787`). Three `_previous…74d19281` history keys are added. |
+| **3** | **Social names** | **PASS.** `candidateAddedFunctions` is `wsfsetcommunityvisibility`, `wsfcommunitymembers` and `wsfcommunityactivity`, identical to `main`. |
+| **4** | **The candidate boundary `74d19281..938e00d8`** | **PASS.** There is one first-parent merge. `938e00d8` = `74d19281` + **`ffb517e5`**, the product Check 54 passed, and **its tree equals `git merge-tree` of the parents**. 140 files, +5838 / −586. **The only protected-set path is `A scripts/westayfit/render-banner-ring.mjs`.** |
+| **5** | **The script is off the build and runtime path** | **PASS.** Outside the script itself, the only reference is a code **comment** in `CommunityParityView.tsx:619`. No `package.json` script, `build:web` step or `.github` workflow calls it. **The app `require`s the committed `assets/brand/derived/banner-ring.png`** (`CommunityParityView.tsx:559`). **A fresh `build:web` of `938e00d8`** (stamped `938e00d8`) emits `banner-ring.<hash>{,@2x,@3x}.png` **byte-identical (SHA-256) to the committed PNGs**: 1× `7ab71c24…`, 2× `926ffaa6…`, 3× `0a969f4f…`. **No output file contains "render-banner-ring".** The script's `--check` confirms that the committed bytes are its deterministic output. |
+| **6** | **Everything else in the protected boundary** | **PASS.** `functions-westayfit` is tree **`5a3f232e` at both SHAs**. The rules, indexes, hosting and emulator configs, `.firebaserc`, root and app packages, `app.json`, `.github/` and `functions/` are unchanged. |
+| **7** | **Scripts** | **PASS.** `run-all` exits 0. **`resolve-candidate`:** an empty request and `938e00d8` resolve to it; **`74d19281`, `ffb517e5` and `0e5d6f38` are refused**; the control, `main`'s pin, resolves to `74d19281`. **`read-inventory`:** 46 + 3 = 49; 49 matches; **48 and 50 are refused.** The tests and `scripts/` in the pin tree are identical to `main`. |
+| **8** | **Expected deploy** | **49 → 49, `CREATED_THIS_DEPLOY=none`.** The functions tree and allowlist are unchanged. |
+
+**Status:** **PASS on the pin at `a3f2e3c6`.** W7 dispatched nothing. Nothing is accepted, integrated or staged by W7.
