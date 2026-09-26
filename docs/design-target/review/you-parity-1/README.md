@@ -330,3 +330,82 @@ WSF_PLAYWRIGHT_BASE_URL=http://127.0.0.1:5010 \
   ./node_modules/.bin/playwright test --config=playwright.config.ts tests-e2e/sprint-w6-you-parity.spec.ts
 # evidence: prefix WSF_CAPTURE_FRAMES=1 and add -g evidence
 ```
+
+## Phase B — the real route, on the accepted lineage (`claude/wsf-w6-you-route-1`)
+
+**Status: delivered for W7 route QA and the Director's route review. Not accepted, integrated
+or staged.** This supersedes the parked hook checkpoint on `claude/wsf-w6-you-hook-1`
+(`db6c2e2d` on PERF `889e9775`, #498), per Director #365 `5841997009`. Only the adapter's own
+commits were cherry-picked; no evidence SHA is in its base.
+
+| | |
+|---|---|
+| Base | development head **`87997c58`** (`claude/wsf-app-shell`): accepted PERF `ad3d2f88` + You Phase A `02f86fc2` + Progress Phase A `92993f09` |
+| Product SHA | the head of the three product commits on this branch (see the PR); the last is "goals helped in other communities" |
+| Commits | `2d71db08` → optional `pending` name + `refresh` note (Phase B only, per #492 `5841926397`); `db6c2e2d` → the adapter; then the cross-community rows |
+| Route | `app/(tabs)/you.tsx`: PERF's reads, record, focus revalidation and checking / stale / Retry are kept |
+
+**What the adapter owns** (and nothing else):
+- an unanswered `sharedTotal` → `UNKNOWN_SHARED`, never 0 (and `knownShared` fails closed on
+  NaN / ±Infinity / negatives);
+- `periodLabel` from `endsAt` in the goal's own IANA zone, via the canonical `formatEndsAt` /
+  `formatEndedOn`. An `active` goal whose end instant has passed reads "Ended …";
+- `communityName` = the goal's own community;
+- `eligible` = some goal in the selected community is `active`, has a target above 0 and a window
+  that is not over;
+- **goals helped in the member's other communities** (Director #365 `5841997009`): read from the
+  account's record only (`elsewhereFromRecord`), each under its own community's name, never the
+  lead — the lead card names no community and sits under the selected community's band. The view
+  takes them as the optional `member.otherOpen`. No extra read and no cold fan-out: a community
+  whose goals, or a goal whose own part, the record does not hold marks the list partial.
+  MEMBER-SNAPSHOT-1 later fills that gap in one call; the view is already source-agnostic.
+
+**Tests (`tests-e2e/sprint-w6-you-hook.spec.ts`, real route, emulator):**
+
+| run | result |
+|---|---|
+| hook tests 1–4 on `889e9775` without the hook (fail-first, earlier) | 4 / 4 fail |
+| new test 5 (other community) on the `db6c2e2d` adapter (fail-first) | **fails**: no partial note |
+| all hook tests on this product | **5 / 5**; gated evidence 6 / 6 |
+
+The five tests cover:
+- the reference order, with the period in the goal's zone: Kiritimati writes the next day, New York
+  the same day;
+- an unknown shared total: no number, no Living WE, never 0;
+- Start moving withheld when the only active goal's window is over, and offered in window;
+- a failed revalidation that is kept, labelled and retried;
+- Oak (selected) + Harbor, where Harbor's goal ends sooner. After Home, You is partial, with no
+  Harbor row. After Progress has read both communities, the Harbor row shows under "Harbor Lunch
+  Crew", Oak's goal still leads, and the list is complete.
+
+**Existing specs that drive `/you`, on this tree: 111 passed**, plus 2 gated evidence skips. These
+are `you-page`, `ui-app-shell`, `identity-account-switch`, `e5-community-goal-seam`, `mu2-flow`,
+`sprint-w1b-kiosk-confinement`, `sprint-w9-app-feel-parity-1`, `sprint-w9-contribute-exits`,
+`sprint-w9-focus-return-1`, `sprint-w9-perf-mobile-1`, `sprint-w9-recovery-port-rendering`,
+`sprint-w9-shell-nav`, `sprint-w9-shell-production`, `sprint-w6-you-parity` and this hook spec. No
+capture producer was run.
+
+Focused units: goal-truth + You pure + view **48 / 48**. The two new ones fail if any open goal may
+lead. `ts:check` 0; evidence guard 9 / 20.
+
+### `route/` — full-viewport route frames (no crop, no alignment)
+
+These are the real shell masthead, the page and the real tab bar, beside the frozen original, at
+device pixel ratio 1. Recaptured on this product, **the four PNGs are byte-identical** to the
+parked hook's (`b99f59a4`); only the manifest's `source` line names the new lineage.
+
+| frame | full-frame differing share |
+|---|---|
+| `route/route-you-normal-390x844.png` | 0.3965 |
+| `route/route-you-normal-390x640.png` | 0.4302 |
+
+Each has a `cmp-*-full-side-by-side.png`, and `route/manifest.json` holds the SHA-256 digests.
+
+Most of the full-frame difference is the shell, which is W9's:
+- the app has no 30 px prototype strip;
+- its top bar and tab bar are not the reference's;
+- so the whole page sits about 40 px higher.
+
+Below the masthead the page is the Phase A component. Its row sub-line is the canonical
+"Oak Grove Together · Ends Sat, Oct 3", written in the goal's zone. The evidence member is in one
+community, so it shows no partial note.
