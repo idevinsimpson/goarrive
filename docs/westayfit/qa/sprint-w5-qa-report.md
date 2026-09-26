@@ -2705,3 +2705,44 @@ This follows L0 `5843155084` and Director `5842638933`. The commit sits on `88d5
   - A real count of 23 with 2 named members still gives "21 members shown without names".
 
 **K-F1 is closed.**
+
+## QA2: MEMBER-SNAPSHOT-1 Phase A (#510), exact product `b71cf07f24bb388822c4c355357873dcb76515c2` — **FAIL (one material defect)**
+
+Released by Director `5846709025`. Base `74d19281`; receipt `baae5e21`. The change is one additive callable, `wsfMyMemberSnapshot`, plus the `FieldPath` import and one new test file. No existing export changed: git shows a single removed line, the old import, which is re-added with `FieldPath`.
+
+**Measured on local emulators** (`demo-wsf-local`, `emulators:exec --only firestore,auth`; the callable runs in-process through `.run()`):
+- The PR's own suite: 10/10.
+- The constituent suites, unchanged: 35/35 (my-communities 5, list-goals 10, list-goals-history 13, my-contribution 7).
+- W5 probes: 12 cases, 10 pass. The two failures are both P6. Files: `sprint-w5-pr510-snapshot-probe.test.ts.txt`, `sprint-w5-pr510-probe.log`.
+
+| # | row | verdict | evidence |
+| --- | --- | --- | --- |
+| 1 | the subject is `request.auth.uid` only | **PASS** | An anonymous call returns `unauthenticated`. A caller sending `{uid, userId, groupId}` belonging to user B gets only its own data; none of B's ids or credits (9871 / 6543 / 4321) appear. |
+| 2 | recursive allowlist | **PASS** | Seeded private fields (`ownerUid`, `joinCode`, `createdByUserId`, `email`, notes, the caller's uid, `communityGroupId`, `contributionCount`) never appear. Every key path is inside the contract. |
+| 3 | departed communities | **PASS** | Memberships that are `left`, `removed`, `pending` or `banned` leak no group or goal id, including for goals with own rows. |
+| 4 | 0 versus unknown | **PASS** | No own row gives `ownCredit` 0. A malformed, negative or Infinity own total gives `null`. A goal with no shard docs gives `sharedTotal` 0 (a real zero; only a failed read gives `null`). A community with no active goals gives `goals: []` and `partial: false`. |
+| 5 | cursor | **FAIL: F1, plus F2** | Malformed, oversized, negative, fractional, path-bearing and non-string cursors all return `invalid-argument`. A forged but well-formed cursor stays within the caller's own rows. See F1 and F2. |
+| 6 | caps / truncated / partial | **FAIL: F1 makes pagination untruthful** | The 20-community cap sets `truncated.communities`. The `partial` semantics match the source. See F1 and F3. |
+| 7 | no unordered fallback | **PASS** | When the own-rows query fails the result is `partial: true` with no fallback. There is no lifetime-history read. |
+| 8 | cost | **PASS, receipt reproduced** | The 20/4/25 case gives exactly 50 goals, 47 RPCs and 725 docs. 500 of those docs are shards (10 per goal). The response is about 14.9 kB. No cost shape is materially worse than claimed; F3 covers the smaller points. |
+| 9 | constituent callables unchanged | **PASS** | Additive diff only; 35/35 on their suites. |
+| 10 | deployment boundary | **PASS (source)** | The receipt says the index must be READY first, the inventory goes 49 → 50 via `candidateAddedFunctions`, and the client fallback stays while transport is SHUT. The source says it must not be deployed or wired before the index is ready. |
+
+**F1 (material): the page cursor silently drops rows that share a millisecond.**
+- **Cause:** the cursor stores `t = updatedAt.toMillis()`, truncated to the millisecond, and resumes with `startAfter(Timestamp.fromMillis(t), id)` under `updatedAt desc, __name__ desc`. Every row whose `updatedAt` lies in (floor-ms, the 25th row's exact instant] is treated as already served.
+- **Measured (P6):** 30 own rows, where rows 23–30 have the same millisecond but finer precision.
+  - Page 1 returns 25 rows.
+  - Page 2 returns **0** rows with `nextCursor: null`, so **5 rows are silently lost** and the client believes it has everything.
+  - This happens both with identical microsecond instants and with distinct microseconds inside one millisecond.
+  - Whole-millisecond controls return 25 + 5 = 30.
+- **Production exposure:** production writes `updatedAt` with `FieldValue.serverTimestamp()`, which has microsecond precision in Firestore. The emulator's `serverTimestamp()` is millisecond-only, and the PR's own pager test seeds whole milliseconds, so neither can catch this.
+- **Smallest fix:** carry the full `seconds` + `nanoseconds` (or the Timestamp's exact value) in the cursor, and add a sub-millisecond test.
+
+**F2 (low): an out-of-range cursor time returns `internal`, not `invalid-argument`.** A `t` of 9007199254740991 or 3e14 passes `decodeSnapshotCursor`. `Timestamp.fromMillis` then throws outside the guarded block. Bound `t` to the Timestamp range inside the decoder.
+
+**F3 (low, cost and shape).** None of these is a condition.
+- Every active membership's community document is read before the 20-community cap applies: 25 memberships read 25 community docs.
+- At the 50-goal cap, about 25 active goals are cut while `truncated.goals` is `true` and `nextCursor` is `null`, so those goals cannot be reached on any page. The flag is truthful, but the cut is permanent for this call shape.
+- 10 of the 35 own-total reads are for goals the cap then drops.
+
+**Not measured:** production's microsecond precision (taken from Firestore's documented behaviour), the composite index (the emulator does not enforce indexes), and the HTTP transport (the callable ran in-process).
