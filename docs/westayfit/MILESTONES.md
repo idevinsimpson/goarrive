@@ -53,7 +53,7 @@ Six slices. **Feature freeze Sep 28 · code freeze Oct 4 · event Oct 11.**
 The reframe that makes this fit: **FitLife is one community**, created by hand before the
 doors open. Attendees join it; they do not search, choose a type, or resolve duplicates.
 
-| Slice | Substance | M-U parent | Owner |
+| Slice | Substance | M-U parent | Historical owner at 2026-09-05 plan |
 |---|---|---|---|
 | **E1** | Verification email actually delivers | M-U2 completion | Manus (config) + Maia (deploy) |
 | **E2** | Join an existing community by link / QR | M-U3, reduced | Maia |
@@ -61,6 +61,8 @@ doors open. Attendees join it; they do not search, choose a type, or resolve dup
 | **E4** | Aggregate counters, honest and live | M-U5, reduced | Maia |
 | **E5** | Community Pulse display view (kiosk two) | M-U5, reduced | Maia |
 | **E6** | Expo hardening — attract, auto-reset, large targets | M-U7, reduced | Maia |
+
+Current owner/worker routing is not taken from the historical table above. Resolve it from the canonical CURRENT STATE record and `ops/WORKER_INBOXES.md` under the one-ACTIVE-NOW rule.
 
 ### Dependency correction
 
