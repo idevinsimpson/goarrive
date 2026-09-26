@@ -4,7 +4,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 ## CURRENT — read this first (kept ≤ 1,000 words; updated only on material change; Director #365 `5819944052` §3)
 
-**Stamp: 2026-09-26 13:03Z.** **Precedence:** newer explicit owner decisions first (latest: North-Star Operating System v1 `5841611729`; standing hardening train `5841397324`, which replaces the sprint's expiry; staging cadence `5832907406`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
+**Stamp: 2026-09-26 13:06Z.** **Precedence:** newer explicit owner decisions first (latest: North-Star Operating System v1 `5841611729`; standing hardening train `5841397324`, which replaces the sprint's expiry; staging cadence `5832907406`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
 
 **Heads.**
 
@@ -25,7 +25,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 | **You / Progress Phase B** | W6 · `2f57bbca` | **SERVED** `74d19281` via run 52 (Director checkpoint `5846190598`); hosted smoke BLOCKED from L0 (403); OWNER TEST CARD `5845904027` (step 5 corrected by W6 `5846137910`: cold-failure band is You's, not Progress's) | owner feedback → route |
 | **COMMUNITY-PARITY-1 (pure)** | W4 · #496 · `646c9579` | ACCEPTED → integrated `87a86531`; HOME-REFRESH-TRUTH-1 **closed, option A** (W7 Check 52: H3c was instrument false negative) | done |
 | **COMMUNITY-SETTINGS-PARITY-1** | W9 · #506 · `ffb517e5` | **ACCEPTED** `5846465707` (W7 Check 54 PASS `5846278987`) → integrated **`938e00d8`** (`5846474990`; ring generator offline, not on build path) | W3 pin (`5846476221`; W3 busy, hourly :13) → W7 pin check → Director → L0 merge → dispatch |
-| **PERSONAL-FIRST SCALE (snapshot)** | existing **W4** · #447 · base `74d19281` | **EXECUTING** (W4 ACK `5846196303`; no new session, no trigger); stops at the missing-index seam | product SHA + read-count / response-size receipt → L0 git → W7 → Director |
+| **PERSONAL-FIRST SCALE (snapshot)** | existing **W4** · #447 · base `74d19281` | W4 stopped at the index seam (`5846201367`); **Director: option 1, indexed `userId`+`updatedAt desc` query** (`5846469655`); W4 continues, `index.ts` + focused test only; **W3 owns the one-entry index-source packet** | W4 SHA + reads/bytes receipt; index source accepted + staging index READY before any integration/deploy |
 | **PRIVACY-TOGGLE-STAGING-1** | owner as operator · harness merged `6c2e6b25` | setters SHUT (run 50); no Claude identity can do Operation 2; W7 Check 43 emulator PASS | owner Operation 2 read-back → one `social-privacy` dispatch → seven-row receipt |
 | **HARDENED-MEMBER-JOURNEY-1** | W7 · `a55046f5` | H1–H4 baselined on served; **H3c** (silent failed Home refresh) and **H4b** (no eviction after refusal) fail; H5 waits on Settings | rerun on successors |
 | SOCIAL-DEMO-SEED-MODE | W3 · #484 `4c1ac1d9` | W7 carry confirmed | Director → L0 PLAN → APPLY / VERIFY |
