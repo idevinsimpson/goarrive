@@ -47,12 +47,12 @@ export function renderCurrent(s) {
   L.push('');
   L.push('## Workers');
   L.push('');
-  L.push('| Worker | Inbox | Active now | Awaiting review | Blocked | Next | Queue | WATCH |');
-  L.push('| --- | --- | --- | --- | --- | --- | --- | --- |');
+  L.push('| Worker | Inbox | Active now | Reviewing | Waiting on review | Blocked | Next | Queue | WATCH |');
+  L.push('| --- | --- | --- | --- | --- | --- | --- | --- | --- |');
   for (const w of Object.keys(s.workers).sort()) {
     const b = workerBuckets(s, w);
     const ids = (xs) => (xs.length ? xs.map((p) => p.id).join(', ') : '—');
-    L.push(`| ${w} | #${s.workers[w].inbox} | ${ids(b.active)} | ${ids(b.awaitingReview)} | ${ids(b.blocked)} | ${b.next ?? '—'} | ${(s.queue[w] || []).join(', ') || '—'} | ${workerWatch(s, w) ? 'on' : 'off'} |`);
+    L.push(`| ${w} | #${s.workers[w].inbox} | ${ids(b.active)} | ${ids(b.reviewing)} | ${ids(b.waiting)} | ${ids(b.blocked)} | ${b.next ?? '—'} | ${(s.queue[w] || []).join(', ') || '—'} | ${workerWatch(s, w) ? 'on' : 'off'} |`);
   }
   L.push('');
   L.push('## Packets');

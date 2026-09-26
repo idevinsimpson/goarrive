@@ -28,6 +28,9 @@ export function invariants(s) {
       else if (p.owner !== w) problems.push(`${w}'s queue names ${id}, which belongs to ${p.owner}`);
     }
     if (new Set(s.queue[w] || []).size !== (s.queue[w] || []).length) problems.push(`${w}'s queue names a packet twice`);
+    // One active review per W# reviewer, as one ACTIVE per implementer.
+    const reviews = b.reviewing.map((p) => p.id);
+    if (reviews.length > 1) problems.push(`${w} is already reviewing ${reviews.length - 1} work packet (${reviews.slice(0, -1).join(', ')}); a W# reviewer holds at most one review (also asked: ${reviews.at(-1)})`);
     // Ops v1.2: one driving NEXT. Reference packets are exempt; they never drive the loop.
     const queuedWork = (s.queue[w] || []).filter((id) => s.packets[id]?.kind === 'work');
     if (queuedWork.length > 1) problems.push(`${w} has ${queuedWork.length} queued work packets (${queuedWork.join(', ')}); at most one NEXT`);
@@ -37,6 +40,7 @@ export function invariants(s) {
     if (p.phase !== 'QUEUED' && p.phase !== 'WITHDRAWN' && p.inbox !== null && s.workers[p.owner] && p.inbox !== s.workers[p.owner].inbox) {
       problems.push(`${id}: released in #${p.inbox}, outside ${p.owner}'s canonical inbox #${s.workers[p.owner].inbox}`);
     }
+    if (p.phase === 'UNDER_REVIEW') for (const r of p.reviewers) if (RE.worker.test(r) && !s.workers[r]) problems.push(`reviewer ${r} of ${id} is not a registered worker`);
     if (p.phase === 'QUEUED' && !(s.queue[p.owner] || []).includes(id)) problems.push(`${id} is QUEUED but not in ${p.owner}'s queue`);
     if (p.phase === 'VERIFYING' && p.proof?.result !== 'RUNNING') problems.push(`${id} is VERIFYING without a running proof`);
     for (const k of ['subjectSha', 'prHeadSha', 'evidenceSha', 'mergeSha']) {

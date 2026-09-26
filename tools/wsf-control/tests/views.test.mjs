@@ -57,14 +57,14 @@ test('a reference packet does not keep WATCH on, even when released', () => {
   assert.equal(workerWatch(r.state, 'W7'), false);
   assert.ok(workerView(r.state, 'W7').includes('WATCH=off'));
 });
-test('WATCH stays on while delivered work awaits review, and goes off on acceptance', () => {
+test('WATCH is off for an implementer waiting on review (F4), and stays off on acceptance', () => {
   const r = delivered();
-  assert.equal(workerWatch(r.state, 'W3'), true);
+  assert.equal(workerWatch(r.state, 'W3'), false);
   assert.equal(workerWatch(add(r, { type: 'accept', packet: 'ALPHA', subjectSha: A }).state, 'W3'), false);
 });
 
 // ---- worker-view ----
-test('worker-view prints one ACTIVE NOW, the packets awaiting review, NEXT, WATCH and the typed authority refs', () => {
+test('worker-view prints one ACTIVE NOW, REVIEWING, the packets waiting on review, NEXT, WATCH and the typed authority refs', () => {
   let r = add(delivered(), { type: 'review', packet: 'ALPHA', reviewers: ['Fable', 'W7'] });
   r = chain(r, QUEUE_BETA, { type: 'release', packet: 'BETA', inbox: 396 });
   const v = workerView(r.state, 'W3');
@@ -74,10 +74,15 @@ test('worker-view prints one ACTIVE NOW, the packets awaiting review, NEXT, WATC
   assert.deepEqual(v, [
     'WORKER=W3 inbox=#396',
     'ACTIVE_NOW=BETA phase=RELEASED',
-    `AWAITING_REVIEW=ALPHA phase=UNDER_REVIEW pr=#520 subject=${A} reviewers=Fable,W7`,
+    'REVIEWING=none',
+    'WAITING=ALPHA phase=UNDER_REVIEW (waiting on review; does not keep WATCH on)',
     'NEXT=none',
     'WATCH=on',
     `AUTHORITY BETA origin=ledger queued=${ref(beta.queued)} released=${ref(beta.released)} last=${ref(beta.released)}`,
+  ]);
+  assert.deepEqual(workerView(r.state, 'W7').filter((l) => /^(REVIEWING|WATCH|AUTHORITY)/.test(l)), [
+    `REVIEWING=ALPHA phase=UNDER_REVIEW pr=#520 subject=${A} reviewers=Fable,W7 owner=W3`,
+    'WATCH=on',
     `AUTHORITY ALPHA origin=ledger queued=${ref(alpha.queued)} released=${ref(alpha.released)} last=${ref(alpha.lastTransition)}`,
   ]);
 });
@@ -311,7 +316,7 @@ test('CURRENT is byte-stable, embeds the ledgerHead, and says what the bootstrap
   assert.ok(t1.endsWith('\n'));
   assert.match(t1, /^- Genesis: bootstrap as of 2026-09-26T17:00:00Z\. /m);
   assert.match(t1, /\| ALPHA \| W3 \| work \| STAGED \(hosted\) \| ledger \| DELIVERED \| #520 \| aaaaaaaa \| aaaaaaaa \| — \| — \| — \|/);
-  assert.match(t1, /\| W3 \| #396 \| — \| ALPHA \| — \| — \| — \| on \|/);
+  assert.match(t1, /\| W3 \| #396 \| — \| — \| ALPHA \| — \| — \| — \| off \|/);
   assert.deepEqual(verifyCurrent(r.state, t1), { status: 'current' });
   const imported = renderCurrent(build([boot({ packets: { 'LIVE-1': { owner: 'W3', completion: VERIFIED_ACTIVATION, phase: 'ACKED', refs: [comment(1)] } } })]).state);
   assert.match(imported, /\| LIVE-1 \| W3 \| work \| VERIFIED \(journey-activation\) \| bootstrap \| ACKED \|/);

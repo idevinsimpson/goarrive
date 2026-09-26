@@ -6,9 +6,10 @@
  *
  *   node tools/wsf-control/worker-view.mjs <control-state dir> W3
  *
- * WATCH=on only while the worker holds a worker-owned packet or waits on a
- * near-term review of delivered work. A blocked or reference packet never
- * keeps WATCH on.
+ * WATCH=on only while the worker holds the ball: a worker-owned packet it
+ * implements, or an UNDER_REVIEW packet it is assigned to review. Its own
+ * delivered packet waiting on someone else, a blocked packet and a reference
+ * packet never keep WATCH on.
  */
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -30,12 +31,13 @@ export function workerView(s, worker) {
   const b = workerBuckets(s, worker);
   const out = [`WORKER=${worker} inbox=#${s.workers[worker].inbox}`];
   out.push(`ACTIVE_NOW=${b.active.length ? line(b.active[0]) : 'none'}`);
-  if (b.awaitingReview.length === 0) out.push('AWAITING_REVIEW=none');
-  for (const p of b.awaitingReview) out.push(`AWAITING_REVIEW=${line(p)}`);
+  if (b.reviewing.length === 0) out.push('REVIEWING=none');
+  for (const p of b.reviewing) out.push(`REVIEWING=${line(p)} owner=${p.owner}`);
+  for (const p of b.waiting) out.push(`WAITING=${p.id} phase=${p.phase} (waiting on review; does not keep WATCH on)`);
   for (const p of b.blocked) out.push(`BLOCKED=${p.id} (not work; does not keep WATCH on)`);
   out.push(`NEXT=${b.next ?? 'none'}`);
   out.push(`WATCH=${workerWatch(s, worker) ? 'on' : 'off'}`);
-  for (const p of [...b.active, ...b.awaitingReview]) {
+  for (const p of [...b.active, ...b.reviewing]) {
     out.push(`AUTHORITY ${p.id} origin=${p.origin} queued=${fmtRef(p.authority.queued)} released=${fmtRef(p.authority.released)} last=${fmtRef(p.authority.lastTransition)}`);
   }
   return out;

@@ -132,7 +132,7 @@ These rules hold:
 - After `proof-fail` the worker owns the packet again. The corrective delivery may come on a new PR, because the old one is merged.
 - **Terminal:** the packet's own `completion.terminal`, or WITHDRAWN.
 - **Worker-owned:** RELEASED, ACKED, CHANGES_REQUESTED. A worker holds at most one worker-owned work packet.
-- **Reviewer-owned:** DELIVERED, UNDER_REVIEW.
+- **Reviewer-owned:** DELIVERED, UNDER_REVIEW. The implementer is waiting, not holding the ball. A DELIVERED packet wakes no worker: `program-view` asks Fable to route the `review`. During UNDER_REVIEW the ball is with each assigned **W#** reviewer; a Director, Owner, Fable or L0 reviewer is not a worker and wakes no one. A `finding` hands the ball back to the owner (CHANGES_REQUESTED), and `accept` leaves both off (integration is L0's).
 - ACCEPTED, INTEGRATED and VERIFYING are L0's. They do not keep a worker's WATCH on.
 
 ## Invariants (`check.mjs`)
@@ -141,6 +141,7 @@ These rules hold:
 - `state.json` is exactly its reduction.
 - A worker holds at most one worker-owned work packet.
 - Each queue holds exactly its owner's QUEUED packets, each once. A released packet cannot be queued again.
+- **One review per W# reviewer:** a W# reviewer holds at most one UNDER_REVIEW work packet, as an implementer holds one ACTIVE. A `review` that would give a busy reviewer a second is refused, and the packet stays DELIVERED (and ACTIONABLE) until that reviewer is free or another is chosen. Several reviewers on one packet are fine when each is free. A W# reviewer must be a registered worker.
 - **One NEXT:** a worker has at most one queued work packet (ops v1.2). Reference packets are exempt and never become NEXT. `append` refuses a second queued work packet, and so does a bootstrap import, so no valid state can hide one.
 - A release is handed off only in the owner's canonical inbox.
 - A VERIFYING packet has a running proof.
@@ -151,7 +152,8 @@ These rules hold:
 ## WATCH, ACTIONABLE and MONITOR
 
 - **`WATCH`** (from `worker-view`) is derived per worker and never stored.
-  - It is on only while the worker holds a worker-owned work packet, or has delivered work awaiting review.
+  - It is on only while the worker holds the ball: a work packet it owns in a worker-owned phase, or an UNDER_REVIEW work packet it is assigned to review.
+  - Its own delivered packet waiting on someone else's review does not keep it on (`worker-view` lists it as `WAITING`).
   - Blocked, reference and queued packets never turn it on.
   - A worker's own check-in may disable itself while it is off.
   - NEXT is the worker's one queued work packet, if any.
@@ -215,7 +217,7 @@ node tools/wsf-control/check.mjs <dir>                                          
 node tools/wsf-control/append.mjs <dir> <event.json> --expect-head <ledgerHead>
                                                                                 # APPENDED … | APPEND=noop … | APPEND=refused (nothing written)
 node tools/wsf-control/reconcile.mjs <dir> <snapshot.json>                      # FINDING … / CURRENT_SURFACE=… / RECONCILE findings=N
-node tools/wsf-control/worker-view.mjs <dir> W3                                 # ACTIVE_NOW / AWAITING_REVIEW / NEXT / WATCH / AUTHORITY
+node tools/wsf-control/worker-view.mjs <dir> W3                                 # ACTIVE_NOW / REVIEWING / WAITING / NEXT / WATCH / AUTHORITY
 node tools/wsf-control/program-view.mjs <dir> [--snapshot <file>]               # CRITICAL_PATH / NEEDS_TRANSITION / … / ACTIONABLE / MONITOR
 node tools/wsf-control/render-current.mjs <dir> [--out <file> | --verify <file>]
 node tools/wsf-control/run-all.mjs                                              # the regression suite

@@ -6,6 +6,7 @@ const suites = [
   'views.test.mjs',
   'skill.test.mjs',
   'closure.test.mjs',
+  'review.test.mjs',
 ];
 let failed = 0;
 for (const s of suites) {

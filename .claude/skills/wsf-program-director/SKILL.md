@@ -41,7 +41,7 @@ Only **Fable** and **L0** write the ledger. A worker (W3, W7, …) owns packets,
 8. **Hand off once.** Post one handoff to the owner's canonical inbox (the `inbox` in `worker-view`), naming the packet and the ledger head. A release outside that inbox is refused.
 9. **Dedupe wakes, and derive WATCH.**
    - A wake whose event is already recorded is a no-op.
-   - A worker's check-in follows `WATCH=` from `worker-view`, and may disable itself when it is off. Blocked and reference packets never keep it on.
+   - A worker's check-in follows `WATCH=` from `worker-view`, and may disable itself when it is off. WATCH follows the ball: the implementer while it works, the assigned W# reviewer during review. Blocked, reference and waiting-on-review packets never keep it on.
    - Fable's global heartbeat follows `MONITOR=on`. It stays enabled even when `ACTIONABLE=off`, so a dependency that clears while every worker is off is still noticed. When `ACTIONABLE=off`, it is silent.
    - Post no status for an unchanged blocked lane.
 
@@ -84,7 +84,8 @@ node tools/wsf-control/program-view.mjs <dir> --snapshot <snapshot.json>
 
 - `worker-view` prints:
   - `ACTIVE_NOW` (at most one packet);
-  - `AWAITING_REVIEW`;
+  - `REVIEWING` (the review this worker holds);
+  - `WAITING` (its own delivered packets; they never keep WATCH on);
   - `NEXT`;
   - `WATCH`;
   - the `AUTHORITY` refs.

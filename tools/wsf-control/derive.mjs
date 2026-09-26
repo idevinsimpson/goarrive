@@ -7,22 +7,33 @@ import { REVIEWER_OWNED, WORKER_OWNED, isTerminal } from './schema.mjs';
 const byId = (s) => Object.keys(s.packets).sort().map((id) => ({ id, ...s.packets[id] }));
 export const fmtRef = (r) => (r ? `${r.kind}:${r.id}` : 'none');
 
-/** A worker's packets, by who holds the ball. Reference and blocked packets never count as work. */
+/**
+ * A worker's packets, by who holds the ball. Reference and blocked packets never count as work.
+ *   active    it owns the packet and the phase is worker-owned (RELEASED, ACKED, CHANGES_REQUESTED);
+ *   reviewing it is an assigned reviewer of an UNDER_REVIEW work packet (it holds the ball);
+ *   waiting   it owns a delivered packet that someone else holds (DELIVERED, UNDER_REVIEW).
+ */
 export function workerBuckets(s, worker) {
-  const mine = byId(s).filter((p) => p.owner === worker && p.kind === 'work');
+  const all = byId(s).filter((p) => p.kind === 'work');
+  const mine = all.filter((p) => p.owner === worker);
   return {
     active: mine.filter((p) => WORKER_OWNED.includes(p.phase)),
-    awaitingReview: mine.filter((p) => REVIEWER_OWNED.includes(p.phase)),
+    reviewing: all.filter((p) => p.phase === 'UNDER_REVIEW' && p.reviewers.includes(worker)),
+    waiting: mine.filter((p) => REVIEWER_OWNED.includes(p.phase)),
     blocked: mine.filter((p) => p.phase === 'BLOCKED'),
     // NEXT is the first WORK packet in queue order; a queued reference is released at will and never drives the loop.
     next: (s.queue[worker] || []).find((id) => s.packets[id]?.kind === 'work') ?? null,
   };
 }
 
-/** WATCH=on only while the worker holds work or waits on a near-term review of its delivered work. */
+/**
+ * WATCH=on only while the worker holds the ball: an active packet it owns, or a
+ * review it is assigned. An implementer waiting on someone else's review is off;
+ * a Director/Owner/Fable/L0 reviewer is not a worker and wakes no one.
+ */
 export function workerWatch(s, worker) {
   const b = workerBuckets(s, worker);
-  return b.active.length > 0 || b.awaitingReview.length > 0;
+  return b.active.length > 0 || b.reviewing.length > 0;
 }
 
 /** How far a packet has come, for blockers. A failed proof sends it back: nothing after CHANGES_REQUESTED counts. */
