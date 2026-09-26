@@ -141,6 +141,7 @@ These rules hold:
 - `state.json` is exactly its reduction.
 - A worker holds at most one worker-owned work packet.
 - Each queue holds exactly its owner's QUEUED packets, each once. A released packet cannot be queued again.
+- **One ball per worker:** a worker holds at most one ball in total across implementation and review. It cannot hold an active implementation packet (RELEASED, ACKED, CHANGES_REQUESTED) and an UNDER_REVIEW assignment at once. A `review` naming a worker with active work is refused, and so is a `release` to a worker that is reviewing. A reviewing worker may keep one queued NEXT, but `program-view` does not suggest releasing it until the review leaves the worker. A `finding` that would hand work back to an owner who is reviewing is likewise refused until one of the two moves.
 - **One review per W# reviewer:** a W# reviewer holds at most one UNDER_REVIEW work packet, as an implementer holds one ACTIVE. A `review` that would give a busy reviewer a second is refused, and the packet stays DELIVERED (and ACTIONABLE) until that reviewer is free or another is chosen. Several reviewers on one packet are fine when each is free. A W# reviewer must be a registered worker.
 - **One NEXT:** a worker has at most one queued work packet (ops v1.2). Reference packets are exempt and never become NEXT. `append` refuses a second queued work packet, and so does a bootstrap import, so no valid state can hide one.
 - A release is handed off only in the owner's canonical inbox.

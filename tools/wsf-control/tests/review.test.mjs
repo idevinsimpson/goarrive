@@ -75,4 +75,24 @@ test('F4: a W# reviewer must be a registered worker (it has no inbox or check-in
   refused(() => add(delivered(), { type: 'review', packet: 'ALPHA', reviewers: ['W8'] }), /reviewer W8 of ALPHA is not a registered worker/);
 });
 
+// ---- F4 clarification (Director #519 5848971923): one W# holds one ball in total ----
+/** W7 holds implementation work: GAMMA released to W7. */
+const w7Active = (r) => chain(r, { type: 'queue', packet: 'GAMMA', owner: 'W7', completion: { terminal: 'INTEGRATED', proofType: 'source-only' } }, { type: 'release', packet: 'GAMMA', inbox: 400 });
+test('F4.8: a worker holding implementation ACTIVE cannot be assigned as a reviewer', () => {
+  const r = w7Active(delivered());
+  assert.equal(r.state.packets.GAMMA.phase, 'RELEASED');
+  refused(() => add(r, { type: 'review', packet: 'ALPHA', reviewers: ['W7'] }), /W7 holds 2 balls \(active GAMMA; reviewing ALPHA\); one ball per worker across implementation and review/);
+  assert.equal(r.state.packets.ALPHA.phase, 'DELIVERED');
+});
+test('F4.9: a REVIEWING worker keeps one queued NEXT, but program-view does not suggest releasing it until the review completes', () => {
+  let r = add(delivered(), { type: 'review', packet: 'ALPHA', reviewers: ['W7'] });
+  r = add(r, { type: 'queue', packet: 'GAMMA', owner: 'W7', completion: { terminal: 'INTEGRATED', proofType: 'source-only' } });
+  assert.ok(workerView(r.state, 'W7').includes('NEXT=GAMMA'));
+  assert.ok(!programView(r.state).some((l) => /NEEDS_TRANSITION GAMMA event=release/.test(l)));
+  refused(() => add(r, { type: 'release', packet: 'GAMMA', inbox: 400 }), /W7 holds 2 balls \(active GAMMA; reviewing ALPHA\)/);
+  r = raw(r, { type: 'accept', source: comment(9102), packet: 'ALPHA', subjectSha: 'a'.repeat(40) });
+  assert.ok(programView(r.state).includes('NEEDS_TRANSITION GAMMA event=release by=Fable reactivates=W7 :: W7 holds no active packet and GAMMA is next'));
+  assert.equal(add(r, { type: 'release', packet: 'GAMMA', inbox: 400 }).state.packets.GAMMA.phase, 'RELEASED');
+});
+
 done('review');

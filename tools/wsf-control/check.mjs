@@ -30,6 +30,10 @@ export function invariants(s) {
     if (new Set(s.queue[w] || []).size !== (s.queue[w] || []).length) problems.push(`${w}'s queue names a packet twice`);
     // One active review per W# reviewer, as one ACTIVE per implementer.
     const reviews = b.reviewing.map((p) => p.id);
+    // One ball in total across implementation and review (ops: one ACTIVE NOW per worker).
+    if (b.active.length >= 1 && reviews.length >= 1) {
+      problems.push(`${w} holds ${b.active.length + reviews.length} balls (active ${b.active.map((p) => p.id).join(', ')}; reviewing ${reviews.join(', ')}); one ball per worker across implementation and review`);
+    }
     if (reviews.length > 1) problems.push(`${w} is already reviewing ${reviews.length - 1} work packet (${reviews.slice(0, -1).join(', ')}); a W# reviewer holds at most one review (also asked: ${reviews.at(-1)})`);
     // Ops v1.2: one driving NEXT. Reference packets are exempt; they never drive the loop.
     const queuedWork = (s.queue[w] || []).filter((id) => s.packets[id]?.kind === 'work');

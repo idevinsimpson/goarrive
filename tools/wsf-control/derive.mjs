@@ -81,7 +81,8 @@ export function neededTransitions(s, snapshot = null) {
   }
   for (const w of Object.keys(s.workers).sort()) {
     const b = workerBuckets(s, w);
-    if (b.active.length === 0 && b.next) out.push({ packet: b.next, event: 'release', by: 'Fable', why: `${w} holds no active packet and ${b.next} is next`, reactivates: w });
+    // A worker holding a review holds its one ball: its NEXT waits until the review leaves it.
+    if (b.active.length === 0 && b.reviewing.length === 0 && b.next) out.push({ packet: b.next, event: 'release', by: 'Fable', why: `${w} holds no active packet and ${b.next} is next`, reactivates: w });
   }
   return out;
 }
