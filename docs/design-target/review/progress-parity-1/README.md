@@ -14,11 +14,11 @@ Packet sources:
 | | |
 |---|---|
 | Base | `claude/wsf-app-shell` @ `0b460ce3f2f0766406100fef14d9a444c8cad43a` |
-| Product SHA | **`f79a3c49e4593d5f18a62b6f89bfc4444f06eb87`** |
-| Component | **`apps/westayfit/src/ui/ProgressParityView.tsx`**, blob `21e30d77` |
-| Pure rules | `apps/westayfit/src/progressParity.ts`, blob `6e6657b3` |
-| Fixture | `apps/westayfit/app/design-target/progress-parity.tsx`, blob `58241ab9`. Emulator builds only; `?state=populated\|first-eligible\|no-open-goal\|partial\|failure\|receipts-contract` |
-| Tests | `tests/progress-parity.test.ts` `95cdb93a` (21) · `tests/progress-parity-view.test.tsx` `eddc0950` (13) · `tests-e2e/sprint-w6-progress-parity.spec.ts` `0d23352d` |
+| Product SHA | **`5c4041f345f1edf515448d8baa0b9f79c84a6347`**. It supersedes `f79a3c49` and is **stacked on You `66e56c4d`** by merge commit `9aacd613` (#365 `5841122582`), so the Progress delta is reviewed relative to You |
+| Component | **`apps/westayfit/src/ui/ProgressParityView.tsx`**, blob `7514eea5` |
+| Pure rules | `apps/westayfit/src/progressParity.ts`, blob `37dbc2bb`, on the shared `src/goalTruth.ts` (from You) |
+| Fixture | `apps/westayfit/app/design-target/progress-parity.tsx`, blob `1ad1dc68`. Emulator builds only; `?state=populated\|first-eligible\|no-open-goal\|partial\|failure\|receipts-contract\|unknown-shared` |
+| Tests | `tests/progress-parity.test.ts` `930a120b` (20) · `tests/progress-parity-view.test.tsx` `b0eeca60` (14) · `tests-e2e/sprint-w6-progress-parity.spec.ts` `fd5bebc8` (14) |
 | Route | `app/(tabs)/activity.tsx` = base blob `ffbab845` — **protected-path delta: no** |
 | Reference | Lovable `e15b9fa0-b2a0-4314-bc21-9c573b8eceb1` @ `09b8a73cc4e661115e52cb1ec4aebcb625c5fc9a`: `src/demo/screens/progress.tsx`, `src/demo/model.ts` (`progressView`, `baseView`), `src/demo/ui.tsx` (`StatusPill`), `src/styles.css` (including its `PROGRESS-FIRST-CONTRIBUTION` block) |
 | Environment | emulator `demo-wsf-local`. Web bundle built from the product tree with `EXPO_PUBLIC_WSF_AUTH_ENABLED=1 EXPO_PUBLIC_WSF_USE_EMULATORS=1`. Chromium, iPhone UA, `en-US`, `America/New_York`. Frames at device pixel ratio 1 |
@@ -83,13 +83,28 @@ and its band says so. Laid over the reference's populated original, it measures 
 differing share on the body window and **0.0013** aligned, so a future authorized source fills it
 with no redesign. It is not a canonical state, and no canonical path produces it.
 
-## Focused tests on `f79a3c49`
+## The truth correction: `f79a3c49` → `5c4041f3`
+
+This applies the Director's You review (#492 `5841012915`) to Progress, through the shared module.
+
+- **The shared position is explicit.** `sharedTotal: number | null` is now
+  `shared: SharedPosition`. The lifecycle pill, the Shared cell and the reached rule all come from
+  `src/goalTruth.ts`:
+  - an unknown position is `Unknown`, never 0;
+  - an open goal says `OPEN`;
+  - a closed goal says only `CLOSED`.
+- **No date is interpreted in the view.** `endsAt` is now `periodLabel: string | null`, formatted
+  by the Phase B adapter in the goal's own timezone and shown verbatim. `whenLabel()` is removed.
+- **A new fixture state, `unknown-shared`,** has an open goal and a finished goal whose totals did
+  not answer. Own parts are known, so the total still reads 145.
+
+## Focused tests on `5c4041f3`
 
 | check | first run | rerun |
 |---|---|---|
 | `tests/progress-parity.test.ts` + `tests/progress-parity-view.test.tsx` | 34 / 34 | 34 / 34 |
-| full vitest (`apps/westayfit`) | 925 / 925 (891 at base + 34) | — |
-| `sprint-w6-progress-parity.spec.ts`, ungated | 12 passed, 1 skipped (evidence), **0 bytes written** | 12 / 12 |
+| full vitest (`apps/westayfit`, including You's 38) | 963 / 963 (891 at base + 38 + 34) | — |
+| `sprint-w6-progress-parity.spec.ts`, ungated | 14 passed, 1 skipped (evidence), **0 bytes written** | — |
 | same spec, `WSF_CAPTURE_FRAMES=1 -g evidence` | 1 passed; writes only `fixture/` | 1 passed (after the landmark fix below) |
 | `npm run ts:check` | exit 0 | — |
 | `check-evidence-intact` | frozen 9 / accepted 20 intact | — |
@@ -104,6 +119,9 @@ The e2e runs at 390×844 and 390×640. Per class it checks six things:
 - **Partial:** the note sits above the lists, the total is 45 (what loaded), and Retry calls back.
 - **Failure:** the identity stays, no totals are shown, and Retry is whole on screen and calls
   back.
+- **Unknown shared totals:** the open row says `OPEN` and not `REACHED`, the closed row says
+  `CLOSED` and not `UNFINISHED`, both Shared cells say `Unknown`, the period label is shown
+  verbatim, and the total is still 145.
 - **Keyboard:** Tab reaches receipts r1 to r5 in order, and Enter opens r1.
 
 **Compact geometry (the reference's `max-height: 700px` block).** The screen top is 10 px (14 at
@@ -139,7 +157,10 @@ a60eca2030dd152ca7f7484f554d0d2ea88787e934593ded26d434f04cfb6277  progress-failu
 The reference publishes a 390×640 original only for first-eligible. The other states' 390×640
 frames below are canonical-only.
 
-### `fixture/` — `ProgressParityView` at `f79a3c49`, through the component fixture
+### `fixture/` — `ProgressParityView` at `5c4041f3`, through the component fixture
+
+The 11 frames that also existed at `f79a3c49` are **byte-identical** to it, carried by hash. The
+two `unknown-shared` frames are new and canonical-only.
 
 The fixture is the reference's own state:
 - member Alex M., in Oak Grove Together and Harbor Lunch Crew;
@@ -163,6 +184,8 @@ ff9a25238828fde4a46de95a03e290c681189f15667ea03da811f690733e55b9  progress-no-op
 2ab57996cc1d6c2cc889cc07275225c345a115173f394babeca62f6c59f4d8d7  progress-partial-390x640.png
 bc113e3b1b026520e069f258d9c66581de452d033486f27c513cd98a640aa84f  progress-failure-390x844.png
 c929c97935044f67ff2e594ef91b9d032ce522e7bba98dafc52f1b0a66d32e44  progress-failure-390x640.png
+50861ab478cb7a439ca1aef32459fec07f407c43d1ea0d586bbc068183497377  progress-unknown-shared-390x844.png
+27a9c749127cc5dc0b286c49236dba2cee0a67c7324a6540265d78fe7d871623  progress-unknown-shared-390x640.png
 ```
 
 Each frame with an original has two comparison sets. Both are listed with measurements in
@@ -202,9 +225,9 @@ to the same face in this environment.
   partial read can lose open or finished goals; the reference's wording describes its own fixture.
 - **The receipts slot is a seam** (above). The populated state shows its honest line where the
   reference shows five rows.
-- **The goal row sub-line** is "community · Ends Sep 27" or "Ended Aug 31" (`whenLabel`), not the
-  reference's period name ("This week", "August"). Canonical goals carry `endsAt`, not a period
-  label.
+- **The goal row sub-line** is "community · {periodLabel}", with the label supplied by the adapter.
+  The fixture uses "Ends Sep 27" and "Ended Aug 31"; the reference prints its demo period names
+  ("This week", "August").
 - **"(not live)" and the legacy held-aside note** are not drawn. Canonical Progress has no
   staleness state and no legacy local entries.
 - **Font weights 750 and 850 are drawn at 700 and 800.** React Native's `fontWeight` has neither;
@@ -228,7 +251,8 @@ When W9 posts the immutable PERF product SHA:
    - `finished` → `finished`;
    - `partial` → `partial`;
    - `error` → `failed`;
-   - `sharedTotal` absent → `null`;
+   - `sharedTotal` absent → `UNKNOWN_SHARED`, never 0;
+   - `periodLabel` formatted from `endsAt` in the goal's stored timezone;
    - `canStart` from any goal read with `status === 'active'` and a target above 0;
    - `memberName` from whatever the route already resolves (no new read);
    - `receipts: null`.

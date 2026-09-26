@@ -282,6 +282,34 @@
         "width": 390,
         "height": 479
       }
+    },
+    {
+      "state": "unknown-shared",
+      "viewport": "390x844",
+      "fixture": "fixture/progress-unknown-shared-390x844.png",
+      "fixtureSha256": "50861ab478cb7a439ca1aef32459fec07f407c43d1ea0d586bbc068183497377",
+      "lovable": null,
+      "lovableSha256": null,
+      "crop": {
+        "x": 0,
+        "y": 92,
+        "width": 390,
+        "height": 677
+      }
+    },
+    {
+      "state": "unknown-shared",
+      "viewport": "390x640",
+      "fixture": "fixture/progress-unknown-shared-390x640.png",
+      "fixtureSha256": "27a9c749127cc5dc0b286c49236dba2cee0a67c7324a6540265d78fe7d871623",
+      "lovable": null,
+      "lovableSha256": null,
+      "crop": {
+        "x": 0,
+        "y": 86,
+        "width": 390,
+        "height": 479
+      }
     }
   ]
 }
