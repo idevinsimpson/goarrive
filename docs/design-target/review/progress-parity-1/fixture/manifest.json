@@ -6,7 +6,7 @@
       "state": "populated",
       "viewport": "390x844",
       "fixture": "fixture/progress-populated-390x844.png",
-      "fixtureSha256": "6e00ee1325b55c93f8c788f873fbfe059a78504c784b0fe15bb297f86587ad35",
+      "fixtureSha256": "2ea1147577bbfa021aaa3b1b74bd3f5624f5823beb1f4219bef8b8f9d5174e9b",
       "lovable": "lovable-09b8a73c/progress-populated-390x844.png",
       "lovableSha256": "2ff0dce8aa7e68a68a5ce82469d474c876754fa1cd23900cb0a5ff60d8fc7eea",
       "crop": {
@@ -18,7 +18,7 @@
       "sideBySide": "fixture/cmp-progress-populated-390x844-side-by-side.png",
       "overlay50": "fixture/cmp-progress-populated-390x844-overlay-50.png",
       "difference": "fixture/cmp-progress-populated-390x844-difference.png",
-      "differingPixelShare": 0.0693,
+      "differingPixelShare": 0.0691,
       "aligned": {
         "referenceRuleY": 409,
         "viewRuleY": 409,
@@ -31,7 +31,7 @@
         "sideBySide": "fixture/cmp-progress-populated-390x844-aligned-side-by-side.png",
         "overlay50": "fixture/cmp-progress-populated-390x844-aligned-overlay-50.png",
         "difference": "fixture/cmp-progress-populated-390x844-aligned-difference.png",
-        "differingPixelShare": 0.1208
+        "differingPixelShare": 0.1204
       }
     },
     {
@@ -195,7 +195,7 @@
       "state": "partial",
       "viewport": "390x844",
       "fixture": "fixture/progress-partial-390x844.png",
-      "fixtureSha256": "74c1214241c3dae67998c6fabee9930ddc8baa98b5b2fe0fa6407dff469de903",
+      "fixtureSha256": "f3e31426770d2606c9735a486cba62be7df6a9b648dfe733ae9a8a16dd2266c8",
       "lovable": "lovable-09b8a73c/progress-partial-390x844.png",
       "lovableSha256": "20f81a123cfc3c9324e7271198b93a28f895700652b5c04fc2334c1397925e47",
       "crop": {
@@ -287,7 +287,7 @@
       "state": "unknown-shared",
       "viewport": "390x844",
       "fixture": "fixture/progress-unknown-shared-390x844.png",
-      "fixtureSha256": "50861ab478cb7a439ca1aef32459fec07f407c43d1ea0d586bbc068183497377",
+      "fixtureSha256": "0e7f60a8b1902d9039bbc42107865371280e277d95a228c726b9d8dc45051d27",
       "lovable": null,
       "lovableSha256": null,
       "crop": {
