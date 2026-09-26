@@ -4629,3 +4629,26 @@ The H5 rows on `2e235c58`:
 This matches W4's measurement: 334–370 ms, with Retry, and the behaviour comes from RETURN-CONTINUITY-1, already in the base. **No product change is implied by this instrument task.** Whether HOME-REFRESH-TRUTH-1 closes is the Director's decision.
 
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0 (9 + 20). No artifacts committed. Emulators only (`demo-wsf-local`).
+
+## 53 · The staging pin #508 at exact `fbcfc80c8585e182167d81ae4caf5e76ce740ac8` (Director `5845751799`; source review #508 `5845751625`; W7 ACK `5845753700`): **PASS**
+
+This is the Check 49 method, run locally by git and with the real staging scripts on the pin tree. No product rerun, and no social, email or index check.
+
+| # | Item | Result |
+|---|---|---|
+| **1** | **Head and scope** | **PASS.** The PR head is exactly `fbcfc80c` on the remote, with one parent, `main` `32563aa0` (still `main`). **One file changes**, `approved-candidate.json` (+8 / −5). **Changed:** `approvedAppSha` (`14ce1907` → **`74d1928145bbc76267498ee63b9423b6f6cdfae8`**), `packageLabel`, `_expectedPriorFunctionsNote`, `_fullCandidateNote` and `_rollbackNote`. **Added:** three `_previous…14ce1907` history keys. **Unchanged:** `expectedPriorFunctions` **49**, `candidateAddedFunctions` (the three social names, equal to `main`) and `project`. |
+| **2** | **The boundary `14ce1907..74d19281`, re-derived** | **PASS.** 211 files, +9844 / −1157, of which 182 are under `docs/`. App routes: `(tabs)/you.tsx` and `(tabs)/activity.tsx` are modified; `design-target/{you,progress,community}-parity.tsx` are added, each gated on `EXPO_PUBLIC_WSF_USE_EMULATORS`, which staging does not set; none is removed. **The protected-path set is empty:** hosting and emulator configs, rules, indexes, `.firebaserc`, packages, `app.json`, `.github/`, `scripts/westayfit/`, `functions/` and `functions-westayfit/`. |
+| **3** | **The four first-parent merges, each an accepted packet** | **PASS.** Each merge's tree **equals `git merge-tree` of its parents:** `993f0796` = `14ce1907` + You Phase A `02f86fc2` (#500); `87997c58` = + Progress Phase A `92993f09` (#501); `87a86531` = + Community Phase A `646c9579` (#496); **`74d19281` = + `2f57bbca`**. **`2f57bbca`'s tree equals the merge of accepted You `18ba6de2` and Progress evidence `3ba527d3`** (Progress product `bdc82c0e`). The You route and views are byte-identical to `18ba6de2`, and the Progress route and views to `bdc82c0e`. |
+| **4** | **Functions and inventory** | **PASS.** `functions-westayfit` is tree **`5a3f232e` at both SHAs**, the tree Check 42 counted at 49 exports. The verifier's 46 base names plus the 3 additions give 49 unique. **`read-inventory`:** 49 gives `PREFLIGHT_BEFORE=49` and matches; **48 and 50 are refused.** **`resolve-candidate`:** an empty request and the full `74d19281` resolve to it; **`14ce1907`, `2f57bbca`, `87a86531` and `18ba6de2` are refused**. The control, `main`'s pin, resolves to `14ce1907`. The expected result is **49 → 49, `CREATED_THIS_DEPLOY=none`**. |
+| **5** | **Rollback** | **PASS.** `_rollbackNote` names **`14ce1907`** (run 51, `main` `32563aa0`). `candidateAddedFunctions` keeps the three social names, and the functions tree is unchanged, so a re-pin of `14ce1907` stays compatible. |
+| **6** | **Tests** | **PASS.** `run-all` exits 0 ("all suites passed"). `.github/wsf-staging/tests` and `scripts/` are byte-identical to `main`. |
+
+**Not checked, carried from #508's own list:**
+- the social transports are SHUT;
+- the `wsfContributions` index has no READY receipt;
+- email is blocked;
+- the kiosk hold stands.
+
+W7 did not re-read run 51's job log.
+
+**Status:** **PASS on the pin at `fbcfc80c`.** W7 dispatched nothing. Nothing is accepted, integrated or staged by W7.
