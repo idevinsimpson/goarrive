@@ -15,7 +15,7 @@ The repository at `github.com/idevinsimpson/goarrive` hosts two first-party apps
 - `apps/goarrive/` — the GoArrive coach/member fitness platform (pre-existing).
 - `apps/westayfit/` — the We Stay Fit universal-community app (this milestone).
 
-Both apps ship from Firebase project `goarrive` (single project ID). There is no `westayfit` Firebase project and none will be created. `.firebaserc` is not changed by this milestone.
+Production architecture: both first-party apps are defined against the established `goarrive` Firebase project boundaries. Current WSF staging is separately controlled in `westayfit-staging`. Do not create or infer another production Firebase project without an explicit architecture decision.
 
 ### (b) Two Hosting sites, one project
 
@@ -101,12 +101,12 @@ staging runbook.
 
 ## Deploy Boundary Summary
 
-| Surface | GoArrive command | WSF command |
+| Surface | GoArrive | WSF |
 |---|---|---|
-| Hosting | `firebase deploy --only hosting --config firebase.json` | `firebase hosting:channel:deploy staging --config firebase.westayfit.json` |
-| Functions | `firebase deploy --only functions:default` | `firebase deploy --only functions:westayfit` |
-| Firestore rules | `firebase deploy --only firestore:rules` (shared file, dual regression required) |  |
-| Storage rules | `firebase deploy --only storage` (shared file, dual regression required) |  |
+| Staging release | GoArrive's own release path | **Only** the reviewed WSF staging control plane on operational `main`; read `skills/wsf-staging-deploy/SKILL.md`. No reconstructed ad-hoc CLI path. |
+| Functions | `functions:default` when a scoped GoArrive deploy is authorized | WSF staging function changes only through the reviewed WSF release packet/control plane; never bare `--only functions`. |
+| Firestore rules/indexes | Shared/protected deployment surfaces | Explicit scope, drift review, dual regression, and environment authorization required; never incidental to a Hosting change. |
+| Storage rules | Shared/protected deployment surface | Explicit scope and dual regression required. |
 | Vitest | `npm --prefix apps/goarrive run test:vitest` | `npm --prefix apps/westayfit run test:vitest` |
 | Playwright | `npm run test:e2e` (root) | `npm --prefix apps/westayfit run test:e2e` |
 | Type-check | `npm --prefix apps/goarrive run ts:check` | `npm --prefix apps/westayfit run ts:check` |
@@ -117,3 +117,8 @@ Every WSF change must produce these two receipts before PR merge:
 
 1. `git diff --stat origin/main -- apps/goarrive functions firestore.rules firestore.indexes.json storage.rules` — must be empty.
 2. `firebase functions:list` before and after WSF-only deploy — every GoArrive function still present, no unexpected deletions or renames.
+
+
+## Current authority note (2026-09-26)
+
+This architecture file preserves durable boundaries; it is not the release runbook or current-state ledger. For WSF work read `DOCUMENT_AUTHORITY_AND_SUPERSESSION.md`, and for current staging execution read the staging skill on operational `main` plus the canonical CURRENT STATE record.
