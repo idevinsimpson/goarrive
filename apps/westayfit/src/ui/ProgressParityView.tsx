@@ -16,6 +16,7 @@ import {
 } from '../progressParity';
 import { ACTION_GREEN, NAVY, PROGRESS_GREEN, SURFACE, elevation } from './kit';
 import { MEMBER_TAB_BAR_BODY, MEMBER_TAB_MOVE_OVERHANG } from './MemberTabBar';
+import { RefreshNote, type RefreshState } from './RefreshNote';
 
 /**
  * PROGRESS PARITY VIEW — the accepted Lovable Progress reference (`09b8a73c`,
@@ -54,6 +55,11 @@ export type ProgressParityViewProps = {
   actions: ProgressParityActions;
   /** The device's bottom safe area; the view already clears the tab bar. */
   bottomInset?: number;
+  /**
+   * The route's revalidation state (PERF-MOBILE-1): checking after a moment,
+   * or stale with a Retry when a refresh failed. Shown in the ready state only.
+   */
+  refresh?: RefreshState;
 };
 
 /**
@@ -81,7 +87,7 @@ const n = (v: number) => v.toLocaleString('en-US');
 const CLARIFICATION =
   'This personal summary is only for you. Community activity follows your visibility settings.';
 
-export function ProgressParityView({ state, actions, bottomInset = 0 }: ProgressParityViewProps) {
+export function ProgressParityView({ state, actions, bottomInset = 0, refresh }: ProgressParityViewProps) {
   const compact = useProgressCompact();
   const memberName = state.kind === 'failed' || state.kind === 'ready' ? state.memberName : null;
   const goals = state.kind === 'ready' ? orderedGoals(state.open, state.finished) : [];
@@ -116,6 +122,11 @@ export function ProgressParityView({ state, actions, bottomInset = 0 }: Progress
           <Text style={s.subtitle} testID="wsf-activity-subtitle">
             Your recorded contributions, by goal.
           </Text>
+          {refresh && (refresh.checking || refresh.stale) && state.kind === 'ready' ? (
+            <View style={s.refresh}>
+              <RefreshNote refresh={refresh} testIDPrefix="wsf-activity" />
+            </View>
+          ) : null}
           {state.kind === 'loading' ? (
             <View testID="wsf-activity-loading" accessibilityLabel="Loading what you have recorded">
               <View style={[s.skel, { width: '30%', height: 52 }]} />
@@ -217,9 +228,11 @@ export function ProgressParityView({ state, actions, bottomInset = 0 }: Progress
             <Text style={s.cardEyebrow}>YOUR CONTRIBUTIONS</Text>
             <Text style={s.cardTitle}>No goal is open for contributions</Text>
             <Text style={s.cardBody}>
-              {state.partial
-                ? 'None of the goals that loaded has a contribution recorded for you, and your community has no goal accepting contributions right now.'
-                : 'Nothing is recorded for you yet, and your community has no goal accepting contributions right now.'}
+              {state.noCommunity
+                ? 'Nothing is recorded for you yet. Your part is counted inside a community’s goals — join one, or start your own.'
+                : state.partial
+                  ? 'None of the goals that loaded has a contribution recorded for you, and your community has no goal accepting contributions right now.'
+                  : 'Nothing is recorded for you yet, and your community has no goal accepting contributions right now.'}
             </Text>
             <View style={s.flowActions}>
               <SecondaryAction
@@ -507,6 +520,8 @@ const s = StyleSheet.create({
   h1Compact: { fontSize: 25, lineHeight: 37.5, marginBottom: 8 },
   subtitle: { color: NAVY, fontSize: 15, lineHeight: 22.5, fontWeight: '700', marginTop: -6, marginBottom: 12 },
   totals: { flexDirection: 'row', flexWrap: 'wrap', gap: 22 },
+  // The note brings its own 10 px top; the subtitle's 12 px bottom sits above it.
+  refresh: { marginTop: -10, marginBottom: 12 },
   totalNumber: { color: NAVY, fontSize: 58, lineHeight: 55.1, fontWeight: '700', letterSpacing: -1.16 },
   totalUnit: { color: UNIT_GREEN, fontSize: 13, lineHeight: 19.5, fontWeight: '700', marginTop: 4 },
   // max-width 46ch / 52ch at the reference's metrics (Arial "0": 0.556 em).

@@ -210,6 +210,16 @@ describe('YouParityView', () => {
     expect(text('wsf-you-row-other')).not.toContain('Oak Grove Together');
   });
 
+  it("another community's open goal is listed under its own name and never leads under this band", () => {
+    render(member({ open: [], otherOpen: [OTHER], eligible: true }));
+    expect(byId('wsf-you-lead')).toBeNull();
+    expect(byId('wsf-you-nothing-yet')).not.toBeNull();
+    expect(text('wsf-you-row-other')).toContain('Harbor Lunch Crew · This week');
+    render(member({ open: [LEAD], otherOpen: [OTHER] }));
+    expect(text('wsf-you-lead')).toContain('500 squats together');
+    expect(text('wsf-you-row-other')).toContain('Harbor Lunch Crew');
+  });
+
   it('the band prints a sub-line only for a type the product names — no "Community" filler', () => {
     render(member());
     expect(text('wsf-you-community')).not.toContain('Community');
@@ -217,6 +227,43 @@ describe('YouParityView', () => {
     expect(text('wsf-you-community')).not.toContain('Community');
     render(member({ community: { ...COMMUNITY, groupType: 'familyFriends' } }));
     expect(text('wsf-you-community')).toContain('Family and friends');
+  });
+
+  it('a pending profile holds the name in place and never guesses it', () => {
+    render(member({ profile: { displayName: null, memberSince: null, pending: true } }));
+    expect(byId('wsf-you-name-pending')).not.toBeNull();
+    expect(byId('wsf-you-name')).toBeNull();
+  });
+
+  it('shows no refresh note unless the route passes one', () => {
+    render(member());
+    expect(byId('wsf-you-checking')).toBeNull();
+    expect(byId('wsf-you-stale')).toBeNull();
+  });
+
+  it('says it is checking, and when a refresh failed keeps what was read and retries by callback', () => {
+    const onRetry = vi.fn();
+    const actions: YouParityActions = {
+      onSettings: vi.fn(), onSignOut: vi.fn(), onSignIn: vi.fn(), onCommunity: vi.fn(), onRetry: vi.fn(), onStartMoving: vi.fn(),
+    };
+    act(() => {
+      root.render(
+        <YouParityView state={member()} email={null} signingOut={false} actions={actions} refresh={{ checking: true, stale: false, onRetry }} />,
+      );
+    });
+    expect(text('wsf-you-checking')).toBe('Checking for updates…');
+    expect(before('wsf-you-identity', 'wsf-you-checking')).toBe(true);
+    expect(before('wsf-you-checking', 'wsf-you-community')).toBe(true);
+    act(() => {
+      root.render(
+        <YouParityView state={member()} email={null} signingOut={false} actions={actions} refresh={{ checking: false, stale: true, onRetry }} />,
+      );
+    });
+    expect(text('wsf-you-stale')).toContain('This is what was last read.');
+    expect(byId('wsf-you-checking')).toBeNull();
+    expect(text('wsf-you-lead-own')).toBe('25 squats');
+    act(() => byId('wsf-you-stale-retry')!.click());
+    expect(onRetry).toHaveBeenCalledTimes(1);
   });
 
   it('admits a partial list', () => {

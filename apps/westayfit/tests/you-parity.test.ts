@@ -67,6 +67,17 @@ describe('leadAndOthers — the reference memberGoalRows order', () => {
     const c = goal({ goalId: 'c', open: false });
     expect(leadAndOthers([], [c])).toEqual({ lead: null, others: [c] });
   });
+  it("another community's open goal is listed after this community's, and never leads", () => {
+    const a = goal({ goalId: 'a' });
+    const b = goal({ goalId: 'b' });
+    const h = goal({ goalId: 'h', communityName: 'Harbor Lunch Crew' });
+    const c = goal({ goalId: 'c', open: false });
+    const withLead = leadAndOthers([a, b], [c], [h]);
+    expect(withLead.lead?.goalId).toBe('a');
+    expect(withLead.others.map((g) => g.goalId)).toEqual(['b', 'h', 'c']);
+    // Nothing open here: no lead at all, rather than Harbor's goal under this band.
+    expect(leadAndOthers([], [c], [h])).toEqual({ lead: null, others: [h, c] });
+  });
 });
 
 describe('partBlock — Start moving only when it is true', () => {

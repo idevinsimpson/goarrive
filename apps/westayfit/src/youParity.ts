@@ -20,6 +20,8 @@ import {
 
 export type YouProfile = {
   displayName: string | null;
+  /** The profile has not been read yet: the name waits in its place, it is not guessed. */
+  pending?: boolean;
   /** "September 2026". A join date is identity, not activity. */
   memberSince: string | null;
 };
@@ -64,8 +66,18 @@ export type YouState =
       kind: 'member';
       profile: YouProfile;
       community: YouCommunity;
-      /** Open goals with own credit, soonest-ending first. The first leads. */
+      /**
+       * Open goals with own credit IN THIS COMMUNITY, soonest-ending first.
+       * The first leads: the lead sits under this community's band.
+       */
       open: YouGoal[];
+      /**
+       * Open goals with own credit in the member's OTHER communities. Listed
+       * under "Other goals you helped" with their own community's name, and
+       * never the lead — the lead card does not name a community, so another
+       * community's goal there would read as this one's.
+       */
+      otherOpen?: YouGoal[];
       /** Finished goals with own credit, most recent first. */
       finished: YouGoal[];
       /** A read failed and these lists may be short. */
@@ -104,14 +116,18 @@ export function initialsOf(name: string | null | undefined): string | null {
 }
 
 /**
- * The lead and the rest. The lead is the first OPEN goal (the route sorts
- * soonest-ending first); "Other goals you helped" is every other credited
- * goal, open ones first, then finished — the reference's `memberGoalRows`
- * order.
+ * The lead and the rest. The lead is the first OPEN goal of THIS community
+ * (the route sorts soonest-ending first); "Other goals you helped" is every
+ * other credited goal, open ones first — this community's, then the member's
+ * other communities' — then finished: the reference's `memberGoalRows` order.
  */
-export function leadAndOthers(open: readonly YouGoal[], finished: readonly YouGoal[]) {
+export function leadAndOthers(
+  open: readonly YouGoal[],
+  finished: readonly YouGoal[],
+  otherOpen: readonly YouGoal[] = [],
+) {
   const lead = open[0] ?? null;
-  return { lead, others: [...open.slice(1), ...finished] };
+  return { lead, others: [...open.slice(1), ...otherOpen, ...finished] };
 }
 
 /** Which "your part" block the member state shows. */
