@@ -38,9 +38,13 @@ A worker is not considered late or idle on an assignment that was never posted t
 
 Wake/check-in automation reads the canonical inbox first. Do not create duplicate wakes for the same assignment.
 
+One task has one authoritative inbox handoff. If the governing decision is on a task PR, the inbox mirror is one short link plus exact SHA/scope. L0 and the Director do not post competing full copies of the same packet. Later corrections are deltas only.
+
 ## 4. State-transition reporting
 
 Routine sweeps are silent when nothing changed.
+
+The program has one canonical CURRENT STATE comment on #365. Update that comment in place rather than appending replacement summaries. Detailed receipts stay on their task/release threads.
 
 Post or update CURRENT only when one of these changes:
 - assignment dispatched or acknowledged;
@@ -143,3 +147,45 @@ A green unit test is not a visual pass. A deployment receipt is not a device pas
 - Community/Settings integrated at `938e00d8` stays isolated and proceeds to its focused staging pin/release.
 - MEMBER-SNAPSHOT-1 and its new index remain separate and do not enter that visible milestone.
 - The new control-plane automation work is itself a separate operations packet and must not delay the Community/Settings release.
+
+
+## 13. Worker watch stop condition
+
+Worker polling is driven by actionable ownership, not by the number of open pull requests.
+
+A worker check-in remains active only while the worker:
+- owns an actionable packet;
+- is waiting on a near-term review event for a packet it just delivered; or
+- has an explicit condition to recheck.
+
+Blocked, historical, reference, evidence-only, merged, and “waiting on another owner” PRs do not keep a worker poller alive. The program-level Fable loop owns global monitoring and reactivates the canonical inbox when a dependency clears.
+
+An open PR by itself is never a stop-condition blocker.
+
+## 14. Handoff deduplication
+
+For each task:
+1. one canonical inbox comment is the actionable handoff;
+2. the task PR may hold detailed governing text/evidence;
+3. the inbox handoff links to that text and names the exact SHA/scope;
+4. Director and L0 do not post duplicate full packets;
+5. a worker ACK belongs to the authoritative handoff or focused correction delta;
+6. wakes reference that exact handoff comment id.
+
+A correction restates only the changed requirement. It does not republish the whole task.
+
+## 15. Canonical CURRENT STATE
+
+#365 maintains one editable comment headed `CANONICAL CURRENT STATE — EDIT THIS COMMENT IN PLACE`.
+
+It should contain only:
+- verified served staging SHA/run/rollback;
+- canonical development head when verified;
+- visible critical path;
+- active operations/control-plane packet;
+- independent QA lanes that can block staging;
+- blocked readiness tracks;
+- irreducible owner action, if any;
+- canonical worker inbox map.
+
+Fable reads this comment first, then only active changed heads/inboxes. It must not reconstruct current state by rereading the full historical comment wall.
