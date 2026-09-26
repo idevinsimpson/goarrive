@@ -34,7 +34,9 @@ export function invariants(s) {
     if (p.phase !== 'QUEUED' && p.phase !== 'WITHDRAWN' && p.inbox !== null && s.workers[p.owner] && p.inbox !== s.workers[p.owner].inbox) {
       problems.push(`${id}: released in #${p.inbox}, outside ${p.owner}'s canonical inbox #${s.workers[p.owner].inbox}`);
     }
-    for (const k of ['subjectSha', 'prHeadSha', 'evidenceSha']) {
+    if (p.phase === 'QUEUED' && !(s.queue[p.owner] || []).includes(id)) problems.push(`${id} is QUEUED but not in ${p.owner}'s queue`);
+    if (p.phase === 'VERIFYING' && p.proof?.result !== 'RUNNING') problems.push(`${id} is VERIFYING without a running proof`);
+    for (const k of ['subjectSha', 'prHeadSha', 'evidenceSha', 'mergeSha']) {
       const v = p.artifact[k];
       if (v !== null && !RE.sha.test(v)) problems.push(`${id}: artifact.${k} is not a 40-character SHA`);
     }

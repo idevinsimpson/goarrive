@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 const suites = [
   'ledger.test.mjs',
   'views.test.mjs',
+  'skill.test.mjs',
 ];
 let failed = 0;
 for (const s of suites) {

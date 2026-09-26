@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { checkDir } from './check.mjs';
-import { byId, workerBuckets, workerWatch } from './derive.mjs';
+import { byId, fmtRef, workerBuckets, workerWatch } from './derive.mjs';
 
 export const MARKER = /^<!-- wsf-control ledgerHead=([0-9a-f]{64}) events=(\d+) /;
 const s8 = (x) => (x ? x.slice(0, 8) : '—');
@@ -30,7 +30,12 @@ export function renderCurrent(s) {
   L.push('Derived from `events.jsonl` on the `wsf-control-state` branch. Do not edit; record a decision with `append.mjs`, then re-render.');
   L.push('GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.');
   L.push('');
+  L.push(`- Repository: \`${s.repository}\``);
   L.push(`- Ledger head: \`${s.ledgerHead}\` (${s.eventCount} events)`);
+  L.push(`- Genesis: bootstrap as of ${s.asOf}. Packets whose origin is \`bootstrap\` were imported in their phase at that instant; the ledger did not observe their earlier transitions.`);
+  L.push(s.surfaces
+    ? `- Surfaces: control inbox #${s.surfaces.controlInbox.pr}; CURRENT is comment ${s.surfaces.current.commentId} on #${s.surfaces.current.pr}`
+    : '- Surfaces: not recorded');
   L.push(s.canonical
     ? `- Canonical: development \`${s.canonical.developmentBranch}\` at \`${s.canonical.developmentSha}\`; operational main \`${s.canonical.operationalMain}\``
     : '- Canonical: not recorded');
@@ -51,11 +56,13 @@ export function renderCurrent(s) {
   L.push('');
   L.push('## Packets');
   L.push('');
-  L.push('| Packet | Owner | Kind | Track | Phase | PR | Subject | PR head | Evidence | Reviewers | Released by | Last decision | Blocked by | Label |');
-  L.push('| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |');
+  L.push('| Packet | Owner | Kind | Completes at | Origin | Phase | PR | Subject | PR head | Evidence | Merge | Proof | Reviewers | Released by | Last transition | Blocked by | Label |');
+  L.push('| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |');
   for (const p of byId(s)) {
     const blockers = p.blockedBy.map((b) => (b.packet ? `${b.packet}≥${b.until}` : `${b.external} (${b.owner})`)).join('; ');
-    L.push(`| ${p.id} | ${p.owner} | ${p.kind} | ${p.track} | ${p.phase}${p.phaseBeforeBlock ? ` (from ${p.phaseBeforeBlock})` : ''} | ${p.pr ? `#${p.pr}` : '—'} | ${s8(p.artifact.subjectSha)} | ${s8(p.artifact.prHeadSha)} | ${s8(p.artifact.evidenceSha)} | ${p.reviewers.join(', ') || '—'} | ${p.authority.released ?? '—'} | ${p.authority.lastTransition} | ${cell(blockers || null)} | ${cell(p.label)} |`);
+    const proof = p.proof ? `${p.proof.type} run ${p.proof.runId}: ${p.proof.result}` : '—';
+    const rel = p.authority.released ? fmtRef(p.authority.released) : '—';
+    L.push(`| ${p.id} | ${p.owner} | ${p.kind} | ${p.completion.terminal} (${p.completion.proofType}) | ${p.origin} | ${p.phase}${p.phaseBeforeBlock ? ` (from ${p.phaseBeforeBlock})` : ''} | ${p.pr ? `#${p.pr}` : '—'} | ${s8(p.artifact.subjectSha)} | ${s8(p.artifact.prHeadSha)} | ${s8(p.artifact.evidenceSha)} | ${s8(p.artifact.mergeSha)} | ${proof} | ${p.reviewers.join(', ') || '—'} | ${rel} | ${fmtRef(p.authority.lastTransition)} | ${cell(blockers || null)} | ${cell(p.label)} |`);
   }
   L.push('');
   return `${L.join('\n')}`;

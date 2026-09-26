@@ -14,13 +14,14 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { RE } from './schema.mjs';
 import { checkDir } from './check.mjs';
-import { workerBuckets, workerWatch } from './derive.mjs';
+import { fmtRef, workerBuckets, workerWatch } from './derive.mjs';
 
 const line = (p) => [
   p.id, `phase=${p.phase}`, p.pr ? `pr=#${p.pr}` : null,
   p.artifact.subjectSha ? `subject=${p.artifact.subjectSha}` : null,
   p.artifact.prHeadSha && p.artifact.prHeadSha !== p.artifact.subjectSha ? `prHead=${p.artifact.prHeadSha}` : null,
   p.reviewers.length ? `reviewers=${p.reviewers.join(',')}` : null,
+  p.proof ? `proof=${p.proof.runId}:${p.proof.result}` : null,
 ].filter(Boolean).join(' ');
 
 /** The view's lines for one worker. */
@@ -35,7 +36,7 @@ export function workerView(s, worker) {
   out.push(`NEXT=${b.next ?? 'none'}`);
   out.push(`WATCH=${workerWatch(s, worker) ? 'on' : 'off'}`);
   for (const p of [...b.active, ...b.awaitingReview]) {
-    out.push(`AUTHORITY ${p.id} queued=${p.authority.queued} released=${p.authority.released ?? 'none'} lastDecision=${p.authority.lastTransition}`);
+    out.push(`AUTHORITY ${p.id} origin=${p.origin} queued=${fmtRef(p.authority.queued)} released=${fmtRef(p.authority.released)} last=${fmtRef(p.authority.lastTransition)}`);
   }
   return out;
 }

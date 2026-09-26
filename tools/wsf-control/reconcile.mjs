@@ -7,29 +7,17 @@
  * Pure and report-only: it reads a state and a snapshot and returns findings.
  * It never mutates either, never writes, never posts and never appends. A
  * finding names who wins:
- *   - github: a FACT (a PR head, a merge, a close, the served SHA, a trigger's
- *     state). The ledger is behind; the suggested event records the fact.
+ *   - github: a FACT (a PR head, a merge, a close, a run's conclusion, the
+ *     served SHA, a check-in's state). The ledger is behind; the suggested
+ *     event records the fact.
  *   - ledger: a DECISION (a release, a review, an acceptance). GitHub shows
  *     something the ledger never decided; a Fable/L0 decision is needed, and
  *     nothing is inferred from the GitHub side.
+ *   - exception: the control surface itself is not as recorded. Fail closed:
+ *     nothing is edited or re-created until a decision resolves it.
  *
- * The snapshot is built by the session from GitHub (see
- * docs/westayfit/ops/CONTROL_STATE.md) and holds pointers only:
- *
- *   { "schemaVersion": 1,
- *     "prs": { "<n>": { "state": "open"|"closed", "merged": bool, "headSha": "<40>",
- *                       "mergeSha": "<40>"?, "changedSinceSubject": ["path", ...]? } },
- *     "inboxHandoffs": [ { "inbox": <n>, "commentId": <n>, "packet": "<ID>" } ],
- *     "pin": { "approvedAppSha": "<40>" }?,
- *     "staging": { "servedSha": "<40>" }?,
- *     "triggers": { "W3": { "enabled": bool } }?,
- *     "externalConditions": { "<ID>": bool }? }
- *
- * `changedSinceSubject` is the list of paths changed between the packet's
- * subjectSha and the PR's current head. With it, a head move is classified:
- * the subject is stale only when a changed path is inside the packet's
- * subjectPaths; otherwise the move is evidence/doc practice and the reviewed
- * subject still stands. Without it, the classification is reported as unknown.
+ * The snapshot shape is in docs/westayfit/ops/CONTROL_STATE.md. It holds
+ * pointers and closed values only.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -37,15 +25,19 @@ import { pathToFileURL } from 'node:url';
 import { RE, isTerminal, screen } from './schema.mjs';
 import { invariants, checkDir } from './check.mjs';
 import { byId, workerWatch } from './derive.mjs';
+import { ledgerHeads } from './reduce.mjs';
 
 export class SnapshotError extends Error {}
 
-const TOP = ['schemaVersion', 'prs', 'inboxHandoffs', 'pin', 'staging', 'triggers', 'externalConditions'];
+const TOP = ['schemaVersion', 'prs', 'runs', 'inboxHandoffs', 'currentSurface', 'pin', 'staging', 'triggers', 'externalConditions'];
 const PR_KEYS = ['state', 'merged', 'headSha', 'mergeSha', 'changedSinceSubject'];
+const RUN_STATUS = ['queued', 'in_progress', 'completed'];
+const RUN_CONCLUSIONS = ['success', 'failure', 'cancelled', 'timed_out', 'skipped', 'neutral', 'action_required', 'startup_failure', 'stale'];
 const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
 const posInt = (v) => Number.isInteger(v) && v > 0;
+const keysAre = (v, keys) => isObj(v) && Object.keys(v).sort().join() === [...keys].sort().join();
 
-/** Problems with a snapshot's shape. It carries pointers and booleans only: no titles, bodies or prose. */
+/** Problems with a snapshot's shape. It carries pointers and closed values only: no titles, bodies or prose. */
 export function validateSnapshot(snap) {
   const p = [];
   if (!isObj(snap)) return ['the snapshot must be a JSON object'];
@@ -68,22 +60,38 @@ export function validateSnapshot(snap) {
       }
     }
   }
+  if (snap.runs !== undefined) {
+    if (!isObj(snap.runs)) p.push('snapshot.runs must be an object keyed by run id');
+    else for (const [id, r] of Object.entries(snap.runs)) {
+      if (!/^[1-9][0-9]*$/.test(id) || !keysAre(r, ['status', 'conclusion']) || !RUN_STATUS.includes(r.status) ||
+        (r.status === 'completed' ? !RUN_CONCLUSIONS.includes(r.conclusion) : r.conclusion !== null)) {
+        p.push(`snapshot.runs.${id} must be exactly { status: queued|in_progress|completed, conclusion: a GitHub conclusion once completed, else null }`);
+      }
+    }
+  }
   if (snap.inboxHandoffs !== undefined) {
     if (!Array.isArray(snap.inboxHandoffs)) p.push('snapshot.inboxHandoffs must be a list');
     else snap.inboxHandoffs.forEach((h, i) => {
-      if (!isObj(h) || Object.keys(h).sort().join() !== 'commentId,inbox,packet' || !posInt(h.inbox) || !posInt(h.commentId) || typeof h.packet !== 'string' || !RE.packet.test(h.packet)) {
+      if (!keysAre(h, ['commentId', 'inbox', 'packet']) || !posInt(h.inbox) || !posInt(h.commentId) || typeof h.packet !== 'string' || !RE.packet.test(h.packet)) {
         p.push(`snapshot.inboxHandoffs[${i}] must be exactly { inbox, commentId, packet }`);
       }
     });
   }
+  if (snap.currentSurface !== undefined) {
+    const c = snap.currentSurface;
+    if (!keysAre(c, ['commentId', 'exists', 'markerHead']) || !posInt(c.commentId) || typeof c.exists !== 'boolean' ||
+      !(c.markerHead === null || (typeof c.markerHead === 'string' && RE.hash.test(c.markerHead)))) {
+      p.push('snapshot.currentSurface must be exactly { commentId, exists: boolean, markerHead: <64-hex> | null }');
+    }
+  }
   for (const [k, field] of [['pin', 'approvedAppSha'], ['staging', 'servedSha']]) {
     if (snap[k] === undefined) continue;
-    if (!isObj(snap[k]) || Object.keys(snap[k]).join() !== field || !RE.sha.test(String(snap[k][field]))) p.push(`snapshot.${k} must be exactly { ${field}: <40-character SHA> }`);
+    if (!keysAre(snap[k], [field]) || !RE.sha.test(String(snap[k][field]))) p.push(`snapshot.${k} must be exactly { ${field}: <40-character SHA> }`);
   }
   if (snap.triggers !== undefined) {
     if (!isObj(snap.triggers)) p.push('snapshot.triggers must be an object keyed by worker');
     else for (const [w, t] of Object.entries(snap.triggers)) {
-      if (!RE.worker.test(w) || !isObj(t) || Object.keys(t).join() !== 'enabled' || typeof t.enabled !== 'boolean') p.push(`snapshot.triggers.${w} must be exactly { enabled: boolean }`);
+      if (!RE.worker.test(w) || !keysAre(t, ['enabled']) || typeof t.enabled !== 'boolean') p.push(`snapshot.triggers.${w} must be exactly { enabled: boolean }`);
     }
   }
   if (snap.externalConditions !== undefined) {
@@ -101,53 +109,82 @@ export function inSubject(file, subjectPaths) {
   return subjectPaths.some((s) => s === '*' || file === s || file.startsWith(s.endsWith('/') ? s : `${s}/`));
 }
 
-const f = (kind, wins, fields) => ({ kind, wins, ...fields });
+/**
+ * The CURRENT comment the ledger points at, checked before anyone edits it.
+ * It must be in the snapshot, be the recorded comment, still exist, and carry
+ * a control marker for a head this ledger has had. Anything else fails closed.
+ */
+export function surfaceStatus(state, snap, heads = [state.ledgerHead]) {
+  const want = state.surfaces?.current;
+  if (!want) return { ok: false, detail: 'the ledger records no CURRENT surface' };
+  const c = snap.currentSurface;
+  if (!c) return { ok: false, detail: 'the snapshot does not report the CURRENT comment; it is not edited unchecked' };
+  if (c.commentId !== want.commentId) return { ok: false, detail: `the snapshot checked comment ${c.commentId}, but the ledger's CURRENT is comment ${want.commentId}` };
+  if (!c.exists) return { ok: false, detail: `CURRENT comment ${want.commentId} is missing; it is not re-created without a set-surfaces decision` };
+  if (c.markerHead === null) return { ok: false, detail: `CURRENT comment ${want.commentId} carries no control marker` };
+  if (!heads.includes(c.markerHead)) return { ok: false, detail: `CURRENT comment ${want.commentId} carries a marker for ${c.markerHead.slice(0, 12)}, which is not a head of this ledger` };
+  return { ok: true, detail: c.markerHead === state.ledgerHead ? 'current' : 'behind the ledger head; re-render and edit in place' };
+}
 
-/** Findings for a (valid) state against a (valid) snapshot. Pure: reads both, mutates neither. */
-export function reconcile(state, snap) {
+const f = (kind, wins, fields) => ({ kind, wins, ...fields });
+const AFTER_MERGE = ['INTEGRATED', 'VERIFYING', 'VERIFIED', 'STAGED'];
+
+/**
+ * Findings for a (valid) state against a (valid) snapshot. Pure: reads both,
+ * mutates neither. `heads` is every head the ledger has had (for the CURRENT
+ * marker check); by default only the current one.
+ */
+export function reconcile(state, snap, { heads } = {}) {
   const problems = validateSnapshot(snap);
   if (problems.length) throw new SnapshotError(problems.join('; '));
   const out = [];
   const prs = snap.prs;
 
   for (const p of byId(state)) {
-    if (p.pr === null) continue;
-    const pr = prs[String(p.pr)];
-    if (!pr) {
-      if (!isTerminal(p)) out.push(f('pr-not-in-snapshot', 'github', { packet: p.id, pr: p.pr, detail: 'the snapshot has no facts for this PR; nothing about it is reconciled' }));
-      continue;
-    }
-    if (pr.merged) {
-      if (!['INTEGRATED', 'STAGED', 'WITHDRAWN'].includes(p.phase)) {
-        out.push(p.phase === 'ACCEPTED'
-          ? f('pr-merged-not-integrated', 'github', { packet: p.id, pr: p.pr, detail: `merged as ${pr.mergeSha}`, suggest: { type: 'integrate', packet: p.id, mergeSha: pr.mergeSha, by: 'L0' } })
-          : f('pr-merged-without-acceptance', 'ledger', { packet: p.id, pr: p.pr, detail: `merged while the ledger says ${p.phase}; the ledger records no acceptance, and none is inferred` }));
+    if (p.pr !== null) {
+      const pr = prs[String(p.pr)];
+      if (!pr) {
+        if (!isTerminal(p)) out.push(f('pr-not-in-snapshot', 'github', { packet: p.id, pr: p.pr, detail: 'the snapshot has no facts for this PR; nothing about it is reconciled' }));
+      } else if (pr.merged) {
+        if (p.artifact.mergeSha === pr.mergeSha) { /* recorded */ } else if (p.phase === 'ACCEPTED') {
+          out.push(f('pr-merged-not-integrated', 'github', { packet: p.id, pr: p.pr, detail: `merged as ${pr.mergeSha}`, suggest: { type: 'integrate', packet: p.id, mergeSha: pr.mergeSha, acceptance: p.authority.accepted?.id ?? null, by: 'L0' } }));
+        } else if (p.artifact.mergeSha) {
+          out.push(f('merge-drift', 'github', { packet: p.id, pr: p.pr, detail: `GitHub merged ${pr.mergeSha}; the ledger records ${p.artifact.mergeSha}` }));
+        } else if (p.phase !== 'WITHDRAWN') {
+          out.push(f('pr-merged-without-acceptance', 'ledger', { packet: p.id, pr: p.pr, detail: `merged while the ledger says ${p.phase}; the ledger records no acceptance, and none is inferred` }));
+        }
+      } else if (pr.state === 'closed') {
+        if (!isTerminal(p)) out.push(f('pr-closed-not-withdrawn', 'ledger', { packet: p.id, pr: p.pr, detail: `closed unmerged while the ledger says ${p.phase}; withdrawing or redelivering is a decision` }));
+      } else if (!isTerminal(p) && !AFTER_MERGE.includes(p.phase) && pr.headSha !== p.artifact.prHeadSha) {
+        out.push(f('pr-head-moved', 'github', { packet: p.id, pr: p.pr, detail: `head ${p.artifact.prHeadSha} → ${pr.headSha}`, suggest: { type: 'reconcile-head', packet: p.id, prHeadSha: pr.headSha } }));
+        if (pr.headSha !== p.artifact.subjectSha) {
+          if (pr.changedSinceSubject === undefined) {
+            out.push(f('subject-change-unknown', 'github', { packet: p.id, pr: p.pr, detail: 'no changedSinceSubject in the snapshot; whether the reviewed subject changed is not determined' }));
+          } else {
+            const touched = pr.changedSinceSubject.filter((x) => inSubject(x, p.subjectPaths));
+            out.push(touched.length
+              ? f('subject-stale', 'ledger', { packet: p.id, pr: p.pr, detail: `${touched.length} subject path(s) changed since ${p.artifact.subjectSha} (${touched.slice(0, 5).join(', ')}); ${p.phase} applies to the old subject until a successor deliver` })
+              : f('evidence-moved', 'github', { packet: p.id, pr: p.pr, detail: `only non-subject paths changed since ${p.artifact.subjectSha}; the reviewed subject stands`, suggest: { type: 'record-evidence', packet: p.id, evidenceSha: pr.headSha } }));
+          }
+        }
       }
-      continue;
     }
-    if (pr.state === 'closed') {
-      if (!isTerminal(p)) out.push(f('pr-closed-not-withdrawn', 'ledger', { packet: p.id, pr: p.pr, detail: `closed unmerged while the ledger says ${p.phase}; withdrawing or redelivering is a decision` }));
-      continue;
-    }
-    if (isTerminal(p) || p.phase === 'INTEGRATED') continue;
-    if (pr.headSha === p.artifact.prHeadSha) continue;
-    out.push(f('pr-head-moved', 'github', { packet: p.id, pr: p.pr, detail: `head ${p.artifact.prHeadSha} → ${pr.headSha}`, suggest: { type: 'reconcile-head', packet: p.id, prHeadSha: pr.headSha } }));
-    if (pr.headSha === p.artifact.subjectSha) continue;
-    if (pr.changedSinceSubject === undefined) {
-      out.push(f('subject-change-unknown', 'github', { packet: p.id, pr: p.pr, detail: 'no changedSinceSubject in the snapshot; whether the reviewed subject changed is not determined' }));
-    } else {
-      const touched = pr.changedSinceSubject.filter((x) => inSubject(x, p.subjectPaths));
-      if (touched.length) {
-        out.push(f('subject-stale', 'ledger', {
-          packet: p.id, pr: p.pr,
-          detail: `${touched.length} subject path(s) changed since ${p.artifact.subjectSha} (${touched.slice(0, 5).join(', ')}); ${p.phase} applies to the old subject until a successor deliver`,
+    // Proof runs: GitHub is the authority for a run's conclusion; the ledger is never silently corrected.
+    if (p.proof && snap.runs) {
+      const run = snap.runs[String(p.proof.runId)];
+      if (!run) {
+        if (p.phase === 'VERIFYING') out.push(f('run-not-in-snapshot', 'github', { packet: p.id, run: p.proof.runId, detail: 'the snapshot has no facts for the proof run' }));
+      } else if (p.proof.result === 'RUNNING' && run.status === 'completed') {
+        out.push(f('proof-run-concluded', 'github', {
+          packet: p.id, run: p.proof.runId, detail: `the ledger says RUNNING; the run concluded ${run.conclusion}`,
+          suggest: run.conclusion === 'success'
+            ? { type: p.completion.terminal === 'VERIFIED' ? 'proof-pass' : 'stage', packet: p.id, runId: p.proof.runId, by: 'L0' }
+            : { type: 'proof-fail', packet: p.id, runId: p.proof.runId, by: 'Fable', source: 'a focused finding comment' },
         }));
-      } else {
-        out.push(f('evidence-moved', 'github', {
-          packet: p.id, pr: p.pr,
-          detail: `only non-subject paths changed since ${p.artifact.subjectSha}; the reviewed subject stands`,
-          suggest: { type: 'record-evidence', packet: p.id, evidenceSha: pr.headSha },
-        }));
+      } else if (p.proof.result === 'PASS' && (run.status !== 'completed' || run.conclusion !== 'success')) {
+        out.push(f('proof-result-drift', 'github', { packet: p.id, run: p.proof.runId, detail: `the ledger records PASS; the run is ${run.status}${run.conclusion ? ` (${run.conclusion})` : ''}` }));
+      } else if (p.proof.result === 'FAIL' && run.status === 'completed' && run.conclusion === 'success') {
+        out.push(f('proof-result-drift', 'github', { packet: p.id, run: p.proof.runId, detail: 'the ledger records FAIL; the run concluded success' }));
       }
     }
   }
@@ -163,10 +200,15 @@ export function reconcile(state, snap) {
       out.push(f('handoff-outside-canonical-inbox', 'ledger', { packet: h.packet, inbox: h.inbox, commentId: h.commentId, detail: `${p.owner}'s canonical inbox is #${state.workers[p.owner]?.inbox}` }));
       continue;
     }
-    const known = [p.authority.queued, p.authority.released, p.authority.lastTransition];
+    const known = [...Object.values(p.authority), ...p.importRefs].filter((r) => r && r.kind === 'comment').map((r) => r.id);
     if (!known.includes(h.commentId)) {
-      out.push(f('handoff-not-recorded', 'ledger', { packet: h.packet, inbox: h.inbox, commentId: h.commentId, detail: `the ledger's last decision for this packet is ${p.authority.lastTransition} (${p.phase})` }));
+      out.push(f('handoff-not-recorded', 'ledger', { packet: h.packet, inbox: h.inbox, commentId: h.commentId, detail: `the ledger's last transition for this packet rests on ${p.authority.lastTransition?.kind}:${p.authority.lastTransition?.id} (${p.phase})` }));
     }
+  }
+
+  if (state.surfaces?.current) {
+    const sfc = surfaceStatus(state, snap, heads ?? [state.ledgerHead]);
+    if (!sfc.ok) out.push(f('control-surface-exception', 'exception', { detail: sfc.detail }));
   }
 
   if (snap.pin && state.staging && snap.pin.approvedAppSha !== state.staging.servedSha) {
@@ -192,7 +234,7 @@ export function reconcile(state, snap) {
 }
 
 export function formatFinding(x) {
-  const where = [x.packet && `packet=${x.packet}`, x.worker && `worker=${x.worker}`, x.pr && `pr=#${x.pr}`, x.inbox && `inbox=#${x.inbox}`, x.commentId && `comment=${x.commentId}`].filter(Boolean).join(' ');
+  const where = [x.packet && `packet=${x.packet}`, x.worker && `worker=${x.worker}`, x.pr && `pr=#${x.pr}`, x.run && `run=${x.run}`, x.inbox && `inbox=#${x.inbox}`, x.commentId && `comment=${x.commentId}`].filter(Boolean).join(' ');
   const suggest = x.suggest ? ` suggest=${JSON.stringify(x.suggest)}` : '';
   return `FINDING kind=${x.kind} wins=${x.wins}${where ? ` ${where}` : ''} :: ${x.detail}${suggest}`;
 }
@@ -205,12 +247,15 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   let snap;
   try { snap = JSON.parse(fs.readFileSync(snapFile, 'utf8')); } catch { console.log('RECONCILE=refused (the snapshot is missing or is not JSON)'); process.exit(2); }
   let findings;
-  try { findings = reconcile(checked.state, snap); } catch (e) {
+  const heads = ledgerHeads(fs.readFileSync(path.join(dir, 'events.jsonl'), 'utf8'));
+  try { findings = reconcile(checked.state, snap, { heads }); } catch (e) {
     if (!(e instanceof SnapshotError)) throw e;
     console.error(`::error::${e.message}`);
     console.log('RECONCILE=refused (the snapshot is malformed)');
     process.exit(2);
   }
   for (const x of findings) console.log(formatFinding(x));
+  const surface = findings.some((x) => x.kind === 'control-surface-exception') ? 'exception' : 'ok';
+  console.log(`CURRENT_SURFACE=${surface}`);
   console.log(`RECONCILE findings=${findings.length} head=${checked.state.ledgerHead}`);
 }
