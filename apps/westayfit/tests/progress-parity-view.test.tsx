@@ -214,6 +214,16 @@ describe('ProgressParityView — states', () => {
     expect(actions.onOpenCommunity).toHaveBeenCalledTimes(1);
   });
 
+  it('no community: no Start moving, and no claim about "your community"', () => {
+    const actions = render(ready({ open: [], finished: [], canStart: false, noCommunity: true }));
+    expect(byId('wsf-activity-empty')!.getAttribute('data-state')).toBe('no-open-goal');
+    expect(text('wsf-activity-empty')).toContain('join one, or start your own');
+    expect(text('wsf-activity-empty')).not.toContain('your community');
+    expect(byId('wsf-activity-start')).toBeNull();
+    click('wsf-activity-open-community');
+    expect(actions.onOpenCommunity).toHaveBeenCalledTimes(1);
+  });
+
   it('partial: says so above the lists, counts only what loaded, Retry calls back', () => {
     const actions = render(ready({ finished: [], partial: true }));
     expect(text('wsf-activity-partial')).toContain('This list is partial.');
