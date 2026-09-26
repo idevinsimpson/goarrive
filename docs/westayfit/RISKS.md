@@ -97,33 +97,30 @@ The audit was right. The record of it was a chat message, so what survived was a
 
 **Mitigation:** an audit whose conclusion matters to a later decision lands in this repo, in `RISKS.md` or `DECISIONS.md`, in the same work session — not in the channel where the work was discussed. When an audit clears a gate, write down the scenarios it *did not* clear as explicitly as the ones it did.
 
-## R-WSF-E1 — goal-read authorization (OPEN — source implementation pending acceptance and hosted verification)
+## R-WSF-E1 — goal-read authorization (CLOSED in served lineage; retain as regression risk)
 
-**Was:** possession of a `goalId` returned a community's shared progress to anyone, through
-`wsfGoalPulse`; `wsfChallengePulse` did the same for challenge aggregates. Package D's
-removal controls did not close it, and its own tests said so.
+The original defect was real: possession of a `goalId` could expose shared progress through
+the aggregate read path without the later publication/member boundary.
 
-**Now: source implementation pending acceptance and hosted verification.** The risk stays
-OPEN. It was briefly recorded as CLOSED on 2026-09-16; that was wrong, and the correction is
-the point of this entry. Nothing that reaches a deployed environment has changed. What exists
-is source on `claude/wsf-package-e-display-auth` — per-goal `aggregateDisplayAuthorized`,
-default off, Champion-controlled through a real interface control, plus an active-member
-route for the member experience. See DECISIONS.md 2026-09-16.
+That implementation-state description is now historical. The authorization model
+(`aggregateDisplayAuthorized`, active-member access, protected own-history behavior and
+the shared access evaluator) is present in the currently served product lineage.
 
-**The deployed baseline is still `1cbf231`, which does not contain any of it.** Until a
-deployment of this branch is verified against hosted staging, every deployed WSF surface
-behaves exactly as it did before Package E: `wsfGoalPulse` serves any caller holding a
-`goalId`. Treat the defect as live in every environment.
+Hosted staging evidence has exercised the relevant Package E authorization rows, including:
+- display authorization round trip;
+- display session/refusal lifecycle;
+- closed-goal authorization lifecycle;
+- protected own-credit read;
+- former-member history/replay;
+- per-goal isolation and stale-response admission.
 
-**What "closed" will require**, all three: Devin accepts the source; the branch deploys;
-the hosted staging smoke re-runs against the deployed build and shows the refusal and the
-authorized path behaving as they do locally. Local verification is against `demo-wsf-local`
-only and is not hosted verification.
+The risk is therefore no longer "source pending." It remains a regression risk because
+publication authorization, membership access and possession of an id must never collapse
+back into one permission.
 
-**Residual even then, and deliberately not closed here:** the transport remains publicly
-reachable, which is correct and is not the boundary. Whether the legacy challenge aggregate
-should ever be shown anonymously is an open compatibility decision, not a defect.
-
+**Mitigation:** keep the Package E hosted authorization rows in the staging regression
+contract, preserve per-goal authorization/default-off semantics, and treat public aggregate
+display permission separately from community membership and member privacy.
 ## R-WSF-E2 — the member experience around an authorized goal is unreviewed (OPEN)
 
 Package E made publication a deliberate permission and proved the boundary holds. It did
