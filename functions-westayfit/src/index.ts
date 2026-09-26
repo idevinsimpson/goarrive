@@ -2,7 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 
 import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
-import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore';
+import { FieldPath, FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore';
 import { defineSecret, projectID } from 'firebase-functions/params';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 
@@ -4614,6 +4614,384 @@ export const wsfListGoals = onCall<ListGoalsRequest>(
     goals.sort((a, b) => (a.endsAt === b.endsAt ? a.goalId.localeCompare(b.goalId) : a.endsAt.localeCompare(b.endsAt)));
 
     return { goals };
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// wsfMyMemberSnapshot — MEMBER-SNAPSHOT-1 Phase A. One member-only read of the
+// facts Progress / You already receive from wsfMyCommunities + wsfListGoals +
+// wsfMyContribution, assembled server-side for the caller alone.
+//
+// PERSONAL-FIRST (Director #447 `5841625866`, decision `5846469655`). The spine
+// is the caller's own wsfGoalMemberTotals rows, newest first:
+//
+//   where('userId', '==', uid).orderBy('updatedAt', 'desc')
+//     .orderBy(documentId, 'desc').limit(N + 1)
+//
+// then only those goal docs, the active-membership filter, and one batched
+// shard read. It never enumerates every goal of every community. A small
+// bounded active-goal set per community (first page only) says whether a
+// member with no own row yet has somewhere truthful to move.
+//
+// INDEX DEPENDENCY. That query needs the composite
+// wsfGoalMemberTotals(userId ASC, updatedAt DESC), which is a SEPARATE index
+// packet (W3) and is NOT declared by this change. The emulator does not
+// enforce composite indexes, so these tests cannot catch its absence: this
+// callable must not be deployed or wired to a client before that index is
+// accepted and READY. There is deliberately no unordered fallback.
+//
+// TRUTH. Unknown is null, never 0: `ownCredit` is 0 only where the own-total
+// document was read and is absent; `sharedTotal` is null when the shard read
+// failed; a community whose goal section could not be completed says
+// `partial: true`. Nothing else about any other member is read or returned.
+// Active memberships only, so a departed community's goals never appear.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Hard caps (#365 `5841254277`), enforced here and flagged when they cut. */
+const SNAPSHOT_MAX_COMMUNITIES = 20;
+const SNAPSHOT_MAX_GOALS_PER_COMMUNITY = 35;
+const SNAPSHOT_MAX_GOALS = 50;
+/** Own rows per page, and active goals per community on the first page. */
+const SNAPSHOT_OWN_PAGE = 25;
+const SNAPSHOT_ACTIVE_PER_COMMUNITY = 3;
+
+type MyMemberSnapshotRequest = { cursor?: unknown };
+
+type SnapshotGoal = {
+  goalId: string;
+  title: string;
+  unit: string;
+  target: number;
+  status: GoalStatus;
+  startsAt: string;
+  endsAt: string;
+  timezone: string;
+  reachedAt?: string;
+  closedAt?: string;
+  sharedTotal: number | null;
+  ownCredit: number | null;
+};
+
+type SnapshotCommunity = {
+  groupId: string;
+  displayName: string;
+  groupType: GroupType;
+  role: string;
+  memberCount: number | null;
+  isSample: boolean;
+  goals: SnapshotGoal[] | null;
+  partial: boolean;
+};
+
+type MyMemberSnapshotResponse = {
+  schemaVersion: 1;
+  communities: SnapshotCommunity[];
+  truncated: { communities: boolean; goals: boolean };
+  nextCursor: string | null;
+};
+
+/**
+ * The cursor carries the row's EXACT updatedAt (seconds + nanoseconds), not
+ * milliseconds: production server timestamps have sub-millisecond precision,
+ * and resuming from a truncated instant would skip every row between that
+ * millisecond and the real one (W5 F1, #510 `5846800450`).
+ */
+type SnapshotCursor = { s: number; n: number; id: string };
+/** Firestore Timestamp's own range: 0001-01-01 .. 9999-12-31T23:59:59Z. */
+const SNAPSHOT_TS_MIN_SECONDS = -62135596800;
+const SNAPSHOT_TS_MAX_SECONDS = 253402300799;
+
+function encodeSnapshotCursor(c: SnapshotCursor): string {
+  return Buffer.from(JSON.stringify(c), 'utf8').toString('base64url');
+}
+
+/** A cursor names a position in the CALLER'S OWN rows; it can widen nothing. */
+function decodeSnapshotCursor(raw: unknown): SnapshotCursor | null {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== 'string' || raw.length === 0 || raw.length > 400) {
+    throw new HttpsError('invalid-argument', 'cursor is invalid.');
+  }
+  try {
+    const parsed = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as unknown;
+    const p = parsed as { s?: unknown; n?: unknown; id?: unknown };
+    if (
+      typeof p.s === 'number' && Number.isSafeInteger(p.s) &&
+      p.s >= SNAPSHOT_TS_MIN_SECONDS && p.s <= SNAPSHOT_TS_MAX_SECONDS &&
+      typeof p.n === 'number' && Number.isSafeInteger(p.n) && p.n >= 0 && p.n <= 999_999_999 &&
+      typeof p.id === 'string' && normalizeStringId(p.id) === p.id
+    ) {
+      return { s: p.s, n: p.n, id: p.id };
+    }
+  } catch {
+    // fall through
+  }
+  throw new HttpsError('invalid-argument', 'cursor is invalid.');
+}
+
+/** A member total is a finite, non-negative number or it is not known. */
+function knownOwnTotal(data: unknown): number | null {
+  const total = (data as { total?: unknown } | undefined)?.total;
+  return typeof total === 'number' && Number.isFinite(total) && total >= 0 ? total : null;
+}
+
+/** The one serializer: exactly the contract's keys, nothing from raw docs. */
+function serializeSnapshotGoal(
+  goalId: string,
+  goal: GoalDoc,
+  sharedTotal: number | null,
+  ownCredit: number | null
+): SnapshotGoal {
+  const out: SnapshotGoal = {
+    goalId,
+    title: goal.title,
+    unit: goal.unit,
+    target: goal.target,
+    status: goal.status,
+    startsAt: goal.startsAt.toDate().toISOString(),
+    endsAt: goal.endsAt.toDate().toISOString(),
+    timezone: goal.timezone,
+    sharedTotal,
+    ownCredit,
+  };
+  // Historical events, passed through as written; absent stays absent.
+  if (goal.reachedAt) out.reachedAt = goal.reachedAt.toDate().toISOString();
+  if (goal.closedAt) out.closedAt = goal.closedAt.toDate().toISOString();
+  return out;
+}
+
+export const wsfMyMemberSnapshot = onCall<MyMemberSnapshotRequest>(
+  { region: 'us-central1' },
+  async (request): Promise<MyMemberSnapshotResponse> => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Sign in first.');
+    }
+    // The subject is the signed-in caller and nothing in the request.
+    const uid = request.auth.uid;
+    const cursor = decodeSnapshotCursor(request.data?.cursor);
+    const firstPage = cursor === null;
+    const db = getFirestore();
+
+    // 1. Active memberships (the same query wsfMyCommunities makes).
+    const membershipsSnap = await db
+      .collection('wsfMemberships')
+      .where('userId', '==', uid)
+      .where('membershipStatus', '==', 'active')
+      .get();
+    const roleByGroup = new Map<string, string>();
+    for (const d of membershipsSnap.docs) {
+      const m = d.data() as { groupId?: unknown; role?: unknown };
+      if (typeof m.groupId === 'string' && m.groupId.length > 0) {
+        roleByGroup.set(m.groupId, typeof m.role === 'string' ? m.role : 'member');
+      }
+    }
+
+    const truncated = { communities: false, goals: false };
+    const groupIds = [...roleByGroup.keys()];
+    const groupSnaps = groupIds.length
+      ? await db.getAll(...groupIds.map((g) => db.doc(`wsfCommunityGroups/${g}`)))
+      : [];
+    let communities = groupSnaps
+      .filter((s) => s.exists)
+      .map((s) => {
+        const g = s.data() as { displayName?: unknown; groupType?: GroupType; isSample?: boolean };
+        return {
+          groupId: s.id,
+          displayName: typeof g.displayName === 'string' ? g.displayName : '',
+          groupType: g.groupType as GroupType,
+          role: roleByGroup.get(s.id) ?? 'member',
+          isSample: g.isSample === true,
+        };
+      })
+      .sort((a, b) =>
+        a.displayName === b.displayName
+          ? a.groupId.localeCompare(b.groupId)
+          : a.displayName.localeCompare(b.displayName)
+      );
+    if (communities.length > SNAPSHOT_MAX_COMMUNITIES) {
+      communities = communities.slice(0, SNAPSHOT_MAX_COMMUNITIES);
+      truncated.communities = true;
+    }
+    const kept = new Set(communities.map((c) => c.groupId));
+
+    // Member counts: the same aggregate wsfMyCommunities uses, one per group.
+    // A failed count is an unknown count, never 0.
+    const memberCounts = await Promise.all(
+      communities.map(async (c) => {
+        try {
+          const snap = await db
+            .collection('wsfMemberships')
+            .where('groupId', '==', c.groupId)
+            .where('membershipStatus', '==', 'active')
+            .count()
+            .get();
+          return snap.data().count;
+        } catch {
+          return null;
+        }
+      })
+    );
+
+    // 2. The caller's own rows, newest first (REQUIRES the composite index).
+    let ownQuery = db
+      .collection('wsfGoalMemberTotals')
+      .where('userId', '==', uid)
+      .orderBy('updatedAt', 'desc')
+      .orderBy(FieldPath.documentId(), 'desc');
+    if (cursor) ownQuery = ownQuery.startAfter(new Timestamp(cursor.s, cursor.n), cursor.id);
+    let ownRowsOk = true;
+    let ownRows: FirebaseFirestore.QueryDocumentSnapshot[] = [];
+    let nextCursor: string | null = null;
+    try {
+      const snap = await ownQuery.limit(SNAPSHOT_OWN_PAGE + 1).get();
+      ownRows = snap.docs;
+      if (ownRows.length > SNAPSHOT_OWN_PAGE) {
+        ownRows = ownRows.slice(0, SNAPSHOT_OWN_PAGE);
+        const last = ownRows[ownRows.length - 1]!;
+        const at = last.get('updatedAt') as FirebaseFirestore.Timestamp | undefined;
+        if (at && typeof at.seconds === 'number' && typeof at.nanoseconds === 'number') {
+          nextCursor = encodeSnapshotCursor({ s: at.seconds, n: at.nanoseconds, id: last.id });
+        }
+        truncated.goals = true;
+      }
+    } catch (e) {
+      console.warn('[wsfMyMemberSnapshot] own rows unavailable', e);
+      ownRowsOk = false;
+    }
+
+    // Own credit by goal, from the rows themselves (null when malformed).
+    const ownByGoal = new Map<string, number | null>();
+    for (const row of ownRows) {
+      const goalId = row.get('goalId');
+      if (typeof goalId === 'string' && goalId.length > 0) ownByGoal.set(goalId, knownOwnTotal(row.data()));
+    }
+
+    // 3. Only those goal docs, then drop any outside an active, kept community.
+    const goalDocs = new Map<string, GoalDoc>();
+    const ownedIds = [...ownByGoal.keys()];
+    let ownedGoalsOk = ownRowsOk;
+    if (ownedIds.length) {
+      try {
+        const snaps = await db.getAll(...ownedIds.map((id) => db.doc(`wsfGoals/${id}`)));
+        for (const s of snaps) {
+          if (!s.exists) continue;
+          const goal = s.data() as GoalDoc;
+          if (roleByGroup.has(goal.communityGroupId)) goalDocs.set(s.id, goal);
+        }
+      } catch (e) {
+        console.warn('[wsfMyMemberSnapshot] owned goals unavailable', e);
+        ownedGoalsOk = false;
+      }
+    }
+    const ownedByGroup = new Map<string, string[]>();
+    for (const id of ownedIds) {
+      const goal = goalDocs.get(id);
+      if (!goal) continue;
+      if (!kept.has(goal.communityGroupId)) continue; // beyond the community cap
+      const list = ownedByGroup.get(goal.communityGroupId) ?? [];
+      list.push(id);
+      ownedByGroup.set(goal.communityGroupId, list);
+    }
+
+    // 4. First page: a small bounded active-goal set per community, so a
+    //    member with no own row yet still learns whether Start is truthful.
+    const activeByGroup = new Map<string, string[]>();
+    const activeFailed = new Set<string>();
+    if (firstPage) {
+      await Promise.all(
+        communities.map(async (c) => {
+          try {
+            const snap = await db
+              .collection('wsfGoals')
+              .where('communityGroupId', '==', c.groupId)
+              .where('status', '==', 'active')
+              .limit(SNAPSHOT_ACTIVE_PER_COMMUNITY + 1)
+              .get();
+            const docs = snap.docs
+              .slice()
+              .sort((a, b) => {
+                const ae = (a.data() as GoalDoc).endsAt.toMillis();
+                const be = (b.data() as GoalDoc).endsAt.toMillis();
+                return ae === be ? a.id.localeCompare(b.id) : ae - be;
+              });
+            if (docs.length > SNAPSHOT_ACTIVE_PER_COMMUNITY) truncated.goals = true;
+            const ids: string[] = [];
+            for (const d of docs.slice(0, SNAPSHOT_ACTIVE_PER_COMMUNITY)) {
+              goalDocs.set(d.id, d.data() as GoalDoc);
+              ids.push(d.id);
+            }
+            activeByGroup.set(c.groupId, ids);
+          } catch (e) {
+            console.warn('[wsfMyMemberSnapshot] active goals unavailable', c.groupId, e);
+            activeFailed.add(c.groupId);
+          }
+        })
+      );
+    }
+
+    // Assemble per community: owned (newest first), then active, capped.
+    let goalCount = 0;
+    const perGroup = new Map<string, string[]>();
+    for (const c of communities) perGroup.set(c.groupId, []);
+    const add = (groupId: string, id: string) => {
+      const list = perGroup.get(groupId)!;
+      if (list.includes(id)) return;
+      if (list.length >= SNAPSHOT_MAX_GOALS_PER_COMMUNITY || goalCount >= SNAPSHOT_MAX_GOALS) {
+        truncated.goals = true;
+        return;
+      }
+      list.push(id);
+      goalCount += 1;
+    };
+    for (const c of communities) for (const id of ownedByGroup.get(c.groupId) ?? []) add(c.groupId, id);
+    for (const c of communities) for (const id of activeByGroup.get(c.groupId) ?? []) add(c.groupId, id);
+
+    // Own credit for RETURNED active goals that were not on this page: read
+    // directly (after the caps, so no read is spent on a goal the caps drop),
+    // so an absent document is a checked 0 and a failed read stays unknown.
+    const returned = [...perGroup.values()].flat();
+    const unchecked = returned.filter((id) => !ownByGoal.has(id));
+    if (unchecked.length) {
+      try {
+        const snaps = await db.getAll(...unchecked.map((id) => db.doc(`wsfGoalMemberTotals/${id}_${uid}`)));
+        snaps.forEach((s, i) => ownByGoal.set(unchecked[i]!, s.exists ? knownOwnTotal(s.data()) : 0));
+      } catch (e) {
+        console.warn('[wsfMyMemberSnapshot] own totals unavailable', e);
+        for (const id of unchecked) ownByGoal.set(id, null);
+      }
+    }
+
+    // 5. One batched shard read for every goal returned; a failure is unknown.
+    let shared: Map<string, number> | null = null;
+    if (returned.length) {
+      try {
+        shared = await sumGoalShardsForMany(returned);
+      } catch (e) {
+        console.warn('[wsfMyMemberSnapshot] shared totals unavailable', e);
+      }
+    }
+
+    const out: SnapshotCommunity[] = communities.map((c, i) => {
+      const ids = perGroup.get(c.groupId)!;
+      const partial = !ownedGoalsOk || activeFailed.has(c.groupId);
+      // No safe section at all: neither the own page nor the active set read.
+      const nothingRead = !ownedGoalsOk && (!firstPage || activeFailed.has(c.groupId));
+      return {
+        groupId: c.groupId,
+        displayName: c.displayName,
+        groupType: c.groupType,
+        role: c.role,
+        memberCount: memberCounts[i] ?? null,
+        isSample: c.isSample,
+        goals: nothingRead
+          ? null
+          : ids.map((id) =>
+              serializeSnapshotGoal(id, goalDocs.get(id)!, shared ? shared.get(id) ?? null : null, ownByGoal.get(id) ?? null)
+            ),
+        partial,
+      };
+    });
+
+    return { schemaVersion: 1, communities: out, truncated, nextCursor };
   }
 );
 
