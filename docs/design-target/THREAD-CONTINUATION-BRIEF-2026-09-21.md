@@ -25,7 +25,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 | **COMMUNITY-PARITY-1 (pure)** | W4 · #496 · `646c9579` | ACCEPTED → integrated `87a86531`; HOME-REFRESH-TRUTH-1 **closed, option A** (W7 Check 52: H3c was instrument false negative) | done |
 | **COMMUNITY-SETTINGS-PARITY-1** | W9 · `ffb517e5` | **SERVED** `938e00d8` via run 53; hosted smoke BLOCKED from L0 (403); OWNER TEST CARD `5846778806` | owner feedback → route |
 | **PERSONAL-FIRST SCALE (snapshot)** | W4 #510 `8dc65316` / index #509 | `b71cf07f` FAIL → successor `8dc65316`; W5 recheck woken `trig_016FDPDU…` (#395 `5847278911`) | W5 → Director; staging needs index READY |
-| CONTROL-PLANE-ACTIVATION-1 | W3 · #521 `be4d66ce` | **Serial plan step 1** (#365 `5849937256`); W3 ACK `5849913213`: install only `google-auth-library@9.15.1` | successor → W7 → accept → integrate → one re-run |
+| CONTROL-PLANE-ACTIVATION-1 | W3 · #521 `839f18f6` | plan step 1: google-auth-library only; **W7 Check 67 PASS** `5850183273`; L0 `5850460359` | Director accept → merge → activation run |
 | AUTONOMY-STATE-1A | W3 · #519 `cc78509a` | **ACCEPTED** `5849867467` → integrated main `5d58ed07` | Phases B–E = plan steps 4–7 (PARKED) |
 | W5 lane | #520 audit; #525 **merged** (W5 PASS, Director `5849425770`) | **owner: revoke Browser Use key** |
 | **HOME-NORTHSTAR-PARITY-1** | W9 · #514 `9d27fdb5` | SERVED run 55 `a3127651`; hosted journey unproven | **W3 NEXT: HOME-HOSTED-JOURNEY-1** (`5849944214`, plan step 2) |
