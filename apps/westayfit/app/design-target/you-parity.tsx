@@ -20,8 +20,10 @@ import type { YouGoal, YouState } from '../../src/youParity';
  * unknown-shared (an open lead and a finished goal whose shared totals did not
  * answer — the reference has no such frame; it is canonical truth only).
  *
- * Period labels are given as the route adapter will give them: already
- * formatted in the goal's own timezone. The view shows them verbatim.
+ * Period labels are the reference's own ("This week", "July"), as the route
+ * adapter will supply them; the view shows them verbatim. Each goal names its
+ * own community, and the community has no group type worth printing, so the
+ * band prints no filler sub-line (Director #492 `5841276795`).
  *
  * THIS IS NOT THE ROUTE. The route stays W9's during PERF-MOBILE-1; the hook is
  * Phase B. Nothing here reads Firebase. The top band is exactly as tall as the
@@ -53,10 +55,11 @@ const LEAD: YouGoal = {
   title: '500 squats together',
   unit: 'squats',
   target: 500,
+  communityName: 'Oak Grove Together',
   yourPart: 25,
   shared: knownShared(241),
   open: true,
-  periodLabel: 'Ends Sep 27',
+  periodLabel: 'This week',
 };
 
 const OTHER: YouGoal = {
@@ -64,10 +67,12 @@ const OTHER: YouGoal = {
   title: '150 squats this week',
   unit: 'squats',
   target: 150,
+  // The reference's first other goal belongs to ANOTHER community.
+  communityName: 'Harbor Lunch Crew',
   yourPart: 20,
   shared: knownShared(155),
   open: true,
-  periodLabel: 'Ends Oct 1',
+  periodLabel: 'This week',
 };
 
 const STATES: Record<string, YouState> = {
@@ -110,10 +115,11 @@ const STATES: Record<string, YouState> = {
         title: '800 squats in July',
         unit: 'squats',
         target: 800,
+        communityName: 'Oak Grove Together',
         yourPart: 40,
         shared: UNKNOWN_SHARED,
         open: false,
-        periodLabel: 'Ended Jul 31',
+        periodLabel: 'July',
       },
     ],
     partial: false,

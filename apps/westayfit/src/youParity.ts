@@ -9,6 +9,7 @@
  * lifecycle rules are src/goalTruth.ts, which Progress uses too.
  */
 
+import { groupTypeLabel } from './labels';
 import {
   hasInstrument,
   sharedCell as goalSharedCell,
@@ -37,6 +38,8 @@ export type YouGoal = {
   title: string;
   unit: string;
   target: number;
+  /** The community this goal belongs to — not necessarily the current one. */
+  communityName: string;
   /** Exactly what this member put in. Never summed with another unit. */
   yourPart: number;
   /** Where the community stands: a different number, or not known at all. */
@@ -76,6 +79,17 @@ export type YouStatus = LifecycleStatus;
 /** The reference's lifecycle pill; see goalTruth.statusOf. */
 export function statusOf(goal: Pick<YouGoal, 'open' | 'target' | 'shared'>): YouStatus {
   return goalStatusOf(goal);
+}
+
+/**
+ * The band's sub-line: the community's type, only when it is a type the
+ * product actually names. An unknown, omitted or custom type prints nothing
+ * rather than the generic "Community" filler.
+ */
+export function bandSubline(groupType: string | null | undefined): string | null {
+  if (!groupType || groupType === 'custom') return null;
+  const label = groupTypeLabel(groupType);
+  return label === groupTypeLabel(null) ? null : label;
 }
 
 /** Up to two initials from the member's own display name; none when unknown. */

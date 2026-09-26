@@ -1,8 +1,9 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
-import { groupTypeCardLabel, memberCountLabel, roleCardLabel } from '../labels';
+import { memberCountLabel, roleCardLabel } from '../labels';
 import {
+  bandSubline,
   hasInstrument,
   initialsOf,
   leadAndOthers,
@@ -235,7 +236,7 @@ function Member({
             <SecondaryAction label="Open community" arrow onPress={actions.onCommunity} testID="wsf-you-open-community" block />
           </View>
         ) : null}
-        <OtherGoals rows={others} communityName={state.community.displayName} />
+        <OtherGoals rows={others} />
       </View>
       {account}
     </>
@@ -299,7 +300,7 @@ export function YouHead({
 
 /** Your current community, full-bleed navy: name, kind, then role and size. */
 function Belonging({ community, compact }: { community: YouCommunity; compact: boolean }) {
-  const kind = groupTypeCardLabel(community.groupType ?? null);
+  const kind = bandSubline(community.groupType);
   return (
     <View style={[s.band, compact && s.bandCompact]} testID="wsf-you-community">
       <View>
@@ -367,58 +368,62 @@ function Lead({ row }: { row: YouGoal }) {
         <Pill status={statusOf(row)} testID="wsf-you-lead-status" />
       </View>
       <View style={s.leadBody}>
-        <View style={s.shared}>
-          {instrument ? (
-            <LivingWeProgress
-              completed={total}
-              target={row.target}
-              unit={row.unit}
-              width={76}
-              surface="dark"
-              testID="wsf-you-lead-we"
-            />
-          ) : null}
-          <View style={s.sharedText}>
-            <Text style={s.sharedSmall}>SHARED POSITION</Text>
-            {line !== null && total !== null ? (
-              <View
-                style={s.sharedNumberLine}
-                testID="wsf-you-lead-shared"
-                accessible
-                accessibilityLabel={line}
-              >
-                <Text style={s.sharedNumber}>{`${n(total)} `}</Text>
-                <Text style={s.sharedOf}>{line.slice(n(total).length + 1)}</Text>
-              </View>
-            ) : (
-              <Text style={s.sharedUnknown} testID="wsf-you-lead-shared-unknown">
-                Not available right now
-              </Text>
-            )}
+        <View style={s.sharedCol}>
+          <View style={s.shared} testID="wsf-you-lead-shared-card">
             {instrument ? (
-              <>
-                <View style={s.track} testID="wsf-you-lead-track">
-                  <View style={[s.trackFill, { width: `${ratio * 100}%` }]} />
-                </View>
-                <View style={s.meta}>
-                  <Text style={s.metaStrong}>
-                    {reached ? 'Goal reached' : `${percentLabel(total, row.target)} complete`}
-                  </Text>
-                  <Text style={s.metaSoft}>{reached ? 'Still open' : `${n(remaining)} ${row.unit} to go`}</Text>
-                </View>
-              </>
+              <LivingWeProgress
+                completed={total}
+                target={row.target}
+                unit={row.unit}
+                width={76}
+                surface="dark"
+                testID="wsf-you-lead-we"
+              />
             ) : null}
+            <View style={s.sharedText}>
+              <Text style={s.sharedSmall}>SHARED POSITION</Text>
+              {line !== null && total !== null ? (
+                <View
+                  style={s.sharedNumberLine}
+                  testID="wsf-you-lead-shared"
+                  accessible
+                  accessibilityLabel={line}
+                >
+                  <Text style={s.sharedNumber}>{`${n(total)} `}</Text>
+                  <Text style={s.sharedOf}>{line.slice(n(total).length + 1)}</Text>
+                </View>
+              ) : (
+                <Text style={s.sharedUnknown} testID="wsf-you-lead-shared-unknown">
+                  Not available right now
+                </Text>
+              )}
+              {instrument ? (
+                <>
+                  <View style={s.track} testID="wsf-you-lead-track">
+                    <View style={[s.trackFill, { width: `${ratio * 100}%` }]} />
+                  </View>
+                  <View style={s.meta}>
+                    <Text style={s.metaStrong}>
+                      {reached ? 'Goal reached' : `${percentLabel(total, row.target)} complete`}
+                    </Text>
+                    <Text style={s.metaSoft}>{reached ? 'Still open' : `${n(remaining)} ${row.unit} to go`}</Text>
+                  </View>
+                </>
+              ) : null}
+            </View>
           </View>
         </View>
-        <View style={s.own}>
-          <Text style={s.ownSmall}>YOUR EXACT CONFIRMED PART</Text>
-          {/* The figure and its unit in one labelled block. The number carries
-              a trailing space, so the block reads "25 squats" as one phrase to
-              assistive tech and to text matching, while the unit sits 3 px
-              under the number as in the reference. */}
-          <View testID="wsf-you-lead-own" accessible accessibilityLabel={`${n(row.yourPart)} ${row.unit}`}>
-            <Text style={s.ownNumber}>{`${n(row.yourPart)} `}</Text>
-            <Text style={s.ownUnit}>{row.unit}</Text>
+        <View style={s.ownCol}>
+          <View style={s.own} testID="wsf-you-lead-own-card">
+            <Text style={s.ownSmall}>YOUR EXACT CONFIRMED PART</Text>
+            {/* The figure and its unit in one labelled block. The number carries
+                a trailing space, so the block reads "25 squats" as one phrase to
+                assistive tech and to text matching, while the unit sits 3 px
+                under the number as in the reference. */}
+            <View testID="wsf-you-lead-own" accessible accessibilityLabel={`${n(row.yourPart)} ${row.unit}`}>
+              <Text style={s.ownNumber}>{`${n(row.yourPart)} `}</Text>
+              <Text style={s.ownUnit}>{row.unit}</Text>
+            </View>
           </View>
         </View>
       </View>
@@ -427,8 +432,11 @@ function Lead({ row }: { row: YouGoal }) {
   );
 }
 
-/** Other goals you helped: each with your part and the shared figure, kept apart. */
-function OtherGoals({ rows, communityName }: { rows: YouGoal[]; communityName: string }) {
+/**
+ * Other goals you helped: each with your part and the shared figure, kept
+ * apart, and each under its OWN community — not necessarily the current one.
+ */
+function OtherGoals({ rows }: { rows: YouGoal[] }) {
   if (rows.length === 0) return null;
   return (
     <View style={s.others} testID="wsf-you-others">
@@ -441,7 +449,7 @@ function OtherGoals({ rows, communityName }: { rows: YouGoal[]; communityName: s
               <Text style={s.rowTitle} numberOfLines={2}>
                 {r.title}
               </Text>
-              <Text style={s.rowSub}>{[communityName, r.periodLabel].filter(Boolean).join(' · ')}</Text>
+              <Text style={s.rowSub}>{[r.communityName, r.periodLabel].filter(Boolean).join(' · ')}</Text>
             </View>
             <Pill status={statusOf(r)} />
           </View>
@@ -721,9 +729,15 @@ const s = StyleSheet.create({
   leadHeading: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
   leadHeadingText: { flex: 1, minWidth: 0 },
   leadBody: { marginTop: 13, flexDirection: 'row', gap: 10 },
+  // `minmax(0,1.35fr) minmax(104px,.65fr)` as the reference lays it out at
+  // 390: 230 / 110 across 340 px after the 10 px gap, i.e. 2.09 : 1, with the
+  // own card's 104 px floor kept for narrower screens. Like the grid's tracks,
+  // the two unpadded columns take the ratio with a zero basis; the padded
+  // cards fill them, so padding and borders do not skew the split.
+  sharedCol: { flexGrow: 2.09, flexShrink: 1, flexBasis: 0, minWidth: 0 },
+  ownCol: { flexGrow: 1, flexShrink: 1, flexBasis: 0, minWidth: 104 },
   shared: {
-    flex: 1.35,
-    minWidth: 0,
+    flexGrow: 1,
     padding: 12,
     borderRadius: 8,
     backgroundColor: NAVY,
@@ -759,8 +773,7 @@ const s = StyleSheet.create({
   metaStrong: { color: CONFIRMED, fontSize: 9, lineHeight: 13.5, fontWeight: '700' },
   metaSoft: { color: SHARED_SOFT, fontSize: 9, lineHeight: 13.5 },
   own: {
-    flex: 0.65,
-    minWidth: 104,
+    flexGrow: 1,
     padding: 12,
     borderRadius: 8,
     borderWidth: 1,

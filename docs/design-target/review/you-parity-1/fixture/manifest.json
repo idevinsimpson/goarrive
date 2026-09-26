@@ -6,7 +6,7 @@
       "state": "normal",
       "viewport": "390x844",
       "fixture": "fixture/you-normal-390x844.png",
-      "fixtureSha256": "ff9420e3587239a7779de393bf56cf7356893561f32fa288db96fb4cc58a69b6",
+      "fixtureSha256": "4022750205a0f8b89981c5df88776f60967aa0179fce7a0c2a0166937489e04b",
       "lovable": "lovable-642f830b/you-normal-390x844.png",
       "lovableSha256": "86f270cb9a0bf86fe84240f86a1e819468e9d1534a37fb118516be32ae33b671",
       "crop": {
@@ -18,7 +18,7 @@
       "sideBySide": "fixture/cmp-you-normal-390x844-side-by-side.png",
       "overlay50": "fixture/cmp-you-normal-390x844-overlay-50.png",
       "difference": "fixture/cmp-you-normal-390x844-difference.png",
-      "differingPixelShare": 0.2548,
+      "differingPixelShare": 0.2988,
       "aligned": {
         "referenceBandTop": 235,
         "viewBandTop": 218,
@@ -31,14 +31,14 @@
         "sideBySide": "fixture/cmp-you-normal-390x844-aligned-side-by-side.png",
         "overlay50": "fixture/cmp-you-normal-390x844-aligned-overlay-50.png",
         "difference": "fixture/cmp-you-normal-390x844-aligned-difference.png",
-        "differingPixelShare": 0.1067
+        "differingPixelShare": 0.2396
       }
     },
     {
       "state": "normal",
       "viewport": "390x640",
       "fixture": "fixture/you-normal-390x640.png",
-      "fixtureSha256": "869a9fe29d5076c281b0026862b591bbe31cad027197815041bd0dfeb6ed59b2",
+      "fixtureSha256": "897fc29d3a0a6c4c628628f0d2f0b7ee8e6c29d3033e45d7beac7ab355533692",
       "lovable": "lovable-642f830b/you-normal-390x640.png",
       "lovableSha256": "87063a31aa66222d205f4c73d9a2157a41845965f8385299e2ae14ca2914eb2b",
       "crop": {
@@ -50,7 +50,7 @@
       "sideBySide": "fixture/cmp-you-normal-390x640-side-by-side.png",
       "overlay50": "fixture/cmp-you-normal-390x640-overlay-50.png",
       "difference": "fixture/cmp-you-normal-390x640-difference.png",
-      "differingPixelShare": 0.2793,
+      "differingPixelShare": 0.3335,
       "aligned": {
         "referenceBandTop": 212,
         "viewBandTop": 195,
@@ -63,14 +63,14 @@
         "sideBySide": "fixture/cmp-you-normal-390x640-aligned-side-by-side.png",
         "overlay50": "fixture/cmp-you-normal-390x640-aligned-overlay-50.png",
         "difference": "fixture/cmp-you-normal-390x640-aligned-difference.png",
-        "differingPixelShare": 0.0939
+        "differingPixelShare": 0.2546
       }
     },
     {
       "state": "no-own",
       "viewport": "390x844",
       "fixture": "fixture/you-no-own-390x844.png",
-      "fixtureSha256": "d27217095b654b43ef4b8020dcbf144ce36646c2fee2efc98d5abcc70754ee6e",
+      "fixtureSha256": "b1270cc89675ea4dc845acabf7661d90b943cb5e048c394f3248db85b0b68d32",
       "lovable": "lovable-642f830b/you-no-own-390x844.png",
       "lovableSha256": "0e83eb0998064a5f848cd3a08d50de1cda7f718bd602e2b4619702d0e1702232",
       "crop": {
@@ -82,7 +82,7 @@
       "sideBySide": "fixture/cmp-you-no-own-390x844-side-by-side.png",
       "overlay50": "fixture/cmp-you-no-own-390x844-overlay-50.png",
       "difference": "fixture/cmp-you-no-own-390x844-difference.png",
-      "differingPixelShare": 0.2708,
+      "differingPixelShare": 0.3321,
       "aligned": {
         "referenceBandTop": 235,
         "viewBandTop": 218,
@@ -95,14 +95,14 @@
         "sideBySide": "fixture/cmp-you-no-own-390x844-aligned-side-by-side.png",
         "overlay50": "fixture/cmp-you-no-own-390x844-aligned-overlay-50.png",
         "difference": "fixture/cmp-you-no-own-390x844-aligned-difference.png",
-        "differingPixelShare": 0.1581
+        "differingPixelShare": 0.2689
       }
     },
     {
       "state": "no-own",
       "viewport": "390x640",
       "fixture": "fixture/you-no-own-390x640.png",
-      "fixtureSha256": "9ad3835367fe41e197db17c7d78890a3471e241546fbe951f09912fc45b18235",
+      "fixtureSha256": "5da7b6f9867170092455a04e39af45b7988b1a6c5aef3874cb6b40e6440bef98",
       "lovable": "lovable-642f830b/you-no-own-390x640.png",
       "lovableSha256": "b48fd978bb2de7de24387726339c4ceca9f62b46dd06b86f1ff5f563c20dd7d5",
       "crop": {
@@ -114,7 +114,7 @@
       "sideBySide": "fixture/cmp-you-no-own-390x640-side-by-side.png",
       "overlay50": "fixture/cmp-you-no-own-390x640-overlay-50.png",
       "difference": "fixture/cmp-you-no-own-390x640-difference.png",
-      "differingPixelShare": 0.2954,
+      "differingPixelShare": 0.3832,
       "aligned": {
         "referenceBandTop": 212,
         "viewBandTop": 195,
@@ -127,14 +127,14 @@
         "sideBySide": "fixture/cmp-you-no-own-390x640-aligned-side-by-side.png",
         "overlay50": "fixture/cmp-you-no-own-390x640-aligned-overlay-50.png",
         "difference": "fixture/cmp-you-no-own-390x640-aligned-difference.png",
-        "differingPixelShare": 0.12
+        "differingPixelShare": 0.2893
       }
     },
     {
       "state": "no-eligible",
       "viewport": "390x844",
       "fixture": "fixture/you-no-eligible-390x844.png",
-      "fixtureSha256": "c4dc7c2384da3d1bf8951d0712d1caf870c8abe1a3e230d495ea6c4c634f1e21",
+      "fixtureSha256": "7d7732249ef69b1aa756b32c238e259d8c5d1966296d705ac5889720d23e106e",
       "lovable": "lovable-642f830b/you-no-eligible-390x844.png",
       "lovableSha256": "3885859b8a8a81082bce6e21fee44a5fd17f28f951714776d91932b2208a5e8c",
       "crop": {
@@ -146,7 +146,7 @@
       "sideBySide": "fixture/cmp-you-no-eligible-390x844-side-by-side.png",
       "overlay50": "fixture/cmp-you-no-eligible-390x844-overlay-50.png",
       "difference": "fixture/cmp-you-no-eligible-390x844-difference.png",
-      "differingPixelShare": 0.1949,
+      "differingPixelShare": 0.2263,
       "aligned": {
         "referenceBandTop": 235,
         "viewBandTop": 218,
@@ -159,14 +159,14 @@
         "sideBySide": "fixture/cmp-you-no-eligible-390x844-aligned-side-by-side.png",
         "overlay50": "fixture/cmp-you-no-eligible-390x844-aligned-overlay-50.png",
         "difference": "fixture/cmp-you-no-eligible-390x844-aligned-difference.png",
-        "differingPixelShare": 0.0971
+        "differingPixelShare": 0.1703
       }
     },
     {
       "state": "failed",
       "viewport": "390x844",
       "fixture": "fixture/you-failed-390x844.png",
-      "fixtureSha256": "c1bcc99477a51dc828656054a0f5da31a216729b2905e74f67a3ba0c91cd43d4",
+      "fixtureSha256": "2fd533e80f003fd08c420487da114dc7329761b1fd8ffdaa54c3620123a16cc9",
       "lovable": null,
       "lovableSha256": null,
       "crop": {
@@ -180,7 +180,7 @@
       "state": "unknown-shared",
       "viewport": "390x844",
       "fixture": "fixture/you-unknown-shared-390x844.png",
-      "fixtureSha256": "a2264bee2cc6df6089e231984b9a00c5c583ff66f0407b2b346ea1005ece0ec0",
+      "fixtureSha256": "ad74553a9474f5a8a21bbb38fa2af926046e43f4d3a135a42c9f8e5862bc33f0",
       "lovable": null,
       "lovableSha256": null,
       "crop": {
@@ -194,7 +194,7 @@
       "state": "unknown-shared",
       "viewport": "390x640",
       "fixture": "fixture/you-unknown-shared-390x640.png",
-      "fixtureSha256": "ee97ebcb5ec3c3a6617f3b5ad8160af9d2cb6cc8538150059d1682624213ae16",
+      "fixtureSha256": "8d8f1f09b488bbbcbd6b142bbfbb89d54e26471bb527f3b9e70505a419f69251",
       "lovable": null,
       "lovableSha256": null,
       "crop": {

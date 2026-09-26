@@ -38,8 +38,8 @@ const before = (a: string, b: string) =>
 
 const PROFILE = { displayName: 'Alex M.', memberSince: 'September 2026' };
 const COMMUNITY = { displayName: 'Oak Grove Together', role: 'member', memberCount: 23 };
-const LEAD: YouGoal = { goalId: 'lead', title: '500 squats together', unit: 'squats', target: 500, yourPart: 25, shared: knownShared(241), open: true, periodLabel: 'Ends Sep 27' };
-const OTHER: YouGoal = { goalId: 'other', title: '150 squats this week', unit: 'squats', target: 150, yourPart: 20, shared: knownShared(155), open: true, periodLabel: 'This week' };
+const LEAD: YouGoal = { goalId: 'lead', title: '500 squats together', unit: 'squats', target: 500, communityName: 'Oak Grove Together', yourPart: 25, shared: knownShared(241), open: true, periodLabel: 'This week' };
+const OTHER: YouGoal = { goalId: 'other', title: '150 squats this week', unit: 'squats', target: 150, communityName: 'Harbor Lunch Crew', yourPart: 20, shared: knownShared(155), open: true, periodLabel: 'This week' };
 
 function render(state: YouState) {
   const actions: YouParityActions = {
@@ -179,18 +179,34 @@ describe('YouParityView', () => {
   it('a closed goal whose shared total is unknown says CLOSED and Unknown, never reached or unfinished', () => {
     render(member({ finished: [{ ...OTHER, goalId: 'x', title: 'Old', open: false, shared: UNKNOWN_SHARED, periodLabel: 'Ended Jul 31' }] }));
     const row = text('wsf-you-row-x');
-    expect(row).toContain('CLOSED');
+    expect(row).toContain('CLOSED · RESULT UNAVAILABLE');
     expect(row).toContain('Unknown');
-    expect(row).not.toMatch(/REACHED|UNFINISHED/);
+    expect(row).not.toMatch(/CLOSED · REACHED|UNFINISHED/);
     expect(row).not.toMatch(/\b0 squats/);
   });
 
   it('shows the period label exactly as given, never re-derived from a date', () => {
     render(member());
-    expect(text('wsf-you-row-other')).toContain('Oak Grove Together · This week');
+    expect(text('wsf-you-row-other')).toContain('Harbor Lunch Crew · This week');
     render(member({ open: [LEAD, { ...OTHER, periodLabel: null }] }));
-    expect(text('wsf-you-row-other')).toContain('Oak Grove Together');
-    expect(text('wsf-you-row-other')).not.toContain('Oak Grove Together ·');
+    expect(text('wsf-you-row-other')).toContain('Harbor Lunch Crew');
+    expect(text('wsf-you-row-other')).not.toContain('Harbor Lunch Crew ·');
+  });
+
+  it('each other goal names its own community, not the current one', () => {
+    render(member());
+    expect(text('wsf-you-community')).toContain('Oak Grove Together');
+    expect(text('wsf-you-row-other')).toContain('Harbor Lunch Crew');
+    expect(text('wsf-you-row-other')).not.toContain('Oak Grove Together');
+  });
+
+  it('the band prints a sub-line only for a type the product names — no "Community" filler', () => {
+    render(member());
+    expect(text('wsf-you-community')).not.toContain('Community');
+    render(member({ community: { ...COMMUNITY, groupType: 'custom' } }));
+    expect(text('wsf-you-community')).not.toContain('Community');
+    render(member({ community: { ...COMMUNITY, groupType: 'familyFriends' } }));
+    expect(text('wsf-you-community')).toContain('Family and friends');
   });
 
   it('admits a partial list', () => {

@@ -80,6 +80,16 @@ for (const vp of [
       await expect(page.getByTestId('wsf-you-lead-shared')).toHaveText('241 / 500 confirmed');
       await expect(page.getByTestId('wsf-you-lead-own')).toContainText('25');
       await expect(page.getByTestId('wsf-you-others')).toContainText('REACHED · STILL OPEN');
+      // Each other goal under its own community (the reference's Harbor row).
+      await expect(page.getByTestId('wsf-you-row-fixture-other')).toContainText('Harbor Lunch Crew · This week');
+      // No filler type line under the community name.
+      await expect(page.getByTestId('wsf-you-community')).not.toContainText('Community');
+      // The reference's lead columns at 390: 230 / 110 with a 10 px gap.
+      const sharedCard = (await page.getByTestId('wsf-you-lead-shared-card').boundingBox())!;
+      const ownCard = (await page.getByTestId('wsf-you-lead-own-card').boundingBox())!;
+      expect(Math.abs(sharedCard.width - 230)).toBeLessThanOrEqual(1);
+      expect(Math.abs(ownCard.width - 110)).toBeLessThanOrEqual(1);
+      expect(Math.round(ownCard.x - (sharedCard.x + sharedCard.width))).toBe(10);
       const y = {
         identity: await top(page, 'wsf-you-identity'),
         community: await top(page, 'wsf-you-community'),
@@ -161,7 +171,8 @@ for (const vp of [
       const row = page.getByTestId('wsf-you-row-fixture-closed-unknown');
       await expect(row).toContainText('CLOSED');
       await expect(row).toContainText('Unknown');
-      await expect(row).toContainText('Oak Grove Together · Ended Jul 31');
+      await expect(row).toContainText('Oak Grove Together · July');
+      await expect(row).toContainText('CLOSED · RESULT UNAVAILABLE');
       await expect(row).not.toContainText('REACHED');
       await expect(row).not.toContainText('UNFINISHED');
       await context.close();

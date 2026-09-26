@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { UNKNOWN_SHARED, knownShared } from '../src/goalTruth';
 import {
+  bandSubline,
   initialsOf,
   leadAndOthers,
   partBlock,
@@ -19,6 +20,7 @@ const goal = (over: Partial<YouGoal>): YouGoal => ({
   title: 'G',
   unit: 'squats',
   target: 500,
+  communityName: 'Oak Grove Together',
   yourPart: 25,
   shared: knownShared(241),
   open: true,
@@ -39,7 +41,7 @@ describe('statusOf — the reference four lifecycle pills', () => {
   it('open with the shared total unknown is still OPEN, never REACHED', () =>
     expect(statusOf(goal({ shared: UNKNOWN_SHARED }))).toEqual({ label: 'OPEN', tone: 'open' }));
   it('closed with the shared total unknown claims neither reached nor unfinished', () =>
-    expect(statusOf(goal({ open: false, shared: UNKNOWN_SHARED }))).toEqual({ label: 'CLOSED', tone: 'muted' }));
+    expect(statusOf(goal({ open: false, shared: UNKNOWN_SHARED }))).toEqual({ label: 'CLOSED · RESULT UNAVAILABLE', tone: 'muted' }));
 });
 
 describe('initialsOf', () => {
@@ -96,5 +98,15 @@ describe('an unknown shared position is never a number', () => {
   it('the lead line is absent and the row cell says Unknown — never 0', () => {
     expect(sharedLine(goal({ shared: UNKNOWN_SHARED }))).toBeNull();
     expect(sharedCell(goal({ shared: UNKNOWN_SHARED }))).toBe('Unknown');
+  });
+});
+
+describe('bandSubline — no filler type', () => {
+  it('names a real type and prints nothing for unknown, omitted or custom', () => {
+    expect(bandSubline('familyFriends')).toBe('Family and friends');
+    expect(bandSubline(undefined)).toBeNull();
+    expect(bandSubline(null)).toBeNull();
+    expect(bandSubline('custom')).toBeNull();
+    expect(bandSubline('somethingNew')).toBeNull();
   });
 });
