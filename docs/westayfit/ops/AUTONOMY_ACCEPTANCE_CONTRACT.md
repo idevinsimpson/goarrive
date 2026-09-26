@@ -2,6 +2,7 @@
 
 Status: owner-authorized autonomy requirements contract.
 Date: 2026-09-26.
+Revision: 1.1 — adds owner staging-freshness acceptance requirements.
 
 This document defines what must be true before routine WE STAY FIT program coordination no longer depends on the ChatGPT hourly director. It is an acceptance contract, not an implementation mechanism. AUTONOMY-STATE-1A and the W3 1B/1C architecture consultation may choose different internal designs as long as they satisfy this contract.
 
@@ -96,6 +97,31 @@ Required:
 
 Exit: trigger state matches derived state across independent QA scenarios and real use.
 
+### Staging freshness is also derived control state
+
+Owner preview staging is part of routine program operations, not a manually remembered release chore.
+
+The accepted autonomy mechanism must make these facts answerable from authoritative state/evidence:
+- newest preview-eligible accepted + integrated member-visible SHA;
+- currently served SHA;
+- active target SHA/run when a deploy is queued or running;
+- `STAGING_FRESHNESS = FRESH | DEPLOYING | BEHIND | BLOCKED`;
+- lag age;
+- exact blocker/reason when not fresh.
+
+Rules:
+- `FRESH` only when the served SHA equals the newest safe preview-eligible accepted/integrated member-visible SHA.
+- `BEHIND` with no active permitted deploy is ACTIONABLE; routine reconcile advances it without owner/ChatGPT prompting.
+- If a newer safe accepted successor lands before dispatch, coalesce to the newest exact candidate instead of intentionally staging an obsolete one.
+- A running deploy finishes; the newest safe accepted successor serializes behind it.
+- Docs-only, evidence-only, R&D, unaccepted work, and candidates with unresolved safety invariants never make staging `BEHIND`.
+- Feature readiness and staging freshness are separate. Email/social/index/kiosk holds do not justify serving an older accepted UI.
+- Failed release/proof returns freshness to a closed `BLOCKED`/ACTIONABLE condition with the known-good served/rollback SHA explicit.
+- Changed-journey proof and owner-card generation must not require an unnecessary second app deploy. The architecture may run proof after the served marker when that is safer/faster.
+- A fast owner-preview path is permitted only under machine-checked invariants; any backend/functions/rules/index/config/package/hosting-contract/release-environment change must fall back to the full reviewed path.
+
+Operating target for fast-path-eligible visible work: accepted integration → served marker in single-digit minutes when practical, with a hard operating goal of **≤10 minutes**.
+
 ## Phase D — recovery and unattended proof
 
 The recovery matrix must pass:
@@ -110,7 +136,11 @@ The recovery matrix must pass:
 9. unknown/unresolvable external condition never auto-unblocks;
 10. authoritative state is malformed/corrupt and progression stops rather than guessing;
 11. two monitor/reconcile runs race and only one valid transition wins;
-12. a duplicate delivery/finding/reconcile is idempotent.
+12. a duplicate delivery/finding/reconcile is idempotent;
+13. a newer accepted preview candidate arrives before an older queued deploy and the target coalesces safely;
+14. staging deploy/proof fails and freshness becomes BLOCKED/ACTIONABLE with rollback preserved;
+15. staging is BEHIND while all worker WATCH values are off, and the global monitor advances the permitted release without ChatGPT;
+16. a non-preview-eligible docs/evidence/R&D successor does not create a false staging lag.
 
 External conditions must be typed. At minimum distinguish:
 - GitHub fact;
@@ -129,7 +159,9 @@ Before retirement:
 - include at least one normal success path and one correction/failure path;
 - human/Director judgment may still occur where explicitly required, but routine continuation after that judgment happens from state;
 - for at least one complete real packet, the ChatGPT hourly task is audit-only and makes no routine coordination write;
-- its observed ACTIVE/NEXT/REVIEWING/WATCH/served state matches the repo-native state.
+- its observed ACTIVE/NEXT/REVIEWING/WATCH/served state matches the repo-native state;
+- at least one real preview-eligible member-visible packet moves from accepted integration to FRESH staging through routine autonomous progression with no ChatGPT handoff/release nudge;
+- during the audit-only packet, staging freshness reported by the repo-native system agrees with the actual served marker and active run.
 
 Then the Director records:
 AUTONOMY PHASE E / RETIRE HOURLY LOOP — ACCEPTED
@@ -148,6 +180,10 @@ Track during the proof period:
 - control-state exceptions;
 - time from worker delivery to reviewer wake;
 - time from finding to implementer wake;
+- time from accepted product/integration to staging target creation;
+- time from accepted product/integration to served marker;
+- time staging spends in BEHIND with no active deploy;
+- count of accepted preview candidates superseded/coalesced before dispatch;
 - time from accepted product/pin to permitted release action;
 - recovery from uncertain writes without owner intervention.
 
@@ -155,7 +191,9 @@ Targets for retirement proof:
 - zero duplicate wakes/handoffs;
 - zero worker polls while authoritative WATCH is off;
 - zero manual ChatGPT routine queue/handoff/wake writes across the required proof packets;
-- every uncertain write resolves by deterministic reconcile or fails closed.
+- every uncertain write resolves by deterministic reconcile or fails closed;
+- zero unaccounted periods where staging is BEHIND and the autonomous control system reports no actionable reason;
+- at least one fast-path-eligible real packet meets the ≤10-minute accepted-integration → served-marker operating goal, or records a measured infrastructure reason why it could not.
 
 ## Non-goals
 
