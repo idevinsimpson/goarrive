@@ -2614,3 +2614,45 @@ The route should only ever pass a finite, non-negative aggregate. A one-line gua
 **Instrument note.** Probe Y8's first draft flagged the view's own disclaimer, "No rank, streak, score or inferred impact.". After excluding that sentence it passes, and no other ranking language appears.
 
 **Not reviewed.** PR #492's evidence head `cf3423ec` (docs and frames) was not reviewed for pixels; that is the Director's.
+
+## QA2: You Y-F1 `02f86fc2` (#500) and Progress `92993f09` (#501)
+
+Released in L0 `5842371466`, per Director `5841927035`. Everything below was measured at `92993f09`, which contains `02f86fc2`.
+
+**Measured**
+- Focused vitest (goal-truth, you-parity ×2, progress-parity ×2): 77/77.
+- `tsc`: 0.
+- The You and Progress fixture e2e specs, on one emulator-flagged export: 26 passed, 2 skipped (the evidence cases).
+- W5 probes: the You set 8/8 and the Progress set 13/13 (`sprint-w5-pr501-progress-probe.test.tsx.txt`).
+
+### You `02f86fc2` — **PASS**
+
+**Scope.** One commit on `cf3423ec` (the evidence head, on top of `5e76a10c`). The only non-docs changes are `goalTruth.ts`, `goal-truth.test.ts` and `you-parity-view.test.tsx`. `YouParityView.tsx`, `youParity.ts` and the fixture are blob-identical to `5e76a10c`.
+
+**The fix.** `knownShared` now returns `UNKNOWN_SHARED` for NaN, ±Infinity or a negative total. `knownShared(0)` stays a known zero.
+
+**Checked.** My original Y7 probe now shows the NaN lead as "Not available right now" and the −5 row as `CLOSED · RESULT UNAVAILABLE` / "Unknown". No other source constructs `{ kind: 'known' }` directly, so nothing bypasses the constructor. **Y-F1 is closed.**
+
+**Residual (low).** The guard is on the constructor only, so a hand-written literal would bypass it. `target` itself is not validated here (for example `Infinity`). Neither case exists in the source today.
+
+### Progress `92993f09` — **PASS (stacked delta)**
+
+**Scope.** A merge of `02f86fc2` into `0bae01e3` (`b8b96f61` plus evidence). All six Progress-specific files are blob-identical to `b8b96f61`. `goalTruth.ts` is identical to the one in `02f86fc2`.
+
+**Delta against my `f79a3c49` carry review**
+- `progressParity.ts` now imports and re-exports `isReachedNow`, `sharedCell` and `statusOf` from the hardened `goalTruth`.
+- The `sharedTotal` field became `shared: SharedPosition`.
+- Local `whenLabel` and all `Date` handling were removed.
+- `periodLabel` is displayed verbatim; there are 4 changed lines in the view.
+
+**Probes**
+- Q1: an arbitrary period label shows byte for byte, and null leaves no dangling "·".
+- Q2: a closed goal with an unknown total shows `CLOSED · RESULT UNAVAILABLE` / "Unknown".
+- Q3: `knownShared(NaN)` shows "Unknown", never NaN.
+- The receipt seam and the CTA probes P1–P10 all still pass.
+
+**Carried findings, still open and not conditions**
+- **C1 (moderate):** the no-open-goal card makes a community-wide claim under partial data (P6 reproduces).
+- **C2 (low):** an empty receipts array draws only a heading.
+- **C3 (low):** a zero-credit goal draws "0 squats recorded".
+- **C4 (low):** the `MemberTabBar` import.
