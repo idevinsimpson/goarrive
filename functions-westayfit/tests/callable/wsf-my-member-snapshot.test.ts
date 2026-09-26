@@ -354,6 +354,48 @@ describe('wsfMyMemberSnapshot', () => {
     }
   });
 
+  it('loses no row that shares a millisecond across the page boundary (W5 F1: exact timestamps)', async () => {
+    const uid = `snap-u-${tag()}`;
+    const g1 = await seedGroup('Sub-millisecond');
+    await seedMember(g1, uid);
+    const baseSec = Math.floor(Date.now() / 1000) - 3600;
+    const ids: string[] = [];
+    for (let i = 0; i < 30; i += 1) {
+      const id = await seedGoal(g1, { status: 'closed', total: 1, endsInDays: -2 });
+      // Rows 0-9 inside ONE millisecond, a microsecond apart, exactly as
+      // production server timestamps can be; rows 10-29 a second apart and
+      // newer. The 25th-newest row (row 5) is inside that millisecond, so
+      // the page boundary splits it.
+      const ts = i < 10 ? new Timestamp(baseSec, 500_000_000 + i * 1000) : new Timestamp(baseSec + i, 0);
+      await getFirestore().doc(`wsfGoalMemberTotals/${id}_${uid}`).set({ goalId: id, userId: uid, total: 1, updatedAt: ts });
+      ids.push(id);
+    }
+    const p1 = await call(uid);
+    const p2 = await call(uid, { cursor: p1.nextCursor });
+    const all = [...goalsOf(p1), ...goalsOf(p2)].map((g) => g.goalId);
+    expect(goalsOf(p1)).toHaveLength(25);
+    expect(goalsOf(p2)).toHaveLength(5);
+    expect(new Set(all).size).toBe(30);
+    expect([...all].sort()).toEqual([...ids].sort());
+    expect(p2.nextCursor).toBeNull();
+  });
+
+  it('refuses cursor instants outside Firestore’s range with invalid-argument, never internal (W5 F2)', async () => {
+    const uid = `snap-v-${tag()}`;
+    const enc = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url');
+    for (const bad of [
+      enc({ s: 9007199254740991, n: 0, id: 'a' }),
+      enc({ s: 253402300800, n: 0, id: 'a' }),
+      enc({ s: -62135596801, n: 0, id: 'a' }),
+      enc({ s: 1, n: 1_000_000_000, id: 'a' }),
+      enc({ s: 1, n: 1.5, id: 'a' }),
+      enc({ t: 1, id: 'a' }),
+      enc({ t: 9007199254740991, id: 'a' }),
+    ]) {
+      await expectRefused(call(uid, { cursor: bad }), 'invalid-argument');
+    }
+  });
+
   it('never exceeds 35 goals per community or 50 in total, and says so', async () => {
     const uid = `snap-t-${tag()}`;
     const groups: string[] = [];

@@ -4690,7 +4690,16 @@ type MyMemberSnapshotResponse = {
   nextCursor: string | null;
 };
 
-type SnapshotCursor = { t: number; id: string };
+/**
+ * The cursor carries the row's EXACT updatedAt (seconds + nanoseconds), not
+ * milliseconds: production server timestamps have sub-millisecond precision,
+ * and resuming from a truncated instant would skip every row between that
+ * millisecond and the real one (W5 F1, #510 `5846800450`).
+ */
+type SnapshotCursor = { s: number; n: number; id: string };
+/** Firestore Timestamp's own range: 0001-01-01 .. 9999-12-31T23:59:59Z. */
+const SNAPSHOT_TS_MIN_SECONDS = -62135596800;
+const SNAPSHOT_TS_MAX_SECONDS = 253402300799;
 
 function encodeSnapshotCursor(c: SnapshotCursor): string {
   return Buffer.from(JSON.stringify(c), 'utf8').toString('base64url');
@@ -4704,12 +4713,14 @@ function decodeSnapshotCursor(raw: unknown): SnapshotCursor | null {
   }
   try {
     const parsed = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as unknown;
-    const p = parsed as { t?: unknown; id?: unknown };
+    const p = parsed as { s?: unknown; n?: unknown; id?: unknown };
     if (
-      typeof p.t === 'number' && Number.isSafeInteger(p.t) && p.t >= 0 &&
+      typeof p.s === 'number' && Number.isSafeInteger(p.s) &&
+      p.s >= SNAPSHOT_TS_MIN_SECONDS && p.s <= SNAPSHOT_TS_MAX_SECONDS &&
+      typeof p.n === 'number' && Number.isSafeInteger(p.n) && p.n >= 0 && p.n <= 999_999_999 &&
       typeof p.id === 'string' && normalizeStringId(p.id) === p.id
     ) {
-      return { t: p.t, id: p.id };
+      return { s: p.s, n: p.n, id: p.id };
     }
   } catch {
     // fall through
@@ -4826,7 +4837,7 @@ export const wsfMyMemberSnapshot = onCall<MyMemberSnapshotRequest>(
       .where('userId', '==', uid)
       .orderBy('updatedAt', 'desc')
       .orderBy(FieldPath.documentId(), 'desc');
-    if (cursor) ownQuery = ownQuery.startAfter(Timestamp.fromMillis(cursor.t), cursor.id);
+    if (cursor) ownQuery = ownQuery.startAfter(new Timestamp(cursor.s, cursor.n), cursor.id);
     let ownRowsOk = true;
     let ownRows: FirebaseFirestore.QueryDocumentSnapshot[] = [];
     let nextCursor: string | null = null;
@@ -4837,8 +4848,8 @@ export const wsfMyMemberSnapshot = onCall<MyMemberSnapshotRequest>(
         ownRows = ownRows.slice(0, SNAPSHOT_OWN_PAGE);
         const last = ownRows[ownRows.length - 1]!;
         const at = last.get('updatedAt') as FirebaseFirestore.Timestamp | undefined;
-        if (at && typeof at.toMillis === 'function') {
-          nextCursor = encodeSnapshotCursor({ t: at.toMillis(), id: last.id });
+        if (at && typeof at.seconds === 'number' && typeof at.nanoseconds === 'number') {
+          nextCursor = encodeSnapshotCursor({ s: at.seconds, n: at.nanoseconds, id: last.id });
         }
         truncated.goals = true;
       }
@@ -4917,19 +4928,6 @@ export const wsfMyMemberSnapshot = onCall<MyMemberSnapshotRequest>(
       );
     }
 
-    // Own credit for active goals that were not on this page: read directly,
-    // so an absent document is a checked 0 and a failed read stays unknown.
-    const unchecked = [...new Set([...activeByGroup.values()].flat())].filter((id) => !ownByGoal.has(id));
-    if (unchecked.length) {
-      try {
-        const snaps = await db.getAll(...unchecked.map((id) => db.doc(`wsfGoalMemberTotals/${id}_${uid}`)));
-        snaps.forEach((s, i) => ownByGoal.set(unchecked[i]!, s.exists ? knownOwnTotal(s.data()) : 0));
-      } catch (e) {
-        console.warn('[wsfMyMemberSnapshot] own totals unavailable', e);
-        for (const id of unchecked) ownByGoal.set(id, null);
-      }
-    }
-
     // Assemble per community: owned (newest first), then active, capped.
     let goalCount = 0;
     const perGroup = new Map<string, string[]>();
@@ -4947,8 +4945,22 @@ export const wsfMyMemberSnapshot = onCall<MyMemberSnapshotRequest>(
     for (const c of communities) for (const id of ownedByGroup.get(c.groupId) ?? []) add(c.groupId, id);
     for (const c of communities) for (const id of activeByGroup.get(c.groupId) ?? []) add(c.groupId, id);
 
-    // 5. One batched shard read for every goal returned; a failure is unknown.
+    // Own credit for RETURNED active goals that were not on this page: read
+    // directly (after the caps, so no read is spent on a goal the caps drop),
+    // so an absent document is a checked 0 and a failed read stays unknown.
     const returned = [...perGroup.values()].flat();
+    const unchecked = returned.filter((id) => !ownByGoal.has(id));
+    if (unchecked.length) {
+      try {
+        const snaps = await db.getAll(...unchecked.map((id) => db.doc(`wsfGoalMemberTotals/${id}_${uid}`)));
+        snaps.forEach((s, i) => ownByGoal.set(unchecked[i]!, s.exists ? knownOwnTotal(s.data()) : 0));
+      } catch (e) {
+        console.warn('[wsfMyMemberSnapshot] own totals unavailable', e);
+        for (const id of unchecked) ownByGoal.set(id, null);
+      }
+    }
+
+    // 5. One batched shard read for every goal returned; a failure is unknown.
     let shared: Map<string, number> | null = null;
     if (returned.length) {
       try {
