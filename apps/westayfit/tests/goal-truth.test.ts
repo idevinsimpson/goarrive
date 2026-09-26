@@ -31,7 +31,7 @@ describe('goalTruth', () => {
     expect(canRenderLivingWe({ shared: knownShared(241), target: 500 })).toBe(true);
   });
 
-  it('the four pills, plus CLOSED alone for a closed goal with an unknown total', () => {
+  it('the four pills, plus CLOSED · RESULT UNAVAILABLE for a closed goal with an unknown total', () => {
     expect(statusOf({ open: true, target: 500, shared: knownShared(241) }).label).toBe('OPEN');
     expect(statusOf({ open: true, target: 500, shared: knownShared(500) }).label).toBe('REACHED · STILL OPEN');
     expect(statusOf({ open: false, target: 500, shared: knownShared(520) })).toEqual({ label: 'CLOSED · REACHED', tone: 'closedReached' });
