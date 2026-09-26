@@ -25,10 +25,10 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 | **COMMUNITY-PARITY-1 (pure)** | W4 · #496 · `646c9579` | ACCEPTED → integrated `87a86531`; HOME-REFRESH-TRUTH-1 **closed, option A** (W7 Check 52: H3c was instrument false negative) | done |
 | **COMMUNITY-SETTINGS-PARITY-1** | W9 · `ffb517e5` | **SERVED** `938e00d8` via run 53; hosted smoke BLOCKED from L0 (403); OWNER TEST CARD `5846778806` | owner feedback → route |
 | **PERSONAL-FIRST SCALE (snapshot)** | W4 #510 `8dc65316` / index #509 | `b71cf07f` FAIL → successor `8dc65316`; W5 recheck woken `trig_016FDPDU…` (#395 `5847278911`) | W5 → Director; staging needs index READY |
-| CONTROL-PLANE-ACTIVATION-1 | W3 · #521 `be4d66ce` | Director HOLD `5848893150`: install only `google-auth-library@9.15.1` | **W3 ACTIVE NOW** (`5849878611`) → W7 delta → accept → one re-run |
-| AUTONOMY-STATE-1A | W3 · #519 `cc78509a` | **ACCEPTED** `5849867467` (W7 66D) → **integrated** main `5d58ed07` (`5849877984`) | Phases B–E; 1B/1C consult = W3 NEXT |
+| CONTROL-PLANE-ACTIVATION-1 | W3 · #521 `be4d66ce` | **Serial plan step 1** (#365 `5849937256`); W3 ACK `5849913213`: install only `google-auth-library@9.15.1` | successor → W7 → accept → integrate → one re-run |
+| AUTONOMY-STATE-1A | W3 · #519 `cc78509a` | **ACCEPTED** `5849867467` → integrated main `5d58ed07` | Phases B–E = plan steps 4–7 (PARKED) |
 | W5 lane | #520 audit; #525 **merged** (W5 PASS, Director `5849425770`) | **owner: revoke Browser Use key** |
-| **HOME-NORTHSTAR-PARITY-1** | W9 · #514 `9d27fdb5` | ACCEPTED → integrated `a3127651` → pin #522 → **SERVED run 55**; owner card `5849113235` | owner test feedback |
+| **HOME-NORTHSTAR-PARITY-1** | W9 · #514 `9d27fdb5` | SERVED run 55 `a3127651`; hosted journey unproven | **W3 NEXT: HOME-HOSTED-JOURNEY-1** (`5849944214`, plan step 2) |
 | **PRIVACY-TOGGLE-STAGING-1** | owner as operator · harness merged `6c2e6b25` | setters SHUT (run 50); no Claude identity can do Operation 2; W7 Check 43 emulator PASS | owner Operation 2 read-back → one `social-privacy` dispatch → seven-row receipt |
 | **HARDENED-MEMBER-JOURNEY-1** | W7 · `a55046f5` | H1–H4 baselined on served; **H3c** (silent failed Home refresh) and **H4b** (no eviction after refusal) fail; H5 waits on Settings | rerun on successors |
 | SOCIAL-DEMO-SEED-MODE | W3 · #484 `4c1ac1d9` | W7 carry confirmed | Director → L0 PLAN → APPLY / VERIFY |
