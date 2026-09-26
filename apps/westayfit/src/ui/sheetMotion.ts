@@ -29,6 +29,8 @@ import { Platform } from 'react-native';
 
 export const SHEET_IN_MS = 240;
 export const SHEET_OUT_MS = 180;
+/** The reference's tab change (styles.css --dur-tab). See `TabSceneFade`. */
+export const TAB_FADE_MS = 140;
 
 const onWeb = (): boolean => Platform.OS === 'web' && typeof document !== 'undefined';
 
@@ -40,9 +42,17 @@ const CSS = `
 [data-wsf-sheet-panel="in"] { animation: wsf-sheet-in ${SHEET_IN_MS}ms cubic-bezier(.22,1,.36,1); }
 [data-wsf-sheet-panel="out"] { animation: wsf-sheet-out ${SHEET_OUT_MS}ms cubic-bezier(.4,0,1,1) forwards; pointer-events: none; }
 [data-wsf-sheet-scrim="in"] { animation: wsf-scrim-in ${SHEET_IN_MS}ms ease-out; }
+@keyframes wsf-side-in { from { transform: translateX(32px); opacity: 0; } }
+@keyframes wsf-side-out { to { transform: translateX(32px); opacity: 0; } }
+[data-wsf-side-panel="in"] { animation: wsf-side-in ${SHEET_IN_MS}ms cubic-bezier(.22,1,.36,1); }
+[data-wsf-side-panel="out"] { animation: wsf-side-out ${SHEET_OUT_MS}ms cubic-bezier(.4,0,1,1) forwards; pointer-events: none; }
 [data-wsf-sheet-scrim="out"] { animation: wsf-scrim-out ${SHEET_OUT_MS}ms cubic-bezier(.4,0,1,1) forwards; }
+@keyframes wsf-tab-in-a { from { opacity: .35; } to { opacity: 1; } }
+@keyframes wsf-tab-in-b { from { opacity: .35; } to { opacity: 1; } }
+[data-wsf-tab-scene="a"] { animation: wsf-tab-in-a ${TAB_FADE_MS}ms ease-out; }
+[data-wsf-tab-scene="b"] { animation: wsf-tab-in-b ${TAB_FADE_MS}ms ease-out; }
 @media (prefers-reduced-motion: reduce) {
-  [data-wsf-sheet-panel], [data-wsf-sheet-scrim] { animation: none !important; }
+  [data-wsf-sheet-panel], [data-wsf-sheet-scrim], [data-wsf-side-panel], [data-wsf-tab-scene] { animation: none !important; }
 }
 `;
 
@@ -138,8 +148,10 @@ export function useSheetExit(reducedMotion: boolean): {
 
 /** The `dataSet` a sheet's panel and scrim carry for their phase. */
 export type SheetPhase = 'in' | 'rest' | 'out';
-export function sheetData(part: 'panel' | 'scrim', phase: SheetPhase): Record<string, unknown> {
-  const key = part === 'panel' ? 'wsfSheetPanel' : 'wsfSheetScrim';
+export function sheetData(part: 'panel' | 'scrim' | 'side', phase: SheetPhase): Record<string, unknown> {
+  // `side`: the reference's right-hand panel (styles.css .demo-surface.panel,
+  // wsf-panel-in/out): translateX(32px) and transparent, 240 ms in, 180 out.
+  const key = part === 'panel' ? 'wsfSheetPanel' : part === 'side' ? 'wsfSidePanel' : 'wsfSheetScrim';
   return { dataSet: { [key]: phase } };
 }
 

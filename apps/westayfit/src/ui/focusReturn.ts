@@ -41,7 +41,7 @@ import { setInert } from './sheetMotion';
  */
 
 /** The root-stack routes whose closing returns focus. */
-const FLOW_ROUTES = new Set(['move/index', 'contribute/[goalId]']);
+const FLOW_ROUTES = new Set(['move/index', 'contribute/[goalId]', 'settings']);
 /** The same two flows, as addresses: a page loaded here is a cold arrival. */
 const FLOW_PATH = /^\/(move\/?$|contribute\/)/;
 
@@ -236,6 +236,18 @@ export function armTabsFocusReturn(): void {
 }
 
 /**
+ * APP-FEEL-PARITY-1 CHECKPOINT 3. A flow opened from a control that no longer
+ * exists when it closes -- Settings, opened from an item of the top bar's
+ * menu, which closed as it opened -- names the control focus should come back
+ * to: the menu's own button, which is still there.
+ */
+let named: Opener | null = null;
+export function armTabsFocusReturnTo(testId: string): void {
+  if (!onWeb()) return;
+  named = { node: null, testId };
+}
+
+/**
  * The page was loaded at one of the two flows (a link, a reload). A kiosk
  * session is not a member arrival and never counts, whatever its path.
  */
@@ -281,7 +293,8 @@ export function useTabsFocusReturn(container: RefObject<unknown>): void {
       // Whatever was still being restored is behind the new flow now.
       cancel();
       lastCovering = null;
-      armed = coveringFlow() ? openerFrom(root(), attention.trail) : null;
+      armed = coveringFlow() ? (named ?? openerFrom(root(), attention.trail)) : null;
+      named = null;
       /*
         APP-FEEL-PARITY-1. THE TAB BEHIND A SHEET IS SHOWN, NOT USABLE. Both
         flows are presented over the mounted tab, which stays painted behind
