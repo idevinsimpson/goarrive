@@ -2,8 +2,10 @@
  * Shared test model for the changed-journey drivers: an in-memory Identity
  * Toolkit + Firestore (also served over HTTP in the shape cleanup-synthetic.mjs
  * speaks), the real fixture kit bound to it, and a scripted page modelling the
- * product's rendered contract at 938e00d8. Used by changed-journey-drivers and
- * journey-activation. Test code only.
+ * product's rendered contract: Community and Settings at 938e00d8, and Home
+ * (/community/<groupId>) with its contribute screens at a3127651
+ * (HOME-NORTHSTAR-PARITY-1). Used by changed-journey-drivers,
+ * journey-activation and home-journey. Test code only.
  */
 import fs from 'node:fs';
 import http from 'node:http';
@@ -83,10 +85,14 @@ export function kitFor(dir, be) {
 
 // ---- a scripted page modelling the product's rendered contract ------------------------
 export function fakeApp(fx, bugs = {}) {
-  const st = { signedIn: false, path: '/', selected: null, panel: false, typed: {}, pressed: [] };
+  const st = { signedIn: false, path: '/', search: '', history: [], lastHome: null, selected: null, panel: false, typed: {}, pressed: [] };
   const serverOrder = bugs.serverOrderBFirst ? [fx.b, fx.a] : [fx.a, fx.b];
   const current = () => st.selected || serverOrder[0];
-  const onTabs = () => st.signedIn && ['/', '/community', '/you'].includes(st.path);
+  const homeOf = (p) => [fx.a, fx.b].find((c) => p === `/community/${c.id}`) || null;
+  const onTabs = () => st.signedIn && (['/', '/community', '/you'].includes(st.path) || homeOf(st.path) !== null);
+  const go = (p, search = '') => { st.history.push({ path: st.path, search: st.search }); st.path = p; st.search = search; if (homeOf(p)) st.lastHome = p; };
+  // The seeded goal facts the product would read back (fixture-kit.mjs: A 500 / 120, B 1000 / 200, squats).
+  const seeded = (c) => (c === fx.a ? { target: 500, shared: 120 } : { target: 1000, shared: 200 });
   const block = (c) => [c.name, c === fx.b ? 'CHAMPION' : '', 'Show my name and initials',
     c.nameVisible ? 'Members see “Jordan Journey”' : (bugs.noAnonymousHint ? 'Hidden' : 'Members see “Anonymous member”'),
     'Show my individual activity'].filter(Boolean).join('\n');
@@ -100,6 +106,42 @@ export function fakeApp(fx, bugs = {}) {
       }
     }
     if (id === 'wsf-member-tab-you' && onTabs()) return { click: () => { st.path = '/you'; } };
+    // HOME at a3127651: /community/<groupId> in the Home tab's stack.
+    if (id === 'wsf-member-tab-community' && onTabs()) return { click: () => go('/community') };
+    if (id === 'wsf-member-tab-home' && onTabs()) return { click: () => go(bugs.homeTabLosesCommunity ? '/' : (st.lastHome || '/')) };
+    const home = st.signedIn ? homeOf(st.path) : null;
+    if (home) {
+      const c = bugs.homeShowsOther ? (home === fx.a ? fx.b : fx.a) : home;
+      const n = seeded(c);
+      const g = c.goalId;
+      if (id === 'wsf-community-name') return { text: () => c.name };
+      if (id === `wsf-community-goal-title-${g}`) return { text: () => c.goalTitle };
+      if (bugs.otherGoalLeaks && id === `wsf-community-goal-title-${(c === fx.a ? fx.b : fx.a).goalId}`) return { text: () => 'leaked' };
+      if (id === `wsf-community-goal-period-${g}`) return { text: () => (bugs.windowClosed ? 'Ended Sep 20' : 'Open · Ends Thu, Oct 1') };
+      if (id === `wsf-community-goal-total-${g}`) return { text: () => `${bugs.totalOff ? n.shared + 1 : n.shared} of ${n.target} squats` };
+      if (id === `wsf-community-your-part-${g}`) {
+        const own = bugs.fabricatedOwn ? `You’ve added ${n.shared} squats`
+          : bugs.ownFigureBesideZero ? `Your first contribution counts here.\nYou’ve added ${n.shared} squats` : 'Your first contribution counts here.';
+        return { text: () => `Your contribution to this goal\n${own}\nPart of our shared ${n.shared}` };
+      }
+      if (id === `wsf-community-your-part-shared-${g}`) return { text: () => `Part of our shared ${bugs.sharedBlended ? 0 : n.shared}` };
+      if (id === `wsf-community-goal-link-${g}` && !bugs.noStart) {
+        return { attrs: { 'aria-label': 'Start moving' }, click: () => { if (!bugs.startGoesNowhere) go(`/contribute/${g}`, `?groupId=${c.id}&mode=move`); } };
+      }
+      if (id === `wsf-community-goal-record-${g}`) {
+        return { attrs: { 'aria-label': bugs.recordUnlabelled ? 'I already moved' : 'Already moved? Record squats' }, click: () => go(`/contribute/${g}`, `?groupId=${c.id}&mode=${bugs.recordOpensMove ? 'move' : 'record'}`) };
+      }
+    }
+    const contributing = st.signedIn ? [fx.a, fx.b].find((c) => st.path === `/contribute/${c.goalId}`) : null;
+    if (contributing) {
+      const mode = new URLSearchParams(st.search).get('mode');
+      if (id === 'wsf-contribute-move-screen' && mode === 'move') return {};
+      if (id === 'wsf-contribute-entry-screen' && mode !== 'move') return {};
+      if (id === 'wsf-contribute-goal-title') return { text: () => contributing.goalTitle };
+      if (id === 'wsf-contribute-back') {
+        return { click: () => { const prev = st.history.pop(); if (bugs.backLost || !prev) { st.path = '/'; st.search = ''; } else { st.path = prev.path; st.search = prev.search; } } };
+      }
+    }
     if (st.signedIn && st.path === '/community') {
       const c = current();
       if (id === 'wsf-parity-name') return { text: () => c.name };
@@ -151,7 +193,7 @@ export function fakeApp(fx, bugs = {}) {
     return loc;
   }
   const page = {
-    goto: async (url) => { st.path = new URL(url).pathname; },
+    goto: async (url) => { const u = new URL(url); go(u.pathname, u.search); },
     // A reload keeps the product's remembered selection; the seeded defect drops it.
     reload: async () => { if (bugs.reloadLosesSelection) st.selected = null; },
     waitForTimeout: async () => {},
