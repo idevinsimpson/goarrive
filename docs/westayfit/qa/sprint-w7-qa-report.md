@@ -5296,3 +5296,40 @@ Everything else in Check 62 stands.
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0. No e2e run and no artifacts. The scratch npm workspace is outside the repository, and every mutant was reverted (the tree is clean).
 
 **Status:** **one finding (F1) at `be4d66ce`.** Items 1–4 PASS: the run-54 correction itself is correct, bounded and proven fail-before / pass-after. Item 5's guard needs the one-line widening, or the narrower install. W7 dispatched, merged and accepted nothing.
+
+## 64 · HOME-PIN-1 pin check, #522 at exact `70a6a51506d2fddc92baf2cda57da914ac80b5ee` on main `37f18ea9` (handoff #434 `5848892289`; L0 receipt #522 `5848891174`; W7 ACK `5848924984`): **PASS**
+
+- **Method:** local and static only, with the Checks 49 / 53 / 55 method. The only outside read was the run-53 record, a read-only GitHub API call.
+- **Not done:** no dispatch, no cloud action.
+
+| # | Item | Result |
+|---|---|---|
+| **1** | **`approvedAppSha`** | **PASS.** It is `a31276516e786ac8f848269de4c839b3b9e13123`, the head of `claude/wsf-app-shell` (and #365). Its parents are `6c7f975c` and `9d27fdb5`, as expected. `70a6a515` is one commit on `37f18ea9` and changes only `.github/wsf-staging/approved-candidate.json`. |
+| **2** | **`resolve-candidate`** (full SHAs via `WSF_REQUESTED_SHA`) | **PASS.** `a3127651…` is accepted (exit 0). `938e00d8…` and `9d27fdb5…` are refused (exit 1), and so is an abbreviated `a3127651`. |
+| **3** | **Inventory** | **PASS.** See the inventory bullets below. |
+| **4** | **Protected paths** | **PASS.** See the protected-path bullets below. |
+| **5** | **Regeneration** | **PASS.** See the regeneration bullets below. |
+| **6** | **`fastPath`** | **PASS.** `eligible: false`, `applies: false`, for two reasons: the `firestore.indexes.json` protected delta, and the release environment changed since run 53 (the listed `.github` files). Nothing in the workflow or any non-test, non-generator script reads `fastPath` or `_pinInvariants` (grep: 0 readers), so the record cannot bypass a gate. |
+| **7** | **`run-all`** | **PASS.** 23 suites, "all suites passed", 3 / 3 runs. The tree stays clean. |
+
+**Row 3, inventory:**
+- `expectedPriorFunctions` stays 49, and `candidateAddedFunctions` stays the same three social callables.
+- `functions-westayfit` is tree `5a3f232e` at both `938e00d8` and `a3127651`.
+- `read-inventory` against synthetic inventories: 49 gives `PREFLIGHT_BASELINE_MATCHES_APPROVAL=true` (exit 0); 48 and 50 are refused (exit 1).
+
+**Row 4, protected paths:**
+- `938e00d8` is an ancestor of `a3127651`, through 5 first-parent integrations and 17 commits.
+- `git diff --name-only 938e00d8 a3127651` over `pin-candidate.mjs`'s `PROTECTED_PATHS` gives exactly **`firestore.indexes.json`**.
+- Its blob at `a3127651` is `dffe575d`, which is **`1f99d67f`'s blob** (MEMBER-SNAPSHOT-INDEX-1's source); at `938e00d8` it was `f71f1a81`.
+- The staging deploy does not deploy indexes.
+
+**Row 5, regeneration:**
+- `pin-candidate.mjs` at `70a6a515` was run with main's approval file (`37f18ea9`), the reviewed `packageLabel` fed verbatim through `--label-file`, and run 53's receipt values: id `36245419181`, number 53, main `7ab19e8f`, date 2026-09-26, 49 → 49, `created=none`, verify pass, hosted marker true, hosted-verify pass, accepted on 2026-09-26, ops head `37f18ea9`.
+- It reproduces the committed file **byte-identically**. A control with `--run-date 2026-09-25` differs, so the comparison is sensitive.
+- **Run 53 is independently confirmed** by the GitHub API: run `36245419181` is `run_number` 53, dispatched on `main` at `7ab19e8f` (the #511 pin merge for `938e00d8`), `conclusion: success`, on 2026-09-26.
+- **The history rotation:** `_previousExpectedPriorFunctionsNote938e00d8`, `_previousFullCandidateNote938e00d8` and `_previousPackageLabel938e00d8` each carry main's current note of the same kind. All older `_previous*` keys are unchanged.
+- **The rollback target** is `938e00d8` / run 53 (`36245419181`) from `7ab19e8f`, 49 → 49, `created=none`, verify pass.
+
+- **Gates:** `ts:check` 0; `check-evidence-intact` 0. No e2e run and no artifacts.
+
+**Status:** **PASS at `70a6a515`.** Next consumer: Director acceptance → L0 merge → one `deploy` dispatch for `a3127651`. W7 dispatched, merged and accepted nothing.
