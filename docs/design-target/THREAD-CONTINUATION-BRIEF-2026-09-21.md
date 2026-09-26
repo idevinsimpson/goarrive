@@ -4,13 +4,13 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 ## CURRENT — read this first (kept ≤ 1,000 words; updated only on material change; Director #365 `5819944052` §3)
 
-**Stamp: 2026-09-26 02:35Z.** **Precedence:** newer explicit owner decisions first (latest: North-Star Operating System v1 `5841611729`; standing hardening train `5841397324`, which replaces the sprint's expiry; staging cadence `5832907406`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
+**Stamp: 2026-09-26 03:20Z.** **Precedence:** newer explicit owner decisions first (latest: North-Star Operating System v1 `5841611729`; standing hardening train `5841397324`, which replaces the sprint's expiry; staging cadence `5832907406`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
 
 **Heads.**
 
 | what | value |
 | --- | --- |
-| development `claude/wsf-app-shell` | **`0b460ce3`** (served) |
+| development `claude/wsf-app-shell` | **`87997c58`** = PERF `14ce1907` (tree = `ad3d2f88`; vitest 909) + You Phase A `993f0796` + Progress Phase A (pure, unstaged) |
 | `main` | **`6c2e6b25`** (Merge #491: social-privacy post-op harness `2cfaa349`, `.github` only); before it `a4b228a5` (pin #488) |
 | staging pin | `approvedAppSha` `0b460ce3`, `expectedPriorFunctions` 49, three social retained |
 | served staging | **`0b460ce3`**, run 50: 49 → 49, created none, `VERIFY=pass`, hosted 24 / 0, cleanup COMPLETE; previous known-good `91392f9d` (run 49) |
@@ -19,12 +19,12 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 | packet | owner · PR · SHA | state | next |
 | --- | --- | --- | --- |
-| **PERF-MOBILE-1 cp1** | W9 · #494 · product **`ad3d2f88`** / evidence `b36989e7` (H4b successor to `889e9775`) | W7 Check 47 PASS on `889e9775`; Director H4b hold `5841923744` → fix: membership re-read on Community Home return; L0 receipt `5842367622` (protected empty, tsc 0, memberReads 18/18); exact W7 H4b file can't finish (Home helper waits for replaced root) | W7 → Director → L0 merges → W3 pin from `main` `6c2e6b25`; 49 → 49 |
-| **YOU-PARITY-1 Phase A** | W6 · #500 · **`02f86fc2`** (Y-F1 on W5-PASSED `5e76a10c`) | only `goalTruth.ts` + tests changed (#492 `5842368767`, which corrects L0 `5841755815`) | W5 delta (wake `trig_01A19bgdQD8jVNj7aPYfPX6Q`) → Director pixel → L0 integrates (accelerator), no staging |
-| **PROGRESS-PARITY-1 Phase A** | W6 · #501 · **`92993f09`** | Progress files byte-identical to `b8b96f61` | W5 delta → Director pixel |
-| You / Progress Phase B | W6 · #498 `4f0b4c33`, #499 `b129ccec` | parked (`5841997009`); adapters `db6c2e2d` / `7f8f0feb` rebase on accepted PERF + Phase A; open lead-row question `5842099001` | rebase → W7 |
-| **COMMUNITY-PARITY-1 (pure)** | W4 · #496 · product **`db41ffd2`** / evidence `88d5969e` | C1–C3 hardened; L0 receipt `5842013758` (7 added files, tsc 0 merged) | W5 QA (`5842003820`) → Director → L0 integrates, no staging; then W4 HOME-REFRESH-TRUTH-1 (`5842043740`) |
-| COMMUNITY-SETTINGS-PARITY-1 | W9 · #497 · `e07453b4` | parked; will adopt W4's pure components (`5841956725`) | after PERF + #496 integrate |
+| **PERF-MOBILE-1 cp1** | W9 · #494 · `ad3d2f88` | **ACCEPTED** `5842637914` (W7 Check 48) → **integrated `14ce1907`** (`5842663994`) | W3 pin `14ce1907` from `main` `6c2e6b25` (`5842660802`; 49 → 49) → W7 → Director → one dispatch → receipts + OWNER TEST CARD |
+| **YOU-PARITY-1 Phase A** | W6 · #500 · `02f86fc2` | **ACCEPTED** `5842638280` → integrated `993f0796`; not staged | done |
+| **PROGRESS-PARITY-1 Phase A** | W6 · #501 · `92993f09` | **ACCEPTED** `5842638626` → integrated `87997c58`; not staged | done |
+| You / Progress Phase B | W6 · #498 / #499 | adapters `db6c2e2d` / `7f8f0feb` restack on `87997c58`; lead-row question `5842099001` open | restack → W7 route QA → stage |
+| **COMMUNITY-PARITY-1 (pure)** | W4 · #496 · `db41ffd2` | W5 QA → Director condition `5842638933`: fix K-F1 (`memberCount` NaN / negative → unknown) | W4 fix → W5 recheck → Director → L0 integrates; then HOME-REFRESH-TRUTH-1 (`5842043740`) |
+| COMMUNITY-SETTINGS-PARITY-1 | W9 · #497 | resume from `87997c58` (`5842667106`); adopt W4 components once integrated | W7 |
 | **MEMBER-SNAPSHOT-1** | backend worker **BLOCKED**: L0 `create_session` refused by classifier; not retried (`5842376324`) | serialized `index.ts` queue (`5842015136`) waits | owner-started session or Director assigns an existing worker |
 | **PRIVACY-TOGGLE-STAGING-1** | owner as operator · harness merged `6c2e6b25` | setters SHUT (run 50); no Claude identity can do Operation 2; W7 Check 43 emulator PASS | owner Operation 2 read-back → one `social-privacy` dispatch → seven-row receipt |
 | **HARDENED-MEMBER-JOURNEY-1** | W7 · `a55046f5` | H1–H4 baselined on served; **H3c** (silent failed Home refresh) and **H4b** (no eviction after refusal) fail; H5 waits on Settings | rerun on successors |
