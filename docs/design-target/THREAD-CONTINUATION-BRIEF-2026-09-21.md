@@ -4,13 +4,13 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 ## CURRENT — read this first (kept ≤ 1,000 words; updated only on material change; Director #365 `5819944052` §3)
 
-**Stamp: 2026-09-26 09:30Z.** **Precedence:** newer explicit owner decisions first (latest: North-Star Operating System v1 `5841611729`; standing hardening train `5841397324`, which replaces the sprint's expiry; staging cadence `5832907406`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
+**Stamp: 2026-09-26 10:10Z.** **Precedence:** newer explicit owner decisions first (latest: North-Star Operating System v1 `5841611729`; standing hardening train `5841397324`, which replaces the sprint's expiry; staging cadence `5832907406`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
 
 **Heads.**
 
 | what | value |
 | --- | --- |
-| development `claude/wsf-app-shell` | **`87a86531`** = PERF `14ce1907` + You / Progress Phase A (`87997c58`) + Community Phase A `646c9579` (pure, unstaged) |
+| development `claude/wsf-app-shell` | **`74d19281`** = `87a86531` + You `18ba6de2` / Progress `bdc82c0e` routes (`2f57bbca`); vitest 1036 |
 | `main` | **`32563aa0`** (Merge #502: pin → `14ce1907`); before it `6c2e6b25` (#491) |
 | staging pin | `approvedAppSha` **`14ce1907`**, `expectedPriorFunctions` 49, three social retained (Director ACCEPTED #502 `5843353545`) |
 | served staging | **`14ce1907`**, run 51 `36219503815`: 49 → 49, created none, `VERIFY=pass`, marker `14ce190`, hosted 24 / 0, cleanup COMPLETE 349 / 349 (#365 `5843464730`–`5843467412`); previous known-good **`0b460ce3`** (run 50) |
@@ -22,7 +22,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 | **PERF-MOBILE-1 cp1** | W9 · #494 · `ad3d2f88` | **SERVED** via run 51; hosted smoke BLOCKED from L0 (sandbox 403 on `*.web.app`, `5843469815`); OWNER TEST CARD `5843470410` | owner feedback → route; H3c successor with W4 |
 | **YOU-PARITY-1 Phase A** | W6 · #500 · `02f86fc2` | **ACCEPTED** `5842638280` → integrated `993f0796`; not staged | done |
 | **PROGRESS-PARITY-1 Phase A** | W6 · #501 · `92993f09` | **ACCEPTED** `5842638626` → integrated `87997c58`; not staged | done |
-| You / Progress Phase B | W6 · #503 → **`18ba6de2`** (Y-F10 fix) / #504 `bdc82c0e` | Director: You HOLD Y-F10 (`5844877801`); **Progress ACCEPTED** (`5844877908`, P-F5 intentional); L0 receipt `5845024782` (tsc 0, 66/66, clean onto `87a86531`) | W7 Y-F10 rerun → W6 carries Progress onto successor → Director → integrate → pin → stage |
+| You / Progress Phase B | W6 · #503 `18ba6de2` / #504 `2f57bbca` | **ACCEPTED** (`5845316258`, `5844877908`) → **integrated `74d19281`** (`5845331119`) | W3 pin `74d19281` from `main` `32563aa0` (`5845330462`; 49 → 49; rollback `14ce1907`) → W7 → Director → dispatch |
 | **COMMUNITY-PARITY-1 (pure)** | W4 · #496 · `646c9579` | ACCEPTED → integrated `87a86531`; HOME-REFRESH-TRUTH-1: W4 finds H3c an instrument false negative (`5843808619`) | W7 re-measures H3c (`5844260871`); Director: close (A) or optional work (B) |
 | COMMUNITY-SETTINGS-PARITY-1 | W9 · #506 `2e235c58` | functional fix verified (`5844603215`); **Director VISUAL HOLD** `5844878042`: Settings panel 366 px / 12 px inset / 8 px radius; exact banner ring; matched-fixture overlays; Check 43 row 3 → assert stored state | W9 visual successor ‖ W7 functional on `2e235c58` → Director → integrate → stage |
 | **MEMBER-SNAPSHOT-1** | backend worker **BLOCKED**: L0 `create_session` refused by classifier; not retried (`5842376324`) | serialized `index.ts` queue (`5842015136`) waits | owner-started session or Director assigns an existing worker |
