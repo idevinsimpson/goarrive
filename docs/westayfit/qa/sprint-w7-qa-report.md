@@ -4291,19 +4291,19 @@ So Phase B must map receipts to **unavailable** and must never fill them from pu
 - **H3b / H3c:** the first version failed each read name **once**. Home's pulse poll re-read and recovered within the window, so that version's H3c "fail" was the harness, not the product. It now fails every read for the whole refresh and samples for 8 s.
 - **H4b:** split into its own test with a clean page, rather than inheriting H4a's session.
 
-### Row → last-passing SHA (the standing matrix)
+### Row → last-passing SHA (the standing matrix; updated in §47 and §48)
 
 | Row(s) | Last passing | Dependencies: re-run when these change |
 |---|---|---|
-| H1a–g | `889e9775` (and `0b460ce3`) | `app/(tabs)/_layout.tsx`, the tab route files, `src/memberReads.ts` |
-| H2a–f | `889e9775` (and `0b460ce3`; H2e rule restated in §47) | `app/move/index.tsx`, `app/contribute/[goalId].tsx`, `app/(tabs)/_layout.tsx`, `src/ui/sheetMotion.ts`, `src/ui/MemberTabBar.tsx` |
-| H3a, H3b, H3d | `889e9775` (and `0b460ce3`) | the tab routes' read effects, `src/memberReads.ts` |
-| H3c | **none** (fails at `0b460ce3` and `889e9775`) | Community Home's refresh handling |
-| H4a | `889e9775` (and `0b460ce3`) | `src/memberReads.ts`, `src/auth*`, the tab routes' read effects |
-| H4b | **none** (fails at `0b460ce3` and `889e9775`; §47 finding 1) | the same as H4a, plus the refusal handling |
-| PERF truth T1 | `889e9775` (and `5633057a`, `0b460ce3`) | `src/memberReads.ts`, auth |
-| PERF truth T2 / T3 / T3b | **`889e9775`** (all fail at `0b460ce3` and `5633057a`) | `src/memberReads.ts`, the Progress / You / contribute read paths |
-| Check 44 / 45 rows | per §44 / §45 (PRESERVE at `0b460ce3`) | You / Progress / Community / Settings routes |
+| H1a–g | `ad3d2f88` (and `889e9775`, `0b460ce3`) | `app/(tabs)/_layout.tsx`, the tab route files, `src/memberReads.ts` |
+| H2a–f | `ad3d2f88` (and `889e9775`, `0b460ce3`; H2e rule restated in §47) | `app/move/index.tsx`, `app/contribute/[goalId].tsx`, `app/(tabs)/_layout.tsx`, `src/ui/sheetMotion.ts`, `src/ui/MemberTabBar.tsx` |
+| H3a, H3b, H3d | `ad3d2f88` (and `889e9775`, `0b460ce3`) | the tab routes' read effects, `src/memberReads.ts` |
+| H3c | **none** (fails at `0b460ce3`, `889e9775` and `ad3d2f88`; the named successor) | Community Home's refresh handling |
+| H4a | `ad3d2f88` (and `889e9775`, `0b460ce3`) | `src/memberReads.ts`, `src/auth*`, the tab routes' read effects |
+| H4b | **`ad3d2f88`** (fails at `0b460ce3` and `889e9775`; harness corrected in §48) | the same as H4a, plus the refusal handling, Community Home's return membership re-check and the Community tab's focus drop |
+| PERF truth T1 | `ad3d2f88` (and `889e9775`, `5633057a`, `0b460ce3`) | `src/memberReads.ts`, auth |
+| PERF truth T2 / T3 / T3b | **`ad3d2f88`** (and `889e9775`; all fail at `0b460ce3` and `5633057a`) | `src/memberReads.ts`, the Progress / You / contribute read paths, Community Home's refusal handling |
+| Check 44 / 45 rows | per §44 / §45 (PRESERVE at `0b460ce3`); Check 45 identical at `889e9775` and `ad3d2f88`; Check 44 identical at `889e9775`, and You / Progress are unchanged at `ad3d2f88` | You / Progress / Community / Settings routes |
 | H5 | — | W9's Settings panel |
 
 **Status:** tests and evidence only. Nothing is accepted, integrated or staged.
@@ -4375,3 +4375,71 @@ The occasional extra read is the 10 s same-load window expiring, a `wsfMyCommuni
    - device and network speed is CANNOT-MEASURE on the emulator.
 
 **Status:** PASS on the routed acceptance criteria: truth rows 4 / 4, the Check 41B gains, unit tests with the mutation fail-first, and evidence. There is no regression in any W7 row. Nothing is accepted, integrated or staged.
+
+## 48 · PERF-MOBILE-1 H4b successor on exact product `ad3d2f889473322046757da7f54d94d2462f24a6`, evidence `b36989e7` (W9 #494 `5842157665`; Director HOLD #494 `5841923744`; W7 ACK #434 `5842302205`): **H4b PASS; it fails on `0b460ce3` and `889e9775`; no regression in any W7 row**
+
+- **Build:** a detached worktree at `ad3d2f88`, with an emulator-flagged `build:web`. It was served beside `demo-wsf-local` in Chromium. The `0b460ce3` and `889e9775` builds from §46 and §47 were served beside it as controls.
+- **Lineage, by git:** `889e9775` → `f6ae5f25` (§47's evidence) → **`ad3d2f88`**.
+  - Over `889e9775`, the product diff touches three files, +151 / −4:
+    - `app/(tabs)/(home)/community/[groupId]/index.tsx`;
+    - `app/(tabs)/community/index.tsx`;
+    - W9's `sprint-w9-perf-mobile-1.spec.ts`.
+  - **No changed line is JSX, a style or a StyleSheet.**
+  - **No path lies outside `apps/westayfit/{app,src,tests,tests-e2e}` or `docs/`.**
+  - `src/memberReads.ts`, `you.tsx` and `activity.tsx` are unchanged.
+  - `b36989e7` adds 16 files under `docs/design-target/review/perf-mobile-1/` and nothing else.
+
+### Harness correction, mine (disclosed; commit `6cabd0ab`, blob `f52fd256`)
+
+- **The defect:** H4b could not complete on the correction. `tab(page, 'home')` waited only for Home's `wsf-community` root. After a removal is proved, Home correctly shows "Not a member" (`wsf-community-not-member`), so the last Home visit timed out before the verdict. W9 reported this (#494 `5842157665`).
+- **The correction:** after the removal, and only then, the H4b wait and text read also accept `wsf-community-not-member` for Home. All other `tab()` calls, and every pre-removal Home wait, still require `wsf-community`.
+- **How it differs from W9's local variant** (`W7-H4B-LOCAL-VARIANT.diff`): W9 widened every Home wait in the file. For H4b the two forms are equivalent, but mine keeps H1–H4a strict, so a spurious "Not a member" there would still fail.
+- **Shown failing first,** on both control builds, before the row counts on `ad3d2f88`.
+
+| # | Check | Result |
+|---|---|---|
+| **1** | **H4b, corrected**, on three builds | **`0b460ce3`: FAIL.** The goal is still shown on Home, Community, Progress and You. Refusals include a fresh `wsfListGoals` 404, but the base has no eviction. **`889e9775`: FAIL,** shown on all four. There is no `wsfListGoals` refusal because the refresh joins the held pre-removal read (§47 finding 1). **`ad3d2f88`: PASS ×2, plus a third pass in the whole-spec run.** The goal is shown on none of the four, and the refusals include a fresh `wsfListGoals` 404. Home ends on "Not a member": the widened wait completes where W9's exact-file run timed out on `wsf-community`, and T2's text shows it directly. |
+| **2** | **The whole HARDENED spec** on `ad3d2f88` (Community Home's return path changed) | **H1 7 / 7 PASS.** **H2 16 / 16 PASS.** Home requests 7 per visit (one 8), Progress and You 2–3; H2e slopes 0.006 / 0.042 / 0. **H3a / b / d PASS. H4a PASS:** 3 of A's requests held, same document, nothing of A shown. **H4b PASS.** **H3c FAIL, unchanged:** Home, 7 × 500 over 8 s, with no stale wording, exactly as on `0b460ce3` and `889e9775`. It is the named successor, not this gate. |
+| **2a** | **H1g: the new return membership read** | **2 listen-channel requests per cycle, identical in all 10 cycles, so it passes (no growth).** Both controls show 0 per cycle. This is the one document read per Home return that W9 disclosed. It is not polled and does not accumulate. Callables stay at 5 per cycle, with the same five names. |
+| **3** | **PERF truth spec**, unchanged (blob `09a618b9` from `600d551d`) | **4 / 4 PASS.** **T1:** nothing of A in B's session. **T2:** Home "Not a member", and Progress drops the goal to its first-contribution empty state. **T3:** 55 / 55. **T3b:** 1 held answer, 55 / 55. |
+| **4** | **Check 41B**, unchanged (blob `245a3357`), 12 / 12 runs, with nothing else running | **Across all 38 transitions: the same callables, loading painted, mounts, blocking and replacement as `889e9775`.** The only field change: "MOVE open again" needed 0 read stages in some runs, where it always needed 1. See the table below. |
+| **5** | **Check 45**, unchanged (the Community tab changed), `--repeat-each=2` | **PRESERVE 13 / 13, FAIL-BEFORE 15 / 15, in both runs, row for row identical to `889e9775`.** I read every failure: each is a labelled FAIL-BEFORE row (C-F1–C-F9, S-F1–S-F6), and each fails in both runs. |
+| **6** | **W9's evidence at `b36989e7`** | **`MANIFEST.sha256` 52 / 52** at `b36989e7`. It is unchanged since `f6ae5f25`, and no PNG, WebM or JSON changed. **The variant diff applies cleanly** to my blob `0f5e1cec` and changes exactly two lines. **The RAW logs agree with W7's runs:** the exact file cannot complete on `ad3d2f88` (a line-165 timeout, not a verdict); the variant passes; the `889e9775` controls fail on all four surfaces; T1–T3b pass. |
+
+### Check 41B: `ad3d2f88` against `889e9775`
+
+Medians of 3 runs, shown as 844 / 640. The `889e9775` values are in brackets.
+
+| Transition | Useful ms | Settled ms | Callables | Stages | Loading | Blocking |
+|---|---|---|---|---|---|---|
+| Progress, first visit | 18 / 17 (19 / 19) | = | 0 (0) | 0 | none | no |
+| You, first visit | 15 / 13 (13 / 14) | = | 0 (0) | 0 | none | no |
+| MOVE open | 77 / 62 (64 / 67) | 103 / 92 (85 / 91) | 3 (3) | 1 | none | no |
+| MOVE open again | 42 / 42 (45 / 44) | 69 / 60 (61 / 56) | 2 (2) | 0–1 (1) | none | no |
+| Home → Community, first visit | 21 / 22 (20 / 22) | 133 / 135 (130 / 142) | 3 (3) | 0 | none | no |
+| Warm switches | 6–8 (5–8) | = | 0 | 0 | none | no |
+| You → Home, pass 1 / pass 2 | 13–15 / 5–6 (14 / 6–7) | 117–121 / 100–120 (99–103 / 94–109) | 5 (5) | 0 | none | no |
+| MOVE Close | 186 / 187 (186 / 186) | 274 / 266 (262 / 265) | 6 (6) | 1 | none | no |
+| Submit → receipt | 61 / 56 (50 / 52) | = | 1 | 1 | none | waits on the write |
+| Receipt → Home | 24 / 27 (27 / 26) | 123 / 125 (122 / 112) | 5 (5) | 0 | none | no |
+| Cold Home, 1 community | 328–370 (321–389) | — | **7** (7); **no identical pair** in any run | 3–4 (3–4) | the same four frames (PERF-COLD-SNAPSHOT-2) | — |
+| Cold Home, 3 communities / Community tab | ≈ | — | 4 / 3 / 4 (=) | = | = | — |
+
+- **Receipt:** Home shows the server's **1,882** on both viewports.
+- **Settled time on Home returns:** 1–22 ms higher at the medians, with identical callables. `settledMs` measures callables and loading frames, not the Firestore channel. This is within local-ms noise and is not a criterion.
+- **MOVE open:** W9's README gives 45–47 ms; W7's medians are 62–77 ms (`889e9775`: 64–67). The calls and stages are the same; local milliseconds differ between runs.
+
+### Precision notes (none blocking)
+
+1. **Build labels in W9's RAW logs:** W9's `ad3d2f88` RAW logs are labelled "(head)" because `W7_LABEL` was unset. Only the filename and README tie them to the build; the output itself does not. W7's own runs above are stamped `ad3d2f88`.
+2. **Not staged here** (W9 disclosed): a transient failure of the membership read itself. These specs do not intercept the Firestore channel, so it is CANNOT-MEASURE in this check.
+3. **Carried, not re-run:**
+   - Check 44: `you.tsx` and `activity.tsx` are unchanged over `889e9775`.
+   - Check 43.
+   - The `memberReads` unit tests and §47's mutation: `src/memberReads.ts` is unchanged.
+
+- **Gates:** `ts:check` exit 0; `check-evidence-intact` exit 0 (9 frozen + 20 accepted, no byte changed).
+- No `artifacts/` or `test-results/` committed.
+- Emulators only (`demo-wsf-local`).
+
+**Status:** **H4b, the Director's pass-after row for the HOLD, passes on `ad3d2f88` and fails on both earlier builds.** No regression in any W7 row. H3c remains the named successor. Nothing is accepted, integrated or staged.
