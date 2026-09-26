@@ -174,9 +174,19 @@ test('a finished goal the member was part of is kept, not filtered away', async 
   // ...and the finished one, which the previous screen dropped entirely.
   await expect(page.getByTestId('wsf-activity-rows')).toContainText('September Push-up Push');
   await expect(page.getByTestId('wsf-activity-rows')).toContainText('REACHED');
-  // Counted as goals, never summed across units.
-  await expect(page.getByTestId('wsf-activity-rows')).toContainText('3 goals you have added to');
-  await expect(page.getByTestId('wsf-activity-rows')).toContainText('2 running · 1 finished');
+  // Counted as goals, never summed across units. (PROGRESS-PARITY-1 Phase B:
+  // the reference's summary line and one total PER UNIT replace the old
+  // "N goals you have added to" / "N running · N finished" lines; the lifecycle
+  // pills carry running and finished.)
+  await expect(page.getByTestId('wsf-activity-summary')).toHaveText(
+    'Across 3 goals in 1 community. Each unit stays separate.',
+  );
+  await expect(page.getByTestId('wsf-activity-total-0')).toHaveAttribute('aria-label', '120 squats recorded');
+  await expect(page.getByTestId('wsf-activity-total-1')).toHaveAttribute('aria-label', '45 step-ups recorded');
+  await expect(page.getByTestId('wsf-activity-total-2')).toHaveAttribute('aria-label', '260 push-ups recorded');
+  const goals = page.getByTestId('wsf-activity-goals');
+  await expect(goals.getByText('OPEN', { exact: true })).toHaveCount(2);
+  await expect(goals.getByText('CLOSED · REACHED', { exact: true })).toHaveCount(1);
 
   await context.close();
 });
@@ -236,14 +246,16 @@ test('A GOAL CORRECTED BELOW ITS TARGET DOES NOT STILL SAY REACHED', async ({ br
   // The goal is listed — a correction does not hide it...
   await expect(rows).toContainText('Corrected Push-up Push');
   /*
-    ...and the real, corrected progress is what is printed. The unreached
-    branch shows a PERCENTAGE, so 2,400 of 3,000 reads as 80% — asserted
-    explicitly, because a total the read never delivered would show 0% and a
-    test that only checked for the absence of REACHED would pass on it. That
-    is the same class of mistake as the bug itself: a label that looks right
-    for a reason nobody checked.
+    ...and the real, corrected progress is what is printed. The SHARED cell
+    shows the corrected total against the target — asserted explicitly,
+    because a total the read never delivered would say Unknown and a test that
+    only checked for the absence of REACHED would pass on it. That is the same
+    class of mistake as the bug itself: a label that looks right for a reason
+    nobody checked. (PROGRESS-PARITY-1 Phase B: the reference's SHARED cell and
+    lifecycle pill replace the old percentage.)
   */
-  await expect(rows).toContainText('80%');
+  await expect(rows).toContainText('2,400 / 3,000 push-ups');
+  await expect(rows).toContainText('CLOSED · UNFINISHED');
   // ...but it does not claim the target was met.
   await expect(rows).not.toContainText('REACHED');
 
@@ -336,8 +348,9 @@ test('one failed read leaves the rest standing, and the screen says so', async (
 
   await page.goto('/activity');
   await expect(page.getByTestId('wsf-activity-rows')).toBeVisible({ timeout: 40_000 });
-  // Something still loaded...
-  await expect(page.getByTestId('wsf-activity-rows')).toContainText('RECORDED');
+  // Something still loaded... (the reference's YOURS cell replaces the old
+  // RECORDED tag)
+  await expect(page.getByTestId('wsf-activity-goals')).toContainText('YOURS');
   // ...and the screen does not present a short list as the whole truth.
   await expect(page.getByTestId('wsf-activity-partial')).toBeVisible();
   await context.close();

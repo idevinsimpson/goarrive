@@ -222,16 +222,21 @@ test.describe('Progress copy — contribution first', () => {
         await expect(page.getByTestId('wsf-activity-privacy')).toHaveCount(1);
         await expect(page.getByTestId('wsf-activity-privacy')).toHaveText(CLARIFICATION);
         await expectNoRetiredCopy(page);
-        // Finished-goal history stays, with its REACHED mark and the Living WE.
-        await expect(page.getByTestId(`wsf-activity-done-${fx.done}`)).toContainText(
+        // Finished-goal history stays, with its REACHED mark. (PROGRESS-PARITY-1
+        // Phase B: the reference's goal rows replace the done-rows, and the
+        // Progress reference draws no Living WE; its SHARED cell states the
+        // finished goal's real total instead.)
+        await expect(page.getByTestId(`wsf-activity-goal-${fx.done}`)).toContainText(
           'September Push-up Push',
         );
-        await expect(page.getByTestId(`wsf-activity-done-${fx.done}`)).toContainText('REACHED');
-        await expect(page.getByTestId('wsf-activity-we')).toBeVisible();
-        // Units stay separate: each row carries its own unit; the summary counts goals.
-        await expect(page.getByTestId(`wsf-activity-row-${fx.squats}`)).toContainText('120 squats');
-        await expect(page.getByTestId(`wsf-activity-row-${fx.steps}`)).toContainText('45 step-ups');
-        await expect(rows).toContainText('3 goals you have added to');
+        await expect(page.getByTestId(`wsf-activity-goal-${fx.done}`)).toContainText('CLOSED · REACHED');
+        await expect(page.getByTestId(`wsf-activity-goal-${fx.done}-shared`)).toContainText('/ 3,000 push-ups');
+        // Units stay separate: each row carries its own unit; totals are per unit.
+        await expect(page.getByTestId(`wsf-activity-goal-${fx.squats}-yours`)).toContainText('120 squats');
+        await expect(page.getByTestId(`wsf-activity-goal-${fx.steps}-yours`)).toContainText('45 step-ups');
+        await expect(page.getByTestId('wsf-activity-summary')).toHaveText(
+          'Across 3 goals in 1 community. Each unit stays separate.',
+        );
         await saveProposed(browser, page, `progress-${key}`);
       } finally {
         await context.close();
@@ -239,7 +244,14 @@ test.describe('Progress copy — contribution first', () => {
     }
   });
 
-  test('empty: "Your first contribution will appear here", with the contribution action', async ({
+  /*
+    PROGRESS-PARITY-1 Phase B. This fixture member belongs to NO community, so
+    no goal can take a contribution. The old screen still promised "Your first
+    contribution will appear here" with a Start moving that had nowhere to go
+    (W7 Check 44 baseline gap). The reference's no-open-goal card replaces it:
+    no Start moving, a way to a community, and no claim about "your community".
+  */
+  test('empty, in no community: no Start moving, and a way to a community', async ({
     browser,
   }) => {
     test.setTimeout(240_000);
@@ -254,12 +266,15 @@ test.describe('Progress copy — contribution first', () => {
         await page.goto('/activity');
         const empty = page.getByTestId('wsf-activity-empty');
         await expect(empty).toBeVisible({ timeout: 40_000 });
-        await expect(empty).toContainText(EMPTY_TITLE);
-        await expect(page.getByTestId('wsf-activity-start')).toBeVisible();
+        await expect(empty).toHaveAttribute('data-state', 'no-open-goal');
+        await expect(empty).not.toContainText(EMPTY_TITLE);
+        await expect(empty).toContainText('join one, or start your own');
+        await expect(empty).not.toContainText('your community');
+        await expect(page.getByTestId('wsf-activity-start')).toHaveCount(0);
+        await expect(page.getByTestId('wsf-activity-open-community')).toBeVisible();
         await expect(page.getByTestId('wsf-activity-subtitle')).toHaveText(SUBTITLE);
         await expect(page.getByTestId('wsf-activity-privacy')).toHaveCount(1);
         await expect(page.getByTestId('wsf-activity-privacy')).toHaveText(CLARIFICATION);
-        await expect(empty).toContainText('Finished goals stay here');
         await expectNoRetiredCopy(page);
         await saveProposed(browser, page, `progress-${key}`);
       } finally {
@@ -268,6 +283,11 @@ test.describe('Progress copy — contribution first', () => {
     }
   });
 
+  /*
+    PROGRESS-PARITY-1 Phase B: the reference's failure card replaces W8's
+    sentence — it keeps the identity and refuses to guess — and its one action
+    is Retry. The two ways on (Home, MOVE) are the persistent tab bar's.
+  */
   test('error: one reassurance, the retry and both ways on', async ({ browser }) => {
     test.setTimeout(180_000);
     const fx = await populatedMember('err');
@@ -278,12 +298,11 @@ test.describe('Progress copy — contribution first', () => {
       await page.goto('/activity');
       const error = page.getByTestId('wsf-activity-error');
       await expect(error).toBeVisible({ timeout: 40_000 });
-      await expect(error).toContainText('What you recorded is still recorded.');
+      await expect(error).toContainText('We won’t guess amounts or show them as zero.');
       await expect(page.getByTestId('wsf-activity-retry')).toBeVisible();
-      await expect(page.getByTestId('wsf-activity-home')).toBeVisible();
-      await expect(page.getByTestId('wsf-activity-move')).toBeVisible();
-      // No summary exists to describe, so the clarification is not shown here.
-      await expect(page.getByTestId('wsf-activity-privacy')).toHaveCount(0);
+      await expect(page.getByTestId('wsf-member-tab-home')).toBeVisible();
+      await expect(page.getByTestId('wsf-member-tab-move')).toBeVisible();
+      await expect(page.getByTestId('wsf-activity-totals')).toHaveCount(0);
       await expectNoRetiredCopy(page);
       await saveProposed(browser, page, 'progress-error-390x844');
     } finally {

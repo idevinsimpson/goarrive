@@ -220,13 +220,16 @@ test('Activity shows what this member actually recorded, and says it is private'
 
   await page.goto('/activity');
   await expect(page.getByTestId('wsf-activity-rows')).toBeVisible({ timeout: 40_000 });
-  const row = page.getByTestId(`wsf-activity-row-${fx.goalId}`);
-  await expect(row).toContainText('20 squats');
+  const row = page.getByTestId(`wsf-activity-goal-${fx.goalId}`);
   await expect(row).toContainText('October Squat Challenge');
   await expect(row).toContainText('Alpharetta Morning Movers');
-  // The number is the member's own, not the goal's shared total: 1,847 is
-  // seeded on the goal and must never appear on this private screen.
-  await expect(page.getByTestId('wsf-activity')).not.toContainText('1,847');
+  // The member's own number, in its own labelled cell. (PROGRESS-PARITY-1
+  // Phase B: the reference shows YOURS and SHARED side by side and apart, so
+  // the shared total is now on this screen — labelled SHARED, never mixed
+  // into the member's own figure.)
+  await expect(page.getByTestId(`wsf-activity-goal-${fx.goalId}-yours`)).toHaveText('YOURS20 squats');
+  await expect(page.getByTestId(`wsf-activity-goal-${fx.goalId}-shared`)).toContainText('SHARED');
+  await expect(page.getByTestId(`wsf-activity-goal-${fx.goalId}-yours`)).not.toContainText('1,8');
   // The one clarification says both halves: this summary is the member's own,
   // and their contributions reach community activity per their settings. The
   // old blanket "nobody else can see it" was wrong about the second half.
