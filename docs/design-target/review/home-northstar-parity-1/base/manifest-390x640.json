@@ -1,0 +1,51 @@
+{
+  "fixtureOnly": "Every person, name and figure is the frozen reference’s sample data, seeded into the local emulator (demo-wsf-local) for this comparison only. No production read or write.",
+  "stage": "BASE",
+  "commit": "6deefe7d",
+  "viewport": {
+    "width": 390,
+    "height": 640
+  },
+  "deviceScaleFactor": 1,
+  "crop": "none — full viewport frames on both sides",
+  "reference": {
+    "file": "reference/mhc-home-default-390x640.png",
+    "sha256": "fcb0d78608e1feae43ce10f924dba13699dde3d0ca2cc45519a3ffaa862b5e8a"
+  },
+  "candidate": {
+    "file": "base/BASE-FIXTURE-home-390x640.png",
+    "sha256": "a5fe7f36355a4fff1ec71a6885470be326002d0a04ca68d3cdef8c2ab93f14cc"
+  },
+  "sideBySide": "base/cmp-home-390x640-side-by-side.png",
+  "overlay50": "base/cmp-home-390x640-overlay-50.png",
+  "difference": "base/cmp-home-390x640-difference.png",
+  "differingShare": 0.4422,
+  "geometry": {
+    "name": {
+      "top": 88,
+      "bottom": 115,
+      "left": 20,
+      "right": 212
+    },
+    "goalTitle": {
+      "top": 206,
+      "bottom": 234,
+      "left": 36,
+      "right": 354
+    },
+    "total": {
+      "top": 307,
+      "bottom": 337,
+      "left": 131,
+      "right": 172
+    },
+    "startMoving": {
+      "top": 404,
+      "bottom": 424,
+      "left": 143,
+      "right": 247
+    },
+    "alreadyMoved": null,
+    "contribution": null
+  }
+}

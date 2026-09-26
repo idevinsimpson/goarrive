@@ -4,6 +4,7 @@ import { httpsCallable } from 'firebase/functions';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -11,6 +12,9 @@ import {
   TextInput,
   useWindowDimensions,
   View,
+  type StyleProp,
+  type TextStyle,
+  type ViewStyle,
 } from 'react-native';
 
 import { useWsfAuth } from '../../../../../src/auth';
@@ -99,7 +103,6 @@ import {
   ON_NAVY_RULE,
   SURFACE,
   TEXT_MUTED,
-  display,
   elevation,
   kit,
 } from '../../../../../src/ui/kit';
@@ -113,9 +116,10 @@ import {
   readOwnCredit,
 } from '../../../../../src/memberReads';
 import {
-  MomentumRow,
-  PresenceRow,
+  initialsOf,
+  relativeWhen,
   type ActivityRow,
+  type PresencePerson,
 } from '../../../../../src/ui/CommunityPresence';
 import { LivingWeProgress } from '../../../../../src/ui/LivingWeProgress';
 import {
@@ -356,6 +360,8 @@ export default function CommunityPage() {
     error state and never a blocked page. A member must not lose their goal
     because the directory was slow.
   */
+  /** The goal card's own box, for its two reference rings (drawn as its background). */
+  const [heroBox, setHeroBox] = useState<{ w: number; h: number } | null>(null);
   const [presence, setPresence] = useState<{
     people: { displayName: string; role: string }[];
     /**
@@ -2094,7 +2100,7 @@ export default function CommunityPage() {
   */
   const heroWeWidth = Math.max(
     96,
-    Math.min(shortViewport ? 120 : windowWidth >= 420 ? 206 : 152, heroContentWidth),
+    Math.min(shortViewport ? 126 : windowWidth >= 420 ? 206 : 152, heroContentWidth),
   );
   /*
     THE BLOOM NEVER EXCEEDS THE CARD IT SITS IN.
@@ -2106,7 +2112,6 @@ export default function CommunityPage() {
     box that scrolls sideways whether or not the thing inside it is decorative.
     Sized from the card's content width, it cannot overflow at any width.
   */
-  const bloom = heroContentWidth;
   /**
    * THE GOAL TITLE SHRINKS BEFORE IT BREAKS A WORD.
    *
@@ -2127,18 +2132,21 @@ export default function CommunityPage() {
    * padding and rhythm when the viewport is short. Nothing changes above
    * ~700px tall.
    */
-  const heroCompact = shortViewport
-    ? { paddingTop: 8, paddingBottom: 9, gap: 3 }
-    : null;
+  // HOME-NORTHSTAR-PARITY-1. The reference's own short-height rules
+  // (@media (max-height: 700px)): the card 4 closer and its top padding 14.
+  const heroCompact = shortViewport ? { paddingTop: 14, marginTop: -1 } : null;
   // The identity block above the hero, not the band that used to be inside it.
-  const identityCompact = shortViewport ? { gap: 0 } : null;
-  const headingCompactType = shortViewport
-    ? { fontSize: 22, lineHeight: 27, marginTop: 0 }
-    : null;
+  // .screen padding-top 10 rather than 14; the band 8 under the descriptor.
+  const identityCompact = shortViewport ? { marginTop: -1 } : null;
+  // The reference keeps its 27 px name at short heights.
+  const headingCompactType = null;
   // The display tier steps down rather than the mark disappearing.
-  const heroTotalCompact = shortViewport ? { fontSize: 27, lineHeight: 31 } : null;
+  // HOME-NORTHSTAR-PARITY-1. The reference's count steps 38 -> 32 at short heights.
+  const heroTotalCompact = shortViewport ? { fontSize: 32, lineHeight: 32 } : null;
   // HOME-POLISH-1. No panel padding: the recessed panel it padded is gone.
-  const factsCompact = shortViewport ? { gap: 3, marginTop: 2 } : null;
+  // HOME-NORTHSTAR-PARITY-1. The reference's short rules change only the
+  // count's size (heroTotalCompact); the facts keep their full-height rhythm.
+  const factsCompact = null;
   // The presence line is the cheapest thing in the band to shrink, and the
   // only one whose meaning survives at 12px.
   const presenceCompact = shortViewport ? { fontSize: 12, lineHeight: 16 } : null;
@@ -2148,6 +2156,9 @@ export default function CommunityPage() {
     become an ENLARGEMENT on a narrower screen — the opposite of what it is
     for, and invisible unless you compare it with the base.
   */
+  // HOME-NORTHSTAR-PARITY-1. The pill beside the kicker needs the kicker
+  // (~120) and the whole window pill (~170) side by side in the card.
+  const pillBeside = heroContentWidth >= 300;
   const heroTitleType =
     windowWidth < 240
       ? { fontSize: 18, lineHeight: 23 }
@@ -2162,8 +2173,11 @@ export default function CommunityPage() {
   // HOME-POLISH-1. 74 -> 66 (53 on a short viewport): the facts are one total
   // line, the bar and one row now, without the recessed panel's padding, so
   // the reserve follows them.
+  // HOME-NORTHSTAR-PARITY-1. The reference's rhythm under the mark: its
+  // margins (10 / 2, or 5 / 2 short), the 38 (32) count line, 8 to the track,
+  // the 8 track, 5 to the one meta line of 16.
   const progressAreaMinHeight =
-    Math.round(heroWeWidth / LIVING_WE_ASPECT) + 14 + 6 + (shortViewport ? 53 : 66);
+    Math.round(heroWeWidth / LIVING_WE_ASPECT) + (shortViewport ? 5 + 2 + 32 : 10 + 2 + 38) + 8 + 8 + 5 + 16;
   const linkJoinable = isLinkJoinable(group.joinPolicy);
   // Champions always get the Invite card (on a private community it carries
   // the honest no-link sentence); members get it only with a working link.
@@ -3815,6 +3829,29 @@ export default function CommunityPage() {
             ) : null}
           </View>
           {/*
+            HOME-NORTHSTAR-PARITY-1. THE REFERENCE'S COMMUNAL LINE, under the name
+            (Director #514 `5847715387`): what the community is doing together,
+            never its settings. "Moving together" only once the goal list has
+            confirmed an open goal to move toward -- never "this week", which
+            no field here establishes. With no goal running, the existing
+            truthful line takes the slot, under its own testID. While the goal
+            list is loading or has failed, the slot keeps its height and says
+            nothing.
+          */}
+          {goalsState.kind === 'loaded' && featured ? (
+            <Text style={styles.identityDescriptor} testID="wsf-community-descriptor">
+              Moving together
+            </Text>
+          ) : humanLine ? (
+            <Text style={styles.identityDescriptor} testID="wsf-community-human-line">
+              {humanLine}
+            </Text>
+          ) : (
+            <Text style={styles.identityDescriptor} {...({ 'aria-hidden': true } as Record<string, unknown>)}>
+              {'\u00A0'}
+            </Text>
+          )}
+          {/*
             PRESENCE — PEOPLE FIRST, THEN THE PROOF THAT THEY MOVED.
 
             The initials row is drawn from `wsfCommunityMembers`, which returns
@@ -3846,10 +3883,10 @@ export default function CommunityPage() {
             wraps, so at a narrow width or a large text size the facts drop
             under the faces instead of being squeezed.
           */}
-          <View style={styles.presenceBand}>
+          <View style={[styles.presenceBand, shortViewport ? styles.presenceBandShort : null]}>
             {presence !== null && presence.people.length > 0 ? (
               // Four faces at about 200% zoom: five and "+N" are wider than the band.
-              <PresenceRow people={presence.people} max={windowWidth < 240 ? 4 : 5} />
+              <HomePresenceStack people={presence.people} complete={presence.complete} max={3} />
             ) : null}
             <View style={styles.presenceFacts}>
               <View style={styles.presenceRow}>
@@ -3895,11 +3932,6 @@ export default function CommunityPage() {
               ) : null}
             </View>
           </View>
-          {humanLine ? (
-            <Text style={styles.humanLine} testID="wsf-community-human-line">
-              {humanLine}
-            </Text>
-          ) : null}
         </View>
 
         {/* The active goal: the product hero, on its own navy surface. */}
@@ -3949,12 +3981,22 @@ export default function CommunityPage() {
                   : 'Open';
               return (
                 <Fragment>
-                <View style={[styles.hero, heroCompact]} testID="wsf-community-goal-hero">
-                  {/* Depth, built from layered views: a light across the
-                      top of the card, and a bloom behind the mark. Neither
-                      needs a gradient dependency or any photography, and the
-                      bloom never touches the mark itself. */}
-                  <View pointerEvents="none" style={styles.heroTopLight} />
+                <View
+                  style={[styles.hero, heroCompact, heroBox ? heroRings(heroBox.w, heroBox.h) : null]}
+                  testID="wsf-community-goal-hero"
+                  onLayout={(e) => {
+                    const { width, height } = e.nativeEvent.layout;
+                    const w = Math.round(width);
+                    const h = Math.round(height);
+                    if (!heroBox || heroBox.w !== w || heroBox.h !== h) setHeroBox({ w, h });
+                  }}
+                >
+                  {/*
+                    HOME-NORTHSTAR-PARITY-1. Depth is the reference's two rings
+                    (styles.css .goal-hero::before / ::after), painted as this
+                    card's own background -- see heroRings -- rather than the
+                    earlier light and bloom. Nothing is laid out past the card.
+                  */}
 
                   {/*
                     A3. The one place this surface can say the target is met
@@ -3987,7 +4029,18 @@ export default function CommunityPage() {
                     not the reference's bare "OPEN". The row wraps, so a narrow
                     screen drops the pill under the label rather than squeezing.
                   */}
-                  <View style={styles.heroTopRow}>
+                  {/*
+                    HOME-NORTHSTAR-PARITY-1. THE REFERENCE'S TOP LINE (.goal-topline):
+                    the kicker, then the title straight under it -- the state
+                    pill sits beside them and never pushes the title down. The
+                    pill keeps its whole line ("Open · Ends Mon, Oct 5", the
+                    window with its end date, under the same testID), so on a
+                    phone wide enough it is lifted out of the flow onto the
+                    kicker's line; on a narrow screen or at large text it
+                    returns to the wrapping row above the title rather than
+                    collide with anything.
+                  */}
+                  <View style={[styles.heroTopRow, pillBeside ? styles.heroTopRowBeside : null]}>
                     {p.kind === 'ok' &&
                     progressPhase(p.pulse.sharedTotal, p.pulse.target, p.pulse.status) ===
                       'reachedOpen' ? (
@@ -4012,11 +4065,17 @@ export default function CommunityPage() {
                       that lands.
                     */}
                     {p.kind === 'ok' && p.refreshFailed ? (
-                      <Text style={styles.heroStatePill} testID={`wsf-community-goal-last-known-${featured.goalId}`}>
+                      <Text
+                        style={[styles.heroStatePill, pillBeside ? styles.heroStatePillBeside : null]}
+                        testID={`wsf-community-goal-last-known-${featured.goalId}`}
+                      >
                         Last known
                       </Text>
                     ) : (
-                      <Text style={styles.heroStatePill} testID={`wsf-community-goal-period-${featured.goalId}`}>
+                      <Text
+                        style={[styles.heroStatePill, pillBeside ? styles.heroStatePillBeside : null]}
+                        testID={`wsf-community-goal-period-${featured.goalId}`}
+                      >
                         {windowLabel}
                       </Text>
                     )}
@@ -4037,14 +4096,7 @@ export default function CommunityPage() {
                   */}
                   <View style={[styles.progressArea, { minHeight: progressAreaMinHeight }]}>
                     {p.kind === 'ok' ? (
-                      <View style={styles.weWrap}>
-                        <View pointerEvents="none" style={styles.glowLayer}>
-                          <View style={[styles.glowRing, glowSize(bloom, 1), styles.glow3]}>
-                            <View style={[styles.glowRing, glowSize(bloom, 0.7), styles.glow2]}>
-                              <View style={[styles.glowRing, glowSize(bloom, 0.43), styles.glow1]} />
-                            </View>
-                          </View>
-                        </View>
+                      <View style={[styles.weWrap, shortViewport ? styles.weWrapShort : null]}>
                         <LivingWeProgress
                           completed={p.pulse.sharedTotal}
                           target={p.pulse.target}
@@ -4057,6 +4109,30 @@ export default function CommunityPage() {
                     ) : null}
                     {renderProgressFacts(featured, p, 'hero')}
                   </View>
+                  {/*
+                    HOME-NORTHSTAR-PARITY-1. The reference closes the card with
+                    who moved: two faces and today's count, over a quiet rule.
+                    The same proven count as the line under the name, so it
+                    renders only when the server established it -- and says the
+                    known zero in the reference's words.
+                  */}
+                  {p.kind === 'ok' && momentum !== null && momentum.contributorsToday !== null ? (
+                    <View
+                      style={[styles.heroMovedRow, shortViewport ? styles.heroMovedRowShort : null]}
+                      testID="wsf-community-hero-moved-today"
+                    >
+                      {presence !== null && presence.people.length > 0 ? (
+                        <HomePresenceStack people={presence.people} complete={presence.complete} max={2} onNavy />
+                      ) : null}
+                      <Text style={styles.heroMovedText}>
+                        {momentum.contributorsToday === 0
+                          ? 'No one has moved today yet — a quiet day is a fresh start.'
+                          : momentum.contributorsToday === 1
+                            ? '1 person moved today.'
+                            : `${momentum.contributorsToday} people moved today.`}
+                      </Text>
+                    </View>
+                  ) : null}
                   {/*
                     SLICE 1f. BOTH ROUTES ARE GATED, NOT ONE.
 
@@ -4103,17 +4179,21 @@ export default function CommunityPage() {
                     </Text>
                   </View>
                 ) : (
-                <View style={[styles.actions, shortViewport ? styles.actionsShort : null]}>
-                  <ButtonLink
+                <View style={[styles.actions, styles.actionPair]}>
+                  <GlyphButtonLink
+                    glyph="pulse"
+                    glyphColor={ON_ACTION}
                     href={contributeHref(featured.goalId, 'move')}
-                    style={styles.primaryButton}
+                    style={[styles.primaryButton, styles.pairPrimary]}
                     textStyle={styles.primaryButtonText}
                     testID={`wsf-community-goal-link-${featured.goalId}`}
                     label="Start moving"
                   />
-                  <ButtonLink
+                  <GlyphButtonLink
+                    glyph="history"
+                    glyphColor="#0B1F3A"
                     href={contributeHref(featured.goalId, 'record')}
-                    style={styles.heroSecondaryAction}
+                    style={[styles.heroSecondaryAction, styles.pairSecondary]}
                     textStyle={styles.heroSecondaryActionText}
                     testID={`wsf-community-goal-record-${featured.goalId}`}
                     // THE UNIT IS BACK IN THE LABEL. Slice 1 cut it to
@@ -4124,7 +4204,11 @@ export default function CommunityPage() {
                     // the approved target asks for. Where the pulse has not
                     // landed the unit is unknown, so the shorter sentence is
                     // used rather than a guessed noun.
-                    label={
+                    // HOME-NORTHSTAR-PARITY-1. Beside the primary, as the
+                    // reference pairs them, so the label is the reference's
+                    // two words; the screen reader still hears what it records.
+                    label="Already moved"
+                    accessibilityLabel={
                       p.kind === 'ok' ? `Already moved? Record ${p.pulse.unit}` : 'I already moved'
                     }
                   />
@@ -4155,14 +4239,17 @@ export default function CommunityPage() {
                     unchanged; the reference's bare figure and its "Part of our
                     shared N" are not copied (see the PR's list of differences).
                   */
-                  <View style={styles.contributionRow} testID={`wsf-community-your-part-${featured.goalId}`}>
+                  <View
+                    style={[styles.contributionRow, shortViewport ? styles.contributionRowShort : null]}
+                    testID={`wsf-community-your-part-${featured.goalId}`}
+                  >
                     <View style={styles.contributionTile}>
                       <TabGlyph name="activity" color={ACTION_GREEN_DEEP} />
                     </View>
                     <View style={styles.contributionText}>
                       <Text style={styles.contributionEyebrow}>
                         {/* The same read as the figure above: last known when it is. */}
-                        {p.refreshFailed ? 'Your last-known contribution' : 'Your contribution'}
+                        {p.refreshFailed ? 'Your last-known contribution' : 'Your contribution to this goal'}
                       </Text>
                       {/*
                         SLICE 2, item 7. THE SAME FACT IS NOT STATED TWICE. On a
@@ -4176,10 +4263,21 @@ export default function CommunityPage() {
                         {p.ownCredit > 0
                           ? (p.repeatPolicy === 'once'
                               ? 'Counted in the shared total above.'
-                              : `You’ve added ${formatCount(p.ownCredit)} ${p.pulse.unit} to this goal.`)
+                              : `You’ve added ${formatCount(p.ownCredit)} ${p.pulse.unit}`)
                           : 'Your first contribution counts here.'}
                       </Text>
                     </View>
+                    {/*
+                      HOME-NORTHSTAR-PARITY-1. The reference's third column: the
+                      member's exact part, set against the shared CONFIRMED
+                      total it is part of -- two different figures, never
+                      merged. Only while the figure is live.
+                    */}
+                    {!p.refreshFailed ? (
+                      <Text style={styles.contributionShared} testID={`wsf-community-your-part-shared-${featured.goalId}`}>
+                        {`Part of our shared ${formatCount(p.pulse.sharedTotal)}`}
+                      </Text>
+                    ) : null}
                   </View>
                 ) : null}
                 {/*
@@ -4217,7 +4315,6 @@ export default function CommunityPage() {
                     </Text>
                   </View>
                 ) : null}
-                {renderFreshness(p)}
                 </Fragment>
               );
             })()
@@ -4287,11 +4384,22 @@ export default function CommunityPage() {
           (momentum.entries.length > 0 || momentum.contributorsToday !== null) ? (
             <View style={styles.momentumCard} testID="wsf-community-momentum-card">
               <Text style={styles.sectionEyebrow}>Recent momentum</Text>
+              {/* HOME-NORTHSTAR-PARITY-1. The reference's section heading. */}
+              <Text style={styles.momentumHeading} {...HEADING_2}>
+                {momentum.entries.length > 0 ? 'We’re showing up' : 'Quiet so far'}
+              </Text>
               {momentum.entries.slice(0, 3).map((row, i) => (
-                <MomentumRow key={i} row={row} first={i === 0} />
+                <HomeMomentumRow key={i} row={row} />
               ))}
             </View>
           ) : null}
+
+          {/*
+            HOME-NORTHSTAR-PARITY-1. When the figure was last confirmed, and
+            how to ask again: utility, so it sits after the matched first
+            screen (it stood between your part and the momentum).
+          */}
+          {featured && goalsState.kind === 'loaded' ? renderFreshness(progress[featured.goalId] ?? { kind: 'loading' }) : null}
 
           {/* The way to the people. A quiet row, never a card competing with
               the goal for weight. */}
@@ -4557,6 +4665,238 @@ export default function CommunityPage() {
   );
 }
 
+/**
+ * HOME-NORTHSTAR-PARITY-1. THE REFERENCE'S PRESENCE STACK (Lovable
+ * `973e1141`, screens/home.tsx `PresenceStack`, styles.css `.avatar-stack`):
+ * up to `max` initials discs, overlapping, then "+N". Drawn from the same
+ * `wsfCommunityMembers` read as before, so it holds only members visible HERE,
+ * and "+N" counts VISIBLE members not drawn -- never hidden ones -- and only
+ * once the whole list came back (`complete`); a partial page says nothing.
+ * Decorative beside the counts it sits next to, so it is hidden from assistive
+ * technology, as the reference's is.
+ */
+const STACK_FILLS = ['#0B1F3A', '#0F7482', '#3A9446'];
+
+function HomePresenceStack({
+  people,
+  complete,
+  max,
+  onNavy = false,
+}: {
+  people: PresencePerson[];
+  complete: boolean;
+  max: number;
+  onNavy?: boolean;
+}) {
+  const shown = people.slice(0, max);
+  const more = complete ? people.length - shown.length : 0;
+  if (shown.length === 0) return null;
+  const disc = onNavy ? stackStyles.discSmall : stackStyles.disc;
+  const text = onNavy ? stackStyles.discTextSmall : stackStyles.discText;
+  const ring = onNavy ? stackStyles.ringNavy : stackStyles.ringPage;
+  const overlap = onNavy ? stackStyles.overlapSmall : stackStyles.overlap;
+  return (
+    <View
+      style={stackStyles.row}
+      testID={onNavy ? 'wsf-hero-presence-row' : 'wsf-presence-row'}
+      {...({ 'aria-hidden': true } as Record<string, unknown>)}
+    >
+      {shown.map((p, i) => (
+        <View
+          key={`${p.displayName}-${i}`}
+          style={[disc, ring, i > 0 ? overlap : null, { backgroundColor: STACK_FILLS[i % 3] }]}
+        >
+          <Text style={[text, stackStyles.onFill]}>{initialsOf(p.displayName)}</Text>
+        </View>
+      ))}
+      {more > 0 ? (
+        <View style={[disc, ring, overlap, stackStyles.more]}>
+          <Text style={[text, stackStyles.onMore]}>{`+${more}`}</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+/**
+ * HOME-NORTHSTAR-PARITY-1. THE GOAL CARD'S TWO RINGS, exactly as the reference
+ * draws them (styles.css `.goal-hero::before`: a 290 circle, 42 border,
+ * confirmed at 13 %, top -128 / right -110; `::after`: a 210 circle, 42
+ * border, surface at 5 %, bottom -150 / left -70), painted as the card's OWN
+ * background from its measured box. Drawn as Views they would be laid out
+ * past the card -- and past a 360 screen, which the shell's R1 check reads,
+ * clipped or not -- so nothing here is laid out at all.
+ */
+function heroRings(w: number, h: number): object {
+  const a =
+    `radial-gradient(circle at ${w - 35}px 17px, rgba(145,203,125,0) 102.5px, rgba(145,203,125,0.13) 103px, ` +
+    'rgba(145,203,125,0.13) 145px, rgba(145,203,125,0) 145.5px)';
+  const b =
+    `radial-gradient(circle at 35px ${h + 45}px, rgba(255,255,255,0) 62.5px, rgba(255,255,255,0.05) 63px, ` +
+    'rgba(255,255,255,0.05) 105px, rgba(255,255,255,0) 105.5px)';
+  return Platform.OS === 'web' ? { backgroundImage: `${a}, ${b}` } : { experimental_backgroundImage: `${a}, ${b}` };
+}
+
+/**
+ * HOME-NORTHSTAR-PARITY-1 (Director #514 `5847715387`). THE TWO ACTION GLYPHS.
+ *
+ * The reference sets Lucide's `Activity` (a pulse) on Start moving and
+ * `History` (a clock with a return arrow) on Already moved. The app has no
+ * icon package, and its only native glyphs are the shell's four tab glyphs,
+ * drawn from plain Views (TabGlyph) -- so these two are drawn the same way,
+ * here: line segments and a ring, no SVG, no font, nothing that can render
+ * as a missing-glyph box. Decorative: the button's own name says what it
+ * does, so the glyph is hidden from assistive technology.
+ */
+type Seg = [number, number, number, number];
+/** Activity: flat, up, down through the baseline, up, flat -- on a 20 box. */
+const PULSE: Seg[] = [
+  [1, 10, 5, 10],
+  [5, 10, 8, 3],
+  [8, 3, 12, 17],
+  [12, 17, 15, 10],
+  [15, 10, 19, 10],
+];
+
+function Stroke({ seg, color, weight }: { seg: Seg; color: string; weight: number }) {
+  const [x1, y1, x2, y2] = seg;
+  const len = Math.hypot(x2 - x1, y2 - y1);
+  const deg = (Math.atan2(y2 - y1, x2 - x1) * 180) / Math.PI;
+  return (
+    <View
+      style={{
+        position: 'absolute',
+        left: (x1 + x2) / 2 - len / 2,
+        top: (y1 + y2) / 2 - weight / 2,
+        width: len + weight * 0.6,
+        height: weight,
+        borderRadius: weight / 2,
+        backgroundColor: color,
+        transform: [{ rotate: `${deg}deg` }],
+      }}
+    />
+  );
+}
+
+function ActionGlyph({ name, color, size }: { name: 'pulse' | 'history'; color: string; size: number }) {
+  const hidden = {
+    accessibilityElementsHidden: true,
+    importantForAccessibility: 'no-hide-descendants' as const,
+    testID: 'wsf-action-glyph',
+    ...({ 'aria-hidden': true } as Record<string, unknown>),
+  };
+  if (name === 'pulse') {
+    return (
+      <View style={{ width: size, height: size }} {...hidden}>
+        <View style={{ width: 20, height: 20, transform: [{ scale: size / 20 }], transformOrigin: 'top left' } as object}>
+          {PULSE.map((seg, i) => (
+            <Stroke key={i} seg={seg} color={color} weight={2} />
+          ))}
+        </View>
+      </View>
+    );
+  }
+  // History: a ring open at the upper left, its return tick there, and two hands.
+  return (
+    <View style={{ width: size, height: size }} {...hidden}>
+      <View style={{ width: 20, height: 20, transform: [{ scale: size / 20 }], transformOrigin: 'top left' } as object}>
+        <View
+          style={{
+            position: 'absolute',
+            left: 2,
+            top: 2,
+            width: 16,
+            height: 16,
+            borderRadius: 8,
+            borderWidth: 2,
+            borderColor: color,
+            borderTopColor: 'transparent',
+            transform: [{ rotate: '-45deg' }],
+          }}
+        />
+        <Stroke seg={[2.5, 3.5, 2.5, 8]} color={color} weight={2} />
+        <Stroke seg={[2.5, 8, 7, 8]} color={color} weight={2} />
+        <Stroke seg={[10, 6, 10, 10]} color={color} weight={2} />
+        <Stroke seg={[10, 10, 13, 12]} color={color} weight={2} />
+      </View>
+    </View>
+  );
+}
+
+/**
+ * The reference's action: glyph, 9 px, label, centred together. The same
+ * link mechanics as `ButtonLink` (Link asChild on a flattened Pressable, the
+ * href kept for cold loads, the testID on the element a test clicks); only
+ * the content is a row. The accessible name is the label unless one is given.
+ */
+function GlyphButtonLink({
+  href,
+  style,
+  textStyle,
+  testID,
+  label,
+  accessibilityLabel,
+  glyph,
+  glyphColor,
+}: {
+  href: string;
+  style: StyleProp<ViewStyle>;
+  textStyle: StyleProp<TextStyle>;
+  testID: string;
+  label: string;
+  accessibilityLabel?: string;
+  glyph: 'pulse' | 'history';
+  glyphColor: string;
+}) {
+  return (
+    <Link href={href as never} asChild>
+      <Pressable
+        style={StyleSheet.flatten(style)}
+        testID={testID}
+        accessibilityRole="link"
+        accessibilityLabel={accessibilityLabel ?? label}
+      >
+        <View style={glyphStyles.row}>
+          <ActionGlyph name={glyph} color={glyphColor} size={glyph === 'pulse' ? 20 : 17} />
+          <Text style={[textStyle, glyphStyles.label]}>{label}</Text>
+        </View>
+      </Pressable>
+    </Link>
+  );
+}
+
+/**
+ * HOME-NORTHSTAR-PARITY-1 (Director #514 `5847715387`). THE REFERENCE'S
+ * MOMENTUM ROW, on Home only: who, then the movement and when, and the exact
+ * amount on its own at the right. The same `ActivityRow` the shared row
+ * reads, so the same truths hold: a member showing activity but not a name is
+ * "Anonymous member" with their amount; a member who hid activity has no row.
+ * "(you)" is never added: the activity read carries no uid and no self marker,
+ * so nothing here could say which row is the viewer's without guessing.
+ */
+function HomeMomentumRow({ row }: { row: ActivityRow }) {
+  const named = row.displayName !== null && row.displayName.trim() !== '';
+  const amount = `${row.amount.toLocaleString()}${row.unit ? ` ${row.unit}` : ''}`;
+  return (
+    <View style={rowStyles.row} testID="wsf-momentum-row">
+      <View style={[rowStyles.avatar, named ? null : rowStyles.avatarAnon]}>
+        <Text style={[rowStyles.avatarText, named ? null : rowStyles.avatarTextAnon]}>
+          {named ? initialsOf(row.displayName!) : '·'}
+        </Text>
+      </View>
+      <View style={rowStyles.text}>
+        <Text style={rowStyles.who} numberOfLines={1}>
+          {named ? row.displayName : 'Anonymous member'}
+        </Text>
+        <Text style={rowStyles.what} numberOfLines={1}>
+          {`added ${amount}${row.at ? ` · ${relativeWhen(row.at)}` : ''}`}
+        </Text>
+      </View>
+      <Text style={rowStyles.amount}>{`+${amount}`}</Text>
+    </View>
+  );
+}
+
 function Row({
   label,
   value,
@@ -4596,28 +4936,27 @@ const INVITE_QR_CAVEAT =
 const CARD_BORDER = '#E3E7E1';
 const SURFACE_WHITE = wsfTheme.colors.surface;
 
-/** One circle of the hero's bloom, sized from the card rather than fixed. */
-function glowSize(base: number, factor: number) {
-  const d = Math.round(base * factor);
-  return { width: d, height: d, borderRadius: Math.round(d / 2) };
-}
 // Cream at reduced strength on the navy hero: still well above 4.5:1.
 const HERO_MUTED = 'rgba(247,245,240,0.78)';
 const HERO_RULE = 'rgba(247,245,240,0.35)';
 
 const styles = StyleSheet.create({
-  scroll: { flex: 1, backgroundColor: wsfTheme.colors.background },
+  // HOME-NORTHSTAR-PARITY-1. The reference's page ground (#FBFAF4), the
+  // same warm white the shell's bars stand on.
+  scroll: { flex: 1, backgroundColor: '#FBFAF4' },
   container: {
     alignItems: 'center',
     paddingHorizontal: 20,
     paddingTop: 12,
     paddingBottom: 48,
-    backgroundColor: wsfTheme.colors.background,
+    backgroundColor: '#FBFAF4',
   },
   // 18 -> 14. The command-centre rhythm the target sets is denser than the
   // page had; four sections at 18 spent most of what the shorter hero freed.
   inner: { maxWidth: 640, width: '100%', gap: 14 },
-  identity: { gap: 2 },
+  // HOME-NORTHSTAR-PARITY-1. The reference's first line sits 3 lower (its
+  // .screen padding 14 plus the eyebrow's own line box).
+  identity: { gap: 2, marginTop: 3 },
   // The loading composition's placeholders: the name's line and the presence
   // band's height, in the ground's own quiet tone.
   loadingName: { height: 30, width: '62%', borderRadius: 8, backgroundColor: '#ECE8E0', marginTop: 4 },
@@ -4656,14 +4995,19 @@ const styles = StyleSheet.create({
     wraps, so a narrow width or a large text size drops the facts under the
     faces rather than squeezing either.
   */
+  // HOME-NORTHSTAR-PARITY-1. .people-presence: 12 under the descriptor, 10
+  // between the faces and the two facts.
   presenceBand: {
     flexDirection: 'row',
     alignItems: 'center',
     flexWrap: 'wrap',
-    columnGap: 12,
+    columnGap: 10,
     rowGap: 4,
-    marginTop: 6,
+    marginTop: 10,
   },
+  identityDescriptor: { color: '#4B5C71', fontSize: 14, lineHeight: 21, marginTop: -1 },
+  // .people-presence at short heights: 8 under the descriptor, not 12.
+  presenceBandShort: { marginTop: 6 },
   presenceFacts: { flexShrink: 1, minWidth: 0, gap: 0 },
   switchChip: {
     minHeight: 32,
@@ -4686,11 +5030,13 @@ const styles = StyleSheet.create({
     // HOME-POLISH-1. 800 -> 500: the reference sets the community's name
     // large and in a medium weight, so its size carries it and the navy hero
     // below stays the heaviest thing on the screen.
+    // HOME-NORTHSTAR-PARITY-1. The reference's h1: 27 / 1.05, weight 400
+    // (Tailwind's preflight lets headings inherit the body weight).
     color: wsfTheme.colors.text,
-    fontSize: 26,
-    fontWeight: '500',
-    lineHeight: 31,
-    letterSpacing: -0.3,
+    fontSize: 27,
+    fontWeight: '400',
+    lineHeight: 28,
+    letterSpacing: 0,
     marginTop: 2,
   },
   // The community name is a stored string of up to 80 characters sitting in a
@@ -4714,7 +5060,6 @@ const styles = StyleSheet.create({
     borderRadius: wsfTheme.radius.pill,
     overflow: 'hidden',
   },
-  humanLine: { color: wsfTheme.colors.textMuted, fontSize: 17, lineHeight: 24 },
   // W7. One quiet line above the feed: a fact about the community's goals,
   // not a leaderboard and not a nudge.
   momentumLine: { color: wsfTheme.colors.text, fontSize: 16, lineHeight: 22, fontWeight: '600' },
@@ -4726,9 +5071,16 @@ const styles = StyleSheet.create({
     (CommunityPresence's MomentumRow, unchanged).
   */
   momentumCard: {
-    paddingTop: 6,
-    gap: 2,
+    paddingTop: 0,
+    gap: 0,
   },
+  // .section-heading h2: 21, weight 400. Its line box is 26 here, not the
+  // reference's 31.5, and the card has no inner gap: the first momentum row
+  // must stay whole above the tab bar at 390x844 (the Director's standing
+  // guard, sprint-w8-social-privacy), which the reference's own row -- under
+  // its 30 px prototype strip -- is not. The heading's glyphs sit ~5 px higher
+  // than the reference's for it.
+  momentumHeading: { color: wsfTheme.colors.text, fontSize: 21, lineHeight: 26, fontWeight: '400', marginTop: 1 },
   // HOME-POLISH-1. 14 -> 12: the second of the two facts beside the faces,
   // at the reference's size.
   movedToday: {
@@ -4770,9 +5122,15 @@ const styles = StyleSheet.create({
 
   // ---- the hero: navy surface, cream type, green for confirmed progress ----
   hero: {
-    backgroundColor: NAVY,
-    // HOME-POLISH-1. 24 -> 22, the reference's corner.
-    borderRadius: 22,
+    // HOME-NORTHSTAR-PARITY-1. The reference's card (.goal-hero): navy
+    // #0B1F3A, corners 24 / 24 / 10 / 10, padding 18 / 16 / 14; its rings
+    // are this card's background (heroRings).
+    backgroundColor: '#0B1F3A',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    borderBottomLeftRadius: 10,
+    borderBottomRightRadius: 10,
+    marginTop: 3,
     paddingHorizontal: 16,
     // TIGHTENED FOR THE SOCIAL FOLD. The Director's AFTER review required the
     // first momentum row to be VISIBLE above the tab bar at 390x844, and said
@@ -4782,41 +5140,13 @@ const styles = StyleSheet.create({
     // its dominance.
     // HOME-POLISH-1. 10 -> 16 / 14, toward the reference's frame: the state
     // moved up beside the label, and the line it freed is spent here.
-    paddingTop: 16,
+    paddingTop: 18,
     paddingBottom: 14,
-    gap: 4,
-    // overflow clips the light and the bloom to the card's own corners.
+    gap: 0,
+    // overflow clips the rings to the card's own corners.
     overflow: 'hidden',
     ...elevation.hero,
   },
-  // A light falling across the top of the card. A rectangle drew a hard seam
-  // straight through the mark — an artifact, not depth — so it is a very
-  // large, very faint circle anchored above the card, which has no edge
-  // inside it.
-  heroTopLight: {
-    position: 'absolute',
-    top: -250,
-    // STAYS INSIDE THE CARD'S OWN WIDTH. A circle wide enough to arc nicely
-    // was 520px, and although the hero clips it, a clipped child still
-    // reports its full box — which the shell's horizontal-overflow check
-    // reads as content running past a 360px screen, correctly, because it
-    // cannot know the difference. A full-width box with deep bottom corners
-    // draws the same soft arc and has no width to run past anything.
-    left: 0,
-    right: 0,
-    height: 360,
-    borderBottomLeftRadius: 220,
-    borderBottomRightRadius: 220,
-    backgroundColor: 'rgba(143,224,138,0.06)',
-  },
-  // Three nested circles approximate a radial bloom without a gradient
-  // dependency. It sits BEHIND the Living WE and never touches it: the mark's
-  // own fill is the only thing that may say anything about progress.
-  glowLayer: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
-  glowRing: { alignItems: 'center', justifyContent: 'center' },
-  glow3: { backgroundColor: 'rgba(145,203,125,0.05)' },
-  glow2: { backgroundColor: 'rgba(145,203,125,0.07)' },
-  glow1: { backgroundColor: 'rgba(145,203,125,0.09)' },
   // The numbers sink into their own panel, so the progress area reads as a
   // recessed instrument rather than as text floating on the card.
   progressPanel: {
@@ -4828,12 +5158,13 @@ const styles = StyleSheet.create({
     marginTop: 6,
     gap: 6,
   },
+  // .hero-kicker: 10 / 850 / .12em, confirmed green.
   heroEyebrow: {
     color: PROGRESS_GREEN,
-    fontSize: 11,
-    lineHeight: 14,
+    fontSize: 10,
+    lineHeight: 15,
     fontWeight: '800',
-    letterSpacing: 1.6,
+    letterSpacing: 1.2,
     textTransform: 'uppercase',
   },
   // HOME-POLISH-1. The label that names the card: a small progress-green dot
@@ -4848,39 +5179,48 @@ const styles = StyleSheet.create({
     columnGap: 8,
     rowGap: 4,
   },
+  // The kicker's own line; the pill is lifted onto it (heroStatePillBeside).
+  heroTopRowBeside: { paddingRight: 0 },
+  heroStatePillBeside: { position: 'absolute', right: 0, top: -5 },
   // The reference's state pill: progress green on a faint wash of itself.
   // #91CB7D on that wash over the navy measures about 6.8:1.
+  // .status: 10 / 850, uppercase, 5 / 9 padding, confirmed at 18 %.
   heroStatePill: {
     color: PROGRESS_GREEN,
-    fontSize: 11,
+    fontSize: 10,
     lineHeight: 15,
-    fontWeight: '700',
-    paddingHorizontal: 10,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    paddingHorizontal: 9,
     paddingVertical: 5,
     borderRadius: wsfTheme.radius.pill,
-    backgroundColor: 'rgba(145,203,125,0.15)',
+    backgroundColor: 'rgba(145,203,125,0.18)',
     overflow: 'hidden',
   },
-  heroLabelDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: PROGRESS_GREEN },
+  heroLabelDot: { width: 7, height: 7, borderRadius: 3.5, backgroundColor: ACTION_GREEN, marginRight: -2 },
   // At about 200% zoom the tracked label is wider than the hero; it keeps one
   // line (the height "Goal reached" has) by stepping down to 10 and tightening
   // its tracking.
   heroLabelNarrow: { fontSize: 10, lineHeight: 13, letterSpacing: 0.8 },
   // HOME-POLISH-1. 22/800 -> 23/500: the reference names the goal in a medium
   // weight, so the shared total under the mark is the one heavy figure here.
+  // .goal-topline h2: 23 / 1.05, weight 400, 3 under the kicker.
   heroTitle: {
-    color: CREAM,
+    color: '#FFFFFF',
     fontSize: 23,
-    fontWeight: '500',
-    lineHeight: 28,
-    letterSpacing: -0.3,
+    fontWeight: '400',
+    lineHeight: 25,
+    letterSpacing: 0,
+    marginTop: 3,
   },
   heroBody: { color: CREAM, fontSize: 16, lineHeight: 22 },
   heroCentered: { alignItems: 'center', gap: 8 },
   // Reserved room for the mark and the facts; the loading line sits centred
   // in it rather than at the top of a hole.
   progressArea: { justifyContent: 'center', gap: 2 },
-  weWrap: { alignItems: 'center', justifyContent: 'center', paddingTop: 4, paddingBottom: 2 },
+  // .living-we: margin 10 auto 2 (5 at short heights).
+  weWrap: { alignItems: 'center', justifyContent: 'center', paddingTop: 10, paddingBottom: 0 },
+  weWrapShort: { paddingTop: 5 },
   /*
     HOME-POLISH-1. THE NUMBERS SIT ON THE CARD, NOT IN A PANEL INSIDE IT. The
     recessed panel made a box inside the box; the accepted reference lets the
@@ -4890,13 +5230,15 @@ const styles = StyleSheet.create({
   */
   factsLarge: {
     alignItems: 'stretch',
-    gap: 6,
-    marginTop: 2,
+    gap: 0,
+    marginTop: 0,
   },
+  // .progress-track: 8 tall, 8 under the count, surface at 18 %.
   track: {
     height: 8,
-    borderRadius: 999,
-    backgroundColor: 'rgba(247,245,240,0.14)',
+    marginTop: 8,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.18)',
     overflow: 'hidden',
   },
   trackFill: { height: '100%', borderRadius: 999, backgroundColor: PROGRESS_GREEN },
@@ -4904,23 +5246,41 @@ const styles = StyleSheet.create({
   // What the community has done together is what this screen exists to show,
   // and at 24 it was smaller than the community's own name.
   heroTotal: { textAlign: 'center' },
-  heroTotalCount: { ...display.lg, color: CREAM },
+  // .goal-number strong: 38 / 1, bold, white.
+  heroTotalCount: { fontSize: 38, lineHeight: 38, fontWeight: '700', letterSpacing: 0, color: '#FFFFFF' },
   // HOME-POLISH-1. The reference's small facts: 13 beside the count, 11 under
   // the bar.
-  heroTotalRest: { color: ON_NAVY_MUTED, fontSize: 13, fontWeight: '700', lineHeight: 18 },
-  heroPercent: { color: PROGRESS_GREEN, fontSize: 11, lineHeight: 15, fontWeight: '700' },
+  heroTotalRest: { color: '#B5CAE0', fontSize: 13, fontWeight: '700', lineHeight: 18 },
+  heroPercent: { color: PROGRESS_GREEN, fontSize: 11, lineHeight: 16, fontWeight: '700' },
   heroStatus: { color: HERO_MUTED, fontSize: 15, lineHeight: 20, textAlign: 'center' },
   // HOME-POLISH-1. What is left, at the right end of the row under the bar.
   // Only this line: the loading line and "Reached on …" keep heroStatus.
-  heroStatusInRow: { fontSize: 11, lineHeight: 15, textAlign: 'right', flexShrink: 1 },
+  heroStatusInRow: { color: '#FFFFFF', fontSize: 11, lineHeight: 16, textAlign: 'right', flexShrink: 1 },
   // HOME-POLISH-1. How far, and how far to go, as one row under the bar.
+  // .progress-meta: 5 under the track, 11 px.
   heroFactsRow: {
     flexDirection: 'row',
     alignItems: 'baseline',
     justifyContent: 'space-between',
     flexWrap: 'wrap',
-    columnGap: 12,
+    columnGap: 14,
+    marginTop: 5,
   },
+  // .hero-presence: 11 under the meta, a 1 px rule of surface at 14 %, 10
+  // above the faces (8 / 7 at short heights).
+  heroMovedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 11,
+    marginHorizontal: -2,
+    marginBottom: -2,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.14)',
+  },
+  heroMovedRowShort: { marginTop: 8, paddingTop: 7 },
+  heroMovedText: { flexShrink: 1, color: '#C8DBE6', fontSize: 10, lineHeight: 15 },
   heroStatusNear: { color: CREAM, fontWeight: '700' },
   // RETURN-CONTINUITY-1. The failed-refresh line under the figures: the
   // sentence, then Retry — beside it when the row has room, under it (with a
@@ -4974,29 +5334,48 @@ const styles = StyleSheet.create({
   // the pair sat flush against the fixed navigation, which reads as the screen
   // running out rather than as a composition ending.
   actionsShort: { marginBottom: 14 },
+  // .action-pair: 1.35fr / 1fr, gap 8, 10 under the card; both 54 tall.
+  // (Net of the section's 8 gap, which already stands above.)
+  actionPair: { flexDirection: 'row', alignItems: 'stretch', gap: 8, marginTop: 2 },
+  pairPrimary: { flexGrow: 1.35, flexShrink: 1, flexBasis: 0, minWidth: 0, borderRadius: 10, paddingHorizontal: 12 },
+  pairSecondary: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 0,
+    minWidth: 0,
+    minHeight: 54,
+    borderRadius: 10,
+    borderColor: '#0B1F3A',
+    paddingHorizontal: 14,
+  },
   // HOME-POLISH-1. The member's own part as the reference sets it: a row on the
   // page, a 40px tile, a quiet label over the sentence. No card around it.
-  contributionRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 2 },
+  // .own-contribution: 13 under the actions, 20 above the momentum (16
+  // short), icon / text / the shared figure, gap 10.
+  // (13 above / 20 below, net of the section's 8 gap on each side.)
+  contributionRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 5, marginBottom: 12, marginHorizontal: 2 },
+  contributionRowShort: { marginBottom: 8 },
+  contributionShared: { color: '#4B5C71', fontSize: 11, lineHeight: 16, flexShrink: 0, maxWidth: '38%', textAlign: 'right' },
   // A tint of the progress green behind the Progress glyph; the glyph itself
   // is the action green's deep edge, measured well above 3:1 on the tint.
   contributionTile: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(145,203,125,0.24)',
   },
-  contributionText: { flexShrink: 1, minWidth: 0, gap: 1 },
+  contributionText: { flex: 1, minWidth: 0, gap: 1 },
   contributionEyebrow: {
-    color: TEXT_MUTED,
-    fontSize: 11,
-    lineHeight: 14,
+    color: '#4B5C71',
+    fontSize: 10,
+    lineHeight: 15,
     fontWeight: '800',
-    letterSpacing: 1.4,
+    letterSpacing: 0.8,
     textTransform: 'uppercase',
   },
-  contributionBody: { color: wsfTheme.colors.text, fontSize: 15, lineHeight: 20, fontWeight: '600' },
+  contributionBody: { color: wsfTheme.colors.text, fontSize: 15, lineHeight: 22, fontWeight: '800' },
   // SLICE 2. The identity band: the community's name, then the one presence
   // fact, separated from the goal below by a hairline rather than a gap, so
   // the hero reads as one object and not two stacked cards.
@@ -5048,7 +5427,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     ...elevation.action,
   },
-  primaryButtonText: { color: ON_ACTION, fontSize: 17, fontWeight: '800', textAlign: 'center' },
+  primaryButtonText: { color: ON_ACTION, fontSize: 16, fontWeight: '800', textAlign: 'center' },
   heroOutlineButtonWide: {
     borderWidth: 1.5,
     borderColor: HAIRLINE,
@@ -5306,6 +5685,53 @@ const styles = StyleSheet.create({
 // { 0: …, 1: … }, which react-native-web then fails to apply — it takes the
 // whole screen down. So the composed footer link style is flattened here,
 // once, rather than written as an array at the call site.
+const glyphStyles = StyleSheet.create({
+  // .primary-action / .secondary-action: glyph, 9 (7 on the secondary), label.
+  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, flexShrink: 1, minWidth: 0 },
+  label: { flexShrink: 1, textAlign: 'center' },
+});
+
+const rowStyles = StyleSheet.create({
+  // .activity-row: avatar / text / amount, a hairline under it. 54 tall, not
+  // the reference's 60, so the first row stays whole above the tab bar at
+  // 390x844 (the Director's standing guard, sprint-w8-social-privacy).
+  row: {
+    minHeight: 54,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#D7DFE7',
+  },
+  // .activity-avatar: 34, navy, 10 px initials.
+  avatar: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#0B1F3A', alignItems: 'center', justifyContent: 'center' },
+  avatarAnon: { backgroundColor: '#EFEFE6' },
+  avatarText: { color: '#FFFFFF', fontSize: 10, lineHeight: 12, fontWeight: '800' },
+  avatarTextAnon: { color: '#4B5C71', fontSize: 14 },
+  text: { flex: 1, minWidth: 0 },
+  who: { color: '#081D36', fontSize: 13, lineHeight: 18, fontWeight: '800' },
+  what: { color: '#4B5C71', fontSize: 10, lineHeight: 15 },
+  // .activity-row > strong: the confirmed amount, right, green.
+  amount: { color: '#005D12', fontSize: 12, lineHeight: 17, fontWeight: '800', flexShrink: 0 },
+});
+
+const stackStyles = StyleSheet.create({
+  row: { flexDirection: 'row', alignItems: 'center' },
+  // .avatar-sm / .avatar-stack .avatar: 29, a 2 px ring of the page, -6 overlap.
+  disc: { width: 29, height: 29, borderRadius: 14.5, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
+  // .goal-hero .avatar-stack .avatar: 23, ringed in navy, -5 overlap.
+  discSmall: { width: 23, height: 23, borderRadius: 11.5, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
+  ringPage: { borderColor: '#FBFAF4' },
+  ringNavy: { borderColor: '#0B1F3A' },
+  overlap: { marginLeft: -6 },
+  overlapSmall: { marginLeft: -5 },
+  discText: { fontSize: 9, lineHeight: 11, fontWeight: '800' },
+  discTextSmall: { fontSize: 7, lineHeight: 9, fontWeight: '800' },
+  onFill: { color: '#FFFFFF' },
+  more: { backgroundColor: PROGRESS_GREEN },
+  onMore: { color: '#0B1F3A' },
+});
+
 const FOOTER_LINK = StyleSheet.flatten([styles.tertiaryButton, styles.footerLink]);
 // Same reason: a ButtonLink demoted to a quiet utility in a wrapping row needs
 // its two styles composed BEFORE the link merges them.
