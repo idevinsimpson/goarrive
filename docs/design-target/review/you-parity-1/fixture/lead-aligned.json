@@ -1,0 +1,75 @@
+{
+  "note": "supplementary diagnostic; aligned at the community band bottom edge",
+  "frames": [
+    {
+      "state": "normal",
+      "viewport": "390x844",
+      "referenceBandBottom": 397,
+      "viewBandBottom": 363,
+      "viewShiftPx": 34,
+      "height": 372,
+      "sideBySide": "fixture/cmp-you-normal-390x844-lead-aligned-side-by-side.png",
+      "overlay50": "fixture/cmp-you-normal-390x844-lead-aligned-overlay-50.png",
+      "difference": "fixture/cmp-you-normal-390x844-lead-aligned-difference.png",
+      "differingPixelShare": 0.1172,
+      "lovableSha256": "86f270cb9a0bf86fe84240f86a1e819468e9d1534a37fb118516be32ae33b671",
+      "fixtureSha256": "4022750205a0f8b89981c5df88776f60967aa0179fce7a0c2a0166937489e04b"
+    },
+    {
+      "state": "normal",
+      "viewport": "390x640",
+      "referenceBandBottom": 359,
+      "viewBandBottom": 325,
+      "viewShiftPx": 34,
+      "height": 206,
+      "sideBySide": "fixture/cmp-you-normal-390x640-lead-aligned-side-by-side.png",
+      "overlay50": "fixture/cmp-you-normal-390x640-lead-aligned-overlay-50.png",
+      "difference": "fixture/cmp-you-normal-390x640-lead-aligned-difference.png",
+      "differingPixelShare": 0.0875,
+      "lovableSha256": "87063a31aa66222d205f4c73d9a2157a41845965f8385299e2ae14ca2914eb2b",
+      "fixtureSha256": "897fc29d3a0a6c4c628628f0d2f0b7ee8e6c29d3033e45d7beac7ab355533692"
+    },
+    {
+      "state": "no-own",
+      "viewport": "390x844",
+      "referenceBandBottom": 397,
+      "viewBandBottom": 363,
+      "viewShiftPx": 34,
+      "height": 372,
+      "sideBySide": "fixture/cmp-you-no-own-390x844-lead-aligned-side-by-side.png",
+      "overlay50": "fixture/cmp-you-no-own-390x844-lead-aligned-overlay-50.png",
+      "difference": "fixture/cmp-you-no-own-390x844-lead-aligned-difference.png",
+      "differingPixelShare": 0.1973,
+      "lovableSha256": "0e83eb0998064a5f848cd3a08d50de1cda7f718bd602e2b4619702d0e1702232",
+      "fixtureSha256": "b1270cc89675ea4dc845acabf7661d90b943cb5e048c394f3248db85b0b68d32"
+    },
+    {
+      "state": "no-own",
+      "viewport": "390x640",
+      "referenceBandBottom": 359,
+      "viewBandBottom": 325,
+      "viewShiftPx": 34,
+      "height": 206,
+      "sideBySide": "fixture/cmp-you-no-own-390x640-lead-aligned-side-by-side.png",
+      "overlay50": "fixture/cmp-you-no-own-390x640-lead-aligned-overlay-50.png",
+      "difference": "fixture/cmp-you-no-own-390x640-lead-aligned-difference.png",
+      "differingPixelShare": 0.1683,
+      "lovableSha256": "b48fd978bb2de7de24387726339c4ceca9f62b46dd06b86f1ff5f563c20dd7d5",
+      "fixtureSha256": "5da7b6f9867170092455a04e39af45b7988b1a6c5aef3874cb6b40e6440bef98"
+    },
+    {
+      "state": "no-eligible",
+      "viewport": "390x844",
+      "referenceBandBottom": 397,
+      "viewBandBottom": 363,
+      "viewShiftPx": 34,
+      "height": 372,
+      "sideBySide": "fixture/cmp-you-no-eligible-390x844-lead-aligned-side-by-side.png",
+      "overlay50": "fixture/cmp-you-no-eligible-390x844-lead-aligned-overlay-50.png",
+      "difference": "fixture/cmp-you-no-eligible-390x844-lead-aligned-difference.png",
+      "differingPixelShare": 0.107,
+      "lovableSha256": "3885859b8a8a81082bce6e21fee44a5fd17f28f951714776d91932b2208a5e8c",
+      "fixtureSha256": "7d7732249ef69b1aa756b32c238e259d8c5d1966296d705ac5889720d23e106e"
+    }
+  ]
+}

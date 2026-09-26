@@ -13,11 +13,11 @@ Packet sources:
 | | |
 |---|---|
 | Base | `claude/wsf-app-shell` @ `0b460ce3f2f0766406100fef14d9a444c8cad43a` |
-| Product SHA | **`66e56c4daeff7e50de427234384f18fef6558157`**. It supersedes `92123f26` (the Director's truth corrections) and `8c4d8210` (the compact block); see below |
-| Component | **`apps/westayfit/src/ui/YouParityView.tsx`**, blob `38e91cda` |
-| Pure rules | `apps/westayfit/src/youParity.ts`, blob `dd18c8c6`; the shared goal-truth module `apps/westayfit/src/goalTruth.ts`, blob `13f868f9` (Progress uses it too) |
-| Fixture | `apps/westayfit/app/design-target/you-parity.tsx`, blob `c066da64`. Emulator builds only; `?state=normal\|no-own\|no-eligible\|failed\|unknown-shared` |
-| Tests | `tests/goal-truth.test.ts` `d1ec5360` (4) · `tests/you-parity.test.ts` `f7956b01` (20) · `tests/you-parity-view.test.tsx` `f2cd6913` (14) · `tests-e2e/sprint-w6-you-parity.spec.ts` `500f6f14` (12) |
+| Product SHA | **`5e76a10ca34c33a2cb3dc9f3ff48450e413ea264`**. It supersedes `66e56c4d` (per-goal community, columns, no filler line; see below), `92123f26` (the truth corrections) and `8c4d8210` (the compact block) |
+| Component | **`apps/westayfit/src/ui/YouParityView.tsx`**, blob `93e70b72` |
+| Pure rules | `apps/westayfit/src/youParity.ts`, blob `0729eb93`; the shared goal-truth module `apps/westayfit/src/goalTruth.ts`, blob `c41deb39` (Progress uses it too) |
+| Fixture | `apps/westayfit/app/design-target/you-parity.tsx`, blob `6339d930`. Emulator builds only; `?state=normal\|no-own\|no-eligible\|failed\|unknown-shared` |
+| Tests | `tests/goal-truth.test.ts` `6a6613a5` (4) · `tests/you-parity.test.ts` `c0a06a9e` (21) · `tests/you-parity-view.test.tsx` `05e54730` (16) · `tests-e2e/sprint-w6-you-parity.spec.ts` `dc825e16` (12) |
 | Route | `app/(tabs)/you.tsx` = base blob `22716995` — **protected-path delta: no** |
 | Reference | Lovable `e15b9fa0-b2a0-4314-bc21-9c573b8eceb1` @ `642f830baa1153b0d9465dc75690028768083fb7`: `src/demo/screens/you.tsx`, `src/styles.css` |
 | Environment | emulator `demo-wsf-local`. Web bundle built from the product tree with `EXPO_PUBLIC_WSF_AUTH_ENABLED=1 EXPO_PUBLIC_WSF_USE_EMULATORS=1`. Chromium, iPhone UA, `en-US`, `America/New_York`. Frames at device pixel ratio 1, because the originals are 390 wide at ratio 1 |
@@ -39,8 +39,9 @@ The order is the reference's:
 3. **YOUR PART IN LIVING WE**: the shared position in a navy card, beside **YOUR EXACT CONFIRMED
    PART** in a white card with a 4 px confirmed-green rule. They are two figures and are never
    joined.
-4. **Other goals you helped**, with the reference's four lifecycle pills: `OPEN`,
-   `REACHED · STILL OPEN`, `CLOSED · REACHED` and `CLOSED · UNFINISHED`.
+4. **Other goals you helped**, each under its own community, with the reference's four lifecycle
+   pills: `OPEN`, `REACHED · STILL OPEN`, `CLOSED · REACHED` and `CLOSED · UNFINISHED`. A closed
+   goal whose result is unknown reads `CLOSED · RESULT UNAVAILABLE`.
 5. The account row, last: email and Sign out. It needs no read, so it renders in every signed-in
    state.
 
@@ -55,6 +56,30 @@ The truth cases:
 - **Not shown anywhere:** rank, streak, score, share of total or inferred impact.
 
 Settings only calls back. The side panel belongs to W9.
+
+## The final correction: `66e56c4d` → `5e76a10c` (Director #492 `5841276795`, `5841182763`, `5841257520`)
+
+- **Each goal owns its community.** `YouGoal.communityName` is rendered per row. The fixture's
+  first other goal is **Harbor Lunch Crew · This week**, as in the reference; the lead is Oak Grove
+  Together · This week. The component no longer assumes every goal belongs to the current
+  community.
+- **Lead columns: 230 / 110 / 10 at 390, measured on both classes.**
+  - The fix is two unpadded columns at `flexGrow 2.09 : 1` with a zero basis, the own column
+    keeping `minWidth 104`, with the padded cards filling them. That is the grid's
+    `minmax(0,1.35fr) minmax(104px,.65fr)` as it lays out at 390.
+  - `flex: 2.09 / 1` on the padded cards themselves still measured 218 / 122, because with
+    border-box sizing their padding and borders count toward the flex basis. The first two e2e
+    runs on this tree failed 2/12 on exactly that (218.125 px) before the wrappers.
+- **No filler type line.** `bandSubline()` prints a type only when the product names one (today,
+  "Family and friends"). An unknown, omitted or `custom` type prints nothing, rather than the
+  generic "Community".
+- **`goalTruth`:** a closed goal with an unknown result reads `CLOSED · RESULT UNAVAILABLE`, and
+  `canRenderLivingWe` names the instrument rule.
+- **Fail-first:** on the `66e56c4d` bundle the Harbor-row assertion fails; the row read "Oak Grove
+  Together · Ends Oct 1". The Director measured 218 / 122 there.
+- **Tests, focused per `5841276795`:** goal-truth + You pure + view **41 / 41**; e2e **12 / 12**;
+  `ts:check` 0; evidence guard 9 / 20. No full vitest; the last full run was 929 / 929 at
+  `66e56c4d`.
 
 ## The truth correction: `92123f26` → `66e56c4d` (Director #492 `5841012915`)
 
@@ -84,7 +109,7 @@ Settings only calls back. The side panel belongs to W9.
   The last one survived the view tests alone, because the view also guards. `tests/goal-truth.test.ts`
   was added to catch it directly.
 
-## Focused tests on `66e56c4d`
+## Focused tests on `66e56c4d` (for `5e76a10c`, see the final correction above)
 
 | check | first run | rerun |
 |---|---|---|
@@ -171,35 +196,36 @@ b48fd978bb2de7de24387726339c4ceca9f62b46dd06b86f1ff5f563c20dd7d5  you-no-own-390
 The reference has no failure frame and no 390×640 no-eligible frame. `you-failed-390x844.png` is
 canonical-only.
 
-### `fixture/` — `YouParityView` at `66e56c4d`, through the component fixture
+### `fixture/` — `YouParityView` at `5e76a10c`, through the component fixture
 
-The six frames that also existed at `92123f26` are **byte-identical** to it, carried by hash (the
-correction changes nothing a known total draws). The two `unknown-shared` frames are new.
+**Every frame is recaptured at `5e76a10c`.** The band lost its filler line in every state, and the
+normal frames also changed columns and the Harbor row. Nothing carries from `66e56c4d`.
 
 The fixture is the reference's own state:
 - member Alex M., since September 2026;
-- community Oak Grove Together: member, 23;
-- lead goal "500 squats together": 241 / 500 shared, 25 own, ends in 2 days;
-- other goal "150 squats this week": 155 / 150 shared, 20 own, still open.
+- community Oak Grove Together: member, 23, with no named type;
+- lead goal "500 squats together" (Oak Grove Together · This week): 241 / 500 shared, 25 own;
+- other goal "150 squats this week" (**Harbor Lunch Crew** · This week): 155 / 150 shared, 20 own,
+  still open.
 
 Its top band is exactly the reference's masthead: prototype strip 30 plus top bar 62, which is 92;
 or 56 at ≤ 700, which is 86. It is labelled `YOU-PARITY-1 · COMPONENT FIXTURE · NOT THE ROUTE`.
 
 ```
-ff9420e3587239a7779de393bf56cf7356893561f32fa288db96fb4cc58a69b6  you-normal-390x844.png
-869a9fe29d5076c281b0026862b591bbe31cad027197815041bd0dfeb6ed59b2  you-normal-390x640.png
-d27217095b654b43ef4b8020dcbf144ce36646c2fee2efc98d5abcc70754ee6e  you-no-own-390x844.png
-9ad3835367fe41e197db17c7d78890a3471e241546fbe951f09912fc45b18235  you-no-own-390x640.png
-c4dc7c2384da3d1bf8951d0712d1caf870c8abe1a3e230d495ea6c4c634f1e21  you-no-eligible-390x844.png
-c1bcc99477a51dc828656054a0f5da31a216729b2905e74f67a3ba0c91cd43d4  you-failed-390x844.png
-a2264bee2cc6df6089e231984b9a00c5c583ff66f0407b2b346ea1005ece0ec0  you-unknown-shared-390x844.png
-ee97ebcb5ec3c3a6617f3b5ad8160af9d2cb6cc8538150059d1682624213ae16  you-unknown-shared-390x640.png
+4022750205a0f8b89981c5df88776f60967aa0179fce7a0c2a0166937489e04b  you-normal-390x844.png
+897fc29d3a0a6c4c628628f0d2f0b7ee8e6c29d3033e45d7beac7ab355533692  you-normal-390x640.png
+b1270cc89675ea4dc845acabf7661d90b943cb5e048c394f3248db85b0b68d32  you-no-own-390x844.png
+5da7b6f9867170092455a04e39af45b7988b1a6c5aef3874cb6b40e6440bef98  you-no-own-390x640.png
+7d7732249ef69b1aa756b32c238e259d8c5d1966296d705ac5889720d23e106e  you-no-eligible-390x844.png
+2fd533e80f003fd08c420487da114dc7329761b1fd8ffdaa54c3620123a16cc9  you-failed-390x844.png
+ad74553a9474f5a8a21bbb38fa2af926046e43f4d3a135a42c9f8e5862bc33f0  you-unknown-shared-390x844.png
+8d8f1f09b488bbbcbd6b142bbfbb89d54e26471bb527f3b9e70505a419f69251  you-unknown-shared-390x640.png
 ```
 
 `unknown-shared` is canonical-only; the reference has no such state.
 
-Each frame with an original has two comparison sets. Both are listed with measurements in
-`fixture/manifest.json`.
+Each frame with an original has three comparison sets. The first two are listed with measurements
+in `fixture/manifest.json`; the third is in `fixture/lead-aligned.json`.
 
 - **`cmp-<state>-<vp>-{side-by-side,overlay-50,difference}.png`** is cropped to one body window:
   below the masthead and above the 75 px tab bar. The masthead and tab bar are the shell's, W9's.
@@ -207,22 +233,34 @@ Each frame with an original has two comparison sets. Both are listed with measur
   with the view shifted so both community bands start on one row. The row is found at x = 5 as
   the band's navy. This measures everything below the head without the head's height difference
   smeared over the frame.
+- **`cmp-<state>-<vp>-lead-aligned-*.png`** is a supplementary diagnostic from the evidence-only
+  script `tools/lead-aligned.mjs`, which is not product code. It aligns at the band's **bottom**
+  edge. The canonical band is one line shorter by design (no filler type line), so band-top
+  alignment carries that recorded offset through everything below. This set measures the lead and
+  the rows on their own.
 
 Differing-pixel share is the share of pixels whose summed channel difference exceeds 48. It is a
 measured figure, not a verdict.
 
-| state · viewport | body window | aligned (view shift) | base route, full frame (`canonical-before/`) |
-|---|---|---|---|
-| normal 390×844 | 0.2548 | **0.1067** (+17 px) | 0.478 |
-| normal 390×640 | 0.2793 | **0.0939** (+17 px) | 0.4954 |
-| no-own 390×844 | 0.2708 | **0.1581** (+17 px) | 0.4422 |
-| no-own 390×640 | 0.2954 | **0.1200** (+17 px) | 0.4926 |
-| no-eligible 390×844 | 0.1949 | **0.0971** (+17 px) | 0.3795 |
+| state · viewport | body window | band-top aligned (shift) | **band-bottom aligned (shift)** | base route, full frame (`canonical-before/`) |
+|---|---|---|---|---|
+| normal 390×844 | 0.2988 | 0.2396 (+17) | **0.1172** (+34) | 0.478 |
+| normal 390×640 | 0.3335 | 0.2546 (+17) | **0.0875** (+34) | 0.4954 |
+| no-own 390×844 | 0.3321 | 0.2689 (+17) | **0.1973** (+34) | 0.4422 |
+| no-own 390×640 | 0.3832 | 0.2893 (+17) | **0.1683** (+34) | 0.4926 |
+| no-eligible 390×844 | 0.2263 | 0.1703 (+17) | **0.1070** (+34) | 0.3795 |
 
-The view shift is **17 px at both classes**, which confirms the compact block matches. It is the
-reference's extra head line: its eyebrow "Sample member · Design prototype" wraps to two lines,
-and it has a "Fictional profile · no account or sign-in" line. Both are demo copy, replaced by
-the truthful "YOUR PROFILE" and "Member since …".
+- **Band-top shift, 17 px at both classes.** This confirms the compact block matches. It is the
+  reference's extra head line: its eyebrow "Sample member · Design prototype" wraps to two lines,
+  and it has a "Fictional profile · no account or sign-in" line. Both are demo copy, replaced by
+  the truthful "YOUR PROFILE" and "Member since …".
+- **Band-bottom shift, 34 px.** That is those 17 px plus the reference's descriptor line "Moving
+  together this week", which the canonical band omits.
+- **Band-top shares are higher than at `66e56c4d`** (0.107 → 0.240 for normal 844). The shorter
+  band moves everything below it; the band-bottom set shows the content below the band on its own.
+- **What remains below the band** in no-own is copy: "for you" against "for this sample member",
+  and the account row against the prototype's links. In normal, the shared card is about 3 px
+  shorter than the reference's.
 
 ### `canonical-before/` — the real route at base `0b460ce3` (ACTUAL BEFORE)
 
@@ -244,12 +282,14 @@ the concurrency correction.
   - "Member since …" instead of "Fictional profile";
   - "23 members" instead of "23 sample members";
   - the no-own card says "for you" instead of "for this sample member".
-- **The band's sub-line** is `groupTypeCardLabel` ("Community"), not the reference's descriptor
-  "Moving together this week". No canonical field holds such a descriptor.
-- **"Other goals you helped" covers the current community only.** Each row reads
-  "community · Ends Oct 1" instead of "Harbor Lunch Crew · This week". Goals across communities
-  would need one read per community, which is a performance seam for Phase B and W9. Nothing is
-  invented.
+- **The band has no sub-line** where the reference prints its descriptor "Moving together this
+  week". No canonical field holds such a descriptor, and an unnamed type prints nothing rather
+  than a filler "Community" (Director `5841276795`). The band is one line shorter: a recorded
+  17 px vertical difference, measured as 34 − 17 between the two alignments.
+- **Other goals across communities.** The component renders each goal under its own community,
+  as the reference does. Whether Phase B can *supply* goals from other communities without a cold
+  per-community read fan-out is a Phase B / W9 performance question; the planned member snapshot
+  (MEMBER-SNAPSHOT-1) would answer it in one read. Nothing is invented.
 - **The prototype's links are replaced by the account row.** "Expo comparison" and "Prototype
   tools" become "Signed in as … / Sign out". Sign out is reachable but subordinate.
 - **Glyphs are drawn from Views.** The app ships no SVG library. The avatar person, the gear
@@ -264,7 +304,7 @@ the concurrency correction.
 
 ## Next
 
-- **Consumer:** W5 (QA2), with Phase A component QA on `66e56c4d` per `5840942863`. Then the
+- **Consumer:** W5 (QA2), with Phase A component QA on `5e76a10c` per `5840942863`. Then the
   Director's Phase A pixels.
 - **Phase B**, when W9 posts the immutable PERF product SHA:
   1. Branch from exactly that SHA.
@@ -272,7 +312,8 @@ the concurrency correction.
      `1720c44b` shows the mapping; its two additive facts are `failed{profile, community}` at the
      goals catch, and `eligible`. The adapter also owns two rules the view no longer applies:
      - an absent `sharedTotal` maps to `UNKNOWN_SHARED`, never 0;
-     - `periodLabel` is formatted from `endsAt` in the goal's stored timezone.
+     - `periodLabel` is formatted from `endsAt` in the goal's stored timezone;
+     - `communityName` is the goal's own community's display name.
   3. Do not rewrite PERF's read or cache effect.
   4. Add a focused integration test and real route frames.
 
