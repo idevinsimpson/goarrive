@@ -4690,3 +4690,23 @@ This is the Check 53 method, run locally by git and with the real staging script
 | **8** | **Expected deploy** | **49 → 49, `CREATED_THIS_DEPLOY=none`.** The functions tree and allowlist are unchanged. |
 
 **Status:** **PASS on the pin at `a3f2e3c6`.** W7 dispatched nothing. Nothing is accepted, integrated or staged by W7.
+
+## 56 · MEMBER-SNAPSHOT-INDEX-1 source / compatibility check, #509 at exact `1f99d67ff71bf342f09c436195773ff57fdc751d` on base `74d19281` (handoff #434 `5846672401`; W7 ACK `5846673584`): **PASS**
+
+Source only. Nothing was deployed, and no cloud readiness was checked; it cannot be proven here.
+
+| # | Item | Result |
+|---|---|---|
+| **1** | **Valid JSON** | **PASS.** Both SHAs parse. The keys are `indexes` and `fieldOverrides`. |
+| **2** | **The semantic delta** | **PASS.** Exactly **one** composite added (49 → 50) and none removed. **`fieldOverrides` are identical** (2 entries). The text diff is **+8 / −0**: one appended object, no reformatting. |
+| **3** | **The composite** | **PASS.** Exactly `{"collectionGroup":"wsfGoalMemberTotals","queryScope":"COLLECTION","fields":[{userId ASCENDING},{updatedAt DESCENDING}]}`. |
+| **4** | **Order preserved** | **PASS.** The first 49 entries at `1f99d67f` equal the base's 49, in order. The new entry is appended last, after `wsfContributions (communityGroupId ASC, createdAt DESC)`. |
+| **5** | **No duplicate** | **PASS.** 0 duplicate entries. The base had **no** `wsfGoalMemberTotals` composite or override. |
+| **6** | **The query shape** `where userId == uid · orderBy updatedAt desc · limit N+1 · cursor(updatedAt, docId)` | **PASS by definition.** Equality on the leading field, then the single ordered field in the index's own direction (DESC); Firestore appends the implicit `__name__` tiebreak in the direction of the last `orderBy`, so the `(updatedAt, docId)` cursor needs no further field. **Emulator run of the exact shape (cursor semantics only; the emulator does not enforce indexes, so it proves nothing about serving):** 5 of one user's docs plus 1 of another's, N = 2, reading N + 1 per page. The pages come back as [g3@09, g2@09], [g5@07, g1@05], [g4@01]: the equal-`updatedAt` tie is broken by document id DESC, with **no duplicate or skip across pages**; the N + 1 read detects the last page; the other user is excluded. |
+| **7** | **Nothing else changed** | **PASS.** The diff over `74d19281` touches exactly two files: `firestore.indexes.json` (M) and `docs/…/member-snapshot-index-1/RECEIPT.md` (A). App, functions, rules, packages, hosting configs, `.github/` and `scripts/` show 0 changes. No IAM or credential material. |
+| **8** | **The receipt's claims** | **PASS.** It states "**Source only. The index is NOT deployed.**" It says the emulator **cannot** prove serving ("an unindexed query passes every local test"), that READY is established **only** by a later single-index staging operator's receipt, that "submitted is not READY", and that the snapshot callable must not stage before READY. **It makes no emulator-READY claim.** Its "48 GoArrive indexes" is consistent: 49 base entries, one of which is `wsf`. |
+| **9** | **The catalog-deploy / pruning guard** | **PASS.** The receipt states "**Never** `firebase deploy --only firestore:indexes`" and that the whole-catalog deploy prunes what the file does not list. The cited `docs/wsf-staging/social-inventory/SINGLE-INDEX-OPERATOR-PROCEDURE.md` **exists on `main`** and carries the same "Never that command here" guard, the pruning explanation and the READY-versus-submitted rule. **No workflow on `main` or at `1f99d67f` mentions indexes or `--only firestore:indexes`.** |
+
+**Carried forward, as the receipt itself says:** the first staging pin that carries this commit will show a **non-empty protected delta** (`firestore.indexes.json`, this one entry). That is expected, not a defect. The pin check must not treat it as a surprise, and the READY receipt stays a separate operator step.
+
+**Status:** **PASS on `1f99d67f` (source).** W7 deployed nothing. Nothing is accepted, integrated or staged.
