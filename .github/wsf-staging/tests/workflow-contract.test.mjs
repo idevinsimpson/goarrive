@@ -1233,14 +1233,35 @@ await test('the activation job builds, deploys and changes nothing, and has no s
     [/gcloud|setIamPolicy|invoker|indexes|firestore\.rules/, 'a transport, IAM, rules or index change'],
     [/wsfSetCommunityVisibility|wsfCommunityMembers/, 'a social write or roster call'],
     [/journeys\/manifest\.json/, 'the live deploy manifest'],
-    // The pinned tooling is installed only so the token mints can resolve
-    // google-auth-library (run 54); its CLI is never invoked here.
-    [/node_modules\/\.bin\/firebase|npx\s+(?:--yes\s+)?firebase|(?:^|[\s;&|(])firebase\s+[a-z]/m, 'the firebase CLI'],
+    // Least capability (Director #521 5848893150): the job holds only the pinned
+    // google-auth-library its token mints need; no firebase-tools, no firebase CLI.
+    [/firebase-tools/i, 'a firebase-tools dependency, require or import'],
+    [/FIREBASE_TOOLS/, 'the deployment tooling pin'],
+    [/\.bin\/firebase\b/, 'a firebase binary path'],
+    [/\bnpx\b[^\n]*\bfirebase\b/, 'npx firebase'],
+    [/\bnpm\s+(?:exec|x)\b[^\n]*\bfirebase\b/, 'npm exec firebase'],
+    [/\b(?:yarn|pnpm)\b[^\n]*\bfirebase\b/, 'a yarn/pnpm firebase call'],
+    [/(?:^|[\s;&|(`"'])firebase\s+[a-z-]/m, 'a firebase CLI call'],
+    [/\bnpm\b[^\n]*\s(?:run|run-script)\s/, 'a candidate npm script (for example deploy:staging)'],
   ];
   for (const [re, what] of forbidden) assert.equal(re.test(body), false, `journey-activation must not use ${what}`);
-  assert.deepEqual(body.split('\n').filter((l) => /FIREBASE_TOOLS/.test(l)).map((l) => l.trim()),
-    ['run: npm install --no-save --ignore-scripts "$FIREBASE_TOOLS"'],
-    'deployment tooling appears in journey-activation only as the exact pinned, script-free install');
+  // Every package install in the job is one of exactly two lines: the candidate's
+  // script-free ci (for Playwright) and the pinned, script-free token library.
+  assert.deepEqual(body.split('\n').filter((l) => /\b(?:npm|yarn|pnpm)\b[^\n]*\s(?:install|i|ci|add)\b/.test(l)).map((l) => l.trim()),
+    ['run: npm --prefix apps/westayfit ci --ignore-scripts', 'run: npm install --no-save --ignore-scripts google-auth-library@9.15.1'],
+    'journey-activation installs only the candidate (script-free) and the exact pinned google-auth-library (script-free)');
+  // The scripts the job runs, and everything they import, carry no firebase-tools path either.
+  const seen = new Set();
+  const scan = (file) => {
+    if (seen.has(file)) return;
+    seen.add(file);
+    const src = fs.readFileSync(file, 'utf8');
+    assert.equal(/firebase-tools|\.bin\/firebase\b/.test(src), false, `${file} (run by journey-activation) must not reach firebase-tools`);
+    for (const m of src.matchAll(/(?:from\s+|import\(\s*|require\(\s*)['"](\.{1,2}\/[^'"]+)['"]/g)) scan(path.resolve(path.dirname(file), m[1]));
+  };
+  const scripts = [...body.matchAll(/node\s+ops\/(\.github\/wsf-staging\/[\w./-]+\.mjs)/g)].map((m) => path.resolve(m[1]));
+  assert.ok(scripts.length >= 3, 'the job runs the marker, activation and cleanup scripts');
+  for (const f of scripts) scan(f);
   const block = /^ {4}permissions:\n((?: {6}[^\n]*\n)+)/m.exec(jobs['journey-activation']);
   assert.deepEqual(block[1].trim().split('\n').map((l) => l.trim()).sort(), ['contents: read', 'id-token: write']);
   assert.match(jobs['journey-activation'], /^ {4}environment: wsf-staging$/m);

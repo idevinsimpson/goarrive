@@ -9,6 +9,9 @@
  * `app/` had nothing to resolve. This suite would have failed on that
  * workflow, both statically and by resolving the workflow's own token snippet
  * from the step's real working directory in a simulated runner workspace.
+ *
+ * Least capability (Director #521 5848893150): journey-activation installs only
+ * the exact pinned google-auth-library it mints with, never firebase-tools.
  */
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -21,10 +24,14 @@ const text = fs.readFileSync(WF, 'utf8');
 let passed = 0;
 const test = (n, f) => { f(); passed += 1; console.log(`  ok  ${n}`); };
 
-const INSTALL = 'npm install --no-save --ignore-scripts "$FIREBASE_TOOLS"';
+/** The deploying jobs' pinned tooling (which carries google-auth-library transitively). */
+const TOOLING = 'npm install --no-save --ignore-scripts "$FIREBASE_TOOLS"';
+/** journey-activation's least-capability install: only the exact library the token mints need. */
+const TOKEN_LIBRARY = 'npm install --no-save --ignore-scripts google-auth-library@9.15.1';
 const REQUIRE = /require\("google-auth-library"\)/;
-/** A step installs the pinned tooling when one line of its script is exactly the install (alone, or in a multi-line script). */
-const installs = (s) => s.run.split('\n').some((l) => l.trim() === INSTALL);
+/** A step installs google-auth-library when one line of its script is exactly one of the pinned installs. */
+const installs = (s) => s.run.split('\n').some((l) => l.trim() === TOOLING || l.trim() === TOKEN_LIBRARY);
+const installsTokenLibrary = (s) => s.run.split('\n').some((l) => l.trim() === TOKEN_LIBRARY);
 
 /** jobs → ordered steps { name, workingDirectory, if, run } from the workflow text. Comments are dropped. */
 function parse() {
@@ -86,6 +93,14 @@ test('the pinned tooling is an exact version', () => {
   assert.match(text, /^ {2}FIREBASE_TOOLS: firebase-tools@\d+\.\d+\.\d+\s*$/m);
 });
 
+test('journey-activation installs exactly google-auth-library@9.15.1, once, unconditionally, script-free, at the workspace root, and no deployment tooling', () => {
+  const steps = jobs['journey-activation'].steps;
+  const lib = steps.filter(installsTokenLibrary);
+  assert.equal(lib.length, 1, 'exactly one pinned google-auth-library install');
+  assert.deepEqual([lib[0].if, lib[0].workingDirectory, lib[0].run.trim()], [null, '.', TOKEN_LIBRARY]);
+  assert.deepEqual(steps.filter((s) => s.run.split('\n').some((l) => l.trim() === TOOLING)).map((s) => s.name), [], 'no firebase-tools install in journey-activation');
+});
+
 test('the parser sees every token-minting step (so a regression cannot hide from it)', () => {
   const found = plan();
   const perJob = Object.fromEntries(Object.keys(jobs).map((j) => [j, found.filter((x) => x.job === j).length]));
@@ -100,11 +115,11 @@ test('every job that requires google-auth-library installs the pinned tooling fi
   assert.deepEqual(missing, [], `token mint with no prior pinned install resolvable from its working directory: ${missing.join('; ')}`);
 });
 
-test('journey-activation installs the pinned tooling after the served-marker check and before authentication', () => {
+test('journey-activation installs the pinned library after the served-marker check and before authentication', () => {
   const steps = jobs['journey-activation'].steps;
   const at = (pred, what) => { const i = steps.findIndex(pred); assert.ok(i >= 0, `journey-activation has no ${what}`); return i; };
   const marker = at((s) => /check-served-marker\.mjs/.test(s.run), 'served-marker step');
-  const install = at(installs, 'pinned tooling install');
+  const install = at(installsTokenLibrary, 'pinned google-auth-library install');
   const authIdx = at((s) => s.name === 'Authenticate to Google Cloud', 'authentication step');
   const mint = at((s) => REQUIRE.test(s.run), 'token mint');
   assert.ok(marker < install, 'the marker is still read before anything else is installed');
