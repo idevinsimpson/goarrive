@@ -177,6 +177,34 @@ test.describe('YOU-PARITY-1 · Phase B · the real route', () => {
     await context.close();
   });
 
+  test('a cold goals-read failure keeps the resolved community; a memberships failure claims none (Y-F10)', async ({
+    browser,
+  }) => {
+    test.setTimeout(240_000);
+    const fx = await seedAlex('ywh7');
+    const { context, page } = await phone(browser, { width: 390, height: 844 });
+    await signInVia(page, fx.email, fx.password);
+
+    // Cold: the reload leaves nothing in the account's record. Memberships
+    // answer; the goals read does not.
+    await page.route('**/wsfListGoals**', (route: Route) => route.abort('failed'));
+    await openYou(page);
+    await expect(page.getByTestId('wsf-you-failed')).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId('wsf-you-community')).toContainText('Oak Grove Together');
+    await expect(page.getByTestId('wsf-you-failed')).toContainText('Your identity and community are still here.');
+    await expect(page.getByTestId('wsf-you-retry')).toBeVisible();
+    await expect(page.getByTestId('wsf-you-failed')).not.toContainText(/\b0\b/);
+    await page.unroute('**/wsfListGoals**');
+
+    // Memberships unknown: no community is claimed.
+    await page.route('**/wsfMyCommunities**', (route: Route) => route.abort('failed'));
+    await openYou(page);
+    await expect(page.getByTestId('wsf-you-failed')).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId('wsf-you-community')).toHaveCount(0);
+    await expect(page.getByTestId('wsf-you-failed')).toContainText('Your identity is still here.');
+    await context.close();
+  });
+
   test('a shared total the list did not answer is unknown: no number, no Living WE, never 0', async ({ browser }) => {
     test.setTimeout(240_000);
     const fx = await seedAlex('ywh2');
