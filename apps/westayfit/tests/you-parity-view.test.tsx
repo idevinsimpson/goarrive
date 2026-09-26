@@ -170,6 +170,16 @@ describe('YouParityView', () => {
     expect(text('wsf-you-lead-own')).toBe('25 squats');
   });
 
+  it('an invalid total read through knownShared draws as unknown, never NaN or negative progress (Y-F1)', () => {
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, -5]) {
+      render(member({ open: [{ ...LEAD, shared: knownShared(bad) }] }));
+      expect(text('wsf-you-lead-shared-unknown')).toBe('Not available right now');
+      expect(byId('wsf-you-lead-we')).toBeNull();
+      expect(byId('wsf-you-lead-track')).toBeNull();
+      expect(text('wsf-you-lead')).not.toMatch(/NaN|Infinity|∞|-5|to go/);
+    }
+  });
+
   it('a known lead draws the Living WE and the track', () => {
     render(member());
     expect(byId('wsf-you-lead-we')).not.toBeNull();

@@ -40,6 +40,20 @@ describe('goalTruth', () => {
     expect(statusOf({ open: false, target: 500, shared: UNKNOWN_SHARED })).toEqual({ label: 'CLOSED · RESULT UNAVAILABLE', tone: 'muted' });
   });
 
+  it('an invalid total fails closed to unknown; 0 stays a known zero (Y-F1)', () => {
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -1]) {
+      const shared = knownShared(bad);
+      expect(shared).toEqual(UNKNOWN_SHARED);
+      expect(sharedTotalOf({ shared })).toBeNull();
+      expect(hasInstrument({ shared, target: 500 })).toBe(false);
+      expect(sharedCell({ open: false, target: 500, unit: 'squats', shared })).toBe('Unknown');
+      expect(statusOf({ open: false, target: 500, shared }).label).toBe('CLOSED · RESULT UNAVAILABLE');
+    }
+    expect(knownShared(0)).toEqual({ kind: 'known', total: 0 });
+    expect(hasInstrument({ shared: knownShared(0), target: 500 })).toBe(true);
+    expect(sharedCell({ open: true, target: 500, unit: 'squats', shared: knownShared(0) })).toBe('0 / 500 squats');
+  });
+
   it('a Shared cell is Unknown, never 0', () => {
     expect(sharedCell({ open: false, target: 500, unit: 'squats', shared: UNKNOWN_SHARED })).toBe('Unknown');
     expect(sharedCell({ open: true, target: 150, unit: 'squats', shared: knownShared(155) })).toBe('155 / 150 squats');

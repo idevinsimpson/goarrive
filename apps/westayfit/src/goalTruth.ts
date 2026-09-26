@@ -15,8 +15,15 @@
 
 export type SharedPosition = { kind: 'known'; total: number } | { kind: 'unknown' };
 
-export const knownShared = (total: number): SharedPosition => ({ kind: 'known', total });
 export const UNKNOWN_SHARED: SharedPosition = { kind: 'unknown' };
+
+/**
+ * A confirmed total is a finite, non-negative count. Anything else (NaN,
+ * ±Infinity, a negative) fails closed to unknown, so it can never draw as
+ * progress (Director #492 `5841926397`, W5 Y-F1).
+ */
+export const knownShared = (total: number): SharedPosition =>
+  Number.isFinite(total) && total >= 0 ? { kind: 'known', total } : UNKNOWN_SHARED;
 
 export type GoalTruth = {
   /** status === 'active' on the goal. */
