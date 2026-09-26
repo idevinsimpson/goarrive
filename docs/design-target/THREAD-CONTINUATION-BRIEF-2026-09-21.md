@@ -4,7 +4,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 ## CURRENT — read this first (kept ≤ 1,000 words; updated only on material change; Director #365 `5819944052` §3)
 
-**Stamp: 2026-09-26 00:58Z.** **Precedence:** newer explicit owner decisions first (latest: North-Star Operating System v1 `5841611729`; standing hardening train `5841397324`, which replaces the sprint's expiry; staging cadence `5832907406`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
+**Stamp: 2026-09-26 01:30Z.** **Precedence:** newer explicit owner decisions first (latest: North-Star Operating System v1 `5841611729`; standing hardening train `5841397324`, which replaces the sprint's expiry; staging cadence `5832907406`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
 
 **Heads.**
 
@@ -19,16 +19,16 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 | packet | owner · PR · SHA | state | next |
 | --- | --- | --- | --- |
-| **PERF-MOBILE-1 cp1** | W9 · #494 · product **`889e9775`** / evidence `f6ae5f25` | successor to held `5633057a` (HOLD `5841354004`); W9 reports W7 truth rows T1–T3b PASS, Check 41B gains held, memberReads 18/18; L0 git receipt `5841731335` (protected diff empty → 49 → 49) | W7 acceptance run → Director → L0 merges → W3 pins from `main` `6c2e6b25` → W7 → Director → one dispatch |
-| **YOU-PARITY-1 Phase A** | W6 · #492 · **`5e76a10c`** / `cf3423ec` | **W5 PASS** `5841558662` (Y-F1 low: `knownShared(NaN)` / negative unguarded); head since moved to **`2d71db08`** (additive `RefreshNote` + pending name; 8 fixture PNGs changed bytes although the message says byte-identical) | Director: which SHA; then pixel PASS → L0 integrates by the accelerator (`5840999929`), no staging |
-| **PROGRESS-PARITY-1 Phase A** | W6 · #495 · head **`20c8a5ac`** (was `b8b96f61` / `0bae01e3`) | stacked on You; imports `goalTruth.ts` | W5 delta review on the final SHA → Director pixel |
+| **PERF-MOBILE-1 cp1** | W9 · #494 · product **`889e9775`** / evidence `f6ae5f25` | W7 Check 47 PASS on routed rows (`5841848373`); **Director HARDENING HOLD** `5841923744`: H4b (joined pre-removal `wsfListGoals` repopulates a removed community) blocks acceptance; fix = one background own-membership read on Community Home return; H3c is a later successor | W9 successor → W7 H4b + T1–T3b carry + 41B → Director → L0 merges → W3 pin from `main` `6c2e6b25`; expect 49 → 49 |
+| **YOU-PARITY-1 Phase A** | W6 · #492 · **`5e76a10c`** / `cf3423ec` | **W5 PASS** `5841558662`; Director `5841926397`: keep `5e76a10c`, add Y-F1 guard (NaN / ±Infinity / negative → unknown) as one successor; `2d71db08` RefreshNote moves to Phase B | W6 successor → W5 delta → Director pixel → L0 integrates (accelerator `5840999929`), no staging |
+| **PROGRESS-PARITY-1 Phase A** | W6 · #495 · head `006d0899` | Director: restack exact `b8b96f61` on the hardened You SHA; Progress files byte-identical | W5 delta → Director pixel |
+| YOU-PARITY-1 Phase B | W6 · #498 · `b99f59a4` (on `889e9775` + `2d71db08`) | L0 receipt `5841931755`: protected diff empty; both bases held | restack on accepted PERF + hardened You → W7 |
 | **COMMUNITY-PRESENTATION-ACCELERATOR-1** | W4 · #496 · product `6acd0243` / evidence `8a00228e` | delivered, pure components only | Director review → W5 |
 | **COMMUNITY-SETTINGS-PARITY-1 cp1** | W9 · #497 · `aa22c723` (on `889e9775` + parked cp3 `e7ea3432`) | Settings holds privacy controls; failed save stays said | after PERF acceptance; W7 |
 | **MEMBER-SNAPSHOT-1** (`5841348058`) | Phase A backend (W4 or bounded backend worker); Phase B consumer after PERF | Phase A does **not** merge before PERF stages unless its consumer is ready | per release train |
 | **PRIVACY-TOGGLE-STAGING-1** | owner as operator · harness merged `6c2e6b25` | setters SHUT (run 50); no Claude identity can do Operation 2; W7 Check 43 emulator PASS | owner Operation 2 read-back → one `social-privacy` dispatch → seven-row receipt |
 | **HARDENED-MEMBER-JOURNEY-1** | W7 · `a55046f5` | H1–H4 baselined on served; **H3c** (silent failed Home refresh) and **H4b** (no eviction after refusal) fail; H5 waits on Settings | rerun on successors |
 | SOCIAL-DEMO-SEED-MODE | W3 · #484 `4c1ac1d9` | W7 carry confirmed | Director → L0 PLAN → APPLY / VERIFY |
-| MOVEMENT-VISION-1 / -NORTHSTAR-1 | W10 #475 `eda58218`; Lovable remix `c1b16a13` | isolated R&D; NOT READY | owner phone trial |
 
 **Standing lanes (beyond the sprint, `5841397324`).** W9: PERF → Community + Settings → route hardening. W6: You / Progress Phase A → route hooks → parity. Snapshot lane: backend → cold-cache consumer. W7: primary QA. W5: QA2 / hardening only. W3: ops, evidence, audits, release prep. No workers for utilization. **Hardened DoD** after each route's parity acceptance: truth / illegal states, concurrency / freshness, degraded network, navigation / lifecycle, accessibility / responsive (44 px, 320 / 390 / 430, 200% text), iOS / Android export sanity, honest evidence. A truth / privacy / isolation / race defect blocks acceptance; later hardening does not hold an accepted milestone.
 
@@ -40,7 +40,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 **Queued Lovable references** (after current routes stabilise; Free Chat only if verified): REWARD-MOMENTS-NORTHSTAR-1 (`5841635724`), EVENT-OPS-NORTHSTAR-1 (`5841637973`, after EVENT-CAPABILITY-AUDIT-1), REP-COUNT-R&D-1. **Lovable active build owner: NONE.** Frozen: project `e15b9fa0-b2a0-4314-bc21-9c573b8eceb1`, NORTHSTAR-OVERNIGHT-1 `a15a610e` / `973e1141`.
 
-**Blocked.** W8 and W2 out of usage credits (other model); L0 `create_session` refused by classifier (#365 `5840866823`) — not retried. Owner: Operation 2; lab phone test (`5826104270`).
+**Blocked.** W8 / W2 out of credits; L0 `create_session` refused (#365 `5840866823`). Owner: Operation 2; lab phone test (`5826104270`); MOVEMENT-VISION R&D.
 
 **Operating rules.** One writer per file. Only L0 integrates, by merge commit, after the Director's ACCEPTED of an exact SHA. SENT ≠ ACK ≠ executing. No new or replacement worker. **L0 alone dispatches WSF staging via the workflow and skill; no production, no credential workaround, no IAM / WIF change; no secrets, no force-push.** Real comment ids only; models change only by the owner. **Worker wake:** handoff comment on the worker's PR; if unACKed and idle, **one** deduplicated one-shot `create_trigger` bound to that session; never for a busy worker, never interrupt.
 
