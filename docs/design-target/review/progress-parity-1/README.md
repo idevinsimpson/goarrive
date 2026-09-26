@@ -296,3 +296,78 @@ WSF_PLAYWRIGHT_BASE_URL=http://127.0.0.1:5010 \
   ./node_modules/.bin/playwright test --config=playwright.config.ts tests-e2e/sprint-w6-progress-parity.spec.ts
 # evidence: prefix WSF_CAPTURE_FRAMES=1 and add -g evidence
 ```
+
+## Phase B — the real route hook (`claude/wsf-w6-progress-hook-1`)
+
+**Status: delivered for W7 route QA and the Director's integration check. Not accepted, integrated
+or staged.**
+
+| | |
+|---|---|
+| Base | W9 PERF-MOBILE-1 cp1 successor **`889e9775`** (#494), exactly |
+| Product SHA | **`7f8f0febdc3613b83bc2c93afc1ea2381d4f9375`** |
+| Component | Progress Phase A `006d0899`, stacked on You `2d71db08`. It is `20c8a5ac` plus an optional `noCommunity` flag. Every Phase A frame is byte-identical |
+| Route | `app/(tabs)/activity.tsx`: PERF's reads, record, focus revalidation and checking / stale / Retry are kept. Inside the effect, only the empty-communities literal gains `canStart: false` |
+
+**What the adapter owns:**
+- An unanswered `sharedTotal` → `UNKNOWN_SHARED`, never 0.
+- `periodLabel` in the goal's own IANA zone.
+- Open goals are ordered soonest-ending first, as on You; PERF listed them in read order.
+- `canStart` = some goal read is active, has a target above 0 and an open window.
+- `memberName` and `noCommunity` come only from the account's record (peeks, no new read).
+- `receipts: null`.
+- The view is keyed by phase and attempt, so every state arrives at its own top, as PERF's
+  scroll-to-top did.
+- Start moving keeps PERF's `router.replace('/move')`.
+
+**Tests (`tests-e2e/sprint-w6-progress-hook.spec.ts`, real route, emulator):**
+
+| run | result |
+|---|---|
+| on `889e9775`, without the hook (fail-first) | **3 / 4 fail**. The fourth, stale kept and retried, is a PRESERVE row for PERF's own behaviour and passes on both |
+| first run on the hook | 3 / 4. The eyebrow expected "ALEX M." on a direct visit; the name comes only from the record, so before any profile read it correctly reads "PRIVATE TO YOU". The test now checks both paths |
+| rerun | **4 / 4**; after the ordering change, 4 / 4 again with the order asserted |
+| gated evidence run | 5 / 5 |
+
+**Existing specs that drive Progress, first run on the hook: 78 / 86**, with 7 failures and 1
+gated skip. All seven pinned the pre-parity composition:
+- `progress-list`: the "N goals you have added to" line, the percentage, the RECORDED tag.
+- `sprint-w8-progress-copy`: done-rows and the finished-goal Living WE; the empty state for a
+  member in **no community** still promising a first contribution with a Start moving (W7 Check
+  44's baseline gap); W8's error sentence with its Home and MOVE exits.
+- `ui-app-shell`: the old row id.
+
+Each is re-pointed to the same truth in the reference composition, with the reason in a comment
+beside it:
+- the summary line and one total per unit;
+- the SHARED cell and lifecycle pill instead of the percentage;
+- YOURS instead of RECORDED;
+- goal rows, with no Living WE on Progress;
+- no Start moving without a community, plus truthful copy;
+- the reference failure sentence, with the tab bar's Home and MOVE as the ways on;
+- YOURS and SHARED shown apart.
+
+After that, **85 / 85** passed, with 1 gated skip. The final ordering change was re-run only
+against the hook spec, `progress-list` and `sprint-w8-progress-copy` (14 / 14). The other specs
+ran on the build just before it.
+
+**Disclosed:** during that last run I invoked `sprint-w8-progress-copy` under
+`WSF_CAPTURE_FRAMES=1`, and its producer rewrote W8's accepted
+`community-presence/progress/PROPOSED-*.png` locally. They were restored with `git checkout`
+before any commit and never committed; the evidence guard is intact (9 / 20).
+
+Focused units: goal-truth + Progress + memberReads 59 / 59; `ts:check` 0.
+
+**For the Director:** on a direct visit the eyebrow shows the member's name only once the profile
+is in the account's record, for instance after You. Reading the profile on Progress would add a
+request back into PERF's measured budget, so it is not done here.
+
+### `route/` — full-viewport route frames (no crop, no alignment)
+
+| frame | full-frame differing share |
+|---|---|
+| `route/route-progress-populated-390x844.png` | 0.1669 against the reference's populated 844 |
+| `route/route-progress-populated-390x640.png` | canonical only; the reference has no populated 640 |
+
+Most of the remaining difference is the shell (W9's: no prototype strip, its own top bar and tab
+bar) and the receipt seam. `route/manifest.json` holds the SHA-256 digests.
