@@ -1,6 +1,13 @@
-# We Stay Fit — Releases
+# We Stay Fit — Releases (Historical Log)
 
-Append-only release log. Each entry: date, milestone, staging channel URL, functions deployed, GoArrive-unchanged proof, PR link.
+> Standing: historical append-only release log. It is not the complete current staging
+> ledger after the control-plane transition. Current served staging, deployment runs,
+> rollback, hosted verification and blockers live in the canonical CURRENT STATE comment
+> on #365 plus the actual GitHub Actions/release receipts. Absence of a recent entry here
+> does not mean no later staging release occurred.
+
+Each historical entry records the evidence available at the time. Do not rewrite old
+receipts to make them look current.
 
 ## Format
 
@@ -68,3 +75,8 @@ Append-only release log. Each entry: date, milestone, staging channel URL, funct
 **Post-commit redeploy**
 
 After committing and pushing the fixes above, one more rebuild + channel redeploy is performed so `/health` displays the SHA of the actual PR HEAD (not the SHA that was HEAD at the time of the first post-fix rebuild).
+
+
+## Current receipt system (2026-09-26)
+
+Later WSF staging releases use the dedicated control plane and per-run receipts rather than relying on this file as the sole ledger. A current release claim must identify the approved candidate, operational-main workflow source, deployment run, served marker, inventory/config effects, hosted verification/cleanup, and rollback anchor. Member-visible milestones additionally use the changed-journey manifest/owner-test-card discipline when applicable.

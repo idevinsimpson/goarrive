@@ -62,10 +62,20 @@ For deep dives into specific areas, consult the files in the `.claude/` director
 | `.claude/known-issues-and-lessons.md` | Resolved bugs, performance risks, and architectural decisions to preserve. |
 | `.claude/testing-and-quality.md` | Testing infrastructure, quality checklist, and deployment verification. |
 | `.claude/existing-docs-index.md` | Index of all existing documentation files with relevance ratings. |
-| `.claude/firebase-deploy-setup.md` | **Mandatory.** How to deploy to staging/production using the service account key in non-interactive environments. |
+| `.claude/firebase-deploy-setup.md` | **GoArrive deploy path only.** Do not use its service-account-key procedure for WSF staging; WSF uses the reviewed operational-main staging control plane. |
 | `.claude/interaction-rules.md` | **Mandatory.** Behavioral rules: scope adherence, continuous improvement loop, communication style, and initiative protocol. |
 | `.claude/task-routing.md` | **Mandatory.** Task routing protocol — Code vs Browser vs Hybrid workflow split based on authentication state. |
-| `docs/westayfit/WE_STAY_FIT_MASTER.md` | **Mandatory for any We Stay Fit work.** Master source of truth for WSF — brand and messaging (including which lines are superseded), the three-surface architecture, system-of-record boundaries, agent routing, the milestone roadmap, the FitLife Expo 2026 activation, and the decisions only Devin may make. Read before acting on WSF; it governs over older WSF handoff documents. |
+| `docs/westayfit/DOCUMENT_AUTHORITY_AND_SUPERSESSION.md` | **Mandatory for any We Stay Fit work.** Defines current product/visual/technical/current-state precedence and marks older WSF documents as governing, historical, or superseded. |
+| `docs/westayfit/WE_STAY_FIT_STRATEGIC_MASTER_v3_1_ADDENDUM_2026-09-26.md` | **Mandatory with Strategic Master v3.0 for WSF product work.** Adds North Star/app-feel/member-shell/social/operations decisions without reopening the Living WE strategy. |
+| `docs/westayfit/WE_STAY_FIT_PROJECT_INSTRUCTIONS_v3_1_2026-09-26.txt` | Compact WSF execution instructions. For deeper meaning, the Strategic Master v3.0 + v3.1 addendum govern. |
+| `docs/westayfit/ops/NORTH_STAR_JOURNEY_MANIFEST.json` | Exact frozen Lovable/target references for member-visible journey parity work. |
+| `docs/westayfit/ops/FABLE_OPERATING_PROTOCOL_v1.md` | Current WSF coordination/evidence protocol. Volatile status lives in the canonical CURRENT STATE comment on #365. |
+| `docs/westayfit/WE_STAY_FIT_MASTER.md` | **Historical v1.2 only.** Superseded product master retained for architecture/decision lineage; never use it to override the current strategy. |
+
+
+### WE STAY FIT current authority
+
+For WSF work, read `docs/westayfit/DOCUMENT_AUTHORITY_AND_SUPERSESSION.md` first. Then use Strategic Master v3.0 + the v3.1 addendum for product meaning, `ops/NORTH_STAR_JOURNEY_MANIFEST.json` for frozen member-visible references, `ops/FABLE_OPERATING_PROTOCOL_v1.md` for current coordination, and the canonical CURRENT STATE comment on #365 for volatile state. Do not treat the superseded September 6 master, old milestone plan, or a current Lovable head as higher authority.
 
 ## Recent Context
 Recent development has focused heavily on enhancing the coach and admin experience. Key updates include fixing admin impersonation for lazy-loaded components and implementing prorated earnings caps with yearly admin configuration. The team also built a bulk movement upload feature utilizing AI auto-analysis and enhanced the workout thumbnail grid with dynamic scaling (4:5 aspect ratio). Additionally, sorting logic across all libraries was updated to prioritize the most recently edited items.

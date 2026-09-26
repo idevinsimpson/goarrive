@@ -5,10 +5,10 @@ GoArrive (G->A) is an online fitness coaching platform and coach operating syste
 
 ## Two Applications Live In This Repository
 
-As of 2026-08-26, this repository hosts **two first-party applications** that ship from the same Firebase project (`goarrive`) but are otherwise isolated:
+This repository hosts **two first-party applications**. The established production architecture shares the `goarrive` Firebase project with isolated app/codebase/hosting boundaries; current WSF staging is separately controlled in `westayfit-staging`. Do not infer a production-project split from the staging environment:
 
 - `apps/goarrive/` — the GoArrive coach/member fitness platform (the subject of everything else in this file).
-- `apps/westayfit/` — We Stay Fit, a universal-community app introduced in milestone M-U1 (see `docs/westayfit/` for its full doc set, invariants, and release log).
+- `apps/westayfit/` — We Stay Fit, the community movement product (see `docs/westayfit/DOCUMENT_AUTHORITY_AND_SUPERSESSION.md` for the current WSF authority map).
 
 **Every rule in this file was written for GoArrive.** None are being deleted, reworded, or weakened. The classification below explains how each existing rule maps to the WSF app; when in doubt, treat any rule below this section as GoArrive-only unless it appears in the GLOBAL AND PRESERVED list.
 
@@ -17,23 +17,23 @@ As of 2026-08-26, this repository hosts **two first-party applications** that sh
 - Privacy enforcement happens at the Firestore Rules layer, not just app logic. `firestore.rules` is a single shared file across both apps; changes require dual regression against both apps (see `docs/westayfit/ARCHITECTURE.md` invariant (d)).
 - `camelCase` everywhere: Firestore documents, TypeScript interfaces, props, state.
 - `FlatList` or `react-native-draggable-flatlist` for lists over 500 items.
-- Always use `thumbnailUrl` for initial media loads — never full video on first render (applies whenever an app renders media; WSF renders no media in M-U1).
+- Always use `thumbnailUrl` for initial media loads — never full video on first render (applies whenever either app renders media).
 - Never deploy to production without explicit Devin approval.
 - Always stage before production.
 - Do-not-build infrastructure items (MySQL, TiDB, Drizzle, S3, Fastify) apply to both apps — WSF ships on the same Firebase stack.
 
 ### CLARIFIED (applies with WSF-specific note)
 
-- **Standing Release Policy — Staging & Production** (2026-08-01) applies to WSF, but WSF has its own release train and its own manifest / receipt discipline documented in `docs/westayfit/RELEASES.md`. A staging deploy of one app does not standing-approve the other. Cross-app bundling into one integration branch is not permitted; combined-staging bundles are per-app.
-- **`/setup` and `/ship` agent commands** operate on `apps/goarrive/` by default. WSF deploys use their own commands (see `docs/westayfit/ARCHITECTURE.md` "Deploy Boundary Summary" table). Do not invoke `/ship` for WSF changes.
+- **Standing Release Policy — Staging & Production** (2026-08-01) applies to WSF, but WSF has its own release train and current manifest / receipt discipline under `docs/westayfit/ops/`, operational `main`, and `skills/wsf-staging-deploy/SKILL.md`. `docs/westayfit/RELEASES.md` is historical, not the current mutable release-state ledger. A staging deploy of one app does not standing-approve the other.
+- **`/setup` and `/ship` agent commands** operate on `apps/goarrive/` by default. For WSF staging, do not reconstruct a direct Firebase CLI path from this file; read `skills/wsf-staging-deploy/SKILL.md` on operational `main` and use the reviewed WSF staging control plane. Do not invoke `/ship` for WSF changes.
 
 ### SCOPED TO apps/goarrive (WSF explicitly does not follow)
 
 - `effectiveUid`, `claims.coachId`, `useAuth()` — WSF has no `useAuth()` hook, no admin impersonation model, and (per the zero-custom-claims invariant) no custom claims at all.
-- `where('coachId', '==', coachId)` on all coach-scoped queries — WSF has no coaches and no coach-scoped queries.
+- `where('coachId', '==', coachId)` on all GoArrive coach-scoped queries — WSF community authorization does not use GoArrive coachId-scoped queries. Optional coaching remains a separate GoArrive-owned layer, not a WSF custom-claim role.
 - Three-role model (`platformAdmin`, `coach`, `member`) — WSF has a different authorization model based on Firestore documents, not claims. **WSF must not add a fourth role to the GoArrive claims either.**
 - Roles set via Firebase Custom Claims — WSF functions never call `setCustomUserClaims` (statically enforced by `apps/westayfit/tests/zero-custom-claims.test.ts`). The zero-claims invariant exists because 7 of the 8 GoArrive claims call sites replace the whole claims object and would silently clobber WSF-specific claims (see `docs/westayfit/ARCHITECTURE.md` (f) for the enumerated sites).
-- Product language ("coach", "member", "movement", "Command Center") — WSF product language is its own (see `docs/westayfit/UNIVERSAL_COMMUNITIES_CHARTER.md`).
+- Product language ("coach", "member", "movement", "Command Center") — WSF product language and experience are governed by Strategic Master v3.0 + the v3.1 addendum and `docs/westayfit/WE_STAY_FIT_PROJECT_INSTRUCTIONS_v3_1_2026-09-26.txt`; the Universal Communities Charter is historical foundation only.
 - Build Tab, Workouts, block canvas, 4:5 aspect ratio for movements — GoArrive product concepts; WSF has none.
 - "White-label / custom domains" under Do Not Build — GoArrive-scoped. WSF is a separate first-party product with its own hosting site (`westayfit-app`) and does not conflict with this rule.
 
@@ -44,7 +44,15 @@ As of 2026-08-26, this repository hosts **two first-party applications** that sh
 - Any change to `firestore.rules` or `storage.rules` (both shared files) requires regression proof against both apps before merge.
 - Any deploy that touches functions must use `--only functions:default` or `--only functions:westayfit` — never the bare `--only functions` (which redeploys both codebases).
 
-For full WSF architecture, invariants, and release discipline, see `docs/westayfit/`.
+For WSF, read these before acting:
+- `docs/westayfit/DOCUMENT_AUTHORITY_AND_SUPERSESSION.md`
+- `docs/westayfit/WE_STAY_FIT_STRATEGIC_MASTER_v3_1_ADDENDUM_2026-09-26.md` together with Strategic Master v3.0
+- `docs/westayfit/WE_STAY_FIT_PROJECT_INSTRUCTIONS_v3_1_2026-09-26.txt`
+- `docs/westayfit/ops/NORTH_STAR_JOURNEY_MANIFEST.json` for member-visible journey references
+- `docs/westayfit/ops/FABLE_OPERATING_PROTOCOL_v1.md` for current coordination
+- the canonical CURRENT STATE comment in #365 for volatile status.
+
+Do not use `docs/westayfit/WE_STAY_FIT_MASTER.md` v1.2 or the Universal Communities Charter to override the current strategy; both are retained for historical lineage.
 
 ## Tech Stack
 - Frontend: React Native + Expo (web, iOS, Android)

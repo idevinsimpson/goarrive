@@ -85,7 +85,7 @@ if nobody writes down which URL was actually hit.*
 
 R-1 covers the ruleset. The index file has identical replace-the-whole-file semantics on `firebase deploy --only firestore:indexes`, and one extra edge: a deploy from a stale file can propose **deleting** indexes it does not contain. A dropped composite index is a production outage on whatever query needed it, with a rebuild measured in minutes to hours.
 
-Currently latent — 48 indexes, zero for `wsf*`, because WSF runs no compound queries at all; every read is a direct `doc()` get. The first one (M-U3 invites, or listing a member's communities) walks straight into it.
+Historical note: the original entry was written before WSF introduced a composite-index requirement. That is no longer current. As of the September 26 reconciliation, WSF source/development includes index-dependent work and cloud READY state is a separate release gate. Do not infer index readiness from source presence or an accepted implementation; require the bounded operator/read-back receipt before the dependent callable is treated as ready.
 
 **Mitigation:** GATE 0 — the live-vs-`main` diff built for the rules deploy — has no equivalent for indexes. Build one against the indexes endpoint before the first WSF index ships, and never accept an index deploy that proposes a deletion.
 
@@ -97,33 +97,30 @@ The audit was right. The record of it was a chat message, so what survived was a
 
 **Mitigation:** an audit whose conclusion matters to a later decision lands in this repo, in `RISKS.md` or `DECISIONS.md`, in the same work session — not in the channel where the work was discussed. When an audit clears a gate, write down the scenarios it *did not* clear as explicitly as the ones it did.
 
-## R-WSF-E1 — goal-read authorization (OPEN — source implementation pending acceptance and hosted verification)
+## R-WSF-E1 — goal-read authorization (CLOSED in served lineage; retain as regression risk)
 
-**Was:** possession of a `goalId` returned a community's shared progress to anyone, through
-`wsfGoalPulse`; `wsfChallengePulse` did the same for challenge aggregates. Package D's
-removal controls did not close it, and its own tests said so.
+The original defect was real: possession of a `goalId` could expose shared progress through
+the aggregate read path without the later publication/member boundary.
 
-**Now: source implementation pending acceptance and hosted verification.** The risk stays
-OPEN. It was briefly recorded as CLOSED on 2026-09-16; that was wrong, and the correction is
-the point of this entry. Nothing that reaches a deployed environment has changed. What exists
-is source on `claude/wsf-package-e-display-auth` — per-goal `aggregateDisplayAuthorized`,
-default off, Champion-controlled through a real interface control, plus an active-member
-route for the member experience. See DECISIONS.md 2026-09-16.
+That implementation-state description is now historical. The authorization model
+(`aggregateDisplayAuthorized`, active-member access, protected own-history behavior and
+the shared access evaluator) is present in the currently served product lineage.
 
-**The deployed baseline is still `1cbf231`, which does not contain any of it.** Until a
-deployment of this branch is verified against hosted staging, every deployed WSF surface
-behaves exactly as it did before Package E: `wsfGoalPulse` serves any caller holding a
-`goalId`. Treat the defect as live in every environment.
+Hosted staging evidence has exercised the relevant Package E authorization rows, including:
+- display authorization round trip;
+- display session/refusal lifecycle;
+- closed-goal authorization lifecycle;
+- protected own-credit read;
+- former-member history/replay;
+- per-goal isolation and stale-response admission.
 
-**What "closed" will require**, all three: Devin accepts the source; the branch deploys;
-the hosted staging smoke re-runs against the deployed build and shows the refusal and the
-authorized path behaving as they do locally. Local verification is against `demo-wsf-local`
-only and is not hosted verification.
+The risk is therefore no longer "source pending." It remains a regression risk because
+publication authorization, membership access and possession of an id must never collapse
+back into one permission.
 
-**Residual even then, and deliberately not closed here:** the transport remains publicly
-reachable, which is correct and is not the boundary. Whether the legacy challenge aggregate
-should ever be shown anonymously is an open compatibility decision, not a defect.
-
+**Mitigation:** keep the Package E hosted authorization rows in the staging regression
+contract, preserve per-goal authorization/default-off semantics, and treat public aggregate
+display permission separately from community membership and member privacy.
 ## R-WSF-E2 — the member experience around an authorized goal is unreviewed (OPEN)
 
 Package E made publication a deliberate permission and proved the boundary holds. It did
@@ -140,3 +137,40 @@ community to use it is the review.
 rediscovered as a surprise. It is not a licence to redesign anything inside Package E, and
 no Package E change should be justified by it. It needs its own packet and its own owner
 decision about scope before any of it is built.
+
+## R-12: Competing WSF masters can send an agent backward in time
+
+The repository retained a September 6 file titled `WE_STAY_FIT_MASTER.md` that called
+itself the governing master while the project had already adopted Strategic Master v3.0
+on September 11. Other files still described M-U1 as current.
+
+**Risk:** a new worker can follow a document that is internally coherent but no longer
+authoritative, reintroducing superseded age gates, milestone meanings, deployment paths or
+visual direction.
+
+**Mitigation:** `DOCUMENT_AUTHORITY_AND_SUPERSESSION.md`; v3.1 project instructions;
+prominent supersession banner on the v1.2 master; CURRENT_STATE.md reduced to a pointer to
+the canonical editable #365 state.
+
+## R-13: North Star drift from "latest Lovable" can invalidate in-flight parity work
+
+The WE Community Home reference continues to evolve. An implementation packet that starts
+against one accepted state and later chases the newest Lovable head can never have a stable
+target or evidence set.
+
+**Mitigation:** freeze journey-specific references in
+`ops/NORTH_STAR_JOURNEY_MANIFEST.json` / issued packets. A newer project head does not
+retarget work without an explicit Director decision and manifest update.
+
+## R-14: Node.js 20 decommission threatens post-freeze WSF function deploys
+
+Current WSF function deployment receipts warn that Node.js 20 was deprecated April 30,
+2026 and is scheduled for decommissioning October 30, 2026.
+
+**Risk:** a release that otherwise passes source review may become undeployable after the
+runtime deadline.
+
+**Mitigation:** plan and independently review the runtime upgrade as an explicit
+operational packet before decommissioning; do not bundle it incidentally into a product
+feature release.
+
