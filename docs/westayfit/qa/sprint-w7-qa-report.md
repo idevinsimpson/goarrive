@@ -4743,3 +4743,26 @@ Operational QA only. It was run from detached worktrees of `cf13140b` and `6be81
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0 (9 + 20). No artifacts committed.
 
 **Status:** PASS on rows 1–9 at `cf13140b`, with findings 1–3 for the Director. Nothing is dispatched, merged, accepted or staged by W7.
+
+## 58 · CONTROL-PLANE-CI-1 closure delta (C4–C6), #513 at exact `abbab755d1217699154eb0a2819dc74f0b268718` against Check 57's `cf13140b` (handoff #434 `5847279036`; W7 ACK `5847280559`): **FAIL on one exact C4 case; C5, C6 and the boundary PASS**
+
+- **The delta:** one commit on `cf13140b`, touching 10 files, all under `.github/`.
+- **Run:** locally with synthetic input. Nothing was merged, activated or deployed, and no live manifest was created.
+
+| # | Item | Result |
+|---|---|---|
+| **C4** | **Cleanup truth** | **The order is right, and the blocking is right.** The runner writes only `changed-journeys.json`; it **no longer renders the card**. "Remove changed-journey fixtures" is **no longer `continue-on-error`**, and `set -euo pipefail` plus a bare `node …cleanup-synthetic.mjs` make the cleaner's exit status the step's, so a failed cleanup fails `hosted-verify`. The new "Render the changed-journey owner card" runs after it and reads the cleanup manifest and receipt. **Card behaviour run directly, with both journeys PASSED:** COMPLETE receipt → **PASSED**; INCOMPLETE → **INCOMPLETE** ("every journey passed, but fixture cleanup is not complete"); MANIFEST_UNUSABLE → INCOMPLETE; an unusable receipt with the manifest present → NOT_RUN / INCOMPLETE; a missing receipt with the manifest present → NOT_RUN / INCOMPLETE. **FAIL: a missing receipt with no manifest → `NOT_NEEDED` → PASSED, and an unusable (non-JSON) receipt with no manifest → `NOT_NEEDED` → PASSED**, although the results prove the drivers ran and so fixtures were created. **This is reachable from a real cleanup failure:** `cleanup-synthetic.mjs` runs `fs.rmSync(MANIFEST)` (line 363) **before** `finish('COMPLETE')` writes the receipt (line 101). A receipt write that fails there, for example on a full disk, leaves neither file. The step then fails and `hosted-verify` goes red, yet the card still renders PASSED. My C4 mutants are all caught: the cleanup made `continue-on-error`, the cleaner's exit swallowed with `|| true`, and INCOMPLETE marked ok. |
+| **C5** | **Reload persistence** | **PASS.** The seeded `reloadLosesSelection` defect makes the real Community driver fail **on** "on return, the selected community is still Summit Journey Club". **My Check 57 bypass mutant (`returned === other.name` → `true`) is now caught.** |
+| **C6** | **Precision and recovery** | **PASS.** The kit and `CONTROL-PLANE.md` now say: documents are tracked **before** write; an account **immediately after** `signUp` returns its uid and **before any dependent document**; and the one window is named, with recovery by the `wsf-<runTag>-…@example.com` email. The cleaner's recovery text now names `e5grp-`, `e5jgrp-` and **`e5cgrp-`**, `e5goal-`, `e5jgoal-` and **`e5cgoal-`**, and the generic rule (the run tag in every document id). |
+| **Boundary / regression** | | **PASS.** `.github/` only. **The Package E "Remove synthetic fixtures" step is byte-identical** (md5 of the step block equal at both SHAs). `pin-candidate.mjs`, `check-milestone-manifest.mjs`, `milestone-manifest.mjs`, the registry and both drivers are **unchanged** from `cf13140b`. There is no `journeys/manifest.json`, and `applies: false`. `run-all`: **22 suites, exit 0.** My Check 57 regression mutants are still caught: the empty registry, Settings' order check bypassed, and the C3 gate made non-blocking. |
+
+**The one finding (material, C4):** `cleanupStatus` treats "no receipt and no manifest", and "an unusable receipt and no manifest", as `NOT_NEEDED` (ok), without asking whether fixtures were created. Smallest corrections, both within W3's scope:
+- **(a)** in `cleanup-synthetic.mjs`, write the COMPLETE receipt **before** removing the manifest;
+- **(b)** in `owner-test-card.mjs`:
+  - never map an unusable receipt to `NOT_NEEDED`;
+  - treat "the results show a driver ran" as proof that fixtures were created, so a missing receipt is `NOT_RUN`;
+  - add those two cases to `owner-test-card.test.mjs`.
+
+- **Gates:** `ts:check` 0; `check-evidence-intact` 0 (9 + 20). No artifacts committed.
+
+**Status:** **FAIL at `abbab755` on that C4 case.** C5, C6 and the boundary are closed, and Check 57's C1–C3 PASS is preserved. W7 merged, activated and deployed nothing.
