@@ -1,0 +1,25 @@
+{
+  "lovableRef": "09b8a73cc4e661115e52cb1ec4aebcb625c5fc9a",
+  "source": "app/(tabs)/activity.tsx on 87997c58 (PERF ad3d2f88 + Phase A 02f86fc2 / 92993f09) + ProgressParityView",
+  "frames": [
+    {
+      "state": "populated",
+      "viewport": "390x844",
+      "route": "route/route-progress-populated-390x844.png",
+      "routeSha256": "e406929eb9d1091487a01ba6267034b6f65ba99bae11804988f91a0db2854d7e",
+      "note": "full viewport, no crop, no alignment; shell masthead and tab bar are the real ones",
+      "lovable": "lovable-09b8a73c/progress-populated-390x844.png",
+      "lovableSha256": "2ff0dce8aa7e68a68a5ce82469d474c876754fa1cd23900cb0a5ff60d8fc7eea",
+      "sideBySide": "route/cmp-route-progress-populated-390x844-full-side-by-side.png",
+      "differingPixelShareFullFrame": 0.1669
+    },
+    {
+      "state": "populated",
+      "viewport": "390x640",
+      "route": "route/route-progress-populated-390x640.png",
+      "routeSha256": "042586e9b5a7bce8cd69655497b7fa341dd8362ab6316203e653610b1ea3f205",
+      "note": "full viewport, no crop, no alignment; shell masthead and tab bar are the real ones",
+      "lovable": null
+    }
+  ]
+}
