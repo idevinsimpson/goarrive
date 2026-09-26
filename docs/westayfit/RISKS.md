@@ -140,3 +140,40 @@ community to use it is the review.
 rediscovered as a surprise. It is not a licence to redesign anything inside Package E, and
 no Package E change should be justified by it. It needs its own packet and its own owner
 decision about scope before any of it is built.
+
+## R-12: Competing WSF masters can send an agent backward in time
+
+The repository retained a September 6 file titled `WE_STAY_FIT_MASTER.md` that called
+itself the governing master while the project had already adopted Strategic Master v3.0
+on September 11. Other files still described M-U1 as current.
+
+**Risk:** a new worker can follow a document that is internally coherent but no longer
+authoritative, reintroducing superseded age gates, milestone meanings, deployment paths or
+visual direction.
+
+**Mitigation:** `DOCUMENT_AUTHORITY_AND_SUPERSESSION.md`; v3.1 project instructions;
+prominent supersession banner on the v1.2 master; CURRENT_STATE.md reduced to a pointer to
+the canonical editable #365 state.
+
+## R-13: North Star drift from "latest Lovable" can invalidate in-flight parity work
+
+The WE Community Home reference continues to evolve. An implementation packet that starts
+against one accepted state and later chases the newest Lovable head can never have a stable
+target or evidence set.
+
+**Mitigation:** freeze journey-specific references in
+`ops/NORTH_STAR_JOURNEY_MANIFEST.json` / issued packets. A newer project head does not
+retarget work without an explicit Director decision and manifest update.
+
+## R-14: Node.js 20 decommission threatens post-freeze WSF function deploys
+
+Current WSF function deployment receipts warn that Node.js 20 was deprecated April 30,
+2026 and is scheduled for decommissioning October 30, 2026.
+
+**Risk:** a release that otherwise passes source review may become undeployable after the
+runtime deadline.
+
+**Mitigation:** plan and independently review the runtime upgrade as an explicit
+operational packet before decommissioning; do not bundle it incidentally into a product
+feature release.
+
