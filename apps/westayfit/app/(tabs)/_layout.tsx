@@ -6,13 +6,15 @@ import { View } from 'react-native';
 import { useWsfAuth } from '../../src/auth';
 import { getFirebaseAuth } from '../../src/firebase';
 import { wsfTheme } from '../../src/theme';
-import { useTabsFocusReturn } from '../../src/ui/focusReturn';
+import { armTabsFocusReturnTo, useTabsFocusReturn } from '../../src/ui/focusReturn';
+import { useReducedMotion } from '../../src/ui/useReducedMotion';
 import { MemberTabBar } from '../../src/ui/MemberTabBar';
 import {
   MemberShellActionsProvider,
   useMemberShellActions,
 } from '../../src/ui/memberShellActions';
 import { MemberTopBar, type MemberMenuItem } from '../../src/ui/MemberTopBar';
+import { TabSceneFade } from '../../src/ui/TabSceneFade';
 
 /**
  * THE MEMBER SHELL: one persistent top bar, four real tabs, and MOVE as an
@@ -63,6 +65,7 @@ export default function MemberTabsLayout() {
 
 function MemberShell() {
   const router = useRouter();
+  const reducedMotion = useReducedMotion();
   /**
    * NO ACCOUNT, NO CHROME.
    *
@@ -94,6 +97,8 @@ function MemberShell() {
   */
   const shellRef = useRef<View>(null);
   useTabsFocusReturn(shellRef);
+  // Which tab was selected last, for the tab fade (src/ui/TabSceneFade.tsx).
+  const lastSelectedTab = useRef<string | null>(null);
 
   /**
    * THE MENU HOLDS THE QUIET GLOBAL UTILITIES, AND NOTHING THAT DOES NOT WORK.
@@ -122,7 +127,12 @@ function MemberShell() {
       key: 'settings',
       label: 'Settings',
       href: '/settings',
-      onNavigate: (href) => router.push(href as never),
+      onNavigate: (href) => {
+        // The menu closes as Settings opens, so its item cannot take focus
+        // back; the menu's own button does (src/ui/focusReturn.ts).
+        armTabsFocusReturnTo('wsf-member-topbar-menu-button');
+        router.push(href as never);
+      },
     },
     {
       kind: 'link',
@@ -185,6 +195,29 @@ function MemberShell() {
             // away and back does not throw your page out" true. Named rather
             // than inherited, so a later edit has to argue with a line.
             freezeOnBlur: false,
+            // The navigator swaps tabs instantly; the fade is the entering
+            // tab's content, below (src/ui/TabSceneFade.tsx).
+            animation: 'none',
+          }}
+          /*
+            APP-FEEL-PARITY-1 CHECKPOINT 3. A TAB CHANGE FADES, QUIETLY.
+            The reference's tab switch is "a quiet fade only (no lift/
+            bounce)": the leaving tab is gone at once and the new one comes
+            from 0.35 opacity to full over 140 ms (styles.css MOTION-FEEL-1,
+            --dur-tab). Only a change of tab fades. Reduced motion: none.
+          */
+          screenLayout={({ route, navigation, children }) => {
+            const tabs = navigation.getState();
+            return (
+              <TabSceneFade
+                routeKey={route.key}
+                selectedKey={tabs.routes[tabs.index]?.key}
+                lastSelected={lastSelectedTab}
+                reducedMotion={reducedMotion}
+              >
+                {children}
+              </TabSceneFade>
+            );
           }}
           tabBar={(props) =>
             signedIn ? <MemberTabBar {...props} onMove={() => router.push('/move')} /> : null

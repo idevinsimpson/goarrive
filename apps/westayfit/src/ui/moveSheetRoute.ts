@@ -36,3 +36,15 @@ export function isMoveSheetRoute(route: RouteLike, state: StateLike): boolean {
   if (i <= 0) return false;
   return MOVE_SHEET_BENEATH.has(routes[i - 1]!.name);
 }
+
+/**
+ * APP-FEEL-PARITY-1 CHECKPOINT 3. IS THIS ROUTE OPENED DIRECTLY OVER THE
+ * MEMBER'S TABS? The root stack presents Settings as a side panel exactly
+ * then (`app/_layout.tsx`), and Settings draws a panel to match; opened any
+ * other way -- a cold or deep link, a reload -- it stays the page it was.
+ */
+export function isOverMemberTabs(route: RouteLike, state: StateLike): boolean {
+  const routes = state?.routes ?? [];
+  const i = routes.findIndex((r) => r.key === route.key);
+  return i > 0 && routes[i - 1]!.name === '(tabs)';
+}

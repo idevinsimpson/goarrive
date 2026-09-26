@@ -91,9 +91,10 @@ export function CommunityParityView(props: CommunityParityProps) {
             </Text>
           ) : null}
           <View style={s.facts} testID="wsf-parity-facts">
-            <Fact label="MEMBERS" value={members === null ? null : formatCount(members)} testID="wsf-parity-fact-members" />
-            <Fact label="YOUR ROLE" value={roleText} testID="wsf-parity-fact-role" />
-            <Fact label="GOALS" value={goalsCount === null ? null : formatCount(goalsCount)} testID="wsf-parity-fact-goals" />
+            {/* The reference's <dt>Members</dt>, uppercased by style as its CSS does. */}
+            <Fact label="Members" value={members === null ? null : formatCount(members)} testID="wsf-parity-fact-members" />
+            <Fact label="Your role" value={roleText} testID="wsf-parity-fact-role" />
+            <Fact label="Goals" value={goalsCount === null ? null : formatCount(goalsCount)} testID="wsf-parity-fact-goals" />
           </View>
         </View>
 
@@ -199,6 +200,8 @@ export function CommunityParityView(props: CommunityParityProps) {
           </Text>
           <RosterBody {...props} />
         </View>
+
+        {props.footer ?? null}
       </ScrollView>
     </View>
   );
@@ -623,7 +626,7 @@ const s = StyleSheet.create({
   bannerSub: { color: BANNER_SUB, fontSize: 14, lineHeight: 21 },
   facts: { marginTop: 18, flexDirection: 'row', gap: 8 },
   fact: { flex: 1, paddingTop: 8, borderTopWidth: 1, borderTopColor: BANNER_RULE },
-  factDt: { color: BANNER_DT, fontSize: 10, lineHeight: 15, letterSpacing: 1 },
+  factDt: { color: BANNER_DT, fontSize: 10, lineHeight: 15, letterSpacing: 1, textTransform: 'uppercase' },
   factDd: { color: SURFACE, fontSize: 17, lineHeight: 25, fontWeight: '800', marginTop: 2 },
 
   switcher: { marginTop: 18 },

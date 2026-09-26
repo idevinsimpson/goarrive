@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react';
+
 import { groupTypeCardLabel, joinPolicyLabel, roleLabel } from '../labels';
 import {
   beyondTarget,
@@ -143,6 +145,12 @@ export type CommunityParityProps = {
   onRetryRoster?: () => void;
   onShowMoreMembers?: () => void;
   onOpenGoal?: (goalId: string) => void;
+  /**
+   * The route's own secondary content, drawn AFTER the reference hierarchy
+   * inside the same scroll (Director #489 `5841270180`: canonical capability
+   * survives after the North-Star core). This view gives it no style.
+   */
+  footer?: ReactNode;
   testID?: string;
 };
 
