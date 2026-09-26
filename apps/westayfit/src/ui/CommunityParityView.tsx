@@ -605,14 +605,22 @@ const s = StyleSheet.create({
     backgroundColor: NAVY,
     overflow: 'hidden',
   },
+  /*
+    The reference's `.community-banner::after` circle sits past the banner's
+    right edge; clipping hides its paint but not its layout, and the shell's
+    guard (ui-app-shell R1: nothing laid out past the right edge at 360 px)
+    measures layout. So it is drawn as the visible quarter ring, inside the
+    banner's own bounds (COMMUNITY-SETTINGS-PARITY-1, reported to W4).
+  */
   bannerRing: {
     position: 'absolute',
-    right: -90,
-    top: -90,
-    width: 260,
-    height: 260,
-    borderRadius: 130,
-    borderWidth: 40,
+    right: 0,
+    top: 0,
+    width: 170,
+    height: 170,
+    borderBottomLeftRadius: 170,
+    borderLeftWidth: 40,
+    borderBottomWidth: 40,
     borderColor: BANNER_RING,
   },
   bannerName: {

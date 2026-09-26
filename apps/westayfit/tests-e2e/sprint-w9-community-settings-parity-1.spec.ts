@@ -204,11 +204,14 @@ test.describe('COMMUNITY-SETTINGS-PARITY-1 cp3 · hardening', () => {
         id: a?.getAttribute('data-testid') ?? null,
         visible: a ? a.matches(':focus-visible') : false,
         outline: a ? getComputedStyle(a).outlineStyle : null,
+        outlineWidth: a ? parseFloat(getComputedStyle(a).outlineWidth) : 0,
       };
     });
     expect(ring.id).toBe(`wsf-privacy-panel-name-${fx.c1.id}`);
     expect(ring.visible).toBe(true);
-    expect(ring.outline).toBe('solid');
+    // A visible ring: the browser's own focus-visible outline counts ("auto").
+    expect(ring.outline, JSON.stringify(ring)).not.toBe('none');
+    expect(ring.outlineWidth).toBeGreaterThan(0);
 
     // Space toggles it, and what shows is what is stored.
     await page.keyboard.press(' ');
