@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   UNKNOWN_SHARED,
+  canRenderLivingWe,
   hasInstrument,
   isReachedNow,
   knownShared,
@@ -26,6 +27,8 @@ describe('goalTruth', () => {
   it('an instrument needs a confirmed total and a positive target', () => {
     expect(hasInstrument({ shared: knownShared(0), target: 500 })).toBe(true);
     expect(hasInstrument({ shared: knownShared(10), target: 0 })).toBe(false);
+    expect(canRenderLivingWe({ shared: UNKNOWN_SHARED, target: 500 })).toBe(false);
+    expect(canRenderLivingWe({ shared: knownShared(241), target: 500 })).toBe(true);
   });
 
   it('the four pills, plus CLOSED alone for a closed goal with an unknown total', () => {
@@ -34,7 +37,7 @@ describe('goalTruth', () => {
     expect(statusOf({ open: false, target: 500, shared: knownShared(520) })).toEqual({ label: 'CLOSED · REACHED', tone: 'closedReached' });
     expect(statusOf({ open: false, target: 500, shared: knownShared(360) })).toEqual({ label: 'CLOSED · UNFINISHED', tone: 'muted' });
     expect(statusOf({ open: true, target: 500, shared: UNKNOWN_SHARED }).label).toBe('OPEN');
-    expect(statusOf({ open: false, target: 500, shared: UNKNOWN_SHARED })).toEqual({ label: 'CLOSED', tone: 'muted' });
+    expect(statusOf({ open: false, target: 500, shared: UNKNOWN_SHARED })).toEqual({ label: 'CLOSED · RESULT UNAVAILABLE', tone: 'muted' });
   });
 
   it('a Shared cell is Unknown, never 0', () => {
