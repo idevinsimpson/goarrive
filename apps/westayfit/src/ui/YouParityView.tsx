@@ -20,6 +20,7 @@ import {
 import { ACTION_GREEN, NAVY, PROGRESS_GREEN, SURFACE, elevation } from './kit';
 import { LivingWeProgress } from './LivingWeProgress';
 import { MEMBER_TAB_BAR_BODY, MEMBER_TAB_MOVE_OVERHANG } from './MemberTabBar';
+import { RefreshNote, type RefreshState } from './RefreshNote';
 import { fillRatio, percentLabel } from './progressFormat';
 
 /**
@@ -57,6 +58,11 @@ export type YouParityViewProps = {
   email: string | null;
   signingOut: boolean;
   actions: YouParityActions;
+  /**
+   * The route's revalidation state (PERF-MOBILE-1): checking after a moment,
+   * or stale with a Retry when a refresh failed. Shown for a member only.
+   */
+  refresh?: RefreshState;
 };
 
 const n = (v: number) => v.toLocaleString('en-US');
@@ -83,7 +89,7 @@ export function useYouCompact(): boolean {
   return hydrated && height > 0 && height <= YOU_COMPACT_MAX_HEIGHT;
 }
 
-export function YouParityView({ state, email, signingOut, actions }: YouParityViewProps) {
+export function YouParityView({ state, email, signingOut, actions, refresh }: YouParityViewProps) {
   const compact = useYouCompact();
   const account = <Account email={email} signingOut={signingOut} onSignOut={actions.onSignOut} />;
   const card = [s.stateCard, compact && s.stateCardCompact];
@@ -176,7 +182,7 @@ export function YouParityView({ state, email, signingOut, actions }: YouParityVi
         ) : null}
 
         {state.kind === 'member' ? (
-          <Member state={state} actions={actions} account={account} compact={compact} />
+          <Member state={state} actions={actions} account={account} compact={compact} refresh={refresh} />
         ) : null}
       </ScrollView>
     </View>
@@ -188,11 +194,13 @@ function Member({
   actions,
   account,
   compact,
+  refresh,
 }: {
   state: Extract<YouState, { kind: 'member' }>;
   actions: YouParityActions;
   account: ReactNode;
   compact: boolean;
+  refresh?: RefreshState;
 }) {
   const { lead, others } = leadAndOthers(state.open, state.finished);
   const block = partBlock(state);
@@ -201,6 +209,7 @@ function Member({
   return (
     <>
       <YouHead profile={state.profile} onSettings={actions.onSettings} compact={compact} />
+      {refresh ? <RefreshNote refresh={refresh} testIDPrefix="wsf-you" /> : null}
       <View testID="wsf-you-member">
         <Belonging community={state.community} compact={compact} />
         {state.partial ? (
@@ -275,9 +284,13 @@ export function YouHead({
       </View>
       <View style={s.headText}>
         <Text style={s.eyebrow} testID="wsf-you-title">YOUR PROFILE</Text>
-        <Text style={s.h1} testID={resolved ? 'wsf-you-name' : undefined} accessibilityRole="header">
-          {name ?? 'You'}
-        </Text>
+        {profile?.pending ? (
+          <View style={s.namePending} testID="wsf-you-name-pending" />
+        ) : (
+          <Text style={s.h1} testID={resolved ? 'wsf-you-name' : undefined} accessibilityRole="header">
+            {name ?? 'You'}
+          </Text>
+        )}
         {profile?.memberSince ? (
           <Text style={s.muted} testID="wsf-you-since">{`Member since ${profile.memberSince}`}</Text>
         ) : null}
@@ -681,6 +694,8 @@ const s = StyleSheet.create({
   },
   avatarText: { color: SURFACE, fontSize: 11, fontWeight: '800' },
   headText: { flex: 1, minWidth: 0 },
+  // The name's own line box (40.5 + 2 + 2), holding its place until it is read.
+  namePending: { width: '62%', height: 30, marginVertical: 7.25, borderRadius: 6, backgroundColor: '#E9E5DC' },
   settings: {
     minWidth: 48,
     minHeight: 48,
