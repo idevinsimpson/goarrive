@@ -4220,3 +4220,38 @@ So Phase B must map receipts to **unavailable** and must never fill them from pu
 - The FAIL-BEFORE rows cannot be seen passing until a hooked build exists. They are literal Lovable copy, order and dialog behaviour, so they can pass by construction.
 
 **Status:** tests and evidence only. Nothing is accepted, integrated or staged.
+
+## 44P-b · PERF-MOBILE-1 diagnostic on `5633057a` (Director #434 `5841354919`; W7 ACK `5841358841`): **T1 PASS · T2 FAIL · T3 FAIL · T3b FAIL with the race reproduced (Progress regresses) — not an acceptance run**
+
+- **Build:** `5633057a` differs from `218eb1df` in two W9 test specs only. Its `apps/westayfit/app` and `src` trees are identical (`2446ce63` and `a5955cff`), so the emulator build of `218eb1df` is its product.
+- **Scope:** only the truth spec, with no Check 41B, as instructed.
+
+**Unchanged spec (`a5bad071`), `--repeat-each=2`, identical results:**
+- **T1 PASS.**
+- **T2 FAIL**, scored on the Director's refusal rule (`5841264164`).
+- **T3 FAIL:** mounted Progress and You show 35 while the server holds 55.
+- **T3b CANNOT-MEASURE:** You opened from the record inside the candidate's 10 s same-load window, so no own read was in flight to hold. Posted as #434 `5841382900`.
+
+**Harness adjustment, disclosed; this spec is committed here:**
+- **T3b now waits 11.5 s after Home settles**, past the 10 s window, so You issues a fresh own read that can be held.
+- **T2 is now an asserted row**, and it records every callable's answer after the removal.
+- **Re-shown on the base `0b460ce3` before being relied on:**
+  - T1 passes;
+  - T2 fails;
+  - T3 fails;
+  - T3b fails with 1 answer held (You 35, Progress 55).
+
+**The adjusted rows on `5633057a`:**
+
+| Row | Base `0b460ce3` | `5633057a` |
+|---|---|---|
+| **T3b** held pre-receipt own read (1 held, server 55, receipt `ordinary`) | You **35**, Progress **55** | You **35**, **Progress 35**. The late pre-receipt answer is taken into the member record and Progress opens on it. **This is the race in `memberReads.read()` the Director read in source (#494 `5841250834`), reproduced; for Progress it is a regression over the base.** |
+| **T2** refusal | Progress still lists the goal | the same |
+
+**T2 in detail, on both builds:**
+- After the membership is removed on the server, Home's own reads receive **real refusals**: `wsfListGoals` 404, `wsfCommunityMembers` 403, `wsfCommunityActivity` 403, `wsfGoalPulse` 404.
+- Home nevertheless shows the goal as **"Last known"**.
+- The returned-to Progress **still lists the refused community's goal** (9 squats).
+- That is a fresh proof of membership loss without the cache or screen invalidation the Director's rule requires.
+
+**Status:** diagnostic only. Nothing is accepted, integrated or staged.

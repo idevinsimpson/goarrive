@@ -177,7 +177,7 @@ test.describe(`W7 PERF-MOBILE-1 truth rows (${LABEL})`, () => {
     expect.soft(r.bProgressShowsOwn && r.bYouShowsOwn, 'B sees B’s own part').toBe(true);
   });
 
-  test('T2 refusal (measure): Progress after the member meets a refusal for a community', async ({ page }) => {
+  test('T2 refusal: after the member meets a refusal, Progress no longer lists that community', async ({ page }) => {
     test.setTimeout(200_000);
     const m = await member('r', 'Refused Goal Squats', 9);
     await signInVia(page, m.email, m.password);
@@ -185,16 +185,24 @@ test.describe(`W7 PERF-MOBILE-1 truth rows (${LABEL})`, () => {
     await tab(page, 'activity');
     const before = await screenText(page, 'wsf-activity');
     await fetch(docUrl(`wsfMemberships/${m.groupId}_${m.uid}`), { method: 'DELETE', headers: OWNER });
+    const answers: string[] = [];
+    page.on('response', (res) => { const u = new URL(res.url()); if (u.port === '5001') answers.push(`${u.pathname.split('/').pop()} ${res.status()}`); });
     await tab(page, 'home');
     await page.waitForTimeout(3_000);
     const home = await screenText(page, 'wsf-community');
     await tab(page, 'activity');
     await page.waitForTimeout(2_000);
     const after = await screenText(page, 'wsf-activity');
-    measure('T2 refusal', {
+    const r = {
       progressBefore: before.includes(m.title), homeAfterRemoval: home.slice(0, 160),
+      callableAnswersAfterRemoval: answers,
       progressAfterRefusal: { goalStillShown: after.includes(m.title), text: after.slice(0, 200) },
-    });
+    };
+    measure('T2 refusal', r);
+    expect(r.progressBefore, 'fixture: Progress listed the goal before the removal').toBe(true);
+    // Director #494 `5841264164`: a fresh server proof of membership loss and cache invalidation happen together;
+    // once the member has met it, the member surfaces must not keep offering that community.
+    expect.soft(r.progressAfterRefusal.goalStillShown, 'after the refusal, Progress no longer lists the removed community’s goal').toBe(false);
   });
 
   test('T3 after a confirmed contribution, mounted Progress and You show the server’s own total', async ({ page }) => {
@@ -238,6 +246,9 @@ test.describe(`W7 PERF-MOBILE-1 truth rows (${LABEL})`, () => {
     });
     await signInVia(page, m.email, m.password);
     await expect(shown(page, 'wsf-community')).toBeVisible({ timeout: 40_000 });
+    // Past the candidate's 10 s same-load window (#494 SAME_LOAD_MS), so You issues a FRESH own read that
+    // can be held; without this a warm record answers and nothing is in flight (CANNOT-MEASURE on 5633057a).
+    await page.waitForTimeout(11_500);
     hold.armed = true;
     await shown(page, 'wsf-member-tab-you').click({ timeout: 10_000 }); // You's first own read is issued and held
     await expect.poll(() => hold.captured, { timeout: 20_000 }).toBe(1);
