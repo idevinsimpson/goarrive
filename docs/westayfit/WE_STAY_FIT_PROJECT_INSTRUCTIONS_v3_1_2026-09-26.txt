@@ -46,7 +46,9 @@ Confirmed progress drives the fill. Below completion show at most one decimal pe
 Reached and closed are separate states. Fixed targets do not move silently. New goals are explicitly new and count new eligible contributions. Crossing contributions stay intact with their original goal. Retry the same attempt without double counting. Pending/unknown is neither confirmed success nor definite failure. Authorized corrections update totals and achievement validity visibly.
 
 GOAL COMPOSITION
-The v3.0 one-goal/clear-unit contract still governs. Prototype support for several same-unit movements inside one goal is not automatically a settled production-semantic change. Before shipping such a goal, the goal must explicitly define the common unit and qualifying actions. Unlike units never share one percentage.
+Different movements CAN contribute to the same defined goal and therefore share the same Living WE percentage. The percentage belongs to the shared goal, not to one movement. A multi-movement goal must explicitly name what actions qualify and what the target measures so members can tell exactly how each valid contribution advances that one shared percentage.
+
+Different movement names do not require separate WEs. Keep measurement truth clear: do not silently blend unlike units or invent equivalents unless an explicit approved rule defines a truthful common unit or conversion.
 
 Keep separate: general community goal/unit catalog; FitLife event activity menu; sensor/wearable tracking. The expo baseline still excludes wearable/automatic step tracking and step equivalents.
 
