@@ -111,12 +111,18 @@ staging runbook.
 | Playwright | `npm run test:e2e` (root) | `npm --prefix apps/westayfit run test:e2e` |
 | Type-check | `npm --prefix apps/goarrive run ts:check` | `npm --prefix apps/westayfit run ts:check` |
 
-## Proof-of-Unchanged Contract
+## Cross-app regression / protected-resource contract
 
-Every WSF change must produce these two receipts before PR merge:
+A normal WSF app-only change must show that GoArrive and protected shared resources were not changed incidentally.
 
-1. `git diff --stat origin/main -- apps/goarrive functions firestore.rules firestore.indexes.json storage.rules` — must be empty.
-2. `firebase functions:list` before and after WSF-only deploy — every GoArrive function still present, no unexpected deletions or renames.
+When a WSF packet intentionally changes a shared/protected resource such as `firestore.rules`, `firestore.indexes.json`, Storage rules, Firebase config, or function inventory, an empty diff is not the criterion. The packet must instead:
+1. name the exact protected change and why it is required;
+2. run the required GoArrive + WSF regressions/drift checks;
+3. prove no unrelated deletion/rename/regression;
+4. keep deploy authority/environment explicit;
+5. record before/after inventory and rollback evidence where applicable.
+
+Never use "WSF-only" as a reason to bypass shared-resource review.
 
 
 ## Current authority note (2026-09-26)
