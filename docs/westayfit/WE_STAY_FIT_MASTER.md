@@ -1,10 +1,23 @@
-# WE STAY FIT — MASTER SOURCE OF TRUTH
+# WE STAY FIT — HISTORICAL MASTER v1.2 (SUPERSEDED)
 
-**Version 1.2 · 2026-09-06 · Owner: Devin Simpson (devin.simpson@goa.fit)**
+**Version 1.2 · 2026-09-06 · Owner: Devin Simpson**
 
-This is the governing document for We Stay Fit (WSF). It is written to be read by
-**Claude Code, ChatGPT, Maia, and Manus** as well as by people. When any of them
-is asked to do WSF work, this document governs.
+> SUPERSEDED FOR CURRENT PRODUCT DIRECTION. Retained for architecture/decision lineage only.
+>
+> Current product strategy: Strategic Master v3.0 — The Living WE System (2026-09-11)
+> plus `WE_STAY_FIT_STRATEGIC_MASTER_v3_1_ADDENDUM_2026-09-26.md`.
+> Current compact instructions: `WE_STAY_FIT_PROJECT_INSTRUCTIONS_v3_1_2026-09-26.txt`.
+> Current document standing: `DOCUMENT_AUTHORITY_AND_SUPERSESSION.md`.
+> Current volatile program state: the canonical CURRENT STATE comment in the Fable/L0
+> control inbox (#365), not this file.
+> Current journey-specific visual references: `ops/NORTH_STAR_JOURNEY_MANIFEST.json`.
+>
+> Do not use this September 6 document to override the September 11/26 strategy,
+> newer owner decisions, frozen journey references, or current environment evidence.
+
+This file was formerly the governing document for We Stay Fit (WSF). It remains useful as
+historical architecture and decision context, but its product/roadmap/role/status statements
+must now be read through the supersession map above.
 
 It consolidates and supersedes, as a reading requirement:
 
