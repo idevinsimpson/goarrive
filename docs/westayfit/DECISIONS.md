@@ -499,3 +499,18 @@ editable CURRENT STATE comment on #365, not in dated strategic documents.
 the durable general activity catalog versus the actual FitLife menu. Prototype capability
 does not silently settle those product semantics.
 
+
+
+## 2026-09-26 — Documentation authority reconciliation
+
+Owner authorized a bounded documentation reconciliation after a current-state/vision audit. This is not a fourth strategy round and does not alter product code or release authority.
+
+**Decision:** Strategic Master v3.0 — The Living WE System remains the strategic foundation. A September 26 v3.1 addendum records durable post-September-11 decisions: the frozen North Star reference process, mobile app-feel/member-shell direction, authenticated community presence/privacy distinctions, bounded Start/Join continuation, and current evidence/operations discipline.
+
+**Authority:** `DOCUMENT_AUTHORITY_AND_SUPERSESSION.md` is the repository map for resolving document conflicts. The September 6 `WE_STAY_FIT_MASTER.md` is explicitly superseded as a product master and retained only for historical architecture/decision lineage. `CURRENT_STATE.md` becomes a pointer to the single canonical editable CURRENT STATE comment on #365 rather than a competing status ledger.
+
+**North Star:** the WE Community Home Lovable project is a design/interaction laboratory only. Member-visible implementation uses an exact frozen journey reference from `ops/NORTH_STAR_JOURNEY_MANIFEST.json` or an issued packet. A newer Lovable edit does not silently move already-issued work. Public marketing Lovable/Supabase remains a separate production marketing/inquiry lineage.
+
+**Execution:** the September 11 implementation-plan draft v0.2 is superseded for sequencing by `WE_STAY_FIT_IMPLEMENTATION_OPERATIONS_CHARTER_v1_2026-09-26.md`. Historical acceptance rationale remains useful; its old package states are not current dispatch instructions.
+
+**No release implication:** documentation creation/reconciliation does not merge product code, repin staging, clear email/social/index/kiosk blockers, or authorize production.
