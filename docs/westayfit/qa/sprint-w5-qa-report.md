@@ -2544,3 +2544,40 @@ The contract's fake page opens elements synchronously, so it cannot express G2 o
 **Residual (low, not a condition).** A 401 with a Google-front-end-style JSON body that carries `status: UNAUTHENTICATED` and a numeric `code` would still read as open. An anonymous request to an IAM-protected service is refused with a 403, so this shape was not observed.
 
 **Probe:** `sprint-w5-pr491-emulator/f1-delta-fake-server.mjs`.
+
+## QA2 carry review: Progress Phase A (PR #495), exact `f79a3c49e4593d5f18a62b6f89bfc4444f06eb87`
+
+This was released by Director #395 `5841328326`. It is one commit on `0b460ce3`, the head of `claude/wsf-app-shell`, and it adds 6 files. `package-lock.json` is blob-identical to the base.
+
+**Skipped as superseded:**
+- the local shared lifecycle/unknown logic (`statusOf` / `isReachedNow`);
+- `whenLabel()` / `endsAt` formatting;
+- the period-label fixture text.
+
+**Measured:**
+- the focused vitest files `progress-parity.test.ts` and `progress-parity-view.test.tsx`: 34/34 pass;
+- `tsc --noEmit`: exit 0;
+- the Phase A e2e spec, against an emulator-flagged `expo export` served locally: 12/12 pass at 390×844 and 390×640. The evidence case is skipped, because frames are off;
+- W5's own jsdom probes P1–P10 (`sprint-w5-pr495-carry-probe.test.tsx.txt`): 10/10 pass.
+
+| carry item | verdict | evidence |
+| --- | --- | --- |
+| pure: no Firebase, router, auth, storage or demo authority | **CARRY PASS, with note C4** | The component and model import only react, react-native, `progressParity`, `kit` and `MemberTabBar`. Every action is a callback. |
+| the private hero, with per-unit totals that never blend | **CARRY PASS** | P1: 17 squats and 5 steps give two totals, and no 22 appears. `unitTotals` is keyed on the exact unit text. |
+| `receipts: null` is honest and invents no rows or times | **CARRY PASS** | P2: the "unavailable" line is shown, with no rows and no relative-time words. See C2 for an empty array. |
+| first-eligible versus no-open-goal CTA | **CARRY PASS** | P10: Start moving and Open community are exclusive, and each calls only its own callback. See C1 for the wording under partial data. |
+| partial and failure don't invent 0; both offer Retry | **CARRY PASS** | P4: the failed state has no digit and no totals, and Retry calls only `onRetry`. P5: the partial note is shown, totals come only from loaded goals, and its Retry works. |
+| actions labelled, targets sane at 390×640/844 | **CARRY PASS** | primary action `minHeight` 54, secondary 48, receipt 60. The e2e spec proves "Start moving whole on screen" and keyboard Tab/Enter at both sizes. |
+| no rank, streak, score or inferred impact | **CARRY PASS** | P8: none of those words appears outside the one disclaimer footnote. |
+| the route-handle bridge is not misleading | **CARRY PASS** | Every reused handle (`wsf-activity`, `-title`, `-subtitle`, `-loading`, `-signed-out`, `-error`, `-retry`, `-partial`, `-empty`, `-start`, `-rows`, `-privacy`) keeps its meaning. `wsf-activity-empty` now carries `data-state` (`first-eligible` / `no-open-goal`). Per-goal handles are renamed from `row-`/`done-` to `goal-<id>`, rather than reused with a different meaning. |
+| short-phone compact behaviour and accessibility | **CARRY PASS** | Compact mode turns on at `height ≤ 700`, and only after hydration. The e2e spec passes at 640. |
+| the focused tests cover the above | **CARRY PASS, with the gaps below** | Both the unit and view suites cover order, units, receipts, states and callbacks. |
+
+### Findings (none blocks the carry)
+
+- **C1 (moderate).** With `partial: true`, no goals loaded and `canStart: false`, the no-open-goal card says "No goal is open for contributions … your community has no goal accepting contributions right now" (probe P6). That is a community-wide negative drawn from an incomplete read. The smallest fix is to hedge the title and body when `partial` is set, for example "No open goal loaded".
+- **C2 (low).** `receipts: []`, meaning a future source that answers "none", draws only the heading "Recent contributions" with nothing under it (P3). It needs a one-line empty state.
+- **C3 (low).** The types allow a zero-credit goal: `yourPart: 0` draws "YOURS 0 squats" and a hero total of "0 squats recorded" (P9). This is a contract the route must keep, because the list means "own credit". Either filter out `yourPart > 0` in the view, or document it as a route precondition.
+- **C4 (low).** The component imports `MemberTabBar` only for two numeric constants. That pulls `kioskSession` (sessionStorage and sign-out helpers) and the bottom-tabs types into the pure module graph. Nothing is called, but the constants belong in `memberShellMetrics`.
+
+**Limits.** This is component-level review only; no route hook exists yet (Phase B). Pixel comparison is the Director's. PR #495's head has since moved to `da9aae08`; that commit was not reviewed.
