@@ -18,7 +18,7 @@ import { appendToDir } from '../append.mjs';
 import { invariants } from '../check.mjs';
 import { ledgerHeads, sha256 } from '../reduce.mjs';
 import { reconcile, surfaceStatus } from '../reconcile.mjs';
-import { renderCurrent } from '../render-current.mjs';
+import { renderCurrent, renderHashes } from '../render-current.mjs';
 import { workerView } from '../worker-view.mjs';
 import { programView } from '../program-view.mjs';
 
@@ -111,29 +111,31 @@ test('F2 crash window: the ledger advanced but the CURRENT edit never happened â
   const r1 = quiet();
   const r2 = add(r1, { type: 'register-worker', worker: 'W9', inbox: 409 });
   const heads = ledgerHeads(r2.eventsText);
+  const renders = renderHashes(r2.eventsText);
+  const at = (h) => surfaceAt(h, { bodySha256: renders[h] }); // the exact, untouched rendering of head h
   // Control: CURRENT at the present head is quiet.
-  const fresh = programView(r2.state, { schemaVersion: 1, prs: {}, currentSurface: surfaceAt(r2.state.ledgerHead) }, { heads });
+  const fresh = programView(r2.state, { schemaVersion: 1, prs: {}, currentSurface: at(r2.state.ledgerHead) }, { heads, renders });
   assert.deepEqual(fresh.slice(-3), ['CURRENT_SURFACE=ok', 'ACTIONABLE=off', 'MONITOR=on']);
   // The crash window: CURRENT still carries the previous head.
-  const snap = freeze({ schemaVersion: 1, prs: {}, currentSurface: surfaceAt(r1.state.ledgerHead) });
-  const out = reconcile(freeze(JSON.parse(r2.stateText)), snap, { heads });
+  const snap = freeze({ schemaVersion: 1, prs: {}, currentSurface: at(r1.state.ledgerHead) });
+  const out = reconcile(freeze(JSON.parse(r2.stateText)), snap, { heads, renders });
   assert.deepEqual(out.map((x) => [x.kind, x.wins]), [['current-surface-stale', 'ledger']]);
   assert.deepEqual(out[0].suggest, { action: 'render-current-and-edit-in-place', commentId: CURRENT_COMMENT, head: r2.state.ledgerHead });
-  const v = programView(r2.state, snap, { heads });
+  const v = programView(r2.state, snap, { heads, renders });
   assert.deepEqual(v.slice(-3), ['CURRENT_SURFACE=stale', 'ACTIONABLE=on', 'MONITOR=on']);
-  assert.deepEqual(surfaceStatus(r2.state, snap, { heads }).status, 'stale');
+  assert.deepEqual(surfaceStatus(r2.state, snap, { heads, renders }).status, 'stale');
 });
 test('F2: exception stays reserved for missing, unmarked, foreign-head and hand-edited surfaces', () => {
   const r = quiet();
   const heads = ledgerHeads(r.eventsText);
   const status = (surface, opts = {}) => surfaceStatus(r.state, { schemaVersion: 1, prs: {}, currentSurface: surface }, { heads, ...opts }).status;
-  assert.equal(status(surfaceAt(r.state.ledgerHead)), 'ok');
+  const good = sha256(renderCurrent(r.state));
+  assert.equal(status(surfaceAt(r.state.ledgerHead, { bodySha256: good })), 'ok');
+  assert.equal(status(surfaceAt(r.state.ledgerHead)), 'exception'); // O1: no body evidence is never ok
   assert.equal(status(surfaceAt(r.state.ledgerHead, { exists: false })), 'exception');
   assert.equal(status(surfaceAt(null)), 'exception');
   assert.equal(status(surfaceAt('f'.repeat(64))), 'exception');
   // Hand-edited: the marker names this head but the body is not its rendering.
-  const good = sha256(renderCurrent(r.state));
-  assert.equal(status(surfaceAt(r.state.ledgerHead, { bodySha256: good })), 'ok');
   assert.equal(status(surfaceAt(r.state.ledgerHead, { bodySha256: sha256('edited by hand') })), 'exception');
   // An earlier head's body is checked against that head's own rendering when known; unknown â†’ exception (fail closed).
   const earlier = heads[heads.length - 2];

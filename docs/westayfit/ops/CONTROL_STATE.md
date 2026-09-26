@@ -141,6 +141,7 @@ These rules hold:
 - `state.json` is exactly its reduction.
 - A worker holds at most one worker-owned work packet.
 - Each queue holds exactly its owner's QUEUED packets, each once. A released packet cannot be queued again.
+- **Independent review:** a W# implementation owner never reviews its own work packet. A `review` naming the owner is refused, and so is a bootstrap import of an UNDER_REVIEW packet its owner reviews. Director, Owner, Fable and L0 reviews are unaffected.
 - **One ball per worker:** a worker holds at most one ball in total across implementation and review. It cannot hold an active implementation packet (RELEASED, ACKED, CHANGES_REQUESTED) and an UNDER_REVIEW assignment at once. A `review` naming a worker with active work is refused, and so is a `release` to a worker that is reviewing. A reviewing worker may keep one queued NEXT, but `program-view` does not suggest releasing it until the review leaves the worker. A `finding` that would hand work back to an owner who is reviewing is likewise refused until one of the two moves.
 - **One review per W# reviewer:** a W# reviewer holds at most one UNDER_REVIEW work packet, as an implementer holds one ACTIVE. A `review` that would give a busy reviewer a second is refused, and the packet stays DELIVERED (and ACTIONABLE) until that reviewer is free or another is chosen. Several reviewers on one packet are fine when each is free. A W# reviewer must be a registered worker.
 - **One NEXT:** a worker has at most one queued work packet (ops v1.2). Reference packets are exempt and never become NEXT. `append` refuses a second queued work packet, and so does a bootstrap import, so no valid state can hide one.
@@ -174,7 +175,7 @@ The session builds a minimal snapshot before acting. It holds pointers and close
   "prs": { "520": { "state": "open", "merged": false, "headSha": "<40>", "changedSinceSubject": ["path/a"] } },
   "runs": { "54": { "status": "completed", "conclusion": "failure" } },
   "inboxHandoffs": [ { "inbox": 396, "commentId": 123, "packet": "PACKET-ID" } ],
-  "currentSurface": { "commentId": 456, "exists": true, "markerHead": "<64-hex from the comment's first line, or null>", "bodySha256": "<optional: sha256 of the comment body>" },
+  "currentSurface": { "commentId": 456, "exists": true, "markerHead": "<64-hex from the comment's first line, or null>", "bodySha256": "<sha256 of the exact body, or null when unavailable>" },
   "pin": { "approvedAppSha": "<40>" },
   "staging": { "servedSha": "<40>" },
   "triggers": { "W3": { "enabled": true } },
@@ -184,6 +185,8 @@ The session builds a minimal snapshot before acting. It holds pointers and close
 
 - `prs`: a merged PR carries `mergeSha`. `changedSinceSubject` lists the paths changed between the packet's `subjectSha` and the current head.
 - `runs`: `conclusion` is null until the run completes.
+
+The `currentSurface` entry is built by `current-surface.mjs` from the comment body as fetched (CRLF normalised to LF), never by hand. `bodySha256` is required whenever the ledger configures a CURRENT surface: a missing, null or malformed hash is `CURRENT_SURFACE=exception`, never `ok` or `stale`. A stale repair therefore overwrites only a body whose hash verifies as a rendering this ledger produced.
 
 ## Reconcile findings
 
@@ -218,6 +221,7 @@ node tools/wsf-control/check.mjs <dir>                                          
 node tools/wsf-control/append.mjs <dir> <event.json> --expect-head <ledgerHead>
                                                                                 # APPENDED … | APPEND=noop … | APPEND=refused (nothing written)
 node tools/wsf-control/reconcile.mjs <dir> <snapshot.json>                      # FINDING … / CURRENT_SURFACE=… / RECONCILE findings=N
+node tools/wsf-control/current-surface.mjs <commentId> <body file>|--missing   # the snapshot's currentSurface entry, from the fetched body
 node tools/wsf-control/worker-view.mjs <dir> W3                                 # ACTIVE_NOW / REVIEWING / WAITING / NEXT / WATCH / AUTHORITY
 node tools/wsf-control/program-view.mjs <dir> [--snapshot <file>]               # CRITICAL_PATH / NEEDS_TRANSITION / … / ACTIONABLE / MONITOR
 node tools/wsf-control/render-current.mjs <dir> [--out <file> | --verify <file>]

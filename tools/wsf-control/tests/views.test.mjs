@@ -11,10 +11,10 @@ import {
 } from './helpers.mjs';
 import { appendEvent, appendToDir } from '../append.mjs';
 import { workerWatch } from '../derive.mjs';
-import { ledgerHeads } from '../reduce.mjs';
+import { ledgerHeads, sha256 } from '../reduce.mjs';
 import { isTerminal } from '../schema.mjs';
 import { reconcile, validateSnapshot, inSubject, surfaceStatus } from '../reconcile.mjs';
-import { renderCurrent, verifyCurrent } from '../render-current.mjs';
+import { renderCurrent, renderHashes, verifyCurrent } from '../render-current.mjs';
 import { workerView } from '../worker-view.mjs';
 import { programView } from '../program-view.mjs';
 
@@ -25,7 +25,8 @@ const base = () => build(BASE);
 const released = () => add(base(), { type: 'release', packet: 'ALPHA', inbox: 396 });
 const delivered = () => add(released(), { type: 'deliver', packet: 'ALPHA', pr: 520, subjectSha: A });
 /** A snapshot whose CURRENT comment is healthy and marked with `s`'s head. */
-const snap = (s, extra = {}) => ({ schemaVersion: 1, prs: {}, currentSurface: { commentId: CURRENT_COMMENT, exists: true, markerHead: s.ledgerHead }, ...extra });
+/** A snapshot whose CURRENT comment is the exact, untouched rendering of `s` (marker and body hash). */
+const snap = (s, extra = {}) => ({ schemaVersion: 1, prs: {}, currentSurface: { commentId: CURRENT_COMMENT, exists: true, markerHead: s.ledgerHead, bodySha256: sha256(renderCurrent(s)) }, ...extra });
 const openPr = (headSha, more = {}) => ({ state: 'open', merged: false, headSha, ...more });
 const kinds = (fs_) => fs_.map((x) => x.kind).sort();
 const EXT = [{ external: 'OWNER-DEVICE', condition: 'device check', owner: 'Owner', unblockWhen: 'owner verdict' }];
@@ -281,8 +282,9 @@ test('CURRENT surface: a comment at this head is ok; one at an earlier head of t
   const r1 = released();
   const heads = ledgerHeads(r1.eventsText);
   assert.deepEqual([surfaceStatus(r1.state, snap(r1.state), heads).ok, surfaceStatus(r1.state, snap(r1.state), heads).status], [true, 'ok']);
-  const earlier = { ...snap(r1.state), currentSurface: { commentId: CURRENT_COMMENT, exists: true, markerHead: heads[1] } };
-  const st = surfaceStatus(r1.state, earlier, heads);
+  const renders = renderHashes(r1.eventsText);
+  const earlier = { ...snap(r1.state), currentSurface: { commentId: CURRENT_COMMENT, exists: true, markerHead: heads[1], bodySha256: renders[heads[1]] } };
+  const st = surfaceStatus(r1.state, earlier, { heads, renders });
   assert.deepEqual([st.ok, st.status], [false, 'stale']);
   assert.match(st.detail, /Render from the present ledger and edit that comment in place; create no new comment/);
 });

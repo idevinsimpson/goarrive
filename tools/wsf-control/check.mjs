@@ -44,6 +44,8 @@ export function invariants(s) {
     if (p.phase !== 'QUEUED' && p.phase !== 'WITHDRAWN' && p.inbox !== null && s.workers[p.owner] && p.inbox !== s.workers[p.owner].inbox) {
       problems.push(`${id}: released in #${p.inbox}, outside ${p.owner}'s canonical inbox #${s.workers[p.owner].inbox}`);
     }
+    // Independent review: a W# implementation owner never reviews its own work packet.
+    if (p.phase === 'UNDER_REVIEW' && p.kind === 'work' && p.reviewers.includes(p.owner)) problems.push(`${p.owner} cannot review its own work packet ${id}; review must be independent`);
     if (p.phase === 'UNDER_REVIEW') for (const r of p.reviewers) if (RE.worker.test(r) && !s.workers[r]) problems.push(`reviewer ${r} of ${id} is not a registered worker`);
     if (p.phase === 'QUEUED' && !(s.queue[p.owner] || []).includes(id)) problems.push(`${id} is QUEUED but not in ${p.owner}'s queue`);
     if (p.phase === 'VERIFYING' && p.proof?.result !== 'RUNNING') problems.push(`${id} is VERIFYING without a running proof`);

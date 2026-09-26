@@ -17,7 +17,7 @@ Only **Fable** and **L0** write the ledger. A worker (W3, W7, …) owns packets,
    - the PRs that live packets name;
    - the proof runs;
    - the handoff comments in the canonical inboxes;
-   - the CURRENT comment (it exists, and its marker head);
+   - the CURRENT comment at `surfaces.current.commentId`: fetch its exact body and build the entry with `node tools/wsf-control/current-surface.mjs <commentId> <body file>` (or `--missing` when it does not exist). The entry carries the marker head and the SHA-256 of the exact body; never write it by hand. Without that body hash the surface is an exception, never `ok` or `stale`;
    - the approved pin and the served marker;
    - each check-in's enabled state;
    - the external conditions.

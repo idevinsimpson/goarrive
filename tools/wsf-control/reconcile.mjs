@@ -84,8 +84,10 @@ export function validateSnapshot(snap) {
     if (!isObj(c) || !['commentId', 'exists', 'markerHead'].every((k) => keys.includes(k)) || keys.some((k) => !['commentId', 'exists', 'markerHead', 'bodySha256'].includes(k)) ||
       !posInt(c.commentId) || typeof c.exists !== 'boolean' ||
       !(c.markerHead === null || (typeof c.markerHead === 'string' && RE.hash.test(c.markerHead))) ||
-      (c.bodySha256 !== undefined && !(typeof c.bodySha256 === 'string' && RE.hash.test(c.bodySha256)))) {
-      p.push('snapshot.currentSurface must be exactly { commentId, exists: boolean, markerHead: <64-hex> | null, bodySha256?: <64-hex> }');
+      (c.bodySha256 !== undefined && c.bodySha256 !== null && typeof c.bodySha256 !== 'string')) {
+      // bodySha256's presence and form are judged by surfaceStatus: missing, null or malformed evidence is a
+      // closed CURRENT_SURFACE=exception, not a refused snapshot, so every other finding is still reported.
+      p.push('snapshot.currentSurface must be exactly { commentId, exists: boolean, markerHead: <64-hex> | null, bodySha256: <64-hex> | null }');
     }
   }
   for (const [k, field] of [['pin', 'approvedAppSha'], ['staging', 'servedSha']]) {
@@ -139,7 +141,10 @@ export function surfaceStatus(state, snap, opts = {}) {
   if (!c.exists) return exception(`CURRENT comment ${want.commentId} is missing; it is not re-created without a set-surfaces decision`);
   if (c.markerHead === null) return exception(`CURRENT comment ${want.commentId} carries no control marker`);
   if (!heads.includes(c.markerHead)) return exception(`CURRENT comment ${want.commentId} carries a marker for ${c.markerHead.slice(0, 12)}, which is not a head of this ledger`);
-  if (c.bodySha256 !== undefined) {
+  // Body integrity is required, not optional: a marker alone never makes a surface ok or stale.
+  if (c.bodySha256 === undefined || c.bodySha256 === null) return exception(`CURRENT comment ${want.commentId}'s body integrity evidence (bodySha256) is missing or unavailable; build the snapshot entry with current-surface.mjs from the exact body`);
+  if (!RE.hash.test(c.bodySha256)) return exception(`CURRENT comment ${want.commentId}'s body integrity evidence (bodySha256) is malformed`);
+  {
     const expected = renders[c.markerHead];
     if (!expected) return exception(`CURRENT comment ${want.commentId}'s body cannot be checked against the rendering of ${c.markerHead.slice(0, 12)}`);
     if (expected !== c.bodySha256) return exception(`CURRENT comment ${want.commentId} is not the rendering of the head its marker names (hand-edited)`);
