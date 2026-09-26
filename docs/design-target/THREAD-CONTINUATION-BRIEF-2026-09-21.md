@@ -4,16 +4,16 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 ## CURRENT — read this first (kept ≤ 1,000 words; updated only on material change; Director #365 `5819944052` §3)
 
-**Stamp: 2026-09-26 17:30Z.** **Precedence:** newer explicit owner decisions first (latest: North-Star Operating System v1 `5841611729`; standing hardening train `5841397324`, which replaces the sprint's expiry; staging cadence `5832907406`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
+**Stamp: 2026-09-26 19:25Z.** **Precedence:** newer explicit owner decisions first (latest: North-Star Operating System v1 `5841611729`; standing hardening train `5841397324`, which replaces the sprint's expiry; staging cadence `5832907406`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
 
 **Heads.**
 
 | what | value |
 | --- | --- |
 | development `claude/wsf-app-shell` | **`a3127651`** = `6c7f975c` + HOME `9d27fdb5` (#514 `5848589381`); since `938e00d8`: ops docs + index source `1f99d67f` |
-| `main` | **`37f18ea9`** (#516 ACTIVATION-1 `44da30fc` merged by L0); pin unchanged `938e00d8` |
+| `main` | **`396b810c`** (#522 HOME pin `70a6a515` merged by L0, Director `5848973595`); pin `a3127651` |
 | staging pin | `approvedAppSha` **`938e00d8`**, 49, three social retained (Director ACCEPTED #511 `5846667051`) |
-| served staging | **`938e00d8`**, run 53 `36245419181` from main `7ab19e8f`: 49 → 49, created none, `VERIFY=pass`, marker `938e00d`, hosted 24 / 0, cleanup COMPLETE 349 / 349 (#365 `5846776040`–`5846777689`); previous known-good **`74d19281`** (run 52) |
+| served staging | **`a3127651`** (HOME), run 55 `36264562975` from main `396b810c`: 49 → 49, created none, `VERIFY=pass`, marker match, hosted 24 / 0, cleanup COMPLETE 349 / 349 (#365 `5849110597`–`5849113235`); previous known-good **`938e00d8`** (run 53); changed-journey smoke skipped (no manifest) |
 
 **Active packets.**
 
@@ -25,9 +25,9 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 | **COMMUNITY-PARITY-1 (pure)** | W4 · #496 · `646c9579` | ACCEPTED → integrated `87a86531`; HOME-REFRESH-TRUTH-1 **closed, option A** (W7 Check 52: H3c was instrument false negative) | done |
 | **COMMUNITY-SETTINGS-PARITY-1** | W9 · `ffb517e5` | **SERVED** `938e00d8` via run 53; hosted smoke BLOCKED from L0 (403); OWNER TEST CARD `5846778806` | owner feedback → route |
 | **PERSONAL-FIRST SCALE (snapshot)** | W4 #510 `8dc65316` / index #509 | `b71cf07f` FAIL → successor `8dc65316`; W5 recheck woken `trig_016FDPDU…` (#395 `5847278911`) | W5 → Director; staging needs index READY |
-| CONTROL-PLANE-ACTIVATION-1 | W3 · #521 `be4d66ce` | fix delivered (L0 `5848766774`); **W7 Check 63** `5848864115`: fix PASS, **F1** contract guard misses 3 firebase spellings | **Director HOLD** `5848893150`: install only `google-auth-library@9.15.1` → W3 after #519 F1–F3 (`5848898954`) → W7 delta → accept → one re-run |
-| AUTONOMY-STATE-1A | #519 `d01c4cd9` | additive `tools/wsf-control` + docs/skills; tests green (L0 `5848305557`) | Director review |
-| **HOME-NORTHSTAR-PARITY-1** | W9 · #514 `9d27fdb5` | ACCEPTED `5848551777` → integrated `a3127651`; **pin #522 `70a6a515`** (49→49; L0 `5848891174`) | **W7 Check 64** `5848892289` → Director → merge → dispatch |
+| CONTROL-PLANE-ACTIVATION-1 | W3 · #521 `be4d66ce` | Director HOLD `5848893150`: install only `google-auth-library@9.15.1` | **W3 ACTIVE NOW** (`5849107245`) → W7 delta → accept → one re-run |
+| AUTONOMY-STATE-1A | W3 · #519 `6dcd448d` | F1–F4 + one-ball closure delivered (L0 `5849104696`, suites green) | W7 closure recheck → Director; then 1B/1C consult (`5849064684`) |
+| **HOME-NORTHSTAR-PARITY-1** | W9 · #514 `9d27fdb5` | ACCEPTED → integrated `a3127651` → pin #522 → **SERVED run 55**; owner card `5849113235` | owner test feedback |
 | **PRIVACY-TOGGLE-STAGING-1** | owner as operator · harness merged `6c2e6b25` | setters SHUT (run 50); no Claude identity can do Operation 2; W7 Check 43 emulator PASS | owner Operation 2 read-back → one `social-privacy` dispatch → seven-row receipt |
 | **HARDENED-MEMBER-JOURNEY-1** | W7 · `a55046f5` | H1–H4 baselined on served; **H3c** (silent failed Home refresh) and **H4b** (no eviction after refusal) fail; H5 waits on Settings | rerun on successors |
 | SOCIAL-DEMO-SEED-MODE | W3 · #484 `4c1ac1d9` | W7 carry confirmed | Director → L0 PLAN → APPLY / VERIFY |
