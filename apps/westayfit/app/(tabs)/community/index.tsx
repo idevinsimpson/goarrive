@@ -8,8 +8,9 @@ import { useWsfAuth } from '../../../src/auth';
 import { mapWithLimit } from '../../../src/concurrency';
 import { rememberCurrentCommunity, resolveCurrentCommunity } from '../../../src/currentCommunity';
 import { getFirebaseFunctions } from '../../../src/firebase';
-import { memberCountLabel, roleCardLabel } from '../../../src/labels';
-import { formatSinceShort } from '../../../src/ui/dates';
+import { groupTypeCardLabel, joinPolicyLabel, memberCountLabel } from '../../../src/labels';
+import { InitialsAvatar, isChampionRole } from '../../../src/ui/CommunityPresence';
+import { formatPeriod, formatSinceShort } from '../../../src/ui/dates';
 import {
   ACTION_GREEN,
   CREAM,
@@ -28,7 +29,15 @@ import {
 } from '../../../src/ui/kit';
 import { LivingWeProgress } from '../../../src/ui/LivingWeProgress';
 import { MEMBER_TAB_BAR_BODY, MEMBER_TAB_MOVE_OVERHANG } from '../../../src/ui/MemberTabBar';
-import { fillRatio, formatCount, percentLabel, totalOfTargetLabel } from '../../../src/ui/progressFormat';
+import {
+  fillRatio,
+  formatCount,
+  isReached,
+  percentLabel,
+  statusLine,
+  totalOfTargetLabel,
+  totalOfTargetParts,
+} from '../../../src/ui/progressFormat';
 import { peekGoals, peekMyCommunities, readGoals, readMyCommunities } from '../../../src/memberReads';
 
 /**
@@ -44,24 +53,22 @@ import { peekGoals, peekMyCommunities, readGoals, readMyCommunities } from '../.
  * and this screen asks rather than picking the first. Marking a row CURRENT by
  * convenience would be the interface inventing a fact.
  *
- * PRESENCE WITHOUT IDENTITIES. The recent-movement strip is amounts, units and
- * coarse times. `wsfGoalRecentAdditions` rebuilds every row from `amount` and
- * `at` alone, so a uid or a name cannot ride out of it even from a hand-edited
- * document — and it is readable on the MEMBER route, for every community a
- * member is active in, not only display-authorized ones. There are no photos,
- * no names of who moved, no reactions and no count of who is here, because
- * none of that exists: `memberCount` is a roll, not a presence.
+ * WHO IS HERE IS WHAT MEMBERS CHOSE TO SHOW. The roster is
+ * `wsfCommunityMembers`: the names of members whose "Show my name" is on, and
+ * -- only when that list is complete -- how many are here without a name. The
+ * recent-movement strip is amounts, units and coarse times; its callable
+ * rebuilds every row from `amount` and `at` alone, so no uid or name can ride
+ * out of it. There are no photos, reactions or rankings.
  *
  * ONE BAD READ MUST NOT EMPTY THE SCREEN. Goals are enriched per community,
  * bounded and in parallel, and each community's failure is its own. A member
  * whose third community will not load still sees the first two and still has
  * their way back into the one they were in.
  *
- * THERE IS NO JOIN CONTROL, and that is deliberate. `/join/[joinCode]` takes
- * the code from the route; nothing in the product accepts a typed one. A
- * "Join" button here would go nowhere, so joining is explained where it is
- * true — in words, in the empty state — and manual join-code entry is a
- * recorded product seam rather than a drawn button.
+ * JOIN GOES WHERE A CODE IS TAKEN. `/join/[joinCode]` takes the code from the
+ * route, and the one place a typed code is accepted is Home's list ("Join
+ * with a code", `/?view=communities`). The Join chip opens exactly that and
+ * is named for it.
  */
 
 /** At most this many community goal reads are in flight at once. */
@@ -76,6 +83,9 @@ type Membership = {
   displayName: string;
   memberCount: number;
   role: string;
+  /** Stored enums; the banner states them through the shared labels or not at all. */
+  groupType?: string;
+  joinPolicy?: string;
 };
 
 type Goal = {
@@ -85,7 +95,20 @@ type Goal = {
   unit: string;
   status: string;
   sharedTotal?: number;
+  startsAt?: string;
+  endsAt?: string;
+  timezone?: string;
 };
+
+/**
+ * The current community's roster, from `wsfCommunityMembers`: the members who
+ * chose to be named, and whether that list is the whole of them. The server
+ * applies each member's privacy choice; this screen never sees a private name.
+ */
+type Roster =
+  | { groupId: string; people: { displayName: string; role: string }[]; complete: boolean }
+  | { groupId: string; failed: true }
+  | 'pending';
 
 type Addition = { amount: number; unit: string; at: string };
 
@@ -100,7 +123,7 @@ type Enriched = Membership & { goals: Goal[] | 'failed' | 'pending' };
 type State =
   | { kind: 'loading' }
   | { kind: 'error' }
-  | { kind: 'ready'; items: Enriched[]; currentId: string | null; momentum: Addition[] };
+  | { kind: 'ready'; items: Enriched[]; currentId: string | null; momentum: Addition[]; roster: Roster };
 
 function activeGoals(goals: Goal[] | 'failed' | 'pending'): Goal[] {
   return goals === 'failed' || goals === 'pending' ? [] : goals.filter((g) => g.status === 'active');
@@ -133,6 +156,7 @@ function warmState(uid: string | null): State | null {
     items: enriched,
     currentId: resolveCurrentCommunity(uid, items.map((m) => m.groupId)),
     momentum: [],
+    roster: 'pending',
   };
 }
 
@@ -194,7 +218,7 @@ export default function CommunityIndexScreen() {
 
       if (items.length === 0) {
         if (liveRef.current === token) {
-          setState({ kind: 'ready', items: [], currentId: null, momentum: [] });
+          setState({ kind: 'ready', items: [], currentId: null, momentum: [], roster: 'pending' });
         }
         return;
       }
@@ -218,10 +242,12 @@ export default function CommunityIndexScreen() {
         items.map((m) => m.groupId),
       );
 
-      let momentum: Addition[] = [];
       const current = currentId ? enriched.find((e) => e.groupId === currentId) : undefined;
       const open = current ? activeGoals(current.goals).slice(0, MOMENTUM_GOAL_LIMIT) : [];
-      if (open.length > 0) {
+
+      // Recent movement and the roster are independent reads: side by side.
+      const readMomentum = async (): Promise<Addition[]> => {
+        if (open.length === 0) return [];
         const recent = httpsCallable<{ goalId: string }, { additions: Addition[] }>(
           fns,
           'wsfGoalRecentAdditions',
@@ -230,18 +256,47 @@ export default function CommunityIndexScreen() {
           const r = await recent({ goalId: g.goalId });
           return Array.isArray(r.data?.additions) ? r.data.additions : [];
         });
-        momentum = reads
-          .flatMap((r) => (r.ok ? r.value : []))
-          .filter((a) => typeof a.amount === 'number' && typeof a.at === 'string')
-          // Merged on the real instant, never on the order the reads returned:
-          // two goals' tails interleave in time and stitching them end to end
-          // would present a false sequence.
-          .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
-          .slice(0, MOMENTUM_ROWS);
-      }
+        return (
+          reads
+            .flatMap((r) => (r.ok ? r.value : []))
+            .filter((a) => typeof a.amount === 'number' && typeof a.at === 'string')
+            // Merged on the real instant, never on the order the reads returned:
+            // two goals' tails interleave in time and stitching them end to end
+            // would present a false sequence.
+            .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
+            .slice(0, MOMENTUM_ROWS)
+        );
+      };
+
+      /*
+        COMMUNITY-SETTINGS-PARITY-1. THE ROSTER, AS THE REFERENCE DRAWS IT
+        LAST: who is in the current community, by the names they chose to
+        show. `wsfCommunityMembers` applies every member's privacy choice
+        server-side; a failure says so rather than guessing a list. The
+        answer carries the community it was read for, so it can never be
+        drawn under another community's heading.
+      */
+      const readRoster = async (): Promise<Roster> => {
+        if (!current) return 'pending';
+        try {
+          const r = await httpsCallable<
+            { groupId: string },
+            { members: { displayName: string; role: string }[]; nextCursor: string | null }
+          >(fns, 'wsfCommunityMembers')({ groupId: current.groupId });
+          return {
+            groupId: current.groupId,
+            people: Array.isArray(r.data?.members) ? r.data.members : [],
+            complete: (r.data?.nextCursor ?? null) === null,
+          };
+        } catch {
+          return { groupId: current.groupId, failed: true };
+        }
+      };
+
+      const [momentum, roster] = await Promise.all([readMomentum().catch(() => [] as Addition[]), readRoster()]);
 
       if (liveRef.current === token) {
-        setState({ kind: 'ready', items: enriched, currentId, momentum });
+        setState({ kind: 'ready', items: enriched, currentId, momentum, roster });
       }
     })();
 
@@ -290,9 +345,11 @@ export default function CommunityIndexScreen() {
             page and gave the member two different Home gestures -- and this
             one navigated INTO the tab tree from inside it, which pushed a new
             community screen instead of returning to the mounted one. */}
-      <Text style={[display.md, styles.pageTitle]} testID="wsf-community-index-title">
-        Community
-      </Text>
+      {state.kind === 'ready' && state.currentId && ready && user ? null : (
+        <Text style={[display.md, styles.pageTitle]} testID="wsf-community-index-title">
+          Community
+        </Text>
+      )}
 
       {!ready || !user ? (
         <Text style={styles.note} testID="wsf-community-index-signed-out">
@@ -309,6 +366,8 @@ export default function CommunityIndexScreen() {
         />
       ) : state.items.length === 0 ? (
         <EmptyBody />
+      ) : state.currentId ? (
+        <CommunityParity state={state} onSelect={select} onOpen={open} onRefresh={() => setAttempt((n) => n + 1)} />
       ) : (
         <>
           <Chips state={state} onSelect={select} />
@@ -464,12 +523,11 @@ function EmptyBody() {
 /**
  * THE REFERENCE'S SWITCHER (Lovable `a15a610e`, screens/community.tsx): one
  * chip per community this account belongs to, the current one filled and
- * checked and pressed; pressing another selects it here, in place. Shown only
- * when there is somewhere to switch to -- a single chip that does nothing
- * would teach the member the control lies.
+ * checked and pressed; pressing another selects it here, in place.
  *
- * Join is not drawn: this product has no join-by-code route (a recorded seam),
- * and Start keeps its existing control below.
+ * Since COMMUNITY-SETTINGS-PARITY-1 the row always shows, as the reference
+ * draws it: every joined community, then Join and Start -- so a member of one
+ * community still sees where more come from.
  */
 function Chips({
   state,
@@ -478,7 +536,6 @@ function Chips({
   state: Extract<State, { kind: 'ready' }>;
   onSelect: (groupId: string, name: string) => void;
 }) {
-  if (state.items.length < 2) return null;
   return (
     <View style={styles.chipsBlock} testID="wsf-community-index-chips">
       <Text style={styles.eyebrow} {...({ role: 'heading', 'aria-level': 2 } as Record<string, unknown>)}>
@@ -508,13 +565,48 @@ function Chips({
             </Pressable>
           );
         })}
+        {/*
+          JOIN AND START, as the reference's dashed chips. Join opens the one
+          place this product takes a join code today (Home's list, with its
+          "Join with a code" field), and is named for exactly that; Start
+          opens community creation. Both are real destinations.
+        */}
+        <Pressable
+          onPress={() => router.push('/?view=communities' as never)}
+          accessibilityRole="link"
+          accessibilityLabel="Join with a code"
+          style={[styles.switchChip, styles.switchChipGhost]}
+          testID="wsf-community-index-join"
+        >
+          <Text style={styles.switchChipIcon} aria-hidden>
+            +
+          </Text>
+          <Text style={[styles.switchChipText, styles.switchChipTextGhost]}>Join</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => router.push('/start-community' as never)}
+          accessibilityRole="link"
+          accessibilityLabel="Start a community"
+          style={[styles.switchChip, styles.switchChipGhost]}
+          testID="wsf-community-index-start"
+        >
+          <Text style={styles.switchChipIcon} aria-hidden>
+            +
+          </Text>
+          <Text style={[styles.switchChipText, styles.switchChipTextGhost]}>Start</Text>
+        </Pressable>
       </View>
     </View>
   );
 }
 
-/* ── ready ───────────────────────────────────────────────────────────────── */
+/* ── several memberships, none chosen ────────────────────────────────────── */
 
+/**
+ * SEVERAL MEMBERSHIPS AND NONE CHOSEN. `resolveCurrentCommunity()` returned
+ * null, so the screen asks instead of picking. Every row is an equal choice
+ * and says so.
+ */
 function ReadyBody({
   state,
   onOpen,
@@ -522,95 +614,258 @@ function ReadyBody({
   state: Extract<State, { kind: 'ready' }>;
   onOpen: (groupId: string) => void;
 }) {
-  const current = state.currentId
-    ? state.items.find((i) => i.groupId === state.currentId)
-    : undefined;
-  const others = state.items.filter((i) => i.groupId !== current?.groupId);
-
   return (
     <View style={styles.stateWrap} testID="wsf-community-index-rows">
-      {current ? (
-        <CurrentPanel item={current} momentum={state.momentum} />
-      ) : (
-        /*
-          SEVERAL MEMBERSHIPS AND NONE CHOSEN. `resolveCurrentCommunity()`
-          returned null, so the screen asks instead of picking. Every row is an
-          equal choice and says so.
-        */
-        <View style={styles.choosePanel} testID="wsf-community-index-choose">
-          <Text style={styles.chooseTitle}>Choose which community Home opens</Text>
-          <Text style={styles.chooseBody}>
-            You are in {state.items.length} communities and have not opened one yet. Pick one — you
-            can switch whenever you like.
-          </Text>
-        </View>
-      )}
-
-      {others.length > 0 ? (
-        <View style={styles.others}>
-          {current ? <Text style={styles.eyebrow}>ALSO YOURS</Text> : null}
-          {others.map((item) => (
-            <OtherRow
-              key={item.groupId}
-              item={item}
-              cue={current ? 'Switch' : 'Choose'}
-              onPress={() => onOpen(item.groupId)}
-            />
-          ))}
-        </View>
-      ) : null}
-
-      <View style={styles.actionRow}>
-        <Pill
-          label="Start a community"
-          testID="wsf-community-index-start"
-          onPress={() => router.replace('/start-community')}
-        />
+      <View style={styles.choosePanel} testID="wsf-community-index-choose">
+        <Text style={styles.chooseTitle}>Choose which community Home opens</Text>
+        <Text style={styles.chooseBody}>
+          You are in {state.items.length} communities and have not opened one yet. Pick one — you
+          can switch whenever you like.
+        </Text>
+      </View>
+      <View style={styles.others}>
+        {state.items.map((item) => (
+          <OtherRow key={item.groupId} item={item} cue="Choose" onPress={() => onOpen(item.groupId)} />
+        ))}
       </View>
     </View>
   );
 }
 
-function CurrentPanel({ item, momentum }: { item: Enriched; momentum: Addition[] }) {
-  const open = activeGoals(item.goals);
-  const lead = open[0];
-  const role = roleCardLabel(item.role);
+/* ── the current community, in the reference's order ─────────────────────── */
+
+/*
+  COMMUNITY-SETTINGS-PARITY-1 CHECKPOINT 2. THE LITERAL HIERARCHY.
+
+  Frozen Lovable `d4f60624`, src/demo/screens/community.tsx, in its order
+  (Director #489 `5841270180`):
+    1. the navy identity banner -- the name, then Members / Your role / Goals;
+    2. every joined community as a chip, then Join and Start;
+    3. THIS PERIOD -- one featured open goal with its Living WE, and the
+       other open goals as a separately labelled "Also open" list;
+    4. GOAL HISTORY -- "What we’ve done together";
+    5. the roster -- "N people", by the names members chose to show.
+  What this route had beyond the reference stays, after it: the rows that
+  open another community's Home, then recent movement (Home owns the
+  momentum feed; here it is a quiet last section).
+
+  NOTHING IS INVENTED FOR THE REFERENCE'S SAMPLE SLOTS (#489 `5840935594`).
+  Its place line is the stored group type, or nothing; its descriptor is the
+  stored join policy in the words Community Home already uses. A goal list
+  not read yet or not readable says so; it is never "No active goal" and
+  never a count of 0.
+*/
+function CommunityParity({
+  state,
+  onSelect,
+  onOpen,
+  onRefresh,
+}: {
+  state: Extract<State, { kind: 'ready' }>;
+  onSelect: (groupId: string, name: string) => void;
+  onOpen: (groupId: string) => void;
+  onRefresh: () => void;
+}) {
+  const current = state.items.find((i) => i.groupId === state.currentId)!;
+  const others = state.items.filter((i) => i.groupId !== current.groupId);
+  const roster = state.roster !== 'pending' && state.roster.groupId === current.groupId ? state.roster : 'pending';
 
   return (
-    <View style={styles.currentPanel} testID="wsf-community-index-current">
-      <View style={styles.currentTop}>
-        <Text style={styles.currentPill}>CURRENT</Text>
-        {role ? <Text style={styles.rolePill}>{role}</Text> : null}
+    <View testID="wsf-community-index-rows">
+      <Banner item={current} />
+      <View style={styles.switcher}>
+        <Chips state={state} onSelect={onSelect} />
       </View>
-      <Text style={[display.lg, styles.currentName]} numberOfLines={2}>
+      <PeriodBlock item={current} onRefresh={onRefresh} />
+      <HistoryBlock item={current} />
+      <RosterBlock item={current} roster={roster} />
+
+      {others.length > 0 ? (
+        <View style={[styles.others, styles.afterCore]}>
+          <Text style={styles.eyebrow}>OPEN ANOTHER COMMUNITY</Text>
+          {others.map((item) => (
+            <OtherRow key={item.groupId} item={item} cue="Switch" onPress={() => onOpen(item.groupId)} />
+          ))}
+        </View>
+      ) : null}
+
+      {state.momentum.length > 0 ? <Momentum rows={state.momentum} /> : null}
+    </View>
+  );
+}
+
+/** Goals this community has, when its list was read; null when it was not. */
+function goalsOf(item: Enriched): Goal[] | null {
+  return item.goals === 'pending' || item.goals === 'failed' ? null : item.goals;
+}
+
+/** The server returns at most this many closed goals with the history. */
+const HISTORY_LIMIT = 50;
+
+function Banner({ item }: { item: Enriched }) {
+  const place = groupTypeCardLabel(item.groupType);
+  const goals = goalsOf(item);
+  const closed = goals ? goals.filter((g) => g.status === 'closed').length : 0;
+  return (
+    <View style={styles.banner} testID="wsf-community-index-current">
+      {/* The reference's ring, drawn inside the banner's own bounds. */}
+      <View style={styles.bannerRing} pointerEvents="none" />
+      {place ? <Text style={styles.bannerEyebrow}>{place}</Text> : null}
+      <Text
+        style={styles.bannerName}
+        numberOfLines={2}
+        testID="wsf-community-index-title"
+        {...({ role: 'heading', 'aria-level': 1 } as Record<string, unknown>)}
+      >
         {item.displayName}
       </Text>
-      <Text style={styles.currentMeta} testID="wsf-community-index-member-count">
-        {memberCountLabel(item.memberCount)}
-      </Text>
+      {typeof item.joinPolicy === 'string' ? (
+        <Text style={styles.bannerLine}>Joining: {joinPolicyLabel(item.joinPolicy)}</Text>
+      ) : null}
+      <View style={styles.bannerFacts}>
+        <View style={styles.factCell}>
+          <Text style={styles.factLabel}>Members</Text>
+          <Text style={styles.factValue} testID="wsf-community-index-member-count">
+            {formatCount(item.memberCount)}
+          </Text>
+        </View>
+        <View style={styles.factCell}>
+          <Text style={styles.factLabel}>Your role</Text>
+          <Text style={styles.factValue}>{isChampionRole(item.role) ? 'Champion' : 'Member'}</Text>
+        </View>
+        <View style={styles.factCell}>
+          <Text style={styles.factLabel}>Goals</Text>
+          {/* A list not read is not a count: a dash, never 0. */}
+          <Text
+            style={styles.factValue}
+            testID="wsf-community-index-goal-count"
+            accessibilityLabel={goals ? undefined : 'Goals not known yet'}
+          >
+            {goals ? `${formatCount(goals.length)}${closed >= HISTORY_LIMIT ? '+' : ''}` : '—'}
+          </Text>
+        </View>
+      </View>
+    </View>
+  );
+}
 
-      <View style={styles.currentRule} />
+type PillKind = 'open' | 'reachedOpen' | 'closedReached' | 'closedUnfinished';
 
-      <Text style={styles.eyebrowDark}>WHAT WE&apos;RE DOING</Text>
-      {item.goals === 'pending' ? (
-        <Text style={styles.currentUnavailable} testID="wsf-community-index-current-pending">
-          Reading progress…
-        </Text>
-      ) : item.goals === 'failed' ? (
+/**
+ * The reference's status pill. Reached is only ever said from a confirmed
+ * total; without one, an active goal is simply open.
+ */
+function pillKind(g: Goal): PillKind {
+  const known = typeof g.sharedTotal === 'number' && g.target > 0;
+  if (g.status === 'closed') {
+    return known && isReached(g.sharedTotal!, g.target) ? 'closedReached' : 'closedUnfinished';
+  }
+  return known && isReached(g.sharedTotal!, g.target) ? 'reachedOpen' : 'open';
+}
+
+const PILL_TEXT: Record<PillKind, string> = {
+  open: 'Open',
+  reachedOpen: 'Reached · still open',
+  closedReached: 'Closed · reached',
+  closedUnfinished: 'Closed · unfinished',
+};
+
+function StatusPill({ goal }: { goal: Goal }) {
+  const kind = pillKind(goal);
+  return (
+    <Text
+      style={[
+        styles.statusPill,
+        kind === 'closedReached'
+          ? styles.statusPillReached
+          : kind === 'closedUnfinished'
+            ? styles.statusPillQuiet
+            : null,
+      ]}
+    >
+      {PILL_TEXT[kind]}
+    </Text>
+  );
+}
+
+/** "Sep 1 – 30", in the goal's own zone; null when it cannot be said. */
+function periodOf(g: Goal): string | null {
+  return g.startsAt && g.endsAt ? formatPeriod(g.startsAt, g.endsAt, { timeZone: g.timezone ?? null }) : null;
+}
+
+/** "Sep 1 – 30 · 241 of 500 squats", or only what is known. */
+function goalLine(g: Goal): string {
+  const amount =
+    typeof g.sharedTotal === 'number'
+      ? totalOfTargetLabel(g.sharedTotal, g.target, g.unit)
+      : `Target ${formatCount(g.target)} ${g.unit}`;
+  const period = periodOf(g);
+  return period ? `${period} · ${amount}` : amount;
+}
+
+function PeriodBlock({ item, onRefresh }: { item: Enriched; onRefresh: () => void }) {
+  const open = activeGoals(item.goals);
+  const lead = open[0];
+  const also = open.slice(1);
+  const known = lead && typeof lead.sharedTotal === 'number';
+  const title =
+    item.goals === 'pending'
+      ? 'Reading this community’s goals…'
+      : item.goals === 'failed'
+        ? 'Goals could not be read just now'
+        : lead
+          ? lead.title
+          : 'No active goal';
+
+  return (
+    <View style={styles.periodBlock} testID="wsf-community-index-period">
+      <View style={styles.sectionHeading}>
+        <View style={styles.sectionHeadingText}>
+          <Text style={styles.eyebrow}>This period</Text>
+          <Text
+            style={styles.h2}
+            testID={
+              item.goals === 'pending'
+                ? 'wsf-community-index-current-pending'
+                : item.goals === 'failed'
+                  ? 'wsf-community-index-current-unavailable'
+                  : lead
+                    ? 'wsf-community-index-period-title'
+                    : 'wsf-community-index-current-nogoal'
+            }
+            {...({ role: 'heading', 'aria-level': 2 } as Record<string, unknown>)}
+          >
+            {title}
+          </Text>
+        </View>
+        {lead ? <StatusPill goal={lead} /> : null}
+      </View>
+
+      {item.goals === 'failed' ? (
         /*
           THIS COMMUNITY'S READ FAILED, and only this one. Saying so where the
-          progress would have been is the honest answer; blanking the screen or
-          showing a zero would both be worse, and a zero would be a lie.
+          progress would have been is the honest answer; a zero would be a lie.
         */
-        <Text style={styles.currentUnavailable} testID="wsf-community-index-current-unavailable">
-          Progress could not be loaded just now.
-        </Text>
-      ) : !lead ? (
-        <Text style={styles.currentUnavailable} testID="wsf-community-index-current-nogoal">
-          No goal running yet.
+        <View style={styles.periodBody}>
+          <Text style={styles.muted}>Nothing is shown as zero — this is the reading, not the record.</Text>
+          <Pressable
+            onPress={onRefresh}
+            accessibilityRole="button"
+            style={styles.inlineAction}
+            testID="wsf-community-index-period-retry"
+          >
+            <Text style={styles.inlineActionText}>Try again</Text>
+          </Pressable>
+        </View>
+      ) : item.goals === 'pending' ? null : !lead ? (
+        <Text style={[styles.muted, styles.periodBody]}>
+          No shared target is being counted.{' '}
+          {isChampionRole(item.role)
+            ? 'You can start the next goal from this community’s Home.'
+            : 'Your Champion can start the next goal.'}
         </Text>
       ) : (
-        <View style={styles.currentGoalRow}>
+        <View style={styles.periodRow}>
           {/*
             The one Living WE on this screen -- only beside a real shared total.
             C-F9 (W7 Check 45; Director #489 `5841279872`): an unknown total
@@ -618,51 +873,201 @@ function CurrentPanel({ item, momentum }: { item: Enriched; momentum: Addition[]
             positive target, means no instrument, no percentage and no
             remaining figure; the target is still stated as a target.
           */}
-          {typeof lead.sharedTotal === 'number' && lead.target > 0 ? (
-            <LivingWeProgress
-              completed={lead.sharedTotal}
-              target={lead.target}
-              unit={lead.unit}
-              width={74}
-              surface="dark"
-              testID="wsf-community-index-we"
-            />
+          {known && lead.target > 0 ? (
+            <View style={styles.wePlate}>
+              <LivingWeProgress
+                completed={lead.sharedTotal!}
+                target={lead.target}
+                unit={lead.unit}
+                width={88}
+                surface="dark"
+                testID="wsf-community-index-we"
+              />
+            </View>
           ) : null}
-          <View style={styles.currentGoalText}>
-            <Text style={styles.currentGoalTitle} numberOfLines={1}>
-              {lead.title}
-            </Text>
-            <Text style={styles.currentGoalTotal}>
-              {typeof lead.sharedTotal === 'number'
-                ? totalOfTargetLabel(lead.sharedTotal, lead.target, lead.unit)
-                : `Target ${formatCount(lead.target)} ${lead.unit}`}
-            </Text>
-            {typeof lead.sharedTotal === 'number' ? (
+          <View style={styles.periodNumbers}>
+            {known && lead.target > 0 ? (
               <>
-                <Track total={lead.sharedTotal} target={lead.target} dark />
-                <Text style={styles.currentGoalPct}>
-                  {percentLabel(lead.sharedTotal, lead.target)}
-                </Text>
+                <View style={styles.goalNumber}>
+                  <Text style={styles.goalNumberStrong}>
+                    {totalOfTargetParts(lead.sharedTotal!, lead.target, lead.unit).count}
+                  </Text>
+                  <Text style={styles.goalNumberRest}>
+                    {totalOfTargetParts(lead.sharedTotal!, lead.target, lead.unit).rest}
+                  </Text>
+                </View>
+                <Track total={lead.sharedTotal!} target={lead.target} />
+                <View style={styles.progressMeta}>
+                  <Text style={styles.progressMetaStrong}>
+                    {isReached(lead.sharedTotal!, lead.target)
+                      ? 'Goal reached'
+                      : `${percentLabel(lead.sharedTotal!, lead.target)} complete`}
+                  </Text>
+                  <Text style={styles.progressMetaRest}>
+                    {statusLine(lead.sharedTotal!, lead.target, lead.status)}
+                  </Text>
+                </View>
               </>
-            ) : null}
+            ) : known ? (
+              <Text style={styles.unknownStrong}>
+                {formatCount(lead.sharedTotal!)} {lead.unit}
+              </Text>
+            ) : (
+              <View testID="wsf-community-index-period-unknown">
+                <Text style={styles.unknownStrong}>Progress unknown</Text>
+                <Text style={styles.muted}>
+                  The current total could not be confirmed. Nothing is shown as zero.
+                </Text>
+                <Text style={styles.small}>
+                  Target {formatCount(lead.target)} {lead.unit}
+                </Text>
+              </View>
+            )}
+            {periodOf(lead) ? <Text style={[styles.small, styles.periodLine]}>{periodOf(lead)}</Text> : null}
           </View>
         </View>
       )}
 
-      {open.length > 1 ? (
-        <View style={styles.currentSecond}>
-          <Text style={styles.currentSecondTitle} numberOfLines={1}>
-            {open[1]!.title}
-          </Text>
-          {typeof open[1]!.sharedTotal === 'number' ? (
-            <Text style={styles.currentSecondPct}>
-              {percentLabel(open[1]!.sharedTotal!, open[1]!.target)}
-            </Text>
-          ) : null}
+      {also.length > 0 ? (
+        <View style={styles.alsoOpen} testID="wsf-community-index-also-open" accessibilityLabel="Also open">
+          <Text style={styles.eyebrowQuiet}>Also open</Text>
+          {also.map((g) => (
+            <View key={g.goalId} style={styles.alsoRow}>
+              <View style={styles.alsoText}>
+                <Text style={styles.rowStrong} numberOfLines={1}>
+                  {g.title}
+                </Text>
+                <Text style={styles.rowSpan}>{goalLine(g)}</Text>
+              </View>
+              <StatusPill goal={g} />
+            </View>
+          ))}
         </View>
       ) : null}
+    </View>
+  );
+}
 
-      {momentum.length > 0 ? <Momentum rows={momentum} /> : null}
+function HistoryBlock({ item }: { item: Enriched }) {
+  const goals = goalsOf(item);
+  // Newest first, on the same rule as Community Home's history.
+  const closed = goals
+    ? goals
+        .filter((g) => g.status === 'closed')
+        .sort((a, b) =>
+          (a.endsAt ?? '') === (b.endsAt ?? '')
+            ? a.goalId.localeCompare(b.goalId)
+            : (b.endsAt ?? '').localeCompare(a.endsAt ?? ''),
+        )
+    : null;
+  return (
+    <View style={styles.historyBlock} testID="wsf-community-index-history">
+      <Text style={styles.eyebrow}>Goal history</Text>
+      <Text style={styles.h2} {...({ role: 'heading', 'aria-level': 2 } as Record<string, unknown>)}>
+        What we’ve done together
+      </Text>
+      {closed === null ? (
+        <Text style={styles.muted}>
+          {item.goals === 'failed' ? 'Past goals could not be read just now.' : 'Reading past goals…'}
+        </Text>
+      ) : closed.length === 0 ? (
+        <Text style={styles.muted}>No past goals yet.</Text>
+      ) : (
+        <View style={styles.timeline}>
+          {closed.map((g) => {
+            const reached = pillKind(g) === 'closedReached';
+            return (
+              <View key={g.goalId} style={styles.timelineItem} testID={`wsf-community-index-history-${g.goalId}`}>
+                <View style={[styles.dot, reached ? null : styles.dotQuiet]} />
+                <View style={styles.alsoText}>
+                  <Text style={styles.rowStrong}>{g.title}</Text>
+                  <Text style={styles.rowSpan}>{goalLine(g)}</Text>
+                </View>
+                <StatusPill goal={g} />
+              </View>
+            );
+          })}
+        </View>
+      )}
+    </View>
+  );
+}
+
+/** How many named members the Community tab draws before "See everyone". */
+const ROSTER_PREVIEW = 8;
+
+function RosterBlock({
+  item,
+  roster,
+}: {
+  item: Enriched;
+  roster: Exclude<Roster, 'pending'> | 'pending';
+}) {
+  const count = item.memberCount;
+  const ready = roster !== 'pending' && !('failed' in roster) ? roster : null;
+  const shown = ready ? ready.people.slice(0, ROSTER_PREVIEW) : [];
+  // Only a complete list can say how many chose not to be named.
+  const anonymous = ready && ready.complete ? Math.max(0, count - ready.people.length) : 0;
+  return (
+    <View style={styles.rosterBlock} testID="wsf-community-index-roster">
+      <View style={styles.sectionHeading}>
+        <View style={styles.sectionHeadingText}>
+          <Text style={styles.eyebrow}>Members</Text>
+          <Text style={styles.h2} {...({ role: 'heading', 'aria-level': 2 } as Record<string, unknown>)}>
+            {count === 1 ? '1 person' : `${formatCount(count)} people`}
+          </Text>
+        </View>
+        <Pressable
+          onPress={() => router.push(`/community/${item.groupId}/members` as never)}
+          accessibilityRole="link"
+          accessibilityLabel={`See everyone in ${item.displayName}`}
+          style={styles.inlineAction}
+          testID="wsf-community-index-roster-all"
+        >
+          <Text style={styles.inlineActionText}>See everyone ›</Text>
+        </Pressable>
+      </View>
+
+      {roster === 'pending' ? (
+        <Text style={styles.muted}>Reading who is here…</Text>
+      ) : 'failed' in roster ? (
+        <Text style={styles.muted}>The member list could not be read just now.</Text>
+      ) : (
+        <View style={styles.rosterList}>
+          {shown.map((p, i) => (
+            <View key={`${p.displayName}-${i}`} style={styles.rosterRow}>
+              <InitialsAvatar displayName={p.displayName} role={p.role} size={36} />
+              <Text style={styles.rosterName} numberOfLines={1}>
+                {p.displayName}
+              </Text>
+              {isChampionRole(p.role) ? <Text style={styles.rosterRole}>Champion</Text> : <View />}
+            </View>
+          ))}
+          {ready && ready.people.length > shown.length ? (
+            <View style={styles.rosterRow}>
+              <View style={[styles.anonAvatar, styles.moreAvatar]}>
+                <Text style={styles.moreAvatarText}>+{formatCount(ready.people.length - shown.length)}</Text>
+              </View>
+              <Text style={styles.rosterName}>more named in See everyone</Text>
+              <View />
+            </View>
+          ) : null}
+          {anonymous > 0 ? (
+            <View style={styles.rosterRow} testID="wsf-community-index-roster-anonymous">
+              {/* The reference's anonymous disc: a person, not an empty circle. */}
+              <View style={styles.anonAvatar} aria-hidden>
+                <View style={styles.anonHead} />
+                <View style={styles.anonBody} />
+              </View>
+              <Text style={styles.rosterName}>
+                {anonymous === 1 ? '1 member shown without a name' : `${formatCount(anonymous)} members shown without names`}
+              </Text>
+              <View />
+            </View>
+          ) : null}
+        </View>
+      )}
+      <Text style={styles.small}>Names follow each member’s privacy choice for this community.</Text>
     </View>
   );
 }
@@ -671,7 +1076,7 @@ function CurrentPanel({ item, momentum }: { item: Enriched; momentum: Addition[]
 function Momentum({ rows }: { rows: Addition[] }) {
   return (
     <View style={styles.momentum} testID="wsf-community-index-momentum">
-      <Text style={styles.eyebrowDark}>RECENT MOVEMENT</Text>
+      <Text style={styles.eyebrow}>Recent movement</Text>
       <View style={styles.momentumRows}>
         {rows.map((r, i) => {
           const since = formatSinceShort(r.at);
@@ -784,54 +1189,175 @@ const styles = StyleSheet.create({
   note: { color: TEXT_MUTED, fontSize: 13, lineHeight: 18 },
   stateWrap: { gap: 14 },
 
-  eyebrow: { color: '#2F7D4F', fontSize: 11, fontWeight: '900', letterSpacing: 1.4 },
-  eyebrowDark: { color: PROGRESS_GREEN, fontSize: 11, fontWeight: '900', letterSpacing: 1.4 },
+  eyebrow: { color: '#2F7D4F', fontSize: 11, lineHeight: 15, fontWeight: '800', letterSpacing: 1.3, textTransform: 'uppercase' },
 
-  currentPanel: { backgroundColor: NAVY, borderRadius: 22, padding: 18, gap: 8, ...elevation.card },
-  currentTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  currentPill: {
-    color: '#04260F',
-    backgroundColor: PROGRESS_GREEN,
-    fontSize: 10,
-    fontWeight: '900',
-    letterSpacing: 1.2,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 999,
+  /* ── the reference's Community (Lovable `d4f60624`, styles.css) ── */
+  banner: {
+    position: 'relative',
     overflow: 'hidden',
+    marginHorizontal: -18,
+    marginTop: -10,
+    paddingHorizontal: 18,
+    paddingTop: 26,
+    paddingBottom: 20,
+    backgroundColor: NAVY,
   },
-  rolePill: {
-    color: ON_NAVY_MUTED,
-    borderColor: ON_NAVY_RULE,
-    borderWidth: 1,
-    fontSize: 10,
+  /* .community-banner::after, as a quarter ring kept inside the banner so
+     nothing is laid out past the screen's right edge. */
+  bannerRing: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    width: 170,
+    height: 170,
+    borderBottomLeftRadius: 170,
+    borderLeftWidth: 40,
+    borderBottomWidth: 40,
+    borderColor: 'rgba(145,203,125,0.14)',
+  },
+  bannerEyebrow: {
+    color: PROGRESS_GREEN,
+    fontSize: 11,
+    lineHeight: 15,
     fontWeight: '800',
-    letterSpacing: 0.8,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+    letterSpacing: 1.3,
+    textTransform: 'uppercase',
+  },
+  bannerName: { color: '#FFFFFF', fontSize: 31, lineHeight: 33, fontWeight: '800', marginTop: 4, marginBottom: 2 },
+  bannerLine: { color: '#C9D6E3', fontSize: 14, lineHeight: 19 },
+  bannerFacts: { flexDirection: 'row', gap: 8, marginTop: 18 },
+  factCell: { flex: 1, paddingTop: 8, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.18)' },
+  factLabel: { color: '#AFC0D2', fontSize: 10, lineHeight: 13, letterSpacing: 1, textTransform: 'uppercase' },
+  factValue: { color: '#FFFFFF', fontSize: 17, lineHeight: 22, fontWeight: '800', marginTop: 2 },
+
+  switcher: { marginTop: 18 },
+
+  sectionHeading: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', gap: 8 },
+  sectionHeadingText: { flex: 1, minWidth: 0 },
+  h2: { color: NAVY, fontSize: 21, lineHeight: 26, fontWeight: '800', marginTop: 2 },
+  muted: { color: TEXT_MUTED, fontSize: 14, lineHeight: 20 },
+  small: { color: TEXT_MUTED, fontSize: 12, lineHeight: 17 },
+
+  periodBlock: { paddingTop: 26 },
+  periodBody: { marginTop: 12, gap: 4 },
+  periodRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 12 },
+  wePlate: {
+    width: 108,
+    height: 92,
+    borderRadius: 16,
+    backgroundColor: NAVY,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  periodNumbers: { flex: 1, minWidth: 0 },
+  goalNumber: { flexDirection: 'row', alignItems: 'baseline', gap: 7, flexWrap: 'wrap' },
+  goalNumberStrong: { color: NAVY, fontSize: 28, lineHeight: 30, fontWeight: '800' },
+  goalNumberRest: { color: TEXT_MUTED, fontSize: 13, fontWeight: '700' },
+  progressMeta: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', columnGap: 14, rowGap: 2, marginTop: 5 },
+  progressMetaStrong: { color: '#2B6E37', fontSize: 11, fontWeight: '800' },
+  progressMetaRest: { color: TEXT_MUTED, fontSize: 11 },
+  periodLine: { marginTop: 6 },
+  unknownStrong: { color: NAVY, fontSize: 18, lineHeight: 24, fontWeight: '800' },
+
+  statusPill: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 9,
+    paddingVertical: 5,
     borderRadius: 999,
     overflow: 'hidden',
+    backgroundColor: '#DCEFD6',
+    color: '#24562B',
+    fontSize: 10,
+    lineHeight: 12,
+    fontWeight: '800',
+    textTransform: 'uppercase',
   },
-  currentName: { color: ON_NAVY },
-  currentMeta: { color: ON_NAVY_MUTED, fontSize: 13, lineHeight: 18 },
-  currentRule: { height: 1, backgroundColor: ON_NAVY_RULE, marginVertical: 4 },
-  currentUnavailable: { color: ON_NAVY_MUTED, fontSize: 14, lineHeight: 20 },
-  currentGoalRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  currentGoalText: { flex: 1, gap: 3 },
-  currentGoalTitle: { color: ON_NAVY, fontSize: 15, lineHeight: 20, fontWeight: '800' },
-  currentGoalTotal: { color: ON_NAVY_MUTED, fontSize: 13, lineHeight: 18 },
-  currentGoalPct: { color: PROGRESS_GREEN, fontSize: 12, lineHeight: 16, fontWeight: '800' },
-  currentSecond: {
+  statusPillReached: { backgroundColor: NAVY, color: PROGRESS_GREEN },
+  statusPillQuiet: { backgroundColor: '#EFEDE6', color: TEXT_MUTED },
+
+  alsoOpen: { marginTop: 12 },
+  eyebrowQuiet: {
+    color: TEXT_MUTED,
+    fontSize: 10,
+    lineHeight: 14,
+    fontWeight: '800',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginBottom: 2,
+  },
+  alsoRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    borderTopWidth: 1,
-    borderTopColor: ON_NAVY_RULE,
-    paddingTop: 8,
     gap: 10,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: HAIRLINE,
   },
-  currentSecondTitle: { color: ON_NAVY_MUTED, fontSize: 13, lineHeight: 18, flex: 1 },
-  currentSecondPct: { color: PROGRESS_GREEN, fontSize: 12, fontWeight: '800' },
+  alsoText: { flex: 1, minWidth: 0 },
+  rowStrong: { color: NAVY, fontSize: 14, lineHeight: 19, fontWeight: '800' },
+  rowSpan: { color: TEXT_MUTED, fontSize: 12, lineHeight: 16, marginTop: 2 },
+
+  historyBlock: { paddingTop: 48 },
+  timeline: { marginTop: 12, paddingLeft: 14, borderLeftWidth: 2, borderLeftColor: HAIRLINE },
+  timelineItem: {
+    position: 'relative',
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    paddingTop: 10,
+    paddingBottom: 14,
+    paddingLeft: 8,
+  },
+  dot: {
+    position: 'absolute',
+    left: -22,
+    top: 15,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: PROGRESS_GREEN,
+    borderWidth: 2,
+    borderColor: CREAM,
+  },
+  dotQuiet: { backgroundColor: '#D7DFE7' },
+
+  rosterBlock: { paddingTop: 48 },
+  rosterList: { marginTop: 12, marginBottom: 10 },
+  rosterRow: {
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: HAIRLINE,
+  },
+  rosterName: { flex: 1, minWidth: 0, color: NAVY, fontSize: 14, fontWeight: '700' },
+  rosterRole: {
+    color: '#2F7D4F',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+  },
+  anonAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#EFEDE6',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    overflow: 'hidden',
+  },
+  anonHead: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#B9B4A9', marginBottom: 2 },
+  anonBody: { width: 22, height: 9, borderTopLeftRadius: 11, borderTopRightRadius: 11, backgroundColor: '#B9B4A9' },
+  moreAvatar: { backgroundColor: PROGRESS_GREEN, alignItems: 'center', justifyContent: 'center' },
+  moreAvatarText: { color: NAVY, fontSize: 11, fontWeight: '800' },
+
+  inlineAction: { minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start' },
+  inlineActionText: { color: '#2F7D4F', fontSize: 12, fontWeight: '800' },
+
+  afterCore: { marginTop: 32 },
 
   choosePanel: { gap: 4 },
   chooseTitle: { color: NAVY, fontSize: 19, lineHeight: 25, fontWeight: '900' },
@@ -861,21 +1387,23 @@ const styles = StyleSheet.create({
   },
   cueText: { color: INK_QUIET, fontSize: 11, fontWeight: '800', letterSpacing: 0.6 },
 
-  momentum: { gap: 7, paddingTop: 4 },
+  momentum: { gap: 7, marginTop: 32 },
   momentumRows: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   chip: {
     flexDirection: 'row',
     alignItems: 'baseline',
     gap: 5,
-    backgroundColor: 'rgba(255,255,255,0.10)',
+    backgroundColor: SURFACE,
+    borderWidth: 1,
+    borderColor: HAIRLINE,
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 5,
   },
-  chipAmount: { color: PROGRESS_GREEN, fontSize: 13, fontWeight: '900' },
-  chipUnit: { color: ON_NAVY, fontSize: 11, fontWeight: '700' },
-  chipAgo: { color: ON_NAVY_MUTED, fontSize: 11 },
-  momentumNote: { color: ON_NAVY_MUTED, fontSize: 11, lineHeight: 15 },
+  chipAmount: { color: '#2B6E37', fontSize: 13, fontWeight: '900' },
+  chipUnit: { color: NAVY, fontSize: 11, fontWeight: '700' },
+  chipAgo: { color: TEXT_MUTED, fontSize: 11 },
+  momentumNote: { color: TEXT_MUTED, fontSize: 11, lineHeight: 15 },
 
   emptyPanel: { backgroundColor: NAVY, borderRadius: 22, padding: 20, gap: 10, ...elevation.card },
   emptyTitle: { color: ON_NAVY },
@@ -964,6 +1492,10 @@ const styles = StyleSheet.create({
   switchChipOn: { borderColor: NAVY, backgroundColor: NAVY },
   switchChipText: { color: NAVY, fontSize: 13, fontWeight: '800', flexShrink: 1 },
   switchChipTextOn: { color: '#FFFFFF' },
+  /* .switch-chip.ghost: a dashed rule and the action green's text. */
+  switchChipGhost: { borderStyle: 'dashed', borderColor: '#C9D3DD' },
+  switchChipTextGhost: { color: '#2F7D4F' },
+  switchChipIcon: { color: '#2F7D4F', fontSize: 15, lineHeight: 17, fontWeight: '800', marginRight: 6 },
   visuallyHidden: { position: 'absolute', width: 1, height: 1, overflow: 'hidden', opacity: 0 },
   pill: {
     borderWidth: 1.5,
