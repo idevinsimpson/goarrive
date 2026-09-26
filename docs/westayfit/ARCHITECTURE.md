@@ -2,7 +2,7 @@
 
 Anchor commit: `092839b1fa3ff43b0d0139e2b56d0f1662d4cfdf` (origin/main at M-U1 dispatch).
 
-We Stay Fit (WSF) is a second first-party app that lives inside the `goarrive` monorepo and ships from the same Firebase project as GoArrive, without sharing UI code, functions codebase, hosting site, or user claims. GoArrive is proven-unchanged after every WSF change; that proof is the contract.
+We Stay Fit (WSF) is a second first-party app that lives inside the `goarrive` monorepo. The production architecture retains the shared GoArrive Firebase-project model with isolated WSF app/functions/hosting/data boundaries. Current WSF staging uses a separately controlled staging environment/project; that environment separation does not silently authorize a production-project split. WSF does not share UI code, a functions codebase, hosting site, or WSF custom claims with GoArrive.
 
 ## Permanent Invariants
 
@@ -84,6 +84,20 @@ Each app owns its own `playwright.config.ts` with its own `testDir` and its own 
 - WSF: `apps/westayfit/playwright.config.ts`, `testDir: './tests-e2e'`, `WSF_PLAYWRIGHT_BASE_URL`.
 
 `npm run test:e2e` at the repo root runs the GoArrive suite only. WSF e2e is invoked as `npm --prefix apps/westayfit run test:e2e`, which passes `--config` to its own file. This prevents a bare `test:e2e` from silently pulling WSF specs into a GoArrive regression run.
+
+## Environment clarification — September 26, 2026
+
+The original M-U1 text below describes the architectural Firebase/codebase boundaries,
+not the current staging operating procedure.
+
+Current WSF staging is driven only through the reviewed operational-`main` control plane:
+`skills/wsf-staging-deploy/SKILL.md`, `.github/workflows/wsf-staging-deploy.yml`,
+and `.github/wsf-staging/approved-candidate.json`. It currently targets the
+`westayfit-staging` environment/project.
+
+Do not manually substitute the old direct Firebase commands below for the current staging
+workflow. They remain useful architecture examples of resource scoping, not the canonical
+staging runbook.
 
 ## Deploy Boundary Summary
 
