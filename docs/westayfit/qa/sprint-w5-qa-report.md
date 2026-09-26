@@ -2581,3 +2581,36 @@ This was released by Director #395 `5841328326`. It is one commit on `0b460ce3`,
 - **C4 (low).** The component imports `MemberTabBar` only for two numeric constants. That pulls `kioskSession` (sessionStorage and sign-out helpers) and the bottom-tabs types into the pure module graph. Nothing is called, but the constants belong in `memberShellMetrics`.
 
 **Limits.** This is component-level review only; no route hook exists yet (Phase B). Pixel comparison is the Director's. PR #495's head has since moved to `da9aae08`; that commit was not reviewed.
+
+## QA2: YOU-PARITY-1 Phase A (PR #492), exact product `5e76a10ca34c33a2cb3dc9f3ff48450e413ea264` — **PASS**
+
+**Routing.** Routed by L0 in #395 `5841499924`. The scope follows the carry rule in `5841133868` and the hold in `5841277254`. The baselines `92123f26` and `66e56c4d` are both ancestors.
+
+**Scope checked by git.** Against `0b460ce3`, the only non-docs files are `goalTruth.ts`, `youParity.ts`, `YouParityView.tsx`, `app/design-target/you-parity.tsx`, three unit/view tests and the e2e spec. `package-lock.json` is blob-identical to the base.
+
+**Measured**
+- Focused vitest (`goal-truth`, `you-parity`, `you-parity-view`): 41/41.
+- `tsc --noEmit`: exit 0.
+- `sprint-w6-you-parity.spec.ts` against an emulator-flagged export served locally: 12/12 at 390×844 and 390×640. The evidence case is skipped.
+- W5 jsdom probes Y1–Y8 (`sprint-w5-pr492-you-probe.test.tsx.txt`): 8/8.
+
+| truth item | verdict | evidence |
+| --- | --- | --- |
+| `SharedPosition` cannot encode an unknown total as a fake zero | **PASS, with note Y-F1** | Probe Y1: an open lead with an unknown total shows OPEN and "Not available right now". It draws no digit in the shared card and no Living WE or track, and the own part is kept. `sharedTotalOf` returns null for unknown. |
+| open and closed-unknown lifecycle | **PASS** | Y2: a closed goal with an unknown total shows `CLOSED · RESULT UNAVAILABLE` with an "Unknown" cell, never REACHED, UNFINISHED or 0. Y3: `REACHED · STILL OPEN` and `CLOSED · UNFINISHED` both appear only on known totals. |
+| no Date, Intl or device-zone logic in the You parity sources | **PASS** | `goalTruth.ts`, `youParity.ts` and `YouParityView.tsx` contain no `Date`, `Intl`, `toLocaleDate/TimeString` or `timeZone`; their only locale call is `toLocaleString('en-US')` on numbers. Note: the unchanged helper `progressFormat.formatCount`, reached through `LivingWeProgress`, formats numbers with `Intl.NumberFormat(undefined)`. That is device-locale digit grouping, not dates or zones, and it predates this PR. |
+| `periodLabel` passes through verbatim | **PASS** | Y4: an arbitrary label appears byte for byte. A null label leaves no dangling "·". |
+| each row carries its own `communityName` | **PASS** | Y5: the Harbor Lunch Crew row shows its own community, not the current one. |
+| lead columns 230 / 110 / 10 | **PASS** | The e2e spec measures shared 230 ±1, own 110 ±1 and a 10 px gap, at both heights. |
+| no filler "Community" sub-line | **PASS** | Y6: an undefined, `custom` or unknown group type prints no "Community" in the band. |
+| no Firebase, router, auth or storage authority | **PASS, with carry note C4** | The view imports react, react-native, labels, the model, kit, `LivingWeProgress`, `MemberTabBar` (for constants only; see C4 on #495) and `progressFormat`. Only the design-target fixture uses `expo-router` (`useLocalSearchParams`), and it is gated. |
+
+**Y-F1 (low, not a condition).** `knownShared(total)` accepts any number:
+- `knownShared(NaN)` draws "NaN / 500 confirmed", "NaN squats to go" and a Living WE, because `hasInstrument` only checks `kind`.
+- `knownShared(-5)` draws "-5 / 150".
+
+The route should only ever pass a finite, non-negative aggregate. A one-line guard in `knownShared` or `hasInstrument` (`Number.isFinite(total) && total >= 0`) would make that impossible to encode.
+
+**Instrument note.** Probe Y8's first draft flagged the view's own disclaimer, "No rank, streak, score or inferred impact.". After excluding that sentence it passes, and no other ranking language appears.
+
+**Not reviewed.** PR #492's evidence head `cf3423ec` (docs and frames) was not reviewed for pixels; that is the Director's.
