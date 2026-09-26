@@ -4,7 +4,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 ## CURRENT — read this first (kept ≤ 1,000 words; updated only on material change; Director #365 `5819944052` §3)
 
-**Stamp: 2026-09-26 03:20Z.** **Precedence:** newer explicit owner decisions first (latest: North-Star Operating System v1 `5841611729`; standing hardening train `5841397324`, which replaces the sprint's expiry; staging cadence `5832907406`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
+**Stamp: 2026-09-26 03:30Z.** **Precedence:** newer explicit owner decisions first (latest: North-Star Operating System v1 `5841611729`; standing hardening train `5841397324`, which replaces the sprint's expiry; staging cadence `5832907406`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
 
 **Heads.**
 
@@ -19,7 +19,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 | packet | owner · PR · SHA | state | next |
 | --- | --- | --- | --- |
-| **PERF-MOBILE-1 cp1** | W9 · #494 · `ad3d2f88` | **ACCEPTED** `5842637914` (W7 Check 48) → **integrated `14ce1907`** (`5842663994`) | W3 pin `14ce1907` from `main` `6c2e6b25` (`5842660802`; 49 → 49) → W7 → Director → one dispatch → receipts + OWNER TEST CARD |
+| **PERF-MOBILE-1 cp1** | W9 · #494 · `ad3d2f88` | **ACCEPTED** `5842637914` (W7 Check 48) → **integrated `14ce1907`** (`5842663994`); pin **#502 `ca2cc4c0`** (W3; L0 receipt `5842768054`: 49 → 49, run-all green) | W7 pin check (wake `trig_01V5TiWz6g8mwVBxtssS3T8K`) → Director → L0 merges → one dispatch → receipts + OWNER TEST CARD |
 | **YOU-PARITY-1 Phase A** | W6 · #500 · `02f86fc2` | **ACCEPTED** `5842638280` → integrated `993f0796`; not staged | done |
 | **PROGRESS-PARITY-1 Phase A** | W6 · #501 · `92993f09` | **ACCEPTED** `5842638626` → integrated `87997c58`; not staged | done |
 | You / Progress Phase B | W6 · #498 / #499 | adapters `db6c2e2d` / `7f8f0feb` restack on `87997c58`; lead-row question `5842099001` open | restack → W7 route QA → stage |
