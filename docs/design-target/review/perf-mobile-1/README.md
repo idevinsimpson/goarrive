@@ -3,12 +3,12 @@
 - **Packet:** Director #365 `5840360454`; L0 #489 `5840568948`; W9 ACK #489 `5840966421`.
 - **Worker:** W9. PR #494.
 - **Base:** development `0b460ce3f2f0766406100fef14d9a444c8cad43a`.
-- **Product SHA: `889e9775`**, the successor to `5633057a`.
-  - `5633057a` was held by the Director (#365 `5841354004`) for three cache corrections (#494 `5841250834`, `5841264164`, `5841341300`); see *Successor* below.
+- **Product SHA: `ad3d2f88`**, the H4b successor to `889e9775` (Director #494 `5841923744`); see *H4b successor* below.
+  - `889e9775` was the successor to `5633057a`, which the Director held (#365 `5841354004`) for three cache corrections (#494 `5841250834`, `5841264164`, `5841341300`); see *Successor* below.
   - The speed work is unchanged from `5633057a`.
 - **Instrument:** W7's `sprint-w7-perf-mobile-baseline.spec.ts`, blob `245a3357` from `dd7828b9`.
   - It was run unchanged, on the same host and emulators, with the same fixture and viewports, once per build.
-  - The raw output is in `RAW-w7-instrument-*.log`.
+  - The raw output is in `RAW-w7-instrument-*.txt`.
 
 **Nothing here is accepted.** Everything is Chromium on the local emulators (`demo-wsf-local`) with synthetic data. These are local milliseconds, not a device-speed claim; the counts, stages, loading states and mounts are what transfer.
 
@@ -42,7 +42,7 @@ Detail for the met rows:
 
 ## Raw before / after (W7 instrument; base `0b460ce3` → candidate `889e9775`)
 
-The same instrument on the held `5633057a` is in `RAW-w7-instrument-CANDIDATE-5633057a.log`. Its numbers agree within noise.
+The same instrument on the held `5633057a` is in `RAW-w7-instrument-CANDIDATE-5633057a.txt`. Its numbers agree within noise.
 
 | Transition | Useful ms (base → cand) | Settled ms | Callables base | Callables cand | Stages | Loading painted base → cand | Mounts cand | Blocking |
 |---|---|---|---|---|---|---|---|---|
@@ -95,7 +95,7 @@ Unchanged by design:
 - **Refusal proof and eviction happen together:** on the contribution poll's not-found, and on Community Home's `wsfListGoals` not-found (load or return), which now shows the refusal, not "last known".
 - **Mounted refresh:** Progress and You recompose from the record on every return, so a receipt shows as MOVE closes.
 
-**W7 truth rows** (`sprint-w7-perf-mobile-verify.spec.ts` at `a5bad071`, run locally; `RAW-w7-truth-rows-*.log`):
+**W7 truth rows** (`sprint-w7-perf-mobile-verify.spec.ts` at `a5bad071`, run locally; `RAW-w7-truth-rows-*.txt`):
 
 | Build | T1 isolation | T2 refusal | T3 receipt on mounted routes | T3b stale read after receipt |
 |---|---|---|---|---|
@@ -103,13 +103,57 @@ Unchanged by design:
 | `5633057a` | PASS | measure: Home "Last known" | FAIL: 35 / 35 | FAIL\*: 35 / 35 |
 | `0b460ce3` | PASS | measure: Home "Last known" | FAIL: 35 / 35 | FAIL\*: You 35 |
 
-\*With the exact `a5bad071` file, T3b cannot measure on `889e9775`, because You opens from the record inside the 10 s same-load window (`RAW-w7-truth-rows-889e9775-exact-a5bad071.log`: T1–T3 pass). The T3b rows use a local, labelled one-line variant that waits 11 s before arming the hold. That is W7's stated adjustment (#494 `5841384342`); the variant is not committed.
+\*With the exact `a5bad071` file, T3b cannot measure on `889e9775`, because You opens from the record inside the 10 s same-load window (`RAW-w7-truth-rows-889e9775-exact-a5bad071.txt`: T1–T3 pass). The T3b rows use a local, labelled one-line variant that waits 11 s before arming the hold. That is W7's stated adjustment (#494 `5841384342`); the variant is not committed.
 
 **Other checks:**
 - **Unit tests:** 18 cases in `tests/memberReads.test.ts`, 7 new: a stale own read after a receipt; a goals read in flight at a receipt; goals and own reads in flight at a refusal; registry eviction after the list is gone; account clearing; a refusal lifted by an authorized answer.
 - vitest **909 / 909**; tsc clean.
 - **Changed-dependency e2e for these corrections:** 22 files, 131 tests, on `889e9775`. **131 / 131 on the first run.** The files are every spec touching refusal, not-member, not-found, Progress or You.
 - **Timelines:** the CANDIDATE frames and WebMs were **recaptured on `889e9775`**; each strip shows that commit. Loading painted is none at every shutter and at both sizes. The BASE frames are unchanged.
+
+## H4b successor `ad3d2f88`: a return re-checks the membership itself
+
+**The defect** (W7 Check 47, #494 `5841848373`):
+- A `wsfListGoals` issued before the membership was removed is in flight, and Community Home's return refresh **joins** it, so no fresh `not-found` arrives.
+- The refusals that do arrive (`wsfCommunityMembers` / `wsfCommunityActivity` 403, `wsfGoalPulse` 404) are not proof of removal, because an infrastructure 403 looks the same.
+- When the older list lands, the community is back on Home, Community, Progress and You.
+
+**The correction** (Director #494 `5841923744`):
+- **Community Home** (`app/(tabs)/(home)/community/[groupId]/index.tsx`): each genuine return also reads the caller's own `wsfMemberships/<groupId>_<uid>` in the background. That is the document the entry read uses.
+  - Missing, refused, or not `active`: `forgetCommunity`, "Not a member", and every refresh answer that lands after that proof is dropped.
+  - Active: nothing changes.
+  - Any other failure: what is on screen stays; nothing is evicted.
+  - One document read per return, never polled, and no loading pixels. The existing refusal evictions stay.
+- **The Community tab** (`app/(tabs)/community/index.tsx`, outside cp1's ACKed list, reported): the tab stays mounted, and a community the account has been refused leaves it when the tab is looked at again. No read is made.
+- **Regression** (`sprint-w9-perf-mobile-1.spec.ts`): a held pre-removal goals answer cannot bring the community back on any of the four surfaces after a return proves the removal.
+
+**W7 H4b row** (`sprint-w7-hardened-journey.spec.ts`, blob `0f5e1cec` at `5217cb81`), first runs:
+
+| Build | Exact file | Labelled local variant (`W7-H4B-LOCAL-VARIANT.diff`) |
+|---|---|---|
+| `889e9775` | **FAIL**: goal shown on home, community, activity, you (`RAW-w7-h4b-exact-889e9775.txt`) | **FAIL**: the same (`RAW-w7-h4b-variant-889e9775.txt`) |
+| **`ad3d2f88`** | **cannot complete** (`RAW-w7-h4b-exact-ad3d2f88.txt`) | **PASS**: shown on none of the four; the older answer, when released, is refused fresh (`wsfListGoals 404`) (`RAW-w7-h4b-variant-ad3d2f88.txt`) |
+
+**Why the exact file cannot complete on the correction:** its `tab(page, 'home')` waits for Home's `wsf-community` root. After the correction Home is "Not a member" (`wsf-community-not-member`), the state the Director requires. So the last Home visit times out before the verdict is recorded. The variant changes two lines and nothing else: the Home root may also be `wsf-community-not-member`, for the visibility wait and for the text read. It is not committed.
+
+**Carried, on `ad3d2f88`:**
+- **Truth rows**, W7's current file (`sprint-w7-perf-mobile-verify.spec.ts` blob `09a618b9`, exact, **no variant**): **T1, T2, T3 and T3b all pass** (`RAW-w7-truth-rows-ad3d2f88-exact-09a618b9.txt`).
+  - T2: Home "Not a member".
+  - T3 and T3b: 55 / 55.
+- **Check 41B instrument, unchanged** (`RAW-w7-instrument-CANDIDATE-ad3d2f88.txt`), against `889e9775`: every transition keeps the same callables, 0 loading painted, the same mounts and not blocking. Useful ms are flat:
+  - Progress first visit: 17 ms;
+  - You: 11–12 ms;
+  - MOVE open: 45–47 ms;
+  - cold Home: 7 calls, no identical pair.
+
+  The re-check is a Firestore document read on returns, not a callable.
+- **Focused route specs**: 28 / 28 on the first run (`RAW-focused-ad3d2f88.txt`): `sprint-w9-perf-mobile-1` (6, including the new case), `sprint-w9-home-return`, `sprint-w9-return-continuity-rendering`, `community-list`, `sprint-w9-app-feel-parity-2`.
+- vitest 909 / 909; tsc clean.
+- **Frames are not recaptured.** The correction touches only Home's return refresh and the Community tab's focus, not the Progress, You or MOVE timelines. 41B shows no change in their calls, stages or loading.
+
+**Not staged or measured here:** a transient failure of the membership read itself. The Firestore channel is not intercepted by these specs; the code path keeps what is shown.
+
+**Named successor, not this gate:** H3c, Home's silent transient-500 refresh (Director `5841923744`).
 
 ## Focused spec: `apps/westayfit/tests-e2e/sprint-w9-perf-mobile-1.spec.ts`
 

@@ -1,0 +1,8 @@
+
+Running 1 test using 1 worker
+
+[1/1] [chromium] › tests-e2e/sprint-w7-hardened-journey.spec.ts:435:7 › W7 HARDENED-MEMBER-JOURNEY-1 (head) › H4b removal: an older pre-removal answer, released after a fresh refusal, cannot resurrect the community
+[chromium] › tests-e2e/sprint-w7-hardened-journey.spec.ts:435:7 › W7 HARDENED-MEMBER-JOURNEY-1 (head) › H4b removal: an older pre-removal answer, released after a fresh refusal, cannot resurrect the community
+MEASURE H4b verdicts (head): [{"row":"H4b after a fresh refusal and a released older answer, no member surface offers the removed community’s goal","result":"PASS","detail":{"refusals":["wsfCommunityMembers 403","wsfCommunityActivity 403","wsfListGoals 404","wsfGoalPulse 404"],"goalShownOn":{"home":false,"community":false,"activity":false,"you":false}}}]
+
+  1 passed (19.8s)

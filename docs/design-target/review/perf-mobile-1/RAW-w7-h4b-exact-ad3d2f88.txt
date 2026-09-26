@@ -1,0 +1,33 @@
+
+Running 1 test using 1 worker
+
+[1/1] [chromium] › tests-e2e/sprint-w7-hardened-journey.spec.ts:435:7 › W7 HARDENED-MEMBER-JOURNEY-1 (head) › H4b removal: an older pre-removal answer, released after a fresh refusal, cannot resurrect the community
+  1) [chromium] › tests-e2e/sprint-w7-hardened-journey.spec.ts:435:7 › W7 HARDENED-MEMBER-JOURNEY-1 (head) › H4b removal: an older pre-removal answer, released after a fresh refusal, cannot resurrect the community 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: locator('[data-testid="wsf-community"]:visible').first()
+    Expected: visible
+    Timeout: 30000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 30000ms
+      - waiting for locator('[data-testid="wsf-community"]:visible').first()
+
+
+      163 | async function tab(page: Page, key: string, settleMs = 900) {
+      164 |   await shown(page, `wsf-member-tab-${key}`).click({ timeout: 10_000 });
+    > 165 |   await expect(shown(page, TAB_ROOT[key])).toBeVisible({ timeout: 30_000 });
+          |                                            ^
+      166 |   await page.waitForTimeout(settleMs);
+      167 | }
+      168 | async function scrollOf(page: Page, id: string): Promise<number | null> {
+        at tab (/home/user/goarrive/apps/westayfit/tests-e2e/sprint-w7-hardened-journey.spec.ts:165:44)
+        at /home/user/goarrive/apps/westayfit/tests-e2e/sprint-w7-hardened-journey.spec.ts:464:7
+
+    Error Context: test-results/sprint-w7-hardened-journey-35b27-not-resurrect-the-community-chromium/error-context.md
+
+
+  1 failed
+    [chromium] › tests-e2e/sprint-w7-hardened-journey.spec.ts:435:7 › W7 HARDENED-MEMBER-JOURNEY-1 (head) › H4b removal: an older pre-removal answer, released after a fresh refusal, cannot resurrect the community 

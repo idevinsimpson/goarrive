@@ -1,0 +1,31 @@
+
+Running 1 test using 1 worker
+
+[1/1] [chromium] › tests-e2e/sprint-w7-hardened-journey.spec.ts:435:7 › W7 HARDENED-MEMBER-JOURNEY-1 (head) › H4b removal: an older pre-removal answer, released after a fresh refusal, cannot resurrect the community
+[chromium] › tests-e2e/sprint-w7-hardened-journey.spec.ts:435:7 › W7 HARDENED-MEMBER-JOURNEY-1 (head) › H4b removal: an older pre-removal answer, released after a fresh refusal, cannot resurrect the community
+MEASURE H4b verdicts (head): [{"row":"H4b after a fresh refusal and a released older answer, no member surface offers the removed community’s goal","result":"FAIL","detail":{"refusals":["wsfCommunityMembers 403","wsfCommunityActivity 403","wsfGoalPulse 404","wsfGoalPulse 404"],"goalShownOn":{"home":true,"community":true,"activity":true,"you":true}}}]
+
+  1) [chromium] › tests-e2e/sprint-w7-hardened-journey.spec.ts:435:7 › W7 HARDENED-MEMBER-JOURNEY-1 (head) › H4b removal: an older pre-removal answer, released after a fresh refusal, cannot resurrect the community 
+
+    Error: H4b after a fresh refusal and a released older answer, no member surface offers the removed community’s goal — {"refusals":["wsfCommunityMembers 403","wsfCommunityActivity 403","wsfGoalPulse 404","wsfGoalPulse 404"],"goalShownOn":{"home":true,"community":true,"activity":true,"you":true}}
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: true
+    Received: false
+
+      194 |       const result = ok === null ? 'CANNOT-MEASURE' : ok ? 'PASS' : 'FAIL';
+      195 |       out.push({ row, result, detail });
+    > 196 |       if (ok !== null) expect.soft(ok, `${row} — ${JSON.stringify(detail)}`).toBe(true);
+          |                                                                              ^
+      197 |     },
+      198 |   };
+      199 | }
+        at Object.row (/home/user/goarrive/apps/westayfit/tests-e2e/sprint-w7-hardened-journey.spec.ts:196:78)
+        at /home/user/goarrive/apps/westayfit/tests-e2e/sprint-w7-hardened-journey.spec.ts:469:7
+
+    Error Context: test-results/sprint-w7-hardened-journey-35b27-not-resurrect-the-community-chromium/error-context.md
+
+
+  1 failed
+    [chromium] › tests-e2e/sprint-w7-hardened-journey.spec.ts:435:7 › W7 HARDENED-MEMBER-JOURNEY-1 (head) › H4b removal: an older pre-removal answer, released after a fresh refusal, cannot resurrect the community 

@@ -1,0 +1,8 @@
+165c165
+<   await expect(shown(page, TAB_ROOT[key])).toBeVisible({ timeout: 30_000 });
+---
+>   await expect(page.locator(`[data-testid="${TAB_ROOT[key]}"]:visible${key === 'home' ? ', [data-testid="wsf-community-not-member"]:visible' : ''}`).first()).toBeVisible({ timeout: 30_000 }); // W9 LOCAL VARIANT: Home may be "Not a member"
+465c465
+<       const t = await page.locator(`[data-testid="${TAB_ROOT[k]}"]:visible`).first().innerText({ timeout: 3_000 }).catch(() => '');
+---
+>       const t = await page.locator(`[data-testid="${TAB_ROOT[k]}"]:visible${k === 'home' ? ', [data-testid="wsf-community-not-member"]:visible' : ''}`).first().innerText({ timeout: 3_000 }).catch(() => ''); // W9 LOCAL VARIANT

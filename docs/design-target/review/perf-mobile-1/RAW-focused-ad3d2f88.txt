@@ -1,0 +1,70 @@
+
+Running 28 tests using 1 worker
+
+[1/28] [chromium] › tests-e2e/community-list.spec.ts:223:5 › choosing a community remembers it and opens that community Home
+[2/28] [chromium] › tests-e2e/community-list.spec.ts:261:5 › switching from the current community opens the one that was tapped
+[3/28] [chromium] › tests-e2e/community-list.spec.ts:292:5 › retry recovers the list without a reload
+[4/28] [chromium] › tests-e2e/community-list.spec.ts:318:5 › Start a community goes to the creation screen, from empty and from a list
+[5/28] [chromium] › tests-e2e/sprint-w9-app-feel-parity-2.spec.ts:150:7 › APP-FEEL-PARITY-1 cp2 · the wordmark selects Home as it stands › from the Community tab: Home comes back as it was -- one instance, no loading, scroll kept
+[chromium] › tests-e2e/sprint-w9-app-feel-parity-2.spec.ts:150:7 › APP-FEEL-PARITY-1 cp2 · the wordmark selects Home as it stands › from the Community tab: Home comes back as it was -- one instance, no loading, scroll kept
+MEASURE wordmark from Community: {"loading":[],"calls":{"wsfCommunityMembers":1,"wsfCommunityActivity":1,"wsfListGoals":2,"wsfGoalPulse":1,"wsfMyContribution":1,"wsfGoalRecentAdditions":1},"instances":1,"tab":"wsf-member-tab-home","scroll":136,"sameInstance":1}
+
+[6/28] [chromium] › tests-e2e/sprint-w9-app-feel-parity-2.spec.ts:186:7 › APP-FEEL-PARITY-1 cp2 · the wordmark selects Home as it stands › on Home, by pointer and by Enter: a no-op
+[chromium] › tests-e2e/sprint-w9-app-feel-parity-2.spec.ts:186:7 › APP-FEEL-PARITY-1 cp2 · the wordmark selects Home as it stands › on Home, by pointer and by Enter: a no-op
+MEASURE wordmark on Home: {"loading":[],"calls":{},"instances":1,"path":"/community/w9afp2a-muhqgn9x-804d58n"}
+
+[7/28] [chromium] › tests-e2e/sprint-w9-app-feel-parity-2.spec.ts:207:7 › APP-FEEL-PARITY-1 cp2 · the wordmark selects Home as it stands › from Progress by Enter: Home as it stands
+[chromium] › tests-e2e/sprint-w9-app-feel-parity-2.spec.ts:207:7 › APP-FEEL-PARITY-1 cp2 · the wordmark selects Home as it stands › from Progress by Enter: Home as it stands
+MEASURE wordmark Enter from Progress: {"loading":[],"calls":{"wsfCommunityMembers":1,"wsfCommunityActivity":1,"wsfListGoals":1,"wsfGoalPulse":1,"wsfMyContribution":1},"instances":1}
+
+[8/28] [chromium] › tests-e2e/sprint-w9-app-feel-parity-2.spec.ts:230:7 › APP-FEEL-PARITY-1 cp2 · warm first render › the Community tab, first visit after Home: the known rows at once, no skeleton, then the fresh answer
+[chromium] › tests-e2e/sprint-w9-app-feel-parity-2.spec.ts:230:7 › APP-FEEL-PARITY-1 cp2 · warm first render › the Community tab, first visit after Home: the known rows at once, no skeleton, then the fresh answer
+MEASURE Community tab first visit: {"loading":[],"calls":{"wsfMyCommunities":1,"wsfListGoals":2,"wsfGoalRecentAdditions":1},"msToRows":108}
+
+[9/28] [chromium] › tests-e2e/sprint-w9-app-feel-parity-2.spec.ts:247:7 › APP-FEEL-PARITY-1 cp2 · warm first render › MOVE with no open goal: “Go to your community” lands on the mounted community -- one instance, no loading, the sheet gone
+[chromium] › tests-e2e/sprint-w9-app-feel-parity-2.spec.ts:247:7 › APP-FEEL-PARITY-1 cp2 · warm first render › MOVE with no open goal: “Go to your community” lands on the mounted community -- one instance, no loading, the sheet gone
+MEASURE MOVE no goal → Go to your community: {"loading":[],"calls":{"wsfCommunityMembers":1,"wsfCommunityActivity":1,"wsfListGoals":1},"instances":1,"sameInstance":1,"tab":"wsf-member-tab-home","path":"/community/w9afp2b-muhqgt0o-1617b4r"}
+
+[10/28] [chromium] › tests-e2e/sprint-w9-app-feel-parity-2.spec.ts:284:7 › APP-FEEL-PARITY-1 cp2 · warm first render › MOVE could not read: “Go Home” selects Home as it stands (labelled injection: the goal read fails)
+[chromium] › tests-e2e/sprint-w9-app-feel-parity-2.spec.ts:284:7 › APP-FEEL-PARITY-1 cp2 · warm first render › MOVE could not read: “Go Home” selects Home as it stands (labelled injection: the goal read fails)
+MEASURE MOVE error → Go Home: {"loading":[],"calls":{"wsfCommunityMembers":2,"wsfCommunityActivity":2,"wsfListGoals":1,"wsfGoalPulse":1,"wsfMyContribution":1},"instances":1,"tab":"wsf-member-tab-home"}
+
+[11/28] [chromium] › tests-e2e/sprint-w9-app-feel-parity-2.spec.ts:313:7 › APP-FEEL-PARITY-1 cp2 · nothing outlives the account or the membership › sign out, then another account signs in on the same page: nothing of the first is ever shown
+[chromium] › tests-e2e/sprint-w9-app-feel-parity-2.spec.ts:313:7 › APP-FEEL-PARITY-1 cp2 · nothing outlives the account or the membership › sign out, then another account signs in on the same page: nothing of the first is ever shown
+MEASURE names of the first account painted for the second: []
+
+[12/28] [chromium] › tests-e2e/sprint-w9-app-feel-parity-2.spec.ts:353:7 › APP-FEEL-PARITY-1 cp2 · nothing outlives the account or the membership › a membership lost while away: the list stops showing it as soon as the fresh read says so; a direct entry lands on the refusal
+[13/28] [chromium] › tests-e2e/sprint-w9-home-return.spec.ts:189:7 › "Back to home" returns to Home as it stands, with confirmed figures › a list the member asked for: the same list, its address, and the committed total
+[14/28] [chromium] › tests-e2e/sprint-w9-home-return.spec.ts:232:7 › "Back to home" returns to Home as it stands, with confirmed figures › a Champion's first contribution: the same Community screen, not a copy of it
+[15/28] [chromium] › tests-e2e/sprint-w9-home-return.spec.ts:283:7 › "Back to home" returns to Home as it stands, with confirmed figures › a failed list re-read leaves the list standing, and the figures still update
+[16/28] [chromium] › tests-e2e/sprint-w9-home-return.spec.ts:327:7 › "Back to home" returns to Home as it stands, with confirmed figures › Back from a community to the list stays on the list, and the list is re-read
+[17/28] [chromium] › tests-e2e/sprint-w9-home-return.spec.ts:381:7 › "Back to home" returns to Home as it stands, with confirmed figures › control: a reload keeps the list the address asks for, with the committed total
+[18/28] [chromium] › tests-e2e/sprint-w9-home-return.spec.ts:397:7 › "Back to home" returns to Home as it stands, with confirmed figures › control: reselecting Home on the list reads nothing and keeps the list
+[19/28] [chromium] › tests-e2e/sprint-w9-perf-mobile-1.spec.ts:127:7 › PERF-MOBILE-1 cp1 · useful before the reads return › Progress and You open on what is known: no skeleton, content before their reads return
+[chromium] › tests-e2e/sprint-w9-perf-mobile-1.spec.ts:127:7 › PERF-MOBILE-1 cp1 · useful before the reads return › Progress and You open on what is known: no skeleton, content before their reads return
+MEASURE Progress: ms to content with every read held 1.5 s; loading painted: {"progressMs":60,"progressLoading":[]}
+
+MEASURE You: ms to the member composition with every read held 1.5 s; loading painted: {"youMs":60,"youLoading":[]}
+
+[20/28] [chromium] › tests-e2e/sprint-w9-perf-mobile-1.spec.ts:157:7 › PERF-MOBILE-1 cp1 · useful before the reads return › MOVE opens over the mounted tab on the known goal: no "working", no second identical goals read
+[chromium] › tests-e2e/sprint-w9-perf-mobile-1.spec.ts:157:7 › PERF-MOBILE-1 cp1 · useful before the reads return › MOVE opens over the mounted tab on the known goal: no "working", no second identical goals read
+MEASURE MOVE: ms to the movement step with every read held 1.5 s; loading painted; calls: {"moveMs":90,"moveLoading":[],"calls":["wsfGoalPulse {\"goalId\":\"w9perfg-muhqhlqi-905da7mv\"}","wsfMyContribution {\"goalId\":\"w9perfg-muhqhlqi-905da7mv\"}"]}
+
+[21/28] [chromium] › tests-e2e/sprint-w9-perf-mobile-1.spec.ts:198:7 › PERF-MOBILE-1 cp1 · cold Home and isolation › cold Home for a member of one community sends no identical read twice
+[chromium] › tests-e2e/sprint-w9-perf-mobile-1.spec.ts:198:7 › PERF-MOBILE-1 cp1 · cold Home and isolation › cold Home for a member of one community sends no identical read twice
+MEASURE cold Home calls: ["wsfMyCommunities {}","wsfListGoals {\"groupId\":\"w9perfc-muhqhq2o-be3cbcch\",\"includeHistory\":true}","wsfGoalPulse {\"goalId\":\"w9perfg-muhqhq2o-be3cbcch\"}","wsfMyContribution {\"goalId\":\"w9perfg-muhqhq2o-be3cbcch\"}","wsfListChallenge {\"groupId\":\"w9perfc-muhqhq2o-be3cbcch\"}","wsfCommunityMembers {\"groupId\":\"w9perfc-muhqhq2o-be3cbcch\"}","wsfCommunityActivity {\"groupId\":\"w9perfc-muhqhq2o-be3cbcch\",\"goalId\":\"w9perfg-muhqhq2o-be3cbcch\"}"]
+
+[22/28] [chromium] › tests-e2e/sprint-w9-perf-mobile-1.spec.ts:219:7 › PERF-MOBILE-1 cp1 · cold Home and isolation › two accounts in one document: nothing of the first is painted for the second
+[chromium] › tests-e2e/sprint-w9-perf-mobile-1.spec.ts:219:7 › PERF-MOBILE-1 cp1 · cold Home and isolation › two accounts in one document: nothing of the first is painted for the second
+MEASURE names of the first account painted for the second: []
+
+[23/28] [chromium] › tests-e2e/sprint-w9-perf-mobile-1.spec.ts:264:7 › PERF-MOBILE-1 cp1 · cold Home and isolation › a refused membership is forgotten: MOVE does not open on the lost community from the record
+[24/28] [chromium] › tests-e2e/sprint-w9-perf-mobile-1.spec.ts:294:7 › PERF-MOBILE-1 cp1 · cold Home and isolation › a return re-checks the membership: a held pre-removal goals answer cannot bring the community back
+[chromium] › tests-e2e/sprint-w9-perf-mobile-1.spec.ts:294:7 › PERF-MOBILE-1 cp1 · cold Home and isolation › a return re-checks the membership: a held pre-removal goals answer cannot bring the community back
+MEASURE the removed community shown on: {"home":false,"community":false,"activity":false,"you":false}
+
+[25/28] [chromium] › tests-e2e/sprint-w9-return-continuity-rendering.spec.ts:123:7 › RETURN-CONTINUITY-1 · a failed refresh after a return is said › Refresh fails: the figure and its stamp stay, the hero says “Last known”, and Retry clears it once a read lands
+[26/28] [chromium] › tests-e2e/sprint-w9-return-continuity-rendering.spec.ts:183:7 › RETURN-CONTINUITY-1 · a failed refresh after a return is said › the reads fail as the member comes back: Home says it without a press
+[27/28] [chromium] › tests-e2e/sprint-w9-return-continuity-rendering.spec.ts:204:7 › RETURN-CONTINUITY-1 · nothing is said when nothing failed › a healthy return says nothing about staleness
+[28/28] [chromium] › tests-e2e/sprint-w9-return-continuity-rendering.spec.ts:219:7 › RETURN-CONTINUITY-1 · nothing is said when nothing failed › a first read that fails keeps the existing error: there is no figure to call last known
+  28 passed (2.1m)
