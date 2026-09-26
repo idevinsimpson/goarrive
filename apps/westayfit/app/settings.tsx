@@ -74,7 +74,18 @@ export default function SettingsScreen() {
   }
 
   const panel = (children: ReactNode) => (
-    <View style={st.panelRoot} testID="wsf-settings-panel-root">
+    <View
+      style={[
+        st.panelRoot,
+        {
+          paddingTop: PANEL_INSET + insets.top,
+          paddingBottom: PANEL_INSET + insets.bottom,
+          paddingLeft: PANEL_INSET + insets.left,
+          paddingRight: PANEL_INSET + insets.right,
+        },
+      ]}
+      testID="wsf-settings-panel-root"
+    >
       <Pressable
         style={st.scrim}
         onPress={close}
@@ -84,7 +95,7 @@ export default function SettingsScreen() {
       />
       <View
         ref={panelRef}
-        style={[st.panel, { paddingTop: insets.top, paddingBottom: insets.bottom }]}
+        style={st.panel}
         testID="wsf-settings-panel"
         {...({ role: 'dialog', 'aria-modal': true, 'aria-label': 'Settings' } as Record<string, unknown>)}
         {...(sheetData('side', phase) as object)}
@@ -143,19 +154,25 @@ export default function SettingsScreen() {
   );
 }
 
+/** The reference overlay's padding around its panel. */
+const PANEL_INSET = 12;
+
 const st = StyleSheet.create({
   // ---- the side panel (APP-FEEL-PARITY-1 checkpoint 3) ----
   panelRoot: { flex: 1, flexDirection: 'row', justifyContent: 'flex-end' },
   scrim: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(11,31,53,0.42)' },
-  /* The reference's panel: flush right, full height, at most 380 wide, a
-     white surface with an 8 px corner. */
+  /* The frozen reference's panel (Lovable @ d4f60624, styles.css
+     `.demo-overlay.panel` padding 12px + `.demo-surface.panel` max-width
+     380px, radius 8): inset 12 px from every viewport edge (plus the safe
+     area), at most 380 wide -- 366 at a 390 viewport -- the full height inside
+     the inset, an 8 px corner all round (Director #506 `5844878042`). */
   panel: {
-    width: '86%',
+    width: '100%',
     maxWidth: 380,
     height: '100%',
     backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 8,
-    borderBottomLeftRadius: 8,
+    borderRadius: 8,
+    overflow: 'hidden',
     shadowColor: '#081D36',
     shadowOpacity: 0.3,
     shadowRadius: 30,

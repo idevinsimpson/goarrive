@@ -216,7 +216,12 @@ test.describe('APP-FEEL-PARITY-1 cp3 · Settings from the side', () => {
     await page.waitForTimeout(400); // past the 240 ms entry
     const box = await page.locator('[data-testid="wsf-settings-panel"]:visible').boundingBox();
     measure('panel box', box);
-    expect(Math.round(box!.x + box!.width), 'flush with the right edge').toBe(PHONE.width);
+    // The frozen reference's geometry (Director #506 `5844878042`): 12 px in
+    // from every edge, at most 380 wide.
+    expect(Math.round(box!.x + box!.width), '12 px in from the right edge').toBe(PHONE.width - 12);
+    expect(Math.round(box!.width), 'at most 380, 12 px in from the left too').toBe(Math.min(380, PHONE.width - 24));
+    expect(Math.round(box!.y), '12 px down from the top').toBe(12);
+    expect(Math.round(box!.y + box!.height), '12 px up from the bottom').toBe(PHONE.height - 12);
     await expect.poll(() => focusedId(page), { timeout: 5_000 }).toBe('wsf-settings-close');
     const scrimTab = await page.getByTestId('wsf-settings-scrim').getAttribute('tabindex');
     expect(scrimTab, 'the scrim is not a Tab stop').toBe('-1');
