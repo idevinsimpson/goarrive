@@ -4,7 +4,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 ## CURRENT — read this first (kept ≤ 1,000 words; updated only on material change; Director #365 `5819944052` §3)
 
-**Stamp: 2026-09-26 14:30Z.** **Precedence:** newer explicit owner decisions first (latest: North-Star Operating System v1 `5841611729`; standing hardening train `5841397324`, which replaces the sprint's expiry; staging cadence `5832907406`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
+**Stamp: 2026-09-26 15:30Z.** **Precedence:** newer explicit owner decisions first (latest: North-Star Operating System v1 `5841611729`; standing hardening train `5841397324`, which replaces the sprint's expiry; staging cadence `5832907406`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
 
 **Heads.**
 
@@ -25,8 +25,9 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 | You / Progress Phase B | W6 · `2f57bbca` | served since run 52 (card `5845904027`, step 5 corrected `5846137910`) | owner feedback → route |
 | **COMMUNITY-PARITY-1 (pure)** | W4 · #496 · `646c9579` | ACCEPTED → integrated `87a86531`; HOME-REFRESH-TRUTH-1 **closed, option A** (W7 Check 52: H3c was instrument false negative) | done |
 | **COMMUNITY-SETTINGS-PARITY-1** | W9 · `ffb517e5` | **SERVED** `938e00d8` via run 53; hosted smoke BLOCKED from L0 (403); OWNER TEST CARD `5846778806` | owner feedback → route |
-| **PERSONAL-FIRST SCALE (snapshot)** | W4 #510 / index #509 | index source integrated `6deefe7d`; `b71cf07f` W5 FAIL (cursor precision); **successor `8dc65316`** (L0 `5847050441`: same 3 reserved files) | W5 changed rows → Director; staging needs index READY |
-| CONTROL-PLANE-CI-1 | W3 · #513 `cf13140b` | edits `wsf-staging-deploy.yml` (+75); tripwire untouched; run-all green (L0 `5847051028`) | Director acceptance before any merge or use |
+| **PERSONAL-FIRST SCALE (snapshot)** | W4 #510 `8dc65316` / index #509 | `b71cf07f` FAIL → successor `8dc65316`; W5 recheck woken `trig_016FDPDU…` (#395 `5847278911`) | W5 → Director; staging needs index READY |
+| CONTROL-PLANE-CI-1 | W3 · #513 `a1f5e7a4` | C4a fix; Director pre-review `5847445173`; tripwire untouched | W7 Check 59 → Director accept → separate ACTIVATION-1 |
+| **HOME-NORTHSTAR-PARITY-1** | W9 · #514 · `6ba49f10` / ev `5e8a22ae` | on `6deefe7d`; 2 files, protected empty, tsc 0, vitest 1042 (L0 `5847471015`) | W7 + Director pixels → integrate → pin → stage |
 | **PRIVACY-TOGGLE-STAGING-1** | owner as operator · harness merged `6c2e6b25` | setters SHUT (run 50); no Claude identity can do Operation 2; W7 Check 43 emulator PASS | owner Operation 2 read-back → one `social-privacy` dispatch → seven-row receipt |
 | **HARDENED-MEMBER-JOURNEY-1** | W7 · `a55046f5` | H1–H4 baselined on served; **H3c** (silent failed Home refresh) and **H4b** (no eviction after refusal) fail; H5 waits on Settings | rerun on successors |
 | SOCIAL-DEMO-SEED-MODE | W3 · #484 `4c1ac1d9` | W7 carry confirmed | Director → L0 PLAN → APPLY / VERIFY |
