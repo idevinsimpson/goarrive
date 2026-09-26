@@ -202,7 +202,7 @@ function Member({
   compact: boolean;
   refresh?: RefreshState;
 }) {
-  const { lead, others } = leadAndOthers(state.open, state.finished);
+  const { lead, others } = leadAndOthers(state.open, state.finished, state.otherOpen);
   const block = partBlock(state);
   const card = [s.stateCard, compact && s.stateCardCompact];
   const cardTitle = [s.stateTitle, compact && s.stateTitleCompact];

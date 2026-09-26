@@ -17,7 +17,8 @@ import {
 } from './helpers/mobile';
 
 /**
- * YOU-PARITY-1 — PHASE B: THE REAL ROUTE HOOK (on W9's PERF-MOBILE-1 `889e9775`).
+ * YOU-PARITY-1 — PHASE B: THE REAL ROUTE HOOK (on the development head `87997c58`:
+ * accepted PERF-MOBILE-1 `ad3d2f88` + You / Progress Phase A `02f86fc2` / `92993f09`).
  *
  * `app/(tabs)/you.tsx` keeps PERF's reads, record and revalidation and now
  * renders `YouParityView`. These tests drive the REAL route against the
@@ -27,7 +28,10 @@ import {
  *   2. the period is written in the GOAL's time zone, not the device's;
  *   3. a shared total the list did not answer is unknown — never 0, no WE;
  *   4. Start moving only when a goal can take a contribution now;
- *   5. a failed revalidation keeps what was read, says so, and Retry re-reads.
+ *   5. a failed revalidation keeps what was read, says so, and Retry re-reads;
+ *   6. a goal helped in another community is listed under that community's
+ *      name once the account's record holds it — never the lead — and the
+ *      list is partial until then (Director #365 `5841997009`).
  *
  * EVIDENCE IS OPT-IN (WSF_CAPTURE_FRAMES=1): full-viewport route frames at
  * 390×844 and 390×640 — the persistent masthead, the page and the tab bar,
@@ -246,6 +250,64 @@ test.describe('YOU-PARITY-1 · Phase B · the real route', () => {
     await expect(page.getByTestId('wsf-you-lead-shared')).toHaveText('241 / 500 confirmed');
     await context.close();
   });
+
+  test("a goal helped in another community: partial until the record holds it, then listed under its own name, never the lead", async ({
+    browser,
+  }) => {
+    test.setTimeout(240_000);
+    // Alex in Oak Grove Together (current) and Harbor Lunch Crew. Harbor's goal
+    // ends SOONER than Oak's lead, so a global soonest-first would lead with it.
+    const fx = await seedAlex('ywh6');
+    const harbor = `ywh6h-${stampId()}`;
+    await seedCommunity({
+      groupId: harbor,
+      displayName: 'Harbor Lunch Crew',
+      joinPolicy: 'inviteOnly',
+      groupType: 'custom',
+      members: [{ uid: fx.uid, role: 'member' }],
+    });
+    const lunch = `ywh6lunch-${stampId()}`;
+    await seedActiveGoal({
+      goalId: lunch,
+      groupId: harbor,
+      ownerUid: fx.uid,
+      title: 'Lunch-break laps',
+      target: 40,
+      unit: 'laps',
+      total: 12,
+      timezone: GOAL_ZONE,
+      endsAt: noonUtcIn(1),
+    });
+    await seedOwnCredit(lunch, fx.uid, 3);
+
+    const { context, page } = await phone(browser, { width: 390, height: 844 });
+    await context.addInitScript(
+      ([uid, groupId]) => window.localStorage.setItem(`wsf.currentCommunity.${uid}`, groupId),
+      [fx.uid, fx.groupId],
+    );
+    await signInVia(page, fx.email, fx.password);
+    await expect(page.getByTestId('wsf-member-tab-you')).toBeVisible({ timeout: 40_000 });
+
+    // No read has brought Harbor's goals in: the list says it may be short and invents nothing.
+    await page.getByTestId('wsf-member-tab-you').click();
+    await expect(page.getByTestId('wsf-you-lead')).toContainText('500 squats together', { timeout: 40_000 });
+    await expect(page.getByTestId('wsf-you-partial')).toBeVisible();
+    await expect(page.getByTestId(`wsf-you-row-${lunch}`)).toHaveCount(0);
+
+    // Progress reads every joined community into the account's record.
+    await page.getByTestId('wsf-member-tab-activity').click();
+    await expect(page.getByText('Lunch-break laps').first()).toBeVisible({ timeout: 40_000 });
+
+    // Back on You: Harbor's goal under its own name; Oak's goal still leads; complete.
+    await page.getByTestId('wsf-member-tab-you').click();
+    await expect(page.getByTestId(`wsf-you-row-${lunch}`)).toContainText('Harbor Lunch Crew', { timeout: 20_000 });
+    await expect(page.getByTestId(`wsf-you-row-${lunch}`)).toContainText('Lunch-break laps');
+    await expect(page.getByTestId(`wsf-you-row-${lunch}`)).not.toContainText('Oak Grove Together');
+    await expect(page.getByTestId('wsf-you-lead')).toContainText('500 squats together');
+    await expect(page.getByTestId('wsf-you-lead')).not.toContainText('Lunch-break laps');
+    await expect(page.getByTestId('wsf-you-partial')).toHaveCount(0);
+    await context.close();
+  });
 });
 
 test.describe('YOU-PARITY-1 · Phase B · route evidence', () => {
@@ -283,7 +345,7 @@ test.describe('YOU-PARITY-1 · Phase B · route evidence', () => {
       });
       await context.close();
     }
-    fs.writeFileSync(path.join(dir, 'manifest.json'), `${JSON.stringify({ lovableRef: '642f830baa1153b0d9465dc75690028768083fb7', source: 'app/(tabs)/you.tsx on PERF 889e9775 + YouParityView', frames: manifest }, null, 2)}\n`);
+    fs.writeFileSync(path.join(dir, 'manifest.json'), `${JSON.stringify({ lovableRef: '642f830baa1153b0d9465dc75690028768083fb7', source: 'app/(tabs)/you.tsx on 87997c58 (PERF ad3d2f88 + Phase A 02f86fc2 / 92993f09) + YouParityView', frames: manifest }, null, 2)}\n`);
   });
 });
 

@@ -85,11 +85,14 @@ const READ_LIMIT = 4;
   reference `642f830b`; src/ui/YouParityView.tsx). This file keeps exactly what
   PERF-MOBILE-1 made it — the account's record first, one read path, the
   revalidation on return, checking / stale / Retry — and only maps the state it
-  resolves into the view's props. Three facts are mapped here and nowhere else:
+  resolves into the view's props. Four facts are mapped here and nowhere else:
     · a shared total the list did not return is UNKNOWN, never 0 (goalTruth);
     · a goal's period is written in the goal's own time zone (src/ui/dates);
     · Start moving is offered only when this community has a goal that can
-      take a contribution now: active, a positive target, its window not over.
+      take a contribution now: active, a positive target, its window not over;
+    · goals the member helped in their OTHER communities are listed under
+      their own community's name when the account's record holds them, never
+      as the lead, and the list is partial until it does (elsewhereFromRecord).
 */
 
 type Community = {
@@ -135,9 +138,15 @@ type Screen =
       kind: 'member';
       profile: Profile;
       community: Community;
+      /** This community's open credited goals; the first leads. */
       open: YouGoal[];
+      /** Open credited goals in the member's other communities; never the lead. */
+      otherOpen: YouGoal[];
       finished: YouGoal[];
-      /** True when a read failed and this list is not the whole truth. */
+      /**
+       * True when this list is not the whole truth: a read failed, or another
+       * community's goals are not in the account's record yet.
+       */
       partial: boolean;
       /** This community has a goal that can take a contribution now. */
       eligible: boolean;
@@ -180,49 +189,107 @@ function takesContributions(goal: Goal): boolean {
   );
 }
 
-/** The member's page from their goals and own parts. `null`: that read failed. */
+type Own = { ownCredit?: unknown; unit?: unknown };
+type Placed = { row: YouGoal; endsAt: string };
+
+/**
+ * One goal as a row on this member's page, under the community it belongs to;
+ * `null` when the member put nothing into it. ONLY GOALS THIS MEMBER ACTUALLY
+ * PUT SOMETHING INTO: a goal they never touched is the community's business,
+ * not a row on their own page.
+ */
+function placeRow(goal: Goal, own: Own | null, communityName: string): Placed | null {
+  const yourPart = typeof own?.ownCredit === 'number' ? own.ownCredit : 0;
+  if (yourPart <= 0) return null;
+  const isOpen = goal.status === 'active';
+  const row: YouGoal = {
+    goalId: goal.goalId,
+    title: goal.title,
+    communityName,
+    unit: (typeof own?.unit === 'string' && own.unit) || goal.unit,
+    target: goal.target,
+    yourPart,
+    // Not answered is not zero (goalTruth): no number, no Living WE.
+    shared: typeof goal.sharedTotal === 'number' ? knownShared(goal.sharedTotal) : UNKNOWN_SHARED,
+    open: isOpen,
+    periodLabel: periodLabelOf(goal, isOpen),
+  };
+  return { row, endsAt: goal.endsAt ?? '' };
+}
+
+/** What the member helped in their OTHER communities, and whether that is all of it. */
+type Elsewhere = { placed: Placed[]; partial: boolean };
+
+/*
+  THE MEMBER'S OTHER COMMUNITIES, FROM THE ACCOUNT'S RECORD ONLY (Director #365
+  `5841997009`). A goal the member helped in another community is theirs too
+  and is listed under "Other goals you helped" with that community's own name.
+  This page reads nothing extra for it: no cold fan-out across communities
+  (MEMBER-SNAPSHOT-1 later brings those facts in one call). A community whose
+  goals, or a goal whose own part, the record does not hold makes the list
+  PARTIAL — never a current-community-only list presented as complete.
+*/
+function elsewhereFromRecord(uid: string, communities: Community[], currentId: string): Elsewhere {
+  const placed: Placed[] = [];
+  let partial = false;
+  for (const c of communities) {
+    if (c.groupId === currentId) continue;
+    const goals = peekGoals<Goal>(uid, c.groupId)?.goals;
+    if (!goals) {
+      partial = true;
+      continue;
+    }
+    for (const goal of goals) {
+      const own = peekOwnCredit(uid, goal.goalId);
+      if (!own) {
+        partial = true;
+        continue;
+      }
+      const p = placeRow(goal, own, c.displayName);
+      if (p) placed.push(p);
+    }
+  }
+  return { placed, partial };
+}
+
+// Soonest to end leads: it is the one with something still to do in it.
+const soonestFirst = (a: Placed, b: Placed) => a.endsAt.localeCompare(b.endsAt);
+const latestFirst = (a: Placed, b: Placed) => b.endsAt.localeCompare(a.endsAt);
+
+/**
+ * The member's page from this community's goals and own parts (`null`: that
+ * read failed) and what they helped elsewhere. The lead is only ever this
+ * community's: it sits under this community's band.
+ */
 function composeMember(
   profile: Profile,
   community: Community,
   goals: Goal[],
-  owned: Array<{ goal: Goal; own: { ownCredit?: unknown; unit?: unknown } | null } | null>,
+  owned: Array<{ goal: Goal; own: Own | null } | null>,
+  elsewhere: Elsewhere,
 ): Screen {
-  let partial = false;
-  const open: Array<{ row: YouGoal; endsAt: string }> = [];
-  const finished: Array<{ row: YouGoal; endsAt: string }> = [];
+  let partial = elsewhere.partial;
+  const open: Placed[] = [];
+  const otherOpen: Placed[] = [];
+  const finished: Placed[] = [];
   for (const item of owned) {
     if (!item) {
       partial = true;
       continue;
     }
-    const { goal, own } = item;
-    const yourPart = typeof own?.ownCredit === 'number' ? own.ownCredit : 0;
-    // ONLY GOALS THIS MEMBER ACTUALLY PUT SOMETHING INTO. A goal they never
-    // touched is the community's business, not a row on their own page.
-    if (yourPart <= 0) continue;
-    const isOpen = goal.status === 'active';
-    const row: YouGoal = {
-      goalId: goal.goalId,
-      title: goal.title,
-      communityName: community.displayName,
-      unit: (typeof own?.unit === 'string' && own.unit) || goal.unit,
-      target: goal.target,
-      yourPart,
-      // Not answered is not zero (goalTruth): no number, no Living WE.
-      shared: typeof goal.sharedTotal === 'number' ? knownShared(goal.sharedTotal) : UNKNOWN_SHARED,
-      open: isOpen,
-      periodLabel: periodLabelOf(goal, isOpen),
-    };
-    (isOpen ? open : finished).push({ row, endsAt: goal.endsAt ?? '' });
+    const p = placeRow(item.goal, item.own, community.displayName);
+    if (p) (p.row.open ? open : finished).push(p);
   }
-  // Soonest to end leads: it is the one with something still to do in it.
-  open.sort((a, b) => a.endsAt.localeCompare(b.endsAt));
-  finished.sort((a, b) => b.endsAt.localeCompare(a.endsAt));
+  for (const p of elsewhere.placed) (p.row.open ? otherOpen : finished).push(p);
+  open.sort(soonestFirst);
+  otherOpen.sort(soonestFirst);
+  finished.sort(latestFirst);
   return {
     kind: 'member',
     profile,
     community,
     open: open.map((o) => o.row),
+    otherOpen: otherOpen.map((o) => o.row),
     finished: finished.map((f) => f.row),
     partial,
     eligible: goals.some(takesContributions),
@@ -248,13 +315,13 @@ function youFromRecord(uid: string): Screen | null {
   if (!community) return { kind: 'pickCommunity', profile, count: communities.length };
   const goals = peekGoals<Goal>(uid, community.groupId)?.goals;
   if (!goals) return null;
-  const owned: Array<{ goal: Goal; own: { ownCredit?: unknown; unit?: unknown } }> = [];
+  const owned: Array<{ goal: Goal; own: Own }> = [];
   for (const goal of goals) {
     const own = peekOwnCredit(uid, goal.goalId);
     if (!own) return null;
     owned.push({ goal, own });
   }
-  return composeMember(profile, community, goals, owned);
+  return composeMember(profile, community, goals, owned, elsewhereFromRecord(uid, communities, community.groupId));
 }
 
 export default function You() {
@@ -425,7 +492,15 @@ export default function You() {
       const profile = await profileRead;
       if (live.current !== token) return;
       settle();
-      setScreen(composeMember(profile, community, goals, owned.map((o) => (o.ok ? o.value : null))));
+      setScreen(
+        composeMember(
+          profile,
+          community,
+          goals,
+          owned.map((o) => (o.ok ? o.value : null)),
+          elsewhereFromRecord(uid, communities, community.groupId),
+        ),
+      );
     })();
     return () => {
       if (slow) clearTimeout(slow);

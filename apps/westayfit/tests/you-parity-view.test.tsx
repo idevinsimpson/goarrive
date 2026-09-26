@@ -210,6 +210,16 @@ describe('YouParityView', () => {
     expect(text('wsf-you-row-other')).not.toContain('Oak Grove Together');
   });
 
+  it("another community's open goal is listed under its own name and never leads under this band", () => {
+    render(member({ open: [], otherOpen: [OTHER], eligible: true }));
+    expect(byId('wsf-you-lead')).toBeNull();
+    expect(byId('wsf-you-nothing-yet')).not.toBeNull();
+    expect(text('wsf-you-row-other')).toContain('Harbor Lunch Crew · This week');
+    render(member({ open: [LEAD], otherOpen: [OTHER] }));
+    expect(text('wsf-you-lead')).toContain('500 squats together');
+    expect(text('wsf-you-row-other')).toContain('Harbor Lunch Crew');
+  });
+
   it('the band prints a sub-line only for a type the product names — no "Community" filler', () => {
     render(member());
     expect(text('wsf-you-community')).not.toContain('Community');
