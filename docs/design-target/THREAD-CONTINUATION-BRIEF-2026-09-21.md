@@ -4,7 +4,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 ## CURRENT — read this first (kept ≤ 1,000 words; updated only on material change; Director #365 `5819944052` §3)
 
-**Stamp: 2026-09-26 19:25Z.** **Precedence:** newer explicit owner decisions first (latest: North-Star Operating System v1 `5841611729`; standing hardening train `5841397324`, which replaces the sprint's expiry; staging cadence `5832907406`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
+**Stamp: 2026-09-27 00:20Z.** **Precedence:** newer explicit owner decisions first (latest: North-Star Operating System v1 `5841611729`; standing hardening train `5841397324`, which replaces the sprint's expiry; staging cadence `5832907406`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
 
 **Heads.**
 
@@ -28,7 +28,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 | CONTROL-PLANE-ACTIVATION-1 | W3 · #521 `839f18f6` | plan step 1 **ACCEPTED** `5850494365` → **integrated** `fff23048` (`5850506125`) | done; activation run follows step 2 |
 | AUTONOMY-STATE-1A | W3 · #519 `cc78509a` | **ACCEPTED** `5849867467` → integrated main `5d58ed07` | Phases B–E = plan steps 4–7 (PARKED) |
 | W5 lane | #520 audit; #525 **merged** (W5 PASS, Director `5849425770`) | **owner: revoke Browser Use key** |
-| **HOME-NORTHSTAR-PARITY-1** | W9 · #514 → served `a3127651` | step 2 #527 `84010706` **ACCEPTED** `5851080277` → integrated `58d3aff8` (`5851097149`) | **run 56 `36281159269` journey-activation** in progress; PASS+cleanup+card closes step 2 |
+| **HOME-NORTHSTAR-PARITY-1** | W9 · #514 → served `a3127651` | step 2 #527 `84010706` **ACCEPTED** `5851080277` → integrated `58d3aff8` (`5851097149`) | **run 56 `36281159269` FAILED** (`home` click timeout; cleanup COMPLETE; card FAILED; `5851163539`); finding → W3 #396 `5851176864`; await Director disposition, no re-dispatch |
 | **PRIVACY-TOGGLE-STAGING-1** | owner as operator · harness merged `6c2e6b25` | setters SHUT (run 50); no Claude identity can do Operation 2; W7 Check 43 emulator PASS | owner Operation 2 read-back → one `social-privacy` dispatch → seven-row receipt |
 | **HARDENED-MEMBER-JOURNEY-1** | W7 · `a55046f5` | H1–H4 baselined on served; **H3c** (silent failed Home refresh) and **H4b** (no eviction after refusal) fail; H5 waits on Settings | rerun on successors |
 | SOCIAL-DEMO-SEED-MODE | W3 · #484 `4c1ac1d9` | W7 carry confirmed | Director → L0 PLAN → APPLY / VERIFY |
