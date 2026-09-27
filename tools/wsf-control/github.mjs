@@ -51,7 +51,7 @@ export function gitHubClient({ token, repo, fetchImpl = globalThis.fetch }) {
     },
     async comment(id) {
       const c = await call('GET', `${r}/issues/comments/${id}`, null, `comment ${id}`);
-      return c && { id: c.id, body: c.body ?? '', author: c.user?.login ?? null };
+      return c && { id: c.id, body: c.body ?? '', author: c.user?.login ?? null, association: c.author_association ?? null };
     },
     /** The newest `count` comments of an issue or PR conversation, oldest first (the endpoint pages oldest-first). */
     async recentComments(issue, count = 100) {
@@ -61,7 +61,7 @@ export function gitHubClient({ token, repo, fetchImpl = globalThis.fetch }) {
         window = window.concat(batch).slice(-count);
         if (batch.length < 100) break;
       }
-      return window.map((c) => ({ id: c.id, body: c.body ?? '', author: c.user?.login ?? null }));
+      return window.map((c) => ({ id: c.id, body: c.body ?? '', author: c.user?.login ?? null, association: c.author_association ?? null }));
     },
     async createComment(issue, body) {
       const c = await call('POST', `${r}/issues/${issue}/comments`, { body }, `create comment on #${issue}`);

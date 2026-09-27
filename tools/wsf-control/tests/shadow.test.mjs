@@ -11,9 +11,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { MAX_ATTEMPTS, bootstrapEvent, runShadow, writerPinProblem } from '../shadow-run.mjs';
-import { decisionBlock, decisionIntake, derivedFacts, SHADOW_PLACEHOLDER } from '../shadow.mjs';
+import { MAX_ATTEMPTS, bootstrapEvent, formatReport, runShadow, writerPinProblem } from '../shadow-run.mjs';
+import { DECISION_OWNER, decisionBlock, decisionIntake, derivedFacts, SHADOW_PLACEHOLDER } from '../shadow.mjs';
 import { redact, tokenGitEnv, STATE_REF } from '../gitstate.mjs';
+import { gitHubClient } from '../github.mjs';
 import { STEP5_PERMISSIONS, appJwt, installationToken, AppTokenError } from '../app-token.mjs';
 import { health } from '../health-view.mjs';
 import { freshness } from '../freshness-view.mjs';
@@ -28,6 +29,7 @@ const git = (cwd, ...args) => { const r = spawnSync('git', args, { cwd, encoding
 const RUNNING = sha('9');
 const AUTHOR = { name: 'wsf-control-writer[bot]', email: '5098407+wsf-control-writer[bot]@users.noreply.github.com' };
 const BOT = 'wsf-control-writer[bot]';
+const OWNER = { author: 'idevinsimpson', association: 'OWNER' };
 
 /** The bootstrap input as the reviewed file carries it: one work packet delivered on PR 12. */
 function input() {
@@ -156,15 +158,57 @@ atest('decision intake: one fenced block in the control inbox becomes a MANUAL l
   await run({ remote, gh });
   const block = (o) => `L0 decision.\n\n\`\`\`wsf-control-decision\n${JSON.stringify(o)}\n\`\`\``;
   const comments = [
-    { id: 901, author: 'idevinsimpson', body: block({ type: 'review', packet: 'ALPHA', reviewers: ['W7'] }) },
+    { id: 901, author: 'idevinsimpson', association: 'OWNER', body: block({ type: 'review', packet: 'ALPHA', reviewers: ['W7'] }) },
     { id: 902, author: BOT, body: block({ type: 'finding', packet: 'ALPHA' }) },
   ];
   const r = await run({ remote, gh, controlInboxComments: comments });
   assert.deepEqual(r.appended, ['review:MANUAL:comment-901']);
+  assert.deepEqual(r.intakeRefused, [], 'the App bot\'s own comment is skipped, not refused');
   const line = remoteEvents(remote).split('\n').map((l) => JSON.parse(l)).find((e) => e.type === 'review');
   assert.deepEqual(line.source, { kind: 'comment', id: 901, repo: REPO });
   assert.deepEqual(line.authority, { class: 'manual', rule: 'MANUAL', evidence: [{ kind: 'comment', id: 901 }] });
   assert.equal((await run({ remote, gh, controlInboxComments: comments })).outcome, 'unchanged', 'a re-read decision is the same identity: a no-op');
+});
+
+atest('Check 71 F1: a valid decision block from any account but the owner is refused, reported and never appended; set-contracts cannot move the pins', async () => {
+  const remote = bareRemote(); const gh = fakeGh();
+  await run({ remote, gh });
+  const before = remoteEvents(remote);
+  const pins = () => JSON.stringify(reduce(`${remoteEvents(remote)}\n`).contracts);
+  const contractsBefore = pins();
+  assert.notEqual(contractsBefore, undefined);
+  const block = (o) => `\`\`\`wsf-control-decision\n${JSON.stringify(o)}\n\`\`\``;
+  const contracts = [{ id: 'writer', path: 'tools/wsf-control', sha: sha('7') }];
+  const comments = [
+    { id: 911, author: 'external-user', association: 'NONE', body: block({ type: 'review', packet: 'ALPHA', reviewers: ['W7'] }) },
+    { id: 912, author: 'external-user', association: 'NONE', body: block({ type: 'set-contracts', contracts }) },
+    { id: 913, author: 'external-user', association: 'OWNER', body: block({ type: 'review', packet: 'ALPHA', reviewers: ['W7'] }) },
+    { id: 914, author: DECISION_OWNER, association: 'COLLABORATOR', body: block({ type: 'set-contracts', contracts }) },
+  ];
+  const r = await run({ remote, gh, controlInboxComments: comments });
+  assert.equal(r.outcome, 'unchanged'); assert.deepEqual(r.appended, []);
+  assert.deepEqual(r.intakeRefused.map((x) => x.commentId), [911, 912, 913, 914]);
+  assert.match(r.intakeRefused[0].reason, /"external-user" is not the repository owner/);
+  assert.match(r.intakeRefused[3].reason, /author_association "COLLABORATOR" is not OWNER/);
+  assert.ok(formatReport(r).includes('INTAKE_REFUSED comment=912 :: author "external-user" is not the repository owner'));
+  assert.equal(remoteEvents(remote), before, 'no ledger mutation');
+  assert.equal(pins(), contractsBefore, 'the writer and workflow pins did not move');
+});
+
+atest('Check 71 F1: the comment-reading path carries each author\'s login and author_association, and a missing one as null', async () => {
+  const raw = [
+    { id: 1, body: 'a', user: { login: 'idevinsimpson' }, author_association: 'OWNER' },
+    { id: 2, body: 'b', user: { login: 'external-user' }, author_association: 'NONE' },
+    { id: 3, body: 'c', user: null },
+  ];
+  const fetchImpl = async (url) => ({ ok: true, status: 200, json: async () => (url.includes('/issues/comments/') ? raw[0] : raw) });
+  const gh = gitHubClient({ token: 't', repo: REPO, fetchImpl });
+  assert.deepEqual(await gh.recentComments(365), [
+    { id: 1, body: 'a', author: 'idevinsimpson', association: 'OWNER' },
+    { id: 2, body: 'b', author: 'external-user', association: 'NONE' },
+    { id: 3, body: 'c', author: null, association: null },
+  ]);
+  assert.deepEqual(await gh.comment(1), { id: 1, body: 'a', author: 'idevinsimpson', association: 'OWNER' });
 });
 
 for (const [n, f] of asyncTests) await runAsync(n, f);
@@ -174,12 +218,12 @@ test('a decision block may carry only its event\'s own fields; bootstrap, upgrad
   const s = reduce(appendEvent('', { ...boot2() }, { expectHead: '0'.repeat(64) }).eventsText);
   const blk = (o) => `\`\`\`wsf-control-decision\n${JSON.stringify(o)}\n\`\`\``;
   const r = decisionIntake(s, [
-    { id: 1, body: blk({ type: 'queue', packet: 'ALPHA', owner: 'W3', completion: { terminal: 'INTEGRATED', proofType: 'source-only' }, actor: 'Fable' }) },
-    { id: 2, body: blk({ type: 'bootstrap' }) },
-    { id: 3, body: blk({ type: 'set-shadow-surface', pr: 365, commentId: 3 }) },
-    { id: 4, body: `${blk({ type: 'withdraw', packet: 'X1' })}\n${blk({ type: 'withdraw', packet: 'X2' })}` },
-    { id: 5, body: '```wsf-control-decision\nnot json\n```' },
-    { id: 6, body: 'prose only' },
+    { id: 1, ...OWNER, body: blk({ type: 'queue', packet: 'ALPHA', owner: 'W3', completion: { terminal: 'INTEGRATED', proofType: 'source-only' }, actor: 'Fable' }) },
+    { id: 2, ...OWNER, body: blk({ type: 'bootstrap' }) },
+    { id: 3, ...OWNER, body: blk({ type: 'set-shadow-surface', pr: 365, commentId: 3 }) },
+    { id: 4, ...OWNER, body: `${blk({ type: 'withdraw', packet: 'X1' })}\n${blk({ type: 'withdraw', packet: 'X2' })}` },
+    { id: 5, ...OWNER, body: '```wsf-control-decision\nnot json\n```' },
+    { id: 6, ...OWNER, body: 'prose only' },
   ]);
   assert.equal(r.events.length, 0);
   assert.deepEqual(r.refused.map((x) => x.commentId), [1, 2, 3, 4, 5]);
@@ -277,9 +321,50 @@ test('the reconcile workflow keeps its five triggers, gates the writer job on th
   // The guard is the whole condition's first conjunct: not ORed, and not nested inside the issue_comment branch.
   assert.match(cond, /^ {4}if: >-\s+github\.ref == 'refs\/heads\/main' &&\s+\(/);
   assert.equal((cond.match(/refs\/heads\/main/g) ?? []).length, 1);
+  assert.ok(cond.includes("github.event.comment.user.login != 'wsf-control-writer[bot]' &&"), 'the App-bot loop skip stays explicit (the owner gate also excludes it)');
   assert.match(job, /^ {4}environment: wsf-control-writer$/m);
   assert.match(job, /^ {10}ref: main$/m);
   assert.match(y, /^ {2}group: wsf-control-writer\n {2}cancel-in-progress: false$/m);
+});
+
+test('Check 71 F1: only login idevinsimpson with author_association OWNER decides; every other association, and a missing one, is refused', () => {
+  const s = reduce(appendEvent('', { ...boot2() }, { expectHead: '0'.repeat(64) }).eventsText);
+  const blk = (o) => `\`\`\`wsf-control-decision\n${JSON.stringify(o)}\n\`\`\``;
+  const d = blk({ type: 'review', packet: 'ALPHA', reviewers: ['W7'] });
+  assert.equal(decisionIntake(s, [{ id: 1, ...OWNER, body: d }]).events.length, 1);
+  const bad = [
+    ...['COLLABORATOR', 'MEMBER', 'CONTRIBUTOR', 'FIRST_TIME_CONTRIBUTOR', 'FIRST_TIMER', 'NONE', 'owner', '', null].map((association) => ({ author: DECISION_OWNER, association })),
+    { author: DECISION_OWNER }, { author: 'someone-else', association: 'OWNER' }, { author: 'IdevinSimpson', association: 'OWNER' }, { association: 'OWNER' }, {},
+  ];
+  const r = decisionIntake(s, bad.map((w, i) => ({ id: 10 + i, ...w, body: d })));
+  assert.equal(r.events.length, 0);
+  assert.equal(r.refused.length, bad.length);
+  assert.match(r.refused.find((x) => x.commentId === 10 + bad.findIndex((w) => !('association' in w))).reason, /author_association null is not OWNER/);
+});
+
+/** The job condition evaluated for a context (GitHub's expression subset this `if` uses: ==, !=, &&, ||, contains, fromJSON). */
+function jobIf(yml, ctx) {
+  const job = yml.slice(yml.indexOf('\n  reconcile:\n'));
+  const text = job.slice(job.indexOf('    if: >-') + '    if: >-'.length, job.indexOf('    runs-on:'));
+  const expr = text.replace(/fromJSON\(/g, 'JSON.parse(').replace(/([!=])=/g, '$1==')
+    .replace(/\bgithub\.([A-Za-z_.]+)/g, (_, p) => `g(${JSON.stringify(p)})`);
+  const g = (p) => p.split('.').reduce((o, k) => (o == null ? null : o[k] ?? null), ctx);
+  return Boolean(new Function('g', 'contains', `return (${expr});`)(g, (a, v) => a.includes(v)));
+}
+
+test('Check 71 F1: the workflow starts the writer job for an owner comment only; a non-owner is refused even with a valid block', () => {
+  const y = fs.readFileSync(fileURLToPath(new URL('../../../.github/workflows/wsf-control-reconcile.yml', import.meta.url)), 'utf8');
+  const main = 'refs/heads/main';
+  const comment = (login, association, issue = 365, ref = main) => ({ ref, event_name: 'issue_comment', event: { issue: { number: issue }, comment: { user: { login }, author_association: association, body: '```wsf-control-decision\n{"type":"review","packet":"ALPHA","reviewers":["W7"]}\n```' } } });
+  assert.equal(jobIf(y, comment('idevinsimpson', 'OWNER')), true);
+  for (const [login, assoc] of [['external-user', 'NONE'], ['external-user', 'OWNER'], ['idevinsimpson', 'COLLABORATOR'], ['idevinsimpson', 'MEMBER'], ['idevinsimpson', 'CONTRIBUTOR'], ['idevinsimpson', undefined], ['wsf-control-writer[bot]', 'NONE'], [undefined, undefined]]) {
+    assert.equal(jobIf(y, comment(login, assoc)), false, `${login}/${assoc} must not start the job`);
+  }
+  assert.equal(jobIf(y, comment('idevinsimpson', 'OWNER', 532)), false, 'outside the six control inboxes');
+  assert.equal(jobIf(y, comment('idevinsimpson', 'OWNER', 365, 'refs/pull/532/merge')), false, 'the main-ref guard still holds');
+  for (const e of ['schedule', 'workflow_dispatch', 'workflow_run']) assert.equal(jobIf(y, { ref: main, event_name: e, event: {} }), true, `${e} on main is unchanged`);
+  assert.equal(jobIf(y, { ref: 'refs/pull/532/merge', event_name: 'pull_request', event: {} }), false);
+  assert.equal(jobIf(y, { ref: main, event_name: 'pull_request', event: {} }), true, 'a pull_request event on main is unchanged');
 });
 
 done('shadow');

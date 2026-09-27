@@ -12,8 +12,11 @@
  *    inbox as exactly one fenced `wsf-control-decision` block, recorded as class
  *    manual, rule MANUAL, source that comment (memo §3.1 manual-v1). The block names
  *    the event type and its fields only; the writer supplies actor, source, schema and
- *    authority, so a block cannot claim a class, a rule or another source. Author
- *    identity is not proven (accepted residual (a)); the class says so.
+ *    authority, so a block cannot claim a class, a rule or another source. Only the
+ *    repository owner's account may decide: the comment's author login must be exactly
+ *    DECISION_OWNER and its author_association exactly OWNER (anything else, missing
+ *    included, is refused). Which role inside that account wrote it is not proven
+ *    (accepted residual (a)); the class says so.
  *
  * Nothing here routes, reviews, accepts, releases or wakes: those rules are Step 6.
  * Every returned line is still appended through append.mjs, which reduces and
@@ -25,6 +28,14 @@ import { reconcile } from './reconcile.mjs';
 
 /** The fenced block a Director/L0 decision is posted in. One per comment; anything else in the comment is prose. */
 export const DECISION_FENCE = 'wsf-control-decision';
+/** The one account whose control-inbox decisions are recorded (Check 71 F1): a public repository's other accounts never decide. */
+export const DECISION_OWNER = 'idevinsimpson';
+/** Why a comment's author may not decide, or null when it may. Fail closed: a missing login or association refuses. */
+export function decisionAuthorProblem(c) {
+  if (c.author !== DECISION_OWNER) return `author ${JSON.stringify(c.author ?? null)} is not the repository owner; only ${DECISION_OWNER} decides`;
+  if (c.association !== 'OWNER') return `author_association ${JSON.stringify(c.association ?? null)} is not OWNER`;
+  return null;
+}
 /** Decisions the writer records from the control inbox. Bootstrap, upgrades and its own surface are never taken from a comment. */
 export const INTAKE_TYPES = Object.freeze(Object.keys(EVENT_FIELDS).filter((t) => !['bootstrap', 'schema-upgrade', 'set-shadow-surface'].includes(t)));
 
@@ -71,7 +82,8 @@ export function decisionBlock(body) {
 }
 
 /**
- * Decision lines from control-inbox comments: [{ id, body }] (the comment id and its exact body). Returns
+ * Decision lines from control-inbox comments: [{ id, body, author, association }] (the comment id, its exact body, the
+ * author's login and GitHub's author_association). A block from anyone but the owner is refused before it is read. Returns
  * { events, refused: [{ commentId, reason }] }. A refused block is reported (INTAKE_REFUSED) and never recorded.
  * Only envelope-free fields are taken from the block: type and that type's fields.
  */
@@ -82,6 +94,8 @@ export function decisionIntake(state, comments) {
   for (const c of [...comments].sort((a, b) => a.id - b.id)) {
     const blk = decisionBlock(c.body);
     if (!blk) continue;
+    const who = decisionAuthorProblem(c);
+    if (who) { refused.push({ commentId: c.id, reason: who }); continue; }
     if (blk.error) { refused.push({ commentId: c.id, reason: blk.error }); continue; }
     const d = blk.value;
     if (!d || typeof d !== 'object' || Array.isArray(d)) { refused.push({ commentId: c.id, reason: 'the decision must be a JSON object' }); continue; }
