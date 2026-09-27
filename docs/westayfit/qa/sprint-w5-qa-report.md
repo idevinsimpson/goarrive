@@ -2857,3 +2857,22 @@ The change is packaged for L0 in two files, neither of which contains the creden
 **Owner action still required.** Revoke the exposed Browser Use Cloud key (sha256 prefix `45b5e468`) in the Browser Use dashboard. Then provision its replacement only through `BROWSER_USE_API_KEY` in a local `.env` or shell, or a runner's secret store. No agent may do this.
 
 No provider call, key validation, rotation, IAM/WIF/secret-store change, history rewrite or branch cleanup.
+
+### DOC-AUTHORITY-v3.1 recheck: #520 at `45992824cb638906cd19f4865b6a28f9261d6781` (parent `54d3eaca`) — **PASS**
+
+This is one commit on the audited head, changing 7 docs (+28 / −24).
+
+**A1–A9: all closed, each against its quoted text**
+- **A1:** the per-app bundling sentence is restored at AGENTS L27, and the L131 combined-staging rule is now qualified "per app".
+- **A2:** "below" becomes "above (invariants (b)–(c))" in both places. `(or --only functions for both)` is replaced with "never bare `--only functions`; WSF staging goes only through skills/wsf-staging-deploy".
+- **A3:** ARCHITECTURE §(g) now describes separate systems of record, citing LOVABLE_HANDOFF §1 and DATA_OWNERSHIP §4.
+- **A4:** R-WSF-E1 is now dated history. It cites run 35369383808 on candidate `65d258db`, and the cited `today-2026-09-18/1PM-READINESS-RECEIPT.md` exists and records "all Package E rows" passing, within a 19/21 run whose two failures were not Package E rows. It points to #365 for the current served state.
+- **A5:** the charter row is added as successor to v0.2, and the v3.0 row now says "held outside this repository".
+- **A6:** the EXPO_CRITICAL_PATH banner is added, and the file is listed as HISTORICAL in §6.
+- **A7:** principle 5 is marked SUPERSEDED, with no rankings.
+- **A8:** the addendum's silence clause is fixed.
+- **A9:** R-2 now points to the control-plane receipts, and R-10 reads "before any further `firestore:indexes` deploy".
+
+**Bounded contradiction scan, over the 7 changed files: no new conflict.**
+- EXPO_CRITICAL_PATH's body still says "Governed by `WE_STAY_FIT_MASTER.md`" and lists adult-only enforcement. Both sit under a banner that explicitly supersedes them, so the historical record is kept verbatim.
+- ARCHITECTURE's scoped `--only functions:westayfit` example sits under the "above" clarification and the Deploy Boundary Summary.
