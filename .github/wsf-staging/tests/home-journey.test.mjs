@@ -174,6 +174,19 @@ await test('run 56: a Close that leaves the sheet open fails [returns] even thou
   assert.ok(r.actionsPerformed.includes('pressed Back from Already moved'), 'one defect does not strand the rest of the journey');
 });
 
+// ---- run 57: the window pill is CSS-uppercased (Director #396 5851553145) --------------------
+await test('run 57: the served window pill reads "OPEN · ENDS THU, OCT 1" (CSS uppercase) and the [goal] row holds on its words, not its case', async () => {
+  const { r, failed } = await drive();
+  assert.deepEqual(failed, []);
+  const row = r.assertions.find((a) => a.expected.startsWith("[goal] the goal's window reads Open · Ends"));
+  assert.ok(row && row.ok, JSON.stringify(row));
+  assert.match(row.expected, /\(saw: OPEN · ENDS THU, OCT 1\)$/, 'the model reads the pill the way the served page does');
+});
+await test('run 57: an ended window still fails the [goal] row, in any case', async () => {
+  const { failed } = await drive({ windowClosed: true });
+  assert.ok(failed.some((f) => /^\[goal\] the goal's window reads Open · Ends … \(saw: ENDED SEP 20\)$/.test(f)), failed.join(' | '));
+});
+
 // ---- through the hook, the cleaner and the card ------------------------------------------
 async function sequence({ failDeletes = false, skipCleanup = false, registry = null } = {}) {
   const d = tmp();

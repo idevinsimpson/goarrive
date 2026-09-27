@@ -117,7 +117,9 @@ export function fakeApp(fx, bugs = {}) {
       if (id === 'wsf-community-name') return { text: () => c.name };
       if (id === `wsf-community-goal-title-${g}`) return { text: () => c.goalTitle };
       if (bugs.otherGoalLeaks && id === `wsf-community-goal-title-${(c === fx.a ? fx.b : fx.a).goalId}`) return { text: () => 'leaked' };
-      if (id === `wsf-community-goal-period-${g}`) return { text: () => (bugs.windowClosed ? 'Ended Sep 20' : 'Open · Ends Thu, Oct 1') };
+      // The pill's text is "Open · Ends Thu, Oct 1"; its served style (heroStatePill, textTransform: uppercase)
+      // makes innerText read it in capitals, as run 57 measured. The model reads it the way the served page does.
+      if (id === `wsf-community-goal-period-${g}`) return { text: () => (bugs.windowClosed ? 'Ended Sep 20' : 'Open · Ends Thu, Oct 1').toUpperCase() };
       if (id === `wsf-community-goal-total-${g}`) return { text: () => `${bugs.totalOff ? n.shared + 1 : n.shared} of ${n.target} squats` };
       if (id === `wsf-community-your-part-${g}`) {
         const own = bugs.fabricatedOwn ? `You’ve added ${n.shared} squats`

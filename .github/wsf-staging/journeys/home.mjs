@@ -66,8 +66,11 @@ export async function home({ page, baseUrl, fixtures }) {
   row('identity')(`Home names ${c.name}`, name === c.name, name);
   const title = await textWhen(page, `wsf-community-goal-title-${g}`, (t) => t === c.goalTitle);
   row('goal')(`the goal card shows the community's own goal "${c.goalTitle}"`, title === c.goalTitle, title);
-  const period = await textWhen(page, `wsf-community-goal-period-${g}`, (t) => /^Open · Ends /.test(t));
-  row('goal')('the goal\'s window reads Open · Ends …', /^Open · Ends /.test(period || ''), period);
+  // The window pill is styled textTransform: uppercase at a3127651, and innerText reads the CSS casing
+  // (run 57 saw "OPEN · ENDS THU, OCT 1"): match its words, not its case. An ended window still fails.
+  const OPEN_WINDOW = /^open · ends /i;
+  const period = await textWhen(page, `wsf-community-goal-period-${g}`, (t) => OPEN_WINDOW.test(t));
+  row('goal')('the goal\'s window reads Open · Ends …', OPEN_WINDOW.test(period || ''), period);
   const leaked = await vis(page, `wsf-community-goal-title-${other.goalId}`).count();
   row('goal')(`no goal of ${other.name} is shown on ${c.name}'s Home`, leaked === 0, leaked);
 
