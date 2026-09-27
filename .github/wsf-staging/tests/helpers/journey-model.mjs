@@ -85,7 +85,7 @@ export function kitFor(dir, be) {
 
 // ---- a scripted page modelling the product's rendered contract ------------------------
 export function fakeApp(fx, bugs = {}) {
-  const st = { signedIn: false, path: '/', search: '', history: [], lastHome: null, selected: null, panel: false, typed: {}, pressed: [] };
+  const st = { signedIn: false, path: '/', search: '', history: [], lastHome: null, sheet: null, selected: null, panel: false, typed: {}, pressed: [] };
   const serverOrder = bugs.serverOrderBFirst ? [fx.b, fx.a] : [fx.a, fx.b];
   const current = () => st.selected || serverOrder[0];
   const homeOf = (p) => [fx.a, fx.b].find((c) => p === `/community/${c.id}`) || null;
@@ -126,11 +126,21 @@ export function fakeApp(fx, bugs = {}) {
       }
       if (id === `wsf-community-your-part-shared-${g}`) return { text: () => `Part of our shared ${bugs.sharedBlended ? 0 : n.shared}` };
       if (id === `wsf-community-goal-link-${g}` && !bugs.noStart) {
-        return { attrs: { 'aria-label': 'Start moving' }, click: () => { if (!bugs.startGoesNowhere) go(`/contribute/${g}`, `?groupId=${c.id}&mode=move`); } };
+        return { attrs: { 'aria-label': 'Start moving' }, click: () => { if (bugs.startGoesNowhere) return; if (bugs.moveAsPage) go(`/contribute/${g}`, `?groupId=${c.id}&mode=move`); else st.sheet = c; } };
       }
       if (id === `wsf-community-goal-record-${g}`) {
         return { attrs: { 'aria-label': bugs.recordUnlabelled ? 'I already moved' : 'Already moved? Record squats' }, click: () => go(`/contribute/${g}`, `?groupId=${c.id}&mode=${bugs.recordOpensMove ? 'move' : 'record'}`) };
       }
+    }
+    // MOVE's sheet at a3127651: a scrim and panel over the still-mounted Home, whose one exit is Close
+    // (wsf-contribute-close). No page chrome, so no wsf-contribute-back inside it.
+    if (st.sheet) {
+      if (id === 'wsf-contribute-sheet') return {};
+      if (id === 'wsf-contribute-move-screen') return {};
+      if (id === 'wsf-contribute-goal-title') return { text: () => st.sheet.goalTitle };
+      if (id === 'wsf-contribute-close') return { click: () => { if (!bugs.closeBroken) st.sheet = null; } };
+      if (bugs.sheetDrawsBack && id === 'wsf-contribute-back') return { click: () => { st.sheet = null; } };
+      return null;
     }
     const contributing = st.signedIn ? [fx.a, fx.b].find((c) => st.path === `/contribute/${c.goalId}`) : null;
     if (contributing) {
@@ -138,7 +148,7 @@ export function fakeApp(fx, bugs = {}) {
       if (id === 'wsf-contribute-move-screen' && mode === 'move') return {};
       if (id === 'wsf-contribute-entry-screen' && mode !== 'move') return {};
       if (id === 'wsf-contribute-goal-title') return { text: () => contributing.goalTitle };
-      if (id === 'wsf-contribute-back') {
+      if (id === 'wsf-contribute-back' && !bugs.recordLosesBack) {
         return { click: () => { const prev = st.history.pop(); if (bugs.backLost || !prev) { st.path = '/'; st.search = ''; } else { st.path = prev.path; st.search = prev.search; } } };
       }
     }
@@ -193,7 +203,8 @@ export function fakeApp(fx, bugs = {}) {
     return loc;
   }
   const page = {
-    goto: async (url) => { const u = new URL(url); go(u.pathname, u.search); },
+    // A navigation (a cold load) never keeps a sheet: it is presented only over a warm tab.
+    goto: async (url) => { const u = new URL(url); st.sheet = null; go(u.pathname, u.search); },
     // A reload keeps the product's remembered selection; the seeded defect drops it.
     reload: async () => { if (bugs.reloadLosesSelection) st.selected = null; },
     waitForTimeout: async () => {},

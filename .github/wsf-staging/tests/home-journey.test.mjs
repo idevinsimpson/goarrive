@@ -119,7 +119,7 @@ await test('HOME on a faithful model of a3127651: real actions, every row holds,
   assert.deepEqual(failed, []);
   assert.ok(r.assertions.length >= 14, `${r.assertions.length} assertions`);
   assert.deepEqual(r.actionsPerformed.map((a) => a.split(' ').slice(0, 2).join(' ')), [
-    'signed in', 'opened Home', 'pressed Start', 'pressed Back', 'pressed Already', 'pressed Back', 'opened the', 'opened the',
+    'signed in', 'opened Home', 'pressed Start', 'pressed Close', 'pressed Already', 'pressed Back', 'opened the', 'opened the',
   ]);
   assert.match(r.setupId, /member of A, founding Champion of B/);
   assert.ok(be.requests.every((q) => q.admin), 'the only writes are the kit\'s admin-scoped fixtures');
@@ -140,6 +140,10 @@ const DEFECTS = [
   [{ recordOpensMove: true }, 'actions'],
   [{ backLost: true }, 'returns'],
   [{ homeTabLosesCommunity: true }, 'returns'],
+  // Run 56 (served a3127651): Start moving is MOVE's sheet, left by Close; Already moved is the page, left by Back.
+  [{ closeBroken: true }, 'returns'],
+  [{ moveAsPage: true }, 'actions'],
+  [{ recordLosesBack: true }, 'returns'],
 ];
 for (const [bugs, row] of DEFECTS) {
   await test(`HOME fails its ${row} row on a seeded defect: ${Object.keys(bugs)[0]}`, async () => {
@@ -147,6 +151,28 @@ for (const [bugs, row] of DEFECTS) {
     assert.ok(failed.some((f) => f.startsWith(`[${row}] `)), `expected a failed [${row}] assertion; failed: ${failed.join(' | ') || 'none'}`);
   });
 }
+
+// ---- run 56: the served exits (Director #396 5851190413) ---------------------------------
+await test('run 56: Start moving opens MOVE as a sheet over Home that draws Close and no Back; the driver leaves it by Close and requires the sheet gone', async () => {
+  const { r, failed, app } = await drive();
+  assert.deepEqual(failed, []);
+  assert.ok(r.actionsPerformed.includes('pressed Close from Start moving'), r.actionsPerformed.join(' | '));
+  assert.equal(r.actionsPerformed.some((a) => a === 'pressed Back from Start moving'), false, 'the sheet has no Back to press');
+  assert.ok(r.assertions.some((a) => /^\[actions\] Start moving opens MOVE as the sheet over Home/.test(a.expected) && a.ok));
+  assert.ok(r.assertions.some((a) => /^\[returns\] Close from Start moving returns to .*, the sheet closed/.test(a.expected) && a.ok));
+  assert.equal(app().st.sheet, null, 'the sheet is closed at the end');
+});
+await test('run 56: Already moved is the page flow, left by its Back (it draws no Close)', async () => {
+  const { r } = await drive();
+  assert.ok(r.actionsPerformed.includes('pressed Back from Already moved'));
+  assert.equal(r.actionsPerformed.includes('pressed Close from Already moved'), false);
+});
+await test('run 56: a Close that leaves the sheet open fails [returns] even though Home is still painted beneath it, and the journey continues', async () => {
+  const { r, failed } = await drive({ closeBroken: true });
+  assert.ok(failed.some((f) => /^\[returns\] Close from Start moving returns to .*\(saw: sheet still open/.test(f)), failed.join(' | '));
+  assert.ok(r.actionsPerformed.some((a) => a.startsWith('reopened Home to recover')), r.actionsPerformed.join(' | '));
+  assert.ok(r.actionsPerformed.includes('pressed Back from Already moved'), 'one defect does not strand the rest of the journey');
+});
 
 // ---- through the hook, the cleaner and the card ------------------------------------------
 async function sequence({ failDeletes = false, skipCleanup = false, registry = null } = {}) {

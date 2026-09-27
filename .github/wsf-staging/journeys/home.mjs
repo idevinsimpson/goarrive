@@ -16,8 +16,17 @@
  * which read wsfCommunityMembers / wsfCommunityActivity, services staging
  * holds transport-shut; a failed read there is not a Home defect. Not
  * exercised: recording a contribution. The driver opens both action screens
- * and leaves by Back without submitting, so it creates nothing outside its
- * own tracked fixtures.
+ * and leaves them without submitting, so it creates nothing outside its own
+ * tracked fixtures.
+ *
+ * How each screen is left is the served contract, not a guess (run 56 threw
+ * clicking a Back the served screen does not draw): at a3127651 "Start
+ * moving" opens MOVE's flow as a SHEET over the still-mounted Home
+ * (APP-FEEL-PARITY-1, isMoveSheetRoute: move mode only) whose one exit is
+ * Close (wsf-contribute-close) and which draws no page Back; "Already moved"
+ * (record mode) is the page flow, left by its Back (wsf-contribute-back).
+ * Because Home stays painted under the sheet, returning is asserted only once
+ * the sheet itself is gone.
  *
  * Every assertion is tagged with the manifest row it measures ([identity],
  * [goal], …): the owner card prints the manifest's rows, so each one has to be
@@ -32,7 +41,7 @@ export const HOME_ROWS = Object.freeze({
   figures: 'the goal reads its exact confirmed total: 120 of 500 squats',
   own: 'the member\'s own part is its true zero state beside the shared confirmed total, never a fabricated or merged figure',
   actions: 'Start moving and Already moved are present, labelled, and each opens its own screen for this goal',
-  returns: 'Back from each screen, and Community then Home, return to the same community and goal',
+  returns: 'Close from Start moving\'s sheet and Back from Already moved\'s screen, and Community then Home, return to the same community and goal',
 });
 
 /** Community A's goal as fixture-kit.mjs seeds it (target, confirmed shards, unit); no own total. */
@@ -72,12 +81,39 @@ export async function home({ page, baseUrl, fixtures }) {
   row('own')(`beside it, the shared confirmed total reads "Part of our shared ${HOME_SEEDED.shared}"`, shared === `Part of our shared ${HOME_SEEDED.shared}`, shared);
 
   // [actions] and [returns]: each action opens its own screen for this goal; Back returns to this Home.
-  const backHome = async (from) => {
-    await vis(page, 'wsf-contribute-back').click();
-    r.did(`pressed Back from ${from}`);
+  // The two served exits. The sheet's Close and the page's Back are different controls with
+  // different testIDs at a3127651, on purpose; neither stands in for the other.
+  const CLOSE = { id: 'wsf-contribute-close', label: 'Close', sheet: true };
+  const BACK = { id: 'wsf-contribute-back', label: 'Back', sheet: false };
+  const sheetOpen = async () => (await vis(page, 'wsf-contribute-sheet').count()) > 0;
+  /** Get back to Home after a failed step, by whichever served exit is drawn, so one defect fails only its own row. */
+  const recover = async (why, tried = null) => {
+    for (const exit of [CLOSE, BACK].filter((x) => x !== tried)) {
+      if (await vis(page, exit.id).count()) {
+        await vis(page, exit.id).click();
+        r.did(`pressed ${exit.label} to recover (${why})`);
+        return;
+      }
+    }
+    if ((await vis(page, 'wsf-community-name').count()) === 0 || await sheetOpen()) {
+      await page.goto(`${baseUrl}/community/${c.id}`);
+      r.did(`reopened Home to recover (${why})`);
+    }
+  };
+  const leave = async (from, exit) => {
+    const present = (await vis(page, exit.id).count()) === 1;
+    row('returns')(`${from} is left by its ${exit.label} (${exit.id})`, present);
+    if (!present) { await recover(`${from} drew no ${exit.label}`); return; }
+    await vis(page, exit.id).click();
+    r.did(`pressed ${exit.label} from ${from}`);
+    // Home stays mounted under the sheet: it is "returned to" only once the sheet itself is gone.
+    if (exit.sheet) await vis(page, 'wsf-contribute-sheet').waitFor({ state: 'detached', timeout: 15_000 }).catch(() => {});
+    const closed = !(await sheetOpen());
     const again = await textWhen(page, `wsf-community-goal-total-${g}`, (t) => t === total, 30_000);
     const back = await textWhen(page, 'wsf-community-name', (t) => t === c.name, 5_000);
-    row('returns')(`Back from ${from} returns to ${c.name}'s Home with ${total}`, back === c.name && again === total, `${back} / ${again}`);
+    row('returns')(`${exit.label} from ${from} returns to ${c.name}'s Home with ${total}${exit.sheet ? ', the sheet closed' : ''}`,
+      closed && back === c.name && again === total, `${closed ? 'no sheet' : 'sheet still open'} / ${back} / ${again}`);
+    if (!closed) await recover(`the ${from} sheet stayed open`, exit);
   };
   const open = async (testId, label, screenId, screen) => {
     const control = vis(page, testId);
@@ -93,21 +129,16 @@ export async function home({ page, baseUrl, fixtures }) {
     if (!opened) {
       // The row has failed. Get back to Home before the next step, so one defect
       // fails its own row and does not strand the rest of the journey.
-      if (await vis(page, 'wsf-contribute-back').count()) {
-        await vis(page, 'wsf-contribute-back').click();
-        r.did(`pressed Back to recover (the ${screen} screen did not open)`);
-      } else if ((await vis(page, 'wsf-community-name').count()) === 0) {
-        await page.goto(`${baseUrl}/community/${c.id}`);
-        r.did(`reopened Home to recover (the ${screen} screen did not open)`);
-      }
+      await recover(`the ${screen} screen did not open`);
       return false;
     }
+    if (screen === 'move') row('actions')('Start moving opens MOVE as the sheet over Home', await sheetOpen());
     const goalTitle = await textWhen(page, 'wsf-contribute-goal-title', (t) => t === c.goalTitle, 30_000);
     row('actions')(`the ${screen} screen is for "${c.goalTitle}"`, goalTitle === c.goalTitle, goalTitle);
     return true;
   };
-  if (await open(`wsf-community-goal-link-${g}`, 'Start moving', 'wsf-contribute-move-screen', 'move')) await backHome('Start moving');
-  if (await open(`wsf-community-goal-record-${g}`, 'Already moved', 'wsf-contribute-entry-screen', 'record entry')) await backHome('Already moved');
+  if (await open(`wsf-community-goal-link-${g}`, 'Start moving', 'wsf-contribute-move-screen', 'move')) await leave('Start moving', CLOSE);
+  if (await open(`wsf-community-goal-record-${g}`, 'Already moved', 'wsf-contribute-entry-screen', 'record entry')) await leave('Already moved', BACK);
 
   const tab = async (testId, did) => {
     const present = (await vis(page, testId).count()) === 1;

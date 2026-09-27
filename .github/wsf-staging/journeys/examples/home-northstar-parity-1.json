@@ -10,7 +10,7 @@
       "setup": "signed-in member of a community with one open goal (500 squats, 120 confirmed), with no contribution of their own",
       "actions": [
         "open Home for that community",
-        "press Start moving, then Back",
+        "press Start moving, then Close its sheet",
         "press Already moved, then Back",
         "open the Community tab, then return to Home"
       ],
@@ -20,7 +20,7 @@
         "the goal reads its exact confirmed total: 120 of 500 squats",
         "the member's own part is its true zero state beside the shared confirmed total, never a fabricated or merged figure",
         "Start moving and Already moved are present, labelled, and each opens its own screen for this goal",
-        "Back from each screen, and Community then Home, return to the same community and goal"
+        "Close from Start moving's sheet and Back from Already moved's screen, and Community then Home, return to the same community and goal"
       ],
       "knownExclusions": [
         "who moved today, the presence faces and the Members link: wsfCommunityMembers and wsfCommunityActivity are transport-shut on staging",
