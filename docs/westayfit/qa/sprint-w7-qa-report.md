@@ -5793,3 +5793,81 @@ The driver I passed would click an absent Back, which is exactly run 56's `locat
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0. No e2e run and no artifacts.
 
 **Status:** **PASS at `64720b75`**, with one non-blocking precision note and one optional hardening. W7 merged, dispatched and deployed nothing.
+
+## §71. Check 71: AUTONOMY-STATE-1B composed source at `ab741bb9`
+
+- **Handoff:** #434 `5858762050`. PR #532, head `ab741bb9b991d1f1a1021ad75b63f3df02755784`, base main `ace92b0b`.
+- **Scope:** the pre-integration source and workflow gate only. It covers no E4, no real bootstrap, no App persistence and no N≥10 evidence.
+- **Method:** a detached worktree, the fake GitHub from the shadow suite, a local bare remote, and no network writes.
+
+| # | Item | Result |
+|---|---|---|
+| **1** | **Lineage / composition** | **PASS.** Detail below. |
+| **2** | **Owner-security boundary** | **PASS on the source; one item unverifiable and two hardening gaps.** Detail below. |
+| **3** | **Triggers / main-ref guard** | **PASS.** Detail below. |
+| **4** | **Writer / state model** | **ONE FINDING (F1).** Detail below. |
+| **5** | **Regression / mutants** | **PASS on the required set.** Detail below. |
+| **6** | **Pre-live boundary** | **Respected.** This review claims no E4, real bootstrap, App persistence, shadow CURRENT equality or N≥10 evidence. |
+
+**Row 1, lineage and composition.**
+- The chain is `ace92b0b` → `be212dcf` → `5ad0ce89`/`427e7868` → `e9535daa` → `878306f2` = merge(`e9535daa`, `0035699a`) → `ab741bb9`, with no rewrite.
+- No file in `878306f2` differs from **both** of its parents.
+- `ab741bb9` adds exactly one file, `tests/shadow.test.mjs` (+17).
+- `git diff 0035699a ab741bb9 -- .github/workflows/` is empty: the workflow is byte-identical to W4's carry.
+
+**Row 2, the owner-security boundary.**
+- The workflow matches the owner receipt `5857937350`:
+  - it uses environment `wsf-control-writer` and App ID `'5098407'`;
+  - `secrets.WSF_CONTROL_WRITER_PRIVATE_KEY` appears only in the env of the `Shadow run (live)` step;
+  - top-level and job permissions are `contents: read`, with no Actions write;
+  - `persist-credentials: false` is set.
+- The App token is down-scoped: `repositories: [goarrive]`, `{contents: write, issues: write, pull_requests: read, actions: read, metadata: read}`.
+- Git receives the token only through `GIT_CONFIG_*` extraheader environment variables, never argv or a URL. Pushes are fast-forward only.
+- **Unverifiable from source:** "no repository-secret fallback". `secrets.X` would resolve to a same-named repository secret if one existed. The owner receipt names only the environment secret.
+- **Hardening gaps (not required):** two mutants of mine survive every control and staging suite:
+  - G11, workflow `contents: write`;
+  - G12, the key moved to job-level `env`, where the `run-all` step would also see it.
+
+  The current source is correct on both; nothing pins them.
+
+**Row 3, triggers and the main-ref guard.**
+- The trigger set is exactly `issue_comment` (created/edited), `pull_request` (synchronize/closed), `workflow_run` (WSF staging deploy), `workflow_dispatch` and `schedule`. There is no `pull_request_target`.
+- The job `if:` starts with `github.ref == 'refs/heads/main' &&`, ANDed ahead of the unchanged issue-comment branch (not bot, one of the six inboxes).
+- Run `36342348556` (event `pull_request`, head `ab741bb9`) concluded **`skipped`**, which is neutral rather than an environment failure.
+
+**Row 4, the writer and state model.**
+- **Holds:**
+  - bootstrap happens only when the ref is absent, from reviewed `bootstrap.v2.json`, and is refused via comment;
+  - an invalid ledger stops with no write;
+  - the writer-code pin is enforced;
+  - CAS makes at most 3 attempts, then raises `writer-contention`;
+  - the writer edits only its own shadow comment, after the push;
+  - v2 lines are App-only, with the authority block checked against `rules.mjs`;
+  - no Step-6 routing, wake or dispatch code was found, and no acceptance or merge authority is granted.
+- **F1 (security): decision intake takes a block from any GitHub account, on a public repository.**
+  - The repository is public: an unauthenticated `GET /repos/idevinsimpson/goarrive` returns `"private": false`.
+  - `shadow-run --live` reads #365's recent comments. `decisionIntake` records every `wsf-control-decision` block whose author is not the App bot as `authority {class: manual, rule: MANUAL}`.
+  - `github.mjs recentComments` does not even carry `author_association`.
+  - The workflow `if:` likewise starts the protected-environment job for an `issue_comment` from any non-bot account on the six inboxes.
+  - Memo residual (a) accepts that roles *within* the owner's account (`idevinsimpson`) cannot be told apart. It does not accept third-party accounts. The in-code note equates the two.
+  - **Reproduction:** the shadow suite's own harness, with a real bare remote. Comments by `mallory-external` carrying `{type: 'review', …}` and `{type: 'set-contracts', contracts: [writer, writer-workflow → fff…]}` gave `SHADOW_RUN=written` and `appended ["review:MANUAL:comment-901", "set-contracts:MANUAL:comment-902"]`. Both lines are in the state ledger, with `intakeRefused []`.
+  - INTAKE_TYPES includes `accept`, `integrate`, `transfer-owner`, `withdraw` and `set-contracts`. `set-contracts` moves the §4.4 writer-code pin, so any account could corrupt the shadow ledger (and the N≥10 equality evidence built on it) or wedge the writer.
+  - **Smallest fix:**
+    - carry `author_association` in `recentComments`;
+    - record a decision only when the author is the repository owner (`idevinsimpson`, association `OWNER`), and report the rest as `INTAKE_REFUSED`;
+    - optionally add `github.event.comment.author_association == 'OWNER'` to the issue-comment branch of the job `if:`, so third-party comments do not start the protected job;
+    - add a regression test with a non-owner author.
+
+**Row 5, regression and mutants.**
+- The control suite `node tools/wsf-control/run-all.mjs` passes **245 / 245**: ledger 75, views 37, skill 6, closure 13, review 10, integrity 11, recovery 37, audit 15, v2 22, shadow 19.
+- Staging `run-all` reports "all suites passed" (exit 0).
+- **The 10 required guard mutants are all killed by the new durable regression:** guard removed, ORed, wrong ref, nested inside `issue_comment`, trigger dropped, `push` added, `pull_request_target`, environment changed, checkout ref changed, `cancel-in-progress: true`.
+- **v2/shadow spot-checks, each run from the repo root:**
+  - killed: writer-pin removed, push forced, bot comments read as decisions, bootstrap admitted via comment;
+  - V6 (invalid ledger not refused) is killed, but by a TypeError rather than an assertion;
+  - **V5 survives** (a non-state file passed to `commitState`). No caller passes one, so this is hardening.
+- **Instrument error, disclosed:** my first v2 mutant batch ran `run-all` from `tools/wsf-control` and failed on the module path. Those six results were void and rerun from the root.
+
+- **Gates:** `ts:check` 0; `check-evidence-intact` 0. Every mutant was reverted, and the reproduction script was removed from the worktree.
+
+**Status:** **ONE FINDING (F1) at `ab741bb9`.** It is not a PASS; integration should wait for the F1 correction. W7 merged, dispatched, bootstrapped and deployed nothing.
