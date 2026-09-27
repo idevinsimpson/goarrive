@@ -5680,3 +5680,69 @@ None of them is the O7 failure below; that is not among the disclosed choices.
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0. No e2e run and no artifacts.
 
 **Status:** **PASS at `84010706`.** W7 merged, dispatched and deployed nothing, and gives no creative verdict.
+
+## §69. Check 69: run-56 Home driver recovery at `8bd19404`
+
+- **Handoff:** #434 `5851374761`. PR #528, head `8bd194043c27f0816534365946883d019db4ed5c`, base main `58d3aff8` (#527 integrated). The run-56 receipt is #365 `5851163539`.
+- **Method:** a focused delta review in a detached worktree, with the product read at `a3127651` through `git show`. No emulator, no browser run, no cloud. I did not open the run-56 artifact `10918558195`; the fail-before cites the receipt and the local reproduction.
+
+**Correction I own (Check 68R).** Check 68R reported "the first `wsf-contribute-back` in the DOM is the chrome Back". That is true only for the page flow. I never read `isMoveSheetRoute`. At `a3127651`, Start moving pushed over `(tabs)` presents move mode as a sheet:
+- `renderChrome` returns null there, so the sheet draws no `wsf-contribute-back`;
+- its one exit is `wsf-contribute-close`.
+
+The driver I passed would click an absent Back, which is exactly run 56's `locator.click: Timeout 30000ms`. From now on, a static driver review reads the presentation predicate for every screen the driver leaves, not only the testIDs.
+
+| # | Item | Result |
+|---|---|---|
+| **1** | **Lineage / scope** | **PASS.** One parent, `58d3aff8` (current main). Exactly the 4 authorised files (+91 / −23): the Home manifest, `home.mjs`, `journey-model.mjs` and `home-journey.test.mjs`. `git diff 58d3aff8 8bd19404 -- .github/workflows` is empty, so the activation re-point stays intact. No app, product or config change. |
+| **2** | **Run-56 cause modelled truthfully** | **PASS.** See the model bullets below. |
+| **3** | **Driver behaviour** | **PASS.** See the driver bullets below. |
+| **4** | **Manifest / card wording** | **PASS.** The action reads "press Start moving, then Close its sheet". The `returns` row reads "Close from Start moving's sheet and Back from Already moved's screen, and Community then Home, return to the same community and goal", and `HOME_ROWS.returns` is identical. The row-parity test holds; reverting the wording fails it (K5). |
+| **5** | **Fail before / pass after** | **PASS.** See the gate bullets below. |
+| **6** | **Mutants** | **PASS: 7 / 7 killed, plus K7.** See the mutant bullets below. |
+| **7** | **Suites** | **PASS.** See the suite bullets below. |
+
+**Row 2, the model.**
+- **Product at `a3127651`:**
+  - `isMoveSheetRoute` holds only for `mode === 'move'`, not a kiosk, with `(tabs)` or `move/index` directly beneath.
+  - The sheet renders `wsf-contribute-sheet` and `wsf-contribute-close` (`onPress={closeSheet}`, then `exitSheet`, then `returnToMemberContext`, then `router.back()`).
+  - `renderChrome` is `asSheet ? null : …`, so there is no page Back.
+  - The move step renders `wsf-contribute-move-screen` and `renderGoalAnchor` (`wsf-contribute-goal-title`) inside the sheet.
+  - Record mode is never a sheet, so it keeps the page chrome Back and has no Close.
+- **The model matches:**
+  - Start moving sets `st.sheet`.
+  - The Home branch is evaluated before the sheet branch, so Home stays findable ("painted") under the sheet.
+  - The sheet answers only sheet, move screen, goal title and Close; there is no Back unless `sheetDrawsBack` is seeded.
+  - The record flow keeps the page Back, and a cold `goto` clears the sheet.
+
+**Row 3, driver behaviour.**
+- Start moving: the driver asserts the sheet is open (`[actions]`), leaves only by `CLOSE`, waits for `wsf-contribute-sheet` to detach, and requires `closed` in the `[returns]` row before reading Home.
+- Already moved: the driver leaves by `BACK`.
+- A missing exit fails its own `[returns]` row, then `recover()` runs (the other exit, or a cold reopen of Home).
+- The Community→Home tab block is unchanged from `58d3aff8`.
+
+**Row 5, fail before / pass after.**
+- **Hosted fail-before:** run 56 (`36281159269`, artifact `10918558195`): `home=failed (the driver threw: locator.click: Timeout 30000ms exceeded.)`.
+- **Local fail-before:** the old driver (`58d3aff8` `home.mjs`) against the updated model THROWS: `locator.waitFor: Timeout exceeded waiting for [data-testid="wsf-contribute-back"]:visible`. That is the same wrong Back click.
+- **Pass after:** the new driver returns 22 assertions with 0 failed, in the sequence: Start moving → Close → Already moved → Back → Community → Home.
+- **Gate:** `MILESTONE_MANIFEST=valid` for `a3127651`.
+
+**Row 6, the mutants.** Each ran in the worktree and was reverted.
+- **K1, Back restored for the move sheet:** killed.
+- **K2, Close never attempted:** killed.
+- **K3, `closed &&` dropped from the return row:** killed ("expected a failed [returns] assertion; failed: none" on `closeBroken`).
+- **K3b, the sheet-gone check forced true:** killed.
+- **K4, Close used for record mode:** killed.
+- **K5, manifest wording reverted to "Back from each screen":** killed (row parity).
+- **K6, the sheet-open `[actions]` row removed:** killed (`moveAsPage` no longer fails `[actions]`).
+- **K7, a product defect (the sheet draws no Close):** the driver does not throw. It fails `[returns] Start moving is left by its Close`, reopens Home and completes Already moved and the tabs.
+
+**Row 7, the suites.**
+- Focused: `home-journey` 31 (25 before, plus 3 defects and 3 run-56 tests).
+- Directly affected: `hosted-changed-journeys` 13, `check-milestone-manifest` 10, `changed-journey-drivers` 18, `journey-activation` 9, `owner-test-card` 35, `workflow-contract` 95.
+- Staging `run-all`: "all suites passed", exit 0.
+
+- **Gates:** `ts:check` 0; `check-evidence-intact` 0. No e2e run and no artifacts.
+- **Residual, not a finding:** the model is a model. The second hosted activation is the first measurement of Close on the served sheet.
+
+**Status:** **PASS at `8bd19404`.** W7 merged, dispatched and deployed nothing.
