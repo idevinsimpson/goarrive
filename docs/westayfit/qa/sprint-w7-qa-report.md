@@ -5746,3 +5746,50 @@ The driver I passed would click an absent Back, which is exactly run 56's `locat
 - **Residual, not a finding:** the model is a model. The second hosted activation is the first measurement of Close on the served sheet.
 
 **Status:** **PASS at `8bd19404`.** W7 merged, dispatched and deployed nothing.
+
+## §70. Check 70: Step-2 run-57 correction at `64720b75`
+
+- **Handoff:** #434 `5851804494`, a recovered missed event. PR #529, head `64720b756e8661359b1cefd0a44acb8ffbde1a77`, base main `68ac9f13` (#528 integrated).
+- **Run 57:** `36284584278` (artifact `10919677535`, not opened by W7). 21 of 22 rows held. `[goal]` failed with "saw: OPEN · ENDS THU, OCT 1".
+- **Method:** a focused review in a detached worktree, with the product read at `a3127651`.
+
+**Second correction I own (Check 68R).** I compared the pill's source string ("Open · Ends …") and never read its style. `heroStatePill` sets `textTransform: 'uppercase'`, and Playwright's `innerText` returns rendered casing. My Check-68R method change (read the presentation predicate) now extends to style: for every text the driver compares, read the element's style and its Text ancestors for `textTransform`.
+
+| # | Item | Result |
+|---|---|---|
+| **1** | **Case-insensitive, still rejects ended** | **PASS.** See the regex bullets below. |
+| **2** | **Model fail-before / pass-after** | **PASS.** See the model bullets below. |
+| **3** | **Mutants** | **PASS on the required set.** See the mutant bullets below. |
+| **4** | **`textTransform` audit** | **PASS for every compared text; one precision note.** See the audit bullets below. |
+| **5** | **No drift** | **PASS.** Exactly 3 files (+21 / −3). `git diff 68ac9f13 64720b75` over the workflow, manifests, fixture kit, `apps/`, functions, rules and indexes is empty. The activation re-point is unchanged; C4 holds. |
+| **6** | **Suites** | **PASS.** `home-journey` 33, `hosted-changed-journeys` 13, `check-milestone-manifest` 10, `changed-journey-drivers` 18, `journey-activation` 9, `owner-test-card` 35, `workflow-contract` 95. Staging `run-all` reports "all suites passed", exit 0. `MILESTONE_MANIFEST=valid` for `a3127651`. |
+
+**Row 1, the regex.**
+- `OPEN_WINDOW = /^open · ends /i` is used by both the wait predicate and the assertion.
+- `formatActiveWindowLabel` (`src/ui/dates.ts`) can only return "Open · Ends …", "Ended …", "Ended" or "Open".
+- The regex, being anchored and requiring `· ends `, accepts only the first. It rejects ended windows in any case, and it also rejects the bare undated "Open".
+
+**Row 2, the model.** The pill now returns `…toUpperCase()`, and the run-57 test pins the served "(saw: OPEN · ENDS THU, OCT 1)".
+- **Old driver (`68ac9f13`) on the new model:** 21/22, failing exactly `[goal] … (saw: OPEN · ENDS THU, OCT 1)`, identical to run 57.
+- **New driver:** 22/22.
+- **`windowClosed`:** fails on both drivers, `(saw: ENDED SEP 20)`.
+
+**Row 3, the mutants.** Each ran in the worktree and was reverted.
+- **Killed:**
+  - N1: the `i` flag dropped (the case-sensitive regression).
+  - N2: widened to `/^(open|ended)/i`.
+  - N4: the model's `toUpperCase` dropped.
+  - C1–C3: carried Close/Back — Back on the sheet, Close on the record page, and the sheet-gone condition.
+  - C4: re-point — the owner card back on the old manifest, killed by `workflow-contract`.
+- **Survived (W7's extra, outside the required set):** N3, widened to a bare `/open/i`. No seeded defect renders a pill that contains "open" but is not an open window, i.e. the product's undated "Open" fallback.
+- **N3 is not a defect in the head.** The head's regex rejects "Open". Optional hardening: seed a `windowUndated` defect where the pill reads "OPEN".
+
+**Row 4, the `textTransform` audit.** W7 read the source independently.
+- Among the compared texts, only `heroStatePill` (the period) is uppercased.
+- The others are not: `heading` / `headingName`, `heroTitle`, `heroTotal` (and `heroTotalCount` / `heroTotalRest` / `totalSmall`), `contributionBody`, `contributionShared` and `anchorTitle`.
+- The your-part row's `contributionEyebrow` is uppercase, but the driver matches only the body by `includes`.
+- **Precision note:** the PR lists `closedGoalTitle` among the uppercase styles. At `a3127651` it has no `textTransform`; the uppercase element on the closed screen is its sibling `heroEyebrow` (`wsf-contribute-community`). This element is never compared, so the note is non-blocking.
+
+- **Gates:** `ts:check` 0; `check-evidence-intact` 0. No e2e run and no artifacts.
+
+**Status:** **PASS at `64720b75`**, with one non-blocking precision note and one optional hardening. W7 merged, dispatched and deployed nothing.
