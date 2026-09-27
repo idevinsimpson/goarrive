@@ -465,3 +465,49 @@ one image being the wrong one.
 whether anything is wider than the sheet that holds it, and whether the document scrolls
 sideways, are assertions that run at every width. Written, then mutation-tested by forcing an
 element to 3000 px, because a guard that cannot fail is decoration.
+
+## 2026-09-26 — Reconcile WSF instruction authority, North Star, app-feel and operations
+
+Owner authorization: Devin directed the documentation audit to proceed with the recommended
+reconciliation rather than opening another strategy round.
+
+**Decision:** Strategic Master v3.0 (September 11) remains the governing strategic
+foundation. A v3.1 addendum records only durable post–September 11 decisions:
+- exact frozen journey references are the visual/interaction authority for scoped
+  member-visible work;
+- Lovable's WE Community Home project is a North Star laboratory, not production data truth;
+- WSF is a native-feeling mobile community app with a persistent Home / Community /
+  Progress / You member shell and MOVE as a focused flow;
+- authenticated community presence may be richer than public-display output, subject to
+  per-community member visibility choices;
+- the bounded real Start-a-community / goal / invite / join path is part of the useful
+  product without making general discovery/full Champion administration a first-delivery
+  dependency;
+- current execution uses the Fable operating protocol, one ACTIVE NOW packet per worker,
+  at most one NEXT, one authoritative handoff, and distinct evidence states.
+
+**Supersession:** `docs/westayfit/WE_STAY_FIT_MASTER.md` v1.2 and the Universal
+Communities Charter are retained as historical lineage but no longer govern current WSF
+product direction. The September 11 implementation-plan working draft is also historical
+execution planning; the September 26 Implementation and Operations Charter replaces its
+sequencing/status role.
+
+**Current-state rule:** volatile SHA/run/blocker/worker state lives in the canonical
+editable CURRENT STATE comment on #365, not in dated strategic documents.
+
+**Originally unresolved in this reconciliation:** general multi-movement goal semantics and
+the durable general activity catalog versus the actual FitLife menu. The multi-movement
+question was explicitly settled by Devin later on September 26: different movements CAN
+share one defined goal percentage. The durable general activity catalog versus the actual
+FitLife menu remains unresolved.
+
+
+## 2026-09-26 — Different movements may share one Living WE percentage
+
+Owner decision: **different / unlike movements CAN contribute to the same defined goal and share the same Living WE percentage.** The percentage belongs to the shared goal, not to a single movement type.
+
+This supersedes the narrower earlier reading that a push-up, squat, jumping jack, or other unlike movement must necessarily have a separate WE merely because the movement differs.
+
+Truth constraint remains: the goal must say what the target measures and which movements/actions qualify. Do not silently mix unlike measurement units or invent equivalents unless a separately approved rule defines a truthful common unit or conversion.
+
+Scope: this settles multi-movement shared-percentage semantics. It does not settle the permanent general activity catalog versus the FitLife event menu.
