@@ -11,7 +11,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 | what | value |
 | --- | --- |
 | development `claude/wsf-app-shell` | **`a3127651`** = `6c7f975c` + HOME `9d27fdb5` (#514 `5848589381`); since `938e00d8`: ops docs + index source `1f99d67f` |
-| `main` | **`fff23048`** = #522 pin + #523/v1.1 + #525 + #519 1A + #521 activation fix; pin `a3127651` |
+| `main` | **`58d3aff8`** = … + #519 1A + #521 activation fix + #527 Home journey; pin `a3127651` |
 | staging pin | `approvedAppSha` **`938e00d8`**, 49, three social retained (Director ACCEPTED #511 `5846667051`) |
 | served staging | **`a3127651`** (HOME), run 55 `36264562975` from main `396b810c`: 49 → 49, created none, `VERIFY=pass`, marker match, hosted 24 / 0, cleanup COMPLETE 349 / 349 (#365 `5849110597`–`5849113235`); previous known-good **`938e00d8`** (run 53); changed-journey smoke skipped (no manifest) |
 
@@ -28,7 +28,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 | CONTROL-PLANE-ACTIVATION-1 | W3 · #521 `839f18f6` | plan step 1 **ACCEPTED** `5850494365` → **integrated** `fff23048` (`5850506125`) | done; activation run follows step 2 |
 | AUTONOMY-STATE-1A | W3 · #519 `cc78509a` | **ACCEPTED** `5849867467` → integrated main `5d58ed07` | Phases B–E = plan steps 4–7 (PARKED) |
 | W5 lane | #520 audit; #525 **merged** (W5 PASS, Director `5849425770`) | **owner: revoke Browser Use key** |
-| **HOME-NORTHSTAR-PARITY-1** | W9 · #514 → served `a3127651` | step 2 **#527 `abc02ad5`** Home journey driver + manifest (L0 `5850902504`) | **W7 Check 68** `5850904456` → Director → merge → one activation run |
+| **HOME-NORTHSTAR-PARITY-1** | W9 · #514 → served `a3127651` | step 2 #527 `84010706` **ACCEPTED** `5851080277` → integrated `58d3aff8` (`5851097149`) | **run 56 `36281159269` journey-activation** in progress; PASS+cleanup+card closes step 2 |
 | **PRIVACY-TOGGLE-STAGING-1** | owner as operator · harness merged `6c2e6b25` | setters SHUT (run 50); no Claude identity can do Operation 2; W7 Check 43 emulator PASS | owner Operation 2 read-back → one `social-privacy` dispatch → seven-row receipt |
 | **HARDENED-MEMBER-JOURNEY-1** | W7 · `a55046f5` | H1–H4 baselined on served; **H3c** (silent failed Home refresh) and **H4b** (no eviction after refusal) fail; H5 waits on Settings | rerun on successors |
 | SOCIAL-DEMO-SEED-MODE | W3 · #484 `4c1ac1d9` | W7 carry confirmed | Director → L0 PLAN → APPLY / VERIFY |
