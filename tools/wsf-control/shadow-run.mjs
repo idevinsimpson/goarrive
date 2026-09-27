@@ -219,6 +219,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
     process.exit(1);
   }
   if (!repo || !runningSha) { console.log('SHADOW_RUN=refused'); console.log('CONTROL_EXCEPTION writer-context-missing'); process.exit(1); }
+  // Defence in depth: the token is never printed, but the runner redacts it from the log should it ever appear.
+  if (process.env.GITHUB_ACTIONS === 'true') console.log(`::add-mask::${token}`);
   const { gitHubClient } = await import('./github.mjs');
   const gh = gitHubClient({ token, repo });
   const botId = await gh.botUserId(slug);
