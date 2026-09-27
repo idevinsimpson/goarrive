@@ -133,7 +133,8 @@ export function inSubject(file, subjectPaths) {
 export function surfaceStatus(state, snap, opts = {}) {
   const { heads = [state.ledgerHead], renders = { [state.ledgerHead]: sha256(renderCurrent(state)) } } = Array.isArray(opts) ? { heads: opts } : opts;
   const exception = (detail) => ({ ok: false, status: 'exception', detail });
-  const want = state.surfaces?.current;
+  // The Step-5 shadow writer checks and edits ITS OWN comment (surfaces.shadow); the human CURRENT is never touched.
+  const want = opts.surface === 'shadow' ? state.surfaces?.shadow : state.surfaces?.current;
   if (!want) return exception('the ledger records no CURRENT surface');
   const c = snap.currentSurface;
   if (!c) return exception('the snapshot does not report the CURRENT comment; it is not edited unchecked');
@@ -163,7 +164,7 @@ const AFTER_MERGE = ['INTEGRATED', 'VERIFYING', 'VERIFIED', 'STAGED'];
  * mutates neither. `heads` is every head the ledger has had (for the CURRENT
  * marker check); by default only the current one.
  */
-export function reconcile(state, snap, { heads, renders } = {}) {
+export function reconcile(state, snap, { heads, renders, surface = 'current' } = {}) {
   const problems = validateSnapshot(snap);
   if (problems.length) throw new SnapshotError(problems.join('; '));
   const out = [];
@@ -235,11 +236,12 @@ export function reconcile(state, snap, { heads, renders } = {}) {
     }
   }
 
-  if (state.surfaces?.current) {
-    const sfc = surfaceStatus(state, snap, { ...(heads ? { heads } : {}), ...(renders ? { renders } : {}) });
+  const surfaceRec = surface === 'shadow' ? state.surfaces?.shadow : state.surfaces?.current;
+  if (surfaceRec) {
+    const sfc = surfaceStatus(state, snap, { ...(heads ? { heads } : {}), ...(renders ? { renders } : {}), surface });
     if (sfc.status === 'exception') out.push(f('control-surface-exception', 'exception', { detail: sfc.detail }));
     if (sfc.status === 'stale') {
-      out.push(f('current-surface-stale', 'ledger', { detail: sfc.detail, suggest: { action: 'render-current-and-edit-in-place', commentId: state.surfaces.current.commentId, head: state.ledgerHead } }));
+      out.push(f('current-surface-stale', 'ledger', { detail: sfc.detail, suggest: { action: 'render-current-and-edit-in-place', commentId: surfaceRec.commentId, head: state.ledgerHead } }));
     }
   }
 

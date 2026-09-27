@@ -11,13 +11,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { RE, isTerminal, screen, unreachableBlocker } from './schema.mjs';
+import { DELIVERED_SUCCESSOR, KNOWN_SCHEMAS, RE, isTerminal, screen, unreachableBlocker } from './schema.mjs';
 import { reduce, serialize } from './reduce.mjs';
 import { workerBuckets } from './derive.mjs';
 
 /** Invariants over a state. Returns problems; empty means sound. */
 export function invariants(s) {
   const problems = [];
+  // A state of a schema this reader does not know is refused whole: nothing below is trusted on it.
+  if (!KNOWN_SCHEMAS.includes(s.schemaVersion)) return [`state schemaVersion ${JSON.stringify(s.schemaVersion)} is not one this reader knows (${KNOWN_SCHEMAS.join(', ')}); fail closed`];
   for (const w of Object.keys(s.workers).sort()) {
     const b = workerBuckets(s, w);
     if (b.active.length > 1) problems.push(`${w} holds ${b.active.length} worker-owned packets (${b.active.map((p) => p.id).join(', ')}); at most one`);
@@ -54,6 +56,12 @@ export function invariants(s) {
     if (p.phase === 'QUEUED' && !(s.queue[p.owner] || []).includes(id)) problems.push(`${id} is QUEUED but not in ${p.owner}'s queue`);
     for (const b of p.blockedBy.filter((x) => x.packet)) { const why = unreachableBlocker(s, id, b); if (why) problems.push(`${id}: ${why}`); }
     if (p.phase === 'VERIFYING' && p.proof?.result !== 'RUNNING') problems.push(`${id} is VERIFYING without a running proof`);
+    if (s.schemaVersion === 2) {
+      // A pending finding waits only on a packet the reviewers still hold; a DELIVERED-SUCCESSOR blocker remembers its base.
+      if (p.pendingFinding && !['DELIVERED', 'UNDER_REVIEW'].includes(p.phase)) problems.push(`${id} carries a pending finding while ${p.phase}`);
+      if (!Number.isInteger(p.deliveries) || p.deliveries < 0) problems.push(`${id}: deliveries must be a count`);
+      for (const b of p.blockedBy.filter((x) => x.until === DELIVERED_SUCCESSOR)) if (!Number.isInteger(b.since)) problems.push(`${id}: a ${DELIVERED_SUCCESSOR} blocker must remember the delivery count it waits past`);
+    } else if (p.blockedBy.some((x) => x.until === DELIVERED_SUCCESSOR)) problems.push(`${id}: ${DELIVERED_SUCCESSOR} is a schema v2 milestone`);
     for (const k of ['subjectSha', 'prHeadSha', 'evidenceSha', 'mergeSha']) {
       const v = p.artifact[k];
       if (v !== null && !RE.sha.test(v)) problems.push(`${id}: artifact.${k} is not a 40-character SHA`);

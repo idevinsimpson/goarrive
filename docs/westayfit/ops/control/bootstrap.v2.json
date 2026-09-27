@@ -1,0 +1,70 @@
+{
+  "_comment": [
+    "THE BOOTSTRAP INPUT for the authoritative control state (AUTONOMY-STATE-1B, accepted A+ memo §12).",
+    "The wsf-control-writer App reads this file ONLY when the protected ref wsf-control-state does not exist.",
+    "It then writes line 1 of the ledger: a schema v2 bootstrap, source = authorizedBy (the comment that",
+    "authorized Step 5), authority class manual, rule MANUAL. It imports CURRENT state as found at asOf,",
+    "never history: a packet's earlier transitions are not replayed.",
+    "",
+    "Contract pins: every entry of contractPaths is pinned at the commit the writer runs from on its",
+    "bootstrap run (the reviewed main commit that carries this file). A later writer version must be",
+    "pinned by a recorded set-contracts decision before it may append (writer-code pin, memo §4.4).",
+    "",
+    "Keep this file true at asOf. If program state moves before integration, the integrator refreshes",
+    "asOf and the packets in the same reviewed change; after bootstrap this file is inert (the ledger",
+    "is the record, and a wrong pre-event bootstrap is recovered on wsf-control-state-2, never rewritten)."
+  ],
+  "authorizedBy": 5857966052,
+  "bootstrap": {
+    "repository": "idevinsimpson/goarrive",
+    "asOf": "2026-09-27T17:12:00Z",
+    "surfaces": { "controlInbox": { "pr": 365 }, "current": { "pr": 365, "commentId": 5847443607 } },
+    "canonical": {
+      "developmentBranch": "claude/wsf-app-shell",
+      "developmentSha": "9a506766dce251fd500c2a93ca0ccafd7c847690",
+      "operationalMain": "ace92b0b82d32dc6a13c764fef02e809d218adb7"
+    },
+    "staging": {
+      "servedSha": "a31276516e786ac8f848269de4c839b3b9e13123",
+      "runId": 36264562975,
+      "runNumber": 55,
+      "rollbackSha": "938e00d8c985993f69becc8924d3037f18425afc",
+      "pinPr": 522
+    },
+    "workers": {
+      "W3": { "inbox": 396 },
+      "W4": { "inbox": 394 },
+      "W5": { "inbox": 395 },
+      "W7": { "inbox": 434 },
+      "W9": { "inbox": 497 }
+    },
+    "queue": { "W3": [], "W4": [], "W5": [], "W7": [], "W9": [] },
+    "packets": {
+      "AUTONOMY-STATE-1B": {
+        "owner": "W3",
+        "completion": { "terminal": "INTEGRATED", "proofType": "source-only" },
+        "phase": "ACKED",
+        "refs": [ { "kind": "comment", "id": 5857966052, "repo": "idevinsimpson/goarrive" }, { "kind": "comment", "id": 5857972906, "repo": "idevinsimpson/goarrive" } ],
+        "releasedBy": 5857966052,
+        "inbox": 396,
+        "label": "Serial step 5: authoritative control state, App writer, bootstrap and shadow reconcile",
+        "review": { "workerReviews": [ { "class": "ops-source", "count": 1 } ], "appliesTo": "subject", "after": "director" }
+      }
+    },
+    "criticalPath": "AUTONOMY-STATE-1B"
+  },
+  "contractPaths": [
+    { "id": "autonomy-architecture", "path": "docs/westayfit/ops/AUTONOMY_ARCHITECTURE_1B_1C.md" },
+    { "id": "autonomy-contract", "path": "docs/westayfit/ops/AUTONOMY_ACCEPTANCE_CONTRACT.md" },
+    { "id": "capabilities", "path": "docs/westayfit/ops/control/capabilities.v1.json" },
+    { "id": "control-state", "path": "docs/westayfit/ops/CONTROL_STATE.md" },
+    { "id": "fable-operating-protocol", "path": "docs/westayfit/ops/control/contracts/FABLE_OPERATING_PROTOCOL_v1.md" },
+    { "id": "north-star-journeys", "path": "docs/westayfit/ops/journeys/NORTH_STAR_JOURNEY_MANIFEST.v1.json" },
+    { "id": "owner-test-card", "path": "docs/westayfit/ops/control/contracts/OWNER_TEST_CARD_AND_SMOKE_CONTRACT.md" },
+    { "id": "program-director-skill", "path": ".claude/skills/wsf-program-director/SKILL.md" },
+    { "id": "staging-control-plane", "path": "skills/wsf-staging-deploy/SKILL.md" },
+    { "id": "worker-inboxes", "path": "docs/westayfit/ops/control/contracts/WORKER_INBOXES.md" },
+    { "id": "writer", "path": "tools/wsf-control" },
+    { "id": "writer-workflow", "path": ".github/workflows/wsf-control-reconcile.yml" }
+  ]
+}

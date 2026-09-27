@@ -284,3 +284,91 @@ Every event also carries `actor` (`Fable` or `L0`) and `source`.
 The ledger never authorizes a merge or deploy, and never product- or pixel-accepts. Those stay human and L0 decisions, recorded after the fact.
 
 The procedure for a session is `.claude/skills/wsf-program-director/SKILL.md`. The staging release itself is in `skills/wsf-staging-deploy/SKILL.md` and `.github/wsf-staging/CONTROL-PLANE.md`.
+
+## Schema v2 and the App writer (AUTONOMY-STATE-1B, Step 5)
+
+The Director accepted architecture A+ (#530 `5856346657`, memo `AUTONOMY_ARCHITECTURE_1B_1C.md`). The authoritative ledger is schema v2, and only the `wsf-control-writer` GitHub App writes it. Everything above still holds for v2, with the changes below.
+
+### Who writes
+
+- Every v2 line's `actor` is `wsf-control-writer`.
+- The ref `wsf-control-state` is protected by ruleset `24078545` on `refs/heads/wsf-control-state*`, whose only bypass actor is App `5098407`; repository admins are not bypass actors.
+- The App key exists only as secret `WSF_CONTROL_WRITER_PRIVATE_KEY` in environment `wsf-control-writer`, which deploys from `main` only.
+- The writer mints its installation token in process (`app-token.mjs`), down-scoped to this repository with `contents: write`, `issues: write`, `pull_requests: read`, `actions: read`. It never asks for Actions write.
+- Fable and L0 no longer run `append.mjs` against the authoritative ref. A v1 ledger (`actor` Fable or L0) remains valid for the tests and for any local dry run.
+
+### What every v2 line says about itself
+
+`authority: { class, rule, evidence }`:
+
+| Class | Meaning |
+| --- | --- |
+| `derived` | The writer computed it from the ledger plus GitHub facts, under a named rule. No caller chooses it. |
+| `attested` | A worker's fact from its canonical inbox. The author is not proven (accepted residual (a)). |
+| `protected-human` | An owner decision through an approval-gated path. None exists in Step 5, so these stay manual and fail closed. |
+| `manual` | A Director/L0 decision, recorded as they are today (rule `MANUAL`). |
+
+The rules are listed once, in `tools/wsf-control/rules.mjs`, with the event types each may carry and the program step from which the writer may derive it on its own. Step 5 derives only `R-RECONCILE-HEAD`, `R-RECORD-EVIDENCE`, `R-STAGE` and `R-SHADOW-SURFACE`. A v2 identity also names its rule, so the same facts re-derived under the same rule are one line (a retry is a no-op). v1 identities are unchanged byte for byte.
+
+### Versions fail closed
+
+- An event names its schema in the envelope (`schema: 2`); a v1 line carries no `schema` field.
+- Any other value is refused before anything else is read, and a state whose `schemaVersion` this reader does not know is refused by `check.mjs`.
+- A ledger never mixes versions except across one `schema-upgrade` line (v1 to v2). The authoritative ledger starts as v2 at its bootstrap, so it has no upgrade line.
+
+### New in v2
+
+| Event or field | What it does |
+| --- | --- |
+| `queue.review`, bootstrap `packets.<id>.review` | The packet's review policy, set at genesis: `{ workerReviews: [{class, count}], appliesTo, after }`. A work packet without one gets the fail-closed default (one `ops-source` review, then the Director); a reference packet has none. `accept` refuses until the required W# passes are recorded, so a required review is never skipped by a direct acceptance. A W# reviewer that declares `classes` must hold one the policy requires. |
+| `set-review-policy` | Changes a live packet's policy; a recorded decision, never self-declared at delivery. |
+| `register-worker.classes`, bootstrap `workers.<W#>.classes` | The reviewer classes a worker may serve. |
+| `set-contracts`, bootstrap `contracts` | Pins the contract versions (`{ id, path, commit }`) that govern every later line. The writer refuses to append when its own code (`writer`: `tools/wsf-control`, and `writer-workflow`) differs from the pinned version: a new writer version needs a recorded `set-contracts` decision first (memo §4.4). |
+| `finding.pending` and `apply-finding` | R-PREEMPT (memo §8). A valid finding on delivered work whose owner already holds another ball is recorded as pending; the ball moves (`apply-finding`) once the owner is free. `program-view` names the one deterministic step by the newer packet's phase: an unACKed release is retracted; ACKED or CHANGES_REQUESTED work is blocked on `ALPHA≥DELIVERED-SUCCESSOR`, its branch untouched; otherwise the finding applies at once. |
+| blocker `until: DELIVERED-SUCCESSOR` | Clears only when the dependency has delivered again after the block (the stored `since` count) and its owner no longer holds it. It never waits on a reference packet. |
+| `set-shadow-surface`, `surfaces.shadow` | The writer's own shadow CURRENT comment on the control surface. It is never the human CURRENT comment. |
+
+### Step 5 is shadow reconcile only
+
+Each run:
+1. bootstraps the ref once from `docs/westayfit/ops/control/bootstrap.v2.json`, only when the ref does not exist;
+2. checks the ledger;
+3. checks its own pin;
+4. builds its snapshot itself;
+5. appends only the Step-5 derived facts and the recorded decisions;
+6. pushes **fast-forward only** (at most three attempts, then `CONTROL_EXCEPTION writer-contention`);
+7. then edits its own shadow comment.
+
+The human CURRENT comment stays authoritative until Step 5 exits (N ≥ 10 real shadow events matching it, and independent QA). Nothing routes, reviews, accepts, releases or wakes from the ledger in Step 5.
+
+**Recording a Director/L0 decision.** Post one fenced block in the control inbox (#365):
+
+````
+```wsf-control-decision
+{ "type": "review", "packet": "ALPHA", "reviewers": ["W7"] }
+```
+````
+
+The block names the event type and that type's fields only. The writer supplies `actor`, `source` (the comment), `schema` and `authority` (`manual` / `MANUAL`). A block that carries anything else, names `bootstrap`, `schema-upgrade` or `set-shadow-surface`, or is not one JSON object is refused and reported as `INTAKE_REFUSED`, never recorded. One block per comment. The writer's own comments are never read as decisions.
+
+### Views (read-only, derived)
+
+- `health-view.mjs`: `CONTROL_HEALTH=OK|DEGRADED|DOWN|UNKNOWN`. OK needs fresh positive evidence (a successful writer run within an hour, a minted token, the writer pinned, no open exception). It always prints the accepted residuals and every capability that is not plainly supported (`docs/westayfit/ops/control/capabilities.v1.json`).
+- `freshness-view.mjs`: `STAGING_FRESHNESS=FRESH|DEPLOYING|BEHIND|BLOCKED|UNKNOWN`, and a separate `JOURNEY_VERIFICATION` per journey-activation packet.
+- `autonomy-view.mjs`: counts by authority class and rule, and the Step-5 exit count.
+
+### Recovering a wrong bootstrap
+
+A bootstrap is never rewritten, and the ruleset forbids force pushes.
+- **Before any post-bootstrap line:** a wrong bootstrap is recovered by bootstrapping a **new** protected ref, `wsf-control-state-2`, from a corrected, reviewed input. The ruleset already covers it. The writer is pointed at it by a reviewed change to `STATE_REF` in `gitstate.mjs` with a matching `set-contracts` pin, and the old ref stays as the audit record.
+- **After events exist:** errors are corrected by later lines.
+
+### Contracts copied in (memo §10.2)
+
+The four operating contracts that lived only on the development branch are copied, byte for byte, to operational `main`:
+- `docs/westayfit/ops/control/contracts/FABLE_OPERATING_PROTOCOL_v1.md`;
+- `docs/westayfit/ops/control/contracts/WORKER_INBOXES.md`;
+- `docs/westayfit/ops/control/contracts/OWNER_TEST_CARD_AND_SMOKE_CONTRACT.md`;
+- `docs/westayfit/ops/journeys/NORTH_STAR_JOURNEY_MANIFEST.v1.json`.
+
+They are pinned at bootstrap. Their paths sit under `control/` and `journeys/`, the reserved Step-5 surface, instead of the memo's `docs/westayfit/ops/` root. Replacing the development copies with pointer stubs is a development-branch change outside this packet; it is named as a follow-up.

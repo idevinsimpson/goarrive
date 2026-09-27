@@ -1,6 +1,7 @@
 /** Shared fixtures for the control-state suites: synthetic SHAs, sources and a ledger builder. */
 import assert from 'node:assert/strict';
 import { appendEvent } from '../append.mjs';
+import { WRITER_APP } from '../schema.mjs';
 
 export const sha = (c) => c.repeat(40);
 export const A = sha('a');
@@ -14,6 +15,8 @@ export const GENESIS = '0'.repeat(64);
 
 let passed = 0;
 export const test = (name, fn) => { fn(); passed += 1; console.log(`  ok  ${name}`); };
+/** An async test: awaited in declaration order, counted like `test`. */
+export const atest = async (name, fn) => { await fn(); passed += 1; console.log(`  ok  ${name}`); };
 export const done = (suite) => console.log(`${suite}: ${passed} passed`);
 
 /** Typed sources. Comment ids are synthetic. */
@@ -76,3 +79,17 @@ export function freeze(o) {
   if (o && typeof o === 'object') { Object.values(o).forEach(freeze); Object.freeze(o); }
   return o;
 }
+
+// ---- schema v2 fixtures (AUTONOMY-STATE-1B) ----
+let nextId = 5000;
+/** A v2 line as the writer records it: MANUAL on a fresh decision comment unless a rule and source are given. */
+export const w2 = (type, fields = {}, { rule = 'MANUAL', cls = 'manual', source = null } = {}) => {
+  nextId += 1;
+  const src = source ?? comment(nextId);
+  return { schema: 2, type, actor: WRITER_APP, source: src, authority: { class: cls, rule, evidence: [{ kind: src.kind, id: src.id }] }, ...fields };
+};
+export const boot2 = (over = {}) => {
+  const b = boot(over);
+  delete b.actor; delete b.source; delete b.type;
+  return w2('bootstrap', b);
+};

@@ -9,6 +9,8 @@ The program's decisions live in an append-only ledger on the `wsf-control-state`
 
 Only **Fable** and **L0** write the ledger. A worker (W3, W7, …) owns packets, and its GitHub comments can be the *source* of an event. A worker never runs `append.mjs`, and never records its own delivery as accepted or integrated.
 
+**Schema v2 (Step 5).** The authoritative v2 ledger on the protected `wsf-control-state*` refs is written only by the `wsf-control-writer` App (`docs/westayfit/ops/CONTROL_STATE.md`, "Schema v2 and the App writer"); the sentence above governs a local or v1 ledger. Until Step 5 exits, the human CURRENT on #365 stays authoritative. Fable and L0 record a decision for the shadow ledger as one fenced `wsf-control-decision` block in the control inbox, and never push to `wsf-control-state*`.
+
 ## Every time, in this order
 
 1. **Fetch the state.** Fetch `wsf-control-state` and work from a fresh checkout of it. Never act from a remembered or copied state.

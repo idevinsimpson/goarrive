@@ -23,11 +23,24 @@
  * `reconcile-head` records a reconciled GitHub PR head and `record-evidence` an
  * evidence/doc head; neither moves the subject, so evidence practice on a PR
  * never silently re-points a review or an acceptance.
+ *
+ * Schema v2 (a ledger whose bootstrap is v2, or after one schema-upgrade line):
+ *   packets carry a review policy (queue/bootstrap, default DEFAULT_REVIEW for work),
+ *   a delivery count and a pending finding;
+ *   accept honours the policy: a required W# review is never skipped by a direct accept;
+ *   finding{pending} records a valid finding without moving the ball; apply-finding moves it
+ *   once the owner holds no other ball (R-PREEMPT, memo §8);
+ *   block may wait on DELIVERED-SUCCESSOR: the dependency's next delivery after the block;
+ *   set-contracts pins the contract versions that govern every later line;
+ *   set-shadow-surface records the writer's shadow CURRENT comment.
+ * A line whose schema is not the ledger's (outside the one upgrade line) is illegal.
  */
-import { GENESIS, RE, SCHEMA_VERSION, isTerminal, unreachableBlocker } from './schema.mjs';
+import { DEFAULT_REVIEW, DELIVERED_SUCCESSOR, GENESIS, RE, SCHEMA_VERSION, isTerminal, schemaOf, unreachableBlocker } from './schema.mjs';
 
 export class Illegal extends Error {}
 const illegal = (m) => { throw new Illegal(m); };
+
+const sortContracts = (cs) => clone(cs).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
 export function emptyState() {
   return {
@@ -57,8 +70,8 @@ function live(p, type) {
   if (isTerminal(p)) illegal(`${type}: packet is terminal (${p.phase})`);
 }
 
-function newPacket({ owner, kind = 'work', completion, label = null, subjectPaths = ['*'] }, origin) {
-  return {
+function newPacket({ owner, kind = 'work', completion, label = null, subjectPaths = ['*'], review }, origin, v = 1) {
+  const p = {
     owner, kind, completion: clone(completion), label, origin,
     phase: 'QUEUED', phaseBeforeBlock: null, queueIndexBeforeBlock: null, inbox: null, pr: null, reviewers: [],
     artifact: { subjectSha: null, prHeadSha: null, evidenceSha: null, mergeSha: null },
@@ -66,6 +79,16 @@ function newPacket({ owner, kind = 'work', completion, label = null, subjectPath
     subjectPaths, blockedBy: [], importRefs: [],
     authority: { queued: null, released: null, accepted: null, lastTransition: null },
   };
+  // v2: the review policy is genesis metadata (fail-closed default for work), and a delivery count feeds DELIVERED-SUCCESSOR.
+  if (v === 2) Object.assign(p, { review: review ? clone(review) : (kind === 'work' ? clone(DEFAULT_REVIEW) : null), deliveries: 0, pendingFinding: null });
+  return p;
+}
+const v2Fields = (p) => Object.assign(p, { review: p.review ?? null, deliveries: p.deliveries ?? 0, pendingFinding: p.pendingFinding ?? null });
+/** The W# passes a v2 policy requires before acceptance (0 when there is no policy). */
+export const requiredPasses = (p) => (p.review ? p.review.workerReviews.reduce((n, r) => n + r.count, 0) : 0);
+/** A DELIVERED-SUCCESSOR blocker as stored: it remembers the dependency's delivery count at the block. */
+function storeBlockers(s, blockers) {
+  return clone(blockers).map((b) => (b.until === DELIVERED_SUCCESSOR ? { ...b, since: s.packets[b.packet].deliveries ?? 0 } : b));
 }
 
 const AFTER_DELIVERY = ['DELIVERED', 'UNDER_REVIEW', 'ACCEPTED', 'INTEGRATED', 'VERIFYING', 'VERIFIED', 'STAGED'];
@@ -74,7 +97,7 @@ const AFTER_MERGE = ['INTEGRATED', 'VERIFYING', 'VERIFIED', 'STAGED'];
 /** Import one packet's CURRENT phase from a bootstrap, with the refs that support it. */
 function importPacket(s, id, x, source) {
   if (!s.workers[x.owner]) illegal(`bootstrap: packet ${id}: owner ${x.owner} is not among the bootstrap workers`);
-  const p = newPacket(x, 'bootstrap');
+  const p = newPacket(x, 'bootstrap', s.schemaVersion);
   const phase = x.phase === 'BLOCKED' ? x.phaseBeforeBlock : x.phase;
   if (x.phase === 'BLOCKED') {
     if (!x.phaseBeforeBlock || !x.blockedBy || ['BLOCKED', 'WITHDRAWN'].includes(x.phaseBeforeBlock)) illegal(`bootstrap: packet ${id}: a blocked packet needs blockedBy and the non-terminal phase it interrupted`);
@@ -98,6 +121,7 @@ function importPacket(s, id, x, source) {
     blockedBy: x.blockedBy ? clone(x.blockedBy) : [],
     importRefs: x.refs.map(ref),
   });
+  if (s.schemaVersion === 1 && x.blockedBy?.some((b) => b.until === DELIVERED_SUCCESSOR)) illegal(`bootstrap: packet ${id}: ${DELIVERED_SUCCESSOR} is a schema v2 milestone`);
   Object.assign(p.artifact, x.artifact ?? {});
   if (p.artifact.subjectSha && !p.artifact.prHeadSha) p.artifact.prHeadSha = p.artifact.subjectSha;
   p.authority = {
@@ -115,7 +139,7 @@ function bootstrap(s, e) {
   s.surfaces = clone(e.surfaces);
   s.canonical = e.canonical ? clone(e.canonical) : null;
   s.staging = e.staging ? { pinPr: null, ...clone(e.staging) } : null;
-  for (const [w, x] of Object.entries(e.workers)) { s.workers[w] = { inbox: x.inbox }; s.queue[w] = []; }
+  for (const [w, x] of Object.entries(e.workers)) { s.workers[w] = x.classes ? { inbox: x.inbox, classes: [...x.classes] } : { inbox: x.inbox }; s.queue[w] = []; }
   for (const [id, x] of Object.entries(e.packets)) importPacket(s, id, x, e.source);
   for (const [w, q] of Object.entries(e.queue)) {
     if (!s.workers[w]) illegal(`bootstrap: queue for ${w}, which is not among the bootstrap workers`);
@@ -128,6 +152,7 @@ function bootstrap(s, e) {
       if (why) illegal(`bootstrap: packet ${id}: ${why}`);
       if (s.packets[b.packet].phase === 'WITHDRAWN') illegal(`bootstrap: packet ${id}: ${b.packet} is withdrawn, so it never reaches ${b.until}`);
     }
+    if (s.schemaVersion === 2) p.blockedBy = storeBlockers(s, p.blockedBy);
   }
   if (e.criticalPath) setCriticalPath(s, need(s, e.criticalPath));
 }
@@ -141,10 +166,20 @@ function setCriticalPath(s, p) {
 /** Apply one (already schema-valid) event; returns a new state or throws Illegal. */
 export function applyEvent(state, e) {
   const s = clone(state);
+  const v = schemaOf(e);
   if (e.type === 'bootstrap') {
     if (s.eventCount !== 0) illegal('bootstrap is legal only as the first ledger line');
     if (e.source.repo !== e.repository) illegal('bootstrap: the source must be in the bootstrapped repository');
-  } else {
+    // The ledger's schema is its bootstrap's. A v2 ledger starts with a v2 bootstrap; nothing ever downgrades.
+    s.schemaVersion = v;
+    if (v === 2) s.contracts = e.contracts ? sortContracts(e.contracts) : null;
+  } else if (e.type === 'schema-upgrade') {
+    if (s.eventCount === 0) illegal('the first ledger line must be the bootstrap');
+    if (s.schemaVersion !== 1) illegal(`schema-upgrade: the ledger is already schema ${s.schemaVersion}`);
+  } else if (v !== s.schemaVersion) {
+    illegal(`a schema ${v} line in a schema ${s.schemaVersion} ledger: versions change only across one schema-upgrade line`);
+  }
+  if (e.type !== 'bootstrap') {
     if (s.eventCount === 0) illegal('the first ledger line must be the bootstrap');
     if (e.source.repo !== s.repository) illegal(`source repository ${e.source.repo} is not the controlled repository ${s.repository}`);
   }
@@ -152,6 +187,33 @@ export function applyEvent(state, e) {
   const src = ref(e.source);
   switch (e.type) {
     case 'bootstrap': bootstrap(s, e); break;
+    case 'schema-upgrade':
+      // Earlier lines stay v1 byte for byte; from here every line is v2 and every packet carries the v2 fields.
+      s.schemaVersion = 2;
+      s.contracts = null;
+      for (const q of Object.values(s.packets)) v2Fields(q);
+      break;
+    case 'set-contracts': s.contracts = sortContracts(e.contracts); break;
+    case 'set-shadow-surface':
+      if (!s.surfaces) illegal('set-shadow-surface: the ledger records no surfaces');
+      if (e.pr !== s.surfaces.current.pr) illegal(`set-shadow-surface: the shadow CURRENT lives on the control surface #${s.surfaces.current.pr}, not #${e.pr}`);
+      if (e.commentId === s.surfaces.current.commentId) illegal('set-shadow-surface: the shadow CURRENT is never the human CURRENT comment');
+      s.surfaces.shadow = { pr: e.pr, commentId: e.commentId };
+      break;
+    case 'set-review-policy':
+      live(p, 'set-review-policy');
+      if (p.kind !== 'work') illegal('set-review-policy: a reference packet is never reviewed');
+      if (['ACCEPTED', 'INTEGRATED', 'VERIFYING'].includes(p.phase)) illegal(`set-review-policy: ${e.packet} is already ${p.phase}; its review policy is spent`);
+      p.review = clone(e.review);
+      break;
+    case 'apply-finding':
+      // R-PREEMPT: the recorded pending finding moves the ball once the owner holds no other one (check.mjs one-ball).
+      from(p, ['DELIVERED', 'UNDER_REVIEW'], 'apply-finding');
+      if (!p.pendingFinding) illegal(`apply-finding: ${e.packet} has no pending finding`);
+      p.phase = 'CHANGES_REQUESTED';
+      p.reviewedBy = [];
+      p.pendingFinding = null;
+      break;
     case 'set-canonical':
       s.canonical = { developmentBranch: e.developmentBranch, developmentSha: e.developmentSha, operationalMain: e.operationalMain };
       break;
@@ -161,13 +223,13 @@ export function applyEvent(state, e) {
     case 'set-surfaces': s.surfaces = clone(e.surfaces); break;
     case 'register-worker':
       if (s.workers[e.worker]) illegal(`worker ${e.worker} is already registered`);
-      s.workers[e.worker] = { inbox: e.inbox };
+      s.workers[e.worker] = e.classes ? { inbox: e.inbox, classes: [...e.classes] } : { inbox: e.inbox };
       s.queue[e.worker] = [];
       break;
     case 'queue': {
       if (s.packets[e.packet]) illegal(`packet ${e.packet} already exists (${s.packets[e.packet].phase}); a released or finished packet cannot be queued again`);
       if (!s.workers[e.owner]) illegal(`worker ${e.owner} is not registered`);
-      const q = newPacket(e, 'ledger');
+      const q = newPacket(e, 'ledger', s.schemaVersion);
       q.authority.queued = src;
       q.authority.lastTransition = src;
       s.packets[e.packet] = q;
@@ -235,9 +297,25 @@ export function applyEvent(state, e) {
       p.artifact.subjectSha = e.subjectSha;
       p.artifact.prHeadSha = e.prHeadSha ?? e.subjectSha;
       if (e.evidenceSha) p.artifact.evidenceSha = e.evidenceSha;
+      if (s.schemaVersion === 2) {
+        if (p.pendingFinding) illegal(`deliver: ${e.packet} has a pending finding; apply-finding hands it back first`);
+        p.deliveries += 1;
+      }
       break;
     }
-    case 'review': from(p, ['DELIVERED'], 'review'); p.phase = 'UNDER_REVIEW'; p.reviewers = [...e.reviewers]; p.reviewedBy = []; break;
+    case 'review': {
+      from(p, ['DELIVERED'], 'review');
+      if (p.review) {
+        // A W# reviewer that declares classes must hold one the policy requires (memo §7). Undeclared: eligible, as in v1.
+        const need = p.review.workerReviews.map((r) => r.class);
+        for (const r of e.reviewers.filter((x) => RE.worker.test(x))) {
+          const has = s.workers[r]?.classes;
+          if (has && !has.some((c) => need.includes(c))) illegal(`review: ${r} holds ${has.join(', ')}, none of the classes ${e.packet}'s policy requires (${need.join(', ') || 'none'})`);
+        }
+      }
+      p.phase = 'UNDER_REVIEW'; p.reviewers = [...e.reviewers]; p.reviewedBy = [];
+      break;
+    }
     case 'review-pass':
       // An assigned W# reviewer's independent PASS: its ball is released. Not acceptance.
       from(p, ['UNDER_REVIEW'], 'review-pass');
@@ -251,12 +329,24 @@ export function applyEvent(state, e) {
       p.reviewers = [...e.reviewers];
       p.reviewedBy = p.reviewedBy.filter((r) => e.reviewers.includes(r));
       break;
-    case 'finding': from(p, ['DELIVERED', 'UNDER_REVIEW'], 'finding'); p.phase = 'CHANGES_REQUESTED'; p.reviewedBy = []; break;
+    case 'finding':
+      from(p, ['DELIVERED', 'UNDER_REVIEW'], 'finding');
+      if (s.schemaVersion === 2 && p.pendingFinding) illegal(`finding: ${e.packet} already has a pending finding; apply-finding hands it back`);
+      if (e.pending) { p.pendingFinding = src; break; } // recorded, the ball does not move yet (R-PREEMPT)
+      p.phase = 'CHANGES_REQUESTED'; p.reviewedBy = [];
+      break;
     case 'accept': {
       from(p, ['DELIVERED', 'UNDER_REVIEW'], 'accept');
       if (e.subjectSha !== p.artifact.subjectSha) illegal(`accept names ${e.subjectSha.slice(0, 8)}, but the subject under review is ${String(p.artifact.subjectSha).slice(0, 8)}`);
       const pending = p.phase === 'UNDER_REVIEW' ? p.reviewers.filter((r) => RE.worker.test(r) && !p.reviewedBy.includes(r)) : [];
       if (pending.length) illegal(`accept: assigned W# review(s) not complete: ${pending.join(', ')}`);
+      if (s.schemaVersion === 2) {
+        // A required worker review is never skipped by a direct acceptance (memo §7).
+        const need = requiredPasses(p);
+        const got = p.phase === 'UNDER_REVIEW' ? p.reviewedBy.filter((r) => RE.worker.test(r)).length : 0;
+        if (got < need) illegal(`accept: ${e.packet}'s review policy requires ${need} W# pass(es); ${got} recorded`);
+        if (p.pendingFinding) illegal(`accept: ${e.packet} has a pending finding`);
+      }
       p.phase = 'ACCEPTED';
       p.authority.accepted = src;
       break;
@@ -310,6 +400,7 @@ export function applyEvent(state, e) {
         if (why) illegal(`block: ${why}`);
         if (s.packets[b.packet].phase === 'WITHDRAWN') illegal(`block: ${b.packet} is withdrawn, so it never reaches ${b.until}`);
       }
+      if (s.schemaVersion === 1 && e.blockedBy.some((b) => b.until === DELIVERED_SUCCESSOR)) illegal(`block: ${DELIVERED_SUCCESSOR} is a schema v2 milestone`);
       p.phaseBeforeBlock = p.phase;
       if (p.phase === 'QUEUED') {
         // Out of the driving queue while blocked, so it is never presented as NEXT.
@@ -317,7 +408,7 @@ export function applyEvent(state, e) {
         s.queue[p.owner] = s.queue[p.owner].filter((x) => x !== e.packet);
       }
       p.phase = 'BLOCKED';
-      p.blockedBy = clone(e.blockedBy);
+      p.blockedBy = s.schemaVersion === 2 ? storeBlockers(s, e.blockedBy) : clone(e.blockedBy);
       break;
     case 'unblock':
       from(p, ['BLOCKED'], 'unblock');
@@ -350,7 +441,7 @@ export function applyEvent(state, e) {
     case 'set-critical-path': setCriticalPath(s, p); break;
     default: illegal(`no transition for ${e.type}`);
   }
-  if (p && !['reconcile-head', 'record-evidence', 'set-critical-path'].includes(e.type)) p.authority.lastTransition = src;
+  if (p && !['reconcile-head', 'record-evidence', 'set-critical-path', 'set-review-policy'].includes(e.type) && !(e.type === 'finding' && e.pending)) p.authority.lastTransition = src;
   // The critical path completes when its packet does; it is never left pointing at a terminal packet.
   if (s.criticalPath && isTerminal(s.packets[s.criticalPath])) s.criticalPath = null;
   s.eventCount += 1;
