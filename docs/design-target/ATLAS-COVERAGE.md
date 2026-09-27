@@ -42,7 +42,7 @@ Evidence: `before/` 24 frozen · `after/` 42
 
 ## Batch B — The invitation, and what a Champion starts
 
-`review/batch-b-join-and-setup/` · `/join/[joinCode]` `/start-community` `/goals/new` `/combined/[setupId]` · **reviewed & accepted** as target reference · `/join/[joinCode]` implemented · the other three NOT implemented
+`review/batch-b-join-and-setup/` · `/join/[joinCode]` `/start-community` `/goals/new` `/combined/[setupId]` · **reviewed & accepted** as target reference · `/join/[joinCode]` and `/goals/new` implemented and accepted · `/start-community` and `/combined/[setupId]` built, not to this target
 
 Contact sheet / other: `CONTACT-SHEET-batch-b.png`
 
@@ -87,7 +87,7 @@ Evidence: `before/` 30 frozen · `after/` 30
 
 ## Batch C — The challenge, and the door
 
-`review/batch-c-challenge-and-door/` · `/community/[groupId]/challenge` `/` · **reviewed & accepted** as target reference · NOT implemented
+`review/batch-c-challenge-and-door/` · `/community/[groupId]/challenge` `/` · **reviewed & accepted** as target reference · routes built · NOT built to this target
 
 Contact sheet / other: `CONTACT-SHEET-batch-c.png`
 
@@ -113,7 +113,7 @@ Contact sheet / other: `CONTACT-SHEET-batch-c.png`
 
 ## Batch D — The event and the line, on your own phone
 
-`review/batch-d-event-and-line/` · `/event/[goalId]` `/queue/[goalId]` · **reviewed & accepted** as target reference · NOT implemented
+`review/batch-d-event-and-line/` · `/event/[goalId]` `/queue/[goalId]` · **reviewed & accepted** as target reference · routes built · NOT built to this target
 
 Contact sheet / other: `CONTACT-SHEET-batch-d.png`
 
@@ -146,7 +146,7 @@ Contact sheet / other: `CONTACT-SHEET-batch-d.png`
 
 ## Batch E — The screens in the room
 
-`review/batch-e-room-screens/` · `/kiosk/[goalId]` `/contribute/[goalId]?kiosk=1` `/station/[goalId]` · **reviewed & accepted** as target reference · NOT implemented
+`review/batch-e-room-screens/` · `/kiosk/[goalId]` `/contribute/[goalId]?kiosk=1` `/station/[goalId]` · **reviewed & accepted** as target reference · routes built · the kiosk contribution screen's confinement and idle-Finish are implemented and accepted (#427, #436) · NOT built to this target's drawings
 
 Contact sheet / other: `CONTACT-SHEET-batch-e.png`
 
@@ -183,7 +183,7 @@ Contact sheet / other: `CONTACT-SHEET-batch-e.png`
 
 ## Batch F — The public display
 
-`review/batch-f-public-display/` · `/display/[goalId]` · **reviewed & accepted** as target reference · NOT implemented
+`review/batch-f-public-display/` · `/display/[goalId]` · **reviewed & accepted** as target reference · route built · responsive layout tiers implemented and accepted (#435 against the #429 target) · this matrix stays reference
 
 Contact sheet / other: `MATRIX-batch-f.png`
 
@@ -202,7 +202,7 @@ Contact sheet / other: `MATRIX-batch-f.png`
 
 ## Batch G — The follow-along
 
-`review/batch-g-follow-along/` · `/move/[goalId]` · **reviewed & accepted** as target reference · NOT implemented
+`review/batch-g-follow-along/` · `/move/[goalId]` · **reviewed & accepted** as target reference · route built · NOT built to this target
 
 Contact sheet / other: `CONTACT-SHEET-batch-g.png`
 
@@ -218,7 +218,7 @@ Contact sheet / other: `CONTACT-SHEET-batch-g.png`
 
 ## Board — The physical product, end to end
 
-`review/physical-flow/` · `(no single route — the whole journey)` · **reviewed & accepted** as target reference · NOT implemented
+`review/physical-flow/` · `(no single route — the whole journey)` · **reviewed & accepted** as target reference · the journey's routes and callables are built and ran hosted on staging (run 45, the turn-service row) · the room itself has not been driven end to end
 
 | State | Classes | end | Files |
 | --- | --- | :---: | ---: |

@@ -35,13 +35,20 @@ import {
  *   SEAM           named capability the product does not have. Not drawn as
  *                  though it did.
  *
- * TWO STATIONS ARE REAL. `wsfCallNextTurn` takes a `stationId` and a secret,
+ * TWO STATIONS ARE REAL. `wsfCallNext` takes a `stationId` and a secret,
  * stations are enrolled into numbered slots, and
  * `tests/callable/wsf-turn.test.ts` has "two stations calling at the same
  * instant cannot assign the same person" — a counter makes the contention
  * unconditional rather than leaving it to the two stations happening to pick
- * the same row. What has never been driven end to end is a room: two paired
+ * the same row. Since staging run 45 the contract has also run HOSTED: its
+ * turn-service row enrolled two stations, called a member, let the lease
+ * expire, rejoined them and recorded once from the phone with both retries
+ * adding nothing. What has never been driven end to end is a room: two paired
  * screens, a real line, and people walking between them.
+ *
+ * The accepted render of this board (review/physical-flow/) predates the
+ * copy correction below; it is the historical reference and is not repainted
+ * by a source edit.
  */
 
 type Status = 'built' | 'target' | 'proof' | 'seam';
@@ -220,15 +227,15 @@ export function PhysicalFlowBoard() {
           <Text style={s.footLabel}>WHAT HAS NEVER BEEN DRIVEN IN A ROOM</Text>
           <Text style={s.footBody}>
             Two paired screens, a real line and people walking between them. The server contract
-            holds and is unit-tested; the room is not.
+            holds, is unit-tested and ran hosted on staging (run 45); the room is not.
           </Text>
           <Chip status="proof" />
         </View>
         <View style={s.footBlock}>
-          <Text style={s.footLabel}>WHAT IS DRAWN BUT NOT BUILT</Text>
+          <Text style={s.footLabel}>WHAT IS DRAWN BUT NOT BUILT TO ITS TARGET</Text>
           <Text style={s.footBody}>
-            Every screen in Batches A–G. Target existence is not visual acceptance and is not
-            implementation.
+            Batches C–G: their routes and callables exist and run today; the accepted drawings
+            stay reference. Target existence is not visual acceptance and is not implementation.
           </Text>
           <Chip status="target" />
         </View>

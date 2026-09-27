@@ -8,8 +8,8 @@ check:route-index` fails if any of them drifts.
 
 | | |
 | --- | ---: |
-| User-facing routes | **23** |
-| Routes with a target | **23** |
+| User-facing routes | **26** |
+| Routes with a target | **26** |
 | Routes with no target | **0** |
 | States drawn | **167** |
 | Frames on disk | **544** |

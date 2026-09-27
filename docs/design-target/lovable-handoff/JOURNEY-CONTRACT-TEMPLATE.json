@@ -1,0 +1,60 @@
+{
+  "$comment": "START HERE. One machine-readable handoff per reserved Lovable reference delivery (Director #365 5821646487). The delivering author fills it and commits it beside the existing evidence manifests (review-evidence.json / recovery-truth-1.json / motion-feel-1.json style). One file feeds human review, the Journey parity register and Claude reads; history is not recreated in prompts. Fields marked required are required; unknown values are written as null with a reason, never guessed.",
+  "startHere": {
+    "packet": "REQUIRED — the packet name (e.g. RECOVERY-TRUTH-1)",
+    "journey": "REQUIRED — one line: who is doing what, from where to where",
+    "readFirst": ["REQUIRED — the 1–3 source files a reader opens first"],
+    "doNotPort": ["REQUIRED — demo-only mechanisms that must never reach the canonical app (simulated ledger, reviewer tools, sample identities, demo timing)"]
+  },
+  "revisions": {
+    "acceptedProductSourceSha": "REQUIRED — the exact Lovable product revision the Director accepted (null + reason while still a draft)",
+    "acceptedEvidenceSha": "REQUIRED — the exact evidence revision",
+    "managedRecordHead": "REQUIRED — the managed evidence-record head",
+    "workingDraftSha": "REQUIRED — the current working head if it differs from the accepted revision (never a reference)"
+  },
+  "fixture": {
+    "deterministic": true,
+    "entry": "REQUIRED — the exact entry state (route / tab / overlay / scroll / focus) and how it is seeded",
+    "expectedStates": [
+      { "name": "REQUIRED", "how": "how the state is reached", "expect": "what is on screen, in the reference's own words", "evidence": "screenshot / recording / test id" }
+    ]
+  },
+  "sourceMap": [
+    {
+      "component": "REQUIRED — the reference component or pure function",
+      "file": "REQUIRED — path at acceptedProductSourceSha",
+      "sha256": "REQUIRED — as recorded in the delivery manifest",
+      "classification": "REQUIRED — one of REUSE | NATIVE ADAPTATION | DEMO ONLY",
+      "canonicalCounterpart": "the Expo / Firebase file or contract it maps to, or null + reason",
+      "notes": "the semantic seam, if any"
+    }
+  ],
+  "motion": [
+    {
+      "name": "REQUIRED per motion — e.g. MOVE sheet open",
+      "trigger": "what starts it",
+      "durationMs": 0,
+      "easing": "the curve, by name or cubic-bezier",
+      "interruption": "what happens if the user acts mid-motion",
+      "reducedMotion": "what renders under prefers-reduced-motion",
+      "measured": "real recording / trace link, or null + reason"
+    }
+  ],
+  "evidence": {
+    "screenshots": [{ "name": "", "viewport": "390x844", "sha256": "", "note": "default entry frame vs scrolled state must be stated" }],
+    "recordings": [{ "name": "", "sha256": "", "coversInteraction": "tap / focus / navigation actually performed, not simulated" }],
+    "tests": [{ "command": "", "result": "first-run counts; reruns apart" }],
+    "measuredLimitations": ["REQUIRED — e.g. not a real-device test; no keyboard validation; 390x420 clips Back/Review"]
+  },
+  "canonical": {
+    "sha": "the canonical candidate / integrated SHA, or null while none exists",
+    "pr": "the canonical PR, or null",
+    "intentionalDifferences": [
+      { "reference": "what the reference does", "canonical": "what the canonical app does", "why": "platform | data truth | accepted contract | seam", "rulingRef": "the #365 / PR comment id that approved it, or null" }
+    ]
+  },
+  "feedbackLoop": {
+    "toLovable": "after a canonical candidate exists: the bounded packet sent back (matching synthetic frames / recording, relevant code, accepted platform differences) and the question asked (the three most consequential UX mismatches with concrete evidence), or null",
+    "findings": [{ "finding": "", "evidence": "", "directorDisposition": "accepted | rejected | deferred, with the comment id" }]
+  }
+}
