@@ -60,7 +60,7 @@ The North Star project does not own production identity, membership, permissions
 
 | Document | Standing |
 | --- | --- |
-| Strategic Master v3.0 (2026-09-11) | GOVERNING strategic foundation |
+| Strategic Master v3.0 (2026-09-11) | GOVERNING strategic foundation; held outside this repository — the in-repo v3.1 addendum and Project Instructions v3.1 summarize and apply it |
 | Strategic Master v3.1 addendum (2026-09-26) | GOVERNING newer durable decisions |
 | Project Instructions v3.1 | GOVERNING compact instructions |
 | docs/westayfit/ops/NORTH_STAR_JOURNEY_MANIFEST.json | GOVERNING per-journey frozen visual reference |
@@ -68,7 +68,9 @@ The North Star project does not own production identity, membership, permissions
 | canonical CURRENT STATE comment on #365 | GOVERNING volatile current program state |
 | docs/westayfit/WE_STAY_FIT_MASTER.md v1.2 (2026-09-06) | SUPERSEDED product master; retained historical architecture lineage |
 | docs/westayfit/UNIVERSAL_COMMUNITIES_CHARTER.md | HISTORICAL FOUNDATION; current product strategy is v3.0 + v3.1 |
-| Implementation Plan working draft v0.2 (2026-09-11) | SUPERSEDED execution plan; useful historical acceptance/planning source |
+| docs/westayfit/EXPO_CRITICAL_PATH.md (2026-09-05) | HISTORICAL expo planning; its adults-only enforcement and `WE_STAY_FIT_MASTER.md` governance are superseded |
+| docs/westayfit/WE_STAY_FIT_IMPLEMENTATION_OPERATIONS_CHARTER_v1_2026-09-26.md | GOVERNING execution sequencing and evidence discipline; successor to Implementation Plan v0.2 |
+| Implementation Plan working draft v0.2 (2026-09-11) | SUPERSEDED by the Implementation and Operations Charter v1.0 (2026-09-26); useful historical acceptance/planning source |
 | docs/design-target/* | visual/reference evidence; individual package standing controls its use |
 | Appendix C of Strategic Master v3.0 | dated history only |
 

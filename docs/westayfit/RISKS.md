@@ -10,7 +10,7 @@ A single ruleset file is written by both apps' work streams. Concurrent PRs can 
 
 Someone running the bare command from muscle memory redeploys GoArrive functions when they intended to touch only WSF (or vice versa).
 
-**Mitigation:** deploy commands in `RELEASES.md` receipts always include `--only functions:default` or `--only functions:westayfit`. `firebase functions:list` before/after diff proves scope.
+**Mitigation:** WSF staging deploys run only through the reviewed staging control plane (`skills/wsf-staging-deploy/SKILL.md`, `.github/workflows/wsf-staging-deploy.yml`), whose receipts record the scoped function inventory before and after; no one runs a bare `--only functions`. GoArrive deploys stay scoped to `--only functions:default`. `RELEASES.md` is historical, not the current receipt ledger.
 
 ## R-3: Custom claim clobber
 
@@ -87,7 +87,7 @@ R-1 covers the ruleset. The index file has identical replace-the-whole-file sema
 
 Historical note: the original entry was written before WSF introduced a composite-index requirement. That is no longer current. As of the September 26 reconciliation, WSF source/development includes index-dependent work and cloud READY state is a separate release gate. Do not infer index readiness from source presence or an accepted implementation; require the bounded operator/read-back receipt before the dependent callable is treated as ready.
 
-**Mitigation:** GATE 0 — the live-vs-`main` diff built for the rules deploy — has no equivalent for indexes. Build one against the indexes endpoint before the first WSF index ships, and never accept an index deploy that proposes a deletion.
+**Mitigation:** GATE 0 — the live-vs-`main` diff built for the rules deploy — has no equivalent for indexes. Build one against the indexes endpoint before any further `firestore:indexes` deploy, and never accept an index deploy that proposes a deletion.
 
 ## R-11: Findings recorded only in Slack are findings that will be missed twice
 
@@ -97,22 +97,18 @@ The audit was right. The record of it was a chat message, so what survived was a
 
 **Mitigation:** an audit whose conclusion matters to a later decision lands in this repo, in `RISKS.md` or `DECISIONS.md`, in the same work session — not in the channel where the work was discussed. When an audit clears a gate, write down the scenarios it *did not* clear as explicitly as the ones it did.
 
-## R-WSF-E1 — goal-read authorization (CLOSED in served lineage; retain as regression risk)
+## R-WSF-E1 — goal-read authorization (source defect addressed by Package E; retained as regression risk)
 
 The original defect was real: possession of a `goalId` could expose shared progress through
 the aggregate read path without the later publication/member boundary.
 
-That implementation-state description is now historical. The authorization model
-(`aggregateDisplayAuthorized`, active-member access, protected own-history behavior and
-the shared access evaluator) is present in the currently served product lineage.
+Package E introduced the authorization model (`aggregateDisplayAuthorized`, active-member
+access, protected own-history behavior and the shared access evaluator).
 
-Hosted staging evidence has exercised the relevant Package E authorization rows, including:
-- display authorization round trip;
-- display session/refusal lifecycle;
-- closed-goal authorization lifecycle;
-- protected own-credit read;
-- former-member history/replay;
-- per-goal isolation and stale-response admission.
+Dated historical evidence, not a statement of what any environment serves now: on
+2026-09-18, hosted run 35369383808 against candidate `65d258db48a5cfe867c98975b7361425884842cb`
+passed all Package E rows (`today-2026-09-18/1PM-READINESS-RECEIPT.md`). What staging or
+production currently serves is recorded only in the canonical CURRENT STATE comment on #365.
 
 The risk is therefore no longer "source pending." It remains a regression risk because
 publication authorization, membership access and possession of an id must never collapse

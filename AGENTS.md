@@ -24,7 +24,7 @@ This repository hosts **two first-party applications**. The established producti
 
 ### CLARIFIED (applies with WSF-specific note)
 
-- **Standing Release Policy — Staging & Production** (2026-08-01) applies to WSF, but WSF has its own release train and current manifest / receipt discipline under `docs/westayfit/ops/`, operational `main`, and `skills/wsf-staging-deploy/SKILL.md`. `docs/westayfit/RELEASES.md` is historical, not the current mutable release-state ledger. A staging deploy of one app does not standing-approve the other.
+- **Standing Release Policy — Staging & Production** (2026-08-01) applies to WSF, but WSF has its own release train and current manifest / receipt discipline under `docs/westayfit/ops/`, operational `main`, and `skills/wsf-staging-deploy/SKILL.md`. `docs/westayfit/RELEASES.md` is historical, not the current mutable release-state ledger. A staging deploy of one app does not standing-approve the other. Cross-app bundling into one integration branch is not permitted; combined-staging bundles are per-app.
 - **`/setup` and `/ship` agent commands** operate on `apps/goarrive/` by default. For WSF staging, do not reconstruct a direct Firebase CLI path from this file; read `skills/wsf-staging-deploy/SKILL.md` on operational `main` and use the reviewed WSF staging control plane. Do not invoke `/ship` for WSF changes.
 
 ### SCOPED TO apps/goarrive (WSF explicitly does not follow)
@@ -128,7 +128,7 @@ This is the standing rule for all release-scoped work. Do not ask Devin for per-
 5. **Batch manifest + terminal result.** Post one concise batch manifest before execution (PRs, SHAs, checks passed, rollback point) and one terminal result afterward (URLs, commit list, smoke-test outcome). This is notification, not an approval prompt, unless a stop-on-surprise condition applies.
 6. **Never applies to:** non-release-scoped experiments/spikes, force-pushes to `main`, hook-skipping (`--no-verify`), amending published commits, or Cloud Functions / Firestore rules changes that were not part of the named batch. When in doubt about scope, ask before executing.
 
-The combined-staging rule in `.claude/multi-agent-workflow-guide.md` Section 1 (2026-07-15) still applies — every staging deploy is built from `main` + all open, release-scoped PR branches merged into an integration branch.
+The combined-staging rule in `.claude/multi-agent-workflow-guide.md` Section 1 (2026-07-15) still applies — every staging deploy is built from `main` + all open, release-scoped PR branches merged into an integration branch. That rule is per app: GoArrive and WSF are never bundled into one integration branch (see the WSF release-policy note above).
 
 ### Do Not Build
 - MySQL, TiDB, Drizzle, S3, Fastify, JotForm, Calendly, Zoom Embedded SDK

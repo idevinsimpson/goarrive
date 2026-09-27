@@ -5,7 +5,7 @@ Owner: Devin Simpson
 
 Status: OWNER-AUTHORIZED DOCUMENT RECONCILIATION. This is a bounded addendum to WE STAY FIT Strategic Master v3.0 — The Living WE System (September 11, 2026). It is not a fourth strategy round and does not reopen the settled Living WE, accounting, privacy, GoArrive-boundary, or brand decisions.
 
-The September 11 master remains the strategic foundation. This addendum governs only the newer decisions and clarifications recorded after it. When this addendum and v3.0 are silent, v3.0 governs. Devin's newer explicit decision still governs its stated scope.
+The September 11 master remains the strategic foundation. This addendum governs only the newer decisions and clarifications recorded after it. Where this addendum is silent, v3.0 governs; where both are silent, follow the authority order in §2. Devin's newer explicit decision still governs its stated scope.
 
 ## 1. Why this addendum exists
 

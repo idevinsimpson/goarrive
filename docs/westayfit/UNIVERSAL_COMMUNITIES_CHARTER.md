@@ -17,7 +17,7 @@ WSF's product wedge is "universal communities" — groups of people who move tog
 2. **Low-friction join.** Joining a community must be possible without a payment step, without a coach relationship, and without exposing the user's identity to the whole community until they choose to be visible.
 3. **Champion-led, not coach-led.** Communities are stewarded by Champions rather than requiring a paid coach. The historical `champion_campaigns` marketing path is not production authority; active Champion roles belong to trusted Firebase membership/permission records.
 4. **No cross-community broadcast without consent.** A champion's actions affect only their community; there is no platform-wide broadcast channel.
-5. **No leaderboards by default.** Comparative ranking is off by default and opt-in per community.
+5. **~~No leaderboards by default.~~ SUPERSEDED.** The old "ranking off by default, opt-in per community" idea is superseded: current WSF has no rankings or leaderboards at all (Project Instructions v3.1; v3.1 addendum §7).
 
 ## Boundaries To GoArrive
 

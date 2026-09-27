@@ -33,7 +33,7 @@ The root `firebase.json` `functions` array carries two entries:
 - `{ "source": "functions", "codebase": "default", ... }` — the existing GoArrive functions (unchanged).
 - `{ "source": "functions-westayfit", "codebase": "westayfit", ... }` — the new WSF functions.
 
-Codebases are the isolation boundary. WSF functions deploy via `firebase deploy --only functions:westayfit`; GoArrive functions deploy via `firebase deploy --only functions:default` (or `--only functions` for both). `firebase functions:list` after a WSF-only deploy must show every pre-existing GoArrive function still present.
+Codebases are the isolation boundary. WSF functions deploy via `firebase deploy --only functions:westayfit`; GoArrive functions deploy via `firebase deploy --only functions:default` (never bare `--only functions`; WSF staging goes only through `skills/wsf-staging-deploy`). `firebase functions:list` after a WSF-only deploy must show every pre-existing GoArrive function still present.
 
 ### (d) Shared canonical Firestore ruleset (dual regression required)
 
@@ -65,7 +65,7 @@ WSF authorization uses Firestore document reads, not custom claims.
 
 ### (g) No dual-write, no bidirectional sync, no auto-conversion
 
-The Lovable-side WSF marketing/interest surface and the Firebase-side WSF app share the same Firebase project but are treated as separate systems for data flow:
+The Lovable/Supabase WSF marketing/interest surface and the authenticated Firebase WSF app are separate systems of record (see `LOVABLE_HANDOFF.md` §1 and `DATA_OWNERSHIP.md` §4). For data flow:
 
 1. No dual-write: a single write operation must not fan out to a second collection with a "keep them in sync" intent.
 2. No bidirectional sync: cross-collection copies flow one way per collection and are explicit, not implicit.
@@ -87,7 +87,7 @@ Each app owns its own `playwright.config.ts` with its own `testDir` and its own 
 
 ## Environment clarification — September 26, 2026
 
-The original M-U1 text below describes the architectural Firebase/codebase boundaries,
+The original M-U1 text above (invariants (b)–(c)) describes the architectural Firebase/codebase boundaries,
 not the current staging operating procedure.
 
 Current WSF staging is driven only through the reviewed operational-`main` control plane:
@@ -95,7 +95,7 @@ Current WSF staging is driven only through the reviewed operational-`main` contr
 and `.github/wsf-staging/approved-candidate.json`. It currently targets the
 `westayfit-staging` environment/project.
 
-Do not manually substitute the old direct Firebase commands below for the current staging
+Do not manually substitute the old direct Firebase commands above (invariants (b)–(c)) for the current staging
 workflow. They remain useful architecture examples of resource scoping, not the canonical
 staging runbook.
 
