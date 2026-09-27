@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { MAX_ATTEMPTS, bootstrapEvent, runShadow, writerPinProblem } from '../shadow-run.mjs';
 import { decisionBlock, decisionIntake, derivedFacts, SHADOW_PLACEHOLDER } from '../shadow.mjs';
 import { redact, tokenGitEnv, STATE_REF } from '../gitstate.mjs';
@@ -263,6 +264,22 @@ test('autonomy counts post-bootstrap lines toward the Step-5 exit, by authority 
   assert.ok(a.lines.includes('SHADOW_EXIT events=0/10 not met'));
   assert.ok(a.lines.some((l) => l.startsWith('PHASE_E ') && l.includes('not measured until Step 6')));
   assert.ok(SHADOW_PLACEHOLDER.startsWith('<!-- wsf-control shadow-current placeholder'));
+});
+
+test('the reconcile workflow keeps its five triggers, gates the writer job on the main ref first, and never gains pull_request_target', () => {
+  const y = fs.readFileSync(fileURLToPath(new URL('../../../.github/workflows/wsf-control-reconcile.yml', import.meta.url)), 'utf8');
+  const on = y.slice(y.indexOf('\non:\n') + 5, y.indexOf('\npermissions:'));
+  assert.deepEqual([...on.matchAll(/^ {2}([a-z_]+):/gm)].map((m) => m[1]).sort(),
+    ['issue_comment', 'pull_request', 'schedule', 'workflow_dispatch', 'workflow_run']);
+  assert.ok(!y.split('\n').some((l) => !/^\s*#/.test(l) && l.includes('pull_request_target')), 'pull_request_target outside a comment');
+  const job = y.slice(y.indexOf('\n  reconcile:\n'));
+  const cond = job.slice(job.indexOf('    if:'), job.indexOf('    runs-on:'));
+  // The guard is the whole condition's first conjunct: not ORed, and not nested inside the issue_comment branch.
+  assert.match(cond, /^ {4}if: >-\s+github\.ref == 'refs\/heads\/main' &&\s+\(/);
+  assert.equal((cond.match(/refs\/heads\/main/g) ?? []).length, 1);
+  assert.match(job, /^ {4}environment: wsf-control-writer$/m);
+  assert.match(job, /^ {10}ref: main$/m);
+  assert.match(y, /^ {2}group: wsf-control-writer\n {2}cancel-in-progress: false$/m);
 });
 
 done('shadow');
