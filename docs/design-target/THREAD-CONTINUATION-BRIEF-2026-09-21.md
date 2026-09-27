@@ -4,14 +4,14 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 ## CURRENT — read this first (kept ≤ 1,000 words; updated only on material change; Director #365 `5819944052` §3)
 
-**Stamp: 2026-09-27 01:20Z.** **Precedence:** newer explicit owner decisions first (latest: event-driven serialization + technical auto-advance `5851193831`; North-Star Operating System v1 `5841611729`; standing hardening train `5841397324`, which replaces the sprint's expiry; staging cadence `5832907406`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
+**Stamp: 2026-09-27 02:20Z.** **Precedence:** newer explicit owner decisions first (latest: event-driven serialization + technical auto-advance `5851193831`; North-Star Operating System v1 `5841611729`; standing hardening train `5841397324`, which replaces the sprint's expiry; staging cadence `5832907406`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
 
 **Heads.**
 
 | what | value |
 | --- | --- |
 | development `claude/wsf-app-shell` | **`a3127651`** = `6c7f975c` + HOME `9d27fdb5` (#514 `5848589381`); since `938e00d8`: ops docs + index source `1f99d67f` |
-| `main` | **`68ac9f13`** = … + #521 activation fix + #527/#528 Home journey; pin `a3127651` |
+| `main` | **`9a7a36b3`** = … + #521 activation fix + #527/#528/#529 Home journey; pin `a3127651` |
 | staging pin | `approvedAppSha` **`938e00d8`**, 49, three social retained (Director ACCEPTED #511 `5846667051`) |
 | served staging | **`a3127651`** (HOME), run 55 `36264562975`: 49 → 49, `VERIFY=pass`, hosted 24 / 0, cleanup COMPLETE (#365 `5849110597`–`5849113235`); previous known-good **`938e00d8`** (run 53) |
 
@@ -28,7 +28,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 | CONTROL-PLANE-ACTIVATION-1 | W3 · #521 `839f18f6` | plan step 1 **ACCEPTED** `5850494365` → **integrated** `fff23048` (`5850506125`) | done; activation run follows step 2 |
 | AUTONOMY-STATE-1A | W3 · #519 `cc78509a` | **ACCEPTED** `5849867467` → integrated main `5d58ed07` | Phases B–E = plan steps 4–7 (PARKED) |
 | W5 lane | #520 audit; #525 **merged** (W5 PASS, Director `5849425770`) | **owner: revoke Browser Use key** |
-| **HOME-NORTHSTAR-PARITY-1** | W9 · #514 → served `a3127651` | step 2: #527 → `58d3aff8`; run 56 FAIL (Back vs sheet Close) → #528 `8bd19404` (W7 69 PASS) auto-advanced → main `68ac9f13`; **run 57 `36284584278` FAIL 21/22** (window pill CSS uppercase vs case-sensitive match; `5851548437`) | W3 correction released #396 `5851553145` → W7 → one third activation |
+| **HOME-NORTHSTAR-PARITY-1** | W9 · #514 → served `a3127651` | step 2 **CLOSED**: runs 56/57 FAIL → #528/#529 (W7 69/70 PASS, auto-advanced) → main `9a7a36b3`; **run 58 `36287663620` PASS**, cleanup COMPLETE, card PASSED (`5851902129`) | done; step 3 #520 A1–A9 ACTIVE (W3, #396 `5851903393`) |
 | **PRIVACY-TOGGLE-STAGING-1** | owner as operator · harness merged `6c2e6b25` | setters SHUT (run 50); no Claude identity can do Operation 2; W7 Check 43 emulator PASS | owner Operation 2 read-back → one `social-privacy` dispatch → seven-row receipt |
 | **HARDENED-MEMBER-JOURNEY-1** | W7 · `a55046f5` | H1–H4 baselined on served; **H3c** (silent failed Home refresh) and **H4b** (no eviction after refusal) fail; H5 waits on Settings | rerun on successors |
 | SOCIAL-DEMO-SEED-MODE | W3 · #484 `4c1ac1d9` | W7 carry confirmed | Director → L0 PLAN → APPLY / VERIFY |
