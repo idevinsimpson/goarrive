@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "milestone": "HOME-NORTHSTAR-PARITY-1",
+  "productSha": "a31276516e786ac8f848269de4c839b3b9e13123",
+  "previousKnownGoodSha": "938e00d8c985993f69becc8924d3037f18425afc",
+  "journeys": [
+    {
+      "id": "home",
+      "entry": "/community/{groupId}",
+      "setup": "signed-in member of a community with one open goal (500 squats, 120 confirmed), with no contribution of their own",
+      "actions": [
+        "open Home for that community",
+        "press Start moving, then Back",
+        "press Already moved, then Back",
+        "open the Community tab, then return to Home"
+      ],
+      "expected": [
+        "Home opens for the intended community, named in its header",
+        "the community's own open goal renders with its title and open window, and no other community's goal",
+        "the goal reads its exact confirmed total: 120 of 500 squats",
+        "the member's own part is its true zero state beside the shared confirmed total, never a fabricated or merged figure",
+        "Start moving and Already moved are present, labelled, and each opens its own screen for this goal",
+        "Back from each screen, and Community then Home, return to the same community and goal"
+      ],
+      "knownExclusions": [
+        "who moved today, the presence faces and the Members link: wsfCommunityMembers and wsfCommunityActivity are transport-shut on staging",
+        "recording a contribution: the driver opens Start moving and Already moved but never submits, so it creates nothing outside its fixtures",
+        "visual parity with the Lovable reference: accepted under #514, not a hosted-smoke row"
+      ]
+    }
+  ]
+}

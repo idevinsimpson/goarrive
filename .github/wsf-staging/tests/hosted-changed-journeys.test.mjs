@@ -44,8 +44,8 @@ function spy({ health = `ok ${A.slice(0, 7)}`, healthOk = true, fetchThrows = fa
 }
 const byId = (r) => Object.fromEntries(r.results.results.map((x) => [x.journeyId, x]));
 
-await test('the shipped registry holds exactly the reviewed Community and Settings drivers, frozen', () => {
-  assert.deepEqual(Object.keys(registered).sort(), ['community', 'settings']);
+await test('the shipped registry holds exactly the reviewed Community, Home and Settings drivers, frozen', () => {
+  assert.deepEqual(Object.keys(registered).sort(), ['community', 'home', 'settings']);
   assert.ok(Object.isFrozen(registered));
   for (const d of Object.values(registered)) assert.equal(typeof d, 'function');
 });

@@ -1204,7 +1204,9 @@ await test('C3: the gate checks the frozen manifest against the approved candida
 // The accepted drivers, once, against staging as it is served. No build, no
 // deploy; the served marker before any credential; blocking cleanup; a verdict
 // recomputed from the evidence.
-const ACTIVATION_MANIFEST = '.github/wsf-staging/journeys/examples/community-settings-parity-1.json';
+// HOME-HOSTED-JOURNEY-1 (Director #396 5850887055): the activation proves the served Home.
+// The COMMUNITY-SETTINGS example stays in the repository as reviewed history and a test fixture.
+const ACTIVATION_MANIFEST = '.github/wsf-staging/journeys/examples/home-northstar-parity-1.json';
 
 await test('journey-activation mode reaches only gate, config and the activation job', () => {
   assert.deepEqual(reachedJobs('journey-activation'), {
@@ -1295,6 +1297,20 @@ await test('the activation manifest is REQUIRED in the gate, from its non-live p
   }
 });
 
+const { drivers: ACTIVATION_DRIVERS } = await import('../journeys/index.mjs');
+const { checkManifestObject: checkActivationManifest } = await import('../check-milestone-manifest.mjs');
+await test('the activation manifest names exactly the served build, its journeys are exactly the verdict\'s, and each has a registered driver', () => {
+  const m = JSON.parse(fs.readFileSync(path.resolve(ACTIVATION_MANIFEST), 'utf8'));
+  const approved = JSON.parse(fs.readFileSync(path.resolve('.github/wsf-staging/approved-candidate.json'), 'utf8')).approvedAppSha;
+  assert.equal(m.productSha, approved, 'the activation manifest must be for the build staging is approved to serve');
+  const r = checkActivationManifest(m, { approvedSha: approved, drivers: ACTIVATION_DRIVERS });
+  assert.equal(r.status, 'valid', r.lines.join('; '));
+  const listed = /^\s+WSF_ACTIVATION_JOURNEYS: (\S+)$/m.exec(stepBlock('journey-activation', 'Require the activation to have passed'))[1].split(',');
+  assert.deepEqual(listed, m.journeys.map((j) => j.id), 'the verdict must require exactly the manifest\'s journeys');
+  // No activation step still reads another manifest.
+  assert.equal((jobs['journey-activation'].match(/journeys\/examples\/[\w.-]+\.json/g) || []).every((p) => p === ACTIVATION_MANIFEST.replace('.github/wsf-staging/', '')), true);
+});
+
 await test('activation cleanup is blocking, the card follows it, the scan gates the upload, and the verdict reads all three', () => {
   const body = jobs['journey-activation'];
   let previous = -1;
@@ -1316,7 +1332,7 @@ await test('activation cleanup is blocking, the card follows it, the scan gates 
   for (const [k, id] of [['WSF_MARKER_OUTCOME', 'marker'], ['WSF_CLEANUP_OUTCOME', 'cleanup'], ['WSF_SCAN_OUTCOME', 'scan-activation-evidence']]) {
     assert.match(verdict, new RegExp(`^\\s+${k}: \\$\\{\\{ steps\\.${id}\\.outcome \\}\\}$`, 'm'), `${k} must carry steps.${id}.outcome`);
   }
-  assert.match(verdict, /^\s+WSF_ACTIVATION_JOURNEYS: community,settings$/m);
+  assert.match(verdict, /^\s+WSF_ACTIVATION_JOURNEYS: home$/m);
   assert.match(verdict, /run: node ops\/\.github\/wsf-staging\/require-activation\.mjs$/m);
   assert.equal(/continue-on-error/.test(verdict), false);
   // The evidence is this mode's own, never another job's.

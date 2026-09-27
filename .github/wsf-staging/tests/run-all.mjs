@@ -23,6 +23,7 @@ const suites = [
   'hosted-changed-journeys.test.mjs',
   'check-milestone-manifest.test.mjs',
   'changed-journey-drivers.test.mjs',
+  'home-journey.test.mjs',
   'check-served-marker.test.mjs',
   'journey-activation.test.mjs',
   'token-dependency.test.mjs',
