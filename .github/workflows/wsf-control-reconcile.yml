@@ -35,10 +35,16 @@ concurrency:
 
 jobs:
   reconcile:
+    # Only a main ref may reach the main-only environment. PR events still start the workflow, but on their
+    # refs/pull/* ref the writer job is skipped (neutral) rather than refused red at the environment; the next
+    # main-ref event or the schedule re-derives PR state (event payloads are only hints, memo §4.1).
     if: >-
-      github.event_name != 'issue_comment' || (
-        github.event.comment.user.login != 'wsf-control-writer[bot]' &&
-        contains(fromJSON('[365, 394, 395, 396, 434, 497]'), github.event.issue.number)
+      github.ref == 'refs/heads/main' &&
+      (
+        github.event_name != 'issue_comment' || (
+          github.event.comment.user.login != 'wsf-control-writer[bot]' &&
+          contains(fromJSON('[365, 394, 395, 396, 434, 497]'), github.event.issue.number)
+        )
       )
     runs-on: ubuntu-latest
     environment: wsf-control-writer
