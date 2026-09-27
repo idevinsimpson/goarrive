@@ -6,8 +6,9 @@
  *       No network, no git: build the v2 bootstrap from the input file and check it.
  *   node tools/wsf-control/shadow-run.mjs --live
  *       In Actions only, in environment wsf-control-writer: WSF_CONTROL_WRITER_PRIVATE_KEY (the App key,
- *       main-only), WSF_CONTROL_WRITER_APP_ID, GITHUB_REPOSITORY and GITHUB_SHA (the main commit this run
- *       executes). The installation token is minted in process (app-token.mjs) and never printed.
+ *       main-only), WSF_CONTROL_WRITER_APP_ID and GITHUB_REPOSITORY. The running commit is the checkout's
+ *       HEAD (the code that executes), never the event's GITHUB_SHA. The token is minted in process
+ *       (app-token.mjs) and never printed.
  *
  * A live run, every time, in this order (memo §4.1):
  *   1. fetch the protected ref; bootstrap it from bootstrap.v2.json only when it does not exist;
@@ -210,7 +211,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   }
   if (mode !== '--live') { console.error('usage: shadow-run.mjs --dry-run <bootstrap.v2.json> <out dir> | --live'); process.exit(2); }
   // The key arrives only from the main-only environment; the token is minted here, down-scoped, and never printed.
-  const { WSF_CONTROL_WRITER_PRIVATE_KEY: pem, WSF_CONTROL_WRITER_APP_ID: appId, GITHUB_REPOSITORY: repo, GITHUB_SHA: runningSha } = process.env;
+  const { WSF_CONTROL_WRITER_PRIVATE_KEY: pem, WSF_CONTROL_WRITER_APP_ID: appId, GITHUB_REPOSITORY: repo } = process.env;
+  // The commit whose code is executing: the job checks out `main` at run time, which can be newer than the
+  // event's GITHUB_SHA. The writer-code pin and the bootstrap pins must name what actually runs.
+  const head = spawnSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' });
+  const runningSha = head.status === 0 && /^[0-9a-f]{40}$/.test(head.stdout.trim()) ? head.stdout.trim() : null;
   const { installationToken, AppTokenError } = await import('./app-token.mjs');
   let token; let slug;
   try { ({ token, slug } = await installationToken({ appId, privateKeyPem: pem, repo })); } catch (e) {
