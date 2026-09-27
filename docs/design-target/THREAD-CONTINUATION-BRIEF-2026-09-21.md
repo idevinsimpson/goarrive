@@ -4,7 +4,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 
 ## CURRENT — read this first (kept ≤ 1,000 words; updated only on material change; Director #365 `5819944052` §3)
 
-**Stamp: 2026-09-27 00:20Z.** **Precedence:** newer explicit owner decisions first (latest: North-Star Operating System v1 `5841611729`; standing hardening train `5841397324`, which replaces the sprint's expiry; staging cadence `5832907406`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
+**Stamp: 2026-09-27 00:30Z.** **Precedence:** newer explicit owner decisions first (latest: event-driven serialization + technical auto-advance `5851193831`; North-Star Operating System v1 `5841611729`; standing hardening train `5841397324`, which replaces the sprint's expiry; staging cadence `5832907406`; worker wake `5834363586`; Lovable is the living UI/UX North Star, `5819686459`), then Strategic Master v3 and the accepted contracts, then the preserved history below.
 
 **Heads.**
 
@@ -13,7 +13,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 | development `claude/wsf-app-shell` | **`a3127651`** = `6c7f975c` + HOME `9d27fdb5` (#514 `5848589381`); since `938e00d8`: ops docs + index source `1f99d67f` |
 | `main` | **`58d3aff8`** = … + #519 1A + #521 activation fix + #527 Home journey; pin `a3127651` |
 | staging pin | `approvedAppSha` **`938e00d8`**, 49, three social retained (Director ACCEPTED #511 `5846667051`) |
-| served staging | **`a3127651`** (HOME), run 55 `36264562975` from main `396b810c`: 49 → 49, created none, `VERIFY=pass`, marker match, hosted 24 / 0, cleanup COMPLETE 349 / 349 (#365 `5849110597`–`5849113235`); previous known-good **`938e00d8`** (run 53); changed-journey smoke skipped (no manifest) |
+| served staging | **`a3127651`** (HOME), run 55 `36264562975`: 49 → 49, `VERIFY=pass`, hosted 24 / 0, cleanup COMPLETE (#365 `5849110597`–`5849113235`); previous known-good **`938e00d8`** (run 53) |
 
 **Active packets.**
 
@@ -28,7 +28,7 @@ Purpose: durable handoff for starting a fresh ChatGPT thread without relying on 
 | CONTROL-PLANE-ACTIVATION-1 | W3 · #521 `839f18f6` | plan step 1 **ACCEPTED** `5850494365` → **integrated** `fff23048` (`5850506125`) | done; activation run follows step 2 |
 | AUTONOMY-STATE-1A | W3 · #519 `cc78509a` | **ACCEPTED** `5849867467` → integrated main `5d58ed07` | Phases B–E = plan steps 4–7 (PARKED) |
 | W5 lane | #520 audit; #525 **merged** (W5 PASS, Director `5849425770`) | **owner: revoke Browser Use key** |
-| **HOME-NORTHSTAR-PARITY-1** | W9 · #514 → served `a3127651` | step 2 #527 `84010706` **ACCEPTED** `5851080277` → integrated `58d3aff8` (`5851097149`) | **run 56 `36281159269` FAILED** (`home` click timeout; cleanup COMPLETE; card FAILED; `5851163539`); finding → W3 #396 `5851176864`; await Director disposition, no re-dispatch |
+| **HOME-NORTHSTAR-PARITY-1** | W9 · #514 → served `a3127651` | step 2 #527 `84010706` **ACCEPTED** `5851080277` → integrated `58d3aff8` (`5851097149`) | **run 56 `36281159269` FAILED** (`home` click timeout; cleanup COMPLETE; card FAILED; `5851163539`); cause: driver clicked Back, served move sheet has only Close; Director correction #396 `5851190413`, W3 ACK `5851196526` | W3 successor → W7 → auto-advance/accept → one re-activation |
 | **PRIVACY-TOGGLE-STAGING-1** | owner as operator · harness merged `6c2e6b25` | setters SHUT (run 50); no Claude identity can do Operation 2; W7 Check 43 emulator PASS | owner Operation 2 read-back → one `social-privacy` dispatch → seven-row receipt |
 | **HARDENED-MEMBER-JOURNEY-1** | W7 · `a55046f5` | H1–H4 baselined on served; **H3c** (silent failed Home refresh) and **H4b** (no eviction after refusal) fail; H5 waits on Settings | rerun on successors |
 | SOCIAL-DEMO-SEED-MODE | W3 · #484 `4c1ac1d9` | W7 carry confirmed | Director → L0 PLAN → APPLY / VERIFY |
