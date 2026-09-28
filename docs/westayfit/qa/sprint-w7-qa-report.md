@@ -6006,6 +6006,15 @@ The driver I passed would click an absent Back, which is exactly run 56's `locat
 
 ## §74. Step-5 runtime permission successor at `448fb1d1` (#536)
 
+> **Revised: one source-precision finding, not a zero-finding PASS.** Director QA delta #434 `5877363163` (19:54Z) arrived before this verdict posted. It says that, per GitHub's REST reference for `POST /repos/{owner}/{repo}/issues/{issue_number}/comments`, a token needs **Issues write or Pull requests write**, and run 9's token already requested `issues: write`. W7 could not fetch the docs page from this container (the request returned nothing), so the docs point rests on the Director's citation. The finding stands without it: run 9 cannot have shown that PR-read caused the 403 while `issues: write` was also held.
+>
+> **P-F1 (source precision):** the head states an unproven cause in three places:
+> - `app-token.mjs` L7–10: "GitHub refuses an App's comment there without pull requests write";
+> - `tests/shadow.test.mjs` L312–314: "the live run on main failed with HTTP 403 when the token was down-scoped to read";
+> - `CONTROL_STATE.md` L297: "Pull requests write is required because … without it … returns HTTP 403 (the first live run on main failed exactly so)".
+>
+> The permission set itself is correct and matches A+ §2.1 and the owner setup. **Smallest fix:** keep `pull_requests: write`; reword all three to "retained per the accepted A+ §2.1 set; the run-9 403 cause is unproven pending a successful live App run".
+
 - **Handoff:** #434 `5877336804`. PR #536, head `448fb1d17e64538022511465478f966ad52a8d22`: one commit on operational main `08b4533e`, which is also its merge base.
 - **Delta:** exactly 3 files (+13 / −6): `app-token.mjs`, `tests/shadow.test.mjs`, `CONTROL_STATE.md`.
 
@@ -6042,10 +6051,10 @@ The driver I passed would click an absent Back, which is exactly run 56's `locat
 - `CONTROL_STATE.md` now states `pull_requests: write`, the PR-conversation reason, and "never asks for Actions write".
 - It matches the memo and the owner setup, and reopens no architecture.
 
-**Correction I own (Check 71).** In §71 I approved the token as "down-scoped: … pull_requests: read" without checking it against memo §2.1 line 82. That line requires PR write for comments in the PR-conversation inboxes. Run 9 (`36472908254`) then hit the 403. My down-scope check now compares the requested set against the memo's permission table, not only against "no Actions write".
+**Correction I own (Check 71), restated.** In §71 I approved the token down-scope without checking it against memo §2.1 line 82, which lists PR write. I also claimed, in this section's first draft, that this setting is "what run 9 then hit". That claim was the same unsupported causal link as P-F1, and it is withdrawn. The run-9 403 cause is unproven.
 
 **Proof boundary.** This review shows only that the source requests the accepted set. It does **not** prove the run-9 HTTP 403 root cause fixed. That needs the accepted head integrated and a successor live App run that creates or edits the shadow comment and proceeds to bootstrap and reconstruction.
 
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0. Every mutant was reverted.
 
-**Status:** **PASS at `448fb1d1`, zero findings.** W7 did no write, merge, bootstrap, state-branch action, provider, App, ruleset or environment change, and no Step 6.
+**Status:** **ONE SOURCE-PRECISION FINDING (P-F1) at `448fb1d1`.** Every functional item passes (rows 1–6); only the causal wording must change. W7 did no write, merge, bootstrap, state-branch action, provider, App, ruleset or environment change, and no Step 6.
