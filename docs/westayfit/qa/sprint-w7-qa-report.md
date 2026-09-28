@@ -6003,3 +6003,49 @@ The driver I passed would click an absent Back, which is exactly run 56's `locat
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0. The repro was removed and every mutant reverted.
 
 **Status:** **PASS at `3a8c3edd`**, with a precision note (parse before gate) and a hardening survivor (S5). There is no unresolved finding. W7 did no integration, bootstrap, state write or Step 6.
+
+## §74. Step-5 runtime permission successor at `448fb1d1` (#536)
+
+- **Handoff:** #434 `5877336804`. PR #536, head `448fb1d17e64538022511465478f966ad52a8d22`: one commit on operational main `08b4533e`, which is also its merge base.
+- **Delta:** exactly 3 files (+13 / −6): `app-token.mjs`, `tests/shadow.test.mjs`, `CONTROL_STATE.md`.
+
+| # | Item | Result |
+|---|---|---|
+| **1** | **Permission set** | **PASS.** Detail below. |
+| **2** | **Request pinned to a literal** | **PASS.** Detail below. |
+| **3** | **Test sensitivity** | **PASS.** Detail below. |
+| **4** | **Docs vs architecture** | **PASS.** Detail below. |
+| **5** | **Ancestry / delta** | **PASS.** `git merge-base --is-ancestor 08b4533e 448fb1d1` holds; `rev-list --count` = 1; 3 files only. |
+| **6** | **Suites** | **PASS.** Control `run-all` **252 / 252**; staging `run-all` green. |
+
+**Row 1, the permission set.**
+- `STEP5_PERMISSIONS` = `{contents: write, issues: write, pull_requests: write, actions: read, metadata: read}`. There is no `workflows`, `administration` or Actions write.
+- This equals memo §2.1 (line 82): "contents: read & write; issues and pull requests: read & write (conversation comments in the control and worker inboxes, which are PRs); actions: read (step 5)…; metadata: read. Nothing else."
+- It also equals the owner receipt #365 `5857937350` (Pull requests read/write granted, so the request narrows nothing past the installation).
+
+**Row 2, the request.**
+- The minted request still sends `{repositories: [name], permissions: STEP5_PERMISSIONS}`.
+- The test now asserts the POST body against a **literal** `accepted` object, and separately asserts that the constant equals the same literal.
+
+**Row 3, test sensitivity.** W7 mutants:
+- **Killed:**
+  - P1: `pull_requests` reverted to `read`;
+  - P2: `pull_requests` dropped;
+  - P3: `actions: write`;
+  - P4: `workflows: write` added;
+  - P5: `administration: write` added;
+  - P6: the request overrides the constant with PR read;
+  - P7: the `repositories` scope dropped.
+- **Fail-before control P8:** with the old constant-to-constant assertion restored, P1 survives. That is exactly the gap the literal closes.
+
+**Row 4, docs.**
+- `CONTROL_STATE.md` now states `pull_requests: write`, the PR-conversation reason, and "never asks for Actions write".
+- It matches the memo and the owner setup, and reopens no architecture.
+
+**Correction I own (Check 71).** In §71 I approved the token as "down-scoped: … pull_requests: read" without checking it against memo §2.1 line 82. That line requires PR write for comments in the PR-conversation inboxes. Run 9 (`36472908254`) then hit the 403. My down-scope check now compares the requested set against the memo's permission table, not only against "no Actions write".
+
+**Proof boundary.** This review shows only that the source requests the accepted set. It does **not** prove the run-9 HTTP 403 root cause fixed. That needs the accepted head integrated and a successor live App run that creates or edits the shadow comment and proceeds to bootstrap and reconstruction.
+
+- **Gates:** `ts:check` 0; `check-evidence-intact` 0. Every mutant was reverted.
+
+**Status:** **PASS at `448fb1d1`, zero findings.** W7 did no write, merge, bootstrap, state-branch action, provider, App, ruleset or environment change, and no Step 6.
