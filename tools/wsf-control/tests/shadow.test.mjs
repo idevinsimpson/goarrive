@@ -29,7 +29,9 @@ const git = (cwd, ...args) => { const r = spawnSync('git', args, { cwd, encoding
 const RUNNING = sha('9');
 const AUTHOR = { name: 'wsf-control-writer[bot]', email: '5098407+wsf-control-writer[bot]@users.noreply.github.com' };
 const BOT = 'wsf-control-writer[bot]';
-const OWNER = { author: 'idevinsimpson', association: 'OWNER' };
+/** A comment as GitHub returns it when never edited: created_at === updated_at. */
+const POSTED = { createdAt: '2026-09-28T12:00:00Z', updatedAt: '2026-09-28T12:00:00Z' };
+const OWNER = { author: 'idevinsimpson', association: 'OWNER', ...POSTED };
 
 /** The bootstrap input as the reviewed file carries it: one work packet delivered on PR 12. */
 function input() {
@@ -158,7 +160,7 @@ atest('decision intake: one fenced block in the control inbox becomes a MANUAL l
   await run({ remote, gh });
   const block = (o) => `L0 decision.\n\n\`\`\`wsf-control-decision\n${JSON.stringify(o)}\n\`\`\``;
   const comments = [
-    { id: 901, author: 'idevinsimpson', association: 'OWNER', body: block({ type: 'review', packet: 'ALPHA', reviewers: ['W7'] }) },
+    { id: 901, ...OWNER, body: block({ type: 'review', packet: 'ALPHA', reviewers: ['W7'] }) },
     { id: 902, author: BOT, body: block({ type: 'finding', packet: 'ALPHA' }) },
   ];
   const r = await run({ remote, gh, controlInboxComments: comments });
@@ -178,12 +180,12 @@ atest('Check 71 F1: a valid decision block from any account but the owner is ref
   const contractsBefore = pins();
   assert.notEqual(contractsBefore, undefined);
   const block = (o) => `\`\`\`wsf-control-decision\n${JSON.stringify(o)}\n\`\`\``;
-  const contracts = [{ id: 'writer', path: 'tools/wsf-control', sha: sha('7') }];
+  const contracts = [{ id: 'writer', path: 'tools/wsf-control', commit: sha('7') }, { id: 'writer-workflow', path: '.github/workflows/wsf-control-reconcile.yml', commit: sha('7') }];
   const comments = [
-    { id: 911, author: 'external-user', association: 'NONE', body: block({ type: 'review', packet: 'ALPHA', reviewers: ['W7'] }) },
-    { id: 912, author: 'external-user', association: 'NONE', body: block({ type: 'set-contracts', contracts }) },
-    { id: 913, author: 'external-user', association: 'OWNER', body: block({ type: 'review', packet: 'ALPHA', reviewers: ['W7'] }) },
-    { id: 914, author: DECISION_OWNER, association: 'COLLABORATOR', body: block({ type: 'set-contracts', contracts }) },
+    { id: 911, author: 'external-user', association: 'NONE', ...POSTED, body: block({ type: 'review', packet: 'ALPHA', reviewers: ['W7'] }) },
+    { id: 912, author: 'external-user', association: 'NONE', ...POSTED, body: block({ type: 'set-contracts', contracts }) },
+    { id: 913, author: 'external-user', association: 'OWNER', ...POSTED, body: block({ type: 'review', packet: 'ALPHA', reviewers: ['W7'] }) },
+    { id: 914, author: DECISION_OWNER, association: 'COLLABORATOR', ...POSTED, body: block({ type: 'set-contracts', contracts }) },
   ];
   const r = await run({ remote, gh, controlInboxComments: comments });
   assert.equal(r.outcome, 'unchanged'); assert.deepEqual(r.appended, []);
@@ -193,22 +195,60 @@ atest('Check 71 F1: a valid decision block from any account but the owner is ref
   assert.ok(formatReport(r).includes('INTAKE_REFUSED comment=912 :: author "external-user" is not the repository owner'));
   assert.equal(remoteEvents(remote), before, 'no ledger mutation');
   assert.equal(pins(), contractsBefore, 'the writer and workflow pins did not move');
+  // The fixture itself is schema-valid: from the owner, unedited, the same set-contracts block is appended through the
+  // writer (append.mjs validates it) and moves the pins, so above only the author gate refused it.
+  const valid = await run({ remote, gh, controlInboxComments: [{ id: 915, ...OWNER, body: block({ type: 'set-contracts', contracts }) }] });
+  assert.deepEqual(valid.refused, [], 'the attack fixture must be a valid set-contracts');
+  assert.deepEqual(valid.appended, ['set-contracts:MANUAL:comment-915']);
+  assert.notEqual(pins(), contractsBefore);
+});
+
+atest('Check 71 F1-R2a: an edited owner comment never decides; review and set-contracts are refused, the ledger and pins do not move; the unedited control is recorded', async () => {
+  const remote = bareRemote(); const gh = fakeGh();
+  await run({ remote, gh });
+  const before = remoteEvents(remote);
+  const pins = () => JSON.stringify(reduce(`${remoteEvents(remote)}\n`).contracts);
+  const contractsBefore = pins();
+  const block = (o) => `\`\`\`wsf-control-decision\n${JSON.stringify(o)}\n\`\`\``;
+  const contracts = [{ id: 'writer', path: 'tools/wsf-control', commit: sha('7') }, { id: 'writer-workflow', path: '.github/workflows/wsf-control-reconcile.yml', commit: sha('7') }];
+  // What a write collaborator's edit of an owner comment looks like: author and association unchanged, updated_at moved.
+  const EDITED = { ...OWNER, updatedAt: '2026-09-28T12:05:00Z' };
+  const attack = [
+    { id: 921, ...EDITED, body: block({ type: 'review', packet: 'ALPHA', reviewers: ['W7'] }) },
+    { id: 922, ...EDITED, body: block({ type: 'set-contracts', contracts }) },
+    { id: 923, ...OWNER, createdAt: null, body: block({ type: 'review', packet: 'ALPHA', reviewers: ['W7'] }) },
+    { id: 924, author: DECISION_OWNER, association: 'OWNER', body: block({ type: 'set-contracts', contracts }) },
+  ];
+  const r = await run({ remote, gh, controlInboxComments: attack });
+  assert.equal(r.outcome, 'unchanged'); assert.deepEqual(r.appended, []);
+  assert.deepEqual(r.intakeRefused.map((x) => x.commentId), [921, 922, 923, 924]);
+  assert.match(r.intakeRefused[0].reason, /^edited-comment: /);
+  assert.match(r.intakeRefused[1].reason, /^edited-comment: /);
+  assert.match(r.intakeRefused[2].reason, /^comment-timestamps-missing: /);
+  assert.match(r.intakeRefused[3].reason, /^comment-timestamps-missing: /);
+  assert.ok(formatReport(r).includes('INTAKE_REFUSED comment=922 :: edited-comment: '));
+  assert.equal(remoteEvents(remote), before, 'no ledger mutation');
+  assert.equal(pins(), contractsBefore, 'the writer and workflow pins did not move');
+  // Control: the same two blocks, never edited, from the owner, are recorded and the pins move.
+  const ok = await run({ remote, gh, controlInboxComments: [{ id: 931, ...OWNER, body: attack[0].body }, { id: 932, ...OWNER, body: attack[1].body }] });
+  assert.deepEqual(ok.appended, ['review:MANUAL:comment-931', 'set-contracts:MANUAL:comment-932']);
+  assert.notEqual(pins(), contractsBefore);
 });
 
 atest('Check 71 F1: the comment-reading path carries each author\'s login and author_association, and a missing one as null', async () => {
   const raw = [
-    { id: 1, body: 'a', user: { login: 'idevinsimpson' }, author_association: 'OWNER' },
-    { id: 2, body: 'b', user: { login: 'external-user' }, author_association: 'NONE' },
+    { id: 1, body: 'a', user: { login: 'idevinsimpson' }, author_association: 'OWNER', created_at: '2026-09-28T12:00:00Z', updated_at: '2026-09-28T12:00:00Z' },
+    { id: 2, body: 'b', user: { login: 'external-user' }, author_association: 'NONE', created_at: '2026-09-28T12:00:00Z', updated_at: '2026-09-28T12:07:00Z' },
     { id: 3, body: 'c', user: null },
   ];
   const fetchImpl = async (url) => ({ ok: true, status: 200, json: async () => (url.includes('/issues/comments/') ? raw[0] : raw) });
   const gh = gitHubClient({ token: 't', repo: REPO, fetchImpl });
   assert.deepEqual(await gh.recentComments(365), [
-    { id: 1, body: 'a', author: 'idevinsimpson', association: 'OWNER' },
-    { id: 2, body: 'b', author: 'external-user', association: 'NONE' },
-    { id: 3, body: 'c', author: null, association: null },
+    { id: 1, body: 'a', author: 'idevinsimpson', association: 'OWNER', createdAt: '2026-09-28T12:00:00Z', updatedAt: '2026-09-28T12:00:00Z' },
+    { id: 2, body: 'b', author: 'external-user', association: 'NONE', createdAt: '2026-09-28T12:00:00Z', updatedAt: '2026-09-28T12:07:00Z' },
+    { id: 3, body: 'c', author: null, association: null, createdAt: null, updatedAt: null },
   ]);
-  assert.deepEqual(await gh.comment(1), { id: 1, body: 'a', author: 'idevinsimpson', association: 'OWNER' });
+  assert.deepEqual(await gh.comment(1), { id: 1, body: 'a', author: 'idevinsimpson', association: 'OWNER', createdAt: '2026-09-28T12:00:00Z', updatedAt: '2026-09-28T12:00:00Z' });
 });
 
 for (const [n, f] of asyncTests) await runAsync(n, f);
@@ -336,10 +376,32 @@ test('Check 71 F1: only login idevinsimpson with author_association OWNER decide
     ...['COLLABORATOR', 'MEMBER', 'CONTRIBUTOR', 'FIRST_TIME_CONTRIBUTOR', 'FIRST_TIMER', 'NONE', 'owner', '', null].map((association) => ({ author: DECISION_OWNER, association })),
     { author: DECISION_OWNER }, { author: 'someone-else', association: 'OWNER' }, { author: 'IdevinSimpson', association: 'OWNER' }, { association: 'OWNER' }, {},
   ];
-  const r = decisionIntake(s, bad.map((w, i) => ({ id: 10 + i, ...w, body: d })));
+  // Every case carries valid, unedited timestamps, so the author gate alone refuses it (F1-R2a must not mask F1).
+  const r = decisionIntake(s, bad.map((w, i) => ({ id: 10 + i, ...POSTED, ...w, body: d })));
   assert.equal(r.events.length, 0);
   assert.equal(r.refused.length, bad.length);
+  assert.ok(r.refused.every((x) => /is not the repository owner|is not OWNER/.test(x.reason)), 'each refusal is the author gate, not the timestamps');
   assert.match(r.refused.find((x) => x.commentId === 10 + bad.findIndex((w) => !('association' in w))).reason, /author_association null is not OWNER/);
+});
+
+test('Check 71 F1-R2a: a decision needs both timestamps, present and identical; anything else fails closed', () => {
+  const s = reduce(appendEvent('', { ...boot2() }, { expectHead: '0'.repeat(64) }).eventsText);
+  const d = `\`\`\`wsf-control-decision\n${JSON.stringify({ type: 'review', packet: 'ALPHA', reviewers: ['W7'] })}\n\`\`\``;
+  const who = { author: DECISION_OWNER, association: 'OWNER' };
+  assert.equal(decisionIntake(s, [{ id: 1, ...who, ...POSTED, body: d }]).events.length, 1);
+  const T = '2026-09-28T12:00:00Z';
+  const cases = [
+    [{}, /^comment-timestamps-missing: /], [{ createdAt: T }, /^comment-timestamps-missing: /], [{ updatedAt: T }, /^comment-timestamps-missing: /],
+    [{ createdAt: null, updatedAt: null }, /^comment-timestamps-missing: /], [{ createdAt: '', updatedAt: '' }, /^comment-timestamps-missing: /],
+    [{ createdAt: 0, updatedAt: 0 }, /^comment-timestamps-missing: /],
+    [{ createdAt: T, updatedAt: '2026-09-28T12:00:01Z' }, /^edited-comment: /], [{ createdAt: T, updatedAt: '2026-09-29T00:00:00Z' }, /^edited-comment: /],
+  ];
+  const r = decisionIntake(s, cases.map(([ts], i) => ({ id: 10 + i, ...who, ...ts, body: d })));
+  assert.equal(r.events.length, 0);
+  assert.equal(r.refused.length, cases.length);
+  cases.forEach(([, re], i) => assert.match(r.refused[i].reason, re, `case ${i}`));
+  // The author gate still runs first: a non-owner's edited comment is refused as a non-owner.
+  assert.match(decisionIntake(s, [{ id: 99, author: 'goarrive-maia', association: 'COLLABORATOR', createdAt: T, updatedAt: '2026-09-28T13:00:00Z', body: d }]).refused[0].reason, /is not the repository owner/);
 });
 
 /** The job condition evaluated for a context (GitHub's expression subset this `if` uses: ==, !=, &&, ||, contains, fromJSON). */
@@ -365,6 +427,15 @@ test('Check 71 F1: the workflow starts the writer job for an owner comment only;
   for (const e of ['schedule', 'workflow_dispatch', 'workflow_run']) assert.equal(jobIf(y, { ref: main, event_name: e, event: {} }), true, `${e} on main is unchanged`);
   assert.equal(jobIf(y, { ref: 'refs/pull/532/merge', event_name: 'pull_request', event: {} }), false);
   assert.equal(jobIf(y, { ref: main, event_name: 'pull_request', event: {} }), true, 'a pull_request event on main is unchanged');
+});
+
+test('Check 71 F1-R2a: an edited owner comment starts the writer job only when the owner is the editor', () => {
+  const y = fs.readFileSync(fileURLToPath(new URL('../../../.github/workflows/wsf-control-reconcile.yml', import.meta.url)), 'utf8');
+  const ev = (action, sender) => ({ ref: 'refs/heads/main', event_name: 'issue_comment', event: { action, sender: sender === undefined ? undefined : { login: sender }, issue: { number: 365 }, comment: { user: { login: 'idevinsimpson' }, author_association: 'OWNER' } } });
+  assert.equal(jobIf(y, ev('created', 'idevinsimpson')), true);
+  assert.equal(jobIf(y, ev('edited', 'idevinsimpson')), true, 'the owner editing their own comment may start the job (intake still refuses the edited block)');
+  for (const sender of ['goarrive-maia', 'external-user', 'wsf-control-writer[bot]', null, undefined]) assert.equal(jobIf(y, ev('edited', sender)), false, `an edit by ${sender} must not start the job`);
+  assert.match(y, /\(github\.event\.action != 'edited' \|\| github\.event\.sender\.login == 'idevinsimpson'\) &&/);
 });
 
 done('shadow');

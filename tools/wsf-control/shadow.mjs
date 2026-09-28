@@ -15,8 +15,9 @@
  *    authority, so a block cannot claim a class, a rule or another source. Only the
  *    repository owner's account may decide: the comment's author login must be exactly
  *    DECISION_OWNER and its author_association exactly OWNER (anything else, missing
- *    included, is refused). Which role inside that account wrote it is not proven
- *    (accepted residual (a)); the class says so.
+ *    included, is refused), and the comment must never have been edited (created_at ==
+ *    updated_at, both present), because an edit keeps the author. Which role inside that
+ *    account wrote it is not proven (accepted residual (a)); the class says so.
  *
  * Nothing here routes, reviews, accepts, releases or wakes: those rules are Step 6.
  * Every returned line is still appended through append.mjs, which reduces and
@@ -34,6 +35,17 @@ export const DECISION_OWNER = 'idevinsimpson';
 export function decisionAuthorProblem(c) {
   if (c.author !== DECISION_OWNER) return `author ${JSON.stringify(c.author ?? null)} is not the repository owner; only ${DECISION_OWNER} decides`;
   if (c.association !== 'OWNER') return `author_association ${JSON.stringify(c.association ?? null)} is not OWNER`;
+  return null;
+}
+/**
+ * Why a comment's body may not decide, or null when it may (Check 71 F1-R2a). An edit keeps the original author and
+ * author_association, and anyone with write access may edit another account's comment, so a block counts only from a
+ * comment never edited since it was posted: created_at and updated_at present and identical. Fail closed otherwise.
+ */
+export function decisionEditProblem(c) {
+  const stamp = (v) => typeof v === 'string' && v.length > 0;
+  if (!stamp(c.createdAt) || !stamp(c.updatedAt)) return `comment-timestamps-missing: created_at ${JSON.stringify(c.createdAt ?? null)} / updated_at ${JSON.stringify(c.updatedAt ?? null)}; a decision needs both`;
+  if (c.createdAt !== c.updatedAt) return `edited-comment: updated ${c.updatedAt} after created ${c.createdAt}; an edited comment never decides, post a new one`;
   return null;
 }
 /** Decisions the writer records from the control inbox. Bootstrap, upgrades and its own surface are never taken from a comment. */
@@ -82,8 +94,9 @@ export function decisionBlock(body) {
 }
 
 /**
- * Decision lines from control-inbox comments: [{ id, body, author, association }] (the comment id, its exact body, the
- * author's login and GitHub's author_association). A block from anyone but the owner is refused before it is read. Returns
+ * Decision lines from control-inbox comments: [{ id, body, author, association, createdAt, updatedAt }] (the comment id,
+ * its exact body, the author's login, GitHub's author_association and the comment's created_at / updated_at). A block from
+ * anyone but the owner, or from an edited comment, is refused before it is read. Returns
  * { events, refused: [{ commentId, reason }] }. A refused block is reported (INTAKE_REFUSED) and never recorded.
  * Only envelope-free fields are taken from the block: type and that type's fields.
  */
@@ -96,6 +109,8 @@ export function decisionIntake(state, comments) {
     if (!blk) continue;
     const who = decisionAuthorProblem(c);
     if (who) { refused.push({ commentId: c.id, reason: who }); continue; }
+    const edit = decisionEditProblem(c);
+    if (edit) { refused.push({ commentId: c.id, reason: edit }); continue; }
     if (blk.error) { refused.push({ commentId: c.id, reason: blk.error }); continue; }
     const d = blk.value;
     if (!d || typeof d !== 'object' || Array.isArray(d)) { refused.push({ commentId: c.id, reason: 'the decision must be a JSON object' }); continue; }

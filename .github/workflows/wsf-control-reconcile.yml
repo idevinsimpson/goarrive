@@ -40,6 +40,9 @@ jobs:
     # main-ref event or the schedule re-derives PR state (event payloads are only hints, memo §4.1).
     # A comment starts the job only when the repository owner wrote it (Check 71 F1): on a public repository
     # no other account's comment reaches the environment. The writer re-checks the same boundary per decision.
+    # An edit keeps the comment's author, so an `edited` event starts the job only when the owner is the editor
+    # (F1-R2a). The writer still refuses every decision from an edited comment; this only keeps a non-owner edit
+    # from launching the protected job.
     if: >-
       github.ref == 'refs/heads/main' &&
       (
@@ -47,6 +50,7 @@ jobs:
           github.event.comment.user.login != 'wsf-control-writer[bot]' &&
           github.event.comment.user.login == 'idevinsimpson' &&
           github.event.comment.author_association == 'OWNER' &&
+          (github.event.action != 'edited' || github.event.sender.login == 'idevinsimpson') &&
           contains(fromJSON('[365, 394, 395, 396, 434, 497]'), github.event.issue.number)
         )
       )
