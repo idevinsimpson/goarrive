@@ -4,10 +4,12 @@
  * reads WSF_CONTROL_WRITER_PRIVATE_KEY from the main-only environment
  * wsf-control-writer, signs a 9-minute App JWT with node:crypto, and exchanges it
  * for an installation token that is DOWN-SCOPED to this one repository and to
- * the Step-5 permissions (contents write for the state branch; issues and pull
- * requests write for the shadow comment, because the control inbox is a PR
- * conversation and GitHub refuses an App's comment there without pull requests
- * write; actions read). Actions write is never
+ * the Step-5 permissions: contents write for the state branch; issues and pull
+ * requests write, which the accepted A+ Step-5 contract grants for the PR-backed
+ * control and worker inbox conversations; actions read. Main's reconcile run 9
+ * returned HTTP 403 at shadow-comment creation while this token was below that
+ * contract (pull requests read); causal closure needs a successor live App run.
+ * Actions write is never
  * requested: the App holds none, and Step 5 dispatches nothing.
  *
  * Neither the key nor the token is ever printed, returned in an error, or passed
