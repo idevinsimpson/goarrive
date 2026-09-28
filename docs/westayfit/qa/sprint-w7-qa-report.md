@@ -5878,7 +5878,9 @@ The driver I passed would click an absent Back, which is exactly run 56's `locat
 - W7 ran the author/association reproduction (6 hostile cases refused and ledger unchanged; owner control recorded), the 249 controls, staging, and 10 focused mutants (all killed).
 - The review stalled before a verdict was posted and was reassigned to another reviewer at #434 `5860066792`. Per that reassignment, W7 posted no verdict. The interim results above are history only.
 
-## §72. Step 5 F1-R2a focused recheck at `2beabc94`
+## §72. Step 5 F1-R2a focused recheck at `2beabc94`: WITHDRAWN (superseded before verdict)
+
+> **Withdrawn.** Director routing correction #434 `5876839562` (19:20:14Z) superseded `2beabc94` before verdict. W3's commit was pushed after the implementation ball moved to W4. The correction reached W7 only after the PASS below had been posted (19:21Z), so they crossed. The verdict comment #532 `5876856231` was edited to say WITHDRAWN. The measurements below are history only; the review moved to W4's sibling `3a8c3edd` (§73).
 
 - **Handoff:** #434 `5876763230`. PR #532, head `2beabc94a285cdd2f531821b4451139860d37926`, parent `274ef3e3`.
 - **Delta:** exactly the 5 named files (+83 / −19), with no app, staging or Step-6 surface.
@@ -5938,3 +5940,66 @@ The driver I passed would click an absent Back, which is exactly run 56's `locat
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0. The repro script was removed and every mutant reverted.
 
 **Status:** **PASS at `2beabc94`.** No unresolved finding on the F1 / F1-R2a surface. W7 merged, bootstrapped, wrote no state branch and dispatched nothing.
+
+## §73. Check 71F-R2b: F1-R2a closure at W4's `3a8c3edd`
+
+- **Handoff:** #434 `5876839562`. PR #535, head `3a8c3edde3f09365798e2804d9bb8c5f9e4fc125`. Its one parent is `274ef3e3`; it is a sibling of the withdrawn `2beabc94`.
+- **Method:** a detached worktree; the shadow harness with a real bare remote; the state read back from the ref.
+
+| # | Item | Result |
+|---|---|---|
+| **1** | **Lineage / scope** | **PASS.** One commit on `274ef3e3`. Exactly the 5 control files (+111 / −21): the workflow, `CONTROL_STATE.md`, `github.mjs`, `shadow.mjs` and `shadow.test.mjs`. No product, app, staging, deploy or Step-6 surface. |
+| **2** | **Edited-comment authority** | **PASS, with one precision note.** Detail below. |
+| **3** | **Positive control** | **PASS.** Detail below. |
+| **4** | **Workflow mirror** | **PASS.** Detail below. |
+| **5** | **Independent attacks** | **PASS.** Six attack cases plus two carried gates, all refused. Detail below. |
+| **6** | **Mutants / suites** | **PASS.** Detail below. |
+
+**Row 2, edited-comment authority.**
+- The owner gate is unchanged: login `idevinsimpson` and association `OWNER`.
+- A missing or empty `created_at` / `updated_at` refuses as `comment-timestamps-missing`.
+- `created_at !== updated_at` refuses as `edited-comment`.
+- Both checks come before the block's error, type, fields and append, so no review, accept, integrate, transfer, withdraw or `set-contracts` repin can occur.
+- An edited comment carrying malformed JSON reports `edited-comment`, not the JSON error.
+- **Precision note:** `decisionBlock(body)` (fence match plus `JSON.parse`) still runs before the author and edit checks. The refusal therefore comes before any field of the block is *used*, not before it is *parsed*. The parse is local and has no side effects, so this is not a finding. The handoff's "before the decision block is parsed" is literally inaccurate for this head (and for `274ef3e3`).
+
+**Row 3, positive control.**
+- An unedited `idevinsimpson`/`OWNER` comment records `review:MANUAL` and `set-contracts:MANUAL` (field `commit`).
+- Read back from `state.json`, the writer and writer-workflow pins move from the bootstrap `999999…` to `ffffff…`: a real repin.
+
+**Row 4, workflow mirror.**
+- The only functional workflow change is `(github.event.action != 'edited' || github.event.sender.login == 'idevinsimpson') &&`, ANDed inside the issue-comment branch.
+- The suite's own `if:` evaluator shows that an edit by a collaborator (`goarrive-maia`) does not start the job.
+- Everything else is byte-identical to `274ef3e3`: main-ref guard, author/OWNER gate, bot skip, inbox list, environment, permissions, pins and secret placement.
+
+**Row 5, independent attacks.**
+- The six handoff cases and the carried author and association mismatch cases were each refused, with the ledger bytes and pins unchanged: `999999…` throughout.
+  - an edited owner `review`;
+  - an edited owner `set-contracts`;
+  - missing `created_at`;
+  - missing `updated_at`;
+  - empty timestamps;
+  - an edited comment with malformed JSON;
+  - `mallory`/OWNER;
+  - owner/COLLABORATOR.
+- The non-owner editor event is covered at the workflow level (row 4 and S6/S7).
+
+**Row 6, mutants and suites.**
+- Controls: **252 / 252**. Staging `run-all`: green.
+- **W7 mutants: 12 of 13 killed.**
+  - S1: edit check removed.
+  - S2: edited comment accepted.
+  - S3: missing-timestamp fallback.
+  - S4: only `updatedAt` required.
+  - S6: workflow edited clause removed.
+  - S7: edited clause weakened to any sender.
+  - S8: `updatedAt` unmapped.
+  - S9: owner control inverted.
+  - Carried: C1 author gate removed, C2 forced push, C3 writer pin removed, C4 main-ref guard removed.
+- **Survivor S5 (hardening, not blocking):** moving the edit check after the block-error and type checks survives the suite. Nothing pins the order, though every mutant order still refuses before append. A test with an edited comment carrying malformed JSON, asserting `edited-comment`, would pin it.
+
+**Carried invariants.** App-auth writer, fast-forward CAS, writer-code pin, main-ref guard: unchanged, and the carried mutants are still killed. Hardening items G11, G12 and V5 (§71) remain optional and open.
+
+- **Gates:** `ts:check` 0; `check-evidence-intact` 0. The repro was removed and every mutant reverted.
+
+**Status:** **PASS at `3a8c3edd`**, with a precision note (parse before gate) and a hardening survivor (S5). There is no unresolved finding. W7 did no integration, bootstrap, state write or Step 6.
