@@ -5871,3 +5871,70 @@ The driver I passed would click an absent Back, which is exactly run 56's `locat
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0. Every mutant was reverted, and the reproduction script was removed from the worktree.
 
 **Status:** **ONE FINDING (F1) at `ab741bb9`.** It is not a PASS; integration should wait for the F1 correction. W7 merged, dispatched, bootstrapped and deployed nothing.
+
+## §71F. Check 71F on `274ef3e3`: reassigned, no verdict delivered
+
+- ACKed at #434 `5859361258`.
+- W7 ran the author/association reproduction (6 hostile cases refused and ledger unchanged; owner control recorded), the 249 controls, staging, and 10 focused mutants (all killed).
+- The review stalled before a verdict was posted and was reassigned to another reviewer at #434 `5860066792`. Per that reassignment, W7 posted no verdict. The interim results above are history only.
+
+## §72. Step 5 F1-R2a focused recheck at `2beabc94`
+
+- **Handoff:** #434 `5876763230`. PR #532, head `2beabc94a285cdd2f531821b4451139860d37926`, parent `274ef3e3`.
+- **Delta:** exactly the 5 named files (+83 / −19), with no app, staging or Step-6 surface.
+- **Method:** a detached worktree; the shadow suite's harness with a real bare remote; no network writes.
+
+| # | Item | Result |
+|---|---|---|
+| **1** | **Edited owner comments cannot decide** | **PASS.** Detail below. |
+| **2** | **Missing timestamps fail closed** | **PASS.** Detail below. |
+| **3** | **Unedited owner control** | **PASS.** Detail below. |
+| **4** | **Workflow sender guard** | **PASS.** Detail below. |
+| **5** | **Regression / security controls** | **PASS.** All six handoff cases reproduced independently (rows 1–3). |
+| **6** | **Suites / mutants** | **PASS.** Detail below. |
+| **7** | **Carry spot-check** | **PASS.** Detail below. |
+
+**Row 1, edited owner comments.**
+- `github.mjs` now carries `createdAt` and `updatedAt` on `comment()` and `recentComments()`.
+- `decisionIntake` applies `decisionAuthorProblem(c) ?? decisionEditProblem(c)` before the block is read into an event.
+- An owner-authored (`idevinsimpson`/`OWNER`) comment with `updatedAt` ≠ `createdAt`, carrying a `review` block or a `set-contracts` repin, was refused as `edited-comment`. `appended []`, and the ledger bytes were unchanged.
+
+**Row 2, missing timestamps.**
+- Missing `createdAt`, missing `updatedAt`, and empty-string timestamps were each refused as `comment-timestamps-missing`, with the ledger unchanged.
+- No fallback treats an unknown timestamp as unedited.
+
+**Row 3, the unedited owner control.**
+- With `idevinsimpson`/`OWNER` and `createdAt === updatedAt`, a `review` records `review:MANUAL:comment-901`.
+- A `set-contracts` using schema field `commit` records `set-contracts:MANUAL:comment-901`.
+- Author mismatch (`mallory`/OWNER) and association mismatch (owner/`COLLABORATOR`) are still refused, with the ledger unchanged.
+
+**Row 4, the workflow sender guard.**
+- The only functional workflow change is `github.event.sender.login == 'idevinsimpson' &&`, ANDed inside the issue-comment branch.
+- For an `edited` event the sender is the editor, so a collaborator's edit does not start the protected job.
+- Everything else is byte-identical to `274ef3e3`: triggers, main-ref guard, bot skip, owner/OWNER gate, inbox list, environment, permissions, pins and secret placement.
+- Scheduled and other runs still read every comment, and there the writer-side edit check applies.
+
+**Row 6, suites and mutants.**
+- Control `run-all`: **251 / 251**. Staging `run-all`: "all suites passed".
+- **W7 mutants, 12 / 12 killed:**
+  - R1: edit check not called;
+  - R2: edited comment accepted;
+  - R3: missing-timestamp fallback;
+  - R4: only `createdAt` required;
+  - R5: sender guard removed;
+  - R6: sender guard ORed;
+  - R7: `updatedAt` not mapped in `recentComments`;
+  - R8: owner control broken (check inverted);
+  - carried R9: author gate removed;
+  - carried R10: forced push;
+  - carried R11: writer pin removed;
+  - carried R12: main-ref guard removed.
+
+**Row 7, carry spot-check.**
+- The App-auth writer boundary, fast-forward CAS, writer-code pin, no admin-bypass assumption, and the absence of Step-6 routing or wakes and of any live bootstrap are unchanged by this delta. The carried mutants above are still killed.
+- Earlier hardening notes G11, G12 and V5 (§71) remain optional and open.
+
+- **Note, not a finding:** the owner's own later edit also permanently disqualifies that comment. This is intended ("post a new comment") and fails closed.
+- **Gates:** `ts:check` 0; `check-evidence-intact` 0. The repro script was removed and every mutant reverted.
+
+**Status:** **PASS at `2beabc94`.** No unresolved finding on the F1 / F1-R2a surface. W7 merged, bootstrapped, wrote no state branch and dispatched nothing.
