@@ -11,7 +11,11 @@
  *       (app-token.mjs) and never printed.
  *
  * A live run, every time, in this order (memo §4.1):
- *   1. fetch the protected ref; bootstrap it from bootstrap.v2.json only when it does not exist;
+ *   1. fetch the protected ref; bootstrap it from bootstrap.v2.json only when it does not exist. A bootstrap is
+ *      refused when its input is stale (asOf older than BOOTSTRAP_MAX_AGE_MS, or in the future), and the
+ *      operational-main SHA is DERIVED (the commit that runs), never imported. On a recovery ref (-2, -3, …)
+ *      the predecessor must exist, check, and hold nothing after its bootstrap but the App's own
+ *      set-shadow-surface line; the new bootstrap names it in `supersedes` and reuses its shadow comment;
  *   2. check the ledger (anything but valid stops: CONTROL_STATE=invalid, no write);
  *   3. refuse to append when this writer's code is not the pinned version (writer-code pin, §4.4);
  *   4. build the snapshot ITSELF from GitHub, reconcile against the SHADOW surface;
@@ -36,23 +40,71 @@ import { surfaceStatus } from './reconcile.mjs';
 import { GENESIS, LATEST_SCHEMA, WRITER_APP, isTerminal } from './schema.mjs';
 import { RULES } from './rules.mjs';
 import { SHADOW_PLACEHOLDER, decisionIntake, derivedFacts, shadowSurfaceEvent } from './shadow.mjs';
-import { STATE_REF, checkoutState, commitState, pushFastForward, readStateFile, redact, tokenGitEnv } from './gitstate.mjs';
+import { STATE_REF, checkoutState, commitState, predecessorRef, pushFastForward, readStateFile, redact, tokenGitEnv } from './gitstate.mjs';
 
 export const MAX_ATTEMPTS = 3;
 /** The contracts whose pinned version must equal the running writer (memo §4.4). */
 export const WRITER_CONTRACTS = Object.freeze(['writer', 'writer-workflow']);
 
-/** The v2 bootstrap line from the reviewed input file, contracts pinned at the commit the writer runs from. */
-export function bootstrapEvent(input, runningSha) {
+/**
+ * How old a bootstrap input may be when a run imports it. The input states program CURRENT at its `asOf`; an
+ * input older than this was reviewed against a program that has since moved (run 50 imported a 28-hour-old
+ * snapshot), so it is refused, not imported: the integrator refreshes asOf and the packets in a reviewed change.
+ */
+export const BOOTSTRAP_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+/** Clock skew tolerated for an asOf slightly ahead of the runner. */
+export const BOOTSTRAP_MAX_SKEW_MS = 5 * 60 * 1000;
+
+/**
+ * The v2 bootstrap line from the reviewed input file, contracts pinned at the commit the writer runs from.
+ * Fails closed on a stale or future input. The operational-main SHA is the running commit (the job checks out
+ * `main`), so the input must not carry one: a SHA written into a file on main is stale once that file merges.
+ */
+export function bootstrapEvent(input, runningSha, { now = Date.now(), supersedes = null } = {}) {
   if (!input || typeof input !== 'object' || !input.bootstrap || !Number.isInteger(input.authorizedBy)) throw new Refused('bootstrap.v2.json must carry authorizedBy and bootstrap');
   const b = input.bootstrap;
+  const asOf = Date.parse(b.asOf);
+  if (!Number.isFinite(asOf)) throw new Refused('bootstrap-stale: the input carries no parseable asOf');
+  if (asOf > now + BOOTSTRAP_MAX_SKEW_MS) throw new Refused(`bootstrap-stale: asOf ${b.asOf} is in the future`);
+  if (now - asOf > BOOTSTRAP_MAX_AGE_MS) throw new Refused(`bootstrap-stale: asOf ${b.asOf} is older than ${BOOTSTRAP_MAX_AGE_MS / 3600000} hours; refresh asOf and the packets to program CURRENT in a reviewed change`);
+  if (b.canonical && Object.hasOwn(b.canonical, 'operationalMain')) throw new Refused('bootstrap input: canonical.operationalMain is derived from the running commit; the input must not carry it');
   const contracts = (input.contractPaths ?? []).map((c) => ({ id: c.id, path: c.path, commit: runningSha }));
   return {
     schema: LATEST_SCHEMA, type: 'bootstrap', actor: WRITER_APP,
     source: { kind: 'comment', id: input.authorizedBy, repo: b.repository },
     authority: { class: 'manual', rule: 'MANUAL', evidence: [{ kind: 'comment', id: input.authorizedBy }] },
-    ...b, ...(contracts.length ? { contracts } : {}),
+    ...b,
+    ...(b.canonical ? { canonical: { ...b.canonical, operationalMain: runningSha } } : {}),
+    ...(contracts.length ? { contracts } : {}),
+    ...(supersedes ? { supersedes } : {}),
   };
+}
+
+/**
+ * Why a predecessor ledger may NOT be superseded, or null when it may. Recovery is for a wrong bootstrap only
+ * (CONTROL_STATE.md "Recovering a wrong bootstrap"): the ledger must check, and after its bootstrap hold nothing
+ * but the App's own set-shadow-surface line. Any program transition (a fact, a decision, a finding) means the
+ * ledger has history, and errors are then corrected by later lines, never by abandoning it.
+ */
+export function recoveryProblem(eventsText, stateText) {
+  if (!eventsText) return 'the predecessor ref holds no ledger';
+  const checked = checkTexts(eventsText, stateText);
+  if (!checked.ok) return `the predecessor ledger does not check: ${checked.problems[0]}`;
+  const events = eventsText.trimEnd().split('\n').map((l) => JSON.parse(l));
+  if (events[0].type !== 'bootstrap') return 'the predecessor ledger does not start with a bootstrap';
+  const later = events.slice(1).filter((e) => !(e.type === 'set-shadow-surface' && e.authority?.rule === 'R-SHADOW-SURFACE'));
+  if (later.length) return `the predecessor ledger has ${later.length} post-bootstrap program line(s) (first: seq ${later[0].seq} ${later[0].type}); it has history and is corrected by later lines, never superseded`;
+  return null;
+}
+
+/** The predecessor's heads and CURRENT renderings, for the shadow comment it rendered (null unless it is exactly the superseded ledger). */
+function predecessorSurfaceHistory(remote, workdir, sup, gitEnv) {
+  const dir = path.join(workdir, 'predecessor-surface');
+  const sha = checkoutState(remote, dir, { env: gitEnv, ref: sup.ref });
+  if (sha !== sup.commit) return null;
+  const text = readStateFile(dir, 'events.jsonl');
+  if (!text || reduce(text).ledgerHead !== sup.ledgerHead) return null;
+  return { heads: ledgerHeads(text), renders: renderHashes(text) };
 }
 
 /** Append lines one by one; a refused line is reported and skipped, never forced. Returns the new texts and a report. */
@@ -110,7 +162,7 @@ export async function buildSnapshot(state, gh, { shadowBody = undefined } = {}) 
  * One run. Everything with a side effect is injected: `gh` (GitHub), `remote` + `gitEnv` (the state ref),
  * `author` (the App bot identity), `runningSha`, `sameTree`. Returns a closed report.
  */
-export async function runShadow({ gh, remote, gitEnv = {}, author, runningSha, sameTree, bootstrapInput, workdir, controlInboxComments, ref = STATE_REF, botLogin }) {
+export async function runShadow({ gh, remote, gitEnv = {}, author, runningSha, sameTree, bootstrapInput, workdir, controlInboxComments, ref = STATE_REF, botLogin, now = Date.now() }) {
   const report = { outcome: null, attempts: 0, bootstrapped: false, appended: [], refused: [], intakeRefused: [], surface: null, head: null, exception: null };
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     report.attempts = attempt;
@@ -118,8 +170,27 @@ export async function runShadow({ gh, remote, gitEnv = {}, author, runningSha, s
     const remoteSha = checkoutState(remote, dir, { env: gitEnv, ref });
     let eventsText = readStateFile(dir, 'events.jsonl');
     const lines = [];
+    let inherited = null; // the predecessor's shadow comment, reused instead of creating a competing surface
     if (!remoteSha) {
-      lines.push({ event: bootstrapEvent(bootstrapInput, runningSha), label: 'bootstrap' });
+      let supersedes = null;
+      const pred = predecessorRef(ref);
+      if (pred) {
+        const pdir = path.join(workdir, `attempt-${attempt}-predecessor`);
+        const predSha = checkoutState(remote, pdir, { env: gitEnv, ref: pred });
+        if (!predSha) return { ...report, outcome: 'refused', exception: `recovery-refused: ${ref} supersedes ${pred}, which does not exist` };
+        const predEvents = readStateFile(pdir, 'events.jsonl');
+        const why = recoveryProblem(predEvents, readStateFile(pdir, 'state.json'));
+        if (why) return { ...report, outcome: 'refused', exception: `recovery-refused: ${pred}: ${why}` };
+        const predState = reduce(predEvents);
+        supersedes = { ref: pred, commit: predSha, ledgerHead: predState.ledgerHead };
+        inherited = predState.surfaces?.shadow?.commentId ?? null;
+      }
+      try {
+        lines.push({ event: bootstrapEvent(bootstrapInput, runningSha, { now, supersedes }), label: 'bootstrap' });
+      } catch (e) {
+        if (!(e instanceof Refused)) throw e;
+        return { ...report, outcome: 'refused', exception: `bootstrap refused: ${e.message}` };
+      }
     } else {
       const checked = checkTexts(eventsText, readStateFile(dir, 'state.json'));
       if (!checked.ok) return { ...report, outcome: 'refused', exception: `CONTROL_STATE=invalid: ${checked.problems[0]}` };
@@ -135,7 +206,7 @@ export async function runShadow({ gh, remote, gitEnv = {}, author, runningSha, s
     const more = [];
     if (!state.surfaces.shadow) {
       const mine = (controlInboxComments ?? []).find((c) => c.author === botLogin && (c.body.startsWith(SHADOW_PLACEHOLDER.split('\n')[0]) || c.body.startsWith('<!-- wsf-control ledgerHead=')));
-      const commentId = mine ? mine.id : (await gh.createComment(state.surfaces.current.pr, SHADOW_PLACEHOLDER)).id;
+      const commentId = inherited ?? (mine ? mine.id : (await gh.createComment(state.surfaces.current.pr, SHADOW_PLACEHOLDER)).id);
       more.push({ event: shadowSurfaceEvent(state, commentId), label: `shadow-comment-${commentId}` });
     }
     const r1 = appendAll(eventsText, more);
@@ -170,7 +241,15 @@ export async function runShadow({ gh, remote, gitEnv = {}, author, runningSha, s
       const body = (await gh.comment(state.surfaces.shadow.commentId))?.body ?? null;
       const rendered = renderCurrent(state);
       const isPlaceholder = body !== null && body.startsWith(SHADOW_PLACEHOLDER.split('\n')[0]);
-      const sfc = isPlaceholder ? { status: 'stale' } : surfaceStatus(state, { currentSurface: surfaceEvidence(state.surfaces.shadow.commentId, body) }, { heads: ledgerHeads(nextText), renders: renderHashes(nextText), surface: 'shadow' });
+      const evidence = surfaceEvidence(state.surfaces.shadow.commentId, body);
+      const known = { heads: ledgerHeads(nextText), renders: renderHashes(nextText) };
+      // A recovery ledger renders into the comment its predecessor rendered: that ledger's heads, and only its, are
+      // this surface's earlier heads (stale, edited in place). Any other foreign head stays an exception.
+      if (!isPlaceholder && state.supersedes && evidence.markerHead && !known.heads.includes(evidence.markerHead)) {
+        const prior = predecessorSurfaceHistory(remote, workdir, state.supersedes, gitEnv);
+        if (prior) { known.heads = [...prior.heads, ...known.heads]; known.renders = { ...prior.renders, ...known.renders }; }
+      }
+      const sfc = isPlaceholder ? { status: 'stale' } : surfaceStatus(state, { currentSurface: evidence }, { ...known, surface: 'shadow' });
       if (sfc.status === 'exception') report.surface = `exception: ${sfc.detail}`;
       else if (body === rendered) report.surface = 'ok';
       else { await gh.editComment(state.surfaces.shadow.commentId, rendered); report.surface = 'edited'; }
@@ -199,7 +278,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
     // No network and no git: the bootstrap line and its checks, exactly as a first live run would write them.
     const input = JSON.parse(fs.readFileSync(a, 'utf8'));
     const sha = spawnSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim();
-    const { eventsText, state, report } = appendAll('', [{ event: bootstrapEvent(input, sha), label: 'bootstrap' }]);
+    let event;
+    try { event = bootstrapEvent(input, sha); } catch (e) {
+      if (!(e instanceof Refused)) throw e;
+      console.log(`DRY_RUN=refused :: ${e.message}`); process.exit(1);
+    }
+    const { eventsText, state, report } = appendAll('', [{ event, label: 'bootstrap' }]);
     if (report.refused.length) { console.log(`DRY_RUN=refused :: ${report.refused[0].reason}`); process.exit(1); }
     fs.mkdirSync(b, { recursive: true });
     fs.writeFileSync(path.join(b, 'events.jsonl'), eventsText);

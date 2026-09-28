@@ -1,8 +1,10 @@
 /**
  * The state branch as git sees it (AUTONOMY-STATE-1B; memo §2.3).
  *
- * The ref is `refs/heads/wsf-control-state` (the ruleset covers wsf-control-state*,
- * so the documented recovery ref wsf-control-state-2 is protected too). Writes are
+ * The ref is `refs/heads/wsf-control-state-2`: the documented recovery ref that
+ * supersedes `wsf-control-state`, whose first bootstrap imported a stale input (run 50).
+ * The old ref is never written again and stays as the audit record. The ruleset covers
+ * wsf-control-state*, so every recovery ref is protected from its first push. Writes are
  * FAST-FORWARD ONLY: a plain push, never forced, so a concurrent writer's push
  * makes ours a non-fast-forward that git refuses (ref compare-and-swap). The
  * caller then re-reads and re-derives; ledgers are never merged.
@@ -15,7 +17,21 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
-export const STATE_REF = 'wsf-control-state';
+export const STATE_REF = 'wsf-control-state-2';
+/** wsf-control-state, then wsf-control-state-2, -3, …: the only names a state ref may take. */
+export const STATE_REF_RE = /^wsf-control-state(?:-([2-9]|[1-9][0-9]+))?$/;
+
+/**
+ * The ref a recovery ref supersedes, DERIVED from its name, never configured: -2 supersedes the base ref and
+ * -N supersedes -(N-1). The base ref supersedes nothing. A ref outside the naming scheme is refused.
+ */
+export function predecessorRef(ref) {
+  const m = STATE_REF_RE.exec(ref);
+  if (!m) throw new Error(`refused: ${JSON.stringify(ref)} is not a control-state ref`);
+  if (!m[1]) return null;
+  const n = Number(m[1]);
+  return n === 2 ? 'wsf-control-state' : `wsf-control-state-${n - 1}`;
+}
 /** The files a state commit holds; nothing else is ever written to the branch. */
 export const STATE_FILES = Object.freeze(['events.jsonl', 'state.json', 'CURRENT.md']);
 

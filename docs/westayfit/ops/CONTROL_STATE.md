@@ -331,7 +331,7 @@ The rules are listed once, in `tools/wsf-control/rules.mjs`, with the event type
 ### Step 5 is shadow reconcile only
 
 Each run:
-1. bootstraps the ref once from `docs/westayfit/ops/control/bootstrap.v2.json`, only when the ref does not exist;
+1. bootstraps the ref once from `docs/westayfit/ops/control/bootstrap.v2.json`, only when the ref does not exist and only from a fresh input (see "Bootstrap freshness" below);
 2. checks the ledger;
 3. checks its own pin;
 4. builds its snapshot itself;
@@ -357,11 +357,22 @@ The block names the event type and that type's fields only. The writer supplies 
 - `freshness-view.mjs`: `STAGING_FRESHNESS=FRESH|DEPLOYING|BEHIND|BLOCKED|UNKNOWN`, and a separate `JOURNEY_VERIFICATION` per journey-activation packet.
 - `autonomy-view.mjs`: counts by authority class and rule, and the Step-5 exit count.
 
+### Bootstrap freshness
+
+The input states program CURRENT at its `asOf`, and review takes time. Run 50 imported an input 28 hours old: operational main `ace92b0b`, and Step 5 in `ACKED` with W3 holding the ball, while the human CURRENT already said otherwise. A bootstrap therefore fails closed on a stale input.
+- `asOf` must be no more than **6 hours** (`BOOTSTRAP_MAX_AGE_MS`) before the run, and not in the future (5 minutes of clock skew are allowed). Otherwise the run reports `bootstrap refused: bootstrap-stale: …` and writes nothing.
+- `canonical.operationalMain` is **derived**: it is the commit the writer runs from, which is `main` at run time. A SHA written into a file on `main` is stale as soon as that file merges, so the input must not carry one, and a bootstrap that does is refused.
+- Everything else in the input (packets, phases, workers, staging, development SHA) is a Director decision about program CURRENT and cannot be derived. The integrator refreshes `asOf` and those fields to equal the human CURRENT, in a reviewed change that lands within the window. If review runs past the window, the input is refreshed again; it is never imported stale.
+
 ### Recovering a wrong bootstrap
 
 A bootstrap is never rewritten, and the ruleset forbids force pushes.
-- **Before any post-bootstrap line:** a wrong bootstrap is recovered by bootstrapping a **new** protected ref, `wsf-control-state-2`, from a corrected, reviewed input. The ruleset already covers it. The writer is pointed at it by a reviewed change to `STATE_REF` in `gitstate.mjs` with a matching `set-contracts` pin, and the old ref stays as the audit record.
-- **After events exist:** errors are corrected by later lines.
+- **Before any post-bootstrap program line:** a wrong bootstrap is recovered on a **new** protected ref. The writer's ref is `STATE_REF` in `gitstate.mjs`, now `wsf-control-state-2`. Its predecessor is derived from its name, never configured: `-2` supersedes `wsf-control-state`, and `-N` supersedes `-(N-1)`. The ruleset covers `wsf-control-state*`, so the new ref is App-only from its first push. When the new ref does not exist, the writer:
+  1. reads the predecessor and refuses (`recovery-refused`, no write) unless it exists, checks, and holds nothing after its bootstrap but the App's own `set-shadow-surface` line;
+  2. bootstraps the new ref from a fresh input. The bootstrap line names what it supersedes, as `supersedes: { ref, commit, ledgerHead }`. That is audit only: nothing is replayed, and no transition is fabricated;
+  3. records the predecessor's shadow comment as its own `set-shadow-surface`, so it creates no competing CURRENT surface. It edits that comment in place, because the comment carries a head of exactly the superseded ledger. A head of any other ledger stays an exception.
+- The predecessor is never written again and stays unchanged as the audit record.
+- **After program events exist:** a ledger with any post-bootstrap program line (a fact, a decision, a finding) has history. It is never superseded, and its errors are corrected by later lines.
 
 ### Contracts copied in (memo §10.2)
 

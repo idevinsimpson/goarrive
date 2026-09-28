@@ -189,6 +189,8 @@ const T = {
     exactKeys(v.controlInbox, ['pr']) && T.int(v.controlInbox.pr) &&
     exactKeys(v.current, ['pr', 'commentId']) && T.int(v.current.pr) && T.int(v.current.commentId) &&
     (v.shadow === undefined || (exactKeys(v.shadow, ['pr', 'commentId']) && T.int(v.shadow.pr) && T.int(v.shadow.commentId))),
+  /** A recovery bootstrap names the ledger it supersedes: the old ref, its commit and its ledger head (audit, never replayed). */
+  supersedes: (v) => exactKeys(v, ['ref', 'commit', 'ledgerHead']) && typeof v.ref === 'string' && /^wsf-control-state(?:-([2-9]|[1-9][0-9]+))?$/.test(v.ref) && T.sha(v.commit) && typeof v.ledgerHead === 'string' && RE.hash.test(v.ledgerHead),
   canonical: (v) => exactKeys(v, ['developmentBranch', 'developmentSha', 'operationalMain']) && T.branch(v.developmentBranch) && T.sha(v.developmentSha) && T.sha(v.operationalMain),
   staging: (v) => exactKeys(v, ['servedSha', 'runId', 'runNumber', 'rollbackSha'], ['pinPr']) && T.sha(v.servedSha) && T.int(v.runId) && T.int(v.runNumber) && T.sha(v.rollbackSha) && (v.pinPr === undefined || T.int(v.pinPr)),
   workersMap: (v) => isObj(v) && Object.entries(v).every(([w, x]) => RE.worker.test(w) && exactKeys(x, ['inbox'], ['classes']) && T.int(x.inbox) && (x.classes === undefined || T.classes(x.classes))),
@@ -245,7 +247,7 @@ export function importedPacketProblems(id, p) {
 
 /** [required fields, optional fields] per event type. */
 export const EVENT_FIELDS = Object.freeze({
-  'bootstrap': [{ repository: T.repo, asOf: T.instant, surfaces: T.surfaces, workers: T.workersMap, queue: T.queueMap, packets: isObj }, { canonical: T.canonical, staging: T.staging, criticalPath: T.packet, contracts: T.contracts }],
+  'bootstrap': [{ repository: T.repo, asOf: T.instant, surfaces: T.surfaces, workers: T.workersMap, queue: T.queueMap, packets: isObj }, { canonical: T.canonical, staging: T.staging, criticalPath: T.packet, contracts: T.contracts, supersedes: T.supersedes }],
   'set-canonical': [{ developmentBranch: T.branch, developmentSha: T.sha, operationalMain: T.sha }, {}],
   'set-staging': [{ servedSha: T.sha, runId: T.int, runNumber: T.int, rollbackSha: T.sha }, { pinPr: T.int }],
   'set-surfaces': [{ surfaces: T.surfaces }, {}],
@@ -282,7 +284,7 @@ export const EVENT_FIELDS = Object.freeze({
 });
 /** Event types, and fields, that exist only in schema v2. A v1 line carrying one is malformed. */
 export const V2_ONLY = Object.freeze(['schema-upgrade', 'set-contracts', 'set-review-policy', 'apply-finding', 'set-shadow-surface']);
-const V2_FIELDS = Object.freeze({ bootstrap: ['contracts'], 'register-worker': ['classes'], queue: ['review'], finding: ['pending'] });
+const V2_FIELDS = Object.freeze({ bootstrap: ['contracts', 'supersedes'], 'register-worker': ['classes'], queue: ['review'], finding: ['pending'] });
 
 /**
  * Which kinds of GitHub object may stand behind each event type.

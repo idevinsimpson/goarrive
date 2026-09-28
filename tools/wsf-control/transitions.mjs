@@ -139,6 +139,8 @@ function bootstrap(s, e) {
   s.surfaces = clone(e.surfaces);
   s.canonical = e.canonical ? clone(e.canonical) : null;
   s.staging = e.staging ? { pinPr: null, ...clone(e.staging) } : null;
+  // Only a recovery bootstrap carries it, so every other state serializes byte for byte as before.
+  if (e.supersedes) s.supersedes = clone(e.supersedes);
   for (const [w, x] of Object.entries(e.workers)) { s.workers[w] = x.classes ? { inbox: x.inbox, classes: [...x.classes] } : { inbox: x.inbox }; s.queue[w] = []; }
   for (const [id, x] of Object.entries(e.packets)) importPacket(s, id, x, e.source);
   for (const [w, q] of Object.entries(e.queue)) {
