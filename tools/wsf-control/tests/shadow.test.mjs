@@ -301,7 +301,7 @@ test('App JWT: RS256, issuer = App id, nine-minute window from a minute ago, ver
 });
 
 const asyncUnits = [];
-asyncUnits.push(['the installation token is requested DOWN-SCOPED: this repository only, Step-5 permissions, never Actions write', async () => {
+asyncUnits.push(['the installation token is requested DOWN-SCOPED: this repository only, exactly the accepted Step-5 permissions (pull requests write for the PR-conversation shadow comment), never Actions write', async () => {
   const seen = [];
   const fetchImpl = async (url, init) => { seen.push({ url, body: init.body ? JSON.parse(init.body) : null });
     const json = url.endsWith('/app') ? { slug: 'wsf-control-writer' } : url.endsWith('/installation') ? { id: 77 } : { token: 'ghs_test', expires_at: '2026-09-27T19:00:00Z' };
@@ -309,7 +309,12 @@ asyncUnits.push(['the installation token is requested DOWN-SCOPED: this reposito
   const r = await installationToken({ appId: 5098407, privateKeyPem: privateKey, repo: 'idevinsimpson/goarrive', fetchImpl });
   assert.equal(r.slug, 'wsf-control-writer');
   const post = seen.find((x) => x.url.includes('/access_tokens'));
-  assert.deepEqual(post.body, { repositories: ['goarrive'], permissions: STEP5_PERMISSIONS });
+  // Pinned as a literal, not by the constant itself: the accepted Step-5 writer boundary. Pull requests write is kept
+  // because the accepted A+ contract requires it; run 9's HTTP 403 (while the token held read) has an unproven cause
+  // pending a successor live App run. Nothing wider, and never Actions write.
+  const accepted = { contents: 'write', issues: 'write', pull_requests: 'write', actions: 'read', metadata: 'read' };
+  assert.deepEqual(post.body, { repositories: ['goarrive'], permissions: accepted });
+  assert.deepEqual({ ...STEP5_PERMISSIONS }, accepted);
   assert.equal(STEP5_PERMISSIONS.actions, 'read');
 }]);
 asyncUnits.push(['a missing or invalid key fails closed with a message that carries no key material', async () => {
