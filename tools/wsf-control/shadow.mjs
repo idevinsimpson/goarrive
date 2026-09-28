@@ -15,7 +15,10 @@
  *    authority, so a block cannot claim a class, a rule or another source. Only the
  *    repository owner's account may decide: the comment's author login must be exactly
  *    DECISION_OWNER and its author_association exactly OWNER (anything else, missing
- *    included, is refused). Which role inside that account wrote it is not proven
+ *    included, is refused), and the comment must be unedited (created_at === updated_at):
+ *    a write collaborator can edit an owner comment while GitHub keeps the owner as its
+ *    author, so an edited comment never decides (F1-R2a). To change a decision, the owner
+ *    posts a new comment. Which role inside that account wrote it is not proven
  *    (accepted residual (a)); the class says so.
  *
  * Nothing here routes, reviews, accepts, releases or wakes: those rules are Step 6.
@@ -34,6 +37,16 @@ export const DECISION_OWNER = 'idevinsimpson';
 export function decisionAuthorProblem(c) {
   if (c.author !== DECISION_OWNER) return `author ${JSON.stringify(c.author ?? null)} is not the repository owner; only ${DECISION_OWNER} decides`;
   if (c.association !== 'OWNER') return `author_association ${JSON.stringify(c.association ?? null)} is not OWNER`;
+  return null;
+}
+/**
+ * Why a comment's text may not be trusted as the owner's, or null when it may (F1-R2a). GitHub keeps the original
+ * author on an edit by anyone with write access, so only an unedited comment decides. Stable reasons, fail closed.
+ */
+export function decisionEditProblem(c) {
+  const ts = (v) => typeof v === 'string' && v.length > 0;
+  if (!ts(c.createdAt) || !ts(c.updatedAt)) return 'comment-timestamps-missing: created_at and updated_at are both required to prove the comment is unedited';
+  if (c.createdAt !== c.updatedAt) return `edited-comment: updated ${c.updatedAt} after created ${c.createdAt}; an edited comment never decides, post a new comment`;
   return null;
 }
 /** Decisions the writer records from the control inbox. Bootstrap, upgrades and its own surface are never taken from a comment. */
@@ -82,8 +95,9 @@ export function decisionBlock(body) {
 }
 
 /**
- * Decision lines from control-inbox comments: [{ id, body, author, association }] (the comment id, its exact body, the
- * author's login and GitHub's author_association). A block from anyone but the owner is refused before it is read. Returns
+ * Decision lines from control-inbox comments: [{ id, body, author, association, createdAt, updatedAt }] (the comment
+ * id, its exact body, the author's login, GitHub's author_association and the comment's created_at and updated_at).
+ * A block from anyone but the owner, or in an edited comment, is refused before it is read. Returns
  * { events, refused: [{ commentId, reason }] }. A refused block is reported (INTAKE_REFUSED) and never recorded.
  * Only envelope-free fields are taken from the block: type and that type's fields.
  */
@@ -94,7 +108,7 @@ export function decisionIntake(state, comments) {
   for (const c of [...comments].sort((a, b) => a.id - b.id)) {
     const blk = decisionBlock(c.body);
     if (!blk) continue;
-    const who = decisionAuthorProblem(c);
+    const who = decisionAuthorProblem(c) ?? decisionEditProblem(c);
     if (who) { refused.push({ commentId: c.id, reason: who }); continue; }
     if (blk.error) { refused.push({ commentId: c.id, reason: blk.error }); continue; }
     const d = blk.value;

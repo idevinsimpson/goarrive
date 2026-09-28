@@ -39,7 +39,9 @@ jobs:
     # refs/pull/* ref the writer job is skipped (neutral) rather than refused red at the environment; the next
     # main-ref event or the schedule re-derives PR state (event payloads are only hints, memo §4.1).
     # A comment starts the job only when the repository owner wrote it (Check 71 F1): on a public repository
-    # no other account's comment reaches the environment. The writer re-checks the same boundary per decision.
+    # no other account's comment reaches the environment. The sender must be the owner too, so an `edited` event
+    # from a collaborator editing an owner comment does not start the job (F1-R2a). This only reduces exposure:
+    # the writer re-checks the author per decision and refuses any edited comment outright, whatever run reads it.
     if: >-
       github.ref == 'refs/heads/main' &&
       (
@@ -47,6 +49,7 @@ jobs:
           github.event.comment.user.login != 'wsf-control-writer[bot]' &&
           github.event.comment.user.login == 'idevinsimpson' &&
           github.event.comment.author_association == 'OWNER' &&
+          github.event.sender.login == 'idevinsimpson' &&
           contains(fromJSON('[365, 394, 395, 396, 434, 497]'), github.event.issue.number)
         )
       )

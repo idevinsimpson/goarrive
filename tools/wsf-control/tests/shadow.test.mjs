@@ -12,7 +12,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { MAX_ATTEMPTS, bootstrapEvent, formatReport, runShadow, writerPinProblem } from '../shadow-run.mjs';
-import { DECISION_OWNER, decisionBlock, decisionIntake, derivedFacts, SHADOW_PLACEHOLDER } from '../shadow.mjs';
+import { DECISION_OWNER, decisionBlock, decisionEditProblem, decisionIntake, derivedFacts, SHADOW_PLACEHOLDER } from '../shadow.mjs';
 import { redact, tokenGitEnv, STATE_REF } from '../gitstate.mjs';
 import { gitHubClient } from '../github.mjs';
 import { STEP5_PERMISSIONS, appJwt, installationToken, AppTokenError } from '../app-token.mjs';
@@ -29,7 +29,11 @@ const git = (cwd, ...args) => { const r = spawnSync('git', args, { cwd, encoding
 const RUNNING = sha('9');
 const AUTHOR = { name: 'wsf-control-writer[bot]', email: '5098407+wsf-control-writer[bot]@users.noreply.github.com' };
 const BOT = 'wsf-control-writer[bot]';
-const OWNER = { author: 'idevinsimpson', association: 'OWNER' };
+const POSTED = '2026-09-28T10:00:00Z';
+/** An unedited comment by the repository owner: the only comment whose decision block is recorded. */
+const OWNER = { author: 'idevinsimpson', association: 'OWNER', createdAt: POSTED, updatedAt: POSTED };
+/** A schema-valid set-contracts payload (id, path, commit): the attack fixtures must fail on authority, never on shape. */
+const ATTACK_CONTRACTS = [{ id: 'writer', path: 'tools/wsf-control', commit: sha('7') }];
 
 /** The bootstrap input as the reviewed file carries it: one work packet delivered on PR 12. */
 function input() {
@@ -158,7 +162,7 @@ atest('decision intake: one fenced block in the control inbox becomes a MANUAL l
   await run({ remote, gh });
   const block = (o) => `L0 decision.\n\n\`\`\`wsf-control-decision\n${JSON.stringify(o)}\n\`\`\``;
   const comments = [
-    { id: 901, author: 'idevinsimpson', association: 'OWNER', body: block({ type: 'review', packet: 'ALPHA', reviewers: ['W7'] }) },
+    { id: 901, ...OWNER, body: block({ type: 'review', packet: 'ALPHA', reviewers: ['W7'] }) },
     { id: 902, author: BOT, body: block({ type: 'finding', packet: 'ALPHA' }) },
   ];
   const r = await run({ remote, gh, controlInboxComments: comments });
@@ -178,7 +182,7 @@ atest('Check 71 F1: a valid decision block from any account but the owner is ref
   const contractsBefore = pins();
   assert.notEqual(contractsBefore, undefined);
   const block = (o) => `\`\`\`wsf-control-decision\n${JSON.stringify(o)}\n\`\`\``;
-  const contracts = [{ id: 'writer', path: 'tools/wsf-control', sha: sha('7') }];
+  const contracts = ATTACK_CONTRACTS;
   const comments = [
     { id: 911, author: 'external-user', association: 'NONE', body: block({ type: 'review', packet: 'ALPHA', reviewers: ['W7'] }) },
     { id: 912, author: 'external-user', association: 'NONE', body: block({ type: 'set-contracts', contracts }) },
@@ -195,20 +199,48 @@ atest('Check 71 F1: a valid decision block from any account but the owner is ref
   assert.equal(pins(), contractsBefore, 'the writer and workflow pins did not move');
 });
 
-atest('Check 71 F1: the comment-reading path carries each author\'s login and author_association, and a missing one as null', async () => {
+atest('Check 71 F1: the comment-reading path carries each author\'s login, author_association, created_at and updated_at, and a missing one as null', async () => {
   const raw = [
-    { id: 1, body: 'a', user: { login: 'idevinsimpson' }, author_association: 'OWNER' },
+    { id: 1, body: 'a', user: { login: 'idevinsimpson' }, author_association: 'OWNER', created_at: POSTED, updated_at: '2026-09-28T11:00:00Z' },
     { id: 2, body: 'b', user: { login: 'external-user' }, author_association: 'NONE' },
     { id: 3, body: 'c', user: null },
   ];
   const fetchImpl = async (url) => ({ ok: true, status: 200, json: async () => (url.includes('/issues/comments/') ? raw[0] : raw) });
   const gh = gitHubClient({ token: 't', repo: REPO, fetchImpl });
   assert.deepEqual(await gh.recentComments(365), [
-    { id: 1, body: 'a', author: 'idevinsimpson', association: 'OWNER' },
-    { id: 2, body: 'b', author: 'external-user', association: 'NONE' },
-    { id: 3, body: 'c', author: null, association: null },
+    { id: 1, body: 'a', author: 'idevinsimpson', association: 'OWNER', createdAt: POSTED, updatedAt: '2026-09-28T11:00:00Z' },
+    { id: 2, body: 'b', author: 'external-user', association: 'NONE', createdAt: null, updatedAt: null },
+    { id: 3, body: 'c', author: null, association: null, createdAt: null, updatedAt: null },
   ]);
-  assert.deepEqual(await gh.comment(1), { id: 1, body: 'a', author: 'idevinsimpson', association: 'OWNER' });
+  assert.deepEqual(await gh.comment(1), { id: 1, body: 'a', author: 'idevinsimpson', association: 'OWNER', createdAt: POSTED, updatedAt: '2026-09-28T11:00:00Z' });
+});
+
+atest('F1-R2a: an edited owner comment never decides (ledger bytes and pins unchanged); missing timestamps refuse; the same block posted unedited is recorded', async () => {
+  const remote = bareRemote(); const gh = fakeGh();
+  await run({ remote, gh });
+  const pins = () => JSON.stringify(reduce(`${remoteEvents(remote)}\n`).contracts);
+  const before = remoteEvents(remote); const pinsBefore = pins();
+  const block = (o) => `\`\`\`wsf-control-decision\n${JSON.stringify(o)}\n\`\`\``;
+  const review = block({ type: 'review', packet: 'ALPHA', reviewers: ['W7'] });
+  const repin = block({ type: 'set-contracts', contracts: ATTACK_CONTRACTS });
+  const edited = { ...OWNER, updatedAt: '2026-09-28T12:34:56Z' };
+  const bad = [
+    { id: 921, ...edited, body: review },
+    { id: 922, ...edited, body: repin },
+    { id: 923, ...OWNER, createdAt: null, body: repin },
+    { id: 924, ...OWNER, updatedAt: undefined, body: repin },
+  ];
+  const r = await run({ remote, gh, controlInboxComments: bad });
+  assert.equal(r.outcome, 'unchanged'); assert.deepEqual(r.appended, []);
+  assert.deepEqual(r.intakeRefused.map((x) => x.reason.split(':')[0]), ['edited-comment', 'edited-comment', 'comment-timestamps-missing', 'comment-timestamps-missing']);
+  assert.ok(formatReport(r).includes('INTAKE_REFUSED comment=922 :: edited-comment: updated 2026-09-28T12:34:56Z after created'));
+  assert.equal(remoteEvents(remote), before, 'no ledger mutation'); assert.equal(pins(), pinsBefore, 'no repin');
+  // Control: the same blocks from the same owner, posted as NEW unedited comments, are recorded, so the edit gate
+  // (not the author gate, and not a malformed payload) is what refused them above.
+  const ok = await run({ remote, gh, controlInboxComments: [...bad, { id: 931, ...OWNER, body: review }, { id: 932, ...OWNER, body: repin }] });
+  assert.deepEqual(ok.appended, ['review:MANUAL:comment-931', 'set-contracts:MANUAL:comment-932']);
+  assert.equal(pins(), JSON.stringify(ATTACK_CONTRACTS), 'the unedited owner set-contracts is schema-valid and repins');
+  assert.equal(ok.intakeRefused.length, 4, 'the edited and timestamp-less comments stay refused on every run');
 });
 
 for (const [n, f] of asyncTests) await runAsync(n, f);
@@ -342,6 +374,14 @@ test('Check 71 F1: only login idevinsimpson with author_association OWNER decide
   assert.match(r.refused.find((x) => x.commentId === 10 + bad.findIndex((w) => !('association' in w))).reason, /author_association null is not OWNER/);
 });
 
+test('F1-R2a: decisionEditProblem fails closed on any missing, empty or differing timestamp', () => {
+  assert.equal(decisionEditProblem(OWNER), null);
+  for (const c of [{}, { createdAt: POSTED }, { updatedAt: POSTED }, { createdAt: '', updatedAt: '' }, { createdAt: null, updatedAt: null }, { createdAt: 1, updatedAt: 1 }]) {
+    assert.match(decisionEditProblem(c), /^comment-timestamps-missing:/);
+  }
+  assert.match(decisionEditProblem({ createdAt: POSTED, updatedAt: '2026-09-28T10:00:01Z' }), /^edited-comment:/);
+});
+
 /** The job condition evaluated for a context (GitHub's expression subset this `if` uses: ==, !=, &&, ||, contains, fromJSON). */
 function jobIf(yml, ctx) {
   const job = yml.slice(yml.indexOf('\n  reconcile:\n'));
@@ -355,12 +395,19 @@ function jobIf(yml, ctx) {
 test('Check 71 F1: the workflow starts the writer job for an owner comment only; a non-owner is refused even with a valid block', () => {
   const y = fs.readFileSync(fileURLToPath(new URL('../../../.github/workflows/wsf-control-reconcile.yml', import.meta.url)), 'utf8');
   const main = 'refs/heads/main';
-  const comment = (login, association, issue = 365, ref = main) => ({ ref, event_name: 'issue_comment', event: { issue: { number: issue }, comment: { user: { login }, author_association: association, body: '```wsf-control-decision\n{"type":"review","packet":"ALPHA","reviewers":["W7"]}\n```' } } });
+  const comment = (login, association, issue = 365, ref = main, sender = login, action = 'created') => ({ ref, event_name: 'issue_comment', event: { action, sender: { login: sender }, issue: { number: issue }, comment: { user: { login }, author_association: association, body: '```wsf-control-decision\n{"type":"review","packet":"ALPHA","reviewers":["W7"]}\n```' } } });
   assert.equal(jobIf(y, comment('idevinsimpson', 'OWNER')), true);
   for (const [login, assoc] of [['external-user', 'NONE'], ['external-user', 'OWNER'], ['idevinsimpson', 'COLLABORATOR'], ['idevinsimpson', 'MEMBER'], ['idevinsimpson', 'CONTRIBUTOR'], ['idevinsimpson', undefined], ['wsf-control-writer[bot]', 'NONE'], [undefined, undefined]]) {
     assert.equal(jobIf(y, comment(login, assoc)), false, `${login}/${assoc} must not start the job`);
   }
   assert.equal(jobIf(y, comment('idevinsimpson', 'OWNER', 532)), false, 'outside the six control inboxes');
+  assert.equal(jobIf(y, comment('idevinsimpson', 'OWNER', 365, main, 'idevinsimpson', 'edited')), true, 'the owner editing their own comment still starts a (read-only for that comment) run');
+  for (const sender of ['write-collaborator', 'external-user', 'wsf-control-writer[bot]', null]) {
+    assert.equal(jobIf(y, comment('idevinsimpson', 'OWNER', 365, main, sender, 'edited')), false, `F1-R2a: ${sender} editing an owner comment must not start the job`);
+  }
+  for (const [login, assoc] of [['external-user', 'NONE'], ['external-user', 'OWNER'], ['write-collaborator', 'COLLABORATOR']]) {
+    assert.equal(jobIf(y, comment(login, assoc, 365, main, 'idevinsimpson', 'edited')), false, `the owner as sender does not stand in for a ${login} comment author`);
+  }
   assert.equal(jobIf(y, comment('idevinsimpson', 'OWNER', 365, 'refs/pull/532/merge')), false, 'the main-ref guard still holds');
   for (const e of ['schedule', 'workflow_dispatch', 'workflow_run']) assert.equal(jobIf(y, { ref: main, event_name: e, event: {} }), true, `${e} on main is unchanged`);
   assert.equal(jobIf(y, { ref: 'refs/pull/532/merge', event_name: 'pull_request', event: {} }), false);
