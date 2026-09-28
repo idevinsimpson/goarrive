@@ -6058,3 +6058,36 @@ The driver I passed would click an absent Back, which is exactly run 56's `locat
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0. Every mutant was reverted.
 
 **Status:** **ONE SOURCE-PRECISION FINDING (C74-F1) at `448fb1d1`.** Every functional item passes (rows 1–6); only the causal wording must change. W7 did no write, merge, bootstrap, state-branch action, provider, App, ruleset or environment change, and no Step 6.
+
+## §75. #536 wording-only recheck at `20a4fdc1` (closes C74-F1)
+
+- **Handoff:** #434 `5878417248`. Exact head `20a4fdc152a114c464b97d9b1decb65c39a13088`.
+- **Chain:** `448fb1d1` → `e0f234b4` → `20a4fdc1`, each commit additive on the one before.
+
+| # | Item | Result |
+|---|---|---|
+| **1** | **Three wording sites evidence-bounded** | **PASS.** Detail below. |
+| **2** | **PR-write reason** | **PASS.** All three cite the accepted A+ Step-5 contract for the PR-backed control and worker inboxes. The permission set is unchanged (`STEP5_PERMISSIONS` L22). |
+| **3** | **Run-9 403 cause unproven** | **PASS.** All three state that run 9's 403 happened while the token held `pull_requests: read`, and leave the cause open pending a successor live App run. |
+| **4** | **Per-commit scope** | **PASS.** Detail below. |
+| **5** | **No behaviour change** | **PASS.** Detail below. |
+
+**Row 1, the three wording sites.**
+- `app-token.mjs` L7–12: "issues and pull requests write, which the accepted A+ Step-5 contract grants…; run 9 returned HTTP 403 … while this token was below that contract (pull requests read); causal closure needs a successor live App run".
+- `CONTROL_STATE.md` L297: "kept because it is part of the accepted A+ Step-5 permission contract…; Whether that down-scope caused the 403 is proven only by a successor live App run".
+- `tests/shadow.test.mjs` L312–314: "kept because the accepted A+ contract requires it; run 9's HTTP 403 … has an unproven cause pending a successor live App run".
+- A grep for the old phrasing ("refuses an App", "failed exactly", "failed with HTTP 403 when") finds nothing.
+
+**Row 4, per-commit scope.**
+- `e0f234b4` versus `448fb1d1` touches only `app-token.mjs` (block comment) and `CONTROL_STATE.md`.
+- `20a4fdc1` versus `e0f234b4` touches only `shadow.test.mjs` (3 `//` comment lines).
+
+**Row 5, no behaviour change.**
+- Every changed JS line is a comment line.
+- With comments stripped, both JS files hash identical to `448fb1d1`.
+- No workflow, app or backend path differs.
+- Controls pass **252 / 252**, and staging `run-all` is green.
+
+- **Gates:** `ts:check` 0; `check-evidence-intact` 0.
+
+**Status:** **PASS at `20a4fdc1`, zero findings. C74-F1 closed.** The run-9 403 root cause remains unproven until a successor live App run on the integrated head. W7 did no write, merge, bootstrap, state-branch action, provider, App, ruleset or environment change, and no Step 6.
