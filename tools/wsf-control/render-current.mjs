@@ -32,17 +32,24 @@ const s8 = (x) => (x ? x.slice(0, 8) : '—');
 const cell = (x) => String(x ?? '—').replace(/\|/g, '\\|');
 
 /** The CURRENT.md text for a state. */
+/** The recovery ref that supersedes `ref` (wsf-control-state → -2, -N → -(N+1)). */
+const successorRef = (ref) => { const m = /-(\d+)$/.exec(ref); return `wsf-control-state-${m ? Number(m[1]) + 1 : 2}`; };
+
 export function renderCurrent(s) {
   const L = [];
   L.push(`<!-- wsf-control ledgerHead=${s.ledgerHead} events=${s.eventCount} rendered by tools/wsf-control/render-current.mjs; do not edit -->`);
   L.push('# WSF control state: CURRENT');
   L.push('');
-  L.push('Derived from `events.jsonl` on the `wsf-control-state` branch. Do not edit; record a decision with `append.mjs`, then re-render.');
+  // A ledger without `supersedes` renders byte for byte as before: a recovery run checks its predecessor's comment
+  // against the predecessor's renderings, recomputed by this code.
+  const branch = s.supersedes ? successorRef(s.supersedes.ref) : 'wsf-control-state';
+  L.push(`Derived from \`events.jsonl\` on the \`${branch}\` branch. Do not edit; record a decision with \`append.mjs\`, then re-render.`);
   L.push('GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.');
   L.push('');
   L.push(`- Repository: \`${s.repository}\``);
   L.push(`- Ledger head: \`${s.ledgerHead}\` (${s.eventCount} events)`);
   L.push(`- Genesis: bootstrap as of ${s.asOf}. Packets whose origin is \`bootstrap\` were imported in their phase at that instant; the ledger did not observe their earlier transitions.`);
+  if (s.supersedes) L.push(`- Supersedes: \`${s.supersedes.ref}\` at commit \`${s.supersedes.commit}\` (ledger head \`${s.supersedes.ledgerHead}\`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.`);
   L.push(s.surfaces
     ? `- Surfaces: control inbox #${s.surfaces.controlInbox.pr}; CURRENT is comment ${s.surfaces.current.commentId} on #${s.surfaces.current.pr}`
     : '- Surfaces: not recorded');
