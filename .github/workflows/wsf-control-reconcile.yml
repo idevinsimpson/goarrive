@@ -1,0 +1,79 @@
+# We Stay Fit — control-state reconcile: one Step-5 SHADOW run of the wsf-control-writer App
+# (AUTONOMY-STATE-1B; memo §4.1). It appends derived Step-5 facts to the protected state ref and edits only
+# the App's own shadow comment. It never routes, wakes, dispatches, deploys or touches production.
+#
+# BOUNDARY
+#   - The job always checks out and executes `main`, never the triggering PR's code, and it declares the
+#     main-only environment `wsf-control-writer`, which holds the App key.
+#   - The workflow token is read-only (`contents: read`). Every write goes through the App installation
+#     token, which shadow-run.mjs mints in process, down-scoped and masked. There is no Actions write.
+#   - One writer at a time: a fixed concurrency group that queues rather than cancels, so a run already
+#     pushing is never killed mid-write.
+#   - `pull_request`, never `pull_request_target`.
+#   - Comments the App itself posts are skipped (no self-trigger loop), as is any issue outside the six
+#     control inboxes.
+name: WSF control reconcile
+
+on:
+  issue_comment:
+    types: [created, edited]
+  pull_request:
+    types: [synchronize, closed]
+  workflow_run:
+    workflows: ['WSF staging deploy']
+    types: [completed]
+  workflow_dispatch:
+  schedule:
+    - cron: '*/30 * * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wsf-control-writer
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    # Only a main ref may reach the main-only environment. PR events still start the workflow, but on their
+    # refs/pull/* ref the writer job is skipped (neutral) rather than refused red at the environment; the next
+    # main-ref event or the schedule re-derives PR state (event payloads are only hints, memo §4.1).
+    # A comment starts the job only when the repository owner wrote it (Check 71 F1): on a public repository
+    # no other account's comment reaches the environment. The sender must be the owner too, so an `edited` event
+    # from a collaborator editing an owner comment does not start the job (F1-R2a). This only reduces exposure:
+    # the writer re-checks the author per decision and refuses any edited comment outright, whatever run reads it.
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (
+        github.event_name != 'issue_comment' || (
+          github.event.comment.user.login != 'wsf-control-writer[bot]' &&
+          github.event.comment.user.login == 'idevinsimpson' &&
+          github.event.comment.author_association == 'OWNER' &&
+          github.event.sender.login == 'idevinsimpson' &&
+          contains(fromJSON('[365, 394, 395, 396, 434, 497]'), github.event.issue.number)
+        )
+      )
+    runs-on: ubuntu-latest
+    environment: wsf-control-writer
+    permissions:
+      contents: read
+    steps:
+      - name: Check out main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+
+      - name: Control-state regression suite
+        run: node tools/wsf-control/run-all.mjs
+
+      - name: Shadow run (live)
+        env:
+          WSF_CONTROL_WRITER_PRIVATE_KEY: ${{ secrets.WSF_CONTROL_WRITER_PRIVATE_KEY }}
+          WSF_CONTROL_WRITER_APP_ID: '5098407'
+        run: node tools/wsf-control/shadow-run.mjs --live

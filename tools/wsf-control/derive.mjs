@@ -2,7 +2,7 @@
  * Derivations shared by the views, the checker and the renderer. Pure; no
  * judgment. WATCH is derived here and nowhere else: it is never stored or set.
  */
-import { REVIEWER_OWNED, WORKER_OWNED, isTerminal } from './schema.mjs';
+import { DELIVERED_SUCCESSOR, REVIEWER_OWNED, WORKER_OWNED, isTerminal } from './schema.mjs';
 
 const byId = (s) => Object.keys(s.packets).sort().map((id) => ({ id, ...s.packets[id] }));
 export const fmtRef = (r) => (r ? `${r.kind}:${r.id}` : 'none');
@@ -55,6 +55,8 @@ export function blockerCleared(s, blocker, snapshot = null) {
   if (blocker.packet) {
     const p = s.packets[blocker.packet];
     if (!p || p.phase === 'WITHDRAWN') return false;
+    // DELIVERED-SUCCESSOR (R-PREEMPT): the dependency delivered again after the block and its owner no longer holds it.
+    if (blocker.until === DELIVERED_SUCCESSOR) return (p.deliveries ?? 0) > blocker.since && !WORKER_OWNED.includes(p.phase) && p.phase !== 'BLOCKED';
     // Being terminal is not enough: the dependency must have reached the named milestone.
     return REACHED[blocker.until].includes(p.phase);
   }
@@ -104,6 +106,14 @@ export function neededTransitions(s, snapshot = null) {
     if (p.phase === 'BLOCKED' && p.blockedBy.length && p.blockedBy.every((b) => blockerCleared(s, b, snapshot))) {
       push(p, 'unblock', 'Fable', 'every blocker has cleared', ballAfterUnblock(p));
     }
+  }
+  // R-PREEMPT (memo §8): a pending finding on delivered work is applied as soon as the owner holds no other ball;
+  // until then the owner's newer work yields to it by one deterministic step, chosen by the newer packet's phase.
+  for (const alpha of byId(s).filter((x) => x.pendingFinding && ['DELIVERED', 'UNDER_REVIEW'].includes(x.phase))) {
+    const beta = workerBuckets(s, alpha.owner).active[0] ?? null;
+    if (!beta) push(alpha, 'apply-finding', 'writer', 'the owner holds no other ball; the pending finding hands this packet back (R-PREEMPT)', alpha.owner);
+    else if (beta.phase === 'RELEASED' && beta.releasedQueueIndex !== null) out.push({ packet: beta.id, event: 'retract-release', by: 'writer', why: `${alpha.id} has a pending finding and ${beta.id} is not yet ACKed (R-PREEMPT)`, reactivates: null });
+    else out.push({ packet: beta.id, event: 'block', by: 'writer', why: `${alpha.id} has a pending finding; ${beta.id} (${beta.phase}) waits on ${alpha.id}≥${DELIVERED_SUCCESSOR}, its work kept (R-PREEMPT)`, reactivates: null });
   }
   for (const w of Object.keys(s.workers).sort()) {
     const b = workerBuckets(s, w);
