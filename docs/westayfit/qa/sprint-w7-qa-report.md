@@ -6091,3 +6091,110 @@ The driver I passed would click an absent Back, which is exactly run 56's `locat
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0.
 
 **Status:** **PASS at `20a4fdc1`, zero findings. C74-F1 closed.** The run-9 403 root cause remains unproven until a successor live App run on the integrated head. W7 did no write, merge, bootstrap, state-branch action, provider, App, ruleset or environment change, and no Step 6.
+
+## §76. Check 76: #538 Step-5 stale-bootstrap recovery at `073b7946`
+
+**Handoff:** #434 `5879614792`. **Subject:** #538 at exactly `073b79467714713c75cb261252998dbe8649f23b`. It is one commit on main `d694b007`, verified in a detached worktree and never pushed.
+
+### 1. Diagnosis and fixture truth
+
+- The fixture `tools/wsf-control/tests/fixtures/run50/{events.jsonl,state.json,CURRENT.md}` is byte-identical (sha256) to the real `wsf-control-state` at `92c37447`, committed by `wsf-control-writer[bot]`.
+- That ledger has exactly two lines: a `bootstrap` (MANUAL, asOf `2026-09-27T17:12:00Z`), then a `set-shadow-surface` (R-SHADOW-SURFACE) pointing at comment `5878724949`.
+- `ls-remote` shows no `-2` ref.
+- A ledger without `supersedes` renders byte for byte as before. The suite's run-50 fixture test and my R8 both confirm it: the App comment carrying the fixture rendering is recognised as a stale head.
+
+### 2. Fail-closed freshness
+
+These are pure `bootstrapEvent` boundaries:
+
+| Input | Result |
+|---|---|
+| asOf exactly 6 h old | accepted |
+| asOf 6 h + 1 s old | `bootstrap-stale … older` |
+| asOf 5 min in the future | accepted |
+| asOf 5 min + 1 s in the future | `… in the future` |
+| asOf `garbage`, `""`, `null`, `undefined` or `2026-13-45T99:00:00Z` | `no parseable asOf` |
+| asOf `12345` (a numeric epoch 12 s after 1970) | `in the future` |
+| `canonical.operationalMain` key present, even as `undefined` or equal to the running SHA | refused |
+| Emitted line | `operationalMain` = running SHA, and no `supersedes` unless one is passed |
+
+- The committed `bootstrap.v2.json` carries no `operationalMain`. At the real clock it refuses as `bootstrap-stale` (asOf `2026-09-27T17:12:00Z`). One hour after its own asOf it would be accepted.
+- R1 runs `runShadow` on `-2` with the committed input and a valid predecessor. It is refused, with no `-2` ref, the base ref unmoved, and zero comment creates or edits.
+
+### 3. Successor-ref recovery
+
+Each refusal was run against a real bare remote. Every error was read, and each refusal left no `-2` ref and the base ref unmoved.
+
+| # | Scenario | Result |
+|---|---|---|
+| R2 | Missing predecessor | `recovery-refused … does not exist` |
+| R3 | Predecessor with a fact (`reconcile-head`) | `… 2 post-bootstrap program line(s)` |
+| R4 | Predecessor's shadow line with its rule rewritten to MANUAL | `does not check: … not "derived"` |
+| R5 | `state.json` hand-edited | `does not check: state.json is not the reduction` |
+| R6 | Ref with no ledger | `holds no ledger` |
+| R7 | Bootstrap-only predecessor (no shadow line) | Recovered. It creates exactly one comment, because there is none to inherit. |
+
+**Run-50 end to end (R8–R10).** I pushed the real fixture as the base ref, with comment `5878724949` holding the fixture rendering, and recovered with a fresh input:
+- The outcome was `written`, with `set-shadow-surface … shadow-comment-5878724949`.
+- It made zero `createComment` calls, and the comment was edited in place.
+- `supersedes` equals `{ref: wsf-control-state, commit: <pushed>, ledgerHead: f48d256e…}` exactly.
+- `-2` holds exactly 2 lines, so nothing was replayed.
+- The base ref and its events are byte-unchanged.
+
+**R12, concurrent recovery.** A racing writer creates `-2` with a different bootstrap between read and push. The plain push is rejected, attempt 2 re-reads, and the outcome is `unchanged`. There is one bootstrap on `-2`, and no second comment.
+
+**Schema (S0–S5), through `appendAll` so the check is not vacuous.**
+- A valid `supersedes` is accepted.
+- These are each refused as `bootstrap: supersedes is malformed`:
+  - an extra key;
+  - ref `main`;
+  - ref `wsf-control-state-1`;
+  - a short commit;
+  - a missing `ledgerHead`;
+  - `null`;
+  - `[]`.
+- On a v1 line, `supersedes` is refused as `supersedes is a schema v2 field`.
+
+### 4. Single shadow surface
+
+- The crash window is repaired: the suite test, plus R8 re-run after a comment reset, recover it.
+- **R11:** I re-committed the predecessor with identical files, so the commit moved and the ledger head stayed the same. The old head then stays `exception: … not a head of this ledger`, and the comment is not edited.
+- **R13:** the marker head of a *different valid* ledger stays an exception, and the comment is not edited.
+- In the suite, a forged head stays an exception.
+
+### 5. Scope
+
+- **Files:** the exact 11-file delta.
+  - `docs/westayfit/ops/CONTROL_STATE.md` and `docs/westayfit/ops/control/bootstrap.v2.json`
+  - In `tools/wsf-control/`: `gitstate`, `render-current`, `schema`, `shadow-run`, `transitions`, `tests/shadow.test.mjs`, and the 3 run-50 fixtures.
+- **Ancestry:** `073b7946^` = `d694b007`, with a rev-list count of 1.
+- **Tests:** controls pass **264 / 264** (shadow 38, v2 22), and staging `run-all` is green.
+- **Wiring:** the live path uses the default `ref = STATE_REF`. There is no workflow, ruleset, App, environment, permission, product, deploy, routing, wake or Step-6 change.
+
+### Mutants (mine, 25)
+
+- **Killed by the PR suite (20):**
+  - freshness: age, future, parse, `operationalMain` ban, and a 48 h window;
+  - recovery gates: skip `recoveryProblem`, allow later lines, skip the predecessor check, and missing predecessor → fresh bootstrap;
+  - surface: no inheritance, and always trusting the marker head;
+  - `supersedes` handling: not written, not v2-only, open shape, and dropped in transitions;
+  - render: branch forced to `-2`;
+  - `STATE_REF` set to base;
+  - three `predecessorRef` off-by-ones.
+- **M12, commit-equality dropped in `predecessorSurfaceHistory`:** the PR suite does not catch it, because its moved-predecessor test also changes the ledger head. My R11 kills it.
+- **Equivalent (3):**
+  - M5: `operationalMain` spread order, which is already banned in the input;
+  - M13: `ledgerHead` equality, since the commit pins the content;
+  - M22: the first-line-bootstrap check, which `transitions.mjs:179/185` already enforce.
+- **M23, `mine` preferred over `inherited`:** survives. Live, both resolve to the App's own comment `5878724949` on #365. The code's precedence (inherited first) is the correct one, but no test pins it.
+
+### Precision notes (non-blocking)
+
+- **PN-1 (tests):** the suite leaves two correct lines unpinned:
+  - the `sha !== sup.commit` guard (M12). Add a case with the same ledger and a new commit, like R11.
+  - `inherited ?? mine` precedence (M23). Add a case where the inbox also holds a different App comment carrying a marker or placeholder.
+- **PN-2:** `render-current`'s `successorRef` uses its own `/-(\d+)$/` rather than `STATE_REF_RE`. It is the exact inverse of `predecessorRef` for every schema-valid `supersedes.ref`, so it is correct, but the naming logic lives in two places.
+
+- **Gates:** `ts:check` 0; `check-evidence-intact` 0.
+
+**Status:** **PASS at `073b7946` with zero unresolved findings.** PN-1 and PN-2 are non-blocking. W7 did no write, merge, bootstrap, state-ref creation or mutation, shadow edit, App, ruleset or environment change, deploy, and no Step 6.
