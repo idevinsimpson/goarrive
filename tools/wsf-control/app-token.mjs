@@ -4,9 +4,10 @@
  * reads WSF_CONTROL_WRITER_PRIVATE_KEY from the main-only environment
  * wsf-control-writer, signs a 9-minute App JWT with node:crypto, and exchanges it
  * for an installation token that is DOWN-SCOPED to this one repository and to
- * the Step-5 permissions (contents write for the state branch, issues write for
- * the shadow comment, pull requests and actions read). Actions write is never
- * requested: the App holds none, and Step 5 dispatches nothing.
+ * the Step-5 permissions (contents write for the state branch; issues and pull
+ * requests write for the shadow comment, because every control inbox is a PR and a
+ * PR conversation comment needs pull-requests write; actions read). Actions write
+ * is never requested: the App holds none, and Step 5 dispatches nothing.
  *
  * Neither the key nor the token is ever printed, returned in an error, or passed
  * on a command line.
@@ -15,7 +16,7 @@ import crypto from 'node:crypto';
 
 const API = 'https://api.github.com';
 /** Exactly what a Step-5 run needs; the request narrows the installation's grant, never widens it. */
-export const STEP5_PERMISSIONS = Object.freeze({ contents: 'write', issues: 'write', pull_requests: 'read', actions: 'read', metadata: 'read' });
+export const STEP5_PERMISSIONS = Object.freeze({ contents: 'write', issues: 'write', pull_requests: 'write', actions: 'read', metadata: 'read' });
 
 const b64url = (buf) => Buffer.from(buf).toString('base64').replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
 

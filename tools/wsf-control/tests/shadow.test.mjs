@@ -312,6 +312,20 @@ asyncUnits.push(['the installation token is requested DOWN-SCOPED: this reposito
   assert.deepEqual(post.body, { repositories: ['goarrive'], permissions: STEP5_PERMISSIONS });
   assert.equal(STEP5_PERMISSIONS.actions, 'read');
 }]);
+asyncUnits.push(['the Step-5 token permission set is exactly the approved grant: pull_requests write (the control inboxes are PRs), never Actions write, nothing else', async () => {
+  // Run 36472908254: with pull_requests read the App's first shadow comment on #365 was refused (HTTP 403).
+  const EXPECTED = { contents: 'write', issues: 'write', pull_requests: 'write', actions: 'read', metadata: 'read' };
+  assert.deepEqual({ ...STEP5_PERMISSIONS }, EXPECTED);
+  assert.ok(Object.isFrozen(STEP5_PERMISSIONS));
+  // And the minting request carries exactly that set, whatever the object identity.
+  let body = null;
+  const fetchImpl = async (url, init) => { if (url.includes('/access_tokens')) body = JSON.parse(init.body);
+    const json = url.endsWith('/app') ? { slug: 'wsf-control-writer' } : url.endsWith('/installation') ? { id: 77 } : { token: 'ghs_test', expires_at: '2026-09-27T19:00:00Z' };
+    return { ok: true, status: 200, json: async () => json }; };
+  await installationToken({ appId: 5098407, privateKeyPem: privateKey, repo: 'idevinsimpson/goarrive', fetchImpl });
+  assert.deepEqual(body.permissions, EXPECTED);
+  assert.deepEqual(body.repositories, ['goarrive']);
+}]);
 asyncUnits.push(['a missing or invalid key fails closed with a message that carries no key material', async () => {
   await assert.rejects(installationToken({ appId: 1, privateKeyPem: '', repo: 'a/b' }), (e) => e instanceof AppTokenError && /not available/.test(e.message));
   await assert.rejects(installationToken({ appId: 1, privateKeyPem: '-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----', repo: 'a/b' }), (e) => e instanceof AppTokenError && !/AAAA/.test(e.message));

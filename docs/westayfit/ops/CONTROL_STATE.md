@@ -294,7 +294,7 @@ The Director accepted architecture A+ (#530 `5856346657`, memo `AUTONOMY_ARCHITE
 - Every v2 line's `actor` is `wsf-control-writer`.
 - The ref `wsf-control-state` is protected by ruleset `24078545` on `refs/heads/wsf-control-state*`, whose only bypass actor is App `5098407`; repository admins are not bypass actors.
 - The App key exists only as secret `WSF_CONTROL_WRITER_PRIVATE_KEY` in environment `wsf-control-writer`, which deploys from `main` only.
-- The writer mints its installation token in process (`app-token.mjs`), down-scoped to this repository with `contents: write`, `issues: write`, `pull_requests: read`, `actions: read`. It never asks for Actions write.
+- The writer mints its installation token in process (`app-token.mjs`), down-scoped to this repository with `contents: write`, `issues: write`, `pull_requests: write` (the control inboxes are PRs, and a PR conversation comment needs it), `actions: read`, `metadata: read`. It never asks for Actions write.
 - Fable and L0 no longer run `append.mjs` against the authoritative ref. A v1 ledger (`actor` Fable or L0) remains valid for the tests and for any local dry run.
 
 ### What every v2 line says about itself
