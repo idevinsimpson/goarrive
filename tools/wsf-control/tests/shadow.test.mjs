@@ -309,9 +309,9 @@ asyncUnits.push(['the installation token is requested DOWN-SCOPED: this reposito
   const r = await installationToken({ appId: 5098407, privateKeyPem: privateKey, repo: 'idevinsimpson/goarrive', fetchImpl });
   assert.equal(r.slug, 'wsf-control-writer');
   const post = seen.find((x) => x.url.includes('/access_tokens'));
-  // Pinned as a literal, not by the constant itself: the accepted Step-5 writer boundary. The control inbox is a PR
-  // conversation, so the shadow comment needs pull requests write (the live run on main failed with HTTP 403 when
-  // the token was down-scoped to read); nothing wider, and never Actions write.
+  // Pinned as a literal, not by the constant itself: the accepted Step-5 writer boundary. Pull requests write is kept
+  // because the accepted A+ contract requires it; run 9's HTTP 403 (while the token held read) has an unproven cause
+  // pending a successor live App run. Nothing wider, and never Actions write.
   const accepted = { contents: 'write', issues: 'write', pull_requests: 'write', actions: 'read', metadata: 'read' };
   assert.deepEqual(post.body, { repositories: ['goarrive'], permissions: accepted });
   assert.deepEqual({ ...STEP5_PERMISSIONS }, accepted);
