@@ -19,6 +19,15 @@ import { byId, fmtRef, workerBuckets, workerWatch } from './derive.mjs';
 import { ledgerLines, reduce, sha256 } from './reduce.mjs';
 
 export const MARKER = /^<!-- wsf-control ledgerHead=([0-9a-f]{64}) events=(\d+) /;
+/**
+ * The three v1 residuals the Director accepted with architecture A+ (#530 5856346657). A v2 rendering always shows
+ * them: the control plane never presents a boundary stronger than the one it has.
+ */
+export const ACCEPTED_RESIDUALS = Object.freeze([
+  'worker-origin facts are ATTESTED, not identity-authenticated: every role posts as the same GitHub user',
+  'the writer boundary is only as strong as operational main: a malicious writer change is detected (writer-code pin), not prevented',
+  'a dead worker session is a typed wake-undelivered exception that a human or the Director reassigns; it is never respawned automatically',
+]);
 const s8 = (x) => (x ? x.slice(0, 8) : '—');
 const cell = (x) => String(x ?? '—').replace(/\|/g, '\\|');
 
@@ -44,6 +53,19 @@ export function renderCurrent(s) {
     ? `- Staging: serves \`${s.staging.servedSha}\` (run ${s.staging.runId}, #${s.staging.runNumber}); rollback \`${s.staging.rollbackSha}\`${s.staging.pinPr ? `; pin PR #${s.staging.pinPr}` : ''}`
     : '- Staging: not recorded');
   L.push(`- Critical path: ${s.criticalPath ? `${s.criticalPath} (${s.packets[s.criticalPath].phase}, ${s.packets[s.criticalPath].owner})` : 'none'}`);
+  if (s.schemaVersion === 2) {
+    L.push('- Schema: v2. Every line is written by the `wsf-control-writer` App and names its authority class and rule.');
+    L.push(s.contracts
+      ? `- Contracts pinned: ${s.contracts.map((c) => `${c.id}@${s8(c.commit)} (\`${c.path}\`)`).join('; ')}`
+      : '- Contracts pinned: none recorded');
+    if (s.surfaces?.shadow) {
+      L.push(`- **SHADOW CURRENT.** This rendering is comment ${s.surfaces.shadow.commentId} on #${s.surfaces.shadow.pr}. The human CURRENT (comment ${s.surfaces.current.commentId}) stays authoritative until Step 5 exits; nothing routes or wakes from this page.`);
+    }
+    L.push('');
+    L.push('## Accepted residuals (A+, v1)');
+    L.push('');
+    for (const r of ACCEPTED_RESIDUALS) L.push(`- ${r}`);
+  }
   L.push('');
   L.push('## Workers');
   L.push('');
@@ -59,11 +81,19 @@ export function renderCurrent(s) {
   L.push('');
   L.push('| Packet | Owner | Kind | Completes at | Origin | Phase | PR | Subject | PR head | Evidence | Merge | Proof | Reviewers | Released by | Last transition | Blocked by | Label |');
   L.push('| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |');
+  const v2 = s.schemaVersion === 2;
+  if (v2) {
+    L.pop(); L.pop();
+    L.push('| Packet | Owner | Kind | Completes at | Origin | Phase | PR | Subject | PR head | Evidence | Merge | Proof | Reviewers | Released by | Last transition | Blocked by | Label | Review policy | Pending finding |');
+    L.push('| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |');
+  }
   for (const p of byId(s)) {
     const blockers = p.blockedBy.map((b) => (b.packet ? `${b.packet}≥${b.until}` : `${b.external} (${b.owner})`)).join('; ');
+    const policy = p.review ? `${p.review.workerReviews.map((r) => `${r.count}×${r.class}`).join('+') || 'no W# review'} then ${p.review.after}` : '—';
+    const tail = v2 ? ` ${cell(policy)} | ${p.pendingFinding ? fmtRef(p.pendingFinding) : '—'} |` : '';
     const proof = p.proof ? `${p.proof.type} run ${p.proof.runId}: ${p.proof.result}` : '—';
     const rel = p.authority.released ? fmtRef(p.authority.released) : '—';
-    L.push(`| ${p.id} | ${p.owner} | ${p.kind} | ${p.completion.terminal} (${p.completion.proofType}) | ${p.origin} | ${p.phase}${p.phaseBeforeBlock ? ` (from ${p.phaseBeforeBlock})` : ''} | ${p.pr ? `#${p.pr}` : '—'} | ${s8(p.artifact.subjectSha)} | ${s8(p.artifact.prHeadSha)} | ${s8(p.artifact.evidenceSha)} | ${s8(p.artifact.mergeSha)} | ${proof} | ${p.reviewers.join(', ') || '—'} | ${rel} | ${fmtRef(p.authority.lastTransition)} | ${cell(blockers || null)} | ${cell(p.label)} |`);
+    L.push(`| ${p.id} | ${p.owner} | ${p.kind} | ${p.completion.terminal} (${p.completion.proofType}) | ${p.origin} | ${p.phase}${p.phaseBeforeBlock ? ` (from ${p.phaseBeforeBlock})` : ''} | ${p.pr ? `#${p.pr}` : '—'} | ${s8(p.artifact.subjectSha)} | ${s8(p.artifact.prHeadSha)} | ${s8(p.artifact.evidenceSha)} | ${s8(p.artifact.mergeSha)} | ${proof} | ${p.reviewers.join(', ') || '—'} | ${rel} | ${fmtRef(p.authority.lastTransition)} | ${cell(blockers || null)} | ${cell(p.label)} |${tail}`);
   }
   L.push('');
   return `${L.join('\n')}`;

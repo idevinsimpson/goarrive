@@ -1,0 +1,28 @@
+{
+  "_comment": [
+    "Runtime capability registry v1 (accepted A+ memo §11.1). INPUT about the runtime, not state.",
+    "Unsupported actions are first-class facts: the writer never routes to an actor that cannot perform",
+    "the action, and health-view prints every capability that is not 'supported'. Pinned by set-contracts",
+    "as contract 'capabilities'; a change is a reviewed commit plus a recorded pin."
+  ],
+  "version": 1,
+  "actors": ["writer-app", "worker-session", "l0-session", "owner-ui"],
+  "capabilities": [
+    { "action": "append-authoritative-state", "writer-app": "supported", "worker-session": "unsupported", "l0-session": "unsupported", "owner-ui": "unsupported",
+      "evidence": "ruleset 24078545 on refs/heads/wsf-control-state*: App 5098407 is the only bypass actor (E1); worker refusal is E2" },
+    { "action": "edit-shadow-current", "writer-app": "supported", "worker-session": "supported-shared-identity", "l0-session": "supported-shared-identity", "owner-ui": "supported",
+      "evidence": "the App authors the shadow comment (E4); every other role is the one shared GitHub user" },
+    { "action": "wake-exact-worker-session", "writer-app": "unsupported", "worker-session": "supported-account-scoped", "l0-session": "supported-account-scoped", "owner-ui": "unsupported",
+      "evidence": "memo M5/M7: account-scoped triggers exist inside Claude sessions; no Actions-to-Claude wake interface was measured. Step 5 posts no wakes" },
+    { "action": "read-session-liveness", "writer-app": "unsupported", "worker-session": "supported", "l0-session": "supported", "owner-ui": "unsupported", "evidence": "memo M6/M7" },
+    { "action": "dispatch-staging", "writer-app": "unsupported", "worker-session": "forbidden-by-policy", "l0-session": "supported", "owner-ui": "supported",
+      "evidence": "the App holds Actions read only in Step 5 (owner receipt #365 5857937350); App dispatch needs the separate Step-7 owner authorization" },
+    { "action": "read-actions-artifacts", "writer-app": "supported", "worker-session": "supported", "l0-session": "unsupported", "owner-ui": "supported", "evidence": "memo M10: L0 measured HTTP 403" },
+    { "action": "edit-rulesets-or-approve-environments", "writer-app": "unsupported", "worker-session": "unsupported", "l0-session": "unsupported", "owner-ui": "supported",
+      "evidence": "E5: the worker surface reads rulesets and cannot edit them or approve environments. GUARDED: an admin-capable worker surface would void the writer boundary" },
+    { "action": "ingest-protected-human-decision", "writer-app": "unsupported", "worker-session": "unsupported", "l0-session": "unsupported", "owner-ui": "supported",
+      "evidence": "no approval-gated decision workflow exists in Step 5; protected-human transitions stay manual and fail closed" },
+    { "action": "open-pr-on-another-base", "writer-app": "unsupported", "worker-session": "supported-reserved-by-policy", "l0-session": "supported", "owner-ui": "supported",
+      "evidence": "memo M13 (#525); machine carry is a later packet" }
+  ]
+}
