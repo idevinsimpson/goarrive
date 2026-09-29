@@ -6198,3 +6198,80 @@ Each refusal was run against a real bare remote. Every error was read, and each 
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0.
 
 **Status:** **PASS at `073b7946` with zero unresolved findings.** PN-1 and PN-2 are non-blocking. W7 did no write, merge, bootstrap, state-ref creation or mutation, shadow edit, App, ruleset or environment change, deploy, and no Step 6.
+
+## §77. Check 77: #540 current-bootstrap snapshot at `6206ab8e`
+
+**Handoff:** #434 `5881795923`. **Subject:** #540 at exactly `6206ab8ea1246601ddb86a09ae7e733cb0aebd91`, one commit on main `d42a3307`. I verified it in a detached worktree and pushed nothing from it.
+
+### 1. Ancestry and scope
+
+- The head's parent is `d42a3307`, and `rev-list` counts exactly 1 commit.
+- `git diff --stat` shows one file, `docs/westayfit/ops/control/bootstrap.v2.json`, +7 / −5.
+
+### 2. Snapshot truth
+
+I read each value against the basis (#396 `5881074395`), the disposition (#396 `5881631044`, which consumes blocker `5881094139`) and the acceptance (#538 `5880328557`).
+
+- **Packet `AUTONOMY-STATE-1B`:**
+  - `phase` is `INTEGRATED`, the terminal of `{INTEGRATED, source-only}`;
+  - `pr` is 538;
+  - `artifact` is `{subjectSha: 073b7946…, mergeSha: d42a3307…}`;
+  - `acceptedBy` is `5880328557`;
+  - `refs` are `5879783497` and `5880328557`;
+  - owner W3, `releasedBy`, `inbox` and `review` are unchanged.
+- **`criticalPath`:** absent, as the disposition requires.
+- **Unchanged values:**
+  - development `claude/wsf-app-shell@9a506766`;
+  - staging `a3127651`, run 36264562975 / #55, rollback `938e00d8`, pin #522;
+  - workers W3/W4/W5/W7/W9 on inboxes 396/394/395/434/497, with every queue empty;
+  - surfaces, `authorizedBy` `5857966052`, and all 12 `contractPaths`, including `north-star-journeys`.
+- **No `operationalMain`.** A rendered dry-run of this input shows:
+  - operational main as the running SHA;
+  - `Critical path: none`;
+  - every worker `—`, with WATCH off;
+  - the packet `INTEGRATED` at #538.
+
+### 3–5. Recovery safety and the offline successor proof
+
+**Setup:**
+- a bare copy of the **real** audit commit `92c3744752d21569e9a31451708366d7f3db8978`, fetched read-only;
+- the **live** body of comment `5878724949`, author `wsf-control-writer[bot]`, `updated_at` 21:13:48Z. It equals the run-50 fixture rendering apart from a trailing newline;
+- this exact input, the real clock, running SHA `6206ab8e`, and the default `STATE_REF`;
+- a fake GitHub API.
+
+**First run:**
+- The target is `wsf-control-state-2`. The outcome is `written`, `BOOTSTRAPPED`.
+- Exactly two lines were appended: `bootstrap:MANUAL` and `set-shadow-surface:R-SHADOW-SURFACE:shadow-comment-5878724949`.
+- The ledger checks.
+- `supersedes` is `{wsf-control-state, 92c37447…, f48d256e…}` exactly.
+- `operationalMain` is the running SHA.
+- `criticalPath` is `null`, and the packet is terminal.
+- The shadow comment was edited once and none was created. It now renders the `-2` head, `Critical path: none` and the Supersedes line.
+- The audit ref is still `92c37447`.
+
+**Second run:** `unchanged`, the surface `ok`, and no further line, create or edit.
+
+**Fail-closed checks on this exact input.** Each produced zero ref changes and zero comment writes:
+
+| Case | Result |
+|---|---|
+| asOf + 6 h + 1 s | `bootstrap-stale … older` |
+| Clock 5 min + 1 s before asOf | `in the future` |
+| `criticalPath` re-added | `set-critical-path: packet is terminal (INTEGRATED)` |
+| `operationalMain` imported | refused |
+| Exactly asOf + 6 h | still accepted |
+
+**Suites and dry-run:**
+- `--dry-run` gives `DRY_RUN=valid schema=2 events=1`. The head differs from W3's `a04b8ac5` only because the dry-run pins the running commit (`6206ab8e` here, `d42a3307` in W3's run), as designed.
+- Controls pass **264 / 264**, and staging `run-all` is green.
+
+**Real remote read-back:** only `refs/heads/wsf-control-state 92c37447`; there is no `-2`.
+
+### Notes (non-blocking)
+
+- The window closes at **2026-09-29T07:03:19Z**. Integration and the live run must both land before then; otherwise the input needs the additive refresh and a focused review of that successor.
+- The live run will pin and derive from the merge commit, so its ledger head will differ from both dry-run heads. That is expected.
+
+- **Gates:** `ts:check` 0; `check-evidence-intact` 0.
+
+**Status:** **PASS at `6206ab8e` with zero findings.** This is source QA only; it does not close Step 5. The live App run and a second unchanged run remain the gate. W7 did no write, merge, live run, state-ref or comment mutation, or Step 6.
