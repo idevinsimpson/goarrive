@@ -23,7 +23,7 @@
   "authorizedBy": 5857966052,
   "bootstrap": {
     "repository": "idevinsimpson/goarrive",
-    "asOf": "2026-09-27T17:12:00Z",
+    "asOf": "2026-09-29T01:03:19Z",
     "surfaces": { "controlInbox": { "pr": 365 }, "current": { "pr": 365, "commentId": 5847443607 } },
     "canonical": {
       "developmentBranch": "claude/wsf-app-shell",
@@ -48,15 +48,17 @@
       "AUTONOMY-STATE-1B": {
         "owner": "W3",
         "completion": { "terminal": "INTEGRATED", "proofType": "source-only" },
-        "phase": "ACKED",
-        "refs": [ { "kind": "comment", "id": 5857966052, "repo": "idevinsimpson/goarrive" }, { "kind": "comment", "id": 5857972906, "repo": "idevinsimpson/goarrive" } ],
+        "phase": "INTEGRATED",
+        "refs": [ { "kind": "comment", "id": 5879783497, "repo": "idevinsimpson/goarrive" }, { "kind": "comment", "id": 5880328557, "repo": "idevinsimpson/goarrive" } ],
+        "pr": 538,
+        "artifact": { "subjectSha": "073b79467714713c75cb261252998dbe8649f23b", "mergeSha": "d42a330798f2b27b945e5beb461f937157df9d7a" },
         "releasedBy": 5857966052,
+        "acceptedBy": 5880328557,
         "inbox": 396,
         "label": "Serial step 5: authoritative control state, App writer, bootstrap and shadow reconcile",
         "review": { "workerReviews": [ { "class": "ops-source", "count": 1 } ], "appliesTo": "subject", "after": "director" }
       }
-    },
-    "criticalPath": "AUTONOMY-STATE-1B"
+    }
   },
   "contractPaths": [
     { "id": "autonomy-architecture", "path": "docs/westayfit/ops/AUTONOMY_ARCHITECTURE_1B_1C.md" },
