@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "80c38892ad713642e37e6619669ef73a4e3e463406ec9f58f05ce272bd428810",
-  "eventCount": 2,
+  "ledgerHead": "2457be55e38d8e9e796210b018b4aa9574b4bf3811ecea0db13c744cdb58800f",
+  "eventCount": 3,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -48,13 +48,70 @@
     }
   },
   "queue": {
-    "W3": [],
+    "W3": [
+      "AUTONOMY-ROUTER-1C"
+    ],
     "W4": [],
     "W5": [],
     "W7": [],
     "W9": []
   },
   "packets": {
+    "AUTONOMY-ROUTER-1C": {
+      "owner": "W3",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Serial step 6: state-derived routing, wakes, and real-event proof",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "*"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 5882813601
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 5882813601
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
+      "pendingFinding": null
+    },
     "AUTONOMY-STATE-1B": {
       "owner": "W3",
       "kind": "work",
