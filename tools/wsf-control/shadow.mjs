@@ -24,7 +24,7 @@
  * checks it; an illegal one is refused there and reported, never forced.
  */
 import { SHADOW_DERIVED, RULES } from './rules.mjs';
-import { LATEST_SCHEMA, WRITER_APP, EVENT_FIELDS } from './schema.mjs';
+import { LATEST_SCHEMA, WRITER_APP, EVENT_FIELDS, WAKE_EVENTS } from './schema.mjs';
 import { reconcile } from './reconcile.mjs';
 
 /** The fenced block a Director/L0 decision is posted in. One per comment; anything else in the comment is prose. */
@@ -48,8 +48,8 @@ export function decisionEditProblem(c) {
   if (c.createdAt !== c.updatedAt) return `edited-comment: updated ${c.updatedAt} after created ${c.createdAt}; an edited comment never decides, post a new one`;
   return null;
 }
-/** Decisions the writer records from the control inbox. Bootstrap, upgrades and its own surface are never taken from a comment. */
-export const INTAKE_TYPES = Object.freeze(Object.keys(EVENT_FIELDS).filter((t) => !['bootstrap', 'schema-upgrade', 'set-shadow-surface'].includes(t)));
+/** Decisions the writer records from the control inbox. Bootstrap, upgrades, its own surface and wake receipts (delivery truth the writer observes itself) are never taken from a comment. */
+export const INTAKE_TYPES = Object.freeze(Object.keys(EVENT_FIELDS).filter((t) => !['bootstrap', 'schema-upgrade', 'set-shadow-surface', ...WAKE_EVENTS].includes(t)));
 
 const v2 = (repo, type, fields, source, rule, evidence) => ({
   schema: LATEST_SCHEMA, type, actor: WRITER_APP, source: { ...source, repo },

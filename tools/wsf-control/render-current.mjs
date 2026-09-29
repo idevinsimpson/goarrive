@@ -103,6 +103,16 @@ export function renderCurrent(s) {
     L.push(`| ${p.id} | ${p.owner} | ${p.kind} | ${p.completion.terminal} (${p.completion.proofType}) | ${p.origin} | ${p.phase}${p.phaseBeforeBlock ? ` (from ${p.phaseBeforeBlock})` : ''} | ${p.pr ? `#${p.pr}` : '—'} | ${s8(p.artifact.subjectSha)} | ${s8(p.artifact.prHeadSha)} | ${s8(p.artifact.evidenceSha)} | ${s8(p.artifact.mergeSha)} | ${proof} | ${p.reviewers.join(', ') || '—'} | ${rel} | ${fmtRef(p.authority.lastTransition)} | ${cell(blockers || null)} | ${cell(p.label)} |${tail}`);
   }
   L.push('');
+  // Step 6: the wake receipts. Rendered only once a wake exists, so every earlier head renders byte for byte as before
+  // (a recovery run and the surface check recompute those renderings with this code).
+  if (s.wakes) {
+    L.push('## Wakes');
+    L.push('');
+    L.push('| Wake | Worker | Packet | Reason | Status | Comments | ACK |');
+    L.push('| --- | --- | --- | --- | --- | --- | --- |');
+    for (const [id, w] of Object.entries(s.wakes)) L.push(`| ${id.slice(0, 12)} | ${w.worker} | ${w.packet} | ${w.reason} | ${w.status}${w.status === 'timed-out' ? ' (wake-undelivered)' : ''} | ${w.comments.join(', ') || '—'} | ${w.ack ? fmtRef(w.ack) : '—'} |`);
+    L.push('');
+  }
   return `${L.join('\n')}`;
 }
 

@@ -35,7 +35,7 @@
  *   set-shadow-surface records the writer's shadow CURRENT comment.
  * A line whose schema is not the ledger's (outside the one upgrade line) is illegal.
  */
-import { DEFAULT_REVIEW, DELIVERED_SUCCESSOR, GENESIS, RE, SCHEMA_VERSION, isTerminal, schemaOf, unreachableBlocker } from './schema.mjs';
+import { DEFAULT_REVIEW, DELIVERED_SUCCESSOR, GENESIS, RE, SCHEMA_VERSION, WAKE_EVENTS, holders, isTerminal, schemaOf, unreachableBlocker } from './schema.mjs';
 
 export class Illegal extends Error {}
 const illegal = (m) => { throw new Illegal(m); };
@@ -163,6 +163,14 @@ function setCriticalPath(s, p) {
   live(p, 'set-critical-path');
   if (p.kind !== 'work') illegal('set-critical-path: a reference packet cannot be the critical path');
   s.criticalPath = Object.keys(s.packets).find((k) => s.packets[k] === p);
+}
+
+/** The recorded wake an event names, for the same packet. */
+function wakeOf(s, e) {
+  const w = s.wakes?.[e.wakeId];
+  if (!w) illegal(`${e.type}: no wake ${e.wakeId.slice(0, 12)} is recorded`);
+  if (w.packet !== e.packet) illegal(`${e.type}: wake ${e.wakeId.slice(0, 12)} is for ${w.packet}, not ${e.packet}`);
+  return w;
 }
 
 /** Apply one (already schema-valid) event; returns a new state or throws Illegal. */
@@ -441,11 +449,54 @@ export function applyEvent(state, e) {
       p.artifact.evidenceSha = e.evidenceSha; // never a substitute for the subject
       break;
     case 'set-critical-path': setCriticalPath(s, p); break;
+    // Wakes (memo §6.2). The first wake creates s.wakes, so a ledger without wakes serializes and renders as before.
+    case 'wake': {
+      if (!s.workers[e.worker]) illegal(`wake: worker ${e.worker} is not registered`);
+      if (s.wakes?.[e.wakeId]) illegal(`wake: ${e.wakeId.slice(0, 12)} is already requested`);
+      s.wakes = { ...(s.wakes ?? {}), [e.wakeId]: { packet: e.packet, worker: e.worker, reason: e.reason, status: 'requested', comments: [], ack: null } };
+      break;
+    }
+    case 'wake-delivered': {
+      const w = wakeOf(s, e);
+      if (w.comments.includes(e.commentId)) illegal(`wake-delivered: comment ${e.commentId} is already recorded for this wake`);
+      if (w.status === 'requested') w.status = 'delivered';
+      else if (w.status === 'retried') w.status = 'redelivered';
+      else illegal(`wake-delivered: the wake is ${w.status}; a comment is posted once, and once more only after a retry`);
+      w.comments.push(e.commentId);
+      break;
+    }
+    case 'wake-ack': {
+      const w = wakeOf(s, e);
+      if (e.worker !== w.worker) illegal(`wake-ack: the wake is ${w.worker}'s, not ${e.worker}'s`);
+      // A late ACK after a timeout still resolves the exception; an ACK before any comment was posted cannot exist.
+      if (!['delivered', 'retried', 'redelivered', 'timed-out'].includes(w.status)) illegal(`wake-ack: the wake is ${w.status}`);
+      w.status = 'acked';
+      w.ack = src;
+      break;
+    }
+    case 'wake-retry': {
+      const w = wakeOf(s, e);
+      if (w.status !== 'delivered') illegal(`wake-retry: only a delivered, unacknowledged wake is retried, and once (it is ${w.status})`);
+      w.status = 'retried';
+      break;
+    }
+    case 'wake-timeout': {
+      const w = wakeOf(s, e);
+      if (w.status !== 'redelivered') illegal(`wake-timeout: only a re-posted, unacknowledged wake times out (it is ${w.status})`);
+      w.status = 'timed-out';
+      break;
+    }
     default: illegal(`no transition for ${e.type}`);
   }
-  if (p && !['reconcile-head', 'record-evidence', 'set-critical-path', 'set-review-policy'].includes(e.type) && !(e.type === 'finding' && e.pending)) p.authority.lastTransition = src;
+  if (p && !['reconcile-head', 'record-evidence', 'set-critical-path', 'set-review-policy', ...WAKE_EVENTS].includes(e.type) && !(e.type === 'finding' && e.pending)) p.authority.lastTransition = src;
   // The critical path completes when its packet does; it is never left pointing at a terminal packet.
   if (s.criticalPath && isTerminal(s.packets[s.criticalPath])) s.criticalPath = null;
+  // A wake is superseded once its worker no longer holds that packet's ball (reassigned, handed back, passed, withdrawn).
+  // Derived here, once, so the writer's clock and exceptions and every view read the same truth; a superseded wake is
+  // never retried, timed out, reported or listed. Only a ledger with wakes has the key, so earlier states are unchanged.
+  for (const w of Object.values(s.wakes ?? {})) {
+    if (!w.superseded && !holders(s.packets[w.packet]).includes(w.worker)) w.superseded = true;
+  }
   s.eventCount += 1;
   return s;
 }

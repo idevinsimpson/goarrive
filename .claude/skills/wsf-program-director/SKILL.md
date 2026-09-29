@@ -81,6 +81,38 @@ Do not manufacture three suggestions merely to satisfy the generic template. Do 
 - Never copy PR state, CI, titles, comment bodies, URLs or prose into an event.
 - Never put a secret, token, key, email address or URL token anywhere. The ledger refuses them, and must never be tested with real ones.
 
+## Worker-inbox wake (Step 6, AUTONOMY-ROUTER-1C)
+
+The `wsf-control-writer` App wakes a worker by posting one comment in the worker's registered inbox. Nobody else posts a wake. The comment is produced by `wakeComment` in `tools/wsf-control/router-run.mjs`, and its first line is the marker the writer finds it by again:
+
+```text
+<!-- wsf-control wake <wakeId> attempt=<1|2> -->
+**WAKE W7**: you are assigned the independent review of `ALPHA` at subject `<sha>` (PR #12, owner W3).
+
+First act: read `wsf-control-state-2`, run `check` and `worker-view W7`. If WATCH is off, stop and post nothing.
+If WATCH is on, answer in this inbox with exactly one block, then work:
+```
+
+The worker answers in **its own inbox**, with exactly one `wsf-control-worker` block that quotes the `wakeId` from `worker-view` (`WAKE=`):
+
+| Report | Block | Answers |
+| --- | --- | --- |
+| ACK | `{"type":"ack","packet":P,"wakeId":W}` | Any wake. On a release wake it is also the packet ACK. |
+| Delivery | `{"type":"deliver","packet":P,"wakeId":W,"pr":N,"subjectSha":S}` | The owner's release or handback wake. The writer checks that PR #N is open, that its head is S, and that S descends from its base. |
+| PASS | `{"type":"pass","packet":P,"wakeId":W,"subjectSha":S}` | The reviewer's review wake. S is the subject under review. |
+| Finding | `{"type":"finding","packet":P,"wakeId":W,"subjectSha":S}` | The reviewer's review wake. The ball returns to the owner at once, or stays pending while the owner holds another ball. |
+
+- The writer checks each report structurally, and records it `attested` when it holds:
+  - the author is the repository owner's account, with an unedited comment;
+  - the comment is in the right inbox;
+  - it quotes the current wake for that worker and packet, after the wake comment;
+  - the owner never passes its own packet;
+  - it names the right subject.
+- Anything else is refused and reported (`INTAKE_REFUSED`), never recorded. Prose never moves a ball.
+- The writer derives review routing itself: the first free eligible W# reviewers the packet's policy requires, in worker-id order, never the owner. With too few, it reports `AWAITING_REVIEWER`.
+- A wake without an ACK is re-posted once after 15 minutes (`attempt=2`). Fifteen minutes after that it times out as `CONTROL_EXCEPTION wake-undelivered <W#> <packet>`. The packet and its ball are kept. `transfer-owner` or `reassign-review` stays a Director decision.
+- The same ball re-derived is the same `wakeId`, so a wake is never posted twice. A new ball is a new wake.
+
 ## Views
 
 ```sh

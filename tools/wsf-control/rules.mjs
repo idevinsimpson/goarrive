@@ -32,11 +32,17 @@ export const RULES = Object.freeze({
   'R-UNBLOCK-MILESTONE': { class: 'derived', events: ['unblock'], step: 6, what: 'every packet blocker reached its milestone' },
   'R-UNBLOCK-RESOLVER': { class: 'derived', events: ['unblock'], step: 6, what: 'a machine-resolvable external condition cleared by its named resolver' },
   'R-FASTPATH': { class: 'derived', events: ['begin-proof', 'stage'], step: 7, what: 'fast-path invariants hold and the writer made the dispatch' },
+  // Wakes (memo §3.2 "wake, wake-retry, wake-timeout (new) | derived | §6"; receipt model §6.2).
+  'R-WAKE': { class: 'derived', events: ['wake'], step: 6, what: 'a worker now holds a ball it has not been woken for (release, handback or review assignment)' },
+  'R-WAKE-DELIVERED': { class: 'derived', events: ['wake-delivered'], step: 6, what: 'the App posted the wake comment carrying the wakeId in the worker\'s inbox' },
+  'R-WAKE-RETRY': { class: 'derived', events: ['wake-retry'], step: 6, what: 'no ACK 15 minutes after the wake comment, and the ball is still the worker\'s: one re-post' },
+  'R-WAKE-TIMEOUT': { class: 'derived', events: ['wake-timeout'], step: 6, what: 'no ACK 15 minutes after the re-post: CONTROL_EXCEPTION wake-undelivered' },
   // Worker facts: recorded from the worker's canonical inbox, author not proven (accepted residual (a)).
   'A-ACK': { class: 'attested', events: ['ack'], step: 6, what: 'the owner ACKed in its canonical inbox' },
   'A-DELIVER': { class: 'attested', events: ['deliver'], step: 6, what: 'the owner delivered a named SHA in its canonical inbox' },
   'A-PASS': { class: 'attested', events: ['review-pass'], step: 6, what: 'the assigned reviewer passed, quoting its assignment' },
   'A-FINDING': { class: 'attested', events: ['finding'], step: 6, what: 'the assigned reviewer found, quoting its assignment' },
+  'A-WAKE-ACK': { class: 'attested', events: ['wake-ack'], step: 6, what: 'the woken worker quoted the wakeId in its canonical inbox, after the wake comment' },
   // Owner decisions through the approval-gated decision workflow only.
   'R-OWNER-DECISION': { class: 'protected-human', events: ['accept', 'unblock'], step: 6, what: 'an owner decision approved in the GitHub environment gate' },
   // Director/L0 decisions recorded as they are today: attested from the control inbox, labelled manual.

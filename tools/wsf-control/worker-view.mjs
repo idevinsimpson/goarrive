@@ -37,6 +37,10 @@ export function workerView(s, worker) {
   for (const p of b.blocked) out.push(`BLOCKED=${p.id} (not work; does not keep WATCH on)`);
   out.push(`NEXT=${b.next ?? 'none'}`);
   out.push(`WATCH=${workerWatch(s, worker) ? 'on' : 'off'}`);
+  // Step 6: the worker's unanswered wakes on balls it still holds, with the wakeId its report must quote (memo §6.3).
+  for (const [id, w] of Object.entries(s.wakes ?? {})) {
+    if (w.worker === worker && w.status !== 'acked' && !w.superseded) out.push(`WAKE=${id} packet=${w.packet} reason=${w.reason} status=${w.status}`);
+  }
   for (const p of [...b.active, ...b.reviewing]) {
     out.push(`AUTHORITY ${p.id} origin=${p.origin} queued=${fmtRef(p.authority.queued)} released=${fmtRef(p.authority.released)} last=${fmtRef(p.authority.lastTransition)}`);
   }
