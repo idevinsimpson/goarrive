@@ -72,7 +72,7 @@ export function routerAppend(eventsText, state, { items, prs, inboxes, botLogin,
   for (const cs of Object.values(inboxes)) for (const c of cs) if (c.author === botLogin && c.createdAt) times[c.id] = c.createdAt;
   const timers = wakeTimerLines(state, eventsText, times, now);
   add(timers.lines.map((event) => ({ event, label: event.type })));
-  return { eventsText, state, appended, refused, intakeRefused, awaiting: awaitingReviewers(state), exceptions: wakeExceptions(state, eventsText), unknownTimes: timers.unknown };
+  return { eventsText, state, appended, refused, intakeRefused, awaiting: awaitingReviewers(state), exceptions: wakeExceptions(state), unknownTimes: timers.unknown };
 }
 
 const REASON_TEXT = {
@@ -112,11 +112,9 @@ export function wakeComment(state, wakeId, w, attempt) {
  * the marker for this attempt is reused. Returns the wake-delivered lines and what was posted.
  */
 export async function postWakes(gh, state, eventsText, inboxes, botLogin) {
-  const current = new Set(balls(eventsText).map((b) => b.wakeId));
   const lines = [];
   const posted = [];
-  for (const w of wakesToPost(state)) {
-    if (!current.has(w.wakeId)) continue; // the ball moved on before the post: WATCH is off for it
+  for (const w of wakesToPost(state)) { // superseded wakes (the ball moved on before the post) are never posted
     const inbox = state.workers[w.worker].inbox;
     const attempt = w.comments.length + 1;
     const marker = wakeMarker(w.wakeId, attempt);

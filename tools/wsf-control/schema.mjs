@@ -289,6 +289,18 @@ export const EVENT_FIELDS = Object.freeze({
   'wake-retry': [{ wakeId: T.hash, packet: T.packet }, {}],
   'wake-timeout': [{ wakeId: T.hash, packet: T.packet }, {}],
 });
+/**
+ * Who holds a work packet's ball: its owner while the phase is worker-owned (RELEASED, ACKED, CHANGES_REQUESTED),
+ * each outstanding W# reviewer while it is UNDER_REVIEW (a recorded pending finding is the verdict: nobody then),
+ * nobody otherwise (delivered and unrouted, blocked, done).
+ */
+export function holders(p) {
+  if (p.kind !== 'work') return [];
+  if (WORKER_OWNED.includes(p.phase)) return [p.owner];
+  if (p.phase === 'UNDER_REVIEW' && !p.pendingFinding) return p.reviewers.filter((x) => /^W[1-9][0-9]?$/.test(x) && !(p.reviewedBy ?? []).includes(x)).sort();
+  return [];
+}
+
 /** Why a worker is woken: its packet was released to it, handed back to it, or it was assigned a review. */
 export const WAKE_REASONS = Object.freeze(['release', 'handback', 'review']);
 /** The wake event types; they record delivery truth and never move a packet's ball. */

@@ -24,6 +24,7 @@ import { byId, neededTransitions } from './derive.mjs';
 import { SnapshotError, formatFinding, reconcile, surfaceLabel } from './reconcile.mjs';
 import { ledgerHeads } from './reduce.mjs';
 import { renderHashes } from './render-current.mjs';
+import { wakeExceptions } from './router.mjs';
 
 /** The view's lines. `snapshot` is optional; `heads` is every head the ledger has had. */
 export function programView(s, snapshot = null, { heads, renders } = {}) {
@@ -54,8 +55,9 @@ export function programView(s, snapshot = null, { heads, renders } = {}) {
   if (!snapshot) out.push('SNAPSHOT=none (external blockers not evaluated; run conclusions unknown; GitHub facts not reconciled)');
   out.push(`CURRENT_SURFACE=${!snapshot ? 'unchecked' : surfaceLabel(findings)}`);
   // Step 6: a timed-out wake is an exception a human or the Director resolves (transfer-owner / reassign-review).
-  const undelivered = Object.entries(s.wakes ?? {}).filter(([, w]) => w.status === 'timed-out');
-  for (const [id, w] of undelivered) out.push(`CONTROL_EXCEPTION wake-undelivered ${w.worker} ${w.packet} wake=${id.slice(0, 12)}`);
+  // Only while the worker still holds that ball: a superseded timeout (reassigned, handed back) is resolved (C78-F1).
+  const undelivered = wakeExceptions(s);
+  for (const x of undelivered) out.push(`CONTROL_EXCEPTION ${x}`);
   out.push(`ACTIONABLE=${needed.length > 0 || findings.length > 0 || undelivered.length > 0 ? 'on' : 'off'}`);
   out.push('MONITOR=on');
   return out;

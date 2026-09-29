@@ -73,7 +73,7 @@ function fakeGh() {
       return c;
     },
     async pull(n) { const p = prs.get(n); return p ? { merged: false, ...p } : null; },
-    async descends(base, head) { return prs.get('descends')?.(base, head) ?? true; },
+    async descends(base, head) { const f = prs.get('descends'); return f ? f(base, head) : true; },
     async changedPaths() { return []; },
     async run() { return null; },
     async comment(id) { const c = all().find((x) => x.id === id); return c ? { id, body: c.body, author: c.author } : null; },
@@ -421,6 +421,75 @@ atest('a policy needing two reviewers with only one free waits (AWAITING_REVIEWE
   assert.deepEqual(r.awaiting, ['ALPHA eligible=W7 (too few free ops-source reviewers)']);
 });
 
+atest('C78-F1: a timeout resolved by reassign-review clears everywhere; the writer and both views agree, before and after the new reviewer passes', async () => {
+  const { remote, gh, reviewWake } = await delivered();
+  gh.clock.now += 15 * 60000; await run(remote, gh);
+  gh.clock.now += 15 * 60000; const t = await run(remote, gh);
+  assert.deepEqual(t.exceptions, [`wake-undelivered W7 ALPHA wake=${reviewWake.slice(0, 12)}`]);
+  assert.ok(programView(state(remote)).includes('ACTIONABLE=on'));
+  // The documented remedy: a Director reassign-review to W4. W4 is woken; W7's timed-out wake is superseded.
+  const dec = (o) => `\`\`\`wsf-control-decision\n${JSON.stringify(o)}\n\`\`\``;
+  gh.post(365, dec({ type: 'reassign-review', packet: 'ALPHA', reviewers: ['W4'] }));
+  const r = await run(remote, gh);
+  assert.ok(r.appended.includes('wake:R-WAKE:W4-review'), r.appended.join());
+  assert.deepEqual(r.exceptions, [], 'the writer: resolved');
+  const s = state(remote);
+  assert.equal(s.wakes[reviewWake].superseded, true);
+  const pv = programView(s);
+  assert.equal(pv.some((l) => l.includes('wake-undelivered')), false, 'program-view: resolved (C78-F1)');
+  assert.ok(pv.includes('ACTIONABLE=off'), pv.join('\n'));
+  assert.equal(workerView(s, 'W7').some((l) => l.startsWith('WAKE=')), false, 'worker-view: the superseded wake is not presented as unanswered');
+  assert.ok(workerView(s, 'W7').includes('WATCH=off'));
+  // Nothing retries or re-reports the superseded wake, however long it waits (W4's own new wake runs its own clock).
+  const w7Posts = appCommentsIn(gh, 434).length;
+  gh.clock.now += 20 * 60000;
+  const idle = await run(remote, gh);
+  assert.deepEqual(idle.exceptions, []);
+  assert.equal(state(remote).wakes[reviewWake].status, 'timed-out'); assert.equal(appCommentsIn(gh, 434).length, w7Posts, 'no re-post to W7');
+  const w4 = wakesOf(state(remote), 'W4')[0].id;
+  gh.post(394, block({ type: 'pass', packet: 'ALPHA', wakeId: w4, subjectSha: A }));
+  const p = await run(remote, gh);
+  assert.ok(p.appended.includes(`review-pass:A-PASS:W4-comment-${gh.inbox(394).at(-1).id}`));
+  const s2 = state(remote);
+  assert.equal(programView(s2).some((l) => l.includes('wake-undelivered')), false, 'still clear after the replacement reviewer passes');
+  assert.ok(programView(s2).some((l) => l.startsWith('AWAITING_ACCEPTANCE ALPHA')));
+  gh.post(434, block({ type: 'ack', packet: 'ALPHA', wakeId: reviewWake }));
+  assert.match((await run(remote, gh)).intakeRefused.at(-1).reason, /stale assignment/, 'W7\'s late ACK answers a ball it no longer holds');
+});
+
+atest('the writer\'s exceptions and program-view\'s agree at every step of the drill (one definition)', async () => {
+  const { remote, gh } = await delivered();
+  for (const minutes of [0, 15, 15, 15, 60]) {
+    gh.clock.now += minutes * 60000;
+    const r = await run(remote, gh);
+    const view = programView(state(remote)).filter((l) => l.startsWith('CONTROL_EXCEPTION wake-undelivered')).map((l) => l.replace('CONTROL_EXCEPTION ', ''));
+    assert.deepEqual(view, r.exceptions);
+  }
+});
+
+atest('PN-1 guards pinned: a wakeId for another packet, a reviewer delivering, an unreadable ancestry, a wake comment of unknown time', async () => {
+  const { remote, gh, reviewWake } = await delivered();
+  // K4: the wake's packet must be the report's packet.
+  gh.post(434, block({ type: 'pass', packet: 'BETA', wakeId: reviewWake, subjectSha: A }));
+  assert.match((await run(remote, gh)).intakeRefused.at(-1).reason, /is for ALPHA, not BETA/);
+  // K7: only the owner delivers (the reviewer's wake is not a release or handback).
+  gh.post(434, block({ type: 'deliver', packet: 'ALPHA', wakeId: reviewWake, pr: 12, subjectSha: A }));
+  assert.match((await run(remote, gh)).intakeRefused.at(-1).reason, /W7 does not own ALPHA; only its owner delivers/);
+  // K19: a wake comment whose time the writer cannot read is reported, never retried.
+  gh.inboxes.set(434, gh.inbox(434).map((c) => (c.author === BOT ? { ...c, createdAt: undefined } : c)));
+  gh.clock.now += 40 * 60000;
+  const r = await run(remote, gh);
+  assert.equal(r.appended.some((x) => x.startsWith('wake-retry')), false, 'no retry on an unknown clock');
+  // K10: an ancestry GitHub cannot compare (null) is refused, not assumed.
+  const r2 = bareRemote(); const g2 = fakeGh();
+  g2.prs.set(12, { state: 'open', headSha: A, baseSha: B });
+  g2.prs.set('descends', () => null);
+  await run(r2, g2);
+  g2.post(396, block({ type: 'deliver', packet: 'ALPHA', wakeId: wakesOf(state(r2), 'W3')[0].id, pr: 12, subjectSha: A }));
+  assert.match((await run(r2, g2)).intakeRefused.at(-1).reason, /does not descend from PR #12's base/);
+  assert.equal(state(r2).packets.ALPHA.phase, 'RELEASED');
+});
+
 // ---- pure units ---------------------------------------------------------------------------------------
 test('wake receipts are never a Director decision, and the same ball re-derived is the same wake identity', () => {
   for (const t of WAKE_EVENTS) assert.equal(INTAKE_TYPES.includes(t), false, t);
@@ -447,11 +516,11 @@ test('workerBlock: exactly one block, a known type, exactly its fields', () => {
 
 await (async () => {
   // postWakes is idempotent: a comment already carrying this attempt's marker is reused, never posted again.
-  const s = { repository: REPO, workers: { W7: { inbox: 434 } }, packets: { ALPHA: { artifact: { subjectSha: A }, pr: 12, owner: 'W3' } }, wakes: { ['c'.repeat(64)]: { packet: 'ALPHA', worker: 'W7', reason: 'review', status: 'requested', comments: [], ack: null } } };
+  const s = { repository: REPO, workers: { W7: { inbox: 434 } }, packets: { ALPHA: { artifact: { subjectSha: A }, pr: 12, owner: 'W3' } }, wakes: { ['c'.repeat(64)]: { packet: 'ALPHA', worker: 'W7', reason: 'review', status: 'requested', comments: [], ack: null, superseded: true } } };
   const text = '';
   const gh = fakeGh();
   const noBalls = await postWakes(gh, s, text, {}, BOT);
-  assert.deepEqual(noBalls.lines, [], 'a wake whose ball is not current is not posted');
+  assert.deepEqual(noBalls.lines, [], 'a superseded wake (its ball moved on before the post) is never posted');
 })();
 
 test('the live wsf-control-state-2 ledger (fixture, 4 lines) still checks and renders byte for byte; its first router run would wake W3 for AUTONOMY-ROUTER-1C', () => {

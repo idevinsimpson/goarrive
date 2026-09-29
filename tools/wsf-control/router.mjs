@@ -18,12 +18,13 @@
  *                 Too few free reviewers: nothing is written and AWAITING_REVIEWER is reported.
  *  - R-FINDING-HANDBACK  a pending finding is applied once its owner holds no other ball.
  *  - R-WAKE-RETRY / R-WAKE-TIMEOUT  15 minutes after the wake comment with no ACK and the ball
- *                 still the worker's: one re-post; 15 minutes after that: a timeout, reported as
- *                 CONTROL_EXCEPTION wake-undelivered. The ledger stores no clock.
+ *                 still the worker's (not superseded): one re-post; 15 minutes after that: a timeout,
+ *                 reported as CONTROL_EXCEPTION wake-undelivered until the ball moves on. The ledger
+ *                 stores no clock.
  */
 import { applyEvent, emptyState } from './transitions.mjs';
 import { ledgerLines } from './reduce.mjs';
-import { DEFAULT_REVIEW, LATEST_SCHEMA, RE, WORKER_OWNED, WRITER_APP, canon, sha256 } from './schema.mjs';
+import { DEFAULT_REVIEW, LATEST_SCHEMA, RE, WRITER_APP, canon, holders, sha256 } from './schema.mjs';
 import { RULES } from './rules.mjs';
 import { neededTransitions, workerWatch } from './derive.mjs';
 
@@ -43,17 +44,6 @@ export function line(repo, type, fields, source, rule, evidence) {
   };
 }
 
-/**
- * Who holds a work packet's ball: its owner while the phase is worker-owned (RELEASED, ACKED, CHANGES_REQUESTED),
- * each outstanding W# reviewer while it is UNDER_REVIEW (a recorded pending finding is the verdict: nobody then),
- * nobody otherwise (delivered and unrouted, blocked, done).
- */
-export function holders(p) {
-  if (p.kind !== 'work') return [];
-  if (WORKER_OWNED.includes(p.phase)) return [p.owner];
-  if (p.phase === 'UNDER_REVIEW' && !p.pendingFinding) return p.reviewers.filter((x) => W_RE.test(x) && !(p.reviewedBy ?? []).includes(x)).sort();
-  return [];
-}
 
 /**
  * Per packet and holder, the ball it holds now: the ledger head and source of the line at which it became a holder,
@@ -158,11 +148,10 @@ export function awaitingReviewers(state) {
  * never retried: the worker's WATCH is off for it. A comment the writer cannot see is reported, not guessed.
  */
 export function wakeTimerLines(state, eventsText, commentTimes, now) {
-  const current = new Set(balls(eventsText).map((b) => b.wakeId));
   const out = [];
   const unknown = [];
   for (const [wakeId, w] of Object.entries(state.wakes ?? {})) {
-    if (!current.has(wakeId) || !['delivered', 'redelivered'].includes(w.status)) continue;
+    if (w.superseded || !['delivered', 'redelivered'].includes(w.status)) continue;
     const last = w.comments[w.comments.length - 1];
     const at = Date.parse(commentTimes[last] ?? '');
     if (!Number.isFinite(at)) { unknown.push({ wakeId, commentId: last }); continue; }
@@ -173,14 +162,15 @@ export function wakeTimerLines(state, eventsText, commentTimes, now) {
   return { lines: out, unknown };
 }
 
-/** CONTROL_EXCEPTION wake-undelivered for every timed-out wake whose ball is still unanswered. */
-export function wakeExceptions(state, eventsText) {
-  const current = new Set(balls(eventsText).map((b) => b.wakeId));
-  return Object.entries(state.wakes ?? {}).filter(([id, w]) => w.status === 'timed-out' && current.has(id))
-    .map(([id, w]) => `wake-undelivered ${w.worker} ${w.packet} wake=${id.slice(0, 12)}`);
-}
+/**
+ * The open wake exceptions: timed out, and the worker still holds that ball. A superseded wake (the reducer marks it
+ * once the worker no longer holds the ball, e.g. after reassign-review) is resolved: writer and views agree on this set.
+ */
+export const openWakeTimeouts = (state) => Object.entries(state.wakes ?? {}).filter(([, w]) => w.status === 'timed-out' && !w.superseded);
+/** CONTROL_EXCEPTION wake-undelivered lines, the same for the writer's report and program-view. */
+export const wakeExceptions = (state) => openWakeTimeouts(state).map(([id, w]) => `wake-undelivered ${w.worker} ${w.packet} wake=${id.slice(0, 12)}`);
 
-/** Wakes requested but not yet posted (or retried and not yet re-posted): the writer posts these after its push. */
-export const wakesToPost = (state) => Object.entries(state.wakes ?? {}).filter(([, w]) => ['requested', 'retried'].includes(w.status)).map(([wakeId, w]) => ({ wakeId, ...w }));
+/** Wakes requested but not yet posted (or retried and not yet re-posted), still current: the writer posts these after its push. */
+export const wakesToPost = (state) => Object.entries(state.wakes ?? {}).filter(([, w]) => !w.superseded && ['requested', 'retried'].includes(w.status)).map(([wakeId, w]) => ({ wakeId, ...w }));
 
-export { RE };
+export { RE, holders };

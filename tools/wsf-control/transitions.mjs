@@ -35,7 +35,7 @@
  *   set-shadow-surface records the writer's shadow CURRENT comment.
  * A line whose schema is not the ledger's (outside the one upgrade line) is illegal.
  */
-import { DEFAULT_REVIEW, DELIVERED_SUCCESSOR, GENESIS, RE, SCHEMA_VERSION, WAKE_EVENTS, isTerminal, schemaOf, unreachableBlocker } from './schema.mjs';
+import { DEFAULT_REVIEW, DELIVERED_SUCCESSOR, GENESIS, RE, SCHEMA_VERSION, WAKE_EVENTS, holders, isTerminal, schemaOf, unreachableBlocker } from './schema.mjs';
 
 export class Illegal extends Error {}
 const illegal = (m) => { throw new Illegal(m); };
@@ -491,6 +491,12 @@ export function applyEvent(state, e) {
   if (p && !['reconcile-head', 'record-evidence', 'set-critical-path', 'set-review-policy', ...WAKE_EVENTS].includes(e.type) && !(e.type === 'finding' && e.pending)) p.authority.lastTransition = src;
   // The critical path completes when its packet does; it is never left pointing at a terminal packet.
   if (s.criticalPath && isTerminal(s.packets[s.criticalPath])) s.criticalPath = null;
+  // A wake is superseded once its worker no longer holds that packet's ball (reassigned, handed back, passed, withdrawn).
+  // Derived here, once, so the writer's clock and exceptions and every view read the same truth; a superseded wake is
+  // never retried, timed out, reported or listed. Only a ledger with wakes has the key, so earlier states are unchanged.
+  for (const w of Object.values(s.wakes ?? {})) {
+    if (!w.superseded && !holders(s.packets[w.packet]).includes(w.worker)) w.superseded = true;
+  }
   s.eventCount += 1;
   return s;
 }
