@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "d37838465c1387a4405324e86341b1f77d253cbd4d90f73794d0ef150e99d2f6",
-  "eventCount": 5,
+  "ledgerHead": "1826338b5916119a023df8fd33fa154da3ab9026b246259124a0b1394681009d",
+  "eventCount": 6,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -247,5 +247,15 @@
     "ref": "wsf-control-state",
     "commit": "92c3744752d21569e9a31451708366d7f3db8978",
     "ledgerHead": "f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb"
+  },
+  "wakes": {
+    "eee5b3c49e14000475c2d99341eaedc1a44697662004bcec567a8fd60b943f8a": {
+      "packet": "AUTONOMY-ROUTER-1C",
+      "worker": "W3",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
+    }
   }
 }

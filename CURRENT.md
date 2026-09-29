@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=d37838465c1387a4405324e86341b1f77d253cbd4d90f73794d0ef150e99d2f6 events=5 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=1826338b5916119a023df8fd33fa154da3ab9026b246259124a0b1394681009d events=6 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `d37838465c1387a4405324e86341b1f77d253cbd4d90f73794d0ef150e99d2f6` (5 events)
+- Ledger head: `1826338b5916119a023df8fd33fa154da3ab9026b246259124a0b1394681009d` (6 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -38,4 +38,10 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | AUTONOMY-ROUTER-1C | W3 | work | INTEGRATED (source-only) | ledger | RELEASED | — | — | — | — | — | — | — | comment:5882824399 | comment:5882824399 | — | Serial step 6: state-derived routing, wakes, and real-event proof | 1×ops-source then director | — |
 | AUTONOMY-STATE-1B | W3 | work | INTEGRATED (source-only) | bootstrap | INTEGRATED | #538 | 073b7946 | 073b7946 | — | d42a3307 | — | — | comment:5857966052 | comment:5857966052 | — | Serial step 5: authoritative control state, App writer, bootstrap and shadow reconcile | 1×ops-source then director | — |
+
+## Wakes
+
+| Wake | Worker | Packet | Reason | Status | Comments | ACK |
+| --- | --- | --- | --- | --- | --- | --- |
+| eee5b3c49e14 | W3 | AUTONOMY-ROUTER-1C | release | requested | — | — |
 
