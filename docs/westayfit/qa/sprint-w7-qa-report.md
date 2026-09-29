@@ -6275,3 +6275,102 @@ I read each value against the basis (#396 `5881074395`), the disposition (#396 `
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0.
 
 **Status:** **PASS at `6206ab8e` with zero findings.** This is source QA only; it does not close Step 5. The live App run and a second unchanged run remain the gate. W7 did no write, merge, live run, state-ref or comment mutation, or Step 6.
+
+## §78. Check 78: #541 AUTONOMY-ROUTER-1C at `566108c7`
+
+**Handoff:** #434 `5883969396`. **Subject:** #541 at exactly `566108c7939791d1c18303035a4299d71ea4bf49`, one commit on `f95bc0a6`. The diff is 21 files, +1439/−36, touching only `tools/wsf-control/**` and the wake template in `.claude/skills/wsf-program-director/SKILL.md`. I verified it in a detached worktree and pushed nothing.
+
+### Reproduced
+
+- Controls pass **281 / 281**: the previous 264 plus the 17 in `router`. Staging `run-all` is green.
+- **`state2-live` fixture.** Its `events.jsonl`, `state.json` and `CURRENT.md` are sha256-identical to the real `wsf-control-state-2` head `1bccde4a`, a `wsf-control-writer[bot]` commit. The ledger has 4 lines:
+  - `bootstrap`;
+  - `set-shadow-surface`;
+  - `queue` for AUTONOMY-ROUTER-1C;
+  - `release` for AUTONOMY-ROUTER-1C.
+
+  The suite's fixture test re-checks it and renders it byte for byte.
+- **The author's 42 / 43 mutants** are not in the tree, so I cannot rerun that exact set. I ran my own 30 instead; see below.
+
+### Independent reproductions
+
+These ran through the real writer against a real bare remote and a fake GitHub holding every inbox.
+
+| # | Scenario | Result |
+|---|---|---|
+| X2 | Stale re-pin: pin V1, then pin V2, then roll back to V1 | The old V1 decision is a no-op. The run is `writer-code-unpinned` and the ledger is byte-unchanged. |
+| X3 | Owner `set-contracts` decision edited after posting | Cannot re-pin. |
+| X4 | While pinned, an owner `set-contracts` to another version (realistic `sameTree`) | Not recorded, reported as `would unpin the running writer`. |
+| X5 | Four idle re-runs | 0 new App comments. |
+| X6 | Unassigned W4, in its own inbox, quotes W7's wake | Refused: `is W7's`. |
+| X7 | Owner W3, in its own inbox, files a finding on W7's wake | Refused. |
+| X8 | Reviewer W7 delivers the packet | Refused: `does not own`. |
+| X9 | Owner re-delivers during review on its stale, ACKed release wake | Refused: `stale assignment`. |
+
+### Finding C78-F1 (views): a resolved wake timeout stays ACTIONABLE forever in `program-view`
+
+`program-view.mjs:57-59` raises `CONTROL_EXCEPTION wake-undelivered` and `ACTIONABLE=on` for **every** wake whose status is `timed-out`. The writer's own `wakeExceptions` (`router.mjs:177-181`) raises it only when that wake is still a **current ball**.
+
+**Reproduction (X1):**
+1. The lost-wake drill runs until W7's review wake times out.
+2. The Director resolves it with the documented remedy, a `reassign-review` of ALPHA to W4. It is recorded, W4 is woken, and **the writer reports no exception**.
+3. `programView(state)` still prints `CONTROL_EXCEPTION wake-undelivered W7 ALPHA wake=04b1d735fbf4` and `ACTIONABLE=on`.
+4. After W4's PASS it still prints both.
+5. W7's late ACK is refused as `no longer W7's current ball (stale assignment)`.
+
+No event can move a stale timed-out wake out of `timed-out`, so ACTIONABLE stays on permanently after the first resolved timeout. The Director's view then disagrees with the writer's report.
+
+Related: `worker-view.mjs:42` also keeps `WAKE=… status=timed-out` for W7 indefinitely, next to `WATCH=off`. It lists every non-ACKed wake, stale ones included.
+
+**Smallest correction:** derive the view exception the way the writer does, with a timed-out wake counting only while it is a current ball. `program-view` has no ledger text to compute `balls` from, so this needs one of:
+- the current wake ids passed in;
+- a recorded terminal state for a superseded wake.
+
+Pin it with a test covering drill → `reassign-review` → `ACTIONABLE=off`.
+
+### My mutants: 30
+
+**The suite kills 24.** These are:
+- the report author and edit checks;
+- inbox binding;
+- ordering;
+- the current-ball check;
+- PR open and PR head;
+- the subject and review-reason checks;
+- owner exclusion in routing;
+- busy capacity;
+- a short reviewer set;
+- class eligibility;
+- the 15-minute boundary;
+- retrying a stale ball;
+- a wakeId without its head;
+- posting a stale ball;
+- marker reuse;
+- re-pinning from any decision;
+- the unpin filter;
+- wake events through intake;
+- wake events stamping `lastTransition`;
+- a pending finding's reviewer still counted as busy;
+- a finding never pending.
+
+**6 survive the suite:**
+
+| Mutant | What it changes | Status |
+|---|---|---|
+| K4 | Drop the `wake.packet === report.packet` check | Test gap. |
+| K7 | Drop "only the owner delivers" | Test gap. My X8 kills it: without the guard, the reviewer's delivery lands. |
+| K10 | Treat a `descends === null` (compare unreadable) as passing | Test gap. |
+| K19 | Retry a wake whose comment time is unknown | Test gap. |
+| K24 | Allow repeated re-pins in one run | Unreachable: once pinned, there is no second problem. |
+| K27 | Allow `wake-retry` from `redelivered` | Unreachable: the router never emits it, so the guard is defence in depth. |
+
+The code is correct for all six.
+
+### Precision notes (non-blocking)
+
+- **PN-1:** the suite does not pin K4, K7, K10 or K19; four small cases would.
+- **PN-2:** worker location is the only report binding, because every report comes from the owner's account (residual (a)). Nothing forbids two workers registering the same inbox. If that happened, a report quoting either worker's wake would count for that worker. Today all five inboxes are distinct.
+
+- **Gates:** `ts:check` 0; `check-evidence-intact` 0.
+
+**Status:** **ONE FINDING, C78-F1, at `566108c7`.** Items 2–6 hold. Item 1 holds except for ACTIONABLE after a resolved timeout. W7 did no integration, live writer run, state-ref mutation, deploy, or Step 7.
