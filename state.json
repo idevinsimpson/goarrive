@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "1826338b5916119a023df8fd33fa154da3ab9026b246259124a0b1394681009d",
-  "eventCount": 6,
+  "ledgerHead": "8c1c0c9ede6f80b210fcd28d11b96c3b9c493d461f290c8b1c7877ed0e466ba0",
+  "eventCount": 7,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -253,8 +253,10 @@
       "packet": "AUTONOMY-ROUTER-1C",
       "worker": "W3",
       "reason": "release",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        5887164849
+      ],
       "ack": null
     }
   }
