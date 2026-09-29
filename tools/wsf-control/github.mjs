@@ -26,7 +26,7 @@ export function gitHubClient({ token, repo, fetchImpl = globalThis.fetch }) {
   return {
     async pull(n) {
       const pr = await call('GET', `${r}/pulls/${n}`, null, `pull ${n}`);
-      return pr && { state: pr.state, merged: Boolean(pr.merged), headSha: pr.head.sha, mergeSha: pr.merged ? pr.merge_commit_sha : undefined };
+      return pr && { state: pr.state, merged: Boolean(pr.merged), headSha: pr.head.sha, baseSha: pr.base?.sha ?? null, mergeSha: pr.merged ? pr.merge_commit_sha : undefined };
     },
     /** Paths changed between two commits, or null when GitHub cannot compare them (then the change is reported unknown). */
     async changedPaths(base, head) {
@@ -39,6 +39,12 @@ export function gitHubClient({ token, repo, fetchImpl = globalThis.fetch }) {
         if (files.length < 100) return out;
       }
       return null; // more than 300 paths: do not guess
+    },
+    /** Does `head` descend from `base`? true, false, or null when GitHub cannot compare them (R-DELIVER-1). */
+    async descends(base, head) {
+      const c = await call('GET', `${r}/compare/${base}...${head}?per_page=1`, null, 'compare');
+      if (!c) return null;
+      return c.status === 'ahead' || c.status === 'identical';
     },
     async run(id) {
       const x = await call('GET', `${r}/actions/runs/${id}`, null, `run ${id}`);

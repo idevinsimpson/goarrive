@@ -167,6 +167,7 @@ const exactKeys = (v, req, opt = []) => isObj(v) && req.every((k) => Object.hasO
 /** Field checks. */
 const T = {
   int: (v) => Number.isInteger(v) && v > 0,
+  hash: (v) => typeof v === 'string' && RE.hash.test(v),
   sha: (v) => typeof v === 'string' && RE.sha.test(v),
   packet: (v) => typeof v === 'string' && RE.packet.test(v),
   worker: (v) => typeof v === 'string' && RE.worker.test(v),
@@ -281,9 +282,19 @@ export const EVENT_FIELDS = Object.freeze({
   'set-review-policy': [{ packet: T.packet, review: T.review }, {}],
   'apply-finding': [{ packet: T.packet }, {}],
   'set-shadow-surface': [{ pr: T.int, commentId: T.int }, {}],
+  // Wakes (Step 6, memo §6.2): request, App comment posted, worker ACK, one retry, timeout. Identity is the wakeId.
+  'wake': [{ wakeId: T.hash, packet: T.packet, worker: T.worker, reason: (v) => WAKE_REASONS.includes(v) }, {}],
+  'wake-delivered': [{ wakeId: T.hash, packet: T.packet, commentId: T.int }, {}],
+  'wake-ack': [{ wakeId: T.hash, packet: T.packet, worker: T.worker }, {}],
+  'wake-retry': [{ wakeId: T.hash, packet: T.packet }, {}],
+  'wake-timeout': [{ wakeId: T.hash, packet: T.packet }, {}],
 });
+/** Why a worker is woken: its packet was released to it, handed back to it, or it was assigned a review. */
+export const WAKE_REASONS = Object.freeze(['release', 'handback', 'review']);
+/** The wake event types; they record delivery truth and never move a packet's ball. */
+export const WAKE_EVENTS = Object.freeze(['wake', 'wake-delivered', 'wake-ack', 'wake-retry', 'wake-timeout']);
 /** Event types, and fields, that exist only in schema v2. A v1 line carrying one is malformed. */
-export const V2_ONLY = Object.freeze(['schema-upgrade', 'set-contracts', 'set-review-policy', 'apply-finding', 'set-shadow-surface']);
+export const V2_ONLY = Object.freeze(['schema-upgrade', 'set-contracts', 'set-review-policy', 'apply-finding', 'set-shadow-surface', 'wake', 'wake-delivered', 'wake-ack', 'wake-retry', 'wake-timeout']);
 const V2_FIELDS = Object.freeze({ bootstrap: ['contracts', 'supersedes'], 'register-worker': ['classes'], queue: ['review'], finding: ['pending'] });
 
 /**
@@ -299,6 +310,9 @@ export const SOURCE_RULES = Object.freeze({
   'finding': C, 'accept': C, 'transfer-owner': C,
   'block': C, 'unblock': C, 'withdraw': C, 'set-critical-path': C,
   'schema-upgrade': C, 'set-contracts': C, 'set-review-policy': C, 'set-shadow-surface': C,
+  // A wake rests on whatever set the ball (a release or finding comment, a delivery); its receipts rest on comments.
+  'wake': ['comment', 'pull_request', 'commit', 'workflow_run'],
+  'wake-delivered': C, 'wake-ack': C, 'wake-retry': C, 'wake-timeout': C,
   // A v2 proof-fail may rest on the failed run itself under the packet's pre-approved failure contract (R-PROOF-FAIL);
   // a v1 proof-fail still needs the focused finding comment (checked in validateEvent).
   'proof-fail': ['comment', 'workflow_run'],
@@ -323,7 +337,8 @@ const ENVELOPE_V2 = ['schema', 'authority'];
  * decision: identical payloads are a retry, different payloads a conflict.
  */
 export function eventId(e) {
-  const subject = e.packet ?? e.worker ?? e.owner ?? null;
+  // A wake's identity is its wakeId (memo §6.2): the same ball re-derived is the same wake, so it is never posted twice.
+  const subject = e.wakeId ?? e.packet ?? e.worker ?? e.owner ?? null;
   const source = { kind: e.source?.kind, id: e.source?.id, repo: e.source?.repo };
   // v1 identities are unchanged byte for byte. A v2 identity also names the derivation rule, so the same facts
   // re-derived under the same rule are one event (a retry is a no-op), and a different rule is a different event.

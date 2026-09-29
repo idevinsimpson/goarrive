@@ -12,6 +12,7 @@ const suites = [
   'audit.test.mjs',
   'v2.test.mjs',
   'shadow.test.mjs',
+  'router.test.mjs',
 ];
 let failed = 0;
 for (const s of suites) {

@@ -41,6 +41,8 @@ import { GENESIS, LATEST_SCHEMA, WRITER_APP, isTerminal } from './schema.mjs';
 import { RULES } from './rules.mjs';
 import { SHADOW_PLACEHOLDER, decisionIntake, derivedFacts, shadowSurfaceEvent } from './shadow.mjs';
 import { STATE_REF, checkoutState, commitState, predecessorRef, pushFastForward, readStateFile, redact, tokenGitEnv } from './gitstate.mjs';
+import { appendAll } from './append-all.mjs';
+import { postWakes, prReads, routerAppend, workerComments } from './router-run.mjs';
 
 export const MAX_ATTEMPTS = 3;
 /** The contracts whose pinned version must equal the running writer (memo §4.4). */
@@ -107,24 +109,7 @@ function predecessorSurfaceHistory(remote, workdir, sup, gitEnv) {
   return { heads: ledgerHeads(text), renders: renderHashes(text) };
 }
 
-/** Append lines one by one; a refused line is reported and skipped, never forced. Returns the new texts and a report. */
-export function appendAll(eventsText, lines) {
-  let text = eventsText;
-  let state = text ? reduce(text) : null;
-  const report = { appended: [], noop: 0, refused: [] };
-  for (const { event, label } of lines) {
-    try {
-      const r = appendEvent(text, event, { expectHead: state?.ledgerHead ?? GENESIS });
-      if (r.noop) { report.noop += 1; continue; }
-      text = r.eventsText; state = r.state;
-      report.appended.push(`${event.type}:${event.authority.rule}${label ? `:${label}` : ''}`);
-    } catch (e) {
-      if (!(e instanceof Refused)) throw e;
-      report.refused.push({ label: label ?? event.type, reason: e.message });
-    }
-  }
-  return { eventsText: text, state, report };
-}
+export { appendAll };
 
 /** The writer-code pin check: the running commit must carry exactly the pinned writer paths. */
 export function writerPinProblem(state, runningSha, sameTree) {
@@ -159,11 +144,26 @@ export async function buildSnapshot(state, gh, { shadowBody = undefined } = {}) 
 }
 
 /**
+ * The re-pin an unpinned writer may record: an owner-authored, unedited set-contracts decision in the control inbox
+ * after which the writer pins match the running commit. Returns { files, state, label } or null.
+ */
+export function repinLine(state, eventsText, controlInboxComments, botLogin, runningSha, sameTree) {
+  const intake = decisionIntake(state, (controlInboxComments ?? []).filter((c) => c.author !== botLogin));
+  for (const x of intake.events.filter((e) => e.event.type === 'set-contracts')) {
+    const r = appendAll(eventsText, [{ event: x.event, label: `comment-${x.commentId}` }]);
+    if (!r.report.appended.length || writerPinProblem(r.state, runningSha, sameTree)) continue;
+    return { files: { 'events.jsonl': r.eventsText, 'state.json': serialize(r.state), 'CURRENT.md': `${renderCurrent(r.state)}\n` }, state: r.state, label: `set-contracts:MANUAL:comment-${x.commentId}` };
+  }
+  return null;
+}
+
+/**
  * One run. Everything with a side effect is injected: `gh` (GitHub), `remote` + `gitEnv` (the state ref),
  * `author` (the App bot identity), `runningSha`, `sameTree`. Returns a closed report.
  */
-export async function runShadow({ gh, remote, gitEnv = {}, author, runningSha, sameTree, bootstrapInput, workdir, controlInboxComments, ref = STATE_REF, botLogin, now = Date.now() }) {
-  const report = { outcome: null, attempts: 0, bootstrapped: false, appended: [], refused: [], intakeRefused: [], surface: null, head: null, exception: null };
+export async function runShadow({ gh, remote, gitEnv = {}, author, runningSha, sameTree, bootstrapInput, workdir, controlInboxComments, ref = STATE_REF, botLogin, now = Date.now(), readInbox = async () => [], route = true }) {
+  const report = { outcome: null, attempts: 0, bootstrapped: false, appended: [], refused: [], intakeRefused: [], surface: null, head: null, exception: null, repinned: null, wakesPosted: [], awaiting: [], exceptions: [], deferred: null };
+  let repinUsed = false;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     report.attempts = attempt;
     const dir = path.join(workdir, `attempt-${attempt}`);
@@ -195,7 +195,22 @@ export async function runShadow({ gh, remote, gitEnv = {}, author, runningSha, s
       const checked = checkTexts(eventsText, readStateFile(dir, 'state.json'));
       if (!checked.ok) return { ...report, outcome: 'refused', exception: `CONTROL_STATE=invalid: ${checked.problems[0]}` };
       const pin = writerPinProblem(checked.state, runningSha, sameTree);
-      if (pin) return { ...report, outcome: 'refused', exception: `writer-code-unpinned: ${pin}` };
+      if (pin) {
+        // The one thing an unpinned writer may record (memo §4.4): the owner's set-contracts decision that pins exactly
+        // the writer code now running. Anything else waits; a decision pinning some other version is ignored here.
+        const repin = repinLine(checked.state, eventsText, controlInboxComments, botLogin, runningSha, sameTree);
+        if (!repin || repinUsed) return { ...report, outcome: 'refused', exception: `writer-code-unpinned: ${pin}` };
+        commitState(dir, repin.files, `wsf-control: re-pin to ${runningSha.slice(0, 12)}, head ${repin.state.ledgerHead.slice(0, 12)}`, author);
+        const pushed = pushFastForward(dir, remote, { env: gitEnv, ref });
+        if (!pushed.ok) {
+          if (pushed.rejected && attempt < MAX_ATTEMPTS) continue;
+          return { ...report, outcome: 'refused', exception: pushed.rejected ? 'writer-contention: the state ref moved on every attempt' : `push failed: ${redact(pushed.detail).split('\n')[0]}` };
+        }
+        report.repinned = repin.label;
+        repinUsed = true;
+        attempt -= 1; // the re-pin is not a contention attempt: re-read the pinned ledger and run normally
+        continue;
+      }
     }
     // Apply the bootstrap first (if any) so the fact and decision derivations see a real state.
     let { eventsText: afterBoot, state, report: r0 } = appendAll(eventsText, lines);
@@ -219,10 +234,29 @@ export async function runShadow({ gh, remote, gitEnv = {}, author, runningSha, s
     // Director/L0 decisions posted as one fenced block in the control inbox.
     const intake = decisionIntake(state, (controlInboxComments ?? []).filter((c) => c.author !== botLogin));
     report.intakeRefused = intake.refused;
+    // A set-contracts that would unpin the running writer is never recorded: an older decision pinning some other
+    // version, read again after a re-pin, must not lock the writer out (memo §4.4). It is reported instead.
+    intake.events = intake.events.filter((x) => {
+      if (x.event.type !== 'set-contracts' || !runningSha) return true;
+      const pins = x.event.contracts.filter((c) => WRITER_CONTRACTS.includes(c.id));
+      const ok = pins.length === WRITER_CONTRACTS.length && pins.every((c) => c.commit === runningSha || sameTree(c.commit, runningSha, c.path));
+      if (!ok) report.intakeRefused.push({ commentId: x.commentId, reason: 'set-contracts would unpin the running writer; not recorded' });
+      return ok;
+    });
     const res = appendAll(eventsText, [...facts, ...intake.events.map((x) => ({ event: x.event, label: `comment-${x.commentId}` }))]);
-    const allAppended = [...r0.appended, ...r1.report.appended, ...res.report.appended];
-    const nextText = res.eventsText; state = res.state;
-    report.refused = res.report.refused;
+    // Step 6 (AUTONOMY-ROUTER-1C): worker reports, review routing and handback, wakes and the wake clock.
+    // `route` is off only in the Step-5 shadow tests, which pin that pipeline's exact lines; a live run always routes.
+    const inboxes = {};
+    if (route) for (const { inbox } of Object.values(res.state.workers)) inboxes[inbox] = await readInbox(inbox);
+    const items = route ? workerComments(res.state, inboxes, botLogin) : [];
+    const rr = route ? routerAppend(res.eventsText, res.state, { items, prs: await prReads(gh, items), inboxes, botLogin, now })
+      : { eventsText: res.eventsText, state: res.state, appended: [], refused: [], intakeRefused: [], awaiting: [], exceptions: [] };
+    report.intakeRefused = [...report.intakeRefused, ...rr.intakeRefused];
+    report.awaiting = rr.awaiting.map((a) => `${a.packet} eligible=${a.awaiting.join(',') || 'none'} (${a.why})`);
+    report.exceptions = rr.exceptions;
+    const allAppended = [...r0.appended, ...r1.report.appended, ...res.report.appended, ...rr.appended];
+    let nextText = rr.eventsText; state = rr.state;
+    report.refused = [...res.report.refused, ...rr.refused];
     const changed = nextText !== readStateFile(dir, 'events.jsonl');
     if (changed) {
       const files = { 'events.jsonl': nextText, 'state.json': serialize(state), 'CURRENT.md': `${renderCurrent(state)}\n` };
@@ -232,6 +266,20 @@ export async function runShadow({ gh, remote, gitEnv = {}, author, runningSha, s
         if (pushed.rejected && attempt < MAX_ATTEMPTS) continue; // a concurrent writer won; re-read and re-derive
         return { ...report, outcome: 'refused', exception: pushed.rejected ? 'writer-contention: the state ref moved on every attempt' : `push failed: ${redact(pushed.detail).split('\n')[0]}` };
       }
+    }
+    // Only after the ledger is pushed: post the wake comments, then record their delivery (a second CAS push).
+    // A lost race here loses nothing: the next run finds each posted comment again by its marker.
+    const wk = route ? await postWakes(gh, state, nextText, inboxes, botLogin) : { lines: [], posted: [] };
+    report.wakesPosted = wk.posted;
+    if (wk.lines.length) {
+      const rd = appendAll(nextText, wk.lines.map((event) => ({ event, label: `comment-${event.commentId}` })));
+      if (rd.report.appended.length) {
+        commitState(dir, { 'events.jsonl': rd.eventsText, 'state.json': serialize(rd.state), 'CURRENT.md': `${renderCurrent(rd.state)}\n` }, `wsf-control: ${rd.report.appended.length} wake receipt(s), head ${rd.state.ledgerHead.slice(0, 12)}`, author);
+        const pushed = pushFastForward(dir, remote, { env: gitEnv, ref });
+        if (pushed.ok) { nextText = rd.eventsText; state = rd.state; allAppended.push(...rd.report.appended); }
+        else report.deferred = `wake receipts not recorded this run (${pushed.rejected ? 'the ref moved' : 'push failed'}); the next run finds the posted comments by marker`;
+      }
+      report.refused.push(...rd.report.refused);
     }
     report.bootstrapped = !remoteSha;
     report.appended = allAppended;
@@ -254,7 +302,7 @@ export async function runShadow({ gh, remote, gitEnv = {}, author, runningSha, s
       else if (body === rendered) report.surface = 'ok';
       else { await gh.editComment(state.surfaces.shadow.commentId, rendered); report.surface = 'edited'; }
     }
-    report.outcome = changed ? 'written' : 'unchanged';
+    report.outcome = changed || allAppended.length ? 'written' : 'unchanged';
     return report;
   }
   return { ...report, outcome: 'refused', exception: 'writer-contention' };
@@ -266,6 +314,11 @@ export function formatReport(r) {
   for (const a of r.appended) L.push(`APPENDED_LINE ${a}`);
   for (const x of r.refused) L.push(`REFUSED_LINE ${x.label} :: ${x.reason}`);
   for (const x of r.intakeRefused) L.push(`INTAKE_REFUSED comment=${x.commentId} :: ${x.reason}`);
+  if (r.repinned) L.push(`REPINNED ${r.repinned}`);
+  for (const x of r.wakesPosted ?? []) L.push(`WAKE_POSTED ${x}`);
+  for (const x of r.awaiting ?? []) L.push(`AWAITING_REVIEWER ${x}`);
+  for (const x of r.exceptions ?? []) L.push(`CONTROL_EXCEPTION ${x}`);
+  if (r.deferred) L.push(`DEFERRED ${r.deferred}`);
   if (r.head) L.push(`LEDGER_HEAD=${r.head}`);
   if (r.surface) L.push(`SHADOW_SURFACE=${r.surface}`);
   if (r.exception) L.push(`CONTROL_EXCEPTION ${r.exception}`);
@@ -321,6 +374,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   const report = await runShadow({
     gh, remote: `https://github.com/${repo}.git`, gitEnv: tokenGitEnv(token), author, runningSha, sameTree,
     bootstrapInput: input, workdir: fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-control-')), controlInboxComments: await gh.recentComments(inbox, 100), botLogin,
+    readInbox: (issue) => gh.recentComments(issue, 100),
   });
   console.log(formatReport(report));
   console.log(`WRITER=${botLogin} RUNNING_SHA=${runningSha}`);

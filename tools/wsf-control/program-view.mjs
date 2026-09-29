@@ -53,7 +53,10 @@ export function programView(s, snapshot = null, { heads, renders } = {}) {
   for (const x of findings) out.push(formatFinding(x));
   if (!snapshot) out.push('SNAPSHOT=none (external blockers not evaluated; run conclusions unknown; GitHub facts not reconciled)');
   out.push(`CURRENT_SURFACE=${!snapshot ? 'unchecked' : surfaceLabel(findings)}`);
-  out.push(`ACTIONABLE=${needed.length > 0 || findings.length > 0 ? 'on' : 'off'}`);
+  // Step 6: a timed-out wake is an exception a human or the Director resolves (transfer-owner / reassign-review).
+  const undelivered = Object.entries(s.wakes ?? {}).filter(([, w]) => w.status === 'timed-out');
+  for (const [id, w] of undelivered) out.push(`CONTROL_EXCEPTION wake-undelivered ${w.worker} ${w.packet} wake=${id.slice(0, 12)}`);
+  out.push(`ACTIONABLE=${needed.length > 0 || findings.length > 0 || undelivered.length > 0 ? 'on' : 'off'}`);
   out.push('MONITOR=on');
   return out;
 }

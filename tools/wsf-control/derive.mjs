@@ -19,7 +19,8 @@ export function workerBuckets(s, worker) {
   return {
     active: mine.filter((p) => WORKER_OWNED.includes(p.phase)),
     // A reviewer that has passed holds no ball: its WATCH is off while the packet waits on others or on acceptance.
-    reviewing: all.filter((p) => p.phase === 'UNDER_REVIEW' && p.reviewers.includes(worker) && !(p.reviewedBy || []).includes(worker)),
+    // A recorded pending finding is the review's verdict (R-PREEMPT): its reviewer holds nothing while it waits.
+    reviewing: all.filter((p) => p.phase === 'UNDER_REVIEW' && !p.pendingFinding && p.reviewers.includes(worker) && !(p.reviewedBy || []).includes(worker)),
     waiting: mine.filter((p) => REVIEWER_OWNED.includes(p.phase)),
     blocked: mine.filter((p) => p.phase === 'BLOCKED'),
     // NEXT is the first WORK packet in queue order; a queued reference is released at will and never drives the loop.

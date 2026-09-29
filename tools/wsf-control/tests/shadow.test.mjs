@@ -69,7 +69,8 @@ function bareRemote() {
   git(d, 'init', '-q', '--bare', 'remote.git');
   return path.join(d, 'remote.git');
 }
-const run = (over) => runShadow({ ref: BASE, now: NOW, author: AUTHOR, runningSha: RUNNING, sameTree: () => true, bootstrapInput: input(), workdir: tmp(), controlInboxComments: [], botLogin: BOT, ...over });
+// The Step-5 shadow pipeline's tests pin its exact lines with routing off; router.test.mjs runs the writer with it on.
+const run = (over) => runShadow({ route: false, ref: BASE, now: NOW, author: AUTHOR, runningSha: RUNNING, sameTree: () => true, bootstrapInput: input(), workdir: tmp(), controlInboxComments: [], botLogin: BOT, ...over });
 const remoteEvents = (remote, ref = BASE) => git(os.tmpdir(), '--git-dir', remote, 'show', `refs/heads/${ref}:events.jsonl`);
 
 const asyncTests = [];
