@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=2457be55e38d8e9e796210b018b4aa9574b4bf3811ecea0db13c744cdb58800f events=3 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=ca51b87e23900a5c2ecc0ee90ff776adc92c41c31d7f6706e2305d1754a37bd7 events=4 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `2457be55e38d8e9e796210b018b4aa9574b4bf3811ecea0db13c744cdb58800f` (3 events)
+- Ledger head: `ca51b87e23900a5c2ecc0ee90ff776adc92c41c31d7f6706e2305d1754a37bd7` (4 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -26,7 +26,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 
 | Worker | Inbox | Active now | Reviewing | Waiting on review | Blocked | Next | Queue | WATCH |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| W3 | #396 | — | — | — | — | AUTONOMY-ROUTER-1C | AUTONOMY-ROUTER-1C | off |
+| W3 | #396 | AUTONOMY-ROUTER-1C | — | — | — | — | — | on |
 | W4 | #394 | — | — | — | — | — | — | off |
 | W5 | #395 | — | — | — | — | — | — | off |
 | W7 | #434 | — | — | — | — | — | — | off |
@@ -36,6 +36,6 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 
 | Packet | Owner | Kind | Completes at | Origin | Phase | PR | Subject | PR head | Evidence | Merge | Proof | Reviewers | Released by | Last transition | Blocked by | Label | Review policy | Pending finding |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| AUTONOMY-ROUTER-1C | W3 | work | INTEGRATED (source-only) | ledger | QUEUED | — | — | — | — | — | — | — | — | comment:5882813601 | — | Serial step 6: state-derived routing, wakes, and real-event proof | 1×ops-source then director | — |
+| AUTONOMY-ROUTER-1C | W3 | work | INTEGRATED (source-only) | ledger | RELEASED | — | — | — | — | — | — | — | comment:5882824399 | comment:5882824399 | — | Serial step 6: state-derived routing, wakes, and real-event proof | 1×ops-source then director | — |
 | AUTONOMY-STATE-1B | W3 | work | INTEGRATED (source-only) | bootstrap | INTEGRATED | #538 | 073b7946 | 073b7946 | — | d42a3307 | — | — | comment:5857966052 | comment:5857966052 | — | Serial step 5: authoritative control state, App writer, bootstrap and shadow reconcile | 1×ops-source then director | — |
 

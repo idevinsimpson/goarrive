@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "2457be55e38d8e9e796210b018b4aa9574b4bf3811ecea0db13c744cdb58800f",
-  "eventCount": 3,
+  "ledgerHead": "ca51b87e23900a5c2ecc0ee90ff776adc92c41c31d7f6706e2305d1754a37bd7",
+  "eventCount": 4,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -48,9 +48,7 @@
     }
   },
   "queue": {
-    "W3": [
-      "AUTONOMY-ROUTER-1C"
-    ],
+    "W3": [],
     "W4": [],
     "W5": [],
     "W7": [],
@@ -66,10 +64,10 @@
       },
       "label": "Serial step 6: state-derived routing, wakes, and real-event proof",
       "origin": "ledger",
-      "phase": "QUEUED",
+      "phase": "RELEASED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
-      "inbox": null,
+      "inbox": 396,
       "pr": null,
       "reviewers": [],
       "artifact": {
@@ -80,7 +78,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": null,
+      "releasedQueueIndex": 0,
       "reviewedBy": [],
       "subjectPaths": [
         "*"
@@ -92,11 +90,14 @@
           "kind": "comment",
           "id": 5882813601
         },
-        "released": null,
+        "released": {
+          "kind": "comment",
+          "id": 5882824399
+        },
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5882813601
+          "id": 5882824399
         }
       },
       "review": {
