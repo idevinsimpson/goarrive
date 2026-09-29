@@ -6374,3 +6374,77 @@ The code is correct for all six.
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0.
 
 **Status:** **ONE FINDING, C78-F1, at `566108c7`.** Items 2–6 hold. Item 1 holds except for ACTIONABLE after a resolved timeout. W7 did no integration, live writer run, state-ref mutation, deploy, or Step 7.
+
+## §79. Check 79: C78-F1 successor at `1bad799e`
+
+**Handoff:** #434 `5886203243`. **Subject:** #541 at exactly `1bad799e0f2f1fd2c2154bfcfd82547123c1c2f3`. It is one commit on `566108c7` touching 7 files, +114/−37, all under `tools/wsf-control/`. I verified it in a detached worktree and pushed nothing.
+
+**The fix.** The reducer now marks a wake `superseded` once its worker no longer holds that packet's ball. The mark is sticky, and the key appears only when it is true. Five places read that one flag:
+- the writer's exceptions (`wakeExceptions(state)`);
+- the clock (`wakeTimerLines`);
+- posting (`wakesToPost`);
+- `program-view`;
+- `worker-view`.
+
+`holders` moved unchanged into `schema.mjs`. There is no new ledger event and no new field in any event.
+
+### 1. Fail before, pass after
+
+I ran the same script on both heads. The script runs the timeout, then a `reassign-review` of ALPHA to W4, then W4's PASS, then W7's late ACK.
+
+| Check | `566108c7` | `1bad799e` |
+|---|---|---|
+| `program-view` after reassignment | `CONTROL_EXCEPTION wake-undelivered W7 ALPHA` and `ACTIONABLE=on`, **FAIL** | clear, `ACTIONABLE=off` |
+| `worker-view` W7 | stale `WAKE=` line, **FAIL** | none |
+| Views after W4's PASS | still on, **FAIL** | still clear |
+| W7's late ACK | refused as `stale assignment` | refused as `stale assignment` |
+| Writer report after reassignment | no exception | no exception |
+
+### 2. One definition
+
+Across 11 checkpoints (drill, reassign, idle, pass, finding handback, ACK, re-delivery, re-review), two sets were equal every time:
+- `balls()`, the ledger-history current balls that the intake uses;
+- the non-superseded recorded wakes.
+
+Supporting checks:
+- An ACK keeps the release wake live.
+- A finding supersedes the review wake and creates a live handback wake. Re-delivery supersedes the handback wake and creates a new, live review wake.
+- The **replacement** reviewer's own wake still retries at 15 minutes, so supersession does not over-suppress.
+
+### 3. A superseded wake is not retried, timed out, posted or listed
+
+After reassignment, 45 idle minutes produced no W7 post and no W7 timer line. W7's late ACK still refuses.
+
+### 4. Reproduced
+
+- Controls pass **284 / 284**: the previous 264 plus router 20. Staging is green.
+- The `state2-live` fixture is sha256-identical to the real `wsf-control-state-2` head `1bccde4a`, which has not moved.
+- Its `state.json` and `CURRENT.md` re-serialize and render byte for byte under this code.
+
+### 5. PN-1 and PN-2
+
+- **PN-1 is closed.** The new test pins K4, K7, K10 and K19. Re-running those four mutants, the suite now **kills all 4**.
+- **Test changes are additive**, with two small adjustments:
+  - the `fakeGh` `descends` stub now passes a `null` through (`?? true` → `f ? f() : true`), which the K10 test needs;
+  - the `postWakes` unit's stale-ball case now marks the hand-built wake `superseded`, and its assertion is equivalent.
+- **PN-2 is unchanged** (no inbox-uniqueness change).
+
+### 6. Scope
+
+7 files under `tools/wsf-control/`. No product path, deploy, live run, state-ref mutation, frozen reference or workflow change.
+
+### Mutants on the successor: 12
+
+| Result | Mutants |
+|---|---|
+| Killed by the suite (10) | K4, K7, K10, K19; S1 (never supersede); S3 (exceptions ignore the flag); S4 (the timer ignores it); S5 (posting ignores it); S6 (`worker-view` lists superseded wakes); S7 (`program-view` uses the old filter) |
+| Survive the suite, killed by my repros (2) | S2 (supersession not sticky: an old handback wake revives on re-delivery); S8 (the `superseded:false` key always present) |
+
+### Precision notes (non-blocking)
+
+- **PN-3:** stickiness (S2) is correct but not pinned by the suite. A non-sticky flag would revive a superseded wake whenever its worker regains the packet's ball through a *new* wake. My X3b catches it.
+- **PN-4:** "the key appears only when true" (S8) is not pinned by the suite. It matters only for byte-stability of future wake ledgers; no live ledger has wakes today.
+
+- **Gates:** `ts:check` 0; `check-evidence-intact` 0.
+
+**Status:** **PASS at `1bad799e` with zero unresolved findings. C78-F1 is closed.** W7 did no integration, live writer run, state-ref mutation, deploy or Step 7.
