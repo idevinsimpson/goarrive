@@ -1,0 +1,430 @@
+{
+ "7ee": {
+  "browserVersion": "141.0.7390.37",
+  "results": [
+   {
+    "id": "desktop P1 champion openManage",
+    "expect": "resolve",
+    "outcome": "PASS",
+    "detail": "resolved -> {\"panelVisible\":true}",
+    "ms": 4993,
+    "extra": {
+     "surface": "shell",
+     "counts": {
+      "wsf-member-topbar": 1,
+      "wsf-member-topbar-menu-button": 1,
+      "wsf-member-topbar-menu": 0,
+      "wsf-member-topbar-menu-manage-community": 0,
+      "wsf-community-wordmark": 0,
+      "wsf-community-manage": 0,
+      "wsf-community-manage-panel": 1
+     }
+    }
+   },
+   {
+    "id": "desktop P2 member assertMemberHasNoManage",
+    "expect": "resolve",
+    "outcome": "PASS",
+    "detail": "resolved",
+    "ms": 2271,
+    "extra": {
+     "surface": "shell",
+     "before": {
+      "wsf-member-topbar": 1,
+      "wsf-member-topbar-menu-button": 1,
+      "wsf-member-topbar-menu": 0,
+      "wsf-member-topbar-menu-manage-community": 0,
+      "wsf-community-wordmark": 0,
+      "wsf-community-manage": 0,
+      "wsf-community-manage-panel": 0
+     },
+     "watch": {
+      "menuVisiblePolls": 20,
+      "polls": 21
+     },
+     "menuVisibleAfter": false,
+     "countsAfter": {
+      "wsf-member-topbar": 1,
+      "wsf-member-topbar-menu-button": 1,
+      "wsf-member-topbar-menu": 0,
+      "wsf-member-topbar-menu-manage-community": 0,
+      "wsf-community-wordmark": 0,
+      "wsf-community-manage": 0,
+      "wsf-community-manage-panel": 0
+     }
+    }
+   },
+   {
+    "id": "desktop N1 champion assertMemberHasNoManage",
+    "expect": "reject",
+    "outcome": "PASS",
+    "detail": "rejected: Member unexpectedly has the Champion Manage surface (Manage community is in the menu)",
+    "ms": 77,
+    "extra": {
+     "counts": {
+      "wsf-member-topbar": 1,
+      "wsf-member-topbar-menu-button": 1,
+      "wsf-member-topbar-menu": 1,
+      "wsf-member-topbar-menu-manage-community": 1,
+      "wsf-community-wordmark": 0,
+      "wsf-community-manage": 0,
+      "wsf-community-manage-panel": 0
+     }
+    }
+   },
+   {
+    "id": "desktop N2 member openManage{timeout:5000}",
+    "expect": "reject",
+    "outcome": "PASS",
+    "detail": "rejected: locator.waitFor: Timeout 5000ms exceeded. | Call log: | \u001b[2m  - waiting for getByTestId('wsf-member-topbar-menu-manage-community') to be visible\u001b[22m | ",
+    "ms": 5057,
+    "extra": {
+     "counts": {
+      "wsf-member-topbar": 1,
+      "wsf-member-topbar-menu-button": 1,
+      "wsf-member-topbar-menu": 1,
+      "wsf-member-topbar-menu-manage-community": 0,
+      "wsf-community-wordmark": 0,
+      "wsf-community-manage": 0,
+      "wsf-community-manage-panel": 0
+     }
+    }
+   },
+   {
+    "id": "desktop N3a about:blank manageSurface(3000)",
+    "expect": "reject",
+    "outcome": "PASS",
+    "detail": "rejected: Neither Manage surface is on the page (no wsf-member-topbar, no wsf-community-wordmark): not a Community Home this harness recognises",
+    "ms": 3081
+   },
+   {
+    "id": "desktop N3a about:blank openManage{timeout:3000}",
+    "expect": "reject",
+    "outcome": "PASS",
+    "detail": "rejected: Neither Manage surface is on the page (no wsf-member-topbar, no wsf-community-wordmark): not a Community Home this harness recognises",
+    "ms": 3064
+   },
+   {
+    "id": "desktop N3b /signin signed-out openManage{timeout:3000}",
+    "expect": "reject",
+    "outcome": "PASS",
+    "detail": "rejected: Neither Manage surface is on the page (no wsf-member-topbar, no wsf-community-wordmark): not a Community Home this harness recognises",
+    "ms": 3061,
+    "extra": {
+     "counts": {
+      "wsf-member-topbar": 0,
+      "wsf-member-topbar-menu-button": 0,
+      "wsf-member-topbar-menu": 0,
+      "wsf-member-topbar-menu-manage-community": 0,
+      "wsf-community-wordmark": 0,
+      "wsf-community-manage": 0,
+      "wsf-community-manage-panel": 0
+     }
+    }
+   },
+   {
+    "id": "desktop N3c / signed-out manageSurface(3000)",
+    "expect": "reject",
+    "outcome": "PASS",
+    "detail": "rejected: Neither Manage surface is on the page (no wsf-member-topbar, no wsf-community-wordmark): not a Community Home this harness recognises",
+    "ms": 3078,
+    "extra": {
+     "url": "http://127.0.0.1:5010/",
+     "counts": {
+      "wsf-member-topbar": 0,
+      "wsf-member-topbar-menu-button": 0,
+      "wsf-member-topbar-menu": 0,
+      "wsf-member-topbar-menu-manage-community": 0,
+      "wsf-community-wordmark": 0,
+      "wsf-community-manage": 0,
+      "wsf-community-manage-panel": 0
+     }
+    }
+   },
+   {
+    "id": "desktop N4 both markers (injected wsf-community-wordmark) openManage",
+    "expect": "reject",
+    "outcome": "PASS",
+    "detail": "rejected: Both Manage surfaces are on the page at once; the harness cannot tell which candidate this is",
+    "ms": 13,
+    "extra": {
+     "counts": {
+      "wsf-member-topbar": 1,
+      "wsf-member-topbar-menu-button": 1,
+      "wsf-member-topbar-menu": 0,
+      "wsf-member-topbar-menu-manage-community": 0,
+      "wsf-community-wordmark": 1,
+      "wsf-community-manage": 0,
+      "wsf-community-manage-panel": 0
+     }
+    }
+   },
+   {
+    "id": "phone P1 champion openManage",
+    "expect": "resolve",
+    "outcome": "PASS",
+    "detail": "resolved -> {\"panelVisible\":true}",
+    "ms": 512,
+    "extra": {
+     "surface": "shell",
+     "counts": {
+      "wsf-member-topbar": 1,
+      "wsf-member-topbar-menu-button": 1,
+      "wsf-member-topbar-menu": 0,
+      "wsf-member-topbar-menu-manage-community": 0,
+      "wsf-community-wordmark": 0,
+      "wsf-community-manage": 0,
+      "wsf-community-manage-panel": 1
+     }
+    }
+   },
+   {
+    "id": "phone P2 member assertMemberHasNoManage",
+    "expect": "resolve",
+    "outcome": "PASS",
+    "detail": "resolved",
+    "ms": 2181,
+    "extra": {
+     "surface": "shell",
+     "before": {
+      "wsf-member-topbar": 1,
+      "wsf-member-topbar-menu-button": 1,
+      "wsf-member-topbar-menu": 0,
+      "wsf-member-topbar-menu-manage-community": 0,
+      "wsf-community-wordmark": 0,
+      "wsf-community-manage": 0,
+      "wsf-community-manage-panel": 0
+     },
+     "watch": {
+      "menuVisiblePolls": 20,
+      "polls": 21
+     },
+     "menuVisibleAfter": false,
+     "countsAfter": {
+      "wsf-member-topbar": 1,
+      "wsf-member-topbar-menu-button": 1,
+      "wsf-member-topbar-menu": 0,
+      "wsf-member-topbar-menu-manage-community": 0,
+      "wsf-community-wordmark": 0,
+      "wsf-community-manage": 0,
+      "wsf-community-manage-panel": 0
+     }
+    }
+   }
+  ]
+ },
+ "c8f": {
+  "browserVersion": "141.0.7390.37",
+  "results": [
+   {
+    "id": "desktop P1 champion openManage",
+    "expect": "resolve",
+    "outcome": "PASS",
+    "detail": "resolved -> {\"panelVisible\":true}",
+    "ms": 3131,
+    "extra": {
+     "surface": "legacy",
+     "counts": {
+      "wsf-member-topbar": 0,
+      "wsf-member-topbar-menu-button": 0,
+      "wsf-member-topbar-menu": 0,
+      "wsf-member-topbar-menu-manage-community": 0,
+      "wsf-community-wordmark": 1,
+      "wsf-community-manage": 1,
+      "wsf-community-manage-panel": 1
+     }
+    }
+   },
+   {
+    "id": "desktop P2 member assertMemberHasNoManage",
+    "expect": "resolve",
+    "outcome": "PASS",
+    "detail": "resolved",
+    "ms": 118,
+    "extra": {
+     "surface": "legacy",
+     "before": {
+      "wsf-member-topbar": 0,
+      "wsf-member-topbar-menu-button": 0,
+      "wsf-member-topbar-menu": 0,
+      "wsf-member-topbar-menu-manage-community": 0,
+      "wsf-community-wordmark": 1,
+      "wsf-community-manage": 0,
+      "wsf-community-manage-panel": 0
+     },
+     "watch": {
+      "menuVisiblePolls": 0,
+      "polls": 1
+     },
+     "menuVisibleAfter": false,
+     "countsAfter": {
+      "wsf-member-topbar": 0,
+      "wsf-member-topbar-menu-button": 0,
+      "wsf-member-topbar-menu": 0,
+      "wsf-member-topbar-menu-manage-community": 0,
+      "wsf-community-wordmark": 1,
+      "wsf-community-manage": 0,
+      "wsf-community-manage-panel": 0
+     }
+    }
+   },
+   {
+    "id": "desktop N1 champion assertMemberHasNoManage",
+    "expect": "reject",
+    "outcome": "PASS",
+    "detail": "rejected: Member unexpectedly has the Champion Manage surface (the legacy Manage control is drawn)",
+    "ms": 7,
+    "extra": {
+     "counts": {
+      "wsf-member-topbar": 0,
+      "wsf-member-topbar-menu-button": 0,
+      "wsf-member-topbar-menu": 0,
+      "wsf-member-topbar-menu-manage-community": 0,
+      "wsf-community-wordmark": 1,
+      "wsf-community-manage": 1,
+      "wsf-community-manage-panel": 0
+     }
+    }
+   },
+   {
+    "id": "desktop N2 member openManage{timeout:5000}",
+    "expect": "reject",
+    "outcome": "PASS",
+    "detail": "rejected: locator.waitFor: Timeout 5000ms exceeded. | Call log: | \u001b[2m  - waiting for getByTestId('wsf-community-manage') to be visible\u001b[22m | ",
+    "ms": 5034,
+    "extra": {
+     "counts": {
+      "wsf-member-topbar": 0,
+      "wsf-member-topbar-menu-button": 0,
+      "wsf-member-topbar-menu": 0,
+      "wsf-member-topbar-menu-manage-community": 0,
+      "wsf-community-wordmark": 1,
+      "wsf-community-manage": 0,
+      "wsf-community-manage-panel": 0
+     }
+    }
+   },
+   {
+    "id": "desktop N3a about:blank manageSurface(3000)",
+    "expect": "reject",
+    "outcome": "PASS",
+    "detail": "rejected: Neither Manage surface is on the page (no wsf-member-topbar, no wsf-community-wordmark): not a Community Home this harness recognises",
+    "ms": 3098
+   },
+   {
+    "id": "desktop N3a about:blank openManage{timeout:3000}",
+    "expect": "reject",
+    "outcome": "PASS",
+    "detail": "rejected: Neither Manage surface is on the page (no wsf-member-topbar, no wsf-community-wordmark): not a Community Home this harness recognises",
+    "ms": 3065
+   },
+   {
+    "id": "desktop N3b /signin signed-out openManage{timeout:3000}",
+    "expect": "reject",
+    "outcome": "PASS",
+    "detail": "rejected: Neither Manage surface is on the page (no wsf-member-topbar, no wsf-community-wordmark): not a Community Home this harness recognises",
+    "ms": 3069,
+    "extra": {
+     "counts": {
+      "wsf-member-topbar": 0,
+      "wsf-member-topbar-menu-button": 0,
+      "wsf-member-topbar-menu": 0,
+      "wsf-member-topbar-menu-manage-community": 0,
+      "wsf-community-wordmark": 0,
+      "wsf-community-manage": 0,
+      "wsf-community-manage-panel": 0
+     }
+    }
+   },
+   {
+    "id": "desktop N3c / signed-out manageSurface(3000)",
+    "expect": "reject",
+    "outcome": "PASS",
+    "detail": "rejected: Neither Manage surface is on the page (no wsf-member-topbar, no wsf-community-wordmark): not a Community Home this harness recognises",
+    "ms": 3087,
+    "extra": {
+     "url": "http://127.0.0.1:5010/",
+     "counts": {
+      "wsf-member-topbar": 0,
+      "wsf-member-topbar-menu-button": 0,
+      "wsf-member-topbar-menu": 0,
+      "wsf-member-topbar-menu-manage-community": 0,
+      "wsf-community-wordmark": 0,
+      "wsf-community-manage": 0,
+      "wsf-community-manage-panel": 0
+     }
+    }
+   },
+   {
+    "id": "desktop N4 both markers (injected wsf-member-topbar) openManage",
+    "expect": "reject",
+    "outcome": "PASS",
+    "detail": "rejected: Both Manage surfaces are on the page at once; the harness cannot tell which candidate this is",
+    "ms": 3,
+    "extra": {
+     "counts": {
+      "wsf-member-topbar": 1,
+      "wsf-member-topbar-menu-button": 0,
+      "wsf-member-topbar-menu": 0,
+      "wsf-member-topbar-menu-manage-community": 0,
+      "wsf-community-wordmark": 1,
+      "wsf-community-manage": 1,
+      "wsf-community-manage-panel": 0
+     }
+    }
+   },
+   {
+    "id": "phone P1 champion openManage",
+    "expect": "resolve",
+    "outcome": "PASS",
+    "detail": "resolved -> {\"panelVisible\":true}",
+    "ms": 505,
+    "extra": {
+     "surface": "legacy",
+     "counts": {
+      "wsf-member-topbar": 0,
+      "wsf-member-topbar-menu-button": 0,
+      "wsf-member-topbar-menu": 0,
+      "wsf-member-topbar-menu-manage-community": 0,
+      "wsf-community-wordmark": 1,
+      "wsf-community-manage": 1,
+      "wsf-community-manage-panel": 1
+     }
+    }
+   },
+   {
+    "id": "phone P2 member assertMemberHasNoManage",
+    "expect": "resolve",
+    "outcome": "PASS",
+    "detail": "resolved",
+    "ms": 107,
+    "extra": {
+     "surface": "legacy",
+     "before": {
+      "wsf-member-topbar": 0,
+      "wsf-member-topbar-menu-button": 0,
+      "wsf-member-topbar-menu": 0,
+      "wsf-member-topbar-menu-manage-community": 0,
+      "wsf-community-wordmark": 1,
+      "wsf-community-manage": 0,
+      "wsf-community-manage-panel": 0
+     },
+     "watch": {
+      "menuVisiblePolls": 0,
+      "polls": 1
+     },
+     "menuVisibleAfter": false,
+     "countsAfter": {
+      "wsf-member-topbar": 0,
+      "wsf-member-topbar-menu-button": 0,
+      "wsf-member-topbar-menu": 0,
+      "wsf-member-topbar-menu-manage-community": 0,
+      "wsf-community-wordmark": 1,
+      "wsf-community-manage": 0,
+      "wsf-community-manage-panel": 0
+     }
+    }
+   }
+  ]
+ }
+}

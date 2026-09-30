@@ -1,0 +1,99 @@
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import {
+  privacySaveErrorCopy,
+  type CommunityPrivacyPanelProps,
+  type PrivacyCommunity,
+} from '../src/ui/communityParityTypes';
+import { CommunityPrivacyPanelView } from '../src/ui/CommunityPrivacyPanelView';
+
+/**
+ * COMMUNITY-PRESENTATION-ACCELERATOR-1: the privacy panel and W7 Check 43's
+ * failure contract (measured on `0b460ce3`):
+ *   - no optimistic privacy: a press asks, and the switch waits for the store
+ *   - the stored value is authoritative: the switch shows only what is stored
+ *   - a save error stays visible after a re-read, until Retry or a new action
+ *   - reply-lost-after-write and a membership refusal each have their words
+ */
+
+let container: HTMLDivElement;
+let root: Root;
+
+beforeEach(() => {
+  container = document.createElement('div');
+  document.body.appendChild(container);
+  root = createRoot(container);
+});
+afterEach(() => {
+  act(() => root.unmount());
+  container.remove();
+});
+
+const byId = (id: string) => container.querySelector(`[data-testid="${id}"]`) as HTMLElement | null;
+const text = (id: string) => byId(id)?.textContent ?? '';
+const checked = (id: string) => byId(id)?.getAttribute('aria-checked');
+function click(id: string) {
+  const el = byId(id);
+  expect(el, `${id} is not on screen`).not.toBeNull();
+  act(() => {
+    el!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+}
+
+const OAK: PrivacyCommunity = {
+  groupId: 'oak',
+  displayName: 'Oak Grove Together',
+  stored: { name: 'visible', activity: 'visible' },
+  saving: null,
+  saveError: null,
+};
+
+function props(communities: PrivacyCommunity[], over: Partial<CommunityPrivacyPanelProps> = {}) {
+  return {
+    load: 'ready' as const,
+    communities,
+    onChange: vi.fn(),
+    onRetrySave: vi.fn(),
+    onRetryLoad: vi.fn(),
+    ...over,
+  };
+}
+function render(p: CommunityPrivacyPanelProps) {
+  act(() => root.render(<CommunityPrivacyPanelView {...p} />));
+  return p;
+}
+describe('W5 privacy probes', () => {
+  it('V1 no optimistic privacy: pressing asks, the switch keeps the stored value until the route changes it', () => {
+    const p = props([OAK]);
+    render(p);
+    const id = `wsf-privacy-panel-name-${OAK.groupId}`;
+    const before = checked(id);
+    click(id);
+    expect(p.onChange).toHaveBeenCalledWith(OAK.groupId, 'name', before === 'true' ? 'private' : 'visible');
+    expect(checked(id)).toBe(before);
+  });
+  it('V2 Space asks for the change; a saving row ignores Space and click', () => {
+    const p = props([OAK]);
+    render(p);
+    const id = `wsf-privacy-panel-activity-${OAK.groupId}`;
+    act(() => { byId(id)!.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true })); });
+    expect(p.onChange).toHaveBeenCalledTimes(1);
+    const q = props([{ ...OAK, saving: 'name' }]);
+    render(q);
+    act(() => { byId(id)!.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true })); });
+    click(id);
+    expect(q.onChange).not.toHaveBeenCalled();
+  });
+  it('V3 membershipRefused: no switches, no Retry, explicit copy', () => {
+    render(props([{ ...OAK, saveError: 'membershipRefused' }]));
+    expect(byId(`wsf-privacy-panel-name-${OAK.groupId}`)).toBeNull();
+    expect(byId(`wsf-privacy-panel-retry-${OAK.groupId}`)).toBeNull();
+    expect(text(`wsf-privacy-panel-error-${OAK.groupId}`)).toMatch(/no longer a member/);
+  });
+  it('V4 the footer does not promise dated history', () => {
+    render(props([OAK]));
+    expect(text('wsf-privacy-panel-foot')).not.toMatch(/dated|history|receipt|every contribution|timeline/i);
+  });
+});

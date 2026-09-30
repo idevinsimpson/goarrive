@@ -1,0 +1,142 @@
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// react-native-web's AccessibilityInfo.addEventListener returns nothing under
+// jsdom, so the shared reduced-motion hook cannot unsubscribe here. It is not
+// under test; the view is.
+vi.mock('../src/ui/useReducedMotion', () => ({ useReducedMotion: () => true }));
+
+import {
+  anonymousRemainder,
+  bannerSupport,
+  canDrawLivingWe,
+  effectiveTotal,
+  goalFigures,
+  goalMeta,
+  goalPill,
+  goalsCountFact,
+  knownMemberCount,
+  totalValue,
+  validTarget,
+  type CommunityParityProps,
+  type DrawableGoal,
+  type ParityGoal,
+} from '../src/ui/communityParityTypes';
+import { CommunityParityView } from '../src/ui/CommunityParityView';
+
+/**
+ * COMMUNITY-PRESENTATION-ACCELERATOR-1: the pure Community view and its rules.
+ *
+ * The rules are the Director's data mapping (#447 `5840935220`): a failed or
+ * partial read is never shown as zero, the Goals fact counts only a fully
+ * loaded collection, the anonymous remainder is derived only from a complete
+ * visible set and a known member count, and Living WE needs a positive target
+ * and a confirmed total. The render tests prove the reference's hierarchy and
+ * that every control only calls its callback.
+ */
+
+let container: HTMLDivElement;
+let root: Root;
+
+beforeEach(() => {
+  container = document.createElement('div');
+  document.body.appendChild(container);
+  root = createRoot(container);
+});
+afterEach(() => {
+  act(() => root.unmount());
+  container.remove();
+});
+
+const byId = (id: string) => container.querySelector(`[data-testid="${id}"]`) as HTMLElement | null;
+const text = (id: string) => byId(id)?.textContent ?? '';
+const before = (a: string, b: string) =>
+  Boolean(byId(a)!.compareDocumentPosition(byId(b)!) & Node.DOCUMENT_POSITION_FOLLOWING);
+function click(id: string) {
+  const el = byId(id);
+  expect(el, `${id} is not on screen`).not.toBeNull();
+  act(() => {
+    el!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+}
+
+const confirmed = (value: number) => ({ state: 'confirmed' as const, value });
+const goal = (over: Partial<ParityGoal> = {}): ParityGoal => ({
+  goalId: 'g1',
+  title: '500 squats together',
+  unit: 'squats',
+  target: 500,
+  total: confirmed(241),
+  status: 'active',
+  windowLabel: 'This week',
+  ...over,
+});
+const drawable = (g: ParityGoal): DrawableGoal => {
+  if (!canDrawLivingWe(g)) throw new Error('fixture goal has no instrument');
+  return g;
+};
+const HISTORY = [
+  goal({ goalId: 'apr', title: '1,000 squats in April', target: 1000, total: confirmed(1024), status: 'closed', windowLabel: 'April' }),
+  goal({ goalId: 'mar', title: '800 squats in March', target: 800, total: confirmed(612), status: 'closed', windowLabel: 'March' }),
+];
+const NAMED = [
+  { key: 'alex', displayName: 'Alex M.', role: 'member' },
+  { key: 'jordan', displayName: 'Jordan P.', role: 'foundingChampion' },
+];
+const CHIPS = {
+  state: 'loaded' as const,
+  value: [
+    { groupId: 'oak', displayName: 'Oak Grove Together' },
+    { groupId: 'harbor', displayName: 'Harbor Lunch Crew' },
+  ],
+};
+
+function props(over: Partial<CommunityParityProps> = {}): CommunityParityProps {
+  return {
+    groupId: 'oak',
+    displayName: 'Oak Grove Together',
+    groupType: 'familyFriends',
+    joinPolicy: 'private',
+    memberCount: 23,
+    role: 'member',
+    communities: CHIPS,
+    goals: { state: 'loaded', value: { featured: goal(), otherOpen: [] } },
+    history: { state: 'loaded', value: HISTORY },
+    roster: { state: 'loaded', value: { named: NAMED, complete: false } },
+    onSelectCommunity: vi.fn(),
+    onJoin: vi.fn(),
+    onStart: vi.fn(),
+    onRetryCommunities: vi.fn(),
+    onRetryGoals: vi.fn(),
+    onRetryHistory: vi.fn(),
+    onRetryRoster: vi.fn(),
+    onShowMoreMembers: vi.fn(),
+    ...over,
+  };
+}
+function render(p: CommunityParityProps) {
+  act(() => root.render(<CommunityParityView {...p} />));
+  return p;
+}
+describe('W5 K-F1 recheck', () => {
+  it('impossible member counts read as not known everywhere; no remainder', () => {
+    for (const memberCount of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -3, 2.5]) {
+      render(props({ memberCount, roster: { state: 'loaded', value: { named: NAMED, complete: true } } }));
+      expect(text('wsf-parity-fact-members'), String(memberCount)).toBe('MEMBERS—');
+      expect(text('wsf-parity-roster-count'), String(memberCount)).toBe('Members');
+      expect(byId('wsf-parity-anonymous'), String(memberCount)).toBeNull();
+      expect(container.textContent, String(memberCount)).not.toMatch(/NaN|Infinity|∞|-3|2\.5|0 people/);
+    }
+  });
+  it('known 0 and -0 stay a real zero; a real count still derives the remainder', () => {
+    for (const memberCount of [0, -0]) {
+      render(props({ memberCount, roster: { state: 'loaded', value: { named: [], complete: true } } }));
+      expect(text('wsf-parity-fact-members')).toBe('MEMBERS0');
+      expect(text('wsf-parity-roster-count')).toBe('0 people');
+      expect(container.textContent).not.toContain('-0');
+    }
+    render(props({ memberCount: 23, roster: { state: 'loaded', value: { named: NAMED, complete: true } } }));
+    expect(text('wsf-parity-anonymous')).toContain('21 members shown without names');
+  });
+});

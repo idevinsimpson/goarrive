@@ -1,0 +1,117 @@
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// react-native-web's AccessibilityInfo.addEventListener returns nothing under
+// jsdom, so the shared reduced-motion hook cannot unsubscribe here. It is not
+// under test; the view is.
+vi.mock('../src/ui/useReducedMotion', () => ({ useReducedMotion: () => true }));
+
+import { UNKNOWN_SHARED, knownShared } from '../src/goalTruth';
+import { YouParityView, type YouParityActions } from '../src/ui/YouParityView';
+import type { YouGoal, YouState } from '../src/youParity';
+
+/**
+ * YOU-PARITY-1: the pure view rendered into jsdom through react-native-web.
+ * It proves order, the own/shared split, the lifecycle pills, which "your
+ * part" block shows, and that every control only calls its callback.
+ */
+
+let container: HTMLDivElement;
+let root: Root;
+
+beforeEach(() => {
+  container = document.createElement('div');
+  document.body.appendChild(container);
+  root = createRoot(container);
+});
+afterEach(() => {
+  act(() => root.unmount());
+  container.remove();
+});
+
+const byId = (id: string) => container.querySelector(`[data-testid="${id}"]`) as HTMLElement | null;
+const text = (id: string) => byId(id)?.textContent ?? '';
+/** Document order: a before b. */
+const before = (a: string, b: string) =>
+  Boolean(byId(a)!.compareDocumentPosition(byId(b)!) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+const PROFILE = { displayName: 'Alex M.', memberSince: 'September 2026' };
+const COMMUNITY = { displayName: 'Oak Grove Together', role: 'member', memberCount: 23 };
+const LEAD: YouGoal = { goalId: 'lead', title: '500 squats together', unit: 'squats', target: 500, communityName: 'Oak Grove Together', yourPart: 25, shared: knownShared(241), open: true, periodLabel: 'This week' };
+const OTHER: YouGoal = { goalId: 'other', title: '150 squats this week', unit: 'squats', target: 150, communityName: 'Harbor Lunch Crew', yourPart: 20, shared: knownShared(155), open: true, periodLabel: 'This week' };
+
+function render(state: YouState) {
+  const actions: YouParityActions = {
+    onSettings: vi.fn(),
+    onSignOut: vi.fn(),
+    onSignIn: vi.fn(),
+    onCommunity: vi.fn(),
+    onRetry: vi.fn(),
+    onStartMoving: vi.fn(),
+  };
+  act(() => {
+    root.render(<YouParityView state={state} email="alex@example.com" signingOut={false} actions={actions} />);
+  });
+  return actions;
+}
+
+const member = (over: Partial<Extract<YouState, { kind: 'member' }>> = {}): YouState => ({
+  kind: 'member',
+  profile: PROFILE,
+  community: COMMUNITY,
+  open: [LEAD, OTHER],
+  finished: [],
+  partial: false,
+  eligible: true,
+  ...over,
+});
+const all = () => container.textContent ?? '';
+describe('W5 You probes', () => {
+  it('Y1 open lead with UNKNOWN shared: OPEN, no number, no Living WE/track, own part kept', () => {
+    render(member({ open: [{ ...LEAD, shared: UNKNOWN_SHARED }], finished: [] }));
+    expect(text('wsf-you-lead-status')).toBe('OPEN');
+    expect(byId('wsf-you-lead-we')).toBeNull(); expect(byId('wsf-you-lead-track')).toBeNull();
+    expect(text('wsf-you-lead-shared-card')).not.toMatch(/\d/);
+    expect(text('wsf-you-lead-own')).toBe('25 squats');
+  });
+  it('Y2 closed + unknown: CLOSED · RESULT UNAVAILABLE and Unknown, never REACHED/UNFINISHED/0', () => {
+    render(member({ open: [LEAD], finished: [{ ...OTHER, goalId: 'c', open: false, shared: UNKNOWN_SHARED }] }));
+    const row = text('wsf-you-row-c');
+    expect(row).toContain('CLOSED · RESULT UNAVAILABLE');
+    expect(row).not.toMatch(/CLOSED · REACHED|UNFINISHED|\b0 \//);
+    expect(row).toContain('Unknown');
+  });
+  it('Y3 open, known total at/above target: REACHED · STILL OPEN; closed below target: CLOSED · UNFINISHED', () => {
+    render(member({ open: [{ ...LEAD, shared: knownShared(500) }], finished: [{ ...OTHER, goalId: 'u', open: false, shared: knownShared(10) }] }));
+    expect(text('wsf-you-lead-status')).toBe('REACHED · STILL OPEN');
+    expect(text('wsf-you-row-u')).toContain('CLOSED · UNFINISHED');
+  });
+  it('Y4 periodLabel is shown verbatim; null leaves no dangling separator', () => {
+    const odd = 'Ends Oct 1 · 11:59 PM ET (goal time)';
+    render(member({ open: [LEAD, { ...OTHER, periodLabel: odd }, { ...OTHER, goalId: 'np', periodLabel: null }], finished: [] }));
+    expect(text('wsf-you-row-other')).toContain(`Harbor Lunch Crew · ${odd}`);
+    expect(text('wsf-you-row-np')).toContain('Harbor Lunch Crew');
+    expect(text('wsf-you-row-np')).not.toMatch(/Harbor Lunch Crew ·|· $/);
+  });
+  it('Y5 each row carries ITS OWN community, not the current one', () => {
+    render(member({ open: [LEAD, OTHER], finished: [] }));
+    expect(text('wsf-you-row-other')).toContain('Harbor Lunch Crew');
+    expect(text('wsf-you-row-other')).not.toContain('Oak Grove Together');
+  });
+  it('Y6 band: no filler "Community" sub-line for custom / missing / unknown group types', () => {
+    for (const groupType of [undefined, 'custom', 'totally-unknown-type']) {
+      render(member({ community: { ...COMMUNITY, groupType } }));
+      const band = text('wsf-you-community').replace('Oak Grove Together', '');
+      expect(band, String(groupType)).not.toMatch(/Community/);
+    }
+  });
+  it('Y7 typed prop edge: knownShared(NaN) / negative — what is drawn', () => {
+    render(member({ open: [{ ...LEAD, shared: knownShared(Number.NaN) }], finished: [{ ...OTHER, goalId: 'neg', open: false, shared: knownShared(-5) }] }));
+    console.log('Y7 NaN lead:', JSON.stringify(text('wsf-you-lead-shared-card')), '| status', text('wsf-you-lead-status'), '| neg row:', JSON.stringify(text('wsf-you-row-neg')));
+  });
+  it('Y8 no rank/streak/score/impact words', () => {
+    render(member({ open: [LEAD, OTHER], finished: [] }));
+    expect(all().replace('No rank, streak, score or inferred impact.', '')).not.toMatch(/rank|streak|score|impact|leader|best/i);
+  });
+});
