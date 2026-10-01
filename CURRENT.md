@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=12fea21ec61b3ea90921d13575e098e62cd6d3ac9525abb4d17eae36d3b1ff2b events=9 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=00429a8e9d211fe408dd6f65fc374538e03ea01d24ff575c9e0bcdd5f951b993 events=12 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `12fea21ec61b3ea90921d13575e098e62cd6d3ac9525abb4d17eae36d3b1ff2b` (9 events)
+- Ledger head: `00429a8e9d211fe408dd6f65fc374538e03ea01d24ff575c9e0bcdd5f951b993` (12 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -26,8 +26,8 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 
 | Worker | Inbox | Active now | Reviewing | Waiting on review | Blocked | Next | Queue | WATCH |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| W3 | #396 | AUTONOMY-ROUTER-1C | — | — | — | — | — | on |
-| W4 | #394 | — | — | — | — | — | — | off |
+| W3 | #396 | — | — | AUTONOMY-ROUTER-1C | — | — | — | off |
+| W4 | #394 | — | AUTONOMY-ROUTER-1C | — | — | — | — | on |
 | W5 | #395 | — | — | — | — | — | — | off |
 | W7 | #434 | — | — | — | — | — | — | off |
 | W9 | #497 | — | — | — | — | — | — | off |
@@ -36,7 +36,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 
 | Packet | Owner | Kind | Completes at | Origin | Phase | PR | Subject | PR head | Evidence | Merge | Proof | Reviewers | Released by | Last transition | Blocked by | Label | Review policy | Pending finding |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| AUTONOMY-ROUTER-1C | W3 | work | INTEGRATED (source-only) | ledger | ACKED | — | — | — | — | — | — | — | comment:5882824399 | comment:5887186862 | — | Serial step 6: state-derived routing, wakes, and real-event proof | 1×ops-source then director | — |
+| AUTONOMY-ROUTER-1C | W3 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #544 | 37c49bbd | 37c49bbd | — | — | — | W4 | comment:5882824399 | comment:5924960796 | — | Serial step 6: state-derived routing, wakes, and real-event proof | 1×ops-source then director | — |
 | AUTONOMY-STATE-1B | W3 | work | INTEGRATED (source-only) | bootstrap | INTEGRATED | #538 | 073b7946 | 073b7946 | — | d42a3307 | — | — | comment:5857966052 | comment:5857966052 | — | Serial step 5: authoritative control state, App writer, bootstrap and shadow reconcile | 1×ops-source then director | — |
 
 ## Wakes
@@ -44,4 +44,5 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | Wake | Worker | Packet | Reason | Status | Comments | ACK |
 | --- | --- | --- | --- | --- | --- | --- |
 | eee5b3c49e14 | W3 | AUTONOMY-ROUTER-1C | release | acked | 5887164849 | comment:5887186862 |
+| 6ffa9335e811 | W4 | AUTONOMY-ROUTER-1C | review | requested | — | — |
 

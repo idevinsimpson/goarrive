@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "12fea21ec61b3ea90921d13575e098e62cd6d3ac9525abb4d17eae36d3b1ff2b",
-  "eventCount": 9,
+  "ledgerHead": "00429a8e9d211fe408dd6f65fc374538e03ea01d24ff575c9e0bcdd5f951b993",
+  "eventCount": 12,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -64,15 +64,17 @@
       },
       "label": "Serial step 6: state-derived routing, wakes, and real-event proof",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
-      "pr": null,
-      "reviewers": [],
+      "pr": 544,
+      "reviewers": [
+        "W4"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "37c49bbd78315cd51df2e5a67ddddc041693bc49",
+        "prHeadSha": "37c49bbd78315cd51df2e5a67ddddc041693bc49",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -97,7 +99,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5887186862
+          "id": 5924960796
         }
       },
       "review": {
@@ -110,7 +112,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "AUTONOMY-STATE-1B": {
@@ -260,7 +262,16 @@
       "ack": {
         "kind": "comment",
         "id": 5887186862
-      }
+      },
+      "superseded": true
+    },
+    "6ffa9335e8115008710bb5f62791fc128271ca14135e14eb4efa889e62f1892b": {
+      "packet": "AUTONOMY-ROUTER-1C",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   }
 }
