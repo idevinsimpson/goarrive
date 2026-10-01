@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=83db7e1f3dc26f25175d483cf383aa9484a7346c9637591db8b7d028fff05e28 events=56 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=2184d15c9f39401b02787b89a9de805942dc2ffbaf1f2585c785619b2f3f04ce events=57 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `83db7e1f3dc26f25175d483cf383aa9484a7346c9637591db8b7d028fff05e28` (56 events)
+- Ledger head: `2184d15c9f39401b02787b89a9de805942dc2ffbaf1f2585c785619b2f3f04ce` (57 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -13,7 +13,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 - Staging: serves `a31276516e786ac8f848269de4c839b3b9e13123` (run 36264562975, #55); rollback `938e00d8c985993f69becc8924d3037f18425afc`; pin PR #522
 - Critical path: none
 - Schema: v2. Every line is written by the `wsf-control-writer` App and names its authority class and rule.
-- Contracts pinned: autonomy-architecture@8ba39e19 (`docs/westayfit/ops/AUTONOMY_ARCHITECTURE_1B_1C.md`); autonomy-contract@8ba39e19 (`docs/westayfit/ops/AUTONOMY_ACCEPTANCE_CONTRACT.md`); capabilities@8ba39e19 (`docs/westayfit/ops/control/capabilities.v1.json`); control-state@8ba39e19 (`docs/westayfit/ops/CONTROL_STATE.md`); fable-operating-protocol@8ba39e19 (`docs/westayfit/ops/control/contracts/FABLE_OPERATING_PROTOCOL_v1.md`); north-star-journeys@8ba39e19 (`docs/westayfit/ops/journeys/NORTH_STAR_JOURNEY_MANIFEST.v1.json`); owner-test-card@8ba39e19 (`docs/westayfit/ops/control/contracts/OWNER_TEST_CARD_AND_SMOKE_CONTRACT.md`); program-director-skill@8ba39e19 (`.claude/skills/wsf-program-director/SKILL.md`); staging-control-plane@8ba39e19 (`skills/wsf-staging-deploy/SKILL.md`); worker-inboxes@8ba39e19 (`docs/westayfit/ops/control/contracts/WORKER_INBOXES.md`); writer@8ba39e19 (`tools/wsf-control`); writer-workflow@8ba39e19 (`.github/workflows/wsf-control-reconcile.yml`)
+- Contracts pinned: autonomy-architecture@73d87d4e (`docs/westayfit/ops/AUTONOMY_ARCHITECTURE_1B_1C.md`); autonomy-contract@73d87d4e (`docs/westayfit/ops/AUTONOMY_ACCEPTANCE_CONTRACT.md`); capabilities@73d87d4e (`docs/westayfit/ops/control/capabilities.v1.json`); control-state@73d87d4e (`docs/westayfit/ops/CONTROL_STATE.md`); fable-operating-protocol@73d87d4e (`docs/westayfit/ops/control/contracts/FABLE_OPERATING_PROTOCOL_v1.md`); north-star-journeys@73d87d4e (`docs/westayfit/ops/journeys/NORTH_STAR_JOURNEY_MANIFEST.v1.json`); owner-test-card@73d87d4e (`docs/westayfit/ops/control/contracts/OWNER_TEST_CARD_AND_SMOKE_CONTRACT.md`); program-director-skill@73d87d4e (`.claude/skills/wsf-program-director/SKILL.md`); staging-control-plane@73d87d4e (`skills/wsf-staging-deploy/SKILL.md`); worker-inboxes@73d87d4e (`docs/westayfit/ops/control/contracts/WORKER_INBOXES.md`); writer@73d87d4e (`tools/wsf-control`); writer-workflow@73d87d4e (`.github/workflows/wsf-control-reconcile.yml`)
 - **SHADOW CURRENT.** This rendering is comment 5878724949 on #365. The human CURRENT (comment 5847443607) stays authoritative until Step 5 exits; nothing routes or wakes from this page.
 
 ## Accepted residuals (A+, v1)

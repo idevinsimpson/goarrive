@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "83db7e1f3dc26f25175d483cf383aa9484a7346c9637591db8b7d028fff05e28",
-  "eventCount": 56,
+  "ledgerHead": "2184d15c9f39401b02787b89a9de805942dc2ffbaf1f2585c785619b2f3f04ce",
+  "eventCount": 57,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -328,62 +328,62 @@
     {
       "id": "autonomy-architecture",
       "path": "docs/westayfit/ops/AUTONOMY_ARCHITECTURE_1B_1C.md",
-      "commit": "8ba39e191796960e2046c45d481f96ff4386a683"
+      "commit": "73d87d4e62ca79c283b844dca5e9fe340d59f70f"
     },
     {
       "id": "autonomy-contract",
       "path": "docs/westayfit/ops/AUTONOMY_ACCEPTANCE_CONTRACT.md",
-      "commit": "8ba39e191796960e2046c45d481f96ff4386a683"
+      "commit": "73d87d4e62ca79c283b844dca5e9fe340d59f70f"
     },
     {
       "id": "capabilities",
       "path": "docs/westayfit/ops/control/capabilities.v1.json",
-      "commit": "8ba39e191796960e2046c45d481f96ff4386a683"
+      "commit": "73d87d4e62ca79c283b844dca5e9fe340d59f70f"
     },
     {
       "id": "control-state",
       "path": "docs/westayfit/ops/CONTROL_STATE.md",
-      "commit": "8ba39e191796960e2046c45d481f96ff4386a683"
+      "commit": "73d87d4e62ca79c283b844dca5e9fe340d59f70f"
     },
     {
       "id": "fable-operating-protocol",
       "path": "docs/westayfit/ops/control/contracts/FABLE_OPERATING_PROTOCOL_v1.md",
-      "commit": "8ba39e191796960e2046c45d481f96ff4386a683"
+      "commit": "73d87d4e62ca79c283b844dca5e9fe340d59f70f"
     },
     {
       "id": "north-star-journeys",
       "path": "docs/westayfit/ops/journeys/NORTH_STAR_JOURNEY_MANIFEST.v1.json",
-      "commit": "8ba39e191796960e2046c45d481f96ff4386a683"
+      "commit": "73d87d4e62ca79c283b844dca5e9fe340d59f70f"
     },
     {
       "id": "owner-test-card",
       "path": "docs/westayfit/ops/control/contracts/OWNER_TEST_CARD_AND_SMOKE_CONTRACT.md",
-      "commit": "8ba39e191796960e2046c45d481f96ff4386a683"
+      "commit": "73d87d4e62ca79c283b844dca5e9fe340d59f70f"
     },
     {
       "id": "program-director-skill",
       "path": ".claude/skills/wsf-program-director/SKILL.md",
-      "commit": "8ba39e191796960e2046c45d481f96ff4386a683"
+      "commit": "73d87d4e62ca79c283b844dca5e9fe340d59f70f"
     },
     {
       "id": "staging-control-plane",
       "path": "skills/wsf-staging-deploy/SKILL.md",
-      "commit": "8ba39e191796960e2046c45d481f96ff4386a683"
+      "commit": "73d87d4e62ca79c283b844dca5e9fe340d59f70f"
     },
     {
       "id": "worker-inboxes",
       "path": "docs/westayfit/ops/control/contracts/WORKER_INBOXES.md",
-      "commit": "8ba39e191796960e2046c45d481f96ff4386a683"
+      "commit": "73d87d4e62ca79c283b844dca5e9fe340d59f70f"
     },
     {
       "id": "writer",
       "path": "tools/wsf-control",
-      "commit": "8ba39e191796960e2046c45d481f96ff4386a683"
+      "commit": "73d87d4e62ca79c283b844dca5e9fe340d59f70f"
     },
     {
       "id": "writer-workflow",
       "path": ".github/workflows/wsf-control-reconcile.yml",
-      "commit": "8ba39e191796960e2046c45d481f96ff4386a683"
+      "commit": "73d87d4e62ca79c283b844dca5e9fe340d59f70f"
     }
   ],
   "supersedes": {
