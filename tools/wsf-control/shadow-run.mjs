@@ -42,7 +42,7 @@ import { RULES } from './rules.mjs';
 import { SHADOW_PLACEHOLDER, decisionIntake, derivedFacts, shadowSurfaceEvent } from './shadow.mjs';
 import { STATE_REF, checkoutState, commitState, predecessorRef, pushFastForward, readStateFile, redact, tokenGitEnv } from './gitstate.mjs';
 import { appendAll } from './append-all.mjs';
-import { postWakes, prReads, routerAppend, workerComments } from './router-run.mjs';
+import { mergeReads, postWakes, prReads, routerAppend, workerComments } from './router-run.mjs';
 
 export const MAX_ATTEMPTS = 3;
 /** The contracts whose pinned version must equal the running writer (memo §4.4). */
@@ -249,8 +249,10 @@ export async function runShadow({ gh, remote, gitEnv = {}, author, runningSha, s
     const inboxes = {};
     if (route) for (const { inbox } of Object.values(res.state.workers)) inboxes[inbox] = await readInbox(inbox);
     const items = route ? workerComments(res.state, inboxes, botLogin) : [];
-    const rr = route ? routerAppend(res.eventsText, res.state, { items, prs: await prReads(gh, items), inboxes, botLogin, now })
-      : { eventsText: res.eventsText, state: res.state, appended: [], refused: [], intakeRefused: [], awaiting: [], exceptions: [] };
+    // The merges are read on the state AFTER this run's decisions, so an acceptance recorded now is integrated now.
+    const rr = route ? routerAppend(res.eventsText, res.state, { items, prs: await prReads(gh, items), inboxes, botLogin, now, merges: await mergeReads(gh, res.state) })
+      : { eventsText: res.eventsText, state: res.state, appended: [], refused: [], intakeRefused: [], awaiting: [], exceptions: [], integrateUnverified: [] };
+    report.integrateUnverified = rr.integrateUnverified.map((x) => `${x.packet} ${x.reason}`);
     report.intakeRefused = [...report.intakeRefused, ...rr.intakeRefused];
     report.awaiting = rr.awaiting.map((a) => `${a.packet} eligible=${a.awaiting.join(',') || 'none'} (${a.why})`);
     report.exceptions = rr.exceptions;
@@ -317,6 +319,7 @@ export function formatReport(r) {
   if (r.repinned) L.push(`REPINNED ${r.repinned}`);
   for (const x of r.wakesPosted ?? []) L.push(`WAKE_POSTED ${x}`);
   for (const x of r.awaiting ?? []) L.push(`AWAITING_REVIEWER ${x}`);
+  for (const x of r.integrateUnverified ?? []) L.push(`INTEGRATE_UNVERIFIED ${x}`);
   for (const x of r.exceptions ?? []) L.push(`CONTROL_EXCEPTION ${x}`);
   if (r.deferred) L.push(`DEFERRED ${r.deferred}`);
   if (r.head) L.push(`LEDGER_HEAD=${r.head}`);

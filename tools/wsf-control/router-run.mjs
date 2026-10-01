@@ -2,6 +2,8 @@
  * The Step-6 part of a writer run (AUTONOMY-ROUTER-1C): worker facts in, routing and wakes out.
  *
  * Order inside one run, after the Director/L0 decisions:
+ *   0. integration: an ACCEPTED packet whose PR is merged (R-INTEGRATE), so an acceptance recorded in this run, or a
+ *      merge that landed since the last one, is integrated now and not left for some later trigger;
  *   1. worker reports from every registered inbox, oldest comment first (worker-intake.mjs);
  *   2. progression, one line at a time: review routing (R-ROUTE-REVIEW), handback (R-FINDING-HANDBACK);
  *   3. a wake for every ball without one (R-WAKE);
@@ -10,7 +12,7 @@
  * and records wake-delivered for each in a second push. Everything here but the PR reads and the posting is pure.
  */
 import { appendAll } from './append-all.mjs';
-import { balls, progressionLine, wakeLines, wakeTimerLines, wakeExceptions, wakesToPost, awaitingReviewers, line } from './router.mjs';
+import { balls, integrateCandidates, integrateLines, progressionLine, wakeLines, wakeTimerLines, wakeExceptions, wakesToPost, awaitingReviewers, line } from './router.mjs';
 import { workerBlock, workerReport, WORKER_FENCE } from './worker-intake.mjs';
 
 /** Comment ids the ledger already rests on (as sources): a re-read of one of them is a no-op. */
@@ -35,11 +37,25 @@ export async function prReads(gh, items) {
   return out;
 }
 
+/** The writer's own reads of every ACCEPTED packet's PR: { [packet]: { merged, mergeSha, headSha, contains } | null }. */
+export async function mergeReads(gh, state) {
+  const out = {};
+  for (const id of integrateCandidates(state)) {
+    const p = state.packets[id];
+    const pr = await gh.pull(p.pr);
+    if (!pr) { out[id] = null; continue; }
+    const head = p.artifact.prHeadSha ?? p.artifact.subjectSha;
+    const contains = pr.merged && pr.mergeSha && pr.headSha === head ? await gh.descends(head, pr.mergeSha) : null;
+    out[id] = { merged: pr.merged === true, mergeSha: pr.mergeSha ?? null, headSha: pr.headSha, contains };
+  }
+  return out;
+}
+
 /**
- * Steps 1–4 on (eventsText, state). Returns the new texts, what was appended and refused, the worker reports
+ * Steps 0–4 on (eventsText, state). Returns the new texts, what was appended and refused, the worker reports
  * refused, packets awaiting a reviewer, open wake exceptions, and wake comments whose time could not be read.
  */
-export function routerAppend(eventsText, state, { items, prs, inboxes, botLogin, now }) {
+export function routerAppend(eventsText, state, { items, prs, inboxes, botLogin, now, merges = {} }) {
   const appended = [];
   const refused = [];
   const intakeRefused = [];
@@ -48,6 +64,9 @@ export function routerAppend(eventsText, state, { items, prs, inboxes, botLogin,
     eventsText = r.eventsText; state = r.state;
     appended.push(...r.report.appended); refused.push(...r.report.refused);
   };
+  // 0. integration of accepted, merged packets
+  const integ = integrateLines(state, merges);
+  add(integ.lines.map((event) => ({ event, label: `pr-${event.source.id}` })));
   // 1. worker reports
   for (const { worker, comment } of items) {
     const current = new Set(balls(eventsText).map((b) => b.wakeId));
@@ -72,7 +91,7 @@ export function routerAppend(eventsText, state, { items, prs, inboxes, botLogin,
   for (const cs of Object.values(inboxes)) for (const c of cs) if (c.author === botLogin && c.createdAt) times[c.id] = c.createdAt;
   const timers = wakeTimerLines(state, eventsText, times, now);
   add(timers.lines.map((event) => ({ event, label: event.type })));
-  return { eventsText, state, appended, refused, intakeRefused, awaiting: awaitingReviewers(state), exceptions: wakeExceptions(state), unknownTimes: timers.unknown };
+  return { eventsText, state, appended, refused, intakeRefused, awaiting: awaitingReviewers(state), exceptions: wakeExceptions(state), unknownTimes: timers.unknown, integrateUnverified: integ.unverified };
 }
 
 const REASON_TEXT = {
