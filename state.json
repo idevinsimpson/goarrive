@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "94bdb12d82abd3cfdace81808bd0ad11045a867d2d36ed3f97e1aa993ff35944",
-  "eventCount": 72,
+  "ledgerHead": "fe9467a6407e07cba5e9854033713da84248c0f493aa95f4315c937e497f0f18",
+  "eventCount": 73,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -267,7 +267,7 @@
       },
       "label": "Step 7 completion: bounded main-only workflow-token dispatch of the existing ledger fast path and unattended proof",
       "origin": "ledger",
-      "phase": "ACCEPTED",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -279,7 +279,7 @@
         "subjectSha": "ffe4821755b21c2e69b7cfc288d39f18c53b15d4",
         "prHeadSha": "ffe4821755b21c2e69b7cfc288d39f18c53b15d4",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "3c38046fa58ee5f9957a37f8f24dcdfe4c2a1fd7"
       },
       "proof": null,
       "served": null,
@@ -306,8 +306,8 @@
           "id": 5941560263
         },
         "lastTransition": {
-          "kind": "comment",
-          "id": 5941560263
+          "kind": "pull_request",
+          "id": 549
         }
       },
       "review": {
