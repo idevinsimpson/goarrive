@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "85efe78a9b066ff2f642f393bada8e1c6a905ca3285eb0079036c8e7393a4991",
-  "eventCount": 48,
+  "ledgerHead": "60e0ee15517801c7e7f59e3cd37748e8a682826e0579505a764b6ad7030bfc2f",
+  "eventCount": 52,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -267,7 +267,7 @@
       },
       "label": "Step 7: automate preview-eligible accepted/integrated to deterministic candidate, pin, existing staging dispatch, and FRESH readback",
       "origin": "ledger",
-      "phase": "CHANGES_REQUESTED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -276,8 +276,8 @@
         "W4"
       ],
       "artifact": {
-        "subjectSha": "aafa9b5104b96b5b6681d7d1d34344e84a4afdf5",
-        "prHeadSha": "aafa9b5104b96b5b6681d7d1d34344e84a4afdf5",
+        "subjectSha": "c295d5c1167c8a368002e196a004ac1ad67492a5",
+        "prHeadSha": "c295d5c1167c8a368002e196a004ac1ad67492a5",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -302,7 +302,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5939557841
+          "id": 5939809528
         }
       },
       "review": {
@@ -315,7 +315,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 1,
+      "deliveries": 2,
       "pendingFinding": null
     }
   },
@@ -482,7 +482,16 @@
       "ack": {
         "kind": "comment",
         "id": 5939583222
-      }
+      },
+      "superseded": true
+    },
+    "49e02ef8bfa07f33c8b26731012280b4343e679ff69e72cdbf19dfebe113e55a": {
+      "packet": "STAGING-FRESHNESS-FASTPATH",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   }
 }
