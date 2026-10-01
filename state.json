@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "3cd4f60c6103caf19ddbf7c34a55c95f0434a2de423dc3d11ed146f57784e38f",
-  "eventCount": 31,
+  "ledgerHead": "75cd4e746a663110691a103d2f4563a9efc8ca33134a3de82fc4c6e669a08efe",
+  "eventCount": 33,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -64,7 +64,7 @@
       },
       "label": "Serial step 6: state-derived routing, wakes, and real-event proof",
       "origin": "ledger",
-      "phase": "ACCEPTED",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -76,7 +76,7 @@
         "subjectSha": "37c49bbd78315cd51df2e5a67ddddc041693bc49",
         "prHeadSha": "37c49bbd78315cd51df2e5a67ddddc041693bc49",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "5f7b63c94fcc1cf0fcb135fb48ec1cc0f7fa1c23"
       },
       "proof": null,
       "served": null,
@@ -103,8 +103,8 @@
           "id": 5926409781
         },
         "lastTransition": {
-          "kind": "comment",
-          "id": 5926409781
+          "kind": "pull_request",
+          "id": 544
         }
       },
       "review": {
@@ -129,7 +129,7 @@
       },
       "label": "Step 6 correction: derive integrate from ACCEPTED plus merged PR with same-cycle or successor reconcile and idempotency proof",
       "origin": "ledger",
-      "phase": "ACCEPTED",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -141,7 +141,7 @@
         "subjectSha": "fd697e0f1ad9e52fc56d91824101c04eebb78954",
         "prHeadSha": "fd697e0f1ad9e52fc56d91824101c04eebb78954",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "8ba39e191796960e2046c45d481f96ff4386a683"
       },
       "proof": null,
       "served": null,
@@ -174,8 +174,8 @@
           "id": 5929977908
         },
         "lastTransition": {
-          "kind": "comment",
-          "id": 5929977908
+          "kind": "pull_request",
+          "id": 545
         }
       },
       "review": {
