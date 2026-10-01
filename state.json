@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "16934c21869c59a4b662aa8ef763cb64cb430ac733983a54b21a60eb6d3c55c0",
-  "eventCount": 29,
+  "ledgerHead": "0fc72c0a88c928bec51602e1be847b426d7952aab5a1c206a2aecdb5f9c90ba8",
+  "eventCount": 30,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -129,7 +129,7 @@
       },
       "label": "Step 6 correction: derive integrate from ACCEPTED plus merged PR with same-cycle or successor reconcile and idempotency proof",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "ACCEPTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -169,10 +169,13 @@
           "kind": "comment",
           "id": 5929164484
         },
-        "accepted": null,
+        "accepted": {
+          "kind": "comment",
+          "id": 5929977908
+        },
         "lastTransition": {
           "kind": "comment",
-          "id": 5929492314
+          "id": 5929977908
         }
       },
       "review": {
