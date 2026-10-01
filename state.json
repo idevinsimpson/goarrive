@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "8e533f6c98935b20ad9c7b561ceee48a4bb0157d921faa074c8e67bc667179eb",
-  "eventCount": 23,
+  "ledgerHead": "c3cd9ec9f2dcf43cd93df20c74c65eed6bd7013d8c91aec72b7c0d91bc6e12f0",
+  "eventCount": 26,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -129,15 +129,17 @@
       },
       "label": "Step 6 correction: derive integrate from ACCEPTED plus merged PR with same-cycle or successor reconcile and idempotency proof",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
-      "pr": null,
-      "reviewers": [],
+      "pr": 545,
+      "reviewers": [
+        "W4"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "fd697e0f1ad9e52fc56d91824101c04eebb78954",
+        "prHeadSha": "fd697e0f1ad9e52fc56d91824101c04eebb78954",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -168,7 +170,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5929185474
+          "id": 5929370157
         }
       },
       "review": {
@@ -181,7 +183,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "AUTONOMY-STATE-1B": {
@@ -359,7 +361,16 @@
       "ack": {
         "kind": "comment",
         "id": 5929185474
-      }
+      },
+      "superseded": true
+    },
+    "eccccc309ebb87da7c9129d92a5e040296487af305cb6671fef339a73078cdee": {
+      "packet": "AUTONOMY-ROUTER-1C-INTEGRATE",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   }
 }
