@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "02f5c91e78e453833994c9f013299dd4444dc0f88da69728da4a24589b4e5912",
-  "eventCount": 64,
+  "ledgerHead": "44e2208768dba8cb6fcf3d600bc95817ba44cd72e543d8976f5ef3b3810f4079",
+  "eventCount": 67,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -267,15 +267,17 @@
       },
       "label": "Step 7 completion: bounded main-only workflow-token dispatch of the existing ledger fast path and unattended proof",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
-      "pr": null,
-      "reviewers": [],
+      "pr": 549,
+      "reviewers": [
+        "W4"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "ffe4821755b21c2e69b7cfc288d39f18c53b15d4",
+        "prHeadSha": "ffe4821755b21c2e69b7cfc288d39f18c53b15d4",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -300,7 +302,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5940850285
+          "id": 5941312685
         }
       },
       "review": {
@@ -313,7 +315,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "STAGING-FRESHNESS-FASTPATH": {
@@ -573,7 +575,16 @@
       "ack": {
         "kind": "comment",
         "id": 5940850285
-      }
+      },
+      "superseded": true
+    },
+    "149b4bc87e80fd2cbb4881df61b927a2ed40be66819608117645f5c6cbd865c1": {
+      "packet": "STAGING-FRESHNESS-DISPATCH",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   }
 }
