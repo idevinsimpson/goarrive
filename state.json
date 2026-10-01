@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "89ecde95158cc080cc5c307393f1d60460ebaa168196039020c698c13e556413",
-  "eventCount": 44,
+  "ledgerHead": "1fe8c431918500c4a17429fed534d64b559e18ae0178cb8aa374220758618e90",
+  "eventCount": 46,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -267,7 +267,7 @@
       },
       "label": "Step 7: automate preview-eligible accepted/integrated to deterministic candidate, pin, existing staging dispatch, and FRESH readback",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "CHANGES_REQUESTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -302,7 +302,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5939428430
+          "id": 5939557841
         }
       },
       "review": {
@@ -468,7 +468,16 @@
       "ack": {
         "kind": "comment",
         "id": 5939481985
-      }
+      },
+      "superseded": true
+    },
+    "415e663bcb833bd618810f7c0179a0fb115bc3c07c2821a12b1b2a4014511018": {
+      "packet": "STAGING-FRESHNESS-FASTPATH",
+      "worker": "W3",
+      "reason": "handback",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   }
 }
