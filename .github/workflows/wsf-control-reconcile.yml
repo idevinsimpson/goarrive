@@ -23,8 +23,10 @@ on:
     workflows: ['WSF staging deploy']
     types: [completed]
   workflow_dispatch:
+  # The fallback runs every 30 minutes off the hour and half-hour: GitHub delays, and under load drops, scheduled runs
+  # at the start of the hour (its documented guidance is to schedule at another minute). Events stay the primary trigger.
   schedule:
-    - cron: '*/30 * * * *'
+    - cron: '13,43 * * * *'
 
 permissions:
   contents: read
