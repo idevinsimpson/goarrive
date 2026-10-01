@@ -202,6 +202,8 @@ const T = {
   contracts: (v) => Array.isArray(v) && v.length > 0 && new Set(v.map((c) => c?.id)).size === v.length &&
     v.every((c) => exactKeys(c, ['id', 'path', 'commit']) && RE.contractId.test(c.id) && typeof c.path === 'string' && RE.path.test(c.path) && c.path !== '*' && RE.sha.test(c.commit)),
   bool: (v) => v === true,
+  /** A two-valued switch (set-fastpath): true or false, nothing else. */
+  onOff: (v) => v === true || v === false,
   queueMap: (v) => isObj(v) && Object.entries(v).every(([w, q]) => RE.worker.test(w) && T.packets(q)),
 };
 
@@ -284,6 +286,8 @@ export const EVENT_FIELDS = Object.freeze({
   'set-shadow-surface': [{ pr: T.int, commentId: T.int }, {}],
   // Step 7 fast path (memo §9.2): the staging target held in the ledger, against the full-path pin it was checked on.
   'set-target': [{ packet: T.packet, appSha: T.sha, pinSha: T.sha }, {}],
+  // The owner's standing switch for unattended fast-path dispatch (memo §9.5). Absent means off.
+  'set-fastpath': [{ enabled: T.onOff }, {}],
   // Wakes (Step 6, memo §6.2): request, App comment posted, worker ACK, one retry, timeout. Identity is the wakeId.
   'wake': [{ wakeId: T.hash, packet: T.packet, worker: T.worker, reason: (v) => WAKE_REASONS.includes(v) }, {}],
   'wake-delivered': [{ wakeId: T.hash, packet: T.packet, commentId: T.int }, {}],
@@ -308,7 +312,7 @@ export const WAKE_REASONS = Object.freeze(['release', 'handback', 'review']);
 /** The wake event types; they record delivery truth and never move a packet's ball. */
 export const WAKE_EVENTS = Object.freeze(['wake', 'wake-delivered', 'wake-ack', 'wake-retry', 'wake-timeout']);
 /** Event types, and fields, that exist only in schema v2. A v1 line carrying one is malformed. */
-export const V2_ONLY = Object.freeze(['schema-upgrade', 'set-contracts', 'set-review-policy', 'apply-finding', 'set-shadow-surface', 'set-target', 'wake', 'wake-delivered', 'wake-ack', 'wake-retry', 'wake-timeout']);
+export const V2_ONLY = Object.freeze(['schema-upgrade', 'set-contracts', 'set-review-policy', 'apply-finding', 'set-shadow-surface', 'set-target', 'set-fastpath', 'wake', 'wake-delivered', 'wake-ack', 'wake-retry', 'wake-timeout']);
 const V2_FIELDS = Object.freeze({ bootstrap: ['contracts', 'supersedes'], 'register-worker': ['classes'], queue: ['review'], finding: ['pending'] });
 
 /**
@@ -326,6 +330,7 @@ export const SOURCE_RULES = Object.freeze({
   'schema-upgrade': C, 'set-contracts': C, 'set-review-policy': C, 'set-shadow-surface': C,
   // The target rests on the integrated packet's merged PR (R-FASTPATH), or on a recorded decision.
   'set-target': ['pull_request', 'comment'],
+  'set-fastpath': C,
   // A wake rests on whatever set the ball (a release or finding comment, a delivery); its receipts rest on comments.
   'wake': ['comment', 'pull_request', 'commit', 'workflow_run'],
   'wake-delivered': C, 'wake-ack': C, 'wake-retry': C, 'wake-timeout': C,

@@ -234,6 +234,12 @@ export function applyEvent(state, e) {
     // Step 7 fast path (memo §9.2): the ledger holds the staging target. Only an INTEGRATED work packet's own merge can be
     // the target; the same target twice adds nothing. The first one creates s.stagingTarget, so a ledger without one
     // serializes and renders as before.
+    // memo §9.5: unattended dispatch of the fast path is a standing authorization the owner records, and revokes, here.
+    // Never derived (no rule but MANUAL carries it). Absent: off. Recording the state it is already in adds nothing.
+    case 'set-fastpath':
+      if ((s.fastpath?.enabled ?? false) === e.enabled) illegal(`set-fastpath: unattended fast-path dispatch is already ${e.enabled ? 'enabled' : 'disabled'}`);
+      s.fastpath = { enabled: e.enabled };
+      break;
     case 'set-target': {
       if (p.kind !== 'work') illegal(`set-target: ${e.packet} is a reference packet`);
       if (p.phase !== 'INTEGRATED') illegal(`set-target: ${e.packet} is ${p.phase}; only an INTEGRATED packet's merge is a staging target`);

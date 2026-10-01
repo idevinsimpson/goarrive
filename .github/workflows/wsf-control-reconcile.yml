@@ -5,8 +5,11 @@
 # BOUNDARY
 #   - The job always checks out and executes `main`, never the triggering PR's code, and it declares the
 #     main-only environment `wsf-control-writer`, which holds the App key.
-#   - The workflow token is read-only (`contents: read`). Every write goes through the App installation
-#     token, which shadow-run.mjs mints in process, down-scoped and masked. There is no Actions write.
+#   - The writer job's workflow token is read-only (`contents: read`). Every ledger write goes through the App
+#     installation token, which shadow-run.mjs mints in process, down-scoped and masked. The App has no Actions write.
+#   - The one exception is the separate `fastpath-dispatch` job below (Step 7, Director ruling #365 5940481437): its
+#     own workflow token may dispatch workflows, it holds no App key, and it acts only behind the owner's recorded
+#     set-fastpath switch.
 #   - One writer at a time: a fixed concurrency group that queues rather than cancels, so a run already
 #     pushing is never killed mid-write.
 #   - `pull_request`, never `pull_request_target`.
@@ -80,3 +83,47 @@ jobs:
           WSF_CONTROL_WRITER_PRIVATE_KEY: ${{ secrets.WSF_CONTROL_WRITER_PRIVATE_KEY }}
           WSF_CONTROL_WRITER_APP_ID: '5098407'
         run: node tools/wsf-control/shadow-run.mjs --live
+
+  # The Step-7 unattended fast-path dispatch (STAGING-FRESHNESS-DISPATCH; Director ruling #365 5940481437, Option B).
+  # A separate, minimal job: it runs only after the writer job succeeded on main, holds NO App key and NO environment,
+  # and its workflow token can read contents and dispatch workflows, nothing more. fastpath-dispatch.mjs re-reads the
+  # protected state ref and dispatches the EXISTING wsf-staging-deploy.yml in target_source=ledger mode only when the
+  # owner's recorded switch (set-fastpath) is on, the target is not served, never sent before, and still verifies. The
+  # staging workflow's own gate re-verifies it again before anything is fetched or deployed. Revoke: record
+  # set-fastpath {enabled: false} (the reviewed pin path is then the only path), or delete this job.
+  fastpath-dispatch:
+    needs: reconcile
+    if: ${{ github.ref == 'refs/heads/main' && needs.reconcile.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Check out main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      # The ledger as the writer job just left it: DATA only, checked by the operational checker in the next step.
+      - name: Check out the control ledger
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: wsf-control-state-2
+          path: control-ledger
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+
+      - name: Dispatch the ledger fast path (or report why not)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          export WSF_LEDGER_AUTHOR="$(git -C control-ledger log -1 --format=%an)"
+          node .github/wsf-staging/fastpath-dispatch.mjs .github/wsf-staging/approved-candidate.json control-ledger

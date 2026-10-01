@@ -111,6 +111,9 @@ export const STAGING_URL = 'https://westayfit-staging--staging-4a616y5m.web.app'
 export const STAGING_WORKFLOW = 'wsf-staging-deploy.yml';
 /** The run title of a deploy-mode staging run (the workflow's run-name). Runs titled otherwise are not deploys. */
 export const DEPLOY_TITLE = 'WSF staging · mode=deploy';
+/** The title of a ledger-mode (fast-path) deploy of `sha`: a deploy title that names its target. */
+export const targetTitle = (sha) => `${DEPLOY_TITLE} · target=${sha}`;
+export const isDeployTitle = (t) => t === DEPLOY_TITLE || (typeof t === 'string' && t.startsWith(`${DEPLOY_TITLE} · target=`));
 
 /** The served SHA: the first of `shas` whose 7-character prefix the hosted /health page names (the verifier's rule). */
 export const servedOf = (healthText, shas) => (typeof healthText === 'string' ? shas.find((x) => x && healthText.includes(x.slice(0, 7))) ?? null : null);
@@ -123,7 +126,7 @@ export const servedOf = (healthText, shas) => (typeof healthText === 'string' ? 
 export function freshnessFacts(state, reads, { health, runs }) {
   const candidateSha = reads?.candidate?.mergeSha ?? reads?.pin?.sha ?? null;
   const servedSha = servedOf(health, [candidateSha, state.stagingTarget?.appSha, reads?.pin?.sha, state.staging?.servedSha]);
-  const deploys = Array.isArray(runs) ? runs.filter((r) => r.title === DEPLOY_TITLE) : null;
+  const deploys = Array.isArray(runs) ? runs.filter((r) => isDeployTitle(r.title)) : null;
   const active = deploys?.find((r) => r.status !== 'completed') ?? null;
   const last = deploys?.find((r) => r.status === 'completed') ?? null;
   return {
