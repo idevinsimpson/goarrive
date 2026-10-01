@@ -28,7 +28,7 @@ export function freshness(state, facts) {
   let label;
   if (!facts?.candidateSha || !facts?.servedSha) label = 'UNKNOWN';
   else if (facts.servedSha === facts.candidateSha) label = 'FRESH';
-  else if (facts.activeRun && ['queued', 'in_progress'].includes(facts.activeRun.status)) label = 'DEPLOYING';
+  else if (facts.activeRun && facts.activeRun.status !== 'completed') label = 'DEPLOYING'; // queued, waiting, pending, requested or in progress
   else if (facts.lastRun && facts.lastRun.conclusion && facts.lastRun.conclusion !== 'success') label = 'BLOCKED';
   else label = 'BEHIND';
   lines.push(`STAGING_FRESHNESS=${label}`);
@@ -36,6 +36,8 @@ export function freshness(state, facts) {
   if (facts?.candidateSha) lines.push(`CANDIDATE=${facts.candidateSha}`);
   if (label === 'BLOCKED') lines.push(`KNOWN_GOOD=${facts.servedSha} ROLLBACK=${state.staging?.rollbackSha ?? 'not recorded'} FAILED_RUN=${facts.lastRun.id}`);
   if (label === 'BEHIND') lines.push('ACTIONABLE=on reason=the candidate is not served and nothing is deploying');
+  if (label === 'UNKNOWN' && facts?.candidateSha && !facts?.servedSha) lines.push('REASON=the hosted marker names none of the candidate, the target, the pin or the recorded served SHA, or could not be read');
+  if (facts?.runs && facts.runs !== 'classified') lines.push(`RUNS=${facts.runs === 'unread' ? 'unread' : 'no deploy-titled staging run yet (older runs carry no mode in their title)'}`);
   for (const p of byId(state).filter((x) => x.completion.proofType === 'journey-activation')) {
     const j = p.phase === 'VERIFIED' ? 'VERIFIED' : p.phase === 'BLOCKED' || p.proof?.result === 'FAIL' ? 'BLOCKED' : 'PENDING';
     lines.push(`JOURNEY_VERIFICATION ${p.id}=${j}`);

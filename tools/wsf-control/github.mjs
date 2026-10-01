@@ -26,7 +26,7 @@ export function gitHubClient({ token, repo, fetchImpl = globalThis.fetch }) {
   return {
     async pull(n) {
       const pr = await call('GET', `${r}/pulls/${n}`, null, `pull ${n}`);
-      return pr && { state: pr.state, merged: Boolean(pr.merged), headSha: pr.head.sha, baseSha: pr.base?.sha ?? null, mergeSha: pr.merged ? pr.merge_commit_sha : undefined };
+      return pr && { state: pr.state, merged: Boolean(pr.merged), headSha: pr.head.sha, baseSha: pr.base?.sha ?? null, baseRef: pr.base?.ref ?? null, mergeSha: pr.merged ? pr.merge_commit_sha : undefined };
     },
     /** Paths changed between two commits, or null when GitHub cannot compare them (then the change is reported unknown). */
     async changedPaths(base, head) {
@@ -46,6 +46,12 @@ export function gitHubClient({ token, repo, fetchImpl = globalThis.fetch }) {
       if (!c) return null;
       return c.status === 'ahead' || c.status === 'identical';
     },
+    /** One file's text at a commit, or null when it does not exist there (Step 7: the full-path pin at the running main). */
+    async fileText(filePath, ref) {
+      const f = await call('GET', `${r}/contents/${filePath.split('/').map(encodeURIComponent).join('/')}?ref=${encodeURIComponent(ref)}`, null, 'contents');
+      if (!f || f.type !== 'file' || f.encoding !== 'base64' || typeof f.content !== 'string') return null;
+      return Buffer.from(f.content, 'base64').toString('utf8');
+    },
     async run(id) {
       const x = await call('GET', `${r}/actions/runs/${id}`, null, `run ${id}`);
       return x && { status: ['queued', 'in_progress', 'completed'].includes(x.status) ? x.status : 'queued', conclusion: x.status === 'completed' ? x.conclusion : null };
@@ -53,7 +59,7 @@ export function gitHubClient({ token, repo, fetchImpl = globalThis.fetch }) {
     /** The workflow runs of one workflow file, newest first (health: the writer's own recent runs). */
     async workflowRuns(file, n = 10) {
       const x = await call('GET', `${r}/actions/workflows/${file}/runs?per_page=${n}`, null, 'workflow runs');
-      return (x?.workflow_runs ?? []).map((w) => ({ id: w.id, status: w.status, conclusion: w.conclusion, createdAt: w.created_at, headSha: w.head_sha }));
+      return (x?.workflow_runs ?? []).map((w) => ({ id: w.id, status: w.status, conclusion: w.conclusion, createdAt: w.created_at, headSha: w.head_sha, title: w.display_title ?? null }));
     },
     async comment(id) {
       const c = await call('GET', `${r}/issues/comments/${id}`, null, `comment ${id}`);

@@ -31,7 +31,7 @@ export const RULES = Object.freeze({
   'R-PROOF-FAIL': { class: 'derived', events: ['proof-fail'], step: 6, what: 'the proof run failed under the packet\'s pre-approved failure contract' },
   'R-UNBLOCK-MILESTONE': { class: 'derived', events: ['unblock'], step: 6, what: 'every packet blocker reached its milestone' },
   'R-UNBLOCK-RESOLVER': { class: 'derived', events: ['unblock'], step: 6, what: 'a machine-resolvable external condition cleared by its named resolver' },
-  'R-FASTPATH': { class: 'derived', events: ['begin-proof', 'stage'], step: 7, what: 'fast-path invariants hold and the writer made the dispatch' },
+  'R-FASTPATH': { class: 'derived', events: ['set-target', 'begin-proof', 'stage'], step: 7, what: 'fast-path invariants hold: the staging target, and the dispatch the writer itself made' },
   // Wakes (memo §3.2 "wake, wake-retry, wake-timeout (new) | derived | §6"; receipt model §6.2).
   'R-WAKE': { class: 'derived', events: ['wake'], step: 6, what: 'a worker now holds a ball it has not been woken for (release, handback or review assignment)' },
   'R-WAKE-DELIVERED': { class: 'derived', events: ['wake-delivered'], step: 6, what: 'the App posted the wake comment carrying the wakeId in the worker\'s inbox' },

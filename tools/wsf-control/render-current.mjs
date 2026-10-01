@@ -59,6 +59,8 @@ export function renderCurrent(s) {
   L.push(s.staging
     ? `- Staging: serves \`${s.staging.servedSha}\` (run ${s.staging.runId}, #${s.staging.runNumber}); rollback \`${s.staging.rollbackSha}\`${s.staging.pinPr ? `; pin PR #${s.staging.pinPr}` : ''}`
     : '- Staging: not recorded');
+  // Step 7: only a ledger that holds a fast-path target says so, so every earlier ledger renders as before.
+  if (s.stagingTarget) L.push(`- Staging target (fast path): \`${s.stagingTarget.appSha}\` (${s.stagingTarget.packet}), checked against the full-path pin \`${s.stagingTarget.pinSha}\``);
   L.push(`- Critical path: ${s.criticalPath ? `${s.criticalPath} (${s.packets[s.criticalPath].phase}, ${s.packets[s.criticalPath].owner})` : 'none'}`);
   if (s.schemaVersion === 2) {
     L.push('- Schema: v2. Every line is written by the `wsf-control-writer` App and names its authority class and rule.');

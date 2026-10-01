@@ -231,6 +231,18 @@ export function applyEvent(state, e) {
       s.staging = { servedSha: e.servedSha, runId: e.runId, runNumber: e.runNumber, rollbackSha: e.rollbackSha, pinPr: e.pinPr ?? null };
       break;
     case 'set-surfaces': s.surfaces = clone(e.surfaces); break;
+    // Step 7 fast path (memo §9.2): the ledger holds the staging target. Only an INTEGRATED work packet's own merge can be
+    // the target; the same target twice adds nothing. The first one creates s.stagingTarget, so a ledger without one
+    // serializes and renders as before.
+    case 'set-target': {
+      if (p.kind !== 'work') illegal(`set-target: ${e.packet} is a reference packet`);
+      if (p.phase !== 'INTEGRATED') illegal(`set-target: ${e.packet} is ${p.phase}; only an INTEGRATED packet's merge is a staging target`);
+      if (p.artifact.mergeSha !== e.appSha) illegal(`set-target: ${e.appSha.slice(0, 8)} is not ${e.packet}'s merge ${String(p.artifact.mergeSha).slice(0, 8)}`);
+      if (e.appSha === e.pinSha) illegal('set-target: the target is the full-path pin itself; nothing to fast-path');
+      if (s.stagingTarget?.appSha === e.appSha) illegal(`set-target: ${e.appSha.slice(0, 8)} is already the staging target`);
+      s.stagingTarget = { packet: e.packet, appSha: e.appSha, pinSha: e.pinSha };
+      break;
+    }
     case 'register-worker': {
       const was = s.workers[e.worker];
       if (was) {
@@ -500,7 +512,7 @@ export function applyEvent(state, e) {
     }
     default: illegal(`no transition for ${e.type}`);
   }
-  if (p && !['reconcile-head', 'record-evidence', 'set-critical-path', 'set-review-policy', ...WAKE_EVENTS].includes(e.type) && !(e.type === 'finding' && e.pending)) p.authority.lastTransition = src;
+  if (p && !['reconcile-head', 'record-evidence', 'set-critical-path', 'set-review-policy', 'set-target', ...WAKE_EVENTS].includes(e.type) && !(e.type === 'finding' && e.pending)) p.authority.lastTransition = src;
   // The critical path completes when its packet does; it is never left pointing at a terminal packet.
   if (s.criticalPath && isTerminal(s.packets[s.criticalPath])) s.criticalPath = null;
   // A wake is superseded once its worker no longer holds that packet's ball (reassigned, handed back, passed, withdrawn).

@@ -15,6 +15,16 @@ WE STAY FIT staging deploys through the manual GitHub Actions workflow:
 
 Do **not** use the generic GoArrive local Firebase/service-account deploy instructions for WSF staging. This workflow uses GitHub OIDC/WIF and is the reviewed release path.
 
+### The Step-7 fast-path candidate (`target_source=ledger`)
+
+The same workflow, the same jobs, the same verification. Only the gate's choice of commit differs:
+
+- `target_source=pin` (the default) deploys what the reviewed `approved-candidate.json` names, exactly as before.
+- `target_source=ledger` (deploy mode only) deploys the staging target the control writer recorded on `wsf-control-state-2` (`set-target`, rule `R-FASTPATH`). The credential-free gate re-verifies it before anything is fetched: the ledger checks and its head commit is the App's; the target was checked against this run's pin; that pin is the recorded served full-path deploy with a rollback SHA; the target is an integrated merge on the development branch; and it differs from the pin in member-visible source only (no functions, rules, indexes, hosting or package configuration, no `.github/`). Any failure refuses the run, and the candidate takes the reviewed pin path.
+- A fast-path run expects the pin's verified inventory (`expectedPriorFunctions` plus `candidateAddedFunctions`) as its baseline, because the functions tree is the pin's.
+- The control writer reports `STAGING_TARGET …` and `STAGING_FRESHNESS=FRESH|DEPLOYING|BEHIND|BLOCKED|UNKNOWN` every run. Run titles name the mode (`WSF staging · mode=deploy`), so the readback can tell a deploy from a proof-only run.
+- Unattended dispatch of `target_source=ledger` is **not** wired. It is a standing authorization the owner records (memo §9.5); until then a person dispatches it, exactly like a pin dispatch.
+
 ## Owner request means act
 
 When Devin explicitly says "deploy staging now", do not stop at a status report and do not ask him to repeat permission already given.

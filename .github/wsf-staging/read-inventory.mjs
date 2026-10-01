@@ -23,6 +23,13 @@
  * next package will have a different prior inventory. When the field is absent
  * the baseline must still be non-empty, because deploying Package E into a
  * project with no WSF functions is not a scenario this pipeline supports.
+ *
+ * THE FAST PATH (WSF_FASTPATH=true, set only by the gate's ledger resolver).
+ * A fast-path candidate changes no functions source relative to the pin, and
+ * the pin's own deploy was verified, so staging already holds the pin's
+ * inventory: `expectedPriorFunctions` plus its `candidateAddedFunctions`. That
+ * is the baseline here. Anything else means staging moved since the pin was
+ * verified, and the run refuses rather than deploy over an unexplained state.
  */
 import fs from 'node:fs';
 
@@ -82,6 +89,12 @@ if (approvalPath) {
     if (v !== undefined && v !== null) {
       if (!Number.isInteger(v) || v < 0) fail('expectedPriorFunctions in the approval file is not a non-negative integer');
       expected = v;
+      if (process.env.WSF_FASTPATH === 'true') {
+        const added = approval?.candidateAddedFunctions ?? [];
+        if (!Array.isArray(added)) fail('candidateAddedFunctions in the approval file is not an array');
+        expected = v + added.length;
+        console.log(`PREFLIGHT_FASTPATH_BASELINE=${expected} (the pin's verified inventory: ${v} prior + ${added.length} added)`);
+      }
     }
   } catch {
     fail('the approval file could not be read while checking the expected baseline');

@@ -10,15 +10,19 @@ let passed = 0;
 const d = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-inv-'));
 const NAMES22 = Array.from({ length: 22 }, (_, i) => ({ id: `wsfFn${i}` }));
 
-function run(exitCode, rawBody, { expectedPrior } = {}) {
+function run(exitCode, rawBody, { expectedPrior, added, fastpath } = {}) {
   const raw = path.join(d, `raw-${Math.random().toString(36).slice(2)}.json`);
   fs.writeFileSync(raw, rawBody);
   const out = path.join(d, `out-${Math.random().toString(36).slice(2)}.json`);
   const approval = path.join(d, `ap-${Math.random().toString(36).slice(2)}.json`);
   const body = { project: 'westayfit-staging', approvedAppSha: '8e1a3ed485a5c0eadbcb23c1f35becad455923c7' };
   if (expectedPrior !== undefined) body.expectedPriorFunctions = expectedPrior;
+  if (added !== undefined) body.candidateAddedFunctions = added;
   fs.writeFileSync(approval, JSON.stringify(body));
-  const r = spawnSync(process.execPath, [READ, String(exitCode), raw, out, approval], { encoding: 'utf8' });
+  const env = { ...process.env };
+  delete env.WSF_FASTPATH;
+  if (fastpath !== undefined) env.WSF_FASTPATH = fastpath;
+  const r = spawnSync(process.execPath, [READ, String(exitCode), raw, out, approval], { encoding: 'utf8', env });
   let parsed = null;
   try { parsed = JSON.parse(fs.readFileSync(out, 'utf8')); } catch {}
   return { code: r.status, out: r.stdout || '', err: r.stderr || '', written: parsed };
@@ -83,6 +87,25 @@ test('with no expectation recorded, a non-empty baseline is accepted', () => {
   const r = run(0, JSON.stringify({ result: NAMES22.slice(0, 5) }));
   assert.equal(r.code, 0, r.err);
   assert.equal(r.written.functions.length, 5);
+});
+
+test('FAST PATH: the baseline is the pin\'s verified inventory (prior + added); the pre-pin count is refused', () => {
+  const added = ['wsfadded1', 'wsfadded2', 'wsfadded3'];
+  const ok = run(0, JSON.stringify({ result: NAMES22 }), { expectedPrior: 19, added, fastpath: 'true' });
+  assert.equal(ok.code, 0, ok.err);
+  assert.match(ok.out, /PREFLIGHT_FASTPATH_BASELINE=22 \(the pin's verified inventory: 19 prior \+ 3 added\)/);
+  const stale = run(0, JSON.stringify({ result: NAMES22.slice(0, 19) }), { expectedPrior: 19, added, fastpath: 'true' });
+  assert.equal(stale.code, 1, 'staging still at the pre-pin inventory: the pin deploy was not what the fast path assumes');
+  assert.match(stale.err, /has 19 WSF functions but this candidate was approved against 22/);
+  const bad = run(0, JSON.stringify({ result: NAMES22 }), { expectedPrior: 19, added: 'x', fastpath: 'true' });
+  assert.equal(bad.code, 1); assert.match(bad.err, /candidateAddedFunctions in the approval file is not an array/);
+});
+
+test('without WSF_FASTPATH=true (the reviewed pin path) the baseline is exactly expectedPriorFunctions, as before', () => {
+  const added = ['wsfadded1', 'wsfadded2', 'wsfadded3'];
+  assert.equal(run(0, JSON.stringify({ result: NAMES22.slice(0, 19) }), { expectedPrior: 19, added }).code, 0);
+  assert.equal(run(0, JSON.stringify({ result: NAMES22.slice(0, 19) }), { expectedPrior: 19, added, fastpath: 'false' }).code, 0);
+  assert.equal(run(0, JSON.stringify({ result: NAMES22 }), { expectedPrior: 19, added, fastpath: '1' }).code, 1, 'only the exact string true selects the fast path');
 });
 
 console.log(`\nread-inventory: ${passed} passed`);

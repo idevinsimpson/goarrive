@@ -113,6 +113,8 @@ The worker answers in **its own inbox**, with exactly one `wsf-control-worker` b
 - Eligibility comes from the classes a worker declares. A worker that declares none is eligible for every class, so with no declarations every review goes to the lowest-numbered free worker. To send reviews to a QA worker, record one `register-worker` decision per worker with its `classes` (same inbox; a re-registration keeps the worker's queue, packets and assigned reviews). It is recorded once, never per delivery.
 - A wake without an ACK is re-posted once (`attempt=2`) by the first writer run at least 15 minutes after the wake comment. Runs come from events and the 30-minute fallback schedule, so the real gap can be longer. Fifteen minutes after the re-post, on the same terms, it times out as `CONTROL_EXCEPTION wake-undelivered <W#> <packet>`. The packet and its ball are kept. `transfer-owner` or `reassign-review` stays a Director decision.
 - The same ball re-derived is the same `wakeId`, so a wake is never posted twice. A new ball is a new wake.
+- Integration is derived: an ACCEPTED packet whose PR merged is recorded `integrate` (R-INTEGRATE) by the writer, in the run that records the acceptance or the first run after the merge. A merge it cannot verify is reported `INTEGRATE_UNVERIFIED`.
+- Step 7 (staging freshness): every run reports `STAGING_TARGET SET|HELD|FULL_PATH_REQUIRED|NONE …` and `STAGING_FRESHNESS=…`. `SET` records the fast-path target (`set-target`, R-FASTPATH); it dispatches nothing. `BEHIND` with `ACTIONABLE=on` means the newest preview-eligible merge is not served and no deploy is running.
 
 ## Views
 
