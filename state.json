@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "75cd4e746a663110691a103d2f4563a9efc8ca33134a3de82fc4c6e669a08efe",
-  "eventCount": 33,
+  "ledgerHead": "e7442ec45cd1249a722961bc15fa279f38b0bb6f975699fe584051c842023d68",
+  "eventCount": 34,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -48,7 +48,9 @@
     }
   },
   "queue": {
-    "W3": [],
+    "W3": [
+      "STAGING-FRESHNESS-FASTPATH"
+    ],
     "W4": [],
     "W5": [],
     "W7": [],
@@ -243,6 +245,61 @@
         "lastTransition": {
           "kind": "comment",
           "id": 5857966052
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
+      "pendingFinding": null
+    },
+    "STAGING-FRESHNESS-FASTPATH": {
+      "owner": "W3",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Step 7: automate preview-eligible accepted/integrated to deterministic candidate, pin, existing staging dispatch, and FRESH readback",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "*"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 5937487510
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 5937487510
         }
       },
       "review": {
