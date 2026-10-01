@@ -36,6 +36,9 @@
 # Privileged jobs install dependencies with --ignore-scripts, so package
 # lifecycle code never runs alongside a credential.
 name: WSF staging deploy
+# The run title names the mode, so a reader of the run list (the control writer's staging freshness readback,
+# tools/wsf-control/fastpath.mjs DEPLOY_TITLE) can tell a deploy from a proof-only run without opening it.
+run-name: "WSF staging · mode=${{ inputs.mode || 'deploy' }}"
 
 on:
   workflow_dispatch:
@@ -107,6 +110,23 @@ on:
         description: "cleanup-recovery only. The workflow run id IN THIS REPOSITORY whose wsf-player-evidence artifact holds the manifest to clean up."
         required: false
         type: string
+      # THE STEP-7 FAST PATH (STAGING-FRESHNESS-FASTPATH; memo §9.2). `pin`
+      # (the default) deploys the commit the REVIEWED approved-candidate.json
+      # names, exactly as before. `ledger` deploys the staging target the
+      # control writer recorded on the protected state ref, and only after
+      # resolve-ledger-target.mjs re-verifies it in this credential-free gate:
+      # checked against THIS run's pin, the pin is the recorded served
+      # full-path deploy, the target is an integrated merge on the development
+      # branch, and it differs from the pin in member-visible source only.
+      # Deploy mode only; every other mode refuses it.
+      target_source:
+        description: "deploy only. pin (default): the reviewed approved-candidate.json. ledger: the control ledger's fast-path staging target, re-verified at the gate."
+        required: false
+        default: pin
+        type: choice
+        options:
+          - pin
+          - ledger
 
 # Nothing is granted at workflow level. Each job takes only what it needs.
 permissions: {}
@@ -141,6 +161,8 @@ jobs:
       contents: read
     outputs:
       app_sha: ${{ steps.candidate.outputs.app_sha }}
+      # `true` only when resolve-ledger-target.mjs accepted a fast-path target.
+      fastpath: ${{ steps.candidate.outputs.fastpath }}
     steps:
       # github.sha is the exact commit this workflow run was dispatched from, so
       # the operational assets are pinned to one commit rather than read from a
@@ -151,11 +173,35 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
 
+      # The control ledger, for the fast path only: DATA (events, state,
+      # CURRENT), checked by the operational checker below. Nothing in it is
+      # executed, and no candidate code is fetched here.
+      - name: Check out the control ledger (fast path only)
+        if: ${{ inputs.target_source == 'ledger' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: wsf-control-state-2
+          path: control-ledger
+          fetch-depth: 1
+          persist-credentials: false
+
       - name: Resolve the approved candidate
         id: candidate
         env:
           WSF_REQUESTED_SHA: ${{ inputs.app_sha }}
-        run: node .github/wsf-staging/resolve-candidate.mjs .github/wsf-staging/approved-candidate.json
+          WSF_TARGET_SOURCE: ${{ inputs.target_source || 'pin' }}
+          WSF_INPUT_MODE: ${{ inputs.mode }}
+          # Read-only (this job holds contents: read only): the ledger
+          # resolver's GitHub compare reads. The pin path never uses it.
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "$WSF_TARGET_SOURCE" = "ledger" ]; then
+            export WSF_LEDGER_AUTHOR="$(git -C control-ledger log -1 --format=%an)"
+            node .github/wsf-staging/resolve-ledger-target.mjs .github/wsf-staging/approved-candidate.json control-ledger
+          else
+            node .github/wsf-staging/resolve-candidate.mjs .github/wsf-staging/approved-candidate.json
+          fi
 
       # THE FROZEN MILESTONE MANIFEST, CHECKED BEFORE ANYTHING IS BUILT
       # (CONTROL-PLANE-CI-1 C3). Read from this operational checkout only. An
@@ -439,6 +485,10 @@ jobs:
 
       - name: Read-only preflight before any change
         working-directory: app
+        env:
+          # The gate's own output: `true` only for a re-verified fast-path
+          # target, which expects the pin's verified inventory as its baseline.
+          WSF_FASTPATH: ${{ needs.gate.outputs.fastpath }}
         run: |
           set -euo pipefail
           cp ../ops/firebase.westayfit.staging.json .

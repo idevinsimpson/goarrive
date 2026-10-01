@@ -74,7 +74,10 @@ function fakeGh() {
     },
     async pull(n) { const p = prs.get(n); return p ? { merged: false, ...p } : null; },
     async descends(base, head) { const f = prs.get('descends'); return f ? f(base, head) : true; },
-    async changedPaths() { return []; },
+    async changedPaths(base, head) { const f = prs.get('paths'); return f ? f(base, head) : []; },
+    async fileText(filePath, ref) { const f = prs.get('file'); return f ? f(filePath, ref) : null; },
+    async workflowRuns(file, n) { const f = prs.get('runs'); return f ? f(file, n) : []; },
+    async treeSha(commit, dir) { const f = prs.get('tree'); return f ? f(commit, dir) : 'f'.repeat(40); },
     async run() { return null; },
     async comment(id) { const c = all().find((x) => x.id === id); return c ? { id, body: c.body, author: c.author } : null; },
     async createComment(issue, body) {
@@ -427,6 +430,103 @@ test('integrateLines (pure): only ACCEPTED work packets with a comment acceptanc
   const evid = { ...s, packets: { ALPHA: p('ACCEPTED', { artifact: { subjectSha: A, prHeadSha: D, mergeSha: null } }) } };
   assert.equal(integrateLines(evid, { ALPHA: { ...ok, headSha: D } }).lines.length, 1, 'a recorded evidence head (record-evidence) is the head that must have merged');
   assert.match(integrateLines(evid, { ALPHA: ok }).unverified[0].reason, /is not the accepted head/);
+});
+
+// ---- Step 7: the staging target (STAGING-FRESHNESS-FASTPATH) ---------------------------------------------
+const PIN = sha('3');
+const UI_PATHS = ['apps/westayfit/app/(tabs)/index.tsx'];
+/** The router fixture with staging serving the full-path pin PIN, recorded by set-staging. */
+const stagedInput = () => { const inp = input(); inp.bootstrap.staging = { servedSha: PIN, runId: 9, runNumber: 55, rollbackSha: D }; return inp; };
+/** ALPHA passed by W7 on a ledger whose staging serves PIN; PR #12 merged at MERGE into `base`; the pin file at the running main names PIN. */
+async function productMerged({ base = 'claude/wsf-dev', own = UI_PATHS, sincePin = UI_PATHS, file = () => JSON.stringify({ project: 'westayfit-staging', approvedAppSha: PIN }) } = {}) {
+  const remote = bareRemote(); const gh = fakeGh();
+  const go = () => run(remote, gh, { bootstrapInput: stagedInput() });
+  gh.prs.set(12, { state: 'open', headSha: A, baseSha: B, baseRef: base });
+  await go();
+  const w3 = wakesOf(state(remote), 'W3')[0].id;
+  gh.post(396, block({ type: 'deliver', packet: 'ALPHA', wakeId: w3, pr: 12, subjectSha: A }));
+  await go();
+  gh.post(434, block({ type: 'pass', packet: 'ALPHA', wakeId: wakesOf(state(remote), 'W7')[0].id, subjectSha: A }));
+  await go();
+  gh.prs.set(12, { state: 'closed', merged: true, headSha: A, baseSha: B, baseRef: base, mergeSha: MERGE });
+  gh.prs.set('file', (p, ref) => { assert.equal(p, '.github/wsf-staging/approved-candidate.json'); assert.equal(ref, RUNNING, 'the pin is read at the running main, never elsewhere'); return file(); });
+  gh.prs.set('paths', (from, to) => (from === `${MERGE}^1` && to === MERGE ? own : from === PIN && to === MERGE ? sincePin : null));
+  gh.prs.set('descends', (from, to) => (from === A && to === MERGE) || (from === PIN && to === MERGE));
+  const acc = gh.post(365, decide({ type: 'accept', packet: 'ALPHA', subjectSha: A }));
+  return { remote, gh, go, acc };
+}
+
+atest('Step 7, same run: an accepted product merge is integrated AND targeted (R-FASTPATH set-target on the PR) in one run; every later run holds it', async () => {
+  const { remote, gh, go, acc } = await productMerged();
+  const posted = gh.calls.created.length;
+  const r = await go();
+  assert.equal(gh.calls.created.length, posted, 'the targeting run posts nothing and dispatches nothing');
+  assert.deepEqual(r.appended, [`accept:MANUAL:comment-${acc.id}`, 'integrate:R-INTEGRATE:pr-12', 'set-target:R-FASTPATH:pr-12']);
+  assert.equal(r.stagingTarget, `SET target=${MERGE} packet=ALPHA pin=${PIN}`);
+  assert.ok(formatReport(r).includes(`STAGING_TARGET SET target=${MERGE} packet=ALPHA pin=${PIN}`));
+  assert.deepEqual(state(remote).stagingTarget, { packet: 'ALPHA', appSha: MERGE, pinSha: PIN });
+  const before = events(remote);
+  const again = await go();
+  assert.equal(again.outcome, 'unchanged'); assert.equal(again.stagingTarget, `HELD target=${MERGE} packet=ALPHA`);
+  assert.equal(events(remote), before);
+});
+
+atest('Step 7 readback: BEHIND (actionable) while the pin is served, DEPLOYING with a deploy-titled run, FRESH once the marker names the target, BLOCKED with rollback after a failed deploy, UNKNOWN without the marker', async () => {
+  const { remote, gh } = await productMerged();
+  let health = `ok build ${PIN.slice(0, 7)}`;
+  const go = () => run(remote, gh, { bootstrapInput: stagedInput(), stagingHealth: async () => health });
+  const r = await go();
+  assert.deepEqual(r.freshness.slice(0, 4), ['STAGING_FRESHNESS=BEHIND', `SERVED=${PIN}`, `CANDIDATE=${MERGE}`, 'ACTIONABLE=on reason=the candidate is not served and nothing is deploying']);
+  assert.ok(r.freshness.includes('RUNS=no deploy-titled staging run yet (older runs carry no mode in their title)'));
+  assert.ok(formatReport(r).includes('STAGING_FRESHNESS=BEHIND'));
+  gh.prs.set('runs', (file) => { assert.equal(file, 'wsf-staging-deploy.yml'); return [
+    { id: 71, status: 'completed', conclusion: 'failure', title: 'WSF staging deploy' }, // an untitled older run is never classified
+    { id: 70, status: 'in_progress', conclusion: null, title: 'WSF staging · mode=deploy' },
+  ]; });
+  assert.equal((await go()).freshness[0], 'STAGING_FRESHNESS=DEPLOYING');
+  gh.prs.set('runs', () => [{ id: 72, status: 'in_progress', conclusion: null, title: 'WSF staging · mode=journey-activation' }]);
+  assert.equal((await go()).freshness[0], 'STAGING_FRESHNESS=BEHIND', 'a proof-only run is not a deploy');
+  gh.prs.set('runs', () => [{ id: 73, status: 'completed', conclusion: 'failure', title: 'WSF staging · mode=deploy' }]);
+  const b = await go();
+  assert.equal(b.freshness[0], 'STAGING_FRESHNESS=BLOCKED');
+  assert.ok(b.freshness.includes(`KNOWN_GOOD=${PIN} ROLLBACK=${D} FAILED_RUN=73`));
+  health = `ok build ${MERGE.slice(0, 7)}`;
+  gh.prs.set('runs', () => [{ id: 74, status: 'completed', conclusion: 'success', title: 'WSF staging · mode=deploy' }]);
+  assert.equal((await go()).freshness[0], 'STAGING_FRESHNESS=FRESH');
+  health = null;
+  const u = await go();
+  assert.equal(u.freshness[0], 'STAGING_FRESHNESS=UNKNOWN');
+  assert.ok(u.freshness.some((l) => l.startsWith('REASON=the hosted marker names none')));
+  const noRead = await run(remote, gh, { bootstrapInput: stagedInput() });
+  assert.equal(noRead.freshness[0], 'STAGING_FRESHNESS=UNKNOWN', 'no marker reader: never FRESH by default');
+});
+
+atest('Step 7 fails closed: an operational merge is never a candidate; a docs-only merge never lags; a protected path or a stale pin takes the full path; a failed read never stops routing', async () => {
+  { const { go } = await productMerged({ base: 'main' });
+    const r = await go();
+    assert.ok(r.appended.includes('integrate:R-INTEGRATE:pr-12')); assert.equal(r.appended.some((x) => x.startsWith('set-target')), false);
+    assert.match(r.stagingTarget, /^NONE reason=no integrated preview-eligible merge on the development branch/); }
+  { const { go } = await productMerged({ own: ['docs/westayfit/x.md'] });
+    const r = await go();
+    assert.equal(r.appended.some((x) => x.startsWith('set-target')), false); assert.match(r.stagingTarget, /^NONE reason=no integrated preview-eligible/); }
+  { const { go } = await productMerged({ sincePin: [...UI_PATHS, 'functions-westayfit/src/index.ts'] });
+    const r = await go();
+    assert.equal(r.appended.some((x) => x.startsWith('set-target')), false);
+    assert.match(r.stagingTarget, /^FULL_PATH_REQUIRED candidate=5+ packet=ALPHA reason=.*protected paths changed: functions-westayfit\/src\/index\.ts/); }
+  { const { go } = await productMerged({ file: () => JSON.stringify({ project: 'westayfit-staging', approvedAppSha: sha('4') }) });
+    const r = await go();
+    assert.match(r.stagingTarget, /^FULL_PATH_REQUIRED .* is not the recorded served full-path deploy/); }
+  { const { go } = await productMerged({ file: () => { throw Object.assign(new Error('x'), { status: 502 }); } });
+    const r = await go();
+    assert.deepEqual(r.appended.slice(0, 2).map((x) => x.split(':')[0]), ['accept', 'integrate'], 'routing and integration still happen');
+    assert.equal(r.stagingTarget, 'NONE reason=fast-path reads failed (HTTP 502); nothing targeted'); }
+  { const { gh, go } = await productMerged();
+    gh.prs.set('tree', (commit, dir) => { assert.equal(dir, 'functions-westayfit'); return commit === PIN ? '1'.repeat(40) : '2'.repeat(40); });
+    const r = await go();
+    assert.equal(r.appended.some((x) => x.startsWith('set-target')), false);
+    assert.match(r.stagingTarget, /^FULL_PATH_REQUIRED .*the functions-westayfit tree changed \(11111111 → 22222222\)/, 'the tree is checked even when the path list looks clean'); }
+  { const { go } = await productMerged({ file: () => '{not json' });
+    assert.match((await go()).stagingTarget, /^NONE reason=the full-path pin/); }
 });
 
 atest('the writer re-pin: an unpinned writer refuses everything but the owner\'s set-contracts that pins exactly the running writer; then it runs', async () => {

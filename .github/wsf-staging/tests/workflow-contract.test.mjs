@@ -1375,4 +1375,35 @@ await test('A1: the activation job re-reads the marker as a drift check before i
   assert.ok(names.indexOf('Read the served marker before any credential or fixture') < names.indexOf('Authenticate to Google Cloud'));
 });
 
+// ---- the Step-7 fast path (STAGING-FRESHNESS-FASTPATH) ----------------------------------------------------
+test('FAST PATH: target_source is a pin|ledger choice and defaults to the reviewed pin', () => {
+  assert.match(text, /\n      target_source:\n(?:\s+#.*\n)*\s+description: .*\n\s+required: false\n\s+default: pin\n\s+type: choice\n\s+options:\n\s+- pin\n\s+- ledger\n/);
+});
+
+test('FAST PATH: the gate stays credential-free; the ledger is checked out as data, only in ledger mode, with no persisted credential', () => {
+  assert.equal(/id-token/.test(jobs.gate), false);
+  assert.match(jobs.gate, /\n    permissions:\n      contents: read\n    outputs:/, 'the gate takes contents: read and nothing more');
+  const co = stepBlock('gate', 'Check out the control ledger (fast path only)');
+  assert.match(co, /if: \$\{\{ inputs\.target_source == 'ledger' \}\}/);
+  assert.match(co, /persist-credentials: false/);
+  assert.match(co, /path: control-ledger/);
+  for (const [name, body] of Object.entries(jobs)) if (name !== 'gate') assert.equal(/control-ledger|wsf-control-state/.test(body), false, `${name} must not read the ledger`);
+});
+
+test('FAST PATH: one resolve step; the ledger resolver only for target_source=ledger, the reviewed resolver otherwise', () => {
+  const step = stepBlock('gate', 'Resolve the approved candidate');
+  assert.match(step, /id: candidate/);
+  assert.match(step, /WSF_TARGET_SOURCE: \$\{\{ inputs\.target_source \|\| 'pin' \}\}/);
+  assert.match(step, /WSF_INPUT_MODE: \$\{\{ inputs\.mode \}\}/);
+  assert.match(step, /GITHUB_TOKEN: \$\{\{ github\.token \}\}/);
+  assert.match(jobs.gate, /fastpath: \$\{\{ steps\.candidate\.outputs\.fastpath \}\}/);
+});
+
+test('FAST PATH: the inventory baseline flag comes only from the gate output, through env, into the pre-deploy read', () => {
+  const pre = stepBlock('deploy', 'Read-only preflight before any change');
+  assert.match(pre, /env:\n\s+(?:#.*\n\s+)*WSF_FASTPATH: \$\{\{ needs\.gate\.outputs\.fastpath \}\}/);
+  assert.equal((code.match(/needs\.gate\.outputs\.fastpath/g) ?? []).length, 1, 'no other step reads the flag');
+  assert.equal(/\$\{\{[^}]*fastpath[^}]*\}\}[^\n]*node /.test(code), false, 'never interpolated into a shell line');
+});
+
 console.log(`\nworkflow-contract: ${passed} passed`);

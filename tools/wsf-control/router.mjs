@@ -32,7 +32,7 @@ import { RULES } from './rules.mjs';
 import { neededTransitions, workerWatch } from './derive.mjs';
 
 /** The rules the Step-6 writer derives or records by itself. Everything else still needs a recorded decision. */
-export const ROUTER_RULES = Object.freeze(['R-INTEGRATE', 'R-ROUTE-REVIEW', 'R-FINDING-HANDBACK', 'R-WAKE', 'R-WAKE-DELIVERED', 'R-WAKE-RETRY', 'R-WAKE-TIMEOUT', 'A-ACK', 'A-DELIVER', 'A-PASS', 'A-FINDING', 'A-WAKE-ACK']);
+export const ROUTER_RULES = Object.freeze(['R-FASTPATH', 'R-INTEGRATE', 'R-ROUTE-REVIEW', 'R-FINDING-HANDBACK', 'R-WAKE', 'R-WAKE-DELIVERED', 'R-WAKE-RETRY', 'R-WAKE-TIMEOUT', 'A-ACK', 'A-DELIVER', 'A-PASS', 'A-FINDING', 'A-WAKE-ACK']);
 /** Minutes without an ACK before the one retry, and again before the timeout (memo §6.2). */
 export const WAKE_ACK_MINUTES = 15;
 

@@ -42,7 +42,9 @@ import { RULES } from './rules.mjs';
 import { SHADOW_PLACEHOLDER, decisionIntake, derivedFacts, shadowSurfaceEvent } from './shadow.mjs';
 import { STATE_REF, checkoutState, commitState, predecessorRef, pushFastForward, readStateFile, redact, tokenGitEnv } from './gitstate.mjs';
 import { appendAll } from './append-all.mjs';
-import { mergeReads, postWakes, prReads, routerAppend, workerComments } from './router-run.mjs';
+import { fastpathReads, mergeReads, postWakes, prReads, routerAppend, workerComments } from './router-run.mjs';
+import { STAGING_URL, STAGING_WORKFLOW, freshnessFacts, targetDecision } from './fastpath.mjs';
+import { freshness } from './freshness-view.mjs';
 
 export const MAX_ATTEMPTS = 3;
 /** The contracts whose pinned version must equal the running writer (memo §4.4). */
@@ -161,7 +163,7 @@ export function repinLine(state, eventsText, controlInboxComments, botLogin, run
  * One run. Everything with a side effect is injected: `gh` (GitHub), `remote` + `gitEnv` (the state ref),
  * `author` (the App bot identity), `runningSha`, `sameTree`. Returns a closed report.
  */
-export async function runShadow({ gh, remote, gitEnv = {}, author, runningSha, sameTree, bootstrapInput, workdir, controlInboxComments, ref = STATE_REF, botLogin, now = Date.now(), readInbox = async () => [], route = true }) {
+export async function runShadow({ gh, remote, gitEnv = {}, author, runningSha, sameTree, bootstrapInput, workdir, controlInboxComments, ref = STATE_REF, botLogin, now = Date.now(), readInbox = async () => [], route = true, stagingHealth = null }) {
   const report = { outcome: null, attempts: 0, bootstrapped: false, appended: [], refused: [], intakeRefused: [], surface: null, head: null, exception: null, repinned: null, wakesPosted: [], awaiting: [], exceptions: [], deferred: null };
   let repinUsed = false;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
@@ -256,9 +258,29 @@ export async function runShadow({ gh, remote, gitEnv = {}, author, runningSha, s
     report.intakeRefused = [...report.intakeRefused, ...rr.intakeRefused];
     report.awaiting = rr.awaiting.map((a) => `${a.packet} eligible=${a.awaiting.join(',') || 'none'} (${a.why})`);
     report.exceptions = rr.exceptions;
-    const allAppended = [...r0.appended, ...r1.report.appended, ...res.report.appended, ...rr.appended];
-    let nextText = rr.eventsText; state = rr.state;
-    report.refused = [...res.report.refused, ...rr.refused];
+    // Step 7 (STAGING-FRESHNESS-FASTPATH): the staging target, read on the state AFTER this run's integrations, so a
+    // merge integrated now is targeted now. It records a target only; it dispatches nothing.
+    let fp = { eventsText: rr.eventsText, state: rr.state, report: { appended: [], refused: [] } };
+    if (route && rr.state.schemaVersion === 2) {
+      // A failed read never stops routing: the fast path is reported NONE and the run carries on.
+      const why = (err) => (err?.status ? `HTTP ${err.status}` : err?.name ?? 'error');
+      let d;
+      let reads = null;
+      try { reads = await fastpathReads(gh, rr.state, rr.eventsText, runningSha); d = targetDecision(rr.state, reads); } catch (err) {
+        d = { report: `NONE reason=fast-path reads failed (${why(err)}); nothing targeted` };
+      }
+      if (d.line) fp = appendAll(rr.eventsText, [{ event: d.line, label: `pr-${d.line.source.id}` }]);
+      report.stagingTarget = d.line ? `SET target=${d.line.appSha} packet=${d.line.packet} pin=${d.line.pinSha}` : d.report;
+      // The readback: what staging serves now, against the newest candidate. A report only; nothing is stored.
+      try {
+        const health = stagingHealth ? await stagingHealth() : null;
+        const facts = freshnessFacts(fp.state, reads, { health, runs: await gh.workflowRuns(STAGING_WORKFLOW, 10) });
+        report.freshness = freshness(fp.state, facts).lines.filter((l) => !l.startsWith('JOURNEY_VERIFICATION'));
+      } catch (err) { report.freshness = [`STAGING_FRESHNESS=UNKNOWN reason=readback failed (${why(err)})`]; }
+    }
+    const allAppended = [...r0.appended, ...r1.report.appended, ...res.report.appended, ...rr.appended, ...fp.report.appended];
+    let nextText = fp.eventsText; state = fp.state;
+    report.refused = [...res.report.refused, ...rr.refused, ...fp.report.refused];
     const changed = nextText !== readStateFile(dir, 'events.jsonl');
     if (changed) {
       const files = { 'events.jsonl': nextText, 'state.json': serialize(state), 'CURRENT.md': `${renderCurrent(state)}\n` };
@@ -320,6 +342,8 @@ export function formatReport(r) {
   for (const x of r.wakesPosted ?? []) L.push(`WAKE_POSTED ${x}`);
   for (const x of r.awaiting ?? []) L.push(`AWAITING_REVIEWER ${x}`);
   for (const x of r.integrateUnverified ?? []) L.push(`INTEGRATE_UNVERIFIED ${x}`);
+  if (r.stagingTarget) L.push(`STAGING_TARGET ${r.stagingTarget}`);
+  for (const x of r.freshness ?? []) L.push(x);
   for (const x of r.exceptions ?? []) L.push(`CONTROL_EXCEPTION ${x}`);
   if (r.deferred) L.push(`DEFERRED ${r.deferred}`);
   if (r.head) L.push(`LEDGER_HEAD=${r.head}`);
@@ -378,6 +402,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
     gh, remote: `https://github.com/${repo}.git`, gitEnv: tokenGitEnv(token), author, runningSha, sameTree,
     bootstrapInput: input, workdir: fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-control-')), controlInboxComments: await gh.recentComments(inbox, 100), botLogin,
     readInbox: (issue) => gh.recentComments(issue, 100),
+    // The public hosted marker, read with no token and a short timeout: the served half of the freshness readback.
+    stagingHealth: async () => { const res = await fetch(`${STAGING_URL}/health`, { redirect: 'follow', signal: AbortSignal.timeout(10000) }); return res.ok ? res.text() : null; },
   });
   console.log(formatReport(report));
   console.log(`WRITER=${botLogin} RUNNING_SHA=${runningSha}`);

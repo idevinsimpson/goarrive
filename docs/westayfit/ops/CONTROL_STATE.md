@@ -42,6 +42,7 @@ Free text is limited to three fields: `label`, and a blocker's `condition` and `
 | `review-pass` | a comment (the reviewer's own PASS) |
 | `integrate` | a pull_request or commit (the merge); it also carries `acceptance`, the comment id that accepted the packet |
 | `begin-proof`, `proof-pass`, `stage`, `set-staging` | a workflow_run or a comment |
+| `set-target` (v2) | a pull_request (the integrated packet's merged PR, rule `R-FASTPATH`) or a comment (a decision) |
 | `proof-fail` | a comment only: the focused finding that turns a failed run into work |
 | `reconcile-head` | a pull_request or commit |
 | `record-evidence` | a commit, pull_request or comment |
@@ -252,6 +253,7 @@ Every view refuses to run on a state that does not check. None of them makes a j
 | `bootstrap` | `repository`, `asOf`, `surfaces`, `workers`, `queue`, `packets`, [`canonical`, `staging`, `criticalPath`] |
 | `set-canonical` | `developmentBranch`, `developmentSha`, `operationalMain` |
 | `set-staging` | `servedSha`, `runId`, `runNumber`, `rollbackSha`, [`pinPr`] |
+| `set-target` | `packet`, `appSha`, `pinSha` |
 | `set-surfaces` | `surfaces`: `{controlInbox: {pr}, current: {pr, commentId}}` |
 | `register-worker` | `worker`, `inbox` |
 | `queue` | `packet`, `owner`, `completion`, [`kind`, `subjectPaths`, `label`] |
@@ -327,6 +329,7 @@ The rules are listed once, in `tools/wsf-control/rules.mjs`, with the event type
 | `finding.pending` and `apply-finding` | R-PREEMPT (memo §8). A valid finding on delivered work whose owner already holds another ball is recorded as pending; the ball moves (`apply-finding`) once the owner is free. `program-view` names the one deterministic step by the newer packet's phase: an unACKed release is retracted; ACKED or CHANGES_REQUESTED work is blocked on `ALPHA≥DELIVERED-SUCCESSOR`, its branch untouched; otherwise the finding applies at once. |
 | blocker `until: DELIVERED-SUCCESSOR` | Clears only when the dependency has delivered again after the block (the stored `since` count) and its owner no longer holds it. It never waits on a reference packet. |
 | `set-shadow-surface`, `surfaces.shadow` | The writer's own shadow CURRENT comment on the control surface. It is never the human CURRENT comment. |
+| `set-target`, `stagingTarget` | The Step-7 fast-path staging target (memo §9.2): an INTEGRATED work packet's own merge, recorded with the full-path pin (`approved-candidate.json` at the running main) it was checked against. The writer derives it (`R-FASTPATH`) in the run that integrates the packet, only for the NEWEST preview-eligible merge on the canonical development branch (it changes `apps/westayfit/**`), only while that pin is the recorded served deploy (`set-staging`), and only when every path changed since the pin is member-visible source outside every protected path. Otherwise it reports `STAGING_TARGET FULL_PATH_REQUIRED` or `NONE` with the reason and records nothing. A newer eligible merge replaces the target; the same target is never recorded twice. It deploys nothing: the staging workflow's `target_source=ledger` mode re-verifies it at the gate before anything is built. |
 
 ### Step 5 is shadow reconcile only
 

@@ -14,6 +14,7 @@
 import { appendAll } from './append-all.mjs';
 import { balls, integrateCandidates, integrateLines, progressionLine, wakeLines, wakeTimerLines, wakeExceptions, wakesToPost, awaitingReviewers, line } from './router.mjs';
 import { workerBlock, workerReport, WORKER_FENCE } from './worker-intake.mjs';
+import { FUNCTIONS_TREE, integrations, previewEligible } from './fastpath.mjs';
 
 /** Comment ids the ledger already rests on (as sources): a re-read of one of them is a no-op. */
 export const recordedComments = (eventsText) => new Set(eventsText.trimEnd().split('\n').filter(Boolean).map((l) => JSON.parse(l).source).filter((s) => s.kind === 'comment').map((s) => s.id));
@@ -49,6 +50,43 @@ export async function mergeReads(gh, state) {
     out[id] = { merged: pr.merged === true, mergeSha: pr.mergeSha ?? null, headSha: pr.headSha, contains };
   }
   return out;
+}
+
+/** The full-path pin's path; the writer reads it at the commit it runs from, never from a candidate. */
+export const PIN_FILE = '.github/wsf-staging/approved-candidate.json';
+/** How many of the newest integrations the writer inspects for the fast-path candidate. */
+export const CANDIDATE_WINDOW = 10;
+
+/**
+ * The writer's own reads for the Step-7 fast path (fastpath.mjs targetDecision): the pin at `runningSha`, the newest
+ * integrated merge on the canonical development branch and whether it is preview-eligible, then its lineage and diff
+ * against the pin. The newest development-branch merge decides: when its eligibility cannot be read, nothing older is
+ * tried (an older candidate is never staged on purpose).
+ */
+export async function fastpathReads(gh, state, eventsText, runningSha) {
+  const reads = { pin: null, candidate: null, descends: null, paths: null, functionsTree: null, unknown: null };
+  const text = runningSha ? await gh.fileText(PIN_FILE, runningSha) : null;
+  let pin = null;
+  try { pin = text ? JSON.parse(text) : null; } catch { pin = null; }
+  if (!pin || pin.project !== 'westayfit-staging' || !/^[0-9a-f]{40}$/.test(String(pin.approvedAppSha))) return reads;
+  reads.pin = { sha: pin.approvedAppSha };
+  const dev = state.canonical?.developmentBranch;
+  if (!dev) { reads.unknown = 'the ledger records no canonical development branch'; return reads; }
+  for (const c of integrations(state, eventsText).slice(0, CANDIDATE_WINDOW)) {
+    if (c.mergeSha === reads.pin.sha) break; // nothing newer than the pin
+    const pr = await gh.pull(c.pr);
+    if (!pr) { reads.unknown = `PR #${c.pr} (${c.packet}) could not be read`; return reads; }
+    if (pr.baseRef !== dev) continue; // an operational merge: not a product candidate
+    const own = await gh.changedPaths(`${c.mergeSha}^1`, c.mergeSha);
+    if (own === null) { reads.unknown = `whether ${c.packet}'s merge ${c.mergeSha.slice(0, 8)} is member-visible could not be read`; return reads; }
+    if (!previewEligible(own)) continue; // docs, evidence or R&D: never a staging lag
+    reads.candidate = c;
+    reads.descends = await gh.descends(reads.pin.sha, c.mergeSha);
+    reads.paths = await gh.changedPaths(reads.pin.sha, c.mergeSha);
+    reads.functionsTree = { pin: await gh.treeSha(reads.pin.sha, FUNCTIONS_TREE), candidate: await gh.treeSha(c.mergeSha, FUNCTIONS_TREE) };
+    return reads;
+  }
+  return reads;
 }
 
 /**
