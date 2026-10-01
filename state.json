@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "60e0ee15517801c7e7f59e3cd37748e8a682826e0579505a764b6ad7030bfc2f",
-  "eventCount": 52,
+  "ledgerHead": "6026dfd398c34fa16d7f6dfdcaf73af2aa7f634d4aeddc45469eb7486e073307",
+  "eventCount": 53,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -489,8 +489,10 @@
       "packet": "STAGING-FRESHNESS-FASTPATH",
       "worker": "W4",
       "reason": "review",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        5939829834
+      ],
       "ack": null
     }
   }
