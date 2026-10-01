@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "cd6761696c59ee2535b57b27f77f68e4492c268711d739165e04c0b6c8091244",
-  "eventCount": 55,
+  "ledgerHead": "83db7e1f3dc26f25175d483cf383aa9484a7346c9637591db8b7d028fff05e28",
+  "eventCount": 56,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -267,7 +267,7 @@
       },
       "label": "Step 7: automate preview-eligible accepted/integrated to deterministic candidate, pin, existing staging dispatch, and FRESH readback",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "ACCEPTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -301,10 +301,13 @@
           "kind": "comment",
           "id": 5938517396
         },
-        "accepted": null,
+        "accepted": {
+          "kind": "comment",
+          "id": 5940546500
+        },
         "lastTransition": {
           "kind": "comment",
-          "id": 5939888098
+          "id": 5940546500
         }
       },
       "review": {
