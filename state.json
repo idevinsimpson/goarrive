@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "dc94cbcf41d48f13e133841a163a817dc1726dda5cdcee50a30816de464ee7cc",
-  "eventCount": 18,
+  "ledgerHead": "0bab19d9590a51691c438f43b6b09c923bb5ba06f7673bd63ccc7f2249db2832",
+  "eventCount": 20,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -48,9 +48,7 @@
     }
   },
   "queue": {
-    "W3": [
-      "AUTONOMY-ROUTER-1C-INTEGRATE"
-    ],
+    "W3": [],
     "W4": [],
     "W5": [],
     "W7": [],
@@ -131,10 +129,10 @@
       },
       "label": "Step 6 correction: derive integrate from ACCEPTED plus merged PR with same-cycle or successor reconcile and idempotency proof",
       "origin": "ledger",
-      "phase": "QUEUED",
+      "phase": "RELEASED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
-      "inbox": null,
+      "inbox": 396,
       "pr": null,
       "reviewers": [],
       "artifact": {
@@ -145,7 +143,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": null,
+      "releasedQueueIndex": 0,
       "reviewedBy": [],
       "subjectPaths": [
         "tools/wsf-control/shadow-run.mjs",
@@ -163,11 +161,14 @@
           "kind": "comment",
           "id": 5928249940
         },
-        "released": null,
+        "released": {
+          "kind": "comment",
+          "id": 5929164484
+        },
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5928249940
+          "id": 5929164484
         }
       },
       "review": {
@@ -346,6 +347,14 @@
         "id": 5924987835
       },
       "superseded": true
+    },
+    "449cd143d9ec1c68030f169ef319a6a93750bf218b7da51974b2e8791102bb98": {
+      "packet": "AUTONOMY-ROUTER-1C-INTEGRATE",
+      "worker": "W3",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   }
 }
