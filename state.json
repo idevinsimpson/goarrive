@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "c7e9ed23ad7f1a0ed31b0a241ddc0a1c922928c31c7130ffc611b46897a5feca",
-  "eventCount": 16,
+  "ledgerHead": "02573bee01255a7b56837822dd486d9caf350b009200b07dde5ddc3bba68889d",
+  "eventCount": 17,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -64,7 +64,7 @@
       },
       "label": "Serial step 6: state-derived routing, wakes, and real-event proof",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "ACCEPTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -98,10 +98,13 @@
           "kind": "comment",
           "id": 5882824399
         },
-        "accepted": null,
+        "accepted": {
+          "kind": "comment",
+          "id": 5926409781
+        },
         "lastTransition": {
           "kind": "comment",
-          "id": 5925043355
+          "id": 5926409781
         }
       },
       "review": {
