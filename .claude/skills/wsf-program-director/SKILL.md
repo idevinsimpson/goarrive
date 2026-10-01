@@ -115,6 +115,7 @@ The worker answers in **its own inbox**, with exactly one `wsf-control-worker` b
 - The same ball re-derived is the same `wakeId`, so a wake is never posted twice. A new ball is a new wake.
 - Integration is derived: an ACCEPTED packet whose PR merged is recorded `integrate` (R-INTEGRATE) by the writer, in the run that records the acceptance or the first run after the merge. A merge it cannot verify is reported `INTEGRATE_UNVERIFIED`.
 - Step 7 (staging freshness): every run reports `STAGING_TARGET SET|HELD|FULL_PATH_REQUIRED|NONE …` and `STAGING_FRESHNESS=…`. `SET` records the fast-path target (`set-target`, R-FASTPATH); it dispatches nothing. `BEHIND` with `ACTIONABLE=on` means the newest preview-eligible merge is not served and no deploy is running.
+- Unattended staging dispatch is the owner's standing switch: `{"type":"set-fastpath","enabled":true}` (or `false` to revoke) as a decision in the control inbox. While on, the reconcile workflow's `fastpath-dispatch` job sends each new verified target once and never re-sends a failed one; read its `FASTPATH_DISPATCH=` line in the workflow run.
 
 ## Views
 

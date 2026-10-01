@@ -5,7 +5,7 @@ import { checkTexts } from '../check.mjs';
 import { serialize } from '../reduce.mjs';
 import { renderCurrent } from '../render-current.mjs';
 import fs from 'node:fs';
-import { DEPLOY_TITLE, MEMBER_VISIBLE, PROTECTED_PREFIXES, STAGING_URL, STAGING_WORKFLOW, fastPathReasons, freshnessFacts, integrations, previewEligible, protectedPath, servedOf, targetDecision } from '../fastpath.mjs';
+import { DEPLOY_TITLE, MEMBER_VISIBLE, isDeployTitle, targetTitle, PROTECTED_PREFIXES, STAGING_URL, STAGING_WORKFLOW, fastPathReasons, freshnessFacts, integrations, previewEligible, protectedPath, servedOf, targetDecision } from '../fastpath.mjs';
 import { PROTECTED_PATHS } from '../../../.github/wsf-staging/pin-candidate.mjs';
 import { A, B, C, D, E, F, GENESIS, SOURCE_ONLY, atest, boot2, done, refused, test, w2 } from './helpers.mjs';
 import { fastpathReads } from '../router-run.mjs';
@@ -120,7 +120,10 @@ test('coalescing: a newer eligible merge replaces the held target; the older one
 test('the writer\'s staging constants are the workflow\'s: its STAGING_URL, and the run title it gives a deploy', () => {
   const yml = fs.readFileSync(new URL('../../../.github/workflows/wsf-staging-deploy.yml', import.meta.url), 'utf8');
   assert.ok(yml.includes(`  STAGING_URL: ${STAGING_URL}\n`), 'STAGING_URL differs from the workflow env');
-  assert.ok(yml.includes(`run-name: "WSF staging · mode=\${{ inputs.mode || 'deploy' }}"\n`), 'the run-name changed');
+  assert.ok(yml.includes(`run-name: "WSF staging · mode=\${{ inputs.mode || 'deploy' }}\${{ inputs.target_source == 'ledger' && format(' · target={0}', inputs.app_sha) || '' }}"\n`), 'the run-name changed');
+  assert.equal(targetTitle(E), `WSF staging · mode=deploy · target=${E}`);
+  assert.equal(isDeployTitle(DEPLOY_TITLE), true); assert.equal(isDeployTitle(targetTitle(E)), true);
+  assert.equal(isDeployTitle('WSF staging · mode=journey-activation'), false); assert.equal(isDeployTitle('WSF staging deploy'), false);
   assert.equal(DEPLOY_TITLE, 'WSF staging · mode=deploy');
   assert.equal(STAGING_WORKFLOW, 'wsf-staging-deploy.yml');
 });
@@ -135,6 +138,38 @@ test('servedOf and freshnessFacts: the verifier\'s 7-character rule; the candida
   const g = freshnessFacts(s, { pin: { sha: C }, candidate: { mergeSha: E } }, { health: `x ${C.slice(0, 7)}`, runs: [
     { id: 3, status: 'queued', title: DEPLOY_TITLE }, { id: 2, status: 'completed', conclusion: 'success', title: DEPLOY_TITLE }] });
   assert.deepEqual([g.candidateSha, g.servedSha, g.activeRun, g.lastRun, g.runs], [E, C, { id: 3, status: 'queued' }, { id: 2, conclusion: 'success' }, 'classified']);
+});
+
+test('set-fastpath: the owner\'s standing switch (memo §9.5), off unless recorded; on and off are recorded once each; CURRENT says so', () => {
+  const r = integrated();
+  assert.equal(r.state.fastpath, undefined, 'absent means off');
+  assert.equal(renderCurrent(r.state).includes('Unattended fast-path dispatch'), false, 'a ledger without the switch renders as before');
+  refused(() => add(r, w2('set-fastpath', { enabled: false })), /already disabled/);
+  const on = add(r, w2('set-fastpath', { enabled: true }));
+  assert.deepEqual(on.state.fastpath, { enabled: true });
+  assert.ok(renderCurrent(on.state).includes('- Unattended fast-path dispatch: ENABLED (set-fastpath)'));
+  refused(() => add(on, w2('set-fastpath', { enabled: true })), /already enabled/);
+  const off = add(on, w2('set-fastpath', { enabled: false }));
+  assert.deepEqual(off.state.fastpath, { enabled: false });
+  assert.ok(renderCurrent(off.state).includes('every candidate takes the reviewed pin path'));
+  assert.ok(checkTexts(off.eventsText, serialize(off.state)).ok);
+  refused(() => add(r, w2('set-fastpath', { enabled: 'yes' })), /enabled/);
+  refused(() => add(r, w2('set-fastpath', { enabled: true }, { rule: 'R-FASTPATH', cls: 'derived' })), /does not derive a set-fastpath|not.*R-FASTPATH|derive/);
+});
+
+test('the reconcile workflow\'s dispatch job: after the writer, main only, contents read + actions write, no App key, no environment; the writer job is unchanged', () => {
+  const y = fs.readFileSync(new URL('../../../.github/workflows/wsf-control-reconcile.yml', import.meta.url), 'utf8');
+  const writer = y.slice(y.indexOf('\n  reconcile:\n'), y.indexOf('\n  fastpath-dispatch:\n'));
+  const job = y.slice(y.indexOf('\n  fastpath-dispatch:\n'));
+  assert.match(writer, /\n    permissions:\n      contents: read\n    steps:/, 'the writer job keeps a read-only workflow token');
+  assert.match(job, /\n    needs: reconcile\n    if: \$\{\{ github\.ref == 'refs\/heads\/main' && needs\.reconcile\.result == 'success' \}\}\n/);
+  assert.match(job, /\n    permissions:\n      contents: read\n      actions: write\n    steps:/);
+  const code = job.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+  for (const bad of ['secrets.', 'environment:', 'id-token', 'WSF_CONTROL_WRITER', 'pull_request_target']) assert.equal(code.includes(bad), false, `the dispatch job must not carry ${bad}`);
+  assert.equal((code.match(/persist-credentials: false/g) ?? []).length, 2);
+  assert.match(code, /node \.github\/wsf-staging\/fastpath-dispatch\.mjs \.github\/wsf-staging\/approved-candidate\.json control-ledger/);
+  assert.match(code, /ref: wsf-control-state-2\n/);
+  assert.match(y, /^permissions:\n  contents: read$/m, 'the workflow default stays read-only');
 });
 
 const asyncTests = [];

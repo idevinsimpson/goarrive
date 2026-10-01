@@ -529,6 +529,23 @@ atest('Step 7 fails closed: an operational merge is never a candidate; a docs-on
     assert.match((await go()).stagingTarget, /^NONE reason=the full-path pin/); }
 });
 
+atest('Step 7 dispatch switch: the owner records set-fastpath in the control inbox, as a MANUAL decision; an edited or non-owner one is refused', async () => {
+  const remote = bareRemote(); const gh = fakeGh();
+  await run(remote, gh);
+  const on = gh.post(365, decide({ type: 'set-fastpath', enabled: true }));
+  const r = await run(remote, gh);
+  assert.ok(r.appended.includes(`set-fastpath:MANUAL:comment-${on.id}`));
+  assert.deepEqual(state(remote).fastpath, { enabled: true });
+  gh.post(365, decide({ type: 'set-fastpath', enabled: false }), { author: 'external-user', association: 'NONE' });
+  gh.post(365, decide({ type: 'set-fastpath', enabled: false }), { updatedAt: '2026-09-29T09:00:00Z' });
+  const r2 = await run(remote, gh);
+  assert.equal(r2.appended.length, 0); assert.equal(r2.intakeRefused.length >= 2, true);
+  assert.deepEqual(state(remote).fastpath, { enabled: true }, 'only the owner\'s unedited decision moves the switch');
+  const off = gh.post(365, decide({ type: 'set-fastpath', enabled: false }));
+  assert.ok((await run(remote, gh)).appended.includes(`set-fastpath:MANUAL:comment-${off.id}`));
+  assert.deepEqual(state(remote).fastpath, { enabled: false });
+});
+
 atest('the writer re-pin: an unpinned writer refuses everything but the owner\'s set-contracts that pins exactly the running writer; then it runs', async () => {
   const { remote, gh } = await delivered();
   const NEW = sha('8');

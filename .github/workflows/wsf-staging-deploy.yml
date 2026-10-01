@@ -37,8 +37,10 @@
 # lifecycle code never runs alongside a credential.
 name: WSF staging deploy
 # The run title names the mode, so a reader of the run list (the control writer's staging freshness readback,
-# tools/wsf-control/fastpath.mjs DEPLOY_TITLE) can tell a deploy from a proof-only run without opening it.
-run-name: "WSF staging · mode=${{ inputs.mode || 'deploy' }}"
+# tools/wsf-control/fastpath.mjs DEPLOY_TITLE) can tell a deploy from a proof-only run without opening it. A
+# ledger-mode run also names its target, so the unattended dispatcher (fastpath-dispatch.mjs) never sends one target
+# twice, and never again after it failed (memo §9.4).
+run-name: "WSF staging · mode=${{ inputs.mode || 'deploy' }}${{ inputs.target_source == 'ledger' && format(' · target={0}', inputs.app_sha) || '' }}"
 
 on:
   workflow_dispatch:
