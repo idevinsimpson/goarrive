@@ -18,7 +18,7 @@ import { checkTexts } from '../check.mjs';
 import { renderCurrent } from '../render-current.mjs';
 import { programView } from '../program-view.mjs';
 import { workerView } from '../worker-view.mjs';
-import { balls, progressionLine, wakeIdOf } from '../router.mjs';
+import { balls, integrateLines, progressionLine, wakeIdOf } from '../router.mjs';
 import { postWakes, wakeMarker } from '../router-run.mjs';
 import { workerBlock } from '../worker-intake.mjs';
 import { INTAKE_TYPES } from '../shadow.mjs';
@@ -349,6 +349,84 @@ atest('delivery → QA without a manual handoff: the Director re-declares regist
   const s2 = state(remote);
   assert.deepEqual(s2.packets.ALPHA.reviewers, ['W7'], 'W4 now declares only security; W7 holds ops-source');
   assert.equal(appCommentsIn(gh, 434).length, 1, 'one QA wake'); assert.equal(appCommentsIn(gh, 394).length, 0, 'W4 is never woken');
+});
+
+/** ALPHA delivered at A on PR #12 and passed by W7: ACCEPTED once the Director's accept decision is read. */
+async function passed() {
+  const { remote, gh, reviewWake } = await delivered();
+  gh.post(434, block({ type: 'pass', packet: 'ALPHA', wakeId: reviewWake, subjectSha: A }));
+  await run(remote, gh);
+  assert.equal(state(remote).packets.ALPHA.phase, 'UNDER_REVIEW');
+  assert.deepEqual(state(remote).packets.ALPHA.reviewedBy, ['W7']);
+  return { remote, gh };
+}
+const decide = (o) => `\`\`\`wsf-control-decision\n${JSON.stringify(o)}\n\`\`\``;
+const MERGE = sha('5');
+
+atest('R-INTEGRATE, same cycle: an acceptance read after the PR already merged is integrated in that same run, at the merge, once', async () => {
+  const { remote, gh } = await passed();
+  gh.prs.set(12, { state: 'closed', merged: true, headSha: A, baseSha: B, mergeSha: MERGE });
+  gh.prs.set('descends', (base, head) => base === A && head === MERGE); // only "the merge descends from the accepted head"
+  const acc = gh.post(365, decide({ type: 'accept', packet: 'ALPHA', subjectSha: A }));
+  const r = await run(remote, gh);
+  assert.deepEqual(r.appended, [`accept:MANUAL:comment-${acc.id}`, 'integrate:R-INTEGRATE:pr-12']);
+  const s = state(remote);
+  assert.equal(s.packets.ALPHA.phase, 'INTEGRATED'); assert.equal(s.packets.ALPHA.artifact.mergeSha, MERGE);
+  const ln = JSON.parse(events(remote).trimEnd().split('\n').at(-1));
+  assert.deepEqual(ln.authority, { class: 'derived', rule: 'R-INTEGRATE', evidence: [{ kind: 'pull_request', id: 12 }, { kind: 'commit', id: MERGE }, { kind: 'comment', id: acc.id }] });
+  assert.deepEqual(ln.source, { kind: 'pull_request', id: 12, repo: REPO }); assert.equal(ln.acceptance, acc.id);
+  // Idempotent: every later run, on any trigger, re-derives nothing.
+  const before = events(remote);
+  for (let i = 0; i < 3; i += 1) { const again = await run(remote, gh); assert.equal(again.outcome, 'unchanged'); assert.deepEqual(again.appended, []); }
+  assert.equal(events(remote), before);
+  assert.equal(appCommentsIn(gh, 396).length + appCommentsIn(gh, 434).length, 2, 'integration posts no wake');
+});
+
+atest('R-INTEGRATE, successor run: accepted while the PR is open stays ACCEPTED (nothing reported); the first run after the merge integrates it, once', async () => {
+  const { remote, gh } = await passed();
+  gh.post(365, decide({ type: 'accept', packet: 'ALPHA', subjectSha: A }));
+  const r0 = await run(remote, gh);
+  assert.equal(state(remote).packets.ALPHA.phase, 'ACCEPTED');
+  assert.equal(r0.appended.some((x) => x.startsWith('integrate:')), false);
+  assert.deepEqual(r0.integrateUnverified, [], 'an open PR is not a problem, only not yet merged');
+  gh.prs.set(12, { state: 'closed', merged: true, headSha: A, baseSha: B, mergeSha: MERGE });
+  const r1 = await run(remote, gh);
+  assert.deepEqual(r1.appended, ['integrate:R-INTEGRATE:pr-12']);
+  assert.equal((await run(remote, gh)).outcome, 'unchanged');
+});
+
+atest('R-INTEGRATE fails closed: a merged head that is not the accepted head, a merge that does not contain it, an unreadable PR or compare, a merge with no commit: reported, never recorded', async () => {
+  const cases = [
+    [{ state: 'closed', merged: true, headSha: D, baseSha: B, mergeSha: MERGE }, null, /merged head [0-9a-f]{8} is not the accepted head/],
+    [{ state: 'closed', merged: true, headSha: A, baseSha: B, mergeSha: MERGE }, () => false, /does not contain the accepted head/],
+    [{ state: 'closed', merged: true, headSha: A, baseSha: B, mergeSha: MERGE }, () => null, /could not be checked against the accepted head/],
+    [undefined, null, /PR #12: could not be read/],
+  ];
+  for (const [pr, desc, re] of cases) {
+    const { remote, gh } = await passed();
+    gh.post(365, decide({ type: 'accept', packet: 'ALPHA', subjectSha: A }));
+    if (pr) gh.prs.set(12, pr); else gh.prs.delete(12);
+    if (desc) gh.prs.set('descends', desc);
+    const r = await run(remote, gh);
+    assert.equal(state(remote).packets.ALPHA.phase, 'ACCEPTED', String(re));
+    assert.equal(r.appended.some((x) => x.startsWith('integrate:')), false, String(re));
+    assert.match(r.integrateUnverified.join('\n'), re);
+    assert.ok(formatReport(r).split('\n').some((l) => l.startsWith('INTEGRATE_UNVERIFIED ALPHA PR #12: ') && re.test(l)), String(re));
+  }
+});
+
+test('integrateLines (pure): only ACCEPTED work packets with a comment acceptance; not merged → nothing; merged with no merge commit → reported', () => {
+  const p = (phase, over = {}) => ({ kind: 'work', phase, pr: 12, artifact: { subjectSha: A, prHeadSha: A, mergeSha: null }, authority: { accepted: { kind: 'comment', id: 900 } }, ...over });
+  const s = { repository: REPO, packets: { ALPHA: p('ACCEPTED'), BETA: p('UNDER_REVIEW'), GAMMA: p('ACCEPTED', { pr: null }), DELTA: p('ACCEPTED', { kind: 'reference' }) } };
+  const ok = { merged: true, mergeSha: MERGE, headSha: A, contains: true };
+  const all = { ALPHA: ok, BETA: ok, GAMMA: ok, DELTA: ok };
+  assert.deepEqual(integrateLines(s, all).lines.map((l) => l.packet), ['ALPHA']);
+  assert.deepEqual(integrateLines(s, { ALPHA: { ...ok, merged: false } }), { lines: [], unverified: [] });
+  assert.deepEqual(integrateLines(s, {}), { lines: [], unverified: [] }, 'an unread packet is skipped, not guessed');
+  assert.match(integrateLines(s, { ALPHA: { ...ok, mergeSha: null } }).unverified[0].reason, /GitHub names no merge commit/);
+  const evid = { ...s, packets: { ALPHA: p('ACCEPTED', { artifact: { subjectSha: A, prHeadSha: D, mergeSha: null } }) } };
+  assert.equal(integrateLines(evid, { ALPHA: { ...ok, headSha: D } }).lines.length, 1, 'a recorded evidence head (record-evidence) is the head that must have merged');
+  assert.match(integrateLines(evid, { ALPHA: ok }).unverified[0].reason, /is not the accepted head/);
 });
 
 atest('the writer re-pin: an unpinned writer refuses everything but the owner\'s set-contracts that pins exactly the running writer; then it runs', async () => {

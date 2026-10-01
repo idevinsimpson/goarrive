@@ -17,6 +17,9 @@
  *                 its policy requires, in worker-id order; never its owner; one ball per worker.
  *                 Too few free reviewers: nothing is written and AWAITING_REVIEWER is reported.
  *  - R-FINDING-HANDBACK  a pending finding is applied once its owner holds no other ball.
+ *  - R-INTEGRATE  an ACCEPTED work packet whose PR GitHub merged is INTEGRATED at that merge, derived in the same run
+ *                 that records the acceptance (or in the first run after a later merge), once: the merged head must be
+ *                 the accepted head and the merge commit must contain it. Anything else is reported, never recorded.
  *  - R-WAKE-RETRY / R-WAKE-TIMEOUT  15 minutes after the wake comment with no ACK and the ball
  *                 still the worker's (not superseded): one re-post; 15 minutes after that: a timeout,
  *                 reported as CONTROL_EXCEPTION wake-undelivered until the ball moves on. The ledger
@@ -29,7 +32,7 @@ import { RULES } from './rules.mjs';
 import { neededTransitions, workerWatch } from './derive.mjs';
 
 /** The rules the Step-6 writer derives or records by itself. Everything else still needs a recorded decision. */
-export const ROUTER_RULES = Object.freeze(['R-ROUTE-REVIEW', 'R-FINDING-HANDBACK', 'R-WAKE', 'R-WAKE-DELIVERED', 'R-WAKE-RETRY', 'R-WAKE-TIMEOUT', 'A-ACK', 'A-DELIVER', 'A-PASS', 'A-FINDING', 'A-WAKE-ACK']);
+export const ROUTER_RULES = Object.freeze(['R-INTEGRATE', 'R-ROUTE-REVIEW', 'R-FINDING-HANDBACK', 'R-WAKE', 'R-WAKE-DELIVERED', 'R-WAKE-RETRY', 'R-WAKE-TIMEOUT', 'A-ACK', 'A-DELIVER', 'A-PASS', 'A-FINDING', 'A-WAKE-ACK']);
 /** Minutes without an ACK before the one retry, and again before the timeout (memo §6.2). */
 export const WAKE_ACK_MINUTES = 15;
 
@@ -134,6 +137,37 @@ export function progressionLine(state) {
     return { line: line(state.repository, 'apply-finding', { packet: t.packet }, src, 'R-FINDING-HANDBACK', [src]), label: `handback-${t.packet}` };
   }
   return null;
+}
+
+/** ACCEPTED work packets with a PR: the ones whose merge the writer reads to derive R-INTEGRATE, in packet order. */
+export const integrateCandidates = (state) => Object.keys(state.packets).sort()
+  .filter((id) => { const p = state.packets[id]; return p.kind === 'work' && p.phase === 'ACCEPTED' && p.pr !== null && p.authority.accepted?.kind === 'comment'; });
+
+/**
+ * R-INTEGRATE on this state. `merges` is the writer's own read per candidate packet:
+ * { merged, mergeSha, headSha, contains } (contains: the merge commit descends from the accepted head; null if unread),
+ * or null when the PR could not be read. Returns { lines, unverified: [{ packet, reason }] }. A PR not merged yet is
+ * neither: the packet simply stays ACCEPTED until a later run reads the merge.
+ */
+export function integrateLines(state, merges) {
+  const lines = [];
+  const unverified = [];
+  for (const id of integrateCandidates(state)) {
+    if (!Object.hasOwn(merges, id)) continue;
+    const p = state.packets[id];
+    const m = merges[id];
+    const no = (reason) => unverified.push({ packet: id, reason: `PR #${p.pr}: ${reason}` });
+    if (!m) { no('could not be read'); continue; }
+    if (!m.merged) continue;
+    const head = p.artifact.prHeadSha ?? p.artifact.subjectSha;
+    if (!RE.sha.test(String(m.mergeSha))) { no('merged, but GitHub names no merge commit'); continue; }
+    if (m.headSha !== head) { no(`merged head ${String(m.headSha).slice(0, 8)} is not the accepted head ${String(head).slice(0, 8)}`); continue; }
+    if (m.contains !== true) { no(`merge ${m.mergeSha.slice(0, 8)} ${m.contains === false ? 'does not contain' : 'could not be checked against'} the accepted head ${head.slice(0, 8)}`); continue; }
+    const pr = { kind: 'pull_request', id: p.pr };
+    lines.push(line(state.repository, 'integrate', { packet: id, mergeSha: m.mergeSha, acceptance: p.authority.accepted.id }, pr, 'R-INTEGRATE',
+      [pr, { kind: 'commit', id: m.mergeSha }, { kind: 'comment', id: p.authority.accepted.id }]));
+  }
+  return { lines, unverified };
 }
 
 /** Packets waiting on a reviewer this run could not assign, for program-view and the report. */
