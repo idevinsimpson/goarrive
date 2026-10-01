@@ -109,6 +109,25 @@ test('a reviewer that declares classes must hold one the policy requires', () =>
   assert.equal(add(r0, w2('review', { packet: 'ALPHA', reviewers: ['W5'] })).state.packets.ALPHA.phase, 'UNDER_REVIEW');
 });
 
+test('a v2 register-worker re-declares a registered worker\'s classes at the same inbox; its queue and reviews are kept; a v1 one, an inbox move and a no-op are refused', () => {
+  const r0 = build(boot2({ workers: { W3: { inbox: 396 }, W7: { inbox: 400 } }, queue: { W3: [], W7: [] } }),
+    w2('queue', { packet: 'ALPHA', owner: 'W3', completion: WORK }), w2('queue', { packet: 'BETA', owner: 'W7', completion: WORK }),
+    w2('release', { packet: 'ALPHA', inbox: 396 }), w2('ack', { packet: 'ALPHA', worker: 'W3' }), w2('deliver', { packet: 'ALPHA', pr: 12, subjectSha: A }),
+    w2('review', { packet: 'ALPHA', reviewers: ['W7'] }));
+  const r1 = add(r0, w2('register-worker', { worker: 'W7', inbox: 400, classes: ['journey-qa'] }));
+  assert.deepEqual(r1.state.workers.W7, { inbox: 400, classes: ['journey-qa'] });
+  assert.deepEqual(r1.state.queue.W7, ['BETA'], 'the queue survives');
+  assert.deepEqual(r1.state.packets.ALPHA.reviewers, ['W7'], 'a review already assigned is kept; classes gate only the next assignment');
+  assert.deepEqual(invariants(r1.state), []);
+  assert.deepEqual(add(r1, w2('register-worker', { worker: 'W7', inbox: 400, classes: ['ops-source'] })).state.workers.W7.classes, ['ops-source'], 'a same-size different set is a change');
+  const r2 = add(r1, w2('register-worker', { worker: 'W7', inbox: 400 }));
+  assert.deepEqual(r2.state.workers.W7, { inbox: 400 }, 'undeclared again: eligible for any class');
+  refused(() => add(r1, w2('register-worker', { worker: 'W7', inbox: 434, classes: ['ops-source'] })), /keeps the inbox \(#434 refused\)/);
+  refused(() => add(r1, w2('register-worker', { worker: 'W7', inbox: 400, classes: ['journey-qa'] })), /already declares journey-qa/);
+  refused(() => add(r2, w2('register-worker', { worker: 'W7', inbox: 400 })), /already declares no classes/);
+  refused(() => add(build(boot()), { type: 'register-worker', actor: 'Fable', source: comment(5), worker: 'W3', inbox: 396 }), /already registered/);
+});
+
 // ---- R-PREEMPT and DELIVERED-SUCCESSOR (memo §8) -----------------------------------------------------
 /** ALPHA delivered and under W7's review; W3's BETA is released. */
 function alphaBeta() {

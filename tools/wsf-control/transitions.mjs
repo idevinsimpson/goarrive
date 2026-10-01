@@ -231,11 +231,23 @@ export function applyEvent(state, e) {
       s.staging = { servedSha: e.servedSha, runId: e.runId, runNumber: e.runNumber, rollbackSha: e.rollbackSha, pinPr: e.pinPr ?? null };
       break;
     case 'set-surfaces': s.surfaces = clone(e.surfaces); break;
-    case 'register-worker':
-      if (s.workers[e.worker]) illegal(`worker ${e.worker} is already registered`);
+    case 'register-worker': {
+      const was = s.workers[e.worker];
+      if (was) {
+        // Schema v2: a registered worker re-declares its review classes (memo §7) at the same inbox; its queue,
+        // packets and reviews are kept. Moving an inbox is transfer-owner's job, and a re-registration that
+        // changes nothing is refused rather than recorded.
+        if (s.schemaVersion !== 2) illegal(`worker ${e.worker} is already registered`);
+        if (e.inbox !== was.inbox) illegal(`register-worker: ${e.worker} is registered at #${was.inbox}; a re-registration keeps the inbox (#${e.inbox} refused)`);
+        const same = (a, b) => (a ?? []).length === (b ?? []).length && (a ?? []).every((c) => (b ?? []).includes(c));
+        if (same(was.classes, e.classes)) illegal(`register-worker: ${e.worker} already declares ${was.classes ? was.classes.join(', ') : 'no classes'}`);
+        s.workers[e.worker] = e.classes ? { inbox: e.inbox, classes: [...e.classes] } : { inbox: e.inbox };
+        break;
+      }
       s.workers[e.worker] = e.classes ? { inbox: e.inbox, classes: [...e.classes] } : { inbox: e.inbox };
       s.queue[e.worker] = [];
       break;
+    }
     case 'queue': {
       if (s.packets[e.packet]) illegal(`packet ${e.packet} already exists (${s.packets[e.packet].phase}); a released or finished packet cannot be queued again`);
       if (!s.workers[e.owner]) illegal(`worker ${e.owner} is not registered`);

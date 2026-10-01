@@ -316,6 +316,41 @@ atest('routing capacity and eligibility: no free eligible reviewer → AWAITING_
   assert.equal(r2.appended.filter((x) => x.startsWith('wake:')).length, 2);
 });
 
+atest('delivery → QA without a manual handoff: the Director re-declares registered workers\' classes once, and every later delivery routes to the QA reviewer', async () => {
+  const dec = (o) => `\`\`\`wsf-control-decision\n${JSON.stringify(o)}\n\`\`\``;
+  const live = () => { const inp = input(); inp.bootstrap.workers.W4 = { inbox: 394 }; return inp; }; // the live shape: nobody declares classes
+  // Without classes the default policy routes to the lowest free non-owner: W4, not QA.
+  { const remote = bareRemote(); const gh = fakeGh();
+    gh.prs.set(12, { state: 'open', headSha: A, baseSha: B });
+    await run(remote, gh, { bootstrapInput: live() });
+    gh.post(396, block({ type: 'deliver', packet: 'ALPHA', wakeId: wakesOf(state(remote), 'W3')[0].id, pr: 12, subjectSha: A }));
+    await run(remote, gh, { bootstrapInput: live() });
+    assert.deepEqual(state(remote).packets.ALPHA.reviewers, ['W4']); }
+  const remote = bareRemote(); const gh = fakeGh();
+  gh.prs.set(12, { state: 'open', headSha: A, baseSha: B });
+  await run(remote, gh, { bootstrapInput: live() });
+  gh.post(365, dec({ type: 'register-worker', worker: 'W4', inbox: 394, classes: ['security'] }));
+  gh.post(365, dec({ type: 'register-worker', worker: 'W7', inbox: 434, classes: ['journey-qa', 'ops-source'] }));
+  const r = await run(remote, gh, { bootstrapInput: live() });
+  assert.deepEqual(r.appended.filter((x) => x.startsWith('register-worker:')), ['register-worker:MANUAL:comment-' + gh.inbox(365).at(-2).id, 'register-worker:MANUAL:comment-' + gh.inbox(365).at(-1).id]);
+  const s = state(remote);
+  assert.deepEqual(s.workers.W7, { inbox: 434, classes: ['journey-qa', 'ops-source'] });
+  assert.equal(s.packets.ALPHA.phase, 'RELEASED', 'a re-registration moves no packet'); assert.deepEqual(s.queue.W7, []);
+  assert.equal(wakesOf(s, 'W3').length, 1, 'and posts no new wake');
+  // An inbox move and a no-op are refused, never recorded.
+  const before = events(remote);
+  gh.post(365, dec({ type: 'register-worker', worker: 'W7', inbox: 435, classes: ['ops-source'] }));
+  gh.post(365, dec({ type: 'register-worker', worker: 'W7', inbox: 434, classes: ['ops-source', 'journey-qa'] }));
+  const rr = await run(remote, gh, { bootstrapInput: live() });
+  assert.equal(events(remote), before);
+  assert.match(JSON.stringify(rr.refused), /keeps the inbox/); assert.match(JSON.stringify(rr.refused), /already declares journey-qa, ops-source/);
+  gh.post(396, block({ type: 'deliver', packet: 'ALPHA', wakeId: wakesOf(state(remote), 'W3')[0].id, pr: 12, subjectSha: A }));
+  await run(remote, gh, { bootstrapInput: live() });
+  const s2 = state(remote);
+  assert.deepEqual(s2.packets.ALPHA.reviewers, ['W7'], 'W4 now declares only security; W7 holds ops-source');
+  assert.equal(appCommentsIn(gh, 434).length, 1, 'one QA wake'); assert.equal(appCommentsIn(gh, 394).length, 0, 'W4 is never woken');
+});
+
 atest('the writer re-pin: an unpinned writer refuses everything but the owner\'s set-contracts that pins exactly the running writer; then it runs', async () => {
   const { remote, gh } = await delivered();
   const NEW = sha('8');
