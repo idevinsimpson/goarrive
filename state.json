@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "46fe52c07bb24775edc9429bd5057a0d13e0259fb7016cf20dc4a5a43b233c03",
-  "eventCount": 27,
+  "ledgerHead": "fcbbaa5f9fdc62745032a964953f29d384678920f70a032592c8db979db4a5b4",
+  "eventCount": 28,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -368,11 +368,14 @@
       "packet": "AUTONOMY-ROUTER-1C-INTEGRATE",
       "worker": "W4",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         5929384517
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 5929404005
+      }
     }
   }
 }
