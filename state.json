@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "fe9467a6407e07cba5e9854033713da84248c0f493aa95f4315c937e497f0f18",
-  "eventCount": 73,
+  "ledgerHead": "4324e5b9b2bc1a08df170976e57aa955a9ecbb775fd36640d423d2b2c05659de",
+  "eventCount": 74,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -597,5 +597,8 @@
       },
       "superseded": true
     }
+  },
+  "fastpath": {
+    "enabled": true
   }
 }
