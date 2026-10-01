@@ -28,17 +28,33 @@ export function gitHubClient({ token, repo, fetchImpl = globalThis.fetch }) {
       const pr = await call('GET', `${r}/pulls/${n}`, null, `pull ${n}`);
       return pr && { state: pr.state, merged: Boolean(pr.merged), headSha: pr.head.sha, baseSha: pr.base?.sha ?? null, baseRef: pr.base?.ref ?? null, mergeSha: pr.merged ? pr.merge_commit_sha : undefined };
     },
-    /** Paths changed between two commits, or null when GitHub cannot compare them (then the change is reported unknown). */
+    /**
+     * Paths changed between two commits, or null when GitHub cannot compare them (then the change is reported unknown).
+     * A rename reports BOTH paths: the path it left matters as much as the one it reached (a move out of a protected or
+     * subject path is a change to that path; W4 F1 on STAGING-FRESHNESS-FASTPATH).
+     */
     async changedPaths(base, head) {
       const out = [];
       for (let page = 1; page <= 3; page += 1) {
         const c = await call('GET', `${r}/compare/${base}...${head}?per_page=100&page=${page}`, null, 'compare');
         if (!c) return null;
         const files = c.files ?? [];
-        out.push(...files.map((f) => f.filename));
+        out.push(...files.flatMap((f) => (f.previous_filename ? [f.previous_filename, f.filename] : [f.filename])));
         if (files.length < 100) return out;
       }
       return null; // more than 300 paths: do not guess
+    },
+    /**
+     * The git tree id of a top-level directory at a commit: its sha, '' when the commit has no such directory, or null when
+     * GitHub cannot say. Two equal ids mean byte-identical trees (the fast path's functions-tree check).
+     */
+    async treeSha(commit, dir) {
+      const c = await call('GET', `${r}/git/commits/${commit}`, null, 'commit');
+      if (!c?.tree?.sha) return null;
+      const t = await call('GET', `${r}/git/trees/${c.tree.sha}`, null, 'tree');
+      if (!Array.isArray(t?.tree)) return null;
+      const e = t.tree.find((x) => x.path === dir);
+      return !e ? '' : e.type === 'tree' && /^[0-9a-f]{40}$/.test(e.sha) ? e.sha : null;
     },
     /** Does `head` descend from `base`? true, false, or null when GitHub cannot compare them (R-DELIVER-1). */
     async descends(base, head) {

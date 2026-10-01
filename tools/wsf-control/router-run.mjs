@@ -14,7 +14,7 @@
 import { appendAll } from './append-all.mjs';
 import { balls, integrateCandidates, integrateLines, progressionLine, wakeLines, wakeTimerLines, wakeExceptions, wakesToPost, awaitingReviewers, line } from './router.mjs';
 import { workerBlock, workerReport, WORKER_FENCE } from './worker-intake.mjs';
-import { integrations, previewEligible } from './fastpath.mjs';
+import { FUNCTIONS_TREE, integrations, previewEligible } from './fastpath.mjs';
 
 /** Comment ids the ledger already rests on (as sources): a re-read of one of them is a no-op. */
 export const recordedComments = (eventsText) => new Set(eventsText.trimEnd().split('\n').filter(Boolean).map((l) => JSON.parse(l).source).filter((s) => s.kind === 'comment').map((s) => s.id));
@@ -64,7 +64,7 @@ export const CANDIDATE_WINDOW = 10;
  * tried (an older candidate is never staged on purpose).
  */
 export async function fastpathReads(gh, state, eventsText, runningSha) {
-  const reads = { pin: null, candidate: null, descends: null, paths: null, unknown: null };
+  const reads = { pin: null, candidate: null, descends: null, paths: null, functionsTree: null, unknown: null };
   const text = runningSha ? await gh.fileText(PIN_FILE, runningSha) : null;
   let pin = null;
   try { pin = text ? JSON.parse(text) : null; } catch { pin = null; }
@@ -83,6 +83,7 @@ export async function fastpathReads(gh, state, eventsText, runningSha) {
     reads.candidate = c;
     reads.descends = await gh.descends(reads.pin.sha, c.mergeSha);
     reads.paths = await gh.changedPaths(reads.pin.sha, c.mergeSha);
+    reads.functionsTree = { pin: await gh.treeSha(reads.pin.sha, FUNCTIONS_TREE), candidate: await gh.treeSha(c.mergeSha, FUNCTIONS_TREE) };
     return reads;
   }
   return reads;

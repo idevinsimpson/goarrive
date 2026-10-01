@@ -77,6 +77,7 @@ function fakeGh() {
     async changedPaths(base, head) { const f = prs.get('paths'); return f ? f(base, head) : []; },
     async fileText(filePath, ref) { const f = prs.get('file'); return f ? f(filePath, ref) : null; },
     async workflowRuns(file, n) { const f = prs.get('runs'); return f ? f(file, n) : []; },
+    async treeSha(commit, dir) { const f = prs.get('tree'); return f ? f(commit, dir) : 'f'.repeat(40); },
     async run() { return null; },
     async comment(id) { const c = all().find((x) => x.id === id); return c ? { id, body: c.body, author: c.author } : null; },
     async createComment(issue, body) {
@@ -519,6 +520,11 @@ atest('Step 7 fails closed: an operational merge is never a candidate; a docs-on
     const r = await go();
     assert.deepEqual(r.appended.slice(0, 2).map((x) => x.split(':')[0]), ['accept', 'integrate'], 'routing and integration still happen');
     assert.equal(r.stagingTarget, 'NONE reason=fast-path reads failed (HTTP 502); nothing targeted'); }
+  { const { gh, go } = await productMerged();
+    gh.prs.set('tree', (commit, dir) => { assert.equal(dir, 'functions-westayfit'); return commit === PIN ? '1'.repeat(40) : '2'.repeat(40); });
+    const r = await go();
+    assert.equal(r.appended.some((x) => x.startsWith('set-target')), false);
+    assert.match(r.stagingTarget, /^FULL_PATH_REQUIRED .*the functions-westayfit tree changed \(11111111 → 22222222\)/, 'the tree is checked even when the path list looks clean'); }
   { const { go } = await productMerged({ file: () => '{not json' });
     assert.match((await go()).stagingTarget, /^NONE reason=the full-path pin/); }
 });

@@ -9,12 +9,15 @@
  * This script is the gate's own check of that claim, made before the candidate is fetched and before any credential
  * exists. It trusts nothing the writer decided:
  *
- *   1. the ledger checks (tools/wsf-control/check.mjs, run by the caller) and its head commit is the App's;
+ *   1. the ledger checks (tools/wsf-control/check.mjs, run by the caller) and its head commit names the App as its
+ *      author. A name is only a name: what keeps any other pusher off the ref is the wsf-control-state* ruleset and its
+ *      App-only bypass. This check catches a ref that was not written by the writer at all, not a forged one;
  *   2. the target was checked against THIS pin: the approved-candidate.json of the commit this workflow runs from;
  *   3. that pin is the recorded served full-path deploy (set-staging), with its rollback SHA;
  *   4. the target is an INTEGRATED packet's own merge, and the canonical development branch contains it;
- *   5. the §9.3 invariants hold again, from GitHub's own compare: the target descends from the pin and every changed
- *      path is member-visible source outside every protected path (tools/wsf-control/fastpath.mjs, one definition).
+ *   5. the §9.3 invariants hold again, from GitHub's own compare: the target descends from the pin, every changed path
+ *      (both sides of a rename) is member-visible source outside every protected path, and the functions-westayfit tree
+ *      is the pin's, compared by git tree id independently of the path list (tools/wsf-control/fastpath.mjs).
  *
  * Any failure refuses the run: nothing is fetched, built or deployed, and the candidate takes the reviewed path.
  * Runs only in `deploy` mode. Exit 0 = CANDIDATE=<sha>. Exit 1 = CANDIDATE=refused.
@@ -23,18 +26,18 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { checkDir } from '../../tools/wsf-control/check.mjs';
-import { fastPathReasons } from '../../tools/wsf-control/fastpath.mjs';
+import { FUNCTIONS_TREE, fastPathReasons } from '../../tools/wsf-control/fastpath.mjs';
 import { gitHubClient } from '../../tools/wsf-control/github.mjs';
 
 export const WRITER_BOT = 'wsf-control-writer[bot]';
 const SHA = /^[0-9a-f]{40}$/;
 const s8 = (x) => String(x).slice(0, 8);
 
-/** Pure apart from the two GitHub reads in `api` ({ descends(base, head), changedPaths(base, head) }). */
+/** Pure apart from the GitHub reads in `api` ({ descends(base, head), changedPaths(base, head), treeSha(commit, dir) }). */
 export async function resolveLedgerTarget({ approval, state, ledgerAuthor, requested = '', mode, api }) {
   const refuse = (reason) => ({ ok: false, reason });
   if (mode !== 'deploy') return refuse(`target_source=ledger deploys; it is refused in mode ${JSON.stringify(mode)}`);
-  if (ledgerAuthor !== WRITER_BOT) return refuse(`the control ledger head was not written by ${WRITER_BOT} (author ${JSON.stringify(ledgerAuthor)})`);
+  if (ledgerAuthor !== WRITER_BOT) return refuse(`the control ledger head does not name ${WRITER_BOT} as its author (author ${JSON.stringify(ledgerAuthor)})`);
   const t = state?.stagingTarget;
   if (!t) return refuse('the control ledger holds no staging target');
   if (approval?.project !== 'westayfit-staging' || !SHA.test(String(approval?.approvedAppSha))) return refuse('the approved-candidate file does not name a westayfit-staging commit');
@@ -49,7 +52,10 @@ export async function resolveLedgerTarget({ approval, state, ledgerAuthor, reque
   const dev = state.canonical?.developmentBranch;
   if (!dev) return refuse('the control ledger records no canonical development branch');
   if ((await api.descends(t.appSha, dev)) !== true) return refuse(`the development branch ${dev} does not contain the target ${s8(t.appSha)}`);
-  const reasons = fastPathReasons({ pinSha: pin, candidateSha: t.appSha, descends: await api.descends(pin, t.appSha), paths: await api.changedPaths(pin, t.appSha) });
+  const reasons = fastPathReasons({
+    pinSha: pin, candidateSha: t.appSha, descends: await api.descends(pin, t.appSha), paths: await api.changedPaths(pin, t.appSha),
+    functionsTree: { pin: await api.treeSha(pin, FUNCTIONS_TREE), candidate: await api.treeSha(t.appSha, FUNCTIONS_TREE) },
+  });
   if (reasons.length) return refuse(`the fast-path invariants do not hold: ${reasons.join('; ')}`);
   return { ok: true, appSha: t.appSha, packet: t.packet, pin };
 }
@@ -67,7 +73,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
       approval, state: checked.state, ledgerAuthor: process.env.WSF_LEDGER_AUTHOR,
       requested: (process.env.WSF_REQUESTED_SHA || '').trim(), mode: process.env.WSF_INPUT_MODE,
       // The compare reads are the only network use, made with the gate's own read-only token, after every local check.
-      api: token ? gitHubClient({ token, repo }) : { descends: () => { throw new Error('GITHUB_TOKEN is required for the compare reads'); }, changedPaths: () => { throw new Error('GITHUB_TOKEN is required for the compare reads'); } },
+      api: token ? gitHubClient({ token, repo }) : Object.fromEntries(['descends', 'changedPaths', 'treeSha'].map((k) => [k, () => { throw new Error('GITHUB_TOKEN is required for the compare reads'); }])),
     });
     if (!r.ok) fail(`${r.reason}. Nothing is fetched or deployed; the candidate takes the reviewed pin path.`);
     console.log(`CANDIDATE=${r.appSha}`);

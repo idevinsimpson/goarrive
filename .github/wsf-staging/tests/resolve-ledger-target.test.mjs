@@ -27,7 +27,9 @@ function ledger() {
 }
 const approval = { project: 'westayfit-staging', approvedAppSha: C, expectedPriorFunctions: 49 };
 /** A compare API answering only the three questions the resolver may ask, exactly. */
-const apiOf = ({ devHas = true, fromPin = true, paths = UI } = {}) => ({
+const T = 'f'.repeat(40);
+const apiOf = ({ devHas = true, fromPin = true, paths = UI, trees = { [C]: T, [E]: T } } = {}) => ({
+  async treeSha(commit, dir) { if (dir !== 'functions-westayfit') throw new Error(`unexpected tree ${dir}`); if (!(commit in trees)) throw new Error(`unexpected tree commit ${commit}`); return trees[commit]; },
   async descends(base, head) { if (base === E && head === 'claude/wsf-dev') return devHas; if (base === C && head === E) return fromPin; throw new Error(`unexpected descends(${base}, ${head})`); },
   async changedPaths(base, head) { if (base === C && head === E) return paths; throw new Error(`unexpected changedPaths(${base}, ${head})`); },
 });
@@ -43,7 +45,7 @@ await test('every claim is re-checked, and each failure refuses with its reason'
   const cases = [
     [{ mode: 'player-journey' }, /refused in mode "player-journey"/],
     [{ mode: undefined }, /refused in mode undefined/],
-    [{ ledgerAuthor: 'someone' }, /was not written by wsf-control-writer\[bot\]/],
+    [{ ledgerAuthor: 'someone' }, /does not name wsf-control-writer\[bot\] as its author/],
     [{ state: { ...st(), stagingTarget: undefined } }, /holds no staging target/],
     [{ approval: { ...approval, approvedAppSha: F } }, /was checked against the pin c+, not this run's pin f+/],
     [{ approval: { ...approval, project: 'westayfit' } }, /does not name a westayfit-staging commit/],
@@ -59,6 +61,11 @@ await test('every claim is re-checked, and each failure refuses with its reason'
     [{ api: apiOf({ paths: null }) }, /invariants do not hold: the diff .* could not be read in full/],
     [{ api: apiOf({ paths: [...UI, 'functions-westayfit/src/index.ts'] }) }, /protected paths changed: functions-westayfit/],
     [{ api: apiOf({ paths: [...UI, '.github/wsf-staging/verify-deployment.mjs'] }) }, /paths outside apps\/westayfit\/ changed/],
+    // W4 F1: a rename out of a protected path into apps/westayfit/ (both paths reported) is refused, and the functions
+    // tree is compared on its own, so even a path list that looks member-visible cannot hide a functions change.
+    [{ api: apiOf({ paths: [...UI, 'functions-westayfit/src/index.ts', 'apps/westayfit/src/legacy/index.ts'] }) }, /protected paths changed: functions-westayfit\/src\/index\.ts/],
+    [{ api: apiOf({ trees: { [C]: T, [E]: '1'.repeat(40) } }) }, /the functions-westayfit tree changed/],
+    [{ api: apiOf({ trees: { [C]: T, [E]: null } }) }, /the functions-westayfit tree could not be compared/],
   ];
   for (const [over, re] of cases) {
     const r = await resolveLedgerTarget({ ...ok(), ...over });
@@ -73,7 +80,7 @@ await test('CLI: a checked ledger dir, the bot author and the approval; it refus
   const ap = path.join(d, 'approval.json'); fs.writeFileSync(ap, JSON.stringify(approval));
   const cli = (env, dir = d) => spawnSync(process.execPath, ['.github/wsf-staging/resolve-ledger-target.mjs', ap, dir], { encoding: 'utf8', env: { PATH: process.env.PATH, ...env } });
   const wrongAuthor = cli({ WSF_LEDGER_AUTHOR: 'someone', WSF_INPUT_MODE: 'deploy' });
-  assert.equal(wrongAuthor.status, 1); assert.match(wrongAuthor.stderr, /was not written by wsf-control-writer\[bot\][\s\S]*CANDIDATE=refused/);
+  assert.equal(wrongAuthor.status, 1); assert.match(wrongAuthor.stderr, /does not name wsf-control-writer\[bot\] as its author[\s\S]*CANDIDATE=refused/);
   const noToken = cli({ WSF_LEDGER_AUTHOR: WRITER_BOT, WSF_INPUT_MODE: 'deploy' });
   assert.equal(noToken.status, 1); assert.match(noToken.stderr, /GITHUB_TOKEN is required/);
   fs.writeFileSync(path.join(d, 'state.json'), '{}');

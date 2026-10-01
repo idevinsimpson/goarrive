@@ -41,9 +41,18 @@ export const protectedPath = (p) => PROTECTED_PREFIXES.some((x) => (x.endsWith('
 const s8 = (sha) => String(sha).slice(0, 8);
 const some = (xs) => `${xs.slice(0, 5).join(', ')}${xs.length > 5 ? ` and ${xs.length - 5} more` : ''}`;
 
-/** The §9.3 invariants for `candidate` against the full-path `pin`. Empty means the fast path holds. */
-export function fastPathReasons({ pinSha, candidateSha, descends, paths }) {
+/** The deployed functions source: its tree must be the pin's, whatever the path list says (defence in depth). */
+export const FUNCTIONS_TREE = 'functions-westayfit';
+
+/**
+ * The §9.3 invariants for `candidate` against the full-path `pin`. Empty means the fast path holds. `functionsTree` is
+ * { pin, candidate }: the git tree ids of functions-westayfit at both, compared independently of the path list.
+ */
+export function fastPathReasons({ pinSha, candidateSha, descends, paths, functionsTree }) {
   const out = [];
+  const ft = functionsTree ?? {};
+  if (typeof ft.pin !== 'string' || typeof ft.candidate !== 'string') out.push(`the ${FUNCTIONS_TREE} tree could not be compared`);
+  else if (ft.pin !== ft.candidate) out.push(`the ${FUNCTIONS_TREE} tree changed (${ft.pin.slice(0, 8) || 'absent'} → ${ft.candidate.slice(0, 8) || 'absent'})`);
   if (descends === null || descends === undefined) out.push(`lineage: whether ${s8(candidateSha)} descends from the pin ${s8(pinSha)} could not be read`);
   else if (descends !== true) out.push(`lineage: ${s8(candidateSha)} does not descend from the pin ${s8(pinSha)}`);
   if (!Array.isArray(paths)) { out.push(`the diff ${s8(pinSha)}..${s8(candidateSha)} could not be read in full`); return out; }
@@ -89,7 +98,7 @@ export function targetDecision(state, reads) {
   if (!state.staging || state.staging.servedSha !== pinSha) {
     return { report: `FULL_PATH_REQUIRED candidate=${c.mergeSha} packet=${c.packet} reason=the pin ${s8(pinSha)} is not the recorded served full-path deploy (set-staging ${state.staging ? s8(state.staging.servedSha) : 'none'})` };
   }
-  const reasons = fastPathReasons({ pinSha, candidateSha: c.mergeSha, descends: reads.descends, paths: reads.paths });
+  const reasons = fastPathReasons({ pinSha, candidateSha: c.mergeSha, descends: reads.descends, paths: reads.paths, functionsTree: reads.functionsTree });
   if (reasons.length) return { report: `FULL_PATH_REQUIRED candidate=${c.mergeSha} packet=${c.packet} reason=${reasons.join('; ')}` };
   const pr = { kind: 'pull_request', id: c.pr };
   return { line: line(state.repository, 'set-target', { packet: c.packet, appSha: c.mergeSha, pinSha }, pr, 'R-FASTPATH', [pr, { kind: 'commit', id: c.mergeSha }, { kind: 'commit', id: pinSha }]) };

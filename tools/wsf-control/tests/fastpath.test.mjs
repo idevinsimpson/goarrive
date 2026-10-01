@@ -9,6 +9,7 @@ import { DEPLOY_TITLE, MEMBER_VISIBLE, PROTECTED_PREFIXES, STAGING_URL, STAGING_
 import { PROTECTED_PATHS } from '../../../.github/wsf-staging/pin-candidate.mjs';
 import { A, B, C, D, E, F, GENESIS, SOURCE_ONLY, atest, boot2, done, refused, test, w2 } from './helpers.mjs';
 import { fastpathReads } from '../router-run.mjs';
+import { gitHubClient } from '../github.mjs';
 
 const add = (r, e) => appendEvent(r.eventsText, e, { expectHead: r.state?.ledgerHead ?? GENESIS });
 const build = (...events) => events.reduce(add, { eventsText: '', state: null });
@@ -47,8 +48,13 @@ test('the protected set covers every PROTECTED_PATHS entry of the pin generator,
 });
 
 test('§9.3: descends from the pin, a complete non-empty diff, member-visible only, no protected path; each failure is a reason', () => {
-  const ok = { pinSha: C, candidateSha: E, descends: true, paths: UI };
+  const T = 'f'.repeat(40);
+  const ok = { pinSha: C, candidateSha: E, descends: true, paths: UI, functionsTree: { pin: T, candidate: T } };
   assert.deepEqual(fastPathReasons(ok), []);
+  assert.match(fastPathReasons({ ...ok, functionsTree: { pin: T, candidate: '1'.repeat(40) } }).join(), /the functions-westayfit tree changed \(ffffffff → 11111111\)/);
+  assert.match(fastPathReasons({ ...ok, functionsTree: { pin: T, candidate: '' } }).join(), /tree changed \(ffffffff → absent\)/);
+  assert.match(fastPathReasons({ ...ok, functionsTree: { pin: T, candidate: null } }).join(), /tree could not be compared/);
+  assert.match(fastPathReasons({ ...ok, functionsTree: undefined }).join(), /tree could not be compared/);
   assert.match(fastPathReasons({ ...ok, descends: false }).join(), /does not descend from the pin/);
   assert.match(fastPathReasons({ ...ok, descends: null }).join(), /could not be read/);
   assert.match(fastPathReasons({ ...ok, paths: null }).join(), /could not be read in full/);
@@ -85,7 +91,7 @@ test('targetDecision: every reason it does not target is closed and named; the t
   const r = integrated();
   const s = r.state;
   const cand = { packet: 'ALPHA', mergeSha: E, pr: 12 };
-  const reads = { pin: { sha: C }, candidate: cand, descends: true, paths: UI, unknown: null };
+  const reads = { pin: { sha: C }, candidate: cand, descends: true, paths: UI, functionsTree: { pin: 'f'.repeat(40), candidate: 'f'.repeat(40) }, unknown: null };
   assert.match(targetDecision(s, { ...reads, pin: null }).report, /^NONE reason=the full-path pin/);
   assert.match(targetDecision(s, { ...reads, unknown: 'PR #12 (ALPHA) could not be read' }).report, /^NONE reason=PR #12/);
   assert.match(targetDecision(s, { ...reads, candidate: null }).report, /^NONE reason=no integrated preview-eligible merge/);
@@ -102,7 +108,7 @@ test('targetDecision: every reason it does not target is closed and named; the t
 
 test('coalescing: a newer eligible merge replaces the held target; the older one is never targeted again', () => {
   let r = integrated();
-  const reads = (c, m) => ({ pin: { sha: C }, candidate: { packet: c, mergeSha: m, pr: c === 'ALPHA' ? 12 : 13 }, descends: true, paths: UI, unknown: null });
+  const reads = (c, m) => ({ pin: { sha: C }, candidate: { packet: c, mergeSha: m, pr: c === 'ALPHA' ? 12 : 13 }, descends: true, paths: UI, functionsTree: { pin: 'f'.repeat(40), candidate: 'f'.repeat(40) }, unknown: null });
   r = add(r, targetDecision(r.state, reads('ALPHA', E)).line);
   r = integrated(F, 'BETA', 13, r);
   const d = targetDecision(r.state, reads('BETA', F));
@@ -139,12 +145,35 @@ asyncTests.push(['fastpathReads: an unreadable newest merge stops the search (ne
     async pull() { return { baseRef: 'claude/wsf-dev' }; },
     async changedPaths(from, to) { if (from === `${to}^1`) return own[to]; if (from === C) return UI; return null; },
     async descends() { return true; },
+    async treeSha() { return 'f'.repeat(40); },
   });
   const stop = await fastpathReads(gh({ [F]: null, [E]: UI }), r.state, r.eventsText, B);
   assert.equal(stop.candidate, null, 'an older merge is never tried when the newest cannot be read');
   assert.match(stop.unknown, /whether BETA's merge f+ is member-visible could not be read/);
   const skip = await fastpathReads(gh({ [F]: ['docs/x.md'], [E]: UI }), r.state, r.eventsText, B);
   assert.deepEqual([skip.candidate?.packet, skip.descends, skip.paths, skip.unknown], ['ALPHA', true, UI, null], 'a docs-only newer merge never lags; the newest ELIGIBLE one is the candidate');
+  assert.deepEqual(skip.functionsTree, { pin: 'f'.repeat(40), candidate: 'f'.repeat(40) });
+}]);
+asyncTests.push(['W4 F1: a rename reports BOTH paths, so a move out of functions-westayfit/ into apps/westayfit/ is not member-visible-only; the tree read is exact', async () => {
+  const calls = [];
+  const fetchImpl = async (url) => {
+    calls.push(url.replace('https://api.github.com/repos/o/r', ''));
+    const body = url.includes('/compare/') ? { status: 'ahead', files: [
+      { filename: 'apps/westayfit/src/ui/Card.tsx', status: 'modified' },
+      { filename: 'apps/westayfit/src/legacy/index.ts', previous_filename: 'functions-westayfit/src/index.ts', status: 'renamed' }] }
+      : url.includes('/git/commits/') ? { tree: { sha: '9'.repeat(40) } }
+      : url.includes('/git/trees/') ? { tree: [{ path: 'apps', type: 'tree', sha: '8'.repeat(40) }, { path: 'functions-westayfit', type: 'tree', sha: '7'.repeat(40) }] } : null;
+    return { status: 200, ok: true, json: async () => body };
+  };
+  const gh = gitHubClient({ token: 't', repo: 'o/r', fetchImpl });
+  const paths = await gh.changedPaths(C, E);
+  assert.deepEqual(paths, ['apps/westayfit/src/ui/Card.tsx', 'functions-westayfit/src/index.ts', 'apps/westayfit/src/legacy/index.ts']);
+  const reasons = fastPathReasons({ pinSha: C, candidateSha: E, descends: true, paths, functionsTree: { pin: '7'.repeat(40), candidate: '7'.repeat(40) } });
+  assert.match(reasons.join('; '), /paths outside apps\/westayfit\/ changed: functions-westayfit\/src\/index\.ts/);
+  assert.match(reasons.join('; '), /protected paths changed: functions-westayfit\/src\/index\.ts/);
+  assert.equal(await gh.treeSha(E, 'functions-westayfit'), '7'.repeat(40));
+  assert.equal(await gh.treeSha(E, 'functions'), '', 'an absent directory is empty, not unknown');
+  assert.ok(calls.includes(`/git/commits/${E}`));
 }]);
 for (const [n, f] of asyncTests) await atest(n, f);
 
