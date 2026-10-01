@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "8e74fb78d7f91ec2e3e1bfc52a1834817b7c0a08fd5641aa2ba7b7f5e1a08a59",
-  "eventCount": 21,
+  "ledgerHead": "8e533f6c98935b20ad9c7b561ceee48a4bb0157d921faa074c8e67bc667179eb",
+  "eventCount": 23,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -129,7 +129,7 @@
       },
       "label": "Step 6 correction: derive integrate from ACCEPTED plus merged PR with same-cycle or successor reconcile and idempotency proof",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -143,7 +143,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         "tools/wsf-control/shadow-run.mjs",
@@ -168,7 +168,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5929164484
+          "id": 5929185474
         }
       },
       "review": {
@@ -352,11 +352,14 @@
       "packet": "AUTONOMY-ROUTER-1C-INTEGRATE",
       "worker": "W3",
       "reason": "release",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         5929178858
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 5929185474
+      }
     }
   }
 }
