@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "c83d67598755d3ceecaa4885da28bce828f8d4557c44f69e83453b42ced5c05a",
-  "eventCount": 58,
+  "ledgerHead": "8a557acb1c8015d03d4ea19f861311bad08e5d6751ca0bb7e8c560329a043537",
+  "eventCount": 59,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -48,7 +48,9 @@
     }
   },
   "queue": {
-    "W3": [],
+    "W3": [
+      "STAGING-FRESHNESS-DISPATCH"
+    ],
     "W4": [],
     "W5": [],
     "W7": [],
@@ -243,6 +245,61 @@
         "lastTransition": {
           "kind": "comment",
           "id": 5857966052
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
+      "pendingFinding": null
+    },
+    "STAGING-FRESHNESS-DISPATCH": {
+      "owner": "W3",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Step 7 completion: bounded main-only workflow-token dispatch of the existing ledger fast path and unattended proof",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "*"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 5940779280
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 5940779280
         }
       },
       "review": {
