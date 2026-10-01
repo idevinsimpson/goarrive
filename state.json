@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "02573bee01255a7b56837822dd486d9caf350b009200b07dde5ddc3bba68889d",
-  "eventCount": 17,
+  "ledgerHead": "dc94cbcf41d48f13e133841a163a817dc1726dda5cdcee50a30816de464ee7cc",
+  "eventCount": 18,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -48,7 +48,9 @@
     }
   },
   "queue": {
-    "W3": [],
+    "W3": [
+      "AUTONOMY-ROUTER-1C-INTEGRATE"
+    ],
     "W4": [],
     "W5": [],
     "W7": [],
@@ -118,6 +120,67 @@
         "after": "director"
       },
       "deliveries": 1,
+      "pendingFinding": null
+    },
+    "AUTONOMY-ROUTER-1C-INTEGRATE": {
+      "owner": "W3",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Step 6 correction: derive integrate from ACCEPTED plus merged PR with same-cycle or successor reconcile and idempotency proof",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "tools/wsf-control/shadow-run.mjs",
+        "tools/wsf-control/shadow.mjs",
+        "tools/wsf-control/router.mjs",
+        "tools/wsf-control/router-run.mjs",
+        "tools/wsf-control/rules.mjs",
+        "tools/wsf-control/tests/router.test.mjs",
+        "tools/wsf-control/tests/shadow.test.mjs"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 5928249940
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 5928249940
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
       "pendingFinding": null
     },
     "AUTONOMY-STATE-1B": {

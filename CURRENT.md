@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=02573bee01255a7b56837822dd486d9caf350b009200b07dde5ddc3bba68889d events=17 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=dc94cbcf41d48f13e133841a163a817dc1726dda5cdcee50a30816de464ee7cc events=18 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `02573bee01255a7b56837822dd486d9caf350b009200b07dde5ddc3bba68889d` (17 events)
+- Ledger head: `dc94cbcf41d48f13e133841a163a817dc1726dda5cdcee50a30816de464ee7cc` (18 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -26,7 +26,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 
 | Worker | Inbox | Active now | Reviewing | Waiting on review | Blocked | Next | Queue | WATCH |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| W3 | #396 | — | — | — | — | — | — | off |
+| W3 | #396 | — | — | — | — | AUTONOMY-ROUTER-1C-INTEGRATE | AUTONOMY-ROUTER-1C-INTEGRATE | off |
 | W4 | #394 | — | — | — | — | — | — | off |
 | W5 | #395 | — | — | — | — | — | — | off |
 | W7 | #434 | — | — | — | — | — | — | off |
@@ -37,6 +37,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | Packet | Owner | Kind | Completes at | Origin | Phase | PR | Subject | PR head | Evidence | Merge | Proof | Reviewers | Released by | Last transition | Blocked by | Label | Review policy | Pending finding |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | AUTONOMY-ROUTER-1C | W3 | work | INTEGRATED (source-only) | ledger | ACCEPTED | #544 | 37c49bbd | 37c49bbd | — | — | — | W4 | comment:5882824399 | comment:5926409781 | — | Serial step 6: state-derived routing, wakes, and real-event proof | 1×ops-source then director | — |
+| AUTONOMY-ROUTER-1C-INTEGRATE | W3 | work | INTEGRATED (source-only) | ledger | QUEUED | — | — | — | — | — | — | — | — | comment:5928249940 | — | Step 6 correction: derive integrate from ACCEPTED plus merged PR with same-cycle or successor reconcile and idempotency proof | 1×ops-source then director | — |
 | AUTONOMY-STATE-1B | W3 | work | INTEGRATED (source-only) | bootstrap | INTEGRATED | #538 | 073b7946 | 073b7946 | — | d42a3307 | — | — | comment:5857966052 | comment:5857966052 | — | Serial step 5: authoritative control state, App writer, bootstrap and shadow reconcile | 1×ops-source then director | — |
 
 ## Wakes
