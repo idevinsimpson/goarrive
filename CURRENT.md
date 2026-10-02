@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=8d299b8b9bd5093224ceb64d8cfa2f93e272501413e6e2f90b05e36d9356b447 events=178 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=41d03f760eba7a0cbff378b7e24183d1a8422b1c95a4a5d7c096f7e33428924b events=179 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `8d299b8b9bd5093224ceb64d8cfa2f93e272501413e6e2f90b05e36d9356b447` (178 events)
+- Ledger head: `41d03f760eba7a0cbff378b7e24183d1a8422b1c95a4a5d7c096f7e33428924b` (179 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -78,5 +78,5 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | 3abbbf51e4bd | W4 | STAGING-FASTPATH-INVENTORY-BASELINE-FIX | review | acked | 5953815703 | comment:5953831475 |
 | 63b50d508d2e | W3 | STAGING-FASTPATH-FAILED-TARGET-RETRY-FIX | release | acked | 5954305151 | comment:5954314406 |
 | 5408edd1df49 | W4 | STAGING-FASTPATH-FAILED-TARGET-RETRY-FIX | review | acked | 5954528967 | comment:5954543919 |
-| c9b0da9807d3 | W3 | STAGING-FASTPATH-FAILED-TARGET-RETRY-FIX | handback | delivered | 5954697239 | — |
+| c9b0da9807d3 | W3 | STAGING-FASTPATH-FAILED-TARGET-RETRY-FIX | handback | acked | 5954697239 | comment:5954704448 |
 
