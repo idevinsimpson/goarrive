@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "ffc8f44fbf055a99fa318648d8fe74638e6a719fafc29ec0d5a3dbfb4f790fa4",
-  "eventCount": 97,
+  "ledgerHead": "0f7937d6ad085c7c566ae94cf8d0c0673ec2ca04cd5ba26149bbc4b8a1765ed4",
+  "eventCount": 99,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -279,7 +279,7 @@
       },
       "label": "Allow exact Expo Router filenames in control packet path reservations without widening other path syntax",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -293,7 +293,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         "tools/wsf-control/schema.mjs",
@@ -313,7 +313,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5944968693
+          "id": 5944981792
         }
       },
       "review": {
@@ -766,11 +766,14 @@
       "packet": "CONTROL-EXPO-ROUTE-PATH-GRAMMAR",
       "worker": "W3",
       "reason": "release",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         5944978944
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 5944981792
+      }
     }
   },
   "fastpath": {
