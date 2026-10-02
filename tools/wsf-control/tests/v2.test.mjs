@@ -5,7 +5,8 @@ import { invariants } from '../check.mjs';
 import { blockerCleared, neededTransitions } from '../derive.mjs';
 import { reduce, serialize } from '../reduce.mjs';
 import { renderCurrent, ACCEPTED_RESIDUALS } from '../render-current.mjs';
-import { DEFAULT_REVIEW, canon, eventId, sha256 } from '../schema.mjs';
+import { DEFAULT_REVIEW, RE, canon, eventId, sha256 } from '../schema.mjs';
+import { inSubject } from '../reconcile.mjs';
 import { A, B, C, D, E, GENESIS, REPO, SOURCE_ONLY, boot, boot2, comment, commit, done, refused, test, w2 } from './helpers.mjs';
 
 const add = (r, e) => appendEvent(r.eventsText, e, { expectHead: r.state?.ledgerHead ?? GENESIS });
@@ -229,6 +230,52 @@ test('a v2 rendering names the schema, the pins, the shadow surface and the thre
   assert.match(text, /SHADOW CURRENT\.\*\* This rendering is comment 42 on #365\. The human CURRENT \(comment 9001\) stays authoritative/);
   for (const x of ACCEPTED_RESIDUALS) assert.ok(text.includes(x));
   assert.equal(serialize(reduce(r.eventsText)), r.stateText, 'state.json is exactly the reduction');
+});
+
+// ---- CONTROL-EXPO-ROUTE-PATH-GRAMMAR (#365 5944949756; release 5944968693) ---------------------------------------------
+
+/** The exact Expo Router files KIOSK-PAIRING-CLARITY-PROOF-1 reserves (#365 5944922457), which the old alphabet refused. */
+const EXPO_ROUTES = ['apps/westayfit/app/station/[goalId].tsx', 'apps/westayfit/app/(tabs)/(home)/community/[groupId]/index.tsx'];
+
+test('Expo Router paths: a queue reserves the exact route files with literal ( ) [ ]; they are stored as written', () => {
+  const r = add(build(boot2()), w2('queue', { packet: 'ALPHA', owner: 'W3', completion: WORK, subjectPaths: [...EXPO_ROUTES, 'apps/westayfit/tests-e2e/station-enrollment.spec.ts'] }));
+  assert.deepEqual(r.state.packets.ALPHA.subjectPaths, [...EXPO_ROUTES, 'apps/westayfit/tests-e2e/station-enrollment.spec.ts']);
+  for (const p of [...EXPO_ROUTES, 'apps/westayfit/app/[...rest].tsx', 'apps/westayfit/app/(auth)/_layout.tsx']) assert.ok(RE.path.test(p), p);
+  assert.equal(add(build(boot2()), w2('queue', { packet: 'ALPHA', owner: 'W3', completion: WORK, subjectPaths: ['*'] })).state.packets.ALPHA.subjectPaths[0], '*');
+});
+
+test('Expo Router paths: nothing else is widened; * stays the whole-field sentinel; ambiguity outside ( ) [ ] is still refused', () => {
+  const bad = [
+    '', 'apps/*', '*/x', 'a*b', '**', '* ', ' *', 'apps/west ayfit/x.tsx', 'apps/x.tsx ', '\tapps/x', 'apps\\x.tsx', 'apps/x?.tsx', 'apps/x.tsx?q=1',
+    'apps/x.tsx#frag', 'apps/%5BgoalId%5D.tsx', 'apps/{a,b}.tsx', 'apps/{x}.tsx', 'apps/x}', 'apps/<x>.tsx', 'apps/x!.tsx', 'apps/x+y.tsx', 'apps/~x', 'apps/x:y', 'apps/x;y',
+    'apps/x|y', 'apps/x&y', 'apps/$x', "apps/x'y", 'apps/x"y', 'apps/x`y', 'apps/x,y', 'apps/x=y', 'apps/x@y', 'apps/é.tsx', 'apps/x\ny', 'apps/x\u0000',
+    `a${'b'.repeat(160)}`, 'https://example.org/x',
+  ];
+  for (const p of bad) {
+    assert.equal(RE.path.test(p), false, `${JSON.stringify(p)} must stay malformed`);
+    refused(() => add(build(boot2()), w2('queue', { packet: 'ALPHA', owner: 'W3', completion: WORK, subjectPaths: [p] })), /subjectPaths is malformed|forbidden|malformed/);
+  }
+  assert.ok(RE.path.test('a'.repeat(160)) && !RE.path.test('a'.repeat(161)), 'the length bound is unchanged');
+  refused(() => add(build(boot2()), w2('queue', { packet: 'ALPHA', owner: 'W3', completion: WORK, subjectPaths: [] })), /subjectPaths is malformed/);
+});
+
+test('Expo Router paths: a contract pin keeps the old alphabet (its path is a git pathspec, where [ ] would glob)', () => {
+  assert.ok(RE.contractPath.test('tools/wsf-control') && RE.contractPath.test('docs/westayfit/ops/CONTROL_STATE.md'));
+  for (const p of [...EXPO_ROUTES, 'docs/[x].md', 'docs/(x).md', '*']) {
+    assert.equal(RE.contractPath.test(p), false, p);
+    refused(() => add(build(boot2()), w2('set-contracts', { contracts: [{ id: 'writer', path: p, commit: E }] })), /contracts is malformed|malformed/);
+  }
+});
+
+test('Expo Router paths: a reservation matches literally (never as a glob) when a delivery\'s changed files are checked', () => {
+  const [station, home] = EXPO_ROUTES;
+  assert.equal(inSubject(station, EXPO_ROUTES), true);
+  assert.equal(inSubject(home, EXPO_ROUTES), true);
+  for (const sibling of ['apps/westayfit/app/station/g.tsx', 'apps/westayfit/app/station/goalId.tsx', 'apps/westayfit/app/station/[groupId].tsx',
+    'apps/westayfit/app/tabs/home/community/[groupId]/index.tsx', 'apps/westayfit/app/(tabs)/(home)/community/x/index.tsx']) {
+    assert.equal(inSubject(sibling, EXPO_ROUTES), false, sibling);
+  }
+  assert.equal(inSubject('apps/westayfit/app/(tabs)/(home)/community/[groupId]/members.tsx', ['apps/westayfit/app/(tabs)/(home)/community/[groupId]']), true, 'a directory reservation still covers its own files');
 });
 
 done('v2');
