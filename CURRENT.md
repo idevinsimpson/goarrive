@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=d89a3bae8b4242eb27f50e650711f1a6cdd616380728801285db6b296d49e89c events=174 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=c80adc94437ef3a88e4f509363266846f576c8d586f827e25d402c54e8d42b10 events=175 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `d89a3bae8b4242eb27f50e650711f1a6cdd616380728801285db6b296d49e89c` (174 events)
+- Ledger head: `c80adc94437ef3a88e4f509363266846f576c8d586f827e25d402c54e8d42b10` (175 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -77,5 +77,5 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | e5632e3de432 | W3 | STAGING-FASTPATH-INVENTORY-BASELINE-FIX | release | acked | 5953688427 | comment:5953704615 |
 | 3abbbf51e4bd | W4 | STAGING-FASTPATH-INVENTORY-BASELINE-FIX | review | acked | 5953815703 | comment:5953831475 |
 | 63b50d508d2e | W3 | STAGING-FASTPATH-FAILED-TARGET-RETRY-FIX | release | acked | 5954305151 | comment:5954314406 |
-| 5408edd1df49 | W4 | STAGING-FASTPATH-FAILED-TARGET-RETRY-FIX | review | delivered | 5954528967 | — |
+| 5408edd1df49 | W4 | STAGING-FASTPATH-FAILED-TARGET-RETRY-FIX | review | acked | 5954528967 | comment:5954543919 |
 
