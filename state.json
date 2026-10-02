@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "3ec1f3a3ea5b255d581e7c3fb8cbbcf29696a193dd9a5dc0d3f8e2544e64bb0e",
-  "eventCount": 168,
+  "ledgerHead": "e109b9d9a98fe461c6bb0994a7c727e9ca75d841a3b103e9a93e55065859afe9",
+  "eventCount": 170,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -479,7 +479,7 @@
       },
       "label": "Add a fail-closed one-shot recorded retry authorization for an exact repaired staging target and failed run",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -493,7 +493,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         ".github/wsf-staging/fastpath-dispatch.mjs",
@@ -519,7 +519,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5954269955
+          "id": 5954314406
         }
       },
       "review": {
@@ -1124,11 +1124,14 @@
       "packet": "STAGING-FASTPATH-FAILED-TARGET-RETRY-FIX",
       "worker": "W3",
       "reason": "release",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         5954305151
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 5954314406
+      }
     }
   },
   "fastpath": {
