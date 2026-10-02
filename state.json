@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "41cd4216c34d58268db629584f809a1eb35186058f0f733a8e12f271015bf277",
-  "eventCount": 192,
+  "ledgerHead": "497f0f389a72fe686ab8d6d4bf77e9a49cf7cb8fee4977c278228fa66c329683",
+  "eventCount": 193,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -346,7 +346,7 @@
       },
       "label": "Clarify venue-station pairing from the Champion's own phone and prove the existing flow end-to-end",
       "origin": "ledger",
-      "phase": "VERIFYING",
+      "phase": "STAGED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -363,7 +363,11 @@
       "proof": {
         "type": "hosted",
         "runId": 37025084843,
-        "result": "RUNNING"
+        "result": "PASS",
+        "evidenceRef": {
+          "kind": "workflow_run",
+          "id": 37025084843
+        }
       },
       "served": {
         "runId": 37025084843,
@@ -395,7 +399,7 @@
         },
         "lastTransition": {
           "kind": "comment",
-          "id": 5955856634
+          "id": 5955903159
         }
       },
       "review": {
