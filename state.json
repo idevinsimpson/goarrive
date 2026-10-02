@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "54c23fc89c1df8c2dcee0e64471648e18d2418175bcf9d88877ca960365e8c30",
-  "eventCount": 189,
+  "ledgerHead": "866b7d6d3614244995c72d38ef47f00ff2d9501b88365527c765016d423332be",
+  "eventCount": 190,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1191,5 +1191,14 @@
     "packet": "KIOSK-PAIRING-CLARITY-PROOF-1",
     "appSha": "ab77fbfce97e60c1c22492397b2ab6b491f9e0db",
     "pinSha": "a31276516e786ac8f848269de4c839b3b9e13123"
+  },
+  "stagingRetry": {
+    "packet": "KIOSK-PAIRING-CLARITY-PROOF-1",
+    "appSha": "ab77fbfce97e60c1c22492397b2ab6b491f9e0db",
+    "pinSha": "a31276516e786ac8f848269de4c839b3b9e13123",
+    "failedRun": 37012494776,
+    "repairPacket": "STAGING-FASTPATH-INVENTORY-BASELINE-FIX",
+    "repairSha": "745b4f6270a90555757b9b01255ee77f0a74e8fb",
+    "decision": 5955316632
   }
 }
