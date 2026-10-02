@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "e10577639b9dec6472ab0906af4a5444dedfed398c59f0abd9a0669df21c5ae2",
-  "eventCount": 77,
+  "ledgerHead": "b9de8971f321808813ee5161611f30f2f1d4ac3ee9f34838aeca12b7d49db69c",
+  "eventCount": 78,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -660,8 +660,10 @@
       "packet": "STAGING-FASTPATH-DOCS-LINEAGE-FIX",
       "worker": "W3",
       "reason": "release",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        5944573564
+      ],
       "ack": null
     }
   },
