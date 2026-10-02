@@ -1,0 +1,15 @@
+
+Running 11 tests using 1 worker
+
+[1/11] [chromium] › tests-e2e/e2-join-flow.spec.ts:172:5 › E2 §3.1/§3.4/§3.5: a signed-out visitor with only a join URL reaches /community/<id>
+[2/11] [chromium] › tests-e2e/e2-join-flow.spec.ts:271:5 › E2 §3.4 negative: /join/<unknown-code> cold-loads 200 and renders the not-valid state
+[3/11] [chromium] › tests-e2e/event-return.spec.ts:210:5 › a MEMBER who signs in from a scanned event is returned to it, and it is usable
+[4/11] [chromium] › tests-e2e/event-return.spec.ts:258:5 › a NEW account is returned to the scanned event after verifying, and the screen is honest that they are not a member
+[5/11] [chromium] › tests-e2e/event-return.spec.ts:309:5 › a stored return that cannot be vouched for sends nobody anywhere
+[6/11] [chromium] › tests-e2e/event-return.spec.ts:384:5 › EAE signed out: the event names both ways in and says what an account takes, and no way on is a live control yet
+[7/11] [chromium] › tests-e2e/event-return.spec.ts:416:5 › EAE wrong account: a non-member account is told which account it is and can switch, and the event comes back for the right one
+[8/11] [chromium] › tests-e2e/event-return.spec.ts:472:5 › EAE interrupted: a reload at verify-email and at profile-setup still returns the new account to the event
+[9/11] [chromium] › tests-e2e/event-return.spec.ts:512:5 › EAE not now: the cancel boundary forgets the event, so a later sign-in lands home
+[10/11] [chromium] › tests-e2e/ui-event-activity-choice.spec.ts:335:5 › the scanned journey: event and activity survive a real signup, and nothing is in the line until the queue is confirmed
+[11/11] [chromium] › tests-e2e/ui-event-activity-choice.spec.ts:481:5 › “Use my phone” is the contribution flow that already exists, and is offered on the same terms
+  11 passed (30.5s)
