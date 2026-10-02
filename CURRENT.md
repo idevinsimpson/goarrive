@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=c4e4f6e4da58abdf9ce431520807e5625a15507e4fcf9b6c91ea5175c17ef4a0 events=252 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=a4cd39d5d78de3fa5a7077fb31fe4972d67bcef77c1868338f428bee6e6b9530 events=254 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `c4e4f6e4da58abdf9ce431520807e5625a15507e4fcf9b6c91ea5175c17ef4a0` (252 events)
+- Ledger head: `a4cd39d5d78de3fa5a7077fb31fe4972d67bcef77c1868338f428bee6e6b9530` (254 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -33,7 +33,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | W4 | #394 | — | — | — | — | — | — | off |
 | W5 | #395 | — | EMAIL-STAGING-REPAIR | — | — | — | — | on |
 | W7 | #434 | — | — | — | — | — | — | off |
-| W9 | #497 | — | — | — | — | EXPO-ACCOUNT-ENTRY-1 | EXPO-ACCOUNT-ENTRY-1 | off |
+| W9 | #497 | EXPO-ACCOUNT-ENTRY-1 | — | — | — | — | — | on |
 
 ## Packets
 
@@ -44,7 +44,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | AUTONOMY-STATE-1B | W3 | work | INTEGRATED (source-only) | bootstrap | INTEGRATED | #538 | 073b7946 | 073b7946 | — | d42a3307 | — | — | comment:5857966052 | comment:5857966052 | — | Serial step 5: authoritative control state, App writer, bootstrap and shadow reconcile | 1×ops-source then director | — |
 | CONTROL-EXPO-ROUTE-PATH-GRAMMAR | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #552 | 3cc44d30 | 3cc44d30 | — | 6687440d | — | W4 | comment:5944968693 | pull_request:552 | — | Allow exact Expo Router filenames in control packet path reservations without widening other path syntax | 1×ops-source then director | — |
 | EMAIL-STAGING-REPAIR | W3 | work | STAGED (hosted) | ledger | UNDER_REVIEW | #559 | 44ae4898 | 44ae4898 | — | — | — | W4, W5 | comment:5959200686 | comment:5961050452 | — | Diagnose and repair staging verification and password-reset delivery without weakening mail security | 1×ops-source+1×security then director | — |
-| EXPO-ACCOUNT-ENTRY-1 | W9 | work | INTEGRATED (source-only) | ledger | QUEUED | — | — | — | — | — | — | — | — | comment:5961761581 | — | Expo account-entry seam: preserve event context and make the existing phone/kiosk choice fast and truthful without bypassing verified identity | 1×journey-qa then director | — |
+| EXPO-ACCOUNT-ENTRY-1 | W9 | work | INTEGRATED (source-only) | ledger | RELEASED | — | — | — | — | — | — | — | comment:5961789672 | comment:5961789672 | — | Expo account-entry seam: preserve event context and make the existing phone/kiosk choice fast and truthful without bypassing verified identity | 1×journey-qa then director | — |
 | KIOSK-PAIRING-CLARITY-PROOF-1 | W9 | work | STAGED (hosted) | ledger | STAGED | #553 | 4537c26c | 4537c26c | — | ab77fbfc | hosted run 37025084843: PASS | W4 | comment:5945136749 | comment:5955903159 | — | Clarify venue-station pairing from the Champion's own phone and prove the existing flow end-to-end | 1×journey-qa then director | — |
 | STAGING-FASTPATH-DOCS-LINEAGE-FIX | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #551 | 963dd558 | 963dd558 | — | 9825aa36 | — | W4 | comment:5944563639 | pull_request:551 | — | Step 7 correction: allow provably non-runtime docs/instruction lineage while preserving fail-closed fast-path invariants | 1×ops-source then director | — |
 | STAGING-FASTPATH-FAILED-TARGET-RETRY-FIX | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #556 | 92fdfecd | 92fdfecd | — | b4b479a6 | — | W4 | comment:5954269955 | pull_request:556 | — | Add a fail-closed one-shot recorded retry authorization for an exact repaired staging target and failed run | 1×ops-source then director | — |
@@ -94,4 +94,5 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | 7e4ed4f05658 | W3 | EMAIL-STAGING-REPAIR | handback | acked | 5960698473 | comment:5960724869 |
 | 5e98b190d1e9 | W4 | EMAIL-STAGING-REPAIR | review | acked | 5960912888 | comment:5960925680 |
 | d2400a79c8d1 | W5 | EMAIL-STAGING-REPAIR | review | timed-out (wake-undelivered) | 5960913077, 5961195025 | — |
+| b5198e757e61 | W9 | EXPO-ACCOUNT-ENTRY-1 | release | requested | — | — |
 
