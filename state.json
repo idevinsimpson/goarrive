@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "497f0f389a72fe686ab8d6d4bf77e9a49cf7cb8fee4977c278228fa66c329683",
-  "eventCount": 193,
+  "ledgerHead": "b82b7294ce054c1562e88bff844e14c030deeea1a95fb2c4b53343e5f356caff",
+  "eventCount": 194,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -23,11 +23,11 @@
     "operationalMain": "f95bc0a623df475966ae61fc2b1a23e54f085962"
   },
   "staging": {
-    "pinPr": 522,
-    "servedSha": "a31276516e786ac8f848269de4c839b3b9e13123",
-    "runId": 36264562975,
-    "runNumber": 55,
-    "rollbackSha": "938e00d8c985993f69becc8924d3037f18425afc"
+    "servedSha": "ab77fbfce97e60c1c22492397b2ab6b491f9e0db",
+    "runId": 37025084843,
+    "runNumber": 60,
+    "rollbackSha": "a31276516e786ac8f848269de4c839b3b9e13123",
+    "pinPr": 522
   },
   "criticalPath": null,
   "workers": {
