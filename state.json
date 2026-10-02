@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "ab2144b42da27783a062a48093b10b5d37f2df847ff2b9d9defbf72bba04de7c",
-  "eventCount": 126,
+  "ledgerHead": "9f33ac17a3b073776f638b802c6511c669682a92985a62407bdbec1a055ea6bd",
+  "eventCount": 127,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -363,7 +363,9 @@
       "proof": null,
       "served": null,
       "releasedQueueIndex": null,
-      "reviewedBy": [],
+      "reviewedBy": [
+        "W4"
+      ],
       "subjectPaths": [
         "apps/westayfit/app/station/[goalId].tsx",
         "apps/westayfit/app/(tabs)/(home)/community/[groupId]/index.tsx",
@@ -383,7 +385,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5951241445
+          "id": 5951505025
         }
       },
       "review": {
@@ -897,7 +899,8 @@
       "ack": {
         "kind": "comment",
         "id": 5951307156
-      }
+      },
+      "superseded": true
     }
   },
   "fastpath": {
