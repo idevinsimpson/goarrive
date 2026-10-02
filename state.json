@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "4324e5b9b2bc1a08df170976e57aa955a9ecbb775fd36640d423d2b2c05659de",
-  "eventCount": 74,
+  "ledgerHead": "24b3bcc89c16fcc9bc9ee48656edf872fb07aca0104852d65d9b38b369642ba7",
+  "eventCount": 75,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -48,7 +48,9 @@
     }
   },
   "queue": {
-    "W3": [],
+    "W3": [
+      "STAGING-FASTPATH-DOCS-LINEAGE-FIX"
+    ],
     "W4": [],
     "W5": [],
     "W7": [],
@@ -243,6 +245,62 @@
         "lastTransition": {
           "kind": "comment",
           "id": 5857966052
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
+      "pendingFinding": null
+    },
+    "STAGING-FASTPATH-DOCS-LINEAGE-FIX": {
+      "owner": "W3",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Step 7 correction: allow provably non-runtime docs/instruction lineage while preserving fail-closed fast-path invariants",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "tools/wsf-control/fastpath.mjs",
+        "tools/wsf-control/tests/fastpath.test.mjs"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 5944487530
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 5944487530
         }
       },
       "review": {
