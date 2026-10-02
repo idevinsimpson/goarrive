@@ -1,0 +1,34 @@
+
+Running 1 test using 1 worker
+
+[1/1] [chromium] › tests-e2e/ui-manage-event-first.spec.ts:235:5 › the sheet names the community, says nothing is running, and still offers every section
+  1) [chromium] › tests-e2e/ui-manage-event-first.spec.ts:235:5 › the sheet names the community, says nothing is running, and still offers every section 
+
+    Error: expect(locator).toContainText(expected) failed
+
+    Locator: getByTestId('wsf-manage-story')
+    Expected substring: "1 member"
+    Received string:    "No goal running yet"
+    Timeout: 5000ms
+
+    Call log:
+      - Expect "toContainText" with timeout 5000ms
+      - waiting for getByTestId('wsf-manage-story')
+        14 × locator resolved to <div dir="auto" data-testid="wsf-manage-story" class="css-146c3p1 r-2tmiwz r-1b43r93 r-rjixqe r-zl2h9q">No goal running yet</div>
+           - unexpected value "No goal running yet"
+
+
+      250 |   // member count is the real one.
+      251 |   await expect(page.getByTestId('wsf-manage-story')).toContainText('No goal running yet');
+    > 252 |   await expect(page.getByTestId('wsf-manage-story')).toContainText('1 member');
+          |                                                      ^
+      253 |
+      254 |   // THE EMPTY EVENT. It says why there is nothing, and where to go — it does
+      255 |   // not render an empty frame or a dead Open kiosk button.
+        at /home/user/goarrive/apps/westayfit/tests-e2e/ui-manage-event-first.spec.ts:252:54
+
+    Error Context: test-results/ui-manage-event-first-the--98121--still-offers-every-section-chromium/error-context.md
+
+
+  1 failed
+    [chromium] › tests-e2e/ui-manage-event-first.spec.ts:235:5 › the sheet names the community, says nothing is running, and still offers every section 

@@ -1,0 +1,34 @@
+
+Running 1 test using 1 worker
+
+[1/1] [chromium] › tests-e2e/station-enrollment.spec.ts:560:5 › pairing clarity: the venue screen points to the Champion’s own phone, each screen pairs by its own code and slot, and an expired code is replaced
+  1) [chromium] › tests-e2e/station-enrollment.spec.ts:560:5 › pairing clarity: the venue screen points to the Champion’s own phone, each screen pairs by its own code and slot, and an expired code is replaced 
+
+    Error: expect(locator).toContainText(expected) failed
+
+    Locator: getByTestId('wsf-kiosk-stations-intro-o3eEHR31DvjI4dnecJsa')
+    Expected substring: "Every unpaired screen shows its own code"
+    Received string:    "Open this address on each screen, then type the code it shows and choose which station it is. You can revoke a screen from here at any time."
+    Timeout: 5000ms
+
+    Call log:
+      - Expect "toContainText" with timeout 5000ms
+      - waiting for getByTestId('wsf-kiosk-stations-intro-o3eEHR31DvjI4dnecJsa')
+        14 × locator resolved to <div dir="auto" class="css-146c3p1 r-2tmiwz r-1b43r93 r-rjixqe" data-testid="wsf-kiosk-stations-intro-o3eEHR31DvjI4dnecJsa">Open this address on each screen, then type the c…</div>
+           - unexpected value "Open this address on each screen, then type the code it shows and choose which station it is. You can revoke a screen from here at any time."
+
+
+      582 |   if (!KP_BEFORE) {
+      583 |     const intro = page.getByTestId(`wsf-kiosk-stations-intro-${goalId}`);
+    > 584 |     await expect(intro).toContainText('Every unpaired screen shows its own code');
+          |                         ^
+      585 |     await expect(intro).toContainText('approve it here, on your own phone');
+      586 |     const steps = page.getByTestId(`wsf-kiosk-stations-steps-${goalId}`);
+      587 |     await expect(steps).toContainText('Enter the code shown on the screen you’re pairing');
+        at /home/user/goarrive/apps/westayfit/tests-e2e/station-enrollment.spec.ts:584:25
+
+    Error Context: test-results/station-enrollment-pairing-1560b-an-expired-code-is-replaced-chromium/error-context.md
+
+
+  1 failed
+    [chromium] › tests-e2e/station-enrollment.spec.ts:560:5 › pairing clarity: the venue screen points to the Champion’s own phone, each screen pairs by its own code and slot, and an expired code is replaced 

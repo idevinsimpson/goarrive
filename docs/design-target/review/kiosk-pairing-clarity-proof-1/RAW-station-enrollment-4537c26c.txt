@@ -1,0 +1,7 @@
+
+Running 3 tests using 1 worker
+
+[1/3] [chromium] › tests-e2e/station-enrollment.spec.ts:203:5 › a Champion enrols a screen, the attendee codes grant nothing, and revoking empties the screen
+[2/3] [chromium] › tests-e2e/station-enrollment.spec.ts:395:5 › a station on a goal that is not authorized for display refuses in the kiosk’s own words
+[3/3] [chromium] › tests-e2e/station-enrollment.spec.ts:560:5 › pairing clarity: the venue screen points to the Champion’s own phone, each screen pairs by its own code and slot, and an expired code is replaced
+  3 passed (50.9s)

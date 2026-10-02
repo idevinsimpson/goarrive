@@ -1,0 +1,72 @@
+
+Running 38 tests using 1 worker
+
+[1/38] [chromium] › tests-e2e/queue-call-by-name.spec.ts:240:5 › a member chooses initials, the screen calls them by those initials and a code, their phone says it is their turn and taps ready, and recording clears the screen
+[2/38] [chromium] › tests-e2e/queue-call-by-name.spec.ts:516:5 › a person can take their own name off the screen, immediately and without asking anybody
+[3/38] [chromium] › tests-e2e/queue-call-by-name.spec.ts:595:5 › a person waiting can switch to their own phone, which frees the place and opens their activity
+[4/38] [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 maxima (80/120/40): no overflow and no clipping at 390px on all three surfaces
+[5/38] [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 maxima (80/120/40): no overflow and no clipping at 360px on all three surfaces
+[6/38] [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 maxima (80/120/40): no overflow and no clipping at 320px on all three surfaces
+[7/38] [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 maxima (80/120/40): no overflow and no clipping at 195px on all three surfaces
+[8/38] [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 one unbroken 90-character token: no overflow and no clipping at 390px on all three surfaces
+[9/38] [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 one unbroken 90-character token: no overflow and no clipping at 360px on all three surfaces
+[10/38] [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 one unbroken 90-character token: no overflow and no clipping at 320px on all three surfaces
+[11/38] [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 one unbroken 90-character token: no overflow and no clipping at 195px on all three surfaces
+[12/38] [chromium] › tests-e2e/ui-a11y.spec.ts:552:7 › R1b Manage: no overflow at 390px, confirmation open
+[13/38] [chromium] › tests-e2e/ui-a11y.spec.ts:552:7 › R1b Manage: no overflow at 195px, confirmation open
+[14/38] [chromium] › tests-e2e/ui-a11y.spec.ts:625:7 › R2 display contains every element at 1440×900 with maximum-length names
+[15/38] [chromium] › tests-e2e/ui-a11y.spec.ts:625:7 › R2 display contains every element at 390×844 with maximum-length names
+[16/38] [chromium] › tests-e2e/ui-a11y.spec.ts:686:5 › R3 every control is at least 44×44 across Community Home, the sheet, the contribution flow and the display
+[17/38] [chromium] › tests-e2e/ui-a11y.spec.ts:813:5 › R3 axe agrees about target size on Community Home and the contribution entry
+[18/38] [chromium] › tests-e2e/ui-a11y.spec.ts:848:5 › R4 every Tab stop shows a focus ring, and the controls that matter are on the path
+[19/38] [chromium] › tests-e2e/ui-a11y.spec.ts:927:5 › R5a the Manage sheet announces itself as a modal dialog called Champion tools
+[20/38] [chromium] › tests-e2e/ui-a11y.spec.ts:962:5 › R5b the Manage sheet traps focus, blocks the page behind it, and returns focus on Escape
+[21/38] [chromium] › tests-e2e/ui-a11y.spec.ts:1056:7 › R6 reduced motion › nothing animates on Community Home or the display, and the WE starts at its true fill
+[22/38] [chromium] › tests-e2e/ui-a11y.spec.ts:1119:7 › R6 reduced motion › while a contribution is recording, the only thing moving is inside the recording card
+[23/38] [chromium] › tests-e2e/ui-a11y.spec.ts:1203:5 › R7a axe finds no WCAG A/AA violation on any state of any surface
+[24/38] [chromium] › tests-e2e/ui-a11y.spec.ts:1266:5 › R7b every surface has a title, one level-1 heading, a named wordmark, and unambiguous controls
+[25/38] [chromium] › tests-e2e/ui-a11y.spec.ts:1346:5 › R8 the entry error is announced, and the receipt is a polite live region
+[26/38] [chromium] › tests-e2e/ui-a11y.spec.ts:1379:5 › R9 the entry field asks for a numeric keypad, a done key, and never triggers iOS zoom
+[27/38] [chromium] › tests-e2e/ui-a11y.spec.ts:1411:5 › R10 every number survives without colour (greyscale artifacts for human review)
+[28/38] [chromium] › tests-e2e/ui-combined-goal.spec.ts:189:5 › Set up kiosk asks one question, defaults to One goal, and leaves the per-goal controls exactly as they were
+[29/38] [chromium] › tests-e2e/ui-combined-goal.spec.ts:239:5 › a Champion combines two activities, and the address opens cold, reloads, and carries no authority
+[30/38] [chromium] › tests-e2e/ui-combined-goal.spec.ts:417:5 › an unknown combined address says the same nothing an unauthorized one says
+[31/38] [chromium] › tests-e2e/ui-combined-goal.spec.ts:446:5 › a combined event offers every frozen activity by name, and the ways on appear only after one is chosen
+[32/38] [chromium] › tests-e2e/ui-combined-goal.spec.ts:544:5 › a combined event: the station is on one activity, the person picks the other, and the other is what counts
+[33/38] [chromium] › tests-e2e/ui-community-home.spec.ts:256:5 › Community Home at phone size — member view, Champion view, full page
+[34/38] [chromium] › tests-e2e/ui-community-home.spec.ts:550:5 › a failed pulse read says so on the hero, and its retry can be read
+[35/38] [chromium] › tests-e2e/ui-community-home.spec.ts:599:5 › Living WE static states through the real data path
+[36/38] [chromium] › tests-e2e/ui-manage-event-first.spec.ts:235:5 › the sheet names the community, says nothing is running, and still offers every section
+  1) [chromium] › tests-e2e/ui-manage-event-first.spec.ts:235:5 › the sheet names the community, says nothing is running, and still offers every section 
+
+    Error: expect(locator).toContainText(expected) failed
+
+    Locator: getByTestId('wsf-manage-story')
+    Expected substring: "1 member"
+    Received string:    "No goal running yet"
+    Timeout: 5000ms
+
+    Call log:
+      - Expect "toContainText" with timeout 5000ms
+      - waiting for getByTestId('wsf-manage-story')
+        14 × locator resolved to <div dir="auto" data-testid="wsf-manage-story" class="css-146c3p1 r-2tmiwz r-1b43r93 r-rjixqe r-zl2h9q">No goal running yet</div>
+           - unexpected value "No goal running yet"
+
+
+      250 |   // member count is the real one.
+      251 |   await expect(page.getByTestId('wsf-manage-story')).toContainText('No goal running yet');
+    > 252 |   await expect(page.getByTestId('wsf-manage-story')).toContainText('1 member');
+          |                                                      ^
+      253 |
+      254 |   // THE EMPTY EVENT. It says why there is nothing, and where to go — it does
+      255 |   // not render an empty frame or a dead Open kiosk button.
+        at /home/user/goarrive/apps/westayfit/tests-e2e/ui-manage-event-first.spec.ts:252:54
+
+    Error Context: test-results/ui-manage-event-first-the--98121--still-offers-every-section-chromium/error-context.md
+
+
+[37/38] [chromium] › tests-e2e/ui-manage-event-first.spec.ts:286:5 › with goals running, the kiosk address is the event section’s own content and never inside a permission
+[38/38] [chromium] › tests-e2e/ui-manage-event-first.spec.ts:358:5 › combined setup shows what is ineligible and why, refuses an incomplete answer, and reads the choice back
+  1 failed
+    [chromium] › tests-e2e/ui-manage-event-first.spec.ts:235:5 › the sheet names the community, says nothing is running, and still offers every section 
+  37 passed (4.7m)

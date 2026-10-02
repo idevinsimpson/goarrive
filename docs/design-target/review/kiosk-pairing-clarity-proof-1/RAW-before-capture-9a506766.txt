@@ -1,0 +1,5 @@
+
+Running 1 test using 1 worker
+
+[1/1] [chromium] › tests-e2e/station-enrollment.spec.ts:560:5 › pairing clarity: the venue screen points to the Champion’s own phone, each screen pairs by its own code and slot, and an expired code is replaced
+  1 passed (46.9s)
