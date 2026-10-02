@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "41d03f760eba7a0cbff378b7e24183d1a8422b1c95a4a5d7c096f7e33428924b",
-  "eventCount": 179,
+  "ledgerHead": "14ca364fb90d74c92c33f7e2680e298c49eac1429924a1ecd6de3dd95af2caae",
+  "eventCount": 183,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -479,7 +479,7 @@
       },
       "label": "Add a fail-closed one-shot recorded retry authorization for an exact repaired staging target and failed run",
       "origin": "ledger",
-      "phase": "CHANGES_REQUESTED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -488,8 +488,8 @@
         "W4"
       ],
       "artifact": {
-        "subjectSha": "f70571296614f7f4a9c7b47c6a7da5a4e13c8a76",
-        "prHeadSha": "f70571296614f7f4a9c7b47c6a7da5a4e13c8a76",
+        "subjectSha": "92fdfecd3760559f84b00b55ef847ad5c46738c9",
+        "prHeadSha": "92fdfecd3760559f84b00b55ef847ad5c46738c9",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -521,7 +521,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5954670197
+          "id": 5954735123
         }
       },
       "review": {
@@ -534,7 +534,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 1,
+      "deliveries": 2,
       "pendingFinding": null
     },
     "STAGING-FASTPATH-INVENTORY-BASELINE-FIX": {
@@ -1161,7 +1161,16 @@
       "ack": {
         "kind": "comment",
         "id": 5954704448
-      }
+      },
+      "superseded": true
+    },
+    "463e673a965d5d87a738c20e629e7e6d74bec49eca7024f680d23cf71901e3b8": {
+      "packet": "STAGING-FASTPATH-FAILED-TARGET-RETRY-FIX",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
