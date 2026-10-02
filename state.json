@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "975abd68b22ed14c06d1d1f9addd0160f7c407e7ee5f11637bd165e650475e51",
-  "eventCount": 219,
+  "ledgerHead": "be9fc09bb4ae9e92a00f9c319e0fb95de6e7022b94b5e80434f81c3917c2f161",
+  "eventCount": 220,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -61,7 +61,9 @@
     }
   },
   "queue": {
-    "W3": [],
+    "W3": [
+      "EMAIL-STAGING-REPAIR"
+    ],
     "W4": [],
     "W5": [],
     "W7": [],
@@ -335,6 +337,70 @@
         "after": "director"
       },
       "deliveries": 1,
+      "pendingFinding": null
+    },
+    "EMAIL-STAGING-REPAIR": {
+      "owner": "W3",
+      "kind": "work",
+      "completion": {
+        "terminal": "STAGED",
+        "proofType": "hosted"
+      },
+      "label": "Diagnose and repair staging verification and password-reset delivery without weakening mail security",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "functions-westayfit/src/index.ts",
+        "functions-westayfit/tests/callable/wsf-send-verification-email.test.ts",
+        "functions-westayfit/tests/callable/wsf-send-password-reset-email.test.ts",
+        ".github/wsf-staging/STAGING-EMAIL-EVIDENCE.md",
+        ".github/wsf-staging/mail-preflight.mjs",
+        ".github/wsf-staging/tests/mail-preflight-domain.test.mjs"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 5959142290
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 5959142290
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          },
+          {
+            "class": "security",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
       "pendingFinding": null
     },
     "KIOSK-PAIRING-CLARITY-PROOF-1": {
