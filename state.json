@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "caae2595e282dbe7232c1dab038b6dd1610bb9c64ebf5971163897ae5343e514",
-  "eventCount": 198,
+  "ledgerHead": "4ed6bab93cb6856848060d72cfa0351bfae4d4641d2e010e0364873f909fbe3a",
+  "eventCount": 200,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -758,7 +758,7 @@
       },
       "label": "Derive the exact successful staging run proof and pointer sequence when the workflow-run wake is missed",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -772,7 +772,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         "tools/wsf-control/shadow-run.mjs",
@@ -796,7 +796,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5956038540
+          "id": 5956070784
         }
       },
       "review": {
@@ -1261,11 +1261,14 @@
       "packet": "STAGING-PROOF-RECONCILE-ROUTING-FIX",
       "worker": "W3",
       "reason": "release",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         5956063211
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 5956070784
+      }
     }
   },
   "fastpath": {
