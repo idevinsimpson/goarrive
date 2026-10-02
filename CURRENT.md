@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=725d723ec7171bb4cbdb64b227a812da4f939ef90de5a8bd9d86ec273737fe8d events=120 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=aa0ae2d0e969d17c079f6493e9e816c0188084a9f19424d1c06992d393cb7b53 events=121 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `725d723ec7171bb4cbdb64b227a812da4f939ef90de5a8bd9d86ec273737fe8d` (120 events)
+- Ledger head: `aa0ae2d0e969d17c079f6493e9e816c0188084a9f19424d1c06992d393cb7b53` (121 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -65,5 +65,5 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | 869b62557264 | W3 | CONTROL-EXPO-ROUTE-PATH-GRAMMAR | release | acked | 5944978944 | comment:5944981792 |
 | d30fdc119635 | W4 | CONTROL-EXPO-ROUTE-PATH-GRAMMAR | review | acked | 5945036391 | comment:5945047502 |
 | 031e79b98518 | W9 | KIOSK-PAIRING-CLARITY-PROOF-1 | release | acked | 5945147405 | comment:5945165041 |
-| 1ba204ff5c02 | W7 | KIOSK-PAIRING-CLARITY-PROOF-1 | review | redelivered | 5945337933, 5945912678 | — |
+| 1ba204ff5c02 | W7 | KIOSK-PAIRING-CLARITY-PROOF-1 | review | timed-out (wake-undelivered) | 5945337933, 5945912678 | — |
 
