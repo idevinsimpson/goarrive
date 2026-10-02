@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "aa0ae2d0e969d17c079f6493e9e816c0188084a9f19424d1c06992d393cb7b53",
-  "eventCount": 121,
+  "ledgerHead": "186041dc30d9000a4befedf0d6fed3326988724424ffa79993b4ad0afaf0e50a",
+  "eventCount": 124,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -40,7 +40,8 @@
     "W4": {
       "inbox": 394,
       "classes": [
-        "ops-source"
+        "ops-source",
+        "journey-qa"
       ]
     },
     "W5": {
@@ -351,7 +352,7 @@
       "inbox": 497,
       "pr": 553,
       "reviewers": [
-        "W7"
+        "W4"
       ],
       "artifact": {
         "subjectSha": "4537c26c6c340471729cb44f56bfcd676f549b35",
@@ -382,7 +383,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5945327432
+          "id": 5951241445
         }
       },
       "review": {
@@ -882,6 +883,15 @@
         5945337933,
         5945912678
       ],
+      "ack": null,
+      "superseded": true
+    },
+    "d5e0f4697dcf9d69d3fe300edbaef0bbc922eed4e106db6a5fc0213a70eb506f": {
+      "packet": "KIOSK-PAIRING-CLARITY-PROOF-1",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
