@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "7cc1aa64f74e6614e39294c27e3fd2b49137f7dee5e7fdaf1b893c4f36850e79",
-  "eventCount": 266,
+  "ledgerHead": "13d3dcd0f1edeba3b22284aff138ade308fc9db85adb343d375ceb18d92df5ab",
+  "eventCount": 267,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1641,8 +1641,10 @@
       "packet": "WORKER-EXECUTION-PROFILES-1",
       "worker": "W3",
       "reason": "release",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        5962940661
+      ],
       "ack": null
     }
   },
