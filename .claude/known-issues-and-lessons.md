@@ -1,6 +1,6 @@
 # GoArrive Known Issues & Lessons Learned
 
-_Last refreshed: 2026-08-14._
+_Last refreshed: 2026-10-02._
 
 ## Resolved Issues (Reference for Future Work)
 The following issues were encountered and resolved during development. They are documented here as institutional knowledge to prevent regression and inform future decisions.
@@ -252,3 +252,64 @@ The v3 handoff has two music elements — a graph-wired `audible` one for the fo
 This bit us concretely: `ended` (which advances the playlist) lived only on the audible element. While backgrounded that element is paused, and **a paused media element never fires `ended`** — so the shadow played the current track to its end and then simply stopped, with nothing to advance it. Returning to the app resumed the audible at the shadow's position, which immediately hit the end, fired `ended`, and advanced — which is why the symptom presented as "music stops when the track switches" and recovered on re-entry. The track was never switching at all. Fixed in PR #287 by giving the shadow its own `ended`/`error` handlers, guarded by element identity and `inBackgroundRef`.
 
 Two design rules fall out. **When you add a second element that can own playback, audit every listener on the first one** and decide explicitly whether it needs a twin — the failure is silent and only appears at a boundary the tests never reach. And **a handler that can trigger a retry cascade needs a circuit breaker**: `error → advance → error` would have burned an entire playlist in seconds with the real first cause buried at the top of the log, so #287 caps consecutive failures and stops.
+### Worker Class Re-Declaration Requires Explicit Re-Registration, Not a Default Policy (PR #544)
+When a WSF control-state worker is registered without declaring classes, the default routing policy routes every delivery to the lowest-numbered free non-owner worker — not to QA. Before PR #544, the schema v2 reducer refused any `register-worker` event for an already-registered worker, even to add classes, which meant there was no way to configure QA routing after the initial registration. The only path was external state surgery.
+
+The fix: in schema v2, a `register-worker` event for an already-registered worker re-declares its classes at the same inbox (or clears them when `classes` is omitted); queue, packets, and assigned reviews are kept. Inbox moves are still refused (that is `transfer-owner`'s job). An unchanged declaration is also refused so the audit log only records real changes. Schema v1 behavior is unchanged — it still refuses any re-registration.
+
+Lesson: a routing policy that depends on per-worker class declarations must either enforce class declaration at initial registration or provide an explicit re-declaration path. Treating an omitted field at registration as "no classes" and then refusing any update permanently locks workers into the default policy. When a reducer rule is introduced that prevents recovery from an initial omission, pair it with a recovery event or accept that the state will require surgical correction.
+
+### Off-the-Hour Scheduling Prevents Dropped GitHub Actions Runs (PR #544)
+The `wsf-control-reconcile` fallback schedule was set to `*/30` (on the hour and half-hour). GitHub Actions delays and drops scheduled runs most frequently at the top and bottom of the hour under load. Multi-hour gaps in writer runs were observed on this schedule, and those gaps stretched the lost-wake clock for the wake retry and timeout mechanisms that depend on writer runs.
+
+The fix moves the schedule to `13,43 * * * *` — still every 30 minutes but off the hour by 13 and 43 minutes.
+
+Lesson: when a scheduled CI job drives time-sensitive protocol steps (wakes, timeouts, retries), schedule it at non-round-number minutes. GitHub's scheduler deprioritises top-of-hour bursts; a cron at `H/30` is more likely to queue and drop than one at `13,43`. This is especially important for control-plane jobs where a single dropped run extends observable latency by a full scheduling interval.
+
+### WSF Director Integrate Step Should Derive in the Same Run as ACCEPTED (PR #545)
+Before PR #545, the AUTONOMY-ROUTER-1C-INTEGRATE step required a separate writer run after the ACCEPTED decision landed — the Director would record ACCEPTED in one cycle, then a subsequent scheduled writer run would derive INTEGRATE from the merged PR SHA.
+
+PR #545 collapses this into a single pass: when the Director sees both an ACCEPTED decision and a merged PR in the same run, it derives INTEGRATE immediately rather than deferring. The step runs once and does not re-fire on subsequent runs.
+
+Lesson: when a control-plane step's inputs are all present in the same writer run (here: ACCEPTED decision + merge SHA), derive the output in that same run rather than waiting for the next scheduled cycle. Deferral adds latency and leaves the ledger in a half-committed state between cycles, which stretches the window for race conditions and makes the log harder to read.
+### WSF Staging Freshness: File-Tree Rename Produces False Positive in Change Detection (PR #548)
+When comparing two git trees to detect whether the WSF `functions/` directory changed, a renamed file reports both the old path (as a deletion) and the new path (as an addition). A naive comparison that checks for "any changed path under `functions/`" will fire on a rename that touches no functions logic — the rename shows up as two matching paths and trips the gate.
+
+The fix: compare the functions tree independently, on its own rename-aware diff, rather than treating it as part of a whole-tree comparison. Two separate comparisons (one for the functions tree, one for everything else) prevent a top-level rename from triggering a false functions-changed signal.
+
+Lesson: any change-detection gate that scopes on a subdirectory path must account for renames that touch that path prefix without changing the logic inside it. Validate the gate with a fixture that renames a non-functions file whose old or new path shares the `functions/` prefix.
+
+### WSF Unattended Staging Dispatch Requires an Explicit Ledger Switch (PR #549)
+Wiring an automatic (unattended) dispatch step into the `wsf-control-reconcile` scheduled workflow creates a footgun: any reconcile run could trigger a staging deploy unless the dispatch is gated. PR #549 gates the dispatch behind a ledger switch that the owner must explicitly enable — the `fastpath-dispatch.mjs` script reads the switch before firing, and does nothing if the switch is absent or false.
+
+The pattern (Option B unattended path): (1) owner reviews current state and enables the ledger switch; (2) the next scheduled reconcile run reads the switch, finds it set, and dispatches the fast path automatically; (3) the switch is consumed or must be re-enabled for subsequent dispatches. This keeps the "unattended" semantics (no human tap required per cycle) while preventing runaway auto-deploys when the owner hasn't opted in.
+
+Lesson: any CI step that can trigger a deploy or state-advancing action without a human gate must be behind an explicit opt-in signal in durable state (ledger, environment variable, config file) — not just a conditional in the workflow YAML that could be accidentally satisfied. The signal should be owner-set and consumed or time-bounded so it cannot persist indefinitely.
+### WSF Fast-Path Docs-Only Candidates Must Be Refused (PR #551)
+A docs-only change between the served pin and the candidate (only AGENTS.md, CLAUDE.md, or plain .md/.txt files directly in docs/westayfit/) was previously treated as a non-runtime change that could hold the fast path. Allowing docs-only candidates creates a category error: if there is no member-visible path in the diff, there is nothing for the fast path to validate, and holding the gate on a pure-docs candidate indefinitely stalls the deploy queue.
+
+The fix adds two new fail-closed rules in fastPathReasons. A pin-to-candidate diff with no member-visible path is refused immediately so it can never hold the fast path. A non-string entry in the diff is treated as unreadable and fails closed. Named non-runtime files (AGENTS.md, CLAUDE.md, and .md/.txt directly in docs/westayfit/) are now excluded from the member-visible-path test so they do not force a full path by themselves — but they still cannot hold the fast path alone. The writer's targetDecision and the staging gate's resolve-ledger-target.mjs share fastPathReasons, so both boundaries are covered by the same logic.
+
+Lesson: when a fast path has an exemption list for non-runtime files, pair it with an explicit refusal for candidates where the entire diff consists only of exempted files. A diff that passes every individual-path check can still be collectively wrong if there is nothing left to validate after exemptions are applied.
+
+### Expo Router File Paths Require an Extended Path Alphabet in WSF Control Schema (PR #552)
+The WSF control-plane packet path reservation schema rejected Expo Router file paths like apps/westayfit/app/station/[goalId].tsx and apps/westayfit/app/(tabs)/(home)/community/[groupId]/index.tsx with "queue: subjectPaths is malformed" because the path alphabet (RE.path) did not include the characters `(`, `)`, `[`, or `]`. These are valid in filesystem paths but absent from the original alphabet.
+
+The fix extends RE.path to accept those four characters. All other disallowed characters remain blocked, and `*` remains the whole-field sentinel only. A separate RE.contractPath retains the original alphabet because contract paths are passed as git-diff pathspecs, where unescaped `[` and `]` are interpreted as character-class globs rather than literal brackets.
+
+Lesson: when a path-validation regex is also used as a git-diff pathspec, the two uses have incompatible character requirements — square brackets are valid in filesystem paths but are glob syntax in pathspecs. Split into two regexes with clearly documented scopes rather than letting a single regex serve both purposes. Reservations are compared literally (never as globs) so the extended alphabet is safe there, while the pathspec use requires the restricted alphabet to remain.
+### WSF Fast-Path Function Inventory Must Use the Measured Post-Deploy Baseline, Not Re-Add Retained Names (PR #555)
+The fast-path preflight in `read-inventory.mjs` calculated the expected function count as `expectedPriorFunctions + candidateAddedFunctions.length`. The defect: `expectedPriorFunctions` is written by the pin generator as the live inventory count *after* the prior deploy, so it already includes the functions from `candidateAddedFunctions`. Adding that length a second time inflated the expected count — in the concrete case, 46 base functions plus 3 retained social callables = 49, but the preflight expected 52 and refused the correct live 49 with "approved against 52."
+
+The fix uses exactly `expectedPriorFunctions` as the fast-path baseline. A separate retained-name check verifies that each name in `candidateAddedFunctions` is present in the live list, refusing by name if a function is missing even when the count matches (catches swapping one function for an impostor at the same count). A malformed `candidateAddedFunctions` value (non-array, empty strings, non-strings) fails closed. The normal reviewed-pin path is not affected.
+
+Lesson: when a preflight baseline is stored as a measured post-deploy count, treat it as the complete truth — do not add back the names that contributed to it. A double-add produces a floor higher than any correct deployment can reach, so the gate refuses every valid candidate indefinitely. Before writing a count-based gate, confirm whether the stored count already includes the items being re-added.
+
+### WSF Fast-Path Failed Staging Targets Need Owner-Explicit One-Shot Retry Authorization (PR #556)
+A failed fast-path staging run left the `stagingTarget` permanently BLOCKED. The dispatcher's message said "a new target or a recorded decision" was required, but no `authorize-retry` decision type existed in the schema. There was no recovery path short of setting a new target (which voids the existing one).
+
+PR #556 adds `authorize-retry` — a MANUAL, OWNER-only, comment-source decision (never derived) that authorizes a one-shot re-dispatch. It requires: the current `stagingTarget` and its packet; the ID of the specific failed run; the repair packet and its merge SHA (the repair must be INTEGRATED at that exact SHA — a repair that has moved past INTEGRATED is refused). One-shot enforcement: the authorization is spent once any newer attempt at the target exists. Because the dispatcher's own re-dispatch creates a newer attempt, the authorization cannot fire twice. A fresh failure after a re-dispatch requires a fresh owner decision naming the new run ID.
+
+The default behavior is unchanged — without an explicit authorization, a failed target stays BLOCKED. The "no blind re-send" invariant is preserved: the dispatcher refuses if no current attempt at the target is visible, so the authorization cannot trigger without a concrete failed run to name.
+
+Lesson: any control-plane transition that can fail should have an explicit, owner-gated one-shot recovery path. "No automatic recovery" is a valid design choice for safety, but it requires a documented manual escape that (a) names the specific failure being recovered from, (b) requires the root cause to be repaired before it fires, and (c) is consumed on use so it cannot silently persist and re-fire on a later unrelated failure.
