@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "5f461ba2905f7c37f72a4ce19380659472481ff21b8adc417e5876b05cc03311",
-  "eventCount": 107,
+  "ledgerHead": "14764422fdf992d5479595b76c3b05cd8cb08cc7290295e89df9112d96c7fc75",
+  "eventCount": 109,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -64,7 +64,9 @@
     "W4": [],
     "W5": [],
     "W7": [],
-    "W9": []
+    "W9": [
+      "KIOSK-PAIRING-CLARITY-PROOF-1"
+    ]
   },
   "packets": {
     "AUTONOMY-ROUTER-1C": {
@@ -279,7 +281,7 @@
       },
       "label": "Allow exact Expo Router filenames in control packet path reservations without widening other path syntax",
       "origin": "ledger",
-      "phase": "ACCEPTED",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -291,7 +293,7 @@
         "subjectSha": "3cc44d30ee7242c29b6879dd42ad0ce87c25d398",
         "prHeadSha": "3cc44d30ee7242c29b6879dd42ad0ce87c25d398",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "6687440d9eb45dfdec635b4313bd1422c7df8d9b"
       },
       "proof": null,
       "served": null,
@@ -319,8 +321,8 @@
           "id": 5945073242
         },
         "lastTransition": {
-          "kind": "comment",
-          "id": 5945073242
+          "kind": "pull_request",
+          "id": 552
         }
       },
       "review": {
@@ -334,6 +336,63 @@
         "after": "director"
       },
       "deliveries": 1,
+      "pendingFinding": null
+    },
+    "KIOSK-PAIRING-CLARITY-PROOF-1": {
+      "owner": "W9",
+      "kind": "work",
+      "completion": {
+        "terminal": "STAGED",
+        "proofType": "hosted"
+      },
+      "label": "Clarify venue-station pairing from the Champion's own phone and prove the existing flow end-to-end",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "apps/westayfit/app/station/[goalId].tsx",
+        "apps/westayfit/app/(tabs)/(home)/community/[groupId]/index.tsx",
+        "apps/westayfit/tests-e2e/station-enrollment.spec.ts"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 5944922457
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 5944922457
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "journey-qa",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
       "pendingFinding": null
     },
     "STAGING-FASTPATH-DOCS-LINEAGE-FIX": {
