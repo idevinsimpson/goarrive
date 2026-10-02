@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "304dca683c8a69dd87d6a6e56fcaf6a231aba1c4df5b325a6d95146bc4978935",
-  "eventCount": 188,
+  "ledgerHead": "54c23fc89c1df8c2dcee0e64471648e18d2418175bcf9d88877ca960365e8c30",
+  "eventCount": 189,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -479,7 +479,7 @@
       },
       "label": "Add a fail-closed one-shot recorded retry authorization for an exact repaired staging target and failed run",
       "origin": "ledger",
-      "phase": "ACCEPTED",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -491,7 +491,7 @@
         "subjectSha": "92fdfecd3760559f84b00b55ef847ad5c46738c9",
         "prHeadSha": "92fdfecd3760559f84b00b55ef847ad5c46738c9",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "b4b479a62d380edfe3f792bfa6e6090d4979f9c4"
       },
       "proof": null,
       "served": null,
@@ -525,8 +525,8 @@
           "id": 5955164776
         },
         "lastTransition": {
-          "kind": "comment",
-          "id": 5955164776
+          "kind": "pull_request",
+          "id": 556
         }
       },
       "review": {
