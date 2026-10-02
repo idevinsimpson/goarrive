@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "c80adc94437ef3a88e4f509363266846f576c8d586f827e25d402c54e8d42b10",
-  "eventCount": 175,
+  "ledgerHead": "9ef3a75a619f85414d40d02d8e00e90297fd387c302d09b74b6e745c63b63ec9",
+  "eventCount": 177,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -479,7 +479,7 @@
       },
       "label": "Add a fail-closed one-shot recorded retry authorization for an exact repaired staging target and failed run",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "CHANGES_REQUESTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -521,7 +521,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5954503095
+          "id": 5954670197
         }
       },
       "review": {
@@ -1147,7 +1147,16 @@
       "ack": {
         "kind": "comment",
         "id": 5954543919
-      }
+      },
+      "superseded": true
+    },
+    "c9b0da9807d3467acdfba18417c3ebb0b1cdd67a46bc0f0f99897b77c62bce34": {
+      "packet": "STAGING-FASTPATH-FAILED-TARGET-RETRY-FIX",
+      "worker": "W3",
+      "reason": "handback",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
