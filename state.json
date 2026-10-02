@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "0064a5cb06d35866a169ed8c9f40cf86d951a77a30dea178632d5e428b213197",
-  "eventCount": 103,
+  "ledgerHead": "98ba36465faf7ab6ec70562b0b2e8f3ec77c7113fdbfe3a3680d127bcdbbcf67",
+  "eventCount": 104,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -782,11 +782,14 @@
       "packet": "CONTROL-EXPO-ROUTE-PATH-GRAMMAR",
       "worker": "W4",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         5945036391
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 5945047502
+      }
     }
   },
   "fastpath": {
