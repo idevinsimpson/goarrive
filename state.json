@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "78ad4e22313733e803dec51adb583af33c85b26398c497837569e1aec4407487",
-  "eventCount": 93,
+  "ledgerHead": "8c014807d83f60b72e5e77a3c58b6636cf8356fe0fff84c9985aab3bd7e4ad47",
+  "eventCount": 94,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -60,7 +60,9 @@
     }
   },
   "queue": {
-    "W3": [],
+    "W3": [
+      "CONTROL-EXPO-ROUTE-PATH-GRAMMAR"
+    ],
     "W4": [],
     "W5": [],
     "W7": [],
@@ -255,6 +257,62 @@
         "lastTransition": {
           "kind": "comment",
           "id": 5857966052
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
+      "pendingFinding": null
+    },
+    "CONTROL-EXPO-ROUTE-PATH-GRAMMAR": {
+      "owner": "W3",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Allow exact Expo Router filenames in control packet path reservations without widening other path syntax",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "tools/wsf-control/schema.mjs",
+        "tools/wsf-control/tests/v2.test.mjs"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 5944949756
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 5944949756
         }
       },
       "review": {
