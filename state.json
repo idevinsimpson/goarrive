@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "7eccfe696b6c09894e3db0596a02340d4cbd03fb2b2d363027fc3b2c345e9b5e",
-  "eventCount": 209,
+  "ledgerHead": "a99bd995d08e25c0f791c2410d28bb1d37fbf00f3958a04a5602f41de15ed3d0",
+  "eventCount": 213,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -758,7 +758,7 @@
       },
       "label": "Derive the exact successful staging run proof and pointer sequence when the workflow-run wake is missed",
       "origin": "ledger",
-      "phase": "CHANGES_REQUESTED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -767,8 +767,8 @@
         "W4"
       ],
       "artifact": {
-        "subjectSha": "a9a60edbd436eb910f9ef33953ecab35897e2b1f",
-        "prHeadSha": "a9a60edbd436eb910f9ef33953ecab35897e2b1f",
+        "subjectSha": "cc1808985f067a04eef6173509ecd667d1d237fe",
+        "prHeadSha": "cc1808985f067a04eef6173509ecd667d1d237fe",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -798,7 +798,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5956405530
+          "id": 5956469437
         }
       },
       "review": {
@@ -811,7 +811,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 1,
+      "deliveries": 2,
       "pendingFinding": null
     }
   },
@@ -1298,7 +1298,16 @@
       "ack": {
         "kind": "comment",
         "id": 5956449319
-      }
+      },
+      "superseded": true
+    },
+    "4060de349ff9c551295bfddcdaa7048a123ce5409efeb2042b051957e6b4d988": {
+      "packet": "STAGING-PROOF-RECONCILE-ROUTING-FIX",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
