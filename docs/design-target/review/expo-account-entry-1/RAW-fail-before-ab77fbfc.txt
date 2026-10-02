@@ -1,13 +1,13 @@
 
-Running 11 tests using 1 worker
+Running 12 tests using 1 worker
 
-[1/11] [chromium] › tests-e2e/e2-join-flow.spec.ts:172:5 › E2 §3.1/§3.4/§3.5: a signed-out visitor with only a join URL reaches /community/<id>
-[2/11] [chromium] › tests-e2e/e2-join-flow.spec.ts:271:5 › E2 §3.4 negative: /join/<unknown-code> cold-loads 200 and renders the not-valid state
-[3/11] [chromium] › tests-e2e/event-return.spec.ts:210:5 › a MEMBER who signs in from a scanned event is returned to it, and it is usable
-[4/11] [chromium] › tests-e2e/event-return.spec.ts:258:5 › a NEW account is returned to the scanned event after verifying, and the screen is honest that they are not a member
-[5/11] [chromium] › tests-e2e/event-return.spec.ts:309:5 › a stored return that cannot be vouched for sends nobody anywhere
-[6/11] [chromium] › tests-e2e/event-return.spec.ts:384:5 › EAE signed out: the event names both ways in and says what an account takes, and no way on is a live control yet
-  1) [chromium] › tests-e2e/event-return.spec.ts:384:5 › EAE signed out: the event names both ways in and says what an account takes, and no way on is a live control yet 
+[1/12] [chromium] › tests-e2e/e2-join-flow.spec.ts:172:5 › E2 §3.1/§3.4/§3.5: a signed-out visitor with only a join URL reaches /community/<id>
+[2/12] [chromium] › tests-e2e/e2-join-flow.spec.ts:271:5 › E2 §3.4 negative: /join/<unknown-code> cold-loads 200 and renders the not-valid state
+[3/12] [chromium] › tests-e2e/event-return.spec.ts:210:5 › a MEMBER who signs in from a scanned event is returned to it, and it is usable
+[4/12] [chromium] › tests-e2e/event-return.spec.ts:258:5 › a NEW account is returned to the scanned event after verifying, and the screen is honest that they are not a member
+[5/12] [chromium] › tests-e2e/event-return.spec.ts:309:5 › a stored return that cannot be vouched for sends nobody anywhere
+[6/12] [chromium] › tests-e2e/event-return.spec.ts:385:5 › EAE signed out: the event names both ways in and says what an account takes, and no way on is a live control yet
+  1) [chromium] › tests-e2e/event-return.spec.ts:385:5 › EAE signed out: the event names both ways in and says what an account takes, and no way on is a live control yet 
 
     Error: expect(locator).toBeVisible() failed
 
@@ -21,25 +21,25 @@ Running 11 tests using 1 worker
       - waiting for locator('[data-testid="wsf-event-ways"]:visible')
 
 
-      401 |   if (!EAE_BEFORE) {
-      402 |     const ways = shown(page, 'wsf-event-ways');
-    > 403 |     await expect(ways).toBeVisible();
+      402 |   if (!EAE_BEFORE) {
+      403 |     const ways = shown(page, 'wsf-event-ways');
+    > 404 |     await expect(ways).toBeVisible();
           |                        ^
-      404 |     await expect(ways).toContainText(EAE_PHONE_LABEL);
-      405 |     await expect(ways).toContainText(EAE_QUEUE_LABEL);
-      406 |     await expect(ways).toContainText('once you’re signed in');
-        at /home/user/goarrive/apps/westayfit/tests-e2e/event-return.spec.ts:403:24
+      405 |     await expect(ways).toContainText(EAE_PHONE_LABEL);
+      406 |     await expect(ways).toContainText(EAE_QUEUE_LABEL);
+      407 |     await expect(ways).toContainText('once you’re signed in');
+        at /home/user/goarrive/apps/westayfit/tests-e2e/event-return.spec.ts:404:24
 
     Error Context: test-results/event-return-EAE-signed-ou-4fa2f-ay-on-is-a-live-control-yet-chromium/error-context.md
 
 
-[7/11] [chromium] › tests-e2e/event-return.spec.ts:416:5 › EAE wrong account: a non-member account is told which account it is and can switch, and the event comes back for the right one
-  2) [chromium] › tests-e2e/event-return.spec.ts:416:5 › EAE wrong account: a non-member account is told which account it is and can switch, and the event comes back for the right one 
+[7/12] [chromium] › tests-e2e/event-return.spec.ts:417:5 › EAE wrong account: a non-member account is told which account it is and can switch, and the event comes back for the right one
+  2) [chromium] › tests-e2e/event-return.spec.ts:417:5 › EAE wrong account: a non-member account is told which account it is and can switch, and the event comes back for the right one 
 
     Error: expect(locator).toContainText(expected) failed
 
     Locator: locator('[data-testid="wsf-event-not-member-account"]:visible')
-    Expected substring: "wsf-eae-wrong-murjb2q1@example.com"
+    Expected substring: "wsf-eae-wrong-murk0cwe@example.com"
     Timeout: 5000ms
     Error: element(s) not found
 
@@ -48,23 +48,111 @@ Running 11 tests using 1 worker
       - waiting for locator('[data-testid="wsf-event-not-member-account"]:visible')
 
 
-      445 |   if (EAE_BEFORE) return;
-      446 |   // WHICH account this is, so a person can see they used the wrong one.
-    > 447 |   await expect(shown(page, 'wsf-event-not-member-account')).toContainText(wrongEmail);
+      446 |   if (EAE_BEFORE) return;
+      447 |   // WHICH account this is, so a person can see they used the wrong one.
+    > 448 |   await expect(shown(page, 'wsf-event-not-member-account')).toContainText(wrongEmail);
           |                                                             ^
-      448 |   // And a way out that is not "Back to home".
-      449 |   const sw = shown(page, 'wsf-event-switch-account');
-      450 |   await expect(sw).toBeVisible();
-        at /home/user/goarrive/apps/westayfit/tests-e2e/event-return.spec.ts:447:61
+      449 |   // And a way out that is not "Back to home".
+      450 |   const sw = shown(page, 'wsf-event-switch-account');
+      451 |   await expect(sw).toBeVisible();
+        at /home/user/goarrive/apps/westayfit/tests-e2e/event-return.spec.ts:448:61
 
     Error Context: test-results/event-return-EAE-wrong-acc-86488-omes-back-for-the-right-one-chromium/error-context.md
 
 
-[8/11] [chromium] › tests-e2e/event-return.spec.ts:472:5 › EAE interrupted: a reload at verify-email and at profile-setup still returns the new account to the event
-[9/11] [chromium] › tests-e2e/event-return.spec.ts:512:5 › EAE not now: the cancel boundary forgets the event, so a later sign-in lands home
-[10/11] [chromium] › tests-e2e/ui-event-activity-choice.spec.ts:335:5 › the scanned journey: event and activity survive a real signup, and nothing is in the line until the queue is confirmed
-[11/11] [chromium] › tests-e2e/ui-event-activity-choice.spec.ts:481:5 › “Use my phone” is the contribution flow that already exists, and is offered on the same terms
-  2 failed
-    [chromium] › tests-e2e/event-return.spec.ts:384:5 › EAE signed out: the event names both ways in and says what an account takes, and no way on is a live control yet 
-    [chromium] › tests-e2e/event-return.spec.ts:416:5 › EAE wrong account: a non-member account is told which account it is and can switch, and the event comes back for the right one 
-  9 passed (40.8s)
+[8/12] [chromium] › tests-e2e/event-return.spec.ts:473:5 › EAE interrupted: a reload at verify-email and at profile-setup still returns the new account to the event
+[9/12] [chromium] › tests-e2e/event-return.spec.ts:513:5 › EAE not now: the cancel boundary forgets the event, so a later sign-in lands home
+[10/12] [chromium] › tests-e2e/event-return.spec.ts:549:5 › EAE landing choice: a member sees Move on my phone and Use a kiosk, each goes where it always went, and neither joins a line
+  3) [chromium] › tests-e2e/event-return.spec.ts:549:5 › EAE landing choice: a member sees Move on my phone and Use a kiosk, each goes where it always went, and neither joins a line 
+
+    Error: expect(locator).toHaveText(expected) failed
+
+    Locator:  locator('[data-testid="wsf-event-add"]:visible')
+    Expected: "Move on my phone"
+    Received: "Use my phone"
+    Timeout:  5000ms
+
+    Call log:
+      - Expect "toHaveText" with timeout 5000ms
+      - waiting for locator('[data-testid="wsf-event-add"]:visible')
+        14 × locator resolved to <a role="link" tabindex="0" data-testid="wsf-event-add" class="css-g5y9jx r-1loqt21 r-1otgn73" href="/contribute/evtReturn-goal-eae-choice-murk0s84-791b0a">…</a>
+           - unexpected value "Use my phone"
+
+
+      581 |     for (const v of EAE_VIEWPORTS) {
+      582 |       await page.setViewportSize({ width: v.width, height: v.height });
+    > 583 |       await expect(phone).toHaveText(EAE_PHONE_LABEL);
+          |                           ^
+      584 |       await expect(kiosk).toHaveText(EAE_QUEUE_LABEL);
+      585 |     }
+      586 |     await page.setViewportSize({ width: 390, height: 844 });
+        at /home/user/goarrive/apps/westayfit/tests-e2e/event-return.spec.ts:583:27
+
+    Error Context: test-results/event-return-EAE-landing-c-659e3-nt-and-neither-joins-a-line-chromium/error-context.md
+
+
+[11/12] [chromium] › tests-e2e/ui-event-activity-choice.spec.ts:339:5 › the scanned journey: event and activity survive a real signup, and nothing is in the line until the queue is confirmed
+  4) [chromium] › tests-e2e/ui-event-activity-choice.spec.ts:339:5 › the scanned journey: event and activity survive a real signup, and nothing is in the line until the queue is confirmed 
+
+    Error: expect(locator).toHaveText(expected) failed
+
+    Locator:  getByTestId('wsf-event-add')
+    Expected: "Move on my phone"
+    Received: "Use my phone"
+    Timeout:  5000ms
+
+    Call log:
+      - Expect "toHaveText" with timeout 5000ms
+      - waiting for getByTestId('wsf-event-add')
+        14 × locator resolved to <a role="link" tabindex="0" data-testid="wsf-event-add" class="css-g5y9jx r-1loqt21 r-1otgn73" href="/contribute/uiEA-goal-journey-murk0xg2-a5ad4b">…</a>
+           - unexpected value "Use my phone"
+
+
+      430 |   await expect(page.getByTestId('wsf-event-choice-activity')).toHaveText(unit);
+      431 |   // The Director's two sentences, exactly.
+    > 432 |   await expect(page.getByTestId('wsf-event-add')).toHaveText(PHONE_LABEL);
+          |                                                   ^
+      433 |   await expect(page.getByTestId('wsf-event-queue-start')).toHaveText(QUEUE_LABEL);
+      434 |   await expect(page.getByTestId('wsf-event-choice-note')).toHaveText(CHOICE_NOTE);
+      435 |   await snap(page, '03-two-choices');
+        at /home/user/goarrive/apps/westayfit/tests-e2e/ui-event-activity-choice.spec.ts:432:51
+
+    Error Context: test-results/ui-event-activity-choice-t-05967-ntil-the-queue-is-confirmed-chromium/error-context.md
+
+
+[12/12] [chromium] › tests-e2e/ui-event-activity-choice.spec.ts:485:5 › “Move on my phone” is the contribution flow that already exists, and is offered on the same terms
+  5) [chromium] › tests-e2e/ui-event-activity-choice.spec.ts:485:5 › “Move on my phone” is the contribution flow that already exists, and is offered on the same terms 
+
+    Error: expect(locator).toHaveText(expected) failed
+
+    Locator:  getByTestId('wsf-event-add')
+    Expected: "Move on my phone"
+    Received: "Use my phone"
+    Timeout:  5000ms
+
+    Call log:
+      - Expect "toHaveText" with timeout 5000ms
+      - waiting for getByTestId('wsf-event-add')
+        14 × locator resolved to <a role="link" tabindex="0" data-testid="wsf-event-add" class="css-g5y9jx r-1loqt21 r-1otgn73" href="/contribute/uiEA-goal-phone-murk14xi-63db7f">…</a>
+           - unexpected value "Use my phone"
+
+
+      521 |
+      522 |   await page.getByTestId(`wsf-event-activity-${unit}`).click();
+    > 523 |   await expect(page.getByTestId('wsf-event-add')).toHaveText(PHONE_LABEL);
+          |                                                   ^
+      524 |
+      525 |   // ---- and it lands in the ORDINARY contribution flow --------------------
+      526 |   await page.getByTestId('wsf-event-add').click();
+        at /home/user/goarrive/apps/westayfit/tests-e2e/ui-event-activity-choice.spec.ts:523:51
+
+    Error Context: test-results/ui-event-activity-choice-“-2b1f8-s-offered-on-the-same-terms-chromium/error-context.md
+
+
+  5 failed
+    [chromium] › tests-e2e/event-return.spec.ts:385:5 › EAE signed out: the event names both ways in and says what an account takes, and no way on is a live control yet 
+    [chromium] › tests-e2e/event-return.spec.ts:417:5 › EAE wrong account: a non-member account is told which account it is and can switch, and the event comes back for the right one 
+    [chromium] › tests-e2e/event-return.spec.ts:549:5 › EAE landing choice: a member sees Move on my phone and Use a kiosk, each goes where it always went, and neither joins a line 
+    [chromium] › tests-e2e/ui-event-activity-choice.spec.ts:339:5 › the scanned journey: event and activity survive a real signup, and nothing is in the line until the queue is confirmed 
+    [chromium] › tests-e2e/ui-event-activity-choice.spec.ts:485:5 › “Move on my phone” is the contribution flow that already exists, and is offered on the same terms 
+  7 passed (57.1s)

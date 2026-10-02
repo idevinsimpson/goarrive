@@ -1,0 +1,42 @@
+
+Running 37 tests using 1 worker
+
+[1/37] [chromium] › tests-e2e/design-target-event-queue-capture.spec.ts:104:5 › Atlas Batch D renders at three phone classes, plus its contact sheet
+[2/37] [chromium] › tests-e2e/e2-join-flow.spec.ts:172:5 › E2 §3.1/§3.4/§3.5: a signed-out visitor with only a join URL reaches /community/<id>
+[3/37] [chromium] › tests-e2e/e2-join-flow.spec.ts:271:5 › E2 §3.4 negative: /join/<unknown-code> cold-loads 200 and renders the not-valid state
+[4/37] [chromium] › tests-e2e/event-return.spec.ts:210:5 › a MEMBER who signs in from a scanned event is returned to it, and it is usable
+[5/37] [chromium] › tests-e2e/event-return.spec.ts:258:5 › a NEW account is returned to the scanned event after verifying, and the screen is honest that they are not a member
+[6/37] [chromium] › tests-e2e/event-return.spec.ts:309:5 › a stored return that cannot be vouched for sends nobody anywhere
+[7/37] [chromium] › tests-e2e/event-return.spec.ts:385:5 › EAE signed out: the event names both ways in and says what an account takes, and no way on is a live control yet
+[8/37] [chromium] › tests-e2e/event-return.spec.ts:417:5 › EAE wrong account: a non-member account is told which account it is and can switch, and the event comes back for the right one
+[9/37] [chromium] › tests-e2e/event-return.spec.ts:473:5 › EAE interrupted: a reload at verify-email and at profile-setup still returns the new account to the event
+[10/37] [chromium] › tests-e2e/event-return.spec.ts:513:5 › EAE not now: the cancel boundary forgets the event, so a later sign-in lands home
+[11/37] [chromium] › tests-e2e/event-return.spec.ts:549:5 › EAE landing choice: a member sees Move on my phone and Use a kiosk, each goes where it always went, and neither joins a line
+[12/37] [chromium] › tests-e2e/move-follow-along.spec.ts:125:5 › ready, then a 3-second count in, then a 60-second round
+[13/37] [chromium] › tests-e2e/move-follow-along.spec.ts:200:5 › stopping early leads to Enter my reps, and the round records exactly once
+[14/37] [chromium] › tests-e2e/move-follow-along.spec.ts:273:5 › running the round to the end leads to the same Enter my reps
+[15/37] [chromium] › tests-e2e/move-follow-along.spec.ts:298:5 › a hidden tab pauses the round instead of consuming it
+[16/37] [chromium] › tests-e2e/move-follow-along.spec.ts:332:5 › the event, the activity and the way back survive the round
+[17/37] [chromium] › tests-e2e/move-follow-along.spec.ts:367:5 › a station keeps a readable panel beside the player; a phone stacks it
+[18/37] [chromium] › tests-e2e/move-follow-along.spec.ts:430:5 › a goal this screen cannot read says so, and offers nothing it cannot back up
+[19/37] [chromium] › tests-e2e/queue-call-by-name.spec.ts:240:5 › a member chooses initials, the screen calls them by those initials and a code, their phone says it is their turn and taps ready, and recording clears the screen
+[20/37] [chromium] › tests-e2e/queue-call-by-name.spec.ts:516:5 › a person can take their own name off the screen, immediately and without asking anybody
+[21/37] [chromium] › tests-e2e/queue-call-by-name.spec.ts:595:5 › a person waiting can switch to their own phone, which frees the place and opens their activity
+[22/37] [chromium] › tests-e2e/station-enrollment.spec.ts:203:5 › a Champion enrols a screen, the attendee codes grant nothing, and revoking empties the screen
+[23/37] [chromium] › tests-e2e/station-enrollment.spec.ts:395:5 › a station on a goal that is not authorized for display refuses in the kiosk’s own words
+[24/37] [chromium] › tests-e2e/station-enrollment.spec.ts:560:5 › pairing clarity: the venue screen points to the Champion’s own phone, each screen pairs by its own code and slot, and an expired code is replaced
+[25/37] [chromium] › tests-e2e/ui-app-shell.spec.ts:80:5 › the shell carries four destinations and the MOVE action, and Home is the community
+[26/37] [chromium] › tests-e2e/ui-app-shell.spec.ts:198:5 › Activity shows what this member actually recorded, and says it is private
+[27/37] [chromium] › tests-e2e/ui-app-shell.spec.ts:245:5 › the shell stays off the event surfaces and off the signed-out ones
+[28/37] [chromium] › tests-e2e/ui-combined-goal.spec.ts:189:5 › Set up kiosk asks one question, defaults to One goal, and leaves the per-goal controls exactly as they were
+[29/37] [chromium] › tests-e2e/ui-combined-goal.spec.ts:239:5 › a Champion combines two activities, and the address opens cold, reloads, and carries no authority
+[30/37] [chromium] › tests-e2e/ui-combined-goal.spec.ts:417:5 › an unknown combined address says the same nothing an unauthorized one says
+[31/37] [chromium] › tests-e2e/ui-combined-goal.spec.ts:446:5 › a combined event offers every frozen activity by name, and the ways on appear only after one is chosen
+[32/37] [chromium] › tests-e2e/ui-combined-goal.spec.ts:544:5 › a combined event: the station is on one activity, the person picks the other, and the other is what counts
+[33/37] [chromium] › tests-e2e/ui-device-choice.spec.ts:287:5 › “My own phone”: the ordinary path, and still signed in at the end
+[34/37] [chromium] › tests-e2e/ui-device-choice.spec.ts:412:5 › “A shared screen here”: the existing kiosk session, and an empty device when it ends
+[35/37] [chromium] › tests-e2e/ui-device-choice.spec.ts:546:5 › the signup path: a shared screen is never given an account, and an ordinary join is never asked
+[36/37] [chromium] › tests-e2e/ui-event-activity-choice.spec.ts:339:5 › the scanned journey: event and activity survive a real signup, and nothing is in the line until the queue is confirmed
+[37/37] [chromium] › tests-e2e/ui-event-activity-choice.spec.ts:485:5 › “Move on my phone” is the contribution flow that already exists, and is offered on the same terms
+  1 skipped
+  36 passed (5.5m)
