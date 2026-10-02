@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "fd8878b0af6af9c3d99be35cc9c1dec5e448f4ec350e926ce04671e93cdc36a6",
-  "eventCount": 270,
+  "ledgerHead": "592a08b2bfd1e20f8692c0f391b0de53d233247e688c69df9065496b9279bfc8",
+  "eventCount": 272,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -65,9 +65,7 @@
     "W4": [],
     "W5": [],
     "W7": [],
-    "W9": [
-      "EXPO-ATTENDEE-JOURNEY-PROOF-1"
-    ]
+    "W9": []
   },
   "packets": {
     "AUTONOMY-ROUTER-1C": {
@@ -491,10 +489,10 @@
       },
       "label": "Prove the existing attendee phone and two-station journey and expose only real missing seams; test and evidence source, not live expo acceptance",
       "origin": "ledger",
-      "phase": "QUEUED",
+      "phase": "RELEASED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
-      "inbox": null,
+      "inbox": 497,
       "pr": null,
       "reviewers": [],
       "artifact": {
@@ -505,7 +503,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": null,
+      "releasedQueueIndex": 0,
       "reviewedBy": [],
       "subjectPaths": [
         "apps/westayfit/tests-e2e/expo-attendee-journey.spec.ts",
@@ -521,11 +519,14 @@
           "kind": "comment",
           "id": 5962994387
         },
-        "released": null,
+        "released": {
+          "kind": "comment",
+          "id": 5963015704
+        },
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5962994387
+          "id": 5963015704
         }
       },
       "review": {
@@ -1710,6 +1711,14 @@
         "kind": "comment",
         "id": 5962947369
       }
+    },
+    "95ba0af09ab9ac90de7b7c99596f2b9cb5db65905fa583825f3b59c89845bbed": {
+      "packet": "EXPO-ATTENDEE-JOURNEY-PROOF-1",
+      "worker": "W9",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
