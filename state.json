@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "19f26b9375543106570fa2ace30b865c2031006e30ce492bc2ab9f890be0c068",
-  "eventCount": 204,
+  "ledgerHead": "15c3506f3972f5708853812398d17e99dc17cc4ecf2e14d52439ad1a5a45267a",
+  "eventCount": 205,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1277,11 +1277,14 @@
       "packet": "STAGING-PROOF-RECONCILE-ROUTING-FIX",
       "worker": "W4",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         5956269103
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 5956283838
+      }
     }
   },
   "fastpath": {
