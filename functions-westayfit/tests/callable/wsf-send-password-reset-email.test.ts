@@ -226,3 +226,113 @@ describe('wsfSendPasswordResetEmail', () => {
     }
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EMAIL-STAGING-REPAIR: failure accounting, concurrency and the enumeration
+// write pattern. Staging field test: a reset request answered `internal` with
+// no message; a failed attempt also used to strand the retry behind the cooldown.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('wsfSendPasswordResetEmail failure accounting (emulators)', () => {
+  const savedEnv = { ...process.env };
+  let fetchSpy: jest.SpyInstance;
+  let errorSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    setConfig();
+    fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({ ok: true, status: 200, json: async () => ({ id: 'stub' }) } as never);
+    errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+  });
+  afterEach(() => {
+    fetchSpy.mockRestore();
+    errorSpy.mockRestore();
+    jest.restoreAllMocks();
+    for (const k of CONFIG_KEYS) {
+      if (savedEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedEnv[k]!;
+    }
+  });
+
+  async function known(tag: string) {
+    const email = `pw-acct-${tag}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.test`;
+    await clearQuota(await emailHash(email));
+    await createAccount(email, 'strongpassword');
+    return email;
+  }
+  const quotaDoc = async (email: string) => (await getFirestore().doc(`wsfPasswordResetSends/${await emailHash(email)}`).get()).data();
+  const noAddressLogged = (email: string) => {
+    for (const call of errorSpy.mock.calls) for (const arg of call) expect(String(arg)).not.toContain(email);
+  };
+
+  it('provider rejection: internal, cooldown given back, an immediate retry sends', async () => {
+    const email = await known('reject');
+    fetchSpy.mockResolvedValueOnce({ ok: false, status: 422 } as never);
+    expect(((await wsfSendPasswordResetEmail.run(req({ email })).catch((e) => e)) as HttpsError).code).toBe('internal');
+    expect(errorSpy).toHaveBeenCalledWith('[wsfSendPasswordResetEmail] provider rejected send', 422);
+    expect((await quotaDoc(email))?.lastSentAt).toBeUndefined();
+    expect((await quotaDoc(email))?.countToday).toBe(1);
+    await expect(wsfSendPasswordResetEmail.run(req({ email }))).resolves.toEqual({ accepted: true });
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    noAddressLogged(email);
+  });
+
+  it('a network failure is status 0, released and retryable', async () => {
+    const email = await known('network');
+    fetchSpy.mockRejectedValueOnce(new TypeError('fetch failed'));
+    expect(((await wsfSendPasswordResetEmail.run(req({ email })).catch((e) => e)) as HttpsError).code).toBe('internal');
+    expect(errorSpy).toHaveBeenCalledWith('[wsfSendPasswordResetEmail] provider rejected send', 0);
+    await expect(wsfSendPasswordResetEmail.run(req({ email }))).resolves.toEqual({ accepted: true });
+  });
+
+  it('Admin link-minting failure (not an enumeration code): internal, code only, nothing POSTed, released', async () => {
+    const email = await known('admin');
+    const spy = jest.spyOn(getAdminAuth(), 'generatePasswordResetLink')
+      .mockRejectedValueOnce(Object.assign(new Error(`internal error for ${email}`), { code: 'auth/internal-error' }));
+    expect(((await wsfSendPasswordResetEmail.run(req({ email })).catch((e) => e)) as HttpsError).code).toBe('internal');
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledWith('[wsfSendPasswordResetEmail] Admin SDK failed', 'auth/internal-error');
+    expect((await quotaDoc(email))?.lastSentAt).toBeUndefined();
+    noAddressLogged(email);
+    spy.mockRestore();
+    await expect(wsfSendPasswordResetEmail.run(req({ email }))).resolves.toEqual({ accepted: true });
+  });
+
+  it('unknown address KEEPS the reservation exactly as a real send does (no existence signal in the quota writes)', async () => {
+    const unknown = `pw-none-${Date.now()}@example.test`;
+    await clearQuota(await emailHash(unknown));
+    const real = await known('real');
+    await expect(wsfSendPasswordResetEmail.run(req({ email: unknown }))).resolves.toEqual({ accepted: true });
+    await expect(wsfSendPasswordResetEmail.run(req({ email: real }))).resolves.toEqual({ accepted: true });
+    const [u, k] = [await quotaDoc(unknown), await quotaDoc(real)];
+    expect(Object.keys(u ?? {}).sort()).toEqual(Object.keys(k ?? {}).sort());
+    expect([u?.countToday, k?.countToday]).toEqual([1, 1]);
+    expect(u?.lastSentAt).toEqual(expect.any(Number));
+    expect(k?.lastSentAt).toEqual(expect.any(Number));
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('failed attempts count toward the daily cap', async () => {
+    const email = await known('cap');
+    fetchSpy.mockResolvedValue({ ok: false, status: 500 } as never);
+    for (let i = 0; i < 10; i += 1) expect(((await wsfSendPasswordResetEmail.run(req({ email })).catch((e) => e)) as HttpsError).code).toBe('internal');
+    const capped = (await wsfSendPasswordResetEmail.run(req({ email })).catch((e) => e)) as HttpsError;
+    expect(capped.code).toBe('resource-exhausted');
+    expect(capped.message).toMatch(/today/);
+    expect(fetchSpy).toHaveBeenCalledTimes(10);
+  });
+
+  it('concurrent requests for one address: exactly one sends', async () => {
+    const email = await known('race');
+    fetchSpy.mockImplementation(async () => { await new Promise((r) => setTimeout(r, 150)); return { ok: true, status: 200 } as never; });
+    const results = await Promise.allSettled([1, 2, 3].map(() => wsfSendPasswordResetEmail.run(req({ email }))));
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((r) => r.status === 'rejected').map((r) => ((r as PromiseRejectedResult).reason as HttpsError).code)).toEqual(['resource-exhausted', 'resource-exhausted']);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('the address is normalized before the quota key, so case variants share one quota', async () => {
+    const email = await known('case');
+    await expect(wsfSendPasswordResetEmail.run(req({ email }))).resolves.toEqual({ accepted: true });
+    expect(((await wsfSendPasswordResetEmail.run(req({ email: email.toUpperCase() })).catch((e) => e)) as HttpsError).code).toBe('resource-exhausted');
+  });
+});

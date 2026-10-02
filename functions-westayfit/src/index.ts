@@ -2,7 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 
 import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
-import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore';
+import { FieldValue, Timestamp, getFirestore, type DocumentReference } from 'firebase-admin/firestore';
 import { defineSecret, projectID } from 'firebase-functions/params';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 
@@ -375,32 +375,101 @@ export function retargetActionLink(link: string, handler: string): string {
   return target.toString();
 }
 
-/** Cooldown plus daily cap, per uid. Returns ms still to wait, or 0 when clear. */
-async function checkSendQuota(uid: string, now: number): Promise<number> {
-  const ref = getFirestore().doc(`wsfVerificationSends/${uid}`);
-  const snap = await ref.get();
-  const data = snap.data() as
-    | { lastSentAt?: number; dayStart?: number; countToday?: number }
-    | undefined;
+/**
+ * The send quota, shared by verification (keyed by uid) and reset (keyed by a
+ * hash of the address): a cooldown between sends and a daily cap.
+ *
+ * EMAIL-STAGING-REPAIR. The quota used to be spent with a plain read-then-set
+ * BEFORE anything was sent, and nothing gave it back:
+ *
+ *   * A failed attempt (Admin link minting, a provider rejection, a network
+ *     error) still started the 60 s cooldown, so the member's immediate,
+ *     legitimate retry got `resource-exhausted` although no message had left.
+ *     That is exactly the staging field test: "Didn't send", then a resend
+ *     refused as too soon.
+ *   * Read-then-set is not atomic: two concurrent requests could both read a
+ *     clear cooldown and both send.
+ *
+ * Now a transaction RESERVES the send (cooldown and cap checked and written
+ * atomically, so one in-flight attempt per key), and a failed attempt RELEASES
+ * the cooldown back to what it was before this attempt. The attempt still
+ * counts toward the daily cap, so failures cannot be used to hammer the
+ * provider: at most one attempt in flight per key, at most SEND_DAILY_CAP a day,
+ * successful or not. A successful send, and reset's unknown-address path, keep
+ * the reservation exactly as before.
+ */
+type SendReservation = {
+  ref: DocumentReference;
+  reservedAt: number;
+  priorLastSentAt: number | null;
+};
 
-  const since = now - (data?.lastSentAt ?? 0);
-  if (data?.lastSentAt && since < SEND_COOLDOWN_MS) return SEND_COOLDOWN_MS - since;
+async function reserveSend(
+  path: string,
+  now: number,
+  capMessage: string
+): Promise<{ waitMs: number } | { reservation: SendReservation }> {
+  const ref = getFirestore().doc(path);
+  return getFirestore().runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const data = snap.data() as
+      | { lastSentAt?: number; dayStart?: number; countToday?: number }
+      | undefined;
 
-  const dayStart = data?.dayStart ?? 0;
-  const sameDay = now - dayStart < 24 * 60 * 60 * 1000;
-  const countToday = sameDay ? (data?.countToday ?? 0) : 0;
-  if (countToday >= SEND_DAILY_CAP) {
-    throw new HttpsError(
-      'resource-exhausted',
-      'Too many verification emails today. Try again tomorrow.'
+    const since = now - (data?.lastSentAt ?? 0);
+    if (data?.lastSentAt && since < SEND_COOLDOWN_MS) return { waitMs: SEND_COOLDOWN_MS - since };
+
+    const dayStart = data?.dayStart ?? 0;
+    const sameDay = now - dayStart < 24 * 60 * 60 * 1000;
+    const countToday = sameDay ? (data?.countToday ?? 0) : 0;
+    if (countToday >= SEND_DAILY_CAP) {
+      throw new HttpsError('resource-exhausted', capMessage);
+    }
+
+    tx.set(
+      ref,
+      { lastSentAt: now, dayStart: sameDay ? dayStart : now, countToday: countToday + 1 },
+      { merge: true }
     );
-  }
+    return { reservation: { ref, reservedAt: now, priorLastSentAt: data?.lastSentAt ?? null } };
+  });
+}
 
-  await ref.set(
-    { lastSentAt: now, dayStart: sameDay ? dayStart : now, countToday: countToday + 1 },
-    { merge: true }
-  );
-  return 0;
+/**
+ * Gives the cooldown back after an attempt that sent nothing, so the member's
+ * retry is not refused as too soon. Only if the reservation is still the
+ * latest one (nothing reserved after it); the daily count is kept. Best effort:
+ * a failed release leaves the ordinary cooldown, never a bypass.
+ */
+async function releaseSend(r: SendReservation): Promise<void> {
+  try {
+    await getFirestore().runTransaction(async (tx) => {
+      const snap = await tx.get(r.ref);
+      if ((snap.data() as { lastSentAt?: number } | undefined)?.lastSentAt !== r.reservedAt) return;
+      tx.update(r.ref, { lastSentAt: r.priorLastSentAt ?? FieldValue.delete() });
+    });
+  } catch {
+    // Nothing to log that is safe and useful; the cooldown simply stands.
+  }
+}
+
+/** The Firebase error code of an Admin SDK failure, or '' — never its message, which can name the address. */
+function adminErrorCode(e: unknown): string {
+  return typeof e === 'object' && e && 'code' in e ? String((e as { code?: unknown }).code ?? '') : '';
+}
+
+/** POST to the provider. Resolves to the HTTP status, or 0 when the request itself failed. */
+async function postToProvider(config: SendConfig, body: Record<string, unknown>): Promise<number> {
+  try {
+    const res = await fetch(RESEND_ENDPOINT, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${config.apiKey}`, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return res.ok ? 200 : res.status || 0;
+  } catch {
+    return 0;
+  }
 }
 
 export const wsfSendVerificationEmail = onCall(
@@ -424,40 +493,50 @@ export const wsfSendVerificationEmail = onCall(
 
     const config = readSendConfig();
 
-    const waitMs = await checkSendQuota(request.auth.uid, Date.now());
-    if (waitMs > 0) {
+    const quota = await reserveSend(
+      `wsfVerificationSends/${request.auth.uid}`,
+      Date.now(),
+      'Too many verification emails today. Try again tomorrow.'
+    );
+    if ('waitMs' in quota) {
       throw new HttpsError(
         'resource-exhausted',
-        `Please wait ${Math.ceil(waitMs / 1000)}s before requesting another email.`
+        `Please wait ${Math.ceil(quota.waitMs / 1000)}s before requesting another email.`
       );
     }
 
-    const minted = await getAuth().generateEmailVerificationLink(email, {
-      url: config.appUrl,
-      handleCodeInApp: false,
-    });
+    let minted: string;
+    try {
+      minted = await getAuth().generateEmailVerificationLink(email, {
+        url: config.appUrl,
+        handleCodeInApp: false,
+      });
+    } catch (e) {
+      // Was uncaught: the code never reached the logs as a classified fault and
+      // the quota stayed spent. The code only — the message can name the address.
+      console.error('[wsfSendVerificationEmail] Admin SDK failed', adminErrorCode(e) || 'unknown');
+      await releaseSend(quota.reservation);
+      throw new HttpsError('internal', 'Could not send the verification email. Try again shortly.');
+    }
     const link = retargetActionLink(minted, config.actionHandler);
 
-    const res = await fetch(RESEND_ENDPOINT, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${config.apiKey}`, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        from: config.from,
-        to: [email],
-        subject: 'Confirm your email for We Stay Fit',
-        text: [
-          'Confirm your email address to finish setting up your We Stay Fit account.',
-          '',
-          link,
-          '',
-          'If you did not create this account, you can ignore this message.',
-        ].join('\n'),
-      }),
+    const status = await postToProvider(config, {
+      from: config.from,
+      to: [email],
+      subject: 'Confirm your email for We Stay Fit',
+      text: [
+        'Confirm your email address to finish setting up your We Stay Fit account.',
+        '',
+        link,
+        '',
+        'If you did not create this account, you can ignore this message.',
+      ].join('\n'),
     });
 
-    if (!res.ok) {
-      // The response body can echo the recipient; log the status only.
-      console.error('[wsfSendVerificationEmail] provider rejected send', res.status);
+    if (status !== 200) {
+      // The response body can echo the recipient; log the status only (0 = the request itself failed).
+      console.error('[wsfSendVerificationEmail] provider rejected send', status);
+      await releaseSend(quota.reservation);
       throw new HttpsError('internal', 'Could not send the verification email. Try again shortly.');
     }
 
@@ -1916,33 +1995,6 @@ export const wsfChallengePulse = onCall<PulseRequest>(
 //     "not set up yet on this build" copy.
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function checkResetQuota(emailKey: string, now: number): Promise<number> {
-  const ref = getFirestore().doc(`wsfPasswordResetSends/${emailKey}`);
-  const snap = await ref.get();
-  const data = snap.data() as
-    | { lastSentAt?: number; dayStart?: number; countToday?: number }
-    | undefined;
-
-  const since = now - (data?.lastSentAt ?? 0);
-  if (data?.lastSentAt && since < SEND_COOLDOWN_MS) return SEND_COOLDOWN_MS - since;
-
-  const dayStart = data?.dayStart ?? 0;
-  const sameDay = now - dayStart < 24 * 60 * 60 * 1000;
-  const countToday = sameDay ? (data?.countToday ?? 0) : 0;
-  if (countToday >= SEND_DAILY_CAP) {
-    throw new HttpsError(
-      'resource-exhausted',
-      'Too many password reset requests today. Try again tomorrow.'
-    );
-  }
-
-  await ref.set(
-    { lastSentAt: now, dayStart: sameDay ? dayStart : now, countToday: countToday + 1 },
-    { merge: true }
-  );
-  return 0;
-}
-
 function normalizeResetEmail(v: unknown): string | null {
   if (typeof v !== 'string') return null;
   const trimmed = v.trim().toLowerCase();
@@ -1977,11 +2029,15 @@ export const wsfSendPasswordResetEmail = onCall<SendPasswordResetRequest>(
     const config = readSendConfig();
 
     const emailKey = hashEmailForQuota(email);
-    const waitMs = await checkResetQuota(emailKey, Date.now());
-    if (waitMs > 0) {
+    const quota = await reserveSend(
+      `wsfPasswordResetSends/${emailKey}`,
+      Date.now(),
+      'Too many password reset requests today. Try again tomorrow.'
+    );
+    if ('waitMs' in quota) {
       throw new HttpsError(
         'resource-exhausted',
-        `Please wait ${Math.ceil(waitMs / 1000)}s before requesting another reset.`
+        `Please wait ${Math.ceil(quota.waitMs / 1000)}s before requesting another reset.`
       );
     }
 
@@ -1991,14 +2047,12 @@ export const wsfSendPasswordResetEmail = onCall<SendPasswordResetRequest>(
         url: config.appUrl,
       });
     } catch (e) {
-      const code =
-        typeof e === 'object' && e && 'code' in e
-          ? String((e as { code?: unknown }).code ?? '')
-          : '';
+      const code = adminErrorCode(e);
       // Unknown email is the whole enumeration case: return the SAME success
-      // shape the happy path returns. auth/invalid-email is folded in for the
-      // same reason — the client shouldn't be able to distinguish "you typed
-      // it wrong" from "not on file".
+      // shape the happy path returns, and KEEP the reservation exactly as a
+      // real send does — releasing it only here would make the quota write
+      // pattern an account-existence signal. auth/invalid-email is folded in
+      // for the same reason.
       if (
         code === 'auth/user-not-found' ||
         code === 'auth/email-not-found' ||
@@ -2008,36 +2062,31 @@ export const wsfSendPasswordResetEmail = onCall<SendPasswordResetRequest>(
       }
       // Anything else is a real fault. Log the code only, never the address.
       console.error('[wsfSendPasswordResetEmail] Admin SDK failed', code || 'unknown');
+      await releaseSend(quota.reservation);
       throw new HttpsError('internal', 'Could not send the reset email. Try again shortly.');
     }
 
     const link = retargetActionLink(minted, config.actionHandler);
 
-    const res = await fetch(RESEND_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${config.apiKey}`,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        from: config.from,
-        to: [email],
-        subject: 'Reset your We Stay Fit password',
-        text: [
-          'Someone asked to reset the password for your We Stay Fit account.',
-          '',
-          'Open this link to choose a new password. The link expires in an hour.',
-          '',
-          link,
-          '',
-          'If you did not ask for a reset, you can ignore this message.',
-        ].join('\n'),
-      }),
+    const status = await postToProvider(config, {
+      from: config.from,
+      to: [email],
+      subject: 'Reset your We Stay Fit password',
+      text: [
+        'Someone asked to reset the password for your We Stay Fit account.',
+        '',
+        'Open this link to choose a new password. The link expires in an hour.',
+        '',
+        link,
+        '',
+        'If you did not ask for a reset, you can ignore this message.',
+      ].join('\n'),
     });
 
-    if (!res.ok) {
-      // The provider response body can echo the recipient; log the status only.
-      console.error('[wsfSendPasswordResetEmail] provider rejected send', res.status);
+    if (status !== 200) {
+      // The provider response body can echo the recipient; log the status only (0 = the request itself failed).
+      console.error('[wsfSendPasswordResetEmail] provider rejected send', status);
+      await releaseSend(quota.reservation);
       throw new HttpsError('internal', 'Could not send the reset email. Try again shortly.');
     }
 
