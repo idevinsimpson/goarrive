@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "b82b7294ce054c1562e88bff844e14c030deeea1a95fb2c4b53343e5f356caff",
-  "eventCount": 194,
+  "ledgerHead": "141b8b8085782e7edafc7a31138111f3f2a6aa3c01d81a8e39d0085507fff5a2",
+  "eventCount": 195,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -61,7 +61,9 @@
     }
   },
   "queue": {
-    "W3": [],
+    "W3": [
+      "STAGING-PROOF-RECONCILE-ROUTING-FIX"
+    ],
     "W4": [],
     "W5": [],
     "W7": [],
@@ -747,6 +749,66 @@
         "after": "director"
       },
       "deliveries": 2,
+      "pendingFinding": null
+    },
+    "STAGING-PROOF-RECONCILE-ROUTING-FIX": {
+      "owner": "W3",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Derive the exact successful staging run proof and pointer sequence when the workflow-run wake is missed",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "tools/wsf-control/shadow-run.mjs",
+        "tools/wsf-control/shadow.mjs",
+        "tools/wsf-control/reconcile.mjs",
+        "tools/wsf-control/tests/shadow.test.mjs",
+        "tools/wsf-control/tests/recovery.test.mjs",
+        "tools/wsf-control/tests/v2.test.mjs"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 5956001618
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 5956001618
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
       "pendingFinding": null
     }
   },
