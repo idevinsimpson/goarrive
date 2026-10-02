@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "77c2e13fa6e09e7850eae50a6124391e81fa360f8224dfa7c30d9a13bdf4b25c",
-  "eventCount": 162,
+  "ledgerHead": "45b9c2ecfa54a69c050ac88871b29672fb9589020b7bd25eb6af7e880bd046ad",
+  "eventCount": 164,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -479,7 +479,7 @@
       },
       "label": "Correct fast-path inventory preflight to use the reviewed complete measured baseline without double-counting retained functions",
       "origin": "ledger",
-      "phase": "ACCEPTED",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -491,7 +491,7 @@
         "subjectSha": "825b9c017e5ff0fff0eb4cf28700bab11b043176",
         "prHeadSha": "825b9c017e5ff0fff0eb4cf28700bab11b043176",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "745b4f6270a90555757b9b01255ee77f0a74e8fb"
       },
       "proof": null,
       "served": null,
@@ -519,8 +519,8 @@
           "id": 5954007478
         },
         "lastTransition": {
-          "kind": "comment",
-          "id": 5954007478
+          "kind": "pull_request",
+          "id": 555
         }
       },
       "review": {
@@ -671,62 +671,62 @@
     {
       "id": "autonomy-architecture",
       "path": "docs/westayfit/ops/AUTONOMY_ARCHITECTURE_1B_1C.md",
-      "commit": "6687440d9eb45dfdec635b4313bd1422c7df8d9b"
+      "commit": "745b4f6270a90555757b9b01255ee77f0a74e8fb"
     },
     {
       "id": "autonomy-contract",
       "path": "docs/westayfit/ops/AUTONOMY_ACCEPTANCE_CONTRACT.md",
-      "commit": "6687440d9eb45dfdec635b4313bd1422c7df8d9b"
+      "commit": "745b4f6270a90555757b9b01255ee77f0a74e8fb"
     },
     {
       "id": "capabilities",
       "path": "docs/westayfit/ops/control/capabilities.v1.json",
-      "commit": "6687440d9eb45dfdec635b4313bd1422c7df8d9b"
+      "commit": "745b4f6270a90555757b9b01255ee77f0a74e8fb"
     },
     {
       "id": "control-state",
       "path": "docs/westayfit/ops/CONTROL_STATE.md",
-      "commit": "6687440d9eb45dfdec635b4313bd1422c7df8d9b"
+      "commit": "745b4f6270a90555757b9b01255ee77f0a74e8fb"
     },
     {
       "id": "fable-operating-protocol",
       "path": "docs/westayfit/ops/control/contracts/FABLE_OPERATING_PROTOCOL_v1.md",
-      "commit": "6687440d9eb45dfdec635b4313bd1422c7df8d9b"
+      "commit": "745b4f6270a90555757b9b01255ee77f0a74e8fb"
     },
     {
       "id": "north-star-journeys",
       "path": "docs/westayfit/ops/journeys/NORTH_STAR_JOURNEY_MANIFEST.v1.json",
-      "commit": "6687440d9eb45dfdec635b4313bd1422c7df8d9b"
+      "commit": "745b4f6270a90555757b9b01255ee77f0a74e8fb"
     },
     {
       "id": "owner-test-card",
       "path": "docs/westayfit/ops/control/contracts/OWNER_TEST_CARD_AND_SMOKE_CONTRACT.md",
-      "commit": "6687440d9eb45dfdec635b4313bd1422c7df8d9b"
+      "commit": "745b4f6270a90555757b9b01255ee77f0a74e8fb"
     },
     {
       "id": "program-director-skill",
       "path": ".claude/skills/wsf-program-director/SKILL.md",
-      "commit": "6687440d9eb45dfdec635b4313bd1422c7df8d9b"
+      "commit": "745b4f6270a90555757b9b01255ee77f0a74e8fb"
     },
     {
       "id": "staging-control-plane",
       "path": "skills/wsf-staging-deploy/SKILL.md",
-      "commit": "6687440d9eb45dfdec635b4313bd1422c7df8d9b"
+      "commit": "745b4f6270a90555757b9b01255ee77f0a74e8fb"
     },
     {
       "id": "worker-inboxes",
       "path": "docs/westayfit/ops/control/contracts/WORKER_INBOXES.md",
-      "commit": "6687440d9eb45dfdec635b4313bd1422c7df8d9b"
+      "commit": "745b4f6270a90555757b9b01255ee77f0a74e8fb"
     },
     {
       "id": "writer",
       "path": "tools/wsf-control",
-      "commit": "6687440d9eb45dfdec635b4313bd1422c7df8d9b"
+      "commit": "745b4f6270a90555757b9b01255ee77f0a74e8fb"
     },
     {
       "id": "writer-workflow",
       "path": ".github/workflows/wsf-control-reconcile.yml",
-      "commit": "6687440d9eb45dfdec635b4313bd1422c7df8d9b"
+      "commit": "745b4f6270a90555757b9b01255ee77f0a74e8fb"
     }
   ],
   "supersedes": {
