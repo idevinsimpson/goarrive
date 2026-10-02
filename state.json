@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "544004e71d144ea32a4d0b07b2350c674a6b1d5ccdcecbaf60024de5baf39cc8",
-  "eventCount": 238,
+  "ledgerHead": "e8d16a9d1d258e332ffab8dd3c1f3cb3506d2cbdc3d7904c9fe792d018edb5fd",
+  "eventCount": 239,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1434,11 +1434,14 @@
       "packet": "EMAIL-STAGING-REPAIR",
       "worker": "W3",
       "reason": "handback",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         5960698473
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 5960724869
+      }
     }
   },
   "fastpath": {
