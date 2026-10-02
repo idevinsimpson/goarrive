@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "e52cc9d70d6c6ea817c90f423d33618e6b29e85e969241fa725fa19191a15bf0",
-  "eventCount": 263,
+  "ledgerHead": "2a3a8916a398176fa4c9b86709badeda38ac139233639943912d927a514f4acd",
+  "eventCount": 264,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -61,7 +61,9 @@
     }
   },
   "queue": {
-    "W3": [],
+    "W3": [
+      "WORKER-EXECUTION-PROFILES-1"
+    ],
     "W4": [],
     "W5": [],
     "W7": [],
@@ -960,6 +962,70 @@
         "after": "director"
       },
       "deliveries": 2,
+      "pendingFinding": null
+    },
+    "WORKER-EXECUTION-PROFILES-1": {
+      "owner": "W3",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Finish existing PR 562 credential-mode safety and pilot readiness without activating or replacing live workers",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        ".github/workflows/wsf-worker-profiles.yml",
+        ".github/wsf-workers/profiles.json",
+        ".github/wsf-workers/launch.mjs",
+        ".github/wsf-workers/report-smoke.mjs",
+        ".github/wsf-workers/profiles.test.mjs",
+        ".github/wsf-workers/README.md"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 5962904882
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 5962904882
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          },
+          {
+            "class": "security",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
       "pendingFinding": null
     }
   },
