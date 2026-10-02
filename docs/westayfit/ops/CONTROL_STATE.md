@@ -44,6 +44,7 @@ Free text is limited to three fields: `label`, and a blocker's `condition` and `
 | `begin-proof`, `proof-pass`, `stage`, `set-staging` | a workflow_run or a comment |
 | `set-target` (v2) | a pull_request (the integrated packet's merged PR, rule `R-FASTPATH`) or a comment (a decision) |
 | `set-fastpath` (v2) | a comment only: the owner's decision, rule `MANUAL`; never derived |
+| `authorize-retry` (v2) | a comment only: the owner's decision, rule `MANUAL`; never derived |
 | `proof-fail` | a comment only: the focused finding that turns a failed run into work |
 | `reconcile-head` | a pull_request or commit |
 | `record-evidence` | a commit, pull_request or comment |
@@ -256,6 +257,7 @@ Every view refuses to run on a state that does not check. None of them makes a j
 | `set-staging` | `servedSha`, `runId`, `runNumber`, `rollbackSha`, [`pinPr`] |
 | `set-target` | `packet`, `appSha`, `pinSha` |
 | `set-fastpath` | `enabled` (true or false) |
+| `authorize-retry` | `packet`, `appSha` (the current staging target), `failedRun` (the exact failed staging run id), `repairPacket`, `repairSha` (the INTEGRATED repair and its merge) |
 | `set-surfaces` | `surfaces`: `{controlInbox: {pr}, current: {pr, commentId}}` |
 | `register-worker` | `worker`, `inbox` |
 | `queue` | `packet`, `owner`, `completion`, [`kind`, `subjectPaths`, `label`] |
@@ -333,6 +335,7 @@ The rules are listed once, in `tools/wsf-control/rules.mjs`, with the event type
 | `set-shadow-surface`, `surfaces.shadow` | The writer's own shadow CURRENT comment on the control surface. It is never the human CURRENT comment. |
 | `set-target`, `stagingTarget` | The Step-7 fast-path staging target (memo §9.2): an INTEGRATED work packet's own merge, recorded with the full-path pin (`approved-candidate.json` at the running main) it was checked against. The writer derives it (`R-FASTPATH`) in the run that integrates the packet, only for the NEWEST preview-eligible merge on the canonical development branch (it changes `apps/westayfit/**`), only while that pin is the recorded served deploy (`set-staging`), and only when every path changed since the pin is member-visible source outside every protected path. Otherwise it reports `STAGING_TARGET FULL_PATH_REQUIRED` or `NONE` with the reason and records nothing. A newer eligible merge replaces the target; the same target is never recorded twice. It deploys nothing: the staging workflow's `target_source=ledger` mode re-verifies it at the gate before anything is built. |
 | `set-fastpath`, `fastpath` | The owner's standing switch for UNATTENDED fast-path dispatch (memo §9.5; Director ruling #365 5940481437). Absent means off. Only while it is on does the reconcile workflow's separate `fastpath-dispatch` job (its own workflow token: `contents: read`, `actions: write`; no App key, no environment) dispatch `wsf-staging-deploy.yml` in `target_source=ledger` mode, and only for a target that is not served, was never sent before (a failed target is never re-sent), and still verifies. Recording `{enabled: false}` revokes it: the reviewed pin path is then the only path. Recording the state it is already in is refused. |
+| `authorize-retry`, `stagingRetry` | The owner's ONE-SHOT authorization to re-send the current staging target after its exact failed run (memo §9.4: a failed target is otherwise never re-sent; STAGING-FASTPATH-FAILED-TARGET-RETRY-FIX, #365 5954205876). Recorded only for the current target and packet, and only when a separate work packet is INTEGRATED at the named repair merge; the same failed run twice is refused, and a new `set-target` voids it. The `fastpath-dispatch` job honours it only while the switch is on, the target and pin still match, the named run is the NEWEST attempt at that target and ended `failure`, the repair is still INTEGRATED and its merge is on `main`, and the target still verifies; its own dispatch makes a newer attempt, so it is spent by the first use. It deploys nothing itself and changes no workflow, permission or gate. |
 
 ### Step 5 is shadow reconcile only
 

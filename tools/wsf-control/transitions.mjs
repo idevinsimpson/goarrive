@@ -247,6 +247,23 @@ export function applyEvent(state, e) {
       if (e.appSha === e.pinSha) illegal('set-target: the target is the full-path pin itself; nothing to fast-path');
       if (s.stagingTarget?.appSha === e.appSha) illegal(`set-target: ${e.appSha.slice(0, 8)} is already the staging target`);
       s.stagingTarget = { packet: e.packet, appSha: e.appSha, pinSha: e.pinSha };
+      delete s.stagingRetry; // a retry authorization is bound to the target it names; a new target voids it
+      break;
+    }
+    // memo §9.4: a failed target is never re-sent automatically. The owner may authorize ONE re-send of the current target
+    // after its exact failed run, once a separate INTEGRATED packet has repaired the cause. The dispatcher spends it: it
+    // dispatches only while that failed run is still the newest attempt at the target (fastpath-dispatch.mjs).
+    case 'authorize-retry': {
+      const t = s.stagingTarget;
+      if (!t) illegal('authorize-retry: the ledger holds no staging target');
+      if (t.packet !== e.packet || t.appSha !== e.appSha) illegal(`authorize-retry: the staging target is ${t.appSha.slice(0, 8)} (${t.packet}), not ${e.appSha.slice(0, 8)} (${e.packet})`);
+      if (e.repairPacket === e.packet) illegal('authorize-retry: the repair must be a separate packet from the target');
+      const r = need(s, e.repairPacket);
+      if (r.kind !== 'work' || r.phase !== 'INTEGRATED' || r.artifact.mergeSha !== e.repairSha) {
+        illegal(`authorize-retry: ${e.repairPacket} is not an INTEGRATED work packet merged as ${e.repairSha.slice(0, 8)}`);
+      }
+      if (s.stagingRetry?.appSha === e.appSha && s.stagingRetry.failedRun === e.failedRun) illegal(`authorize-retry: a retry after run ${e.failedRun} is already authorized; one authorization per failed run`);
+      s.stagingRetry = { packet: e.packet, appSha: e.appSha, pinSha: t.pinSha, failedRun: e.failedRun, repairPacket: e.repairPacket, repairSha: e.repairSha, decision: e.source.id };
       break;
     }
     case 'register-worker': {
@@ -518,7 +535,7 @@ export function applyEvent(state, e) {
     }
     default: illegal(`no transition for ${e.type}`);
   }
-  if (p && !['reconcile-head', 'record-evidence', 'set-critical-path', 'set-review-policy', 'set-target', ...WAKE_EVENTS].includes(e.type) && !(e.type === 'finding' && e.pending)) p.authority.lastTransition = src;
+  if (p && !['reconcile-head', 'record-evidence', 'set-critical-path', 'set-review-policy', 'set-target', 'authorize-retry', ...WAKE_EVENTS].includes(e.type) && !(e.type === 'finding' && e.pending)) p.authority.lastTransition = src;
   // The critical path completes when its packet does; it is never left pointing at a terminal packet.
   if (s.criticalPath && isTerminal(s.packets[s.criticalPath])) s.criticalPath = null;
   // A wake is superseded once its worker no longer holds that packet's ball (reassigned, handed back, passed, withdrawn).

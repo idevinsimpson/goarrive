@@ -610,4 +610,23 @@ test('supersedes is a schema v2 bootstrap field only, and its shape is closed', 
   }
 });
 
+test('authorize-retry is recorded from the owner\'s unedited decision block only, with exactly its own fields (MANUAL)', () => {
+  const s0 = reduce(appendEvent('', { ...boot2() }, { expectHead: '0'.repeat(64) }).eventsText);
+  const blk = (o) => `\`\`\`wsf-control-decision\n${JSON.stringify(o)}\n\`\`\``;
+  const d = { type: 'authorize-retry', packet: 'KIOSK', appSha: sha('e'), failedRun: 37012494776, repairPacket: 'FIX', repairSha: sha('f') };
+  const ok = decisionIntake(s0, [{ id: 7001, ...OWNER, body: blk(d) }]);
+  assert.equal(ok.events.length, 1);
+  const e = ok.events[0].event;
+  assert.deepEqual([e.type, e.packet, e.appSha, e.failedRun, e.repairPacket, e.repairSha, e.authority.rule, e.authority.class, e.source.kind, e.source.id],
+    ['authorize-retry', 'KIOSK', sha('e'), 37012494776, 'FIX', sha('f'), 'MANUAL', 'manual', 'comment', 7001]);
+  const r = decisionIntake(s0, [
+    { id: 7002, author: 'someone-else', association: 'OWNER', ...POSTED, body: blk(d) },
+    { id: 7003, ...OWNER, updatedAt: '2026-09-28T12:05:00Z', body: blk(d) },
+    { id: 7004, ...OWNER, body: blk({ ...d, once: true }) },
+    { id: 7005, ...OWNER, body: blk({ ...d, actor: 'Fable' }) },
+  ]);
+  assert.equal(r.events.length, 0);
+  assert.deepEqual(r.refused.map((x) => x.commentId), [7002, 7003, 7004, 7005]);
+});
+
 done('shadow');

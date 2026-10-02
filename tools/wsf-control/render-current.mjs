@@ -62,6 +62,7 @@ export function renderCurrent(s) {
   // Step 7: only a ledger that holds a fast-path target says so, so every earlier ledger renders as before.
   if (s.fastpath) L.push(`- Unattended fast-path dispatch: ${s.fastpath.enabled ? 'ENABLED (set-fastpath)' : 'disabled (set-fastpath); every candidate takes the reviewed pin path'}`);
   if (s.stagingTarget) L.push(`- Staging target (fast path): \`${s.stagingTarget.appSha}\` (${s.stagingTarget.packet}), checked against the full-path pin \`${s.stagingTarget.pinSha}\``);
+  if (s.stagingRetry) L.push(`- Staging retry authorized once (authorize-retry, decision ${s.stagingRetry.decision}): \`${s.stagingRetry.appSha}\` (${s.stagingRetry.packet}) after failed run ${s.stagingRetry.failedRun}, repaired by ${s.stagingRetry.repairPacket} at \`${s.stagingRetry.repairSha}\`; spent once any newer attempt at that target exists`);
   L.push(`- Critical path: ${s.criticalPath ? `${s.criticalPath} (${s.packets[s.criticalPath].phase}, ${s.packets[s.criticalPath].owner})` : 'none'}`);
   if (s.schemaVersion === 2) {
     L.push('- Schema: v2. Every line is written by the `wsf-control-writer` App and names its authority class and rule.');
