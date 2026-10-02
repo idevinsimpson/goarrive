@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "c9f82d49f98d956b33681de26709a9a21b72d308e6e06640c2cbe1934cc4220d",
-  "eventCount": 255,
+  "ledgerHead": "45b9039a213a669632cd19ab9efabe08b30aa6318add05ea53dc32a096e9a919",
+  "eventCount": 257,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -418,7 +418,7 @@
       },
       "label": "Expo account-entry seam: preserve event context and make the existing phone/kiosk choice fast and truthful without bypassing verified identity",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -432,7 +432,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         "apps/westayfit/app/event/[goalId].tsx",
@@ -460,7 +460,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5961789672
+          "id": 5961821621
         }
       },
       "review": {
@@ -1542,11 +1542,14 @@
       "packet": "EXPO-ACCOUNT-ENTRY-1",
       "worker": "W9",
       "reason": "release",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         5961804762
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 5961821621
+      }
     }
   },
   "fastpath": {
