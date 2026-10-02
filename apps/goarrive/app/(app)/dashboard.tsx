@@ -266,12 +266,7 @@ export default function DashboardScreen() {
 
   const coachName = adminCoachOverride ? adminCoachOverride.coachName : (user?.displayName ?? user?.email?.split('@')[0] ?? 'Coach');
   const role = claims?.role ?? 'coach';
-  const roleLabel =
-    role === 'platformAdmin'
-      ? 'Platform Admin'
-      : role === 'coachAssistant'
-      ? 'Coach Assistant'
-      : 'Coach';
+  const roleLabel = isAdmin ? 'Platform Admin' : 'Coach';
 
   return (
     <View style={s.root}>
@@ -474,7 +469,7 @@ export default function DashboardScreen() {
           <ListSkeleton count={3} />
         ) : stats.recentCheckins.length > 0 ? (
           stats.recentCheckins.map((checkin) => (
-            <CheckInCard key={checkin.id} />
+            <CheckInCard key={checkin.id} checkin={checkin} />
           ))
         ) : (
           <View style={s.emptyState}>
