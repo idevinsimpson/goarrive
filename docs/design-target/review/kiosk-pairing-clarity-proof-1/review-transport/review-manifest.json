@@ -1,17 +1,19 @@
 [
  {
   "file": "REVIEW-COPY-before-champion-screens-card-390x640-p1of2.png",
-  "bytes": 7251,
+  "bytes": 6878,
   "width": 350,
-  "height": 239,
-  "sha256": "9437e5db4a5711a539cd30d24cb63887cecf1df79771168d205fecc70744ae77",
-  "colors": 16,
+  "height": 295,
+  "sha256": "c601cc1ced7380b5ecb63deb8278bc48ae1574e83fe2f9dd7c5a412e3c5d1e95",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 1.0,
   "panel": "1/2",
   "sourceRows": [
    0,
-   177
+   233
   ],
+  "labelRows": 62,
   "original": {
    "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/before/champion-screens-card-390x640.png",
    "commit": "41a8653c",
@@ -19,21 +21,31 @@
    "bytes": 29634,
    "width": 350,
    "height": 310
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 1.0,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8859
   }
  },
  {
   "file": "REVIEW-COPY-before-champion-screens-card-390x640-p2of2.png",
-  "bytes": 5892,
+  "bytes": 4032,
   "width": 350,
-  "height": 195,
-  "sha256": "2c35d70593529092709e23b6f42873bcb63e98737461f3328e9562940f073ba4",
-  "colors": 16,
+  "height": 139,
+  "sha256": "e88e6b40456b9bde1cec4d08a8486fa70ea6ed9a1614315dff3e97a7f55ebc6b",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 1.0,
   "panel": "2/2",
   "sourceRows": [
-   177,
+   233,
    310
   ],
+  "labelRows": 62,
   "original": {
    "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/before/champion-screens-card-390x640.png",
    "commit": "41a8653c",
@@ -41,21 +53,31 @@
    "bytes": 29634,
    "width": 350,
    "height": 310
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 1.0,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8845
   }
  },
  {
   "file": "REVIEW-COPY-before-champion-screens-card-390x844-p1of2.png",
-  "bytes": 7566,
+  "bytes": 6890,
   "width": 350,
   "height": 294,
-  "sha256": "38e9e7c314c644fe46d4dac2ee0e22f720bea95a68ebd2c58851da4abf26da33",
-  "colors": 16,
+  "sha256": "6b1a8eddc2293eb2126abfa7a3a559d599cac08a7b0952726213abffd651ee3c",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 1.0,
   "panel": "1/2",
   "sourceRows": [
    0,
    232
   ],
+  "labelRows": 62,
   "original": {
    "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/before/champion-screens-card-390x844.png",
    "commit": "41a8653c",
@@ -63,21 +85,31 @@
    "bytes": 29633,
    "width": 350,
    "height": 310
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 1.0,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8865
   }
  },
  {
   "file": "REVIEW-COPY-before-champion-screens-card-390x844-p2of2.png",
-  "bytes": 5232,
+  "bytes": 4041,
   "width": 350,
   "height": 140,
-  "sha256": "370bc9c6a26bd3af9466a86a0fef7f3d7df79e91861326dba9fd4d685161005f",
-  "colors": 16,
+  "sha256": "995fc9ba1eab7b84ce21f31fefac836c0f21b8498e2b063bb5cb55e71ad91002",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 1.0,
   "panel": "2/2",
   "sourceRows": [
    232,
    310
   ],
+  "labelRows": 62,
   "original": {
    "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/before/champion-screens-card-390x844.png",
    "commit": "41a8653c",
@@ -85,21 +117,31 @@
    "bytes": 29633,
    "width": 350,
    "height": 310
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 1.0,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8851
   }
  },
  {
-  "file": "REVIEW-COPY-before-station-expired-1280x800-p1of3.png",
-  "bytes": 6506,
+  "file": "REVIEW-COPY-before-station-expired-1280x800-p1of2.png",
+  "bytes": 7042,
   "width": 1280,
-  "height": 326,
-  "sha256": "f5aa28ee826cf7ac4abc3ace235077d9d2f2587bb75060f97385ad0c57afda63",
-  "colors": 16,
+  "height": 440,
+  "sha256": "6a8a1a6f8337e167ca8e080c88d482fc11498430ec84d0f17be5590fb249cf3c",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 1.0,
-  "panel": "1/3",
+  "panel": "1/2",
   "sourceRows": [
    0,
-   312
+   426
   ],
+  "labelRows": 14,
   "original": {
    "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/before/station-expired-1280x800.png",
    "commit": "41a8653c",
@@ -107,43 +149,31 @@
    "bytes": 50257,
    "width": 1280,
    "height": 800
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 0.9816,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8661
   }
  },
  {
-  "file": "REVIEW-COPY-before-station-expired-1280x800-p2of3.png",
-  "bytes": 7609,
+  "file": "REVIEW-COPY-before-station-expired-1280x800-p2of2.png",
+  "bytes": 5468,
   "width": 1280,
-  "height": 190,
-  "sha256": "32033a33202abafc8e1e13ef7393166dc315fff202a3b30adff3453f4ad1c9ee",
-  "colors": 16,
+  "height": 388,
+  "sha256": "038fc61fef40b4a7ea1f3c52b94fff0ca86433982b106705cce9ec065b2c6edd",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 1.0,
-  "panel": "2/3",
+  "panel": "2/2",
   "sourceRows": [
-   312,
-   488
-  ],
-  "original": {
-   "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/before/station-expired-1280x800.png",
-   "commit": "41a8653c",
-   "sha256": "e60d95dfe66e8348ab68792bb3c2fa4705423de026c0997495818d2cb7fc7f3e",
-   "bytes": 50257,
-   "width": 1280,
-   "height": 800
-  }
- },
- {
-  "file": "REVIEW-COPY-before-station-expired-1280x800-p3of3.png",
-  "bytes": 6269,
-  "width": 1280,
-  "height": 326,
-  "sha256": "3da7ccb0d38b9c8d8add9b00c9d469cbb111c987b0efcd80d84e474d50f48af0",
-  "colors": 16,
-  "scale": 1.0,
-  "panel": "3/3",
-  "sourceRows": [
-   488,
+   426,
    800
   ],
+  "labelRows": 14,
   "original": {
    "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/before/station-expired-1280x800.png",
    "commit": "41a8653c",
@@ -151,21 +181,31 @@
    "bytes": 50257,
    "width": 1280,
    "height": 800
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 0.9889,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8636
   }
  },
  {
   "file": "REVIEW-COPY-before-station-expired-390x640-p1of2.png",
-  "bytes": 7439,
+  "bytes": 7203,
   "width": 390,
-  "height": 425,
-  "sha256": "e449bdcc02f74babc4b65c5471dd7883cd1036661ff3d5d9e96bf5be23144d0f",
-  "colors": 16,
+  "height": 463,
+  "sha256": "1951cfeaa634ff1074701273f5cb54f106b281605d61bbe9684777577566d802",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 1.0,
   "panel": "1/2",
   "sourceRows": [
    0,
-   387
+   425
   ],
+  "labelRows": 38,
   "original": {
    "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/before/station-expired-390x640.png",
    "commit": "41a8653c",
@@ -173,21 +213,31 @@
    "bytes": 32964,
    "width": 390,
    "height": 640
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 0.9655,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8425
   }
  },
  {
   "file": "REVIEW-COPY-before-station-expired-390x640-p2of2.png",
-  "bytes": 5715,
+  "bytes": 2532,
   "width": 390,
-  "height": 291,
-  "sha256": "4eb4cdb575fb7a88d522452374c5d6a795243e6a789a32851d2c904ff5c15e3a",
-  "colors": 16,
+  "height": 253,
+  "sha256": "9b0105817e21578b8b7102a809cc8e3332bcec6448336241f621c6bfd70a05a7",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 1.0,
   "panel": "2/2",
   "sourceRows": [
-   387,
+   425,
    640
   ],
+  "labelRows": 38,
   "original": {
    "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/before/station-expired-390x640.png",
    "commit": "41a8653c",
@@ -195,21 +245,31 @@
    "bytes": 32964,
    "width": 390,
    "height": 640
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 1.0,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8397
   }
  },
  {
   "file": "REVIEW-COPY-before-station-expired-390x844-p1of2.png",
-  "bytes": 7599,
+  "bytes": 7349,
   "width": 390,
-  "height": 509,
-  "sha256": "df3101099e865c73493e9d0ead42aa5a158dee98a25dcdd2086025c51743b727",
-  "colors": 16,
+  "height": 565,
+  "sha256": "b8b72cc6a4bde4a95840915b727bcced847fc21e44fb53396397156014d538da",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 1.0,
   "panel": "1/2",
   "sourceRows": [
    0,
-   471
+   527
   ],
+  "labelRows": 38,
   "original": {
    "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/before/station-expired-390x844.png",
    "commit": "41a8653c",
@@ -217,21 +277,31 @@
    "bytes": 33966,
    "width": 390,
    "height": 844
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 0.9655,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8393
   }
  },
  {
   "file": "REVIEW-COPY-before-station-expired-390x844-p2of2.png",
-  "bytes": 5939,
+  "bytes": 2633,
   "width": 390,
-  "height": 411,
-  "sha256": "e5051d7dca668c74436b0c5836d9128a21822d877314a27e4a16a3cc01b2720e",
-  "colors": 16,
+  "height": 355,
+  "sha256": "b18acdeda2a31c33054889d6f7706ead3c955c193c6c11a4521348e8dc959073",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 1.0,
   "panel": "2/2",
   "sourceRows": [
-   471,
+   527,
    844
   ],
+  "labelRows": 38,
   "original": {
    "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/before/station-expired-390x844.png",
    "commit": "41a8653c",
@@ -239,43 +309,31 @@
    "bytes": 33966,
    "width": 390,
    "height": 844
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 1.0,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.837
   }
  },
  {
-  "file": "REVIEW-COPY-before-station-waiting-1280x800-p1of5.png",
-  "bytes": 6316,
+  "file": "REVIEW-COPY-before-station-waiting-1280x800-p1of3.png",
+  "bytes": 6033,
   "width": 1280,
-  "height": 270,
-  "sha256": "35dc010b7b5f966887a14974a4254499664a81acaa320715e8a4ba2273540225",
-  "colors": 16,
+  "height": 358,
+  "sha256": "1ab4b98274471b0cf8c8b5df0ca64c9609d88170e9cb79a8383c52993d138c98",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 1.0,
-  "panel": "1/5",
+  "panel": "1/3",
   "sourceRows": [
    0,
-   256
-  ],
-  "original": {
-   "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/before/station-waiting-1280x800.png",
-   "commit": "41a8653c",
-   "sha256": "07bf7979419953ca12e3846e07fd830eb0bfdbe9a06844aad1b08723ee5e1396",
-   "bytes": 72467,
-   "width": 1280,
-   "height": 800
-  }
- },
- {
-  "file": "REVIEW-COPY-before-station-waiting-1280x800-p2of5.png",
-  "bytes": 5137,
-  "width": 1280,
-  "height": 102,
-  "sha256": "655ef99d4351d60a3de6dc640b43de298aa4457ad636192948792300f15b376b",
-  "colors": 16,
-  "scale": 1.0,
-  "panel": "2/5",
-  "sourceRows": [
-   256,
    344
   ],
+  "labelRows": 14,
   "original": {
    "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/before/station-waiting-1280x800.png",
    "commit": "41a8653c",
@@ -283,21 +341,31 @@
    "bytes": 72467,
    "width": 1280,
    "height": 800
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 1.0,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8653
   }
  },
  {
-  "file": "REVIEW-COPY-before-station-waiting-1280x800-p3of5.png",
-  "bytes": 6844,
+  "file": "REVIEW-COPY-before-station-waiting-1280x800-p2of3.png",
+  "bytes": 7298,
   "width": 1280,
-  "height": 139,
-  "sha256": "fa81bfc2a65f621aa37442a260168ffd808fa6dc6299c05b546dfd7e89343ff4",
-  "colors": 16,
+  "height": 171,
+  "sha256": "773c78dab1b70fb92719ead3f8c398e920abfe73efe0b8e554b395845444a9e4",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 1.0,
-  "panel": "3/5",
+  "panel": "2/3",
   "sourceRows": [
    344,
-   469
+   501
   ],
+  "labelRows": 14,
   "original": {
    "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/before/station-waiting-1280x800.png",
    "commit": "41a8653c",
@@ -305,43 +373,31 @@
    "bytes": 72467,
    "width": 1280,
    "height": 800
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 1.0,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8636
   }
  },
  {
-  "file": "REVIEW-COPY-before-station-waiting-1280x800-p4of5.png",
-  "bytes": 6720,
+  "file": "REVIEW-COPY-before-station-waiting-1280x800-p3of3.png",
+  "bytes": 6264,
   "width": 1280,
-  "height": 90,
-  "sha256": "750d4cbe1ab28c0fd1cfbcc9a89c261d3afa5c1a182a3ede5f3a63f375d6bfb9",
-  "colors": 16,
+  "height": 313,
+  "sha256": "2a8045468d10a1a42b634e0a408b5d5db67dc2e12fedb0495413da0f13c0ff83",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 1.0,
-  "panel": "4/5",
+  "panel": "3/3",
   "sourceRows": [
-   469,
-   545
-  ],
-  "original": {
-   "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/before/station-waiting-1280x800.png",
-   "commit": "41a8653c",
-   "sha256": "07bf7979419953ca12e3846e07fd830eb0bfdbe9a06844aad1b08723ee5e1396",
-   "bytes": 72467,
-   "width": 1280,
-   "height": 800
-  }
- },
- {
-  "file": "REVIEW-COPY-before-station-waiting-1280x800-p5of5.png",
-  "bytes": 6146,
-  "width": 1280,
-  "height": 269,
-  "sha256": "a45ab6f6ddce07ea8ee5dcb814eecbddf9728c235fff0f0dd77cfdda470c1357",
-  "colors": 16,
-  "scale": 1.0,
-  "panel": "5/5",
-  "sourceRows": [
-   545,
+   501,
    800
   ],
+  "labelRows": 14,
   "original": {
    "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/before/station-waiting-1280x800.png",
    "commit": "41a8653c",
@@ -349,21 +405,31 @@
    "bytes": 72467,
    "width": 1280,
    "height": 800
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 1.0,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8627
   }
  },
  {
-  "file": "REVIEW-COPY-before-station-waiting-390x640-p1of3.png",
-  "bytes": 6564,
+  "file": "REVIEW-COPY-before-station-waiting-390x640-p1of2.png",
+  "bytes": 7338,
   "width": 390,
-  "height": 357,
-  "sha256": "a2195e61bdec71208a1d805f0f46ed3cb7988b8ba2239ca0af8dd68072c01fae",
-  "colors": 16,
+  "height": 443,
+  "sha256": "a0ef641297e07c51096021443fb889647aa69cf1962cd754d4c5856bb717a5e5",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 1.0,
-  "panel": "1/3",
+  "panel": "1/2",
   "sourceRows": [
    0,
-   319
+   405
   ],
+  "labelRows": 38,
   "original": {
    "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/before/station-waiting-390x640.png",
    "commit": "41a8653c",
@@ -371,43 +437,31 @@
    "bytes": 40602,
    "width": 390,
    "height": 640
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 0.9943,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8418
   }
  },
  {
-  "file": "REVIEW-COPY-before-station-waiting-390x640-p2of3.png",
-  "bytes": 7500,
+  "file": "REVIEW-COPY-before-station-waiting-390x640-p2of2.png",
+  "bytes": 4265,
   "width": 390,
-  "height": 162,
-  "sha256": "425819167395d3a24821c9216cbebedbca4be9a5722ecfdf43d6b4c36cfdbb51",
-  "colors": 16,
+  "height": 273,
+  "sha256": "3b5de88df5a18d45a7d941395366cbc15cf911dfacf15163ce40baaaa8264a8a",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 1.0,
-  "panel": "2/3",
+  "panel": "2/2",
   "sourceRows": [
-   319,
-   443
-  ],
-  "original": {
-   "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/before/station-waiting-390x640.png",
-   "commit": "41a8653c",
-   "sha256": "ca3c94233f095a1f38fe37c9bd4112d64114eb86d844ca762a75e26208fd53cf",
-   "bytes": 40602,
-   "width": 390,
-   "height": 640
-  }
- },
- {
-  "file": "REVIEW-COPY-before-station-waiting-390x640-p3of3.png",
-  "bytes": 3724,
-  "width": 390,
-  "height": 235,
-  "sha256": "f2296891bd65f8b9105d81509b838316f78d2f48c982dbaf49d1447bfa061dbd",
-  "colors": 16,
-  "scale": 1.0,
-  "panel": "3/3",
-  "sourceRows": [
-   443,
+   405,
    640
   ],
+  "labelRows": 38,
   "original": {
    "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/before/station-waiting-390x640.png",
    "commit": "41a8653c",
@@ -415,21 +469,31 @@
    "bytes": 40602,
    "width": 390,
    "height": 640
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 1.0,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.839
   }
  },
  {
-  "file": "REVIEW-COPY-before-station-waiting-390x844-p1of3.png",
-  "bytes": 6736,
+  "file": "REVIEW-COPY-before-station-waiting-390x844-p1of2.png",
+  "bytes": 7492,
   "width": 390,
-  "height": 459,
-  "sha256": "8984d25dd63a52db800eed71213436b5d13fc6118163c282811427e5d43986a4",
-  "colors": 16,
+  "height": 545,
+  "sha256": "b7819775c7cfe1f2a2de4302c2ae9274ef162050c92c4068d1a5f75eedc4fd68",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 1.0,
-  "panel": "1/3",
+  "panel": "1/2",
   "sourceRows": [
    0,
-   421
+   507
   ],
+  "labelRows": 38,
   "original": {
    "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/before/station-waiting-390x844.png",
    "commit": "41a8653c",
@@ -437,43 +501,31 @@
    "bytes": 41803,
    "width": 390,
    "height": 844
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 0.9943,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8348
   }
  },
  {
-  "file": "REVIEW-COPY-before-station-waiting-390x844-p2of3.png",
-  "bytes": 6458,
+  "file": "REVIEW-COPY-before-station-waiting-390x844-p2of2.png",
+  "bytes": 4338,
   "width": 390,
-  "height": 143,
-  "sha256": "9a80ae90fe4af04d91dc267b35a4652bcdf0a17820d38c1b01f62aa2fa736fe3",
-  "colors": 16,
+  "height": 375,
+  "sha256": "ca2c60437e0c116a058f3d61b1e91c79b9d0d13682c70bd30b16b4c9198bac9c",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 1.0,
-  "panel": "2/3",
+  "panel": "2/2",
   "sourceRows": [
-   421,
-   526
-  ],
-  "original": {
-   "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/before/station-waiting-390x844.png",
-   "commit": "41a8653c",
-   "sha256": "5d500863ab0b9373becdb000025d65e69f295892af3a06b889adad8110fc2d66",
-   "bytes": 41803,
-   "width": 390,
-   "height": 844
-  }
- },
- {
-  "file": "REVIEW-COPY-before-station-waiting-390x844-p3of3.png",
-  "bytes": 4977,
-  "width": 390,
-  "height": 356,
-  "sha256": "7aa5cf8c621fe15a2ee5a1e03d074963f23c572c08889b5c4afea0234c226176",
-  "colors": 16,
-  "scale": 1.0,
-  "panel": "3/3",
-  "sourceRows": [
-   526,
+   507,
    844
   ],
+  "labelRows": 38,
   "original": {
    "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/before/station-waiting-390x844.png",
    "commit": "41a8653c",
@@ -481,21 +533,31 @@
    "bytes": 41803,
    "width": 390,
    "height": 844
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 1.0,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8325
   }
  },
  {
-  "file": "REVIEW-COPY-after-champion-screens-card-390x640-p1of3.png",
-  "bytes": 7413,
+  "file": "REVIEW-COPY-after-champion-screens-card-390x640-p1of2.png",
+  "bytes": 7527,
   "width": 350,
-  "height": 238,
-  "sha256": "0d745d1459c5fcb79c78a611cd482a070de432765c3203ab7277d8e270c7019a",
-  "colors": 16,
+  "height": 283,
+  "sha256": "7db1017db63ba1b9b5f866e5112cd0df0b677b84677c21ade899c9ac3710ed85",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 1.0,
-  "panel": "1/3",
+  "panel": "1/2",
   "sourceRows": [
    0,
-   176
+   221
   ],
+  "labelRows": 62,
   "original": {
    "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/after/champion-screens-card-390x640.png",
    "commit": "41a8653c",
@@ -503,43 +565,31 @@
    "bytes": 42912,
    "width": 350,
    "height": 436
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 1.0,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8889
   }
  },
  {
-  "file": "REVIEW-COPY-after-champion-screens-card-390x640-p2of3.png",
-  "bytes": 7094,
+  "file": "REVIEW-COPY-after-champion-screens-card-390x640-p2of2.png",
+  "bytes": 7333,
   "width": 350,
-  "height": 245,
-  "sha256": "354875eef480ad2effb2e5f00a80416ec57e296b99de1b40b10870851e14de9c",
-  "colors": 16,
+  "height": 277,
+  "sha256": "69029ec3288af3f6ee146e886ae557d4f465e2766cb768d097a541a4d63a27a6",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 1.0,
-  "panel": "2/3",
+  "panel": "2/2",
   "sourceRows": [
-   176,
-   359
-  ],
-  "original": {
-   "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/after/champion-screens-card-390x640.png",
-   "commit": "41a8653c",
-   "sha256": "3ad70aaa2cbc4110857569d126fb118e0d242169dd3b0bf6a540a4738f12bc61",
-   "bytes": 42912,
-   "width": 350,
-   "height": 436
-  }
- },
- {
-  "file": "REVIEW-COPY-after-champion-screens-card-390x640-p3of3.png",
-  "bytes": 5197,
-  "width": 350,
-  "height": 139,
-  "sha256": "a6418b1ba1c35b84f68ad718d405955115f148f8c9c02d72e099414e6ab407ce",
-  "colors": 16,
-  "scale": 1.0,
-  "panel": "3/3",
-  "sourceRows": [
-   359,
+   221,
    436
   ],
+  "labelRows": 62,
   "original": {
    "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/after/champion-screens-card-390x640.png",
    "commit": "41a8653c",
@@ -547,21 +597,31 @@
    "bytes": 42912,
    "width": 350,
    "height": 436
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 1.0,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8873
   }
  },
  {
-  "file": "REVIEW-COPY-after-champion-screens-card-390x844-p1of3.png",
-  "bytes": 7215,
+  "file": "REVIEW-COPY-after-champion-screens-card-390x844-p1of2.png",
+  "bytes": 7514,
   "width": 350,
-  "height": 237,
-  "sha256": "d5996a8e917f31eed3df101b6fbd0de4a50799a85a7e5a679e2b273ca17a150a",
-  "colors": 16,
+  "height": 282,
+  "sha256": "66d646e5049cc9980cc01c41c8b03ce848d4d46f5f67b7dac949955ce7faf513",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 1.0,
-  "panel": "1/3",
+  "panel": "1/2",
   "sourceRows": [
    0,
-   175
+   220
   ],
+  "labelRows": 62,
   "original": {
    "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/after/champion-screens-card-390x844.png",
    "commit": "41a8653c",
@@ -569,43 +629,31 @@
    "bytes": 42910,
    "width": 350,
    "height": 436
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 1.0,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8879
   }
  },
  {
-  "file": "REVIEW-COPY-after-champion-screens-card-390x844-p2of3.png",
-  "bytes": 7076,
+  "file": "REVIEW-COPY-after-champion-screens-card-390x844-p2of2.png",
+  "bytes": 7325,
   "width": 350,
-  "height": 245,
-  "sha256": "d4111fb3e391e06b7791485b9722997565b503a7bd66c2613d976a5eaa6ef660",
-  "colors": 16,
+  "height": 278,
+  "sha256": "29408c2eac6dc0f0a6fef6434840e5c533093428cdd02b0b0679b43f9bb757f3",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 1.0,
-  "panel": "2/3",
+  "panel": "2/2",
   "sourceRows": [
-   175,
-   358
-  ],
-  "original": {
-   "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/after/champion-screens-card-390x844.png",
-   "commit": "41a8653c",
-   "sha256": "bea2b4ed0314b0b47af5161caa05dd6bbad7566ed690a44ce221e56e0409affa",
-   "bytes": 42910,
-   "width": 350,
-   "height": 436
-  }
- },
- {
-  "file": "REVIEW-COPY-after-champion-screens-card-390x844-p3of3.png",
-  "bytes": 5153,
-  "width": 350,
-  "height": 140,
-  "sha256": "acddcdc8e70371fd64f2a66a75451737c03f84907cb7377c11cec5d14021b7a2",
-  "colors": 16,
-  "scale": 1.0,
-  "panel": "3/3",
-  "sourceRows": [
-   358,
+   220,
    436
   ],
+  "labelRows": 62,
   "original": {
    "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/after/champion-screens-card-390x844.png",
    "commit": "41a8653c",
@@ -613,21 +661,31 @@
    "bytes": 42910,
    "width": 350,
    "height": 436
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 1.0,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8863
   }
  },
  {
   "file": "REVIEW-COPY-after-station-expired-1280x800-p1of3.png",
-  "bytes": 6366,
+  "bytes": 6112,
   "width": 1280,
-  "height": 314,
-  "sha256": "fc83a9d44c5e5a513fc7d080ef3b9877ddda3bf54f3f50458176bf533ff75f4d",
-  "colors": 16,
+  "height": 385,
+  "sha256": "84aa907f7235a348593bb03d40c0f3c0d4a2eee0f2007a7046da86512dc0d4b6",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 1.0,
   "panel": "1/3",
   "sourceRows": [
    0,
-   300
+   371
   ],
+  "labelRows": 14,
   "original": {
    "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/after/station-expired-1280x800.png",
    "commit": "41a8653c",
@@ -635,21 +693,31 @@
    "bytes": 55144,
    "width": 1280,
    "height": 800
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 1.0,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8656
   }
  },
  {
   "file": "REVIEW-COPY-after-station-expired-1280x800-p2of3.png",
-  "bytes": 7243,
+  "bytes": 7580,
   "width": 1280,
-  "height": 109,
-  "sha256": "691379af6d8f823a59258e72ee3ac8ea705a3cf6ec40f6df7785c1667d23ad0e",
-  "colors": 16,
+  "height": 284,
+  "sha256": "8e7b09fdf05a19456453d0f94c10d35564ecfeb9c33a8d63046d0532364942dc",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 1.0,
   "panel": "2/3",
   "sourceRows": [
-   300,
-   395
+   371,
+   641
   ],
+  "labelRows": 14,
   "original": {
    "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/after/station-expired-1280x800.png",
    "commit": "41a8653c",
@@ -657,21 +725,31 @@
    "bytes": 55144,
    "width": 1280,
    "height": 800
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 0.9782,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.864
   }
  },
  {
   "file": "REVIEW-COPY-after-station-expired-1280x800-p3of3.png",
-  "bytes": 7452,
+  "bytes": 1896,
   "width": 1280,
-  "height": 419,
-  "sha256": "13af7b5e4dac965a838004a8b02c5f8609a11716a5b1a1a5fd72e5807b8870c2",
-  "colors": 16,
+  "height": 173,
+  "sha256": "08ee16b948a64870afd6f3b3854b023c484dc49871d13e3468748f0d28c76fe1",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 1.0,
   "panel": "3/3",
   "sourceRows": [
-   395,
+   641,
    800
   ],
+  "labelRows": 14,
   "original": {
    "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/after/station-expired-1280x800.png",
    "commit": "41a8653c",
@@ -679,21 +757,31 @@
    "bytes": 55144,
    "width": 1280,
    "height": 800
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 1.0,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8624
   }
  },
  {
   "file": "REVIEW-COPY-after-station-expired-390x640-p1of2.png",
-  "bytes": 6689,
+  "bytes": 7294,
   "width": 390,
-  "height": 331,
-  "sha256": "f3679916405387efc627a47ead727da0a02710a363e1a4c9908408e9fc29eedf",
-  "colors": 16,
+  "height": 456,
+  "sha256": "d61637630af36cd55a11f0d20c75845928085bf3a9638378bc9251196ebcefc8",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 1.0,
   "panel": "1/2",
   "sourceRows": [
    0,
-   293
+   418
   ],
+  "labelRows": 38,
   "original": {
    "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/after/station-expired-390x640.png",
    "commit": "41a8653c",
@@ -701,21 +789,31 @@
    "bytes": 36454,
    "width": 390,
    "height": 640
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 0.9655,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8445
   }
  },
  {
   "file": "REVIEW-COPY-after-station-expired-390x640-p2of2.png",
-  "bytes": 7558,
+  "bytes": 3454,
   "width": 390,
-  "height": 385,
-  "sha256": "38ff539d4743864e39257ab28c40868ad4f756f771083413589d2dd6901723e7",
-  "colors": 16,
+  "height": 260,
+  "sha256": "1ac917ca2a4a0c18f9286aeb5e65be6bd1816d3dd349a23ddf678a53d3b436f2",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 1.0,
   "panel": "2/2",
   "sourceRows": [
-   293,
+   418,
    640
   ],
+  "labelRows": 38,
   "original": {
    "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/after/station-expired-390x640.png",
    "commit": "41a8653c",
@@ -723,21 +821,31 @@
    "bytes": 36454,
    "width": 390,
    "height": 640
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 1.0,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8418
   }
  },
  {
   "file": "REVIEW-COPY-after-station-expired-390x844-p1of2.png",
-  "bytes": 6792,
+  "bytes": 7421,
   "width": 390,
-  "height": 433,
-  "sha256": "37716172bc1d7de84b87c541483a5dbc4bdc0dde25b8e4e9b19c074152bab7c4",
-  "colors": 16,
+  "height": 558,
+  "sha256": "ea2c94ad1278e6d275f5cbe77dd773560e59edd5350384ed38a35962e4200b19",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 1.0,
   "panel": "1/2",
   "sourceRows": [
    0,
-   395
+   520
   ],
+  "labelRows": 38,
   "original": {
    "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/after/station-expired-390x844.png",
    "commit": "41a8653c",
@@ -745,21 +853,31 @@
    "bytes": 37549,
    "width": 390,
    "height": 844
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 0.9656,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8425
   }
  },
  {
   "file": "REVIEW-COPY-after-station-expired-390x844-p2of2.png",
-  "bytes": 7523,
+  "bytes": 3551,
   "width": 390,
-  "height": 487,
-  "sha256": "4ba8e618b3fe1e1292e784e7d9f9c3b3a63e26e7df2ffbe27bcdf33b605af09e",
-  "colors": 16,
+  "height": 362,
+  "sha256": "9969c8db6ec268d1fd190704a6c8d3e5559923f09c7b46add2143a167c94b26f",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 1.0,
   "panel": "2/2",
   "sourceRows": [
-   395,
+   520,
    844
   ],
+  "labelRows": 38,
   "original": {
    "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/after/station-expired-390x844.png",
    "commit": "41a8653c",
@@ -767,43 +885,31 @@
    "bytes": 37549,
    "width": 390,
    "height": 844
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 1.0,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8401
   }
  },
  {
-  "file": "REVIEW-COPY-after-station-waiting-1280x800-p1of7.png",
-  "bytes": 5966,
+  "file": "REVIEW-COPY-after-station-waiting-1280x800-p1of5.png",
+  "bytes": 5779,
   "width": 1280,
-  "height": 196,
-  "sha256": "e8273eca336cf5b9314bde04b5b015b56834851a57310ecd8f0063e7a2b3d039",
-  "colors": 16,
+  "height": 284,
+  "sha256": "d52ddb2758734fddae2c8b11113cbf5dbfb297a6f7c5de983b3b54d97ca824eb",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 1.0,
-  "panel": "1/7",
+  "panel": "1/5",
   "sourceRows": [
    0,
-   182
-  ],
-  "original": {
-   "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/after/station-waiting-1280x800.png",
-   "commit": "41a8653c",
-   "sha256": "e7683996439be024426c8b0c538092800a653fbe0309ecc19d20f86c2f1b41f6",
-   "bytes": 97054,
-   "width": 1280,
-   "height": 800
-  }
- },
- {
-  "file": "REVIEW-COPY-after-station-waiting-1280x800-p2of7.png",
-  "bytes": 5088,
-  "width": 1280,
-  "height": 102,
-  "sha256": "bb9cc12f1b8359e3ab3214b4b8432ad70dd2a545d344471a97980a515f7679cc",
-  "colors": 16,
-  "scale": 1.0,
-  "panel": "2/7",
-  "sourceRows": [
-   182,
    270
   ],
+  "labelRows": 14,
   "original": {
    "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/after/station-waiting-1280x800.png",
    "commit": "41a8653c",
@@ -811,21 +917,31 @@
    "bytes": 97054,
    "width": 1280,
    "height": 800
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 1.0,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8656
   }
  },
  {
-  "file": "REVIEW-COPY-after-station-waiting-1280x800-p3of7.png",
-  "bytes": 5838,
+  "file": "REVIEW-COPY-after-station-waiting-1280x800-p2of5.png",
+  "bytes": 6137,
   "width": 1280,
-  "height": 139,
-  "sha256": "1834db7b950203bd09c3533a452bdff2851e30125524ea1d0d859b9e607f314d",
-  "colors": 16,
+  "height": 179,
+  "sha256": "feab6c24f99fc4d2c187e4221477e3b0a305b225e523247d1b1a2ef9dc4d16d8",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 1.0,
-  "panel": "3/7",
+  "panel": "2/5",
   "sourceRows": [
    270,
-   395
+   435
   ],
+  "labelRows": 14,
   "original": {
    "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/after/station-waiting-1280x800.png",
    "commit": "41a8653c",
@@ -833,43 +949,31 @@
    "bytes": 97054,
    "width": 1280,
    "height": 800
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 1.0,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8638
   }
  },
  {
-  "file": "REVIEW-COPY-after-station-waiting-1280x800-p4of7.png",
-  "bytes": 7349,
+  "file": "REVIEW-COPY-after-station-waiting-1280x800-p3of5.png",
+  "bytes": 6657,
   "width": 1280,
-  "height": 86,
-  "sha256": "e751f0c27a98150ef7f6e8c0c57a2be20263f97dbe2042ffe68d753b2c746535",
-  "colors": 16,
+  "height": 122,
+  "sha256": "6d39f0d20029cf28f65843f4c993c423223b2c515cc10e10b7a5500cc1f78096",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 1.0,
-  "panel": "4/7",
+  "panel": "3/5",
   "sourceRows": [
-   395,
-   467
-  ],
-  "original": {
-   "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/after/station-waiting-1280x800.png",
-   "commit": "41a8653c",
-   "sha256": "e7683996439be024426c8b0c538092800a653fbe0309ecc19d20f86c2f1b41f6",
-   "bytes": 97054,
-   "width": 1280,
-   "height": 800
-  }
- },
- {
-  "file": "REVIEW-COPY-after-station-waiting-1280x800-p5of7.png",
-  "bytes": 5478,
-  "width": 1280,
-  "height": 90,
-  "sha256": "37c4e4ea7d2471ccf95f3fb9dabb3be09f0874ca3300ee041d1b80d98a8a515d",
-  "colors": 16,
-  "scale": 1.0,
-  "panel": "5/7",
-  "sourceRows": [
-   467,
+   435,
    543
   ],
+  "labelRows": 14,
   "original": {
    "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/after/station-waiting-1280x800.png",
    "commit": "41a8653c",
@@ -877,21 +981,31 @@
    "bytes": 97054,
    "width": 1280,
    "height": 800
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 1.0,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8635
   }
  },
  {
-  "file": "REVIEW-COPY-after-station-waiting-1280x800-p6of7.png",
-  "bytes": 5663,
+  "file": "REVIEW-COPY-after-station-waiting-1280x800-p4of5.png",
+  "bytes": 6644,
   "width": 1280,
-  "height": 90,
-  "sha256": "054a68811ebbdc80aabe77018bb7b46eed51ee5bfef94c5acc95c57f46d272aa",
-  "colors": 16,
+  "height": 109,
+  "sha256": "b6b7c00b405073cac010dd12293bdf97bd4eb44326957172c8d34736d419f601",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 1.0,
-  "panel": "6/7",
+  "panel": "4/5",
   "sourceRows": [
    543,
-   619
+   638
   ],
+  "labelRows": 14,
   "original": {
    "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/after/station-waiting-1280x800.png",
    "commit": "41a8653c",
@@ -899,21 +1013,31 @@
    "bytes": 97054,
    "width": 1280,
    "height": 800
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 1.0,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8632
   }
  },
  {
-  "file": "REVIEW-COPY-after-station-waiting-1280x800-p7of7.png",
-  "bytes": 6557,
+  "file": "REVIEW-COPY-after-station-waiting-1280x800-p5of5.png",
+  "bytes": 3032,
   "width": 1280,
-  "height": 195,
-  "sha256": "a11a05445eb9ef77296fd422d01076027744d27008cb3e1e6647b40bceb03f93",
-  "colors": 16,
+  "height": 176,
+  "sha256": "3657cd1547b36a6ca2416acdd6d284b2406f5d080546410fa8ec429b2f0ffb40",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 1.0,
-  "panel": "7/7",
+  "panel": "5/5",
   "sourceRows": [
-   619,
+   638,
    800
   ],
+  "labelRows": 14,
   "original": {
    "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/after/station-waiting-1280x800.png",
    "commit": "41a8653c",
@@ -921,21 +1045,31 @@
    "bytes": 97054,
    "width": 1280,
    "height": 800
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 1.0,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8625
   }
  },
  {
-  "file": "REVIEW-COPY-after-station-waiting-390x640-p1of4.png",
-  "bytes": 7132,
+  "file": "REVIEW-COPY-after-station-waiting-390x640-p1of3.png",
+  "bytes": 7327,
   "width": 390,
-  "height": 302,
-  "sha256": "70869f7c4fcba911ba53121cf78eaa01a9938c19f7a6df3d2e235f811df56f76",
-  "colors": 16,
+  "height": 387,
+  "sha256": "b76e68b0aab9f38e7ae23fb22a74067208a54d2e61a85641af0adc07ff9969d6",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 1.0,
-  "panel": "1/4",
+  "panel": "1/3",
   "sourceRows": [
    0,
-   264
+   349
   ],
+  "labelRows": 38,
   "original": {
    "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/after/station-waiting-390x640.png",
    "commit": "41a8653c",
@@ -943,21 +1077,31 @@
    "bytes": 56201,
    "width": 390,
    "height": 640
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 0.9879,
+   "greenKept": 0.9943,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8428
   }
  },
  {
-  "file": "REVIEW-COPY-after-station-waiting-390x640-p2of4.png",
-  "bytes": 6864,
+  "file": "REVIEW-COPY-after-station-waiting-390x640-p2of3.png",
+  "bytes": 7285,
   "width": 390,
-  "height": 177,
-  "sha256": "cdd9e3107ba996394cd5fa29b02fed3030a208e6de4ba4429955963eb29534b0",
-  "colors": 16,
+  "height": 211,
+  "sha256": "acc8f6762285d05738ba22465915a1a73d71397ba885efc37505c295d82ab47e",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 1.0,
-  "panel": "2/4",
+  "panel": "2/3",
   "sourceRows": [
-   264,
-   403
+   349,
+   522
   ],
+  "labelRows": 38,
   "original": {
    "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/after/station-waiting-390x640.png",
    "commit": "41a8653c",
@@ -965,43 +1109,31 @@
    "bytes": 56201,
    "width": 390,
    "height": 640
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 1.0,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.841
   }
  },
  {
-  "file": "REVIEW-COPY-after-station-waiting-390x640-p3of4.png",
-  "bytes": 6684,
+  "file": "REVIEW-COPY-after-station-waiting-390x640-p3of3.png",
+  "bytes": 2311,
   "width": 390,
-  "height": 138,
-  "sha256": "6852539af0e06ef78254a2597c970125b1d5a2be845383fbcf49936b9f229a07",
-  "colors": 16,
+  "height": 156,
+  "sha256": "d38865ed4d9b69ebd4966bebaccfc8d563be2ad013374366c488f966c78f60c7",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 1.0,
-  "panel": "3/4",
+  "panel": "3/3",
   "sourceRows": [
-   403,
-   503
-  ],
-  "original": {
-   "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/after/station-waiting-390x640.png",
-   "commit": "41a8653c",
-   "sha256": "7dcff3283798fb293ae26991ce2160fe5fa487c9f6dba04df773a05d2726e7e9",
-   "bytes": 56201,
-   "width": 390,
-   "height": 640
-  }
- },
- {
-  "file": "REVIEW-COPY-after-station-waiting-390x640-p4of4.png",
-  "bytes": 4565,
-  "width": 390,
-  "height": 175,
-  "sha256": "a5aaef0707fc14436f20b722b3072a08b8693b8182b6cef7ecd71d48ce732dd2",
-  "colors": 16,
-  "scale": 1.0,
-  "panel": "4/4",
-  "sourceRows": [
-   503,
+   522,
    640
   ],
+  "labelRows": 38,
   "original": {
    "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/after/station-waiting-390x640.png",
    "commit": "41a8653c",
@@ -1009,21 +1141,31 @@
    "bytes": 56201,
    "width": 390,
    "height": 640
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 1.0,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8404
   }
  },
  {
-  "file": "REVIEW-COPY-after-station-waiting-390x844-p1of4.png",
-  "bytes": 7369,
+  "file": "REVIEW-COPY-after-station-waiting-390x844-p1of3.png",
+  "bytes": 7511,
   "width": 390,
-  "height": 404,
-  "sha256": "59f8a4685ffda38cb7a3119c84be079d7e61f26ced0831ef0d438fd519045f83",
-  "colors": 16,
+  "height": 489,
+  "sha256": "c1e28bbe14510681a62c2d13f89dd43783758564c472b3f78a9a4cdb0ddf402b",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 1.0,
-  "panel": "1/4",
+  "panel": "1/3",
   "sourceRows": [
    0,
-   366
+   451
   ],
+  "labelRows": 38,
   "original": {
    "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/after/station-waiting-390x844.png",
    "commit": "41a8653c",
@@ -1031,21 +1173,31 @@
    "bytes": 57333,
    "width": 390,
    "height": 844
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 0.9879,
+   "greenKept": 0.9943,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8406
   }
  },
  {
-  "file": "REVIEW-COPY-after-station-waiting-390x844-p2of4.png",
-  "bytes": 6850,
+  "file": "REVIEW-COPY-after-station-waiting-390x844-p2of3.png",
+  "bytes": 7268,
   "width": 390,
-  "height": 177,
-  "sha256": "d9556f55823d0ee80f4cc0c570b1daa21b53d063f875c3f22c769ce013b849e2",
-  "colors": 16,
+  "height": 211,
+  "sha256": "eec5bb493d8e59881cf0e0a49803c992848a188a887e09e6057de9b9f56dd2bd",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 1.0,
-  "panel": "2/4",
+  "panel": "2/3",
   "sourceRows": [
-   366,
-   505
+   451,
+   624
   ],
+  "labelRows": 38,
   "original": {
    "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/after/station-waiting-390x844.png",
    "commit": "41a8653c",
@@ -1053,43 +1205,31 @@
    "bytes": 57333,
    "width": 390,
    "height": 844
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 1.0,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8384
   }
  },
  {
-  "file": "REVIEW-COPY-after-station-waiting-390x844-p3of4.png",
-  "bytes": 6669,
+  "file": "REVIEW-COPY-after-station-waiting-390x844-p3of3.png",
+  "bytes": 2363,
   "width": 390,
-  "height": 138,
-  "sha256": "6c511000e1bcaba3d138659cf8ae0a543f86ac96b9aef01cdbe6cbda6953f505",
-  "colors": 16,
+  "height": 258,
+  "sha256": "4cbeb7c99d6a0e0db29c4fa237167d55fa50020cb4d774be1e7cc8e440ae3013",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 1.0,
-  "panel": "3/4",
+  "panel": "3/3",
   "sourceRows": [
-   505,
-   605
-  ],
-  "original": {
-   "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/after/station-waiting-390x844.png",
-   "commit": "41a8653c",
-   "sha256": "7ebab3a139e40a798cc293c3e62c2689fd0885595c0918e6197a6c0913856bd2",
-   "bytes": 57333,
-   "width": 390,
-   "height": 844
-  }
- },
- {
-  "file": "REVIEW-COPY-after-station-waiting-390x844-p4of4.png",
-  "bytes": 4624,
-  "width": 390,
-  "height": 277,
-  "sha256": "0f5747388dae6b4d43bd5306fbcf6f31d9837759a3ee706b3c5d22c7a9831842",
-  "colors": 16,
-  "scale": 1.0,
-  "panel": "4/4",
-  "sourceRows": [
-   605,
+   624,
    844
   ],
+  "labelRows": 38,
   "original": {
    "path": "docs/design-target/review/kiosk-pairing-clarity-proof-1/after/station-waiting-390x844.png",
    "commit": "41a8653c",
@@ -1097,21 +1237,31 @@
    "bytes": 57333,
    "width": 390,
    "height": 844
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 1.0,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8377
   }
  },
  {
-  "file": "REVIEW-COPY-target-TARGET-station-pairing-waiting-1280x800-p1of7.png",
-  "bytes": 5537,
+  "file": "REVIEW-COPY-target-TARGET-station-pairing-waiting-1280x800-p1of3.png",
+  "bytes": 7153,
   "width": 1280,
-  "height": 256,
-  "sha256": "ce3891ed84d129529e00f9596b6882ba805fe408a8948091a3cbe5a3b68b26eb",
-  "colors": 16,
+  "height": 446,
+  "sha256": "5fd435286743dd3c94873e2e31b7fbcb6c01a35021a2fb145113a33385f5042e",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 0.5,
-  "panel": "1/7",
+  "panel": "1/3",
   "sourceRows": [
    0,
-   242
+   432
   ],
+  "labelRows": 14,
   "original": {
    "path": "docs/design-target/review/batch-e-room-screens/TARGET-station-pairing-waiting-1280x800.png",
    "commit": "9a506766",
@@ -1119,87 +1269,31 @@
    "bytes": 180309,
    "width": 2560,
    "height": 1644
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 0.9997,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8459
   }
  },
  {
-  "file": "REVIEW-COPY-target-TARGET-station-pairing-waiting-1280x800-p2of7.png",
-  "bytes": 6314,
+  "file": "REVIEW-COPY-target-TARGET-station-pairing-waiting-1280x800-p2of3.png",
+  "bytes": 6810,
   "width": 1280,
-  "height": 112,
-  "sha256": "ee43d80efe7a85b736dd024eb9710970da3090945e3565304cd8cda9f5f4ef29",
-  "colors": 16,
+  "height": 141,
+  "sha256": "1f57a109a4c867f0b6e765ece9ff24e6376e80d3fb821298f03deb13d84ededa",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 0.5,
-  "panel": "2/7",
+  "panel": "2/3",
   "sourceRows": [
-   242,
-   340
-  ],
-  "original": {
-   "path": "docs/design-target/review/batch-e-room-screens/TARGET-station-pairing-waiting-1280x800.png",
-   "commit": "9a506766",
-   "sha256": "df498b29955e3196776d2e84980016fc5448bddfcac6fed3d7420a9e149dd210",
-   "bytes": 180309,
-   "width": 2560,
-   "height": 1644
-  }
- },
- {
-  "file": "REVIEW-COPY-target-TARGET-station-pairing-waiting-1280x800-p3of7.png",
-  "bytes": 7286,
-  "width": 1280,
-  "height": 158,
-  "sha256": "c165accef594f119c6a2c557addb29bb520ac8ddd8be045e1938582ee6c15636",
-  "colors": 16,
-  "scale": 0.5,
-  "panel": "3/7",
-  "sourceRows": [
-   340,
-   484
-  ],
-  "original": {
-   "path": "docs/design-target/review/batch-e-room-screens/TARGET-station-pairing-waiting-1280x800.png",
-   "commit": "9a506766",
-   "sha256": "df498b29955e3196776d2e84980016fc5448bddfcac6fed3d7420a9e149dd210",
-   "bytes": 180309,
-   "width": 2560,
-   "height": 1644
-  }
- },
- {
-  "file": "REVIEW-COPY-target-TARGET-station-pairing-waiting-1280x800-p4of7.png",
-  "bytes": 6793,
-  "width": 1280,
-  "height": 42,
-  "sha256": "f69b4950d96486f48169e22194c80cf1095f64695427c4d553449b03d692c82e",
-  "colors": 16,
-  "scale": 0.5,
-  "panel": "4/7",
-  "sourceRows": [
-   484,
-   512
-  ],
-  "original": {
-   "path": "docs/design-target/review/batch-e-room-screens/TARGET-station-pairing-waiting-1280x800.png",
-   "commit": "9a506766",
-   "sha256": "df498b29955e3196776d2e84980016fc5448bddfcac6fed3d7420a9e149dd210",
-   "bytes": 180309,
-   "width": 2560,
-   "height": 1644
-  }
- },
- {
-  "file": "REVIEW-COPY-target-TARGET-station-pairing-waiting-1280x800-p5of7.png",
-  "bytes": 4331,
-  "width": 1280,
-  "height": 61,
-  "sha256": "cc23552efd65c12bbc9df0b0a95ebf1bb97f3c47e75cd522ec720b9168fa027a",
-  "colors": 16,
-  "scale": 0.5,
-  "panel": "5/7",
-  "sourceRows": [
-   512,
+   432,
    559
   ],
+  "labelRows": 14,
   "original": {
    "path": "docs/design-target/review/batch-e-room-screens/TARGET-station-pairing-waiting-1280x800.png",
    "commit": "9a506766",
@@ -1207,43 +1301,31 @@
    "bytes": 180309,
    "width": 2560,
    "height": 1644
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 1.0,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8438
   }
  },
  {
-  "file": "REVIEW-COPY-target-TARGET-station-pairing-waiting-1280x800-p6of7.png",
-  "bytes": 7627,
+  "file": "REVIEW-COPY-target-TARGET-station-pairing-waiting-1280x800-p3of3.png",
+  "bytes": 5556,
   "width": 1280,
-  "height": 56,
-  "sha256": "d2def3143122cec2a80dc9534ce0fed113b5a7b2415d69c9b2d7139a7b5246a0",
-  "colors": 16,
+  "height": 277,
+  "sha256": "e32d3776cc1d753e627819893f22d35ed1f45469de3d5e064f300ff000252acb",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 0.5,
-  "panel": "6/7",
+  "panel": "3/3",
   "sourceRows": [
    559,
-   601
-  ],
-  "original": {
-   "path": "docs/design-target/review/batch-e-room-screens/TARGET-station-pairing-waiting-1280x800.png",
-   "commit": "9a506766",
-   "sha256": "df498b29955e3196776d2e84980016fc5448bddfcac6fed3d7420a9e149dd210",
-   "bytes": 180309,
-   "width": 2560,
-   "height": 1644
-  }
- },
- {
-  "file": "REVIEW-COPY-target-TARGET-station-pairing-waiting-1280x800-p7of7.png",
-  "bytes": 3230,
-  "width": 1280,
-  "height": 235,
-  "sha256": "7aaaa5c86c8fc1107c501e2c84102d5cc357474e9225dd25f0ed04606b50d9eb",
-  "colors": 16,
-  "scale": 0.5,
-  "panel": "7/7",
-  "sourceRows": [
-   601,
    822
   ],
+  "labelRows": 14,
   "original": {
    "path": "docs/design-target/review/batch-e-room-screens/TARGET-station-pairing-waiting-1280x800.png",
    "commit": "9a506766",
@@ -1251,21 +1333,31 @@
    "bytes": 180309,
    "width": 2560,
    "height": 1644
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 1.0,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8436
   }
  },
  {
-  "file": "REVIEW-COPY-target-TARGET-station-pairing-expired-1280x800-p1of6.png",
-  "bytes": 5451,
+  "file": "REVIEW-COPY-target-TARGET-station-pairing-expired-1280x800-p1of3.png",
+  "bytes": 7240,
   "width": 1280,
-  "height": 282,
-  "sha256": "403c8b7a2aa0e8859a7a8230bd64acc0e707f3d96a7edadce325a5e3fd2fe563",
-  "colors": 16,
+  "height": 400,
+  "sha256": "e4e37f51df1cd1832d90be7d2478a15234203cfa8802203d33b304c7dc2f89e6",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 0.5,
-  "panel": "1/6",
+  "panel": "1/3",
   "sourceRows": [
    0,
-   268
+   386
   ],
+  "labelRows": 14,
   "original": {
    "path": "docs/design-target/review/batch-e-room-screens/TARGET-station-pairing-expired-1280x800.png",
    "commit": "9a506766",
@@ -1273,65 +1365,31 @@
    "bytes": 181355,
    "width": 2560,
    "height": 1644
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 0.9962,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8475
   }
  },
  {
-  "file": "REVIEW-COPY-target-TARGET-station-pairing-expired-1280x800-p2of6.png",
-  "bytes": 7554,
+  "file": "REVIEW-COPY-target-TARGET-station-pairing-expired-1280x800-p2of3.png",
+  "bytes": 6391,
   "width": 1280,
-  "height": 123,
-  "sha256": "bc58bd7a935a0cb270b86999d2964427565893934dbfdee1be73d61b817be544",
-  "colors": 16,
+  "height": 161,
+  "sha256": "641f25e05fcea5cac11527fb71a7af0f4327d9c1501f3a6c3e08ea6efd2ab512",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 0.5,
-  "panel": "2/6",
+  "panel": "2/3",
   "sourceRows": [
-   268,
-   377
-  ],
-  "original": {
-   "path": "docs/design-target/review/batch-e-room-screens/TARGET-station-pairing-expired-1280x800.png",
-   "commit": "9a506766",
-   "sha256": "bd99daff8614a6ef1037452fba525eb52b24d36515dc25ae8149bccdc4490cf4",
-   "bytes": 181355,
-   "width": 2560,
-   "height": 1644
-  }
- },
- {
-  "file": "REVIEW-COPY-target-TARGET-station-pairing-expired-1280x800-p3of6.png",
-  "bytes": 7012,
-  "width": 1280,
-  "height": 51,
-  "sha256": "59f5d58115ef4bce930e19126336b3a1446a00fedf702eba6bba15945863ac1f",
-  "colors": 16,
-  "scale": 0.5,
-  "panel": "3/6",
-  "sourceRows": [
-   377,
-   414
-  ],
-  "original": {
-   "path": "docs/design-target/review/batch-e-room-screens/TARGET-station-pairing-expired-1280x800.png",
-   "commit": "9a506766",
-   "sha256": "bd99daff8614a6ef1037452fba525eb52b24d36515dc25ae8149bccdc4490cf4",
-   "bytes": 181355,
-   "width": 2560,
-   "height": 1644
-  }
- },
- {
-  "file": "REVIEW-COPY-target-TARGET-station-pairing-expired-1280x800-p4of6.png",
-  "bytes": 6298,
-  "width": 1280,
-  "height": 133,
-  "sha256": "b21e39bcdd443d85881984b046fcb8b58281b17932f49b4a48bf06e5a69bacd4",
-  "colors": 16,
-  "scale": 0.5,
-  "panel": "4/6",
-  "sourceRows": [
-   414,
+   386,
    533
   ],
+  "labelRows": 14,
   "original": {
    "path": "docs/design-target/review/batch-e-room-screens/TARGET-station-pairing-expired-1280x800.png",
    "commit": "9a506766",
@@ -1339,43 +1397,31 @@
    "bytes": 181355,
    "width": 2560,
    "height": 1644
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 1.0,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.8457
   }
  },
  {
-  "file": "REVIEW-COPY-target-TARGET-station-pairing-expired-1280x800-p5of6.png",
-  "bytes": 6193,
+  "file": "REVIEW-COPY-target-TARGET-station-pairing-expired-1280x800-p3of3.png",
+  "bytes": 5758,
   "width": 1280,
-  "height": 38,
-  "sha256": "fbd5d563973d476d8fdefdf8624128e792ae7ba8e47bf48afd3fee05c46c7006",
-  "colors": 16,
+  "height": 303,
+  "sha256": "2833eb99e04df9653b4a23933e9cb0f0371b4a0fa342767bc6449d65de8ff8cc",
+  "contentColors": 16,
+  "labelColors": 2,
   "scale": 0.5,
-  "panel": "5/6",
+  "panel": "3/3",
   "sourceRows": [
    533,
-   557
-  ],
-  "original": {
-   "path": "docs/design-target/review/batch-e-room-screens/TARGET-station-pairing-expired-1280x800.png",
-   "commit": "9a506766",
-   "sha256": "bd99daff8614a6ef1037452fba525eb52b24d36515dc25ae8149bccdc4490cf4",
-   "bytes": 181355,
-   "width": 2560,
-   "height": 1644
-  }
- },
- {
-  "file": "REVIEW-COPY-target-TARGET-station-pairing-expired-1280x800-p6of6.png",
-  "bytes": 4660,
-  "width": 1280,
-  "height": 279,
-  "sha256": "47cf0298994edfd1c3279ac921e5ca74d4cb3810a2cc20217153dd0886eb0e9e",
-  "colors": 16,
-  "scale": 0.5,
-  "panel": "6/6",
-  "sourceRows": [
-   557,
    822
   ],
+  "labelRows": 14,
   "original": {
    "path": "docs/design-target/review/batch-e-room-screens/TARGET-station-pairing-expired-1280x800.png",
    "commit": "9a506766",
@@ -1383,6 +1429,14 @@
    "bytes": 181355,
    "width": 2560,
    "height": 1644
+  },
+  "paletteColors": 16,
+  "acceptance": {
+   "whiteKept": 1.0,
+   "greenKept": 1.0,
+   "whiteToYellow": 0.0,
+   "greenToYellow": 0.0,
+   "stripYellow": 0.846
   }
  }
 ]
