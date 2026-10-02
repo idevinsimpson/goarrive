@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "24b3bcc89c16fcc9bc9ee48656edf872fb07aca0104852d65d9b38b369642ba7",
-  "eventCount": 75,
+  "ledgerHead": "e10577639b9dec6472ab0906af4a5444dedfed398c59f0abd9a0669df21c5ae2",
+  "eventCount": 77,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -48,9 +48,7 @@
     }
   },
   "queue": {
-    "W3": [
-      "STAGING-FASTPATH-DOCS-LINEAGE-FIX"
-    ],
+    "W3": [],
     "W4": [],
     "W5": [],
     "W7": [],
@@ -269,10 +267,10 @@
       },
       "label": "Step 7 correction: allow provably non-runtime docs/instruction lineage while preserving fail-closed fast-path invariants",
       "origin": "ledger",
-      "phase": "QUEUED",
+      "phase": "RELEASED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
-      "inbox": null,
+      "inbox": 396,
       "pr": null,
       "reviewers": [],
       "artifact": {
@@ -283,7 +281,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": null,
+      "releasedQueueIndex": 0,
       "reviewedBy": [],
       "subjectPaths": [
         "tools/wsf-control/fastpath.mjs",
@@ -296,11 +294,14 @@
           "kind": "comment",
           "id": 5944487530
         },
-        "released": null,
+        "released": {
+          "kind": "comment",
+          "id": 5944563639
+        },
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5944487530
+          "id": 5944563639
         }
       },
       "review": {
@@ -654,6 +655,14 @@
         "id": 5941345918
       },
       "superseded": true
+    },
+    "bef6780888dcc82a08cdc026e1e2261dde310de10b53438f34d16ac8a05fde45": {
+      "packet": "STAGING-FASTPATH-DOCS-LINEAGE-FIX",
+      "worker": "W3",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
