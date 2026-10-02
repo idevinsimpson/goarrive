@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "b0676fc5cc8d155be8f70154e38851e47ad29997a175c5ccfd2fefb71b1b05db",
-  "eventCount": 86,
+  "ledgerHead": "766058f538f1da230b2d6ef47b21d7f3c684f7e3fa02eafc29394c34fe972d45",
+  "eventCount": 87,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -267,7 +267,7 @@
       },
       "label": "Step 7 correction: allow provably non-runtime docs/instruction lineage while preserving fail-closed fast-path invariants",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "ACCEPTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -302,10 +302,13 @@
           "kind": "comment",
           "id": 5944563639
         },
-        "accepted": null,
+        "accepted": {
+          "kind": "comment",
+          "id": 5944838792
+        },
         "lastTransition": {
           "kind": "comment",
-          "id": 5944754714
+          "id": 5944838792
         }
       },
       "review": {
