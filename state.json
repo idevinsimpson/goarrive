@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "1c89ea66584dd156e0e6b01bc484e9da9ec9d50c23281a4fcf1fde03337b0207",
-  "eventCount": 216,
+  "ledgerHead": "a7049b20025b8e5b7053d09976a297d552a673fe72d338d8d47850869198e2ee",
+  "eventCount": 217,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -758,7 +758,7 @@
       },
       "label": "Derive the exact successful staging run proof and pointer sequence when the workflow-run wake is missed",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "ACCEPTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -797,10 +797,13 @@
           "kind": "comment",
           "id": 5956038540
         },
-        "accepted": null,
+        "accepted": {
+          "kind": "comment",
+          "id": 5958645894
+        },
         "lastTransition": {
           "kind": "comment",
-          "id": 5957281468
+          "id": 5958645894
         }
       },
       "review": {
