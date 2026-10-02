@@ -637,18 +637,34 @@ export default function StationScreen() {
             Approved. Setting this screen up…
           </Text>
         ) : null}
+        {/*
+          KIOSK-PAIRING-CLARITY-PROOF-1. Whoever is standing here is usually
+          the Champion, holding their own phone. So the screen says what it is
+          (the venue screen, approved from elsewhere), names the real way there
+          in the shell's own words, and says which code and which slot: every
+          unpaired screen shows its own code, and the station number should be
+          this screen's physical place. Nothing about pairing itself changed.
+        */}
         {pairing.kind === 'waiting' ? (
-          <Text
-            style={[styles.genericBody, wide ? styles.genericBodyWide : null]}
-            testID="wsf-station-pairing-instructions"
-          >
-            In your community’s Manage panel, open “Screens at this event”, enter this code, and
-            choose Station 1 or Station 2.
-          </Text>
+          <View style={styles.pairingSteps} testID="wsf-station-pairing-instructions">
+            <Text style={[styles.pairingLead, wide ? styles.pairingLeadWide : null]}>
+              This is the venue screen. Approve it from your own phone.
+            </Text>
+            <Text style={[styles.genericBody, wide ? styles.genericBodyWide : null]}>
+              1. On your phone, open your community, tap the menu, then Manage community.
+            </Text>
+            <Text style={[styles.genericBody, wide ? styles.genericBodyWide : null]}>
+              2. Under Screens at this event, enter the code shown on this screen.
+            </Text>
+            <Text style={[styles.genericBody, wide ? styles.genericBodyWide : null]}>
+              3. Choose Station 1 or Station 2 to match where this screen stands, then Approve.
+            </Text>
+          </View>
         ) : null}
         {pairing.kind === 'expired' ? (
           <Text style={styles.genericBody} testID="wsf-station-pairing-expired">
-            That code has expired. Get a new one and enter it within ten minutes.
+            That code has expired and can’t be used again. Tap Get a new code, then enter the new
+            code on your phone within ten minutes.
           </Text>
         ) : null}
         {pairing.kind === 'failed' ? (
@@ -672,6 +688,9 @@ export default function StationScreen() {
           exactly one thing — permission to show this goal's shared progress.
         */}
         <Text style={styles.caption} testID="wsf-station-pairing-note">
+          {pairing.kind === 'waiting'
+            ? 'Each code works once and lasts ten minutes. '
+            : ''}
           This code only asks a Champion to approve this screen. It is not a sign-in, it gives
           nobody access to an account, and nothing is recorded here.
         </Text>
@@ -1445,6 +1464,11 @@ const styles = StyleSheet.create({
   genericHeadlineWide: { fontSize: 52, lineHeight: 60 },
   genericBody: { color: HERO_MUTED, fontSize: 17, lineHeight: 24, textAlign: 'center' },
   genericBodyWide: { fontSize: 24, lineHeight: 32 },
+  // The pairing steps: one lead in the headline's colour, then the three steps
+  // in body type, close enough together to read as one instruction.
+  pairingSteps: { alignItems: 'center', gap: 6 },
+  pairingLead: { color: CREAM, fontSize: 18, lineHeight: 25, fontWeight: '700', textAlign: 'center' },
+  pairingLeadWide: { fontSize: 26, lineHeight: 34 },
 
   freshnessText: { color: HERO_MUTED, fontSize: 13, letterSpacing: 0.3 },
   testNote: {

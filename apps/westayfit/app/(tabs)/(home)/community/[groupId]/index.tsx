@@ -2498,9 +2498,16 @@ export default function CommunityPage() {
       */}
       <View style={styles.manageGoal} testID={`wsf-kiosk-stations-${goal.goalId}`}>
         <Text style={styles.manageGoalTitle}>Screens at this event</Text>
+        {/*
+          KIOSK-PAIRING-CLARITY-PROOF-1. Pairing happens HERE, on the
+          Champion's own phone, never on the venue screen; every unpaired screen
+          shows its own code; and the slot chosen should be that screen's
+          physical place. The expiry line names the station's own recovery
+          control, and says a code works once, because a spent code never does.
+        */}
         <Text style={styles.manageIntro} testID={`wsf-kiosk-stations-intro-${goal.goalId}`}>
-          Open this address on each screen, then type the code it shows and choose which station
-          it is. You can revoke a screen from here at any time.
+          Open this address on each venue screen. Every unpaired screen shows its own code, and you
+          approve it here, on your own phone. You can revoke a screen from here at any time.
         </Text>
         {stationUrlFor(goal.goalId) ? (
           /*
@@ -2547,6 +2554,11 @@ export default function CommunityPage() {
         ) : null}
 
         <Text style={styles.manageIntro}>Approve a screen</Text>
+        <Text style={styles.manageIntro} testID={`wsf-kiosk-stations-steps-${goal.goalId}`}>
+          Enter the code shown on the screen you’re pairing, choose the station that matches where
+          that screen stands, then Approve. A code works once and lasts ten minutes; if it runs
+          out, tap Get a new code on that screen.
+        </Text>
         <TextInput
           value={stationCode[goal.goalId] ?? ''}
           onChangeText={(raw) =>
