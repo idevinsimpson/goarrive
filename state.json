@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "02339af4266d7a7f9bbcfcf7125e39f0c7a780cbf6d7533a7a2c1b7eee6c6a10",
-  "eventCount": 161,
+  "ledgerHead": "77c2e13fa6e09e7850eae50a6124391e81fa360f8224dfa7c30d9a13bdf4b25c",
+  "eventCount": 162,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -479,7 +479,7 @@
       },
       "label": "Correct fast-path inventory preflight to use the reviewed complete measured baseline without double-counting retained functions",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "ACCEPTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -514,10 +514,13 @@
           "kind": "comment",
           "id": 5953663400
         },
-        "accepted": null,
+        "accepted": {
+          "kind": "comment",
+          "id": 5954007478
+        },
         "lastTransition": {
           "kind": "comment",
-          "id": 5953941768
+          "id": 5954007478
         }
       },
       "review": {
