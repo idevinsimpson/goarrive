@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "4fabba4d171bc55b64a0e3e7511cdbee598b24987f8c224438a337fc7a7aab55",
-  "eventCount": 136,
+  "ledgerHead": "d264f381bea4bcfb2df90921c02e4b310387f88622b08e48cdfcc87f9266ff4c",
+  "eventCount": 138,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -346,7 +346,7 @@
       },
       "label": "Clarify venue-station pairing from the Champion's own phone and prove the existing flow end-to-end",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "CHANGES_REQUESTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -383,7 +383,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5952370511
+          "id": 5952462914
         }
       },
       "review": {
@@ -925,7 +925,16 @@
       "ack": {
         "kind": "comment",
         "id": 5952412371
-      }
+      },
+      "superseded": true
+    },
+    "5d40857c99422baf5c69589870dd2a1608f79f0d1b3301fee2e83f88c07a2c22": {
+      "packet": "KIOSK-PAIRING-CLARITY-PROOF-1",
+      "worker": "W9",
+      "reason": "handback",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
