@@ -39,7 +39,7 @@ import { surfaceEvidence } from './current-surface.mjs';
 import { surfaceStatus } from './reconcile.mjs';
 import { GENESIS, LATEST_SCHEMA, WRITER_APP, isTerminal } from './schema.mjs';
 import { RULES } from './rules.mjs';
-import { SHADOW_PLACEHOLDER, decisionIntake, derivedFacts, shadowSurfaceEvent } from './shadow.mjs';
+import { SHADOW_PLACEHOLDER, decisionIntake, derivedFacts, shadowSurfaceEvent, stagingProofLines } from './shadow.mjs';
 import { STATE_REF, checkoutState, commitState, predecessorRef, pushFastForward, readStateFile, redact, tokenGitEnv } from './gitstate.mjs';
 import { appendAll } from './append-all.mjs';
 import { fastpathReads, mergeReads, postWakes, prReads, routerAppend, workerComments } from './router-run.mjs';
@@ -271,10 +271,24 @@ export async function runShadow({ gh, remote, gitEnv = {}, author, runningSha, s
       }
       if (d.line) fp = appendAll(rr.eventsText, [{ event: d.line, label: `pr-${d.line.source.id}` }]);
       report.stagingTarget = d.line ? `SET target=${d.line.appSha} packet=${d.line.packet} pin=${d.line.pinSha}` : d.report;
+      // The hosted marker and the recent staging runs, read once for the proof sequence and the readback below.
+      let health = null;
+      let runs = null;
+      let readErr = null;
+      try { health = stagingHealth ? await stagingHealth() : null; } catch (err) { readErr = err; }
+      try { if (!readErr) runs = await gh.workflowRuns(STAGING_WORKFLOW, 20); } catch (err) { readErr = err; }
+      // STAGING-PROOF-RECONCILE-ROUTING-FIX: the target's hosted-proof sequence from the run facts, on every run, so a
+      // missed workflow_run wake is caught by the next run of any kind. It records only what the facts prove.
+      const sp = readErr ? { lines: [], report: `UNKNOWN reason=staging reads failed (${why(readErr)}); nothing recorded` } : stagingProofLines(fp.state, { runs, health });
+      if (sp.lines.length) {
+        const ap = appendAll(fp.eventsText, sp.lines.map((event) => ({ event, label: `run-${event.runId}` })));
+        fp = { eventsText: ap.eventsText, state: ap.state, report: { appended: [...fp.report.appended, ...ap.report.appended], refused: [...fp.report.refused, ...ap.report.refused] } };
+      }
+      report.stagingProof = sp.report;
       // The readback: what staging serves now, against the newest candidate. A report only; nothing is stored.
       try {
-        const health = stagingHealth ? await stagingHealth() : null;
-        const facts = freshnessFacts(fp.state, reads, { health, runs: await gh.workflowRuns(STAGING_WORKFLOW, 10) });
+        if (readErr) throw readErr;
+        const facts = freshnessFacts(fp.state, reads, { health, runs: runs.slice(0, 10) });
         report.freshness = freshness(fp.state, facts).lines.filter((l) => !l.startsWith('JOURNEY_VERIFICATION'));
       } catch (err) { report.freshness = [`STAGING_FRESHNESS=UNKNOWN reason=readback failed (${why(err)})`]; }
     }
@@ -343,6 +357,7 @@ export function formatReport(r) {
   for (const x of r.awaiting ?? []) L.push(`AWAITING_REVIEWER ${x}`);
   for (const x of r.integrateUnverified ?? []) L.push(`INTEGRATE_UNVERIFIED ${x}`);
   if (r.stagingTarget) L.push(`STAGING_TARGET ${r.stagingTarget}`);
+  if (r.stagingProof) L.push(`STAGING_PROOF ${r.stagingProof}`);
   for (const x of r.freshness ?? []) L.push(x);
   for (const x of r.exceptions ?? []) L.push(`CONTROL_EXCEPTION ${x}`);
   if (r.deferred) L.push(`DEFERRED ${r.deferred}`);

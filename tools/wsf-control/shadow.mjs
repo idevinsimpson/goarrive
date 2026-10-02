@@ -26,6 +26,7 @@
 import { SHADOW_DERIVED, RULES } from './rules.mjs';
 import { LATEST_SCHEMA, WRITER_APP, EVENT_FIELDS, WAKE_EVENTS } from './schema.mjs';
 import { reconcile } from './reconcile.mjs';
+import { servedOf, targetTitle } from './fastpath.mjs';
 
 /** The fenced block a Director/L0 decision is posted in. One per comment; anything else in the comment is prose. */
 export const DECISION_FENCE = 'wsf-control-decision';
@@ -82,6 +83,54 @@ export function derivedFacts(state, snap, { heads, renders } = {}) {
     }
   }
   return out;
+}
+
+/**
+ * STAGING-PROOF-RECONCILE-ROUTING-FIX (#365 5956001618). The hosted-proof sequence of a fast-path staging target,
+ * derived from GitHub facts on ANY writer run (the workflow_run wake, a comment, or the scheduled fallback), so a missed
+ * run-completion wake no longer leaves a served target unrecorded. From the newest deploy-mode run of the EXACT ledger
+ * target (its run title names the target) that concluded `success`, and a hosted /health marker that names the target:
+ *   begin-proof (R-FASTPATH)  INTEGRATED -> VERIFYING on that run, unless the packet is already proving it;
+ *   stage       (R-FASTPATH)  the deployment receipt of that run (servedSha = the target = the packet's merge);
+ *   proof-pass  (R-PROOF-PASS) the run concluded success: the packet's hosted proof passes, it is STAGED.
+ * Each line is derived only for the state it advances, so a second run (or the event run after the fallback) adds
+ * nothing. Nothing is recorded, and the reason is reported, when: there is no target; the packet is not a hosted STAGED
+ * work packet at the target's merge, or is in another phase; the runs cannot be read; the target has no deploy, or its
+ * newest deploy is still running, failed, or is not the run already in proof; or the marker does not name the target.
+ * A failed run records no proof-fail here (a failure is a finding, memo §9.4). The staging pointer (set-staging) has no
+ * derived rule and is not written. Journey verification is not touched.
+ */
+export function stagingProofLines(state, { runs, health }) {
+  const t = state?.stagingTarget;
+  if (!t) return { lines: [], report: 'NONE reason=the ledger holds no staging target' };
+  const tag = `target=${t.appSha} packet=${t.packet}`;
+  const p = state.packets?.[t.packet];
+  if (!p || p.kind !== 'work' || p.artifact?.mergeSha !== t.appSha) return { lines: [], report: `NONE ${tag} reason=the target is not the packet's integrated merge` };
+  if (p.completion.terminal !== 'STAGED' || p.completion.proofType !== 'hosted') {
+    return { lines: [], report: `NONE ${tag} reason=the packet completes at ${p.completion.terminal} with a ${p.completion.proofType} proof, not a hosted STAGED proof` };
+  }
+  if (p.phase === 'STAGED') return { lines: [], report: `DONE ${tag} run=${p.proof?.runId}` };
+  if (p.phase !== 'INTEGRATED' && p.phase !== 'VERIFYING') return { lines: [], report: `NONE ${tag} reason=the packet is ${p.phase}` };
+  if (!Array.isArray(runs)) return { lines: [], report: `UNKNOWN ${tag} reason=the staging runs could not be read` };
+  const mine = runs.filter((r) => r?.title === targetTitle(t.appSha)).sort((x, y) => y.id - x.id);
+  const run = mine[0];
+  if (!run) return { lines: [], report: `WAITING ${tag} reason=no deploy of the target among the recent staging runs` };
+  if (run.status !== 'completed') return { lines: [], report: `WAITING ${tag} reason=run ${run.id} is ${run.status}` };
+  if (run.conclusion !== 'success') return { lines: [], report: `NONE ${tag} reason=the newest deploy of the target, run ${run.id}, ended ${run.conclusion}; nothing is recorded` };
+  if (p.phase === 'VERIFYING' && p.proof?.runId !== run.id) {
+    return { lines: [], report: `HELD ${tag} reason=the proof in progress is run ${p.proof?.runId}, not the newest successful deploy run ${run.id}` };
+  }
+  if (servedOf(health, [t.appSha]) !== t.appSha) {
+    return { lines: [], report: `NONE ${tag} reason=the hosted marker ${typeof health === 'string' ? 'does not name the target' : 'could not be read'}; run ${run.id} is not recorded as served` };
+  }
+  const repo = state.repository;
+  const src = { kind: 'workflow_run', id: run.id };
+  const ev = [src, { kind: 'commit', id: t.appSha }];
+  const lines = [];
+  if (p.phase === 'INTEGRATED') lines.push(v2(repo, 'begin-proof', { packet: t.packet, runId: run.id, proofType: 'hosted' }, src, 'R-FASTPATH', ev));
+  if (p.served?.runId !== run.id) lines.push(v2(repo, 'stage', { packet: t.packet, runId: run.id, servedSha: t.appSha }, src, 'R-FASTPATH', ev));
+  lines.push(v2(repo, 'proof-pass', { packet: t.packet, runId: run.id, evidenceRef: src }, src, 'R-PROOF-PASS', [src]));
+  return { lines, report: `RECORDED ${tag} run=${run.id} lines=${lines.map((l) => l.type).join(',')}` };
 }
 
 /** The single decision block of a comment body, or null. More than one block is refused, never guessed between. */

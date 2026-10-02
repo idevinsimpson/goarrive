@@ -12,7 +12,9 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { BOOTSTRAP_MAX_AGE_MS, MAX_ATTEMPTS, bootstrapEvent, formatReport, recoveryProblem, runShadow, writerPinProblem } from '../shadow-run.mjs';
-import { shadowSurfaceEvent, DECISION_OWNER, decisionBlock, decisionIntake, derivedFacts, SHADOW_PLACEHOLDER } from '../shadow.mjs';
+import { shadowSurfaceEvent, DECISION_OWNER, decisionBlock, decisionIntake, derivedFacts, SHADOW_PLACEHOLDER, stagingProofLines } from '../shadow.mjs';
+import { appendAll } from '../append-all.mjs';
+import { targetTitle } from '../fastpath.mjs';
 import { redact, tokenGitEnv, STATE_REF, predecessorRef } from '../gitstate.mjs';
 import { gitHubClient } from '../github.mjs';
 import { STEP5_PERMISSIONS, appJwt, installationToken, AppTokenError } from '../app-token.mjs';
@@ -23,7 +25,7 @@ import { checkTexts } from '../check.mjs';
 import { renderCurrent } from '../render-current.mjs';
 import { reduce, serialize } from '../reduce.mjs';
 import { appendEvent } from '../append.mjs';
-import { A, B, C, D, E, F, REPO, atest as runAsync, boot, boot2, done, sha, test } from './helpers.mjs';
+import { A, B, C, D, E, F, REPO, SOURCE_ONLY, atest as runAsync, boot, boot2, done, refused, sha, test, w2 } from './helpers.mjs';
 import { validateEvent } from '../schema.mjs';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-shadow-'));
@@ -628,5 +630,149 @@ test('authorize-retry is recorded from the owner\'s unedited decision block only
   assert.equal(r.events.length, 0);
   assert.deepEqual(r.refused.map((x) => x.commentId), [7002, 7003, 7004, 7005]);
 });
+
+// ---- STAGING-PROOF-RECONCILE-ROUTING-FIX (#365 5956001618; release 5956038540) ----------------------------------------
+
+const asyncTests2 = [];
+const HOSTED = { terminal: 'STAGED', proofType: 'hosted' };
+/** The run-60 shape: KIOSK (hosted STAGED) integrated at E and targeted against the pin C; its run 59 failed. */
+function proofLedger({ completion = HOSTED } = {}) {
+  const add = (r, e) => appendEvent(r.eventsText, e, { expectHead: r.state?.ledgerHead ?? '0'.repeat(64) });
+  let r = [boot2(), w2('queue', { packet: 'KIOSK', owner: 'W3', completion }), w2('release', { packet: 'KIOSK', inbox: 396 }), w2('ack', { packet: 'KIOSK', worker: 'W3' }),
+    w2('deliver', { packet: 'KIOSK', pr: 553, subjectSha: A }), w2('review', { packet: 'KIOSK', reviewers: ['W7'] }), w2('review-pass', { packet: 'KIOSK', reviewer: 'W7' }),
+    w2('accept', { packet: 'KIOSK', subjectSha: A })].reduce(add, { eventsText: '', state: null });
+  r = add(r, w2('integrate', { packet: 'KIOSK', mergeSha: E, acceptance: JSON.parse(r.eventsText.trimEnd().split('\n').at(-1)).source.id }));
+  return add(r, w2('set-target', { packet: 'KIOSK', appSha: E, pinSha: C }, { rule: 'R-FASTPATH', cls: 'derived', source: { kind: 'pull_request', id: 553, repo: REPO } }));
+}
+const RUN59 = 37012494776;
+const RUN60 = 37025084843;
+const deploy = (id, conclusion = 'success', status = 'completed', appSha = E) => ({ id, status, conclusion: status === 'completed' ? conclusion : null, title: targetTitle(appSha) });
+const MARKER = `{"ok":true,"build":"${E.slice(0, 7)}"}`;
+
+test('staging proof: the exact run-60 case records begin-proof, stage and proof-pass on the run, and the packet is STAGED', () => {
+  const r = proofLedger();
+  const d = stagingProofLines(r.state, { runs: [deploy(RUN60), deploy(RUN59, 'failure')], health: MARKER });
+  assert.deepEqual(d.lines.map((l) => [l.type, l.authority.rule, l.source.kind, l.source.id, l.runId]), [
+    ['begin-proof', 'R-FASTPATH', 'workflow_run', RUN60, RUN60], ['stage', 'R-FASTPATH', 'workflow_run', RUN60, RUN60], ['proof-pass', 'R-PROOF-PASS', 'workflow_run', RUN60, RUN60]]);
+  assert.equal(d.lines[0].proofType, 'hosted');
+  assert.equal(d.lines[1].servedSha, E);
+  assert.deepEqual(d.lines[2].evidenceRef, { kind: 'workflow_run', id: RUN60 });
+  assert.equal(d.report, `RECORDED target=${E} packet=KIOSK run=${RUN60} lines=begin-proof,stage,proof-pass`);
+  const unordered = stagingProofLines(r.state, { runs: [deploy(RUN59, 'failure'), deploy(RUN60)], health: MARKER });
+  assert.equal(unordered.report, d.report, 'newest is by run id, whatever order the listing came in');
+  const ap = appendAll(r.eventsText, d.lines.map((event) => ({ event })));
+  assert.deepEqual(ap.report.refused, []);
+  assert.equal(ap.state.packets.KIOSK.phase, 'STAGED');
+  assert.deepEqual(ap.state.packets.KIOSK.served, { runId: RUN60, servedSha: E });
+  assert.equal(ap.state.packets.KIOSK.proof.result, 'PASS');
+  assert.ok(checkTexts(ap.eventsText, serialize(ap.state)).ok);
+  // Idempotent: the next run (the event after the fallback, or the fallback after the event) adds nothing.
+  const again = stagingProofLines(ap.state, { runs: [deploy(RUN60)], health: MARKER });
+  assert.deepEqual([again.lines.length, again.report], [0, `DONE target=${E} packet=KIOSK run=${RUN60}`]);
+  assert.equal(appendAll(ap.eventsText, d.lines.map((event) => ({ event }))).report.appended.length, 0, 'replaying the same lines appends nothing');
+});
+
+test('staging proof resumes a partly recorded sequence from where it stopped, and never re-records a step', () => {
+  const r = proofLedger();
+  const full = stagingProofLines(r.state, { runs: [deploy(RUN60)], health: MARKER }).lines;
+  const afterBegin = appendAll(r.eventsText, [{ event: full[0] }]);
+  assert.equal(afterBegin.state.packets.KIOSK.phase, 'VERIFYING');
+  const rest = stagingProofLines(afterBegin.state, { runs: [deploy(RUN60)], health: MARKER });
+  assert.deepEqual(rest.lines.map((l) => l.type), ['stage', 'proof-pass']);
+  const afterStage = appendAll(afterBegin.eventsText, [{ event: rest.lines[0] }]);
+  assert.deepEqual(stagingProofLines(afterStage.state, { runs: [deploy(RUN60)], health: MARKER }).lines.map((l) => l.type), ['proof-pass']);
+});
+
+test('staging proof fails closed: failed, running, stale, wrong-target and wrong-marker runs record nothing, each with its reason', () => {
+  const r = proofLedger();
+  const cases = [
+    [{ runs: [deploy(RUN59, 'failure')], health: MARKER }, /^NONE .*the newest deploy of the target, run 37012494776, ended failure; nothing is recorded/],
+    [{ runs: [deploy(RUN60, 'cancelled')], health: MARKER }, /ended cancelled/],
+    [{ runs: [deploy(RUN60 + 1, 'failure'), deploy(RUN60)], health: MARKER }, /run 37025084844, ended failure/],
+    [{ runs: [deploy(RUN60, null, 'in_progress')], health: MARKER }, /^WAITING .*run 37025084843 is in_progress/],
+    [{ runs: [deploy(RUN60, null, 'queued')], health: MARKER }, /^WAITING .*is queued/],
+    [{ runs: [deploy(RUN60, 'success', 'completed', F)], health: MARKER }, /^WAITING .*no deploy of the target among the recent staging runs/],
+    [{ runs: [{ ...deploy(RUN60), title: 'WSF staging · mode=deploy' }], health: MARKER }, /no deploy of the target/],
+    [{ runs: [], health: MARKER }, /no deploy of the target/],
+    [{ runs: null, health: MARKER }, /^UNKNOWN .*could not be read/],
+    [{ runs: [deploy(RUN60)], health: `{"build":"${F.slice(0, 7)}"}` }, /^NONE .*the hosted marker does not name the target; run 37025084843 is not recorded as served/],
+    [{ runs: [deploy(RUN60)], health: null }, /the hosted marker could not be read/],
+    // W4 #394 5956405530: the realistic wrong marker after a success is staging still serving the previous build.
+    [{ runs: [deploy(RUN60)], health: `{"build":"${r.state.staging.servedSha.slice(0, 7)}"}` }, /the hosted marker does not name the target; run 37025084843 is not recorded as served/],
+    [{ runs: [deploy(RUN60)], health: `{"build":"${r.state.staging.rollbackSha.slice(0, 7)}"}` }, /the hosted marker does not name the target; run 37025084843 is not recorded as served/],
+  ];
+  assert.deepEqual([r.state.staging.servedSha, r.state.staging.rollbackSha].map((x) => x === E), [false, false], 'the pointer and the rollback are not the target');
+  for (const [facts, re] of cases) {
+    const d = stagingProofLines(r.state, facts);
+    assert.deepEqual(d.lines, [], String(re)); assert.match(d.report, re);
+  }
+  assert.deepEqual([stagingProofLines({ ...r.state, stagingTarget: undefined }, { runs: [deploy(RUN60)], health: MARKER }).report], ['NONE reason=the ledger holds no staging target']);
+});
+
+test('staging proof only for a hosted STAGED work packet at the target\'s merge, INTEGRATED or proving that same run', () => {
+  const src = proofLedger({ completion: SOURCE_ONLY });
+  assert.match(stagingProofLines(src.state, { runs: [deploy(RUN60)], health: MARKER }).report, /completes at INTEGRATED with a source-only proof, not a hosted STAGED proof/);
+  const r = proofLedger();
+  const s = r.state;
+  const drift = { ...s, packets: { ...s.packets, KIOSK: { ...s.packets.KIOSK, artifact: { ...s.packets.KIOSK.artifact, mergeSha: F } } } };
+  assert.match(stagingProofLines(drift, { runs: [deploy(RUN60)], health: MARKER }).report, /the target is not the packet's integrated merge/);
+  assert.match(stagingProofLines({ ...s, packets: { ...s.packets, KIOSK: { ...s.packets.KIOSK, kind: 'reference' } } }, { runs: [deploy(RUN60)], health: MARKER }).report, /not the packet's integrated merge/);
+  assert.match(stagingProofLines({ ...s, packets: { ...s.packets, KIOSK: { ...s.packets.KIOSK, phase: 'CHANGES_REQUESTED' } } }, { runs: [deploy(RUN60)], health: MARKER }).report, /the packet is CHANGES_REQUESTED/);
+  // Already proving an OLDER run: the newer success is not silently swapped in.
+  const proving = appendAll(r.eventsText, [{ event: w2('begin-proof', { packet: 'KIOSK', runId: RUN59, proofType: 'hosted' }) }]);
+  assert.equal(proving.state.packets.KIOSK.phase, 'VERIFYING');
+  assert.match(stagingProofLines(proving.state, { runs: [deploy(RUN60), deploy(RUN59, 'failure')], health: MARKER }).report, /^HELD .*the proof in progress is run 37012494776, not the newest successful deploy run 37025084843/);
+});
+
+test('the writer report carries the staging-proof line', () => {
+  assert.ok(formatReport({ outcome: 'written', appended: [], refused: [], intakeRefused: [], stagingProof: `RECORDED target=${E} packet=KIOSK run=1 lines=proof-pass` }).includes(`STAGING_PROOF RECORDED target=${E} packet=KIOSK run=1 lines=proof-pass`));
+});
+
+// The writer run itself, with no workflow_run event (the scheduled fallback): it reads the runs and the marker and records
+// the sequence; the next run, of any trigger, adds nothing.
+asyncTests2.push(['staging proof, end to end: a scheduled run after a missed workflow_run wake records the run-60 sequence once', async () => {
+  const remote = bareRemote();
+  // Seed the remote with the run-60 ledger (target set, run 59 failed), writer pins at the running commit.
+  const seed = (() => {
+    const r = proofLedger();
+    const pin = w2('set-contracts', { contracts: [{ id: 'writer', path: 'tools/wsf-control', commit: RUNNING }, { id: 'writer-workflow', path: '.github/workflows/wsf-control-reconcile.yml', commit: RUNNING }] });
+    return appendEvent(r.eventsText, pin, { expectHead: r.state.ledgerHead });
+  })();
+  const d = tmp();
+  git(d, 'init', '-q');
+  fs.writeFileSync(path.join(d, 'events.jsonl'), seed.eventsText);
+  fs.writeFileSync(path.join(d, 'state.json'), serialize(seed.state));
+  fs.writeFileSync(path.join(d, 'CURRENT.md'), `${renderCurrent(seed.state)}\n`);
+  git(d, 'add', '.');
+  git(d, '-c', `user.name=${AUTHOR.name}`, '-c', `user.email=${AUTHOR.email}`, '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'seed');
+  git(d, 'push', '-q', remote, `HEAD:refs/heads/${BASE}`);
+  const gh = {
+    ...fakeGh(),
+    async pull() { return null; },
+    async descends() { return true; },
+    async fileText() { return JSON.stringify({ project: 'westayfit-staging', approvedAppSha: C }); },
+    async treeSha() { return 'f'.repeat(40); },
+    async workflowRuns() { return [deploy(RUN60), deploy(RUN59, 'failure')]; },
+  };
+  const go = () => runShadow({ remote, route: true, ref: BASE, now: NOW, author: AUTHOR, runningSha: RUNNING, sameTree: () => true, bootstrapInput: input(), workdir: tmp(),
+    controlInboxComments: [], botLogin: BOT, readInbox: async () => [], stagingHealth: async () => MARKER, gh });
+  // A failed read records nothing and says why; routing is not stopped.
+  const down = await runShadow({ remote, route: true, ref: BASE, now: NOW, author: AUTHOR, runningSha: RUNNING, sameTree: () => true, bootstrapInput: input(), workdir: tmp(),
+    controlInboxComments: [], botLogin: BOT, readInbox: async () => [], stagingHealth: async () => MARKER,
+    gh: { ...gh, async workflowRuns() { throw Object.assign(new Error('x'), { status: 502 }); } } });
+  assert.match(down.stagingProof, /^UNKNOWN reason=staging reads failed \(HTTP 502\); nothing recorded$/);
+  assert.deepEqual(down.appended.filter((x) => /begin-proof|stage|proof-pass/.test(x)), []);
+  const r = await go();
+  assert.deepEqual(r.appended.filter((x) => /begin-proof|stage|proof-pass/.test(x)), [`begin-proof:R-FASTPATH:run-${RUN60}`, `stage:R-FASTPATH:run-${RUN60}`, `proof-pass:R-PROOF-PASS:run-${RUN60}`]);
+  assert.equal(r.stagingProof, `RECORDED target=${E} packet=KIOSK run=${RUN60} lines=begin-proof,stage,proof-pass`);
+  assert.ok(formatReport(r).includes(`STAGING_PROOF RECORDED target=${E} packet=KIOSK run=${RUN60}`));
+  const after = reduce(`${git(d, '--git-dir', remote, 'show', `refs/heads/${BASE}:events.jsonl`)}\n`);
+  assert.equal(after.packets.KIOSK.phase, 'STAGED');
+  assert.equal(after.staging.servedSha, seed.state.staging.servedSha, 'the staging pointer is not written (no derived rule carries set-staging)');
+  const again = await go();
+  assert.deepEqual(again.appended.filter((x) => /begin-proof|stage|proof-pass/.test(x)), []);
+  assert.equal(again.stagingProof, `DONE target=${E} packet=KIOSK run=${RUN60}`);
+}]);
+for (const [n, f] of asyncTests2) await runAsync(n, f);
 
 done('shadow');
