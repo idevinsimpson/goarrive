@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "3c8052c7d591391f42b55174ac21f002faeb104d76cbe50b48f32900a9295d29",
-  "eventCount": 159,
+  "ledgerHead": "3bba1299d64cc277e06491cd2fc3598924d08341a721bebcb452ef8adce1a4a9",
+  "eventCount": 160,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1040,11 +1040,14 @@
       "packet": "STAGING-FASTPATH-INVENTORY-BASELINE-FIX",
       "worker": "W4",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         5953815703
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 5953831475
+      }
     }
   },
   "fastpath": {
