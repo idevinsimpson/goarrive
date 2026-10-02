@@ -276,11 +276,51 @@ describe('wsfSendPasswordResetEmail failure accounting (emulators)', () => {
     noAddressLogged(email);
   });
 
-  it('a network failure is status 0, released and retryable', async () => {
+  // The provider may have accepted a POST whose response never arrived: releasing would allow a duplicate.
+  it('an ambiguous network failure KEEPS the cooldown: classified, not immediately retryable', async () => {
     const email = await known('network');
     fetchSpy.mockRejectedValueOnce(new TypeError('fetch failed'));
     expect(((await wsfSendPasswordResetEmail.run(req({ email })).catch((e) => e)) as HttpsError).code).toBe('internal');
-    expect(errorSpy).toHaveBeenCalledWith('[wsfSendPasswordResetEmail] provider rejected send', 0);
+    expect(errorSpy).toHaveBeenCalledWith('[wsfSendPasswordResetEmail] provider outcome unknown');
+    expect(errorSpy).not.toHaveBeenCalledWith('[wsfSendPasswordResetEmail] provider rejected send', expect.anything());
+    expect((await quotaDoc(email))?.lastSentAt).toEqual(expect.any(Number));
+    expect((await quotaDoc(email))?.countToday).toBe(1);
+    const retry = (await wsfSendPasswordResetEmail.run(req({ email })).catch((e) => e)) as HttpsError;
+    expect(retry.code).toBe('resource-exhausted');
+    expect(retry.message).toMatch(/wait/);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    noAddressLogged(email);
+  });
+
+  it('a bad action-handler config fails closed BEFORE reserving: classified, nothing minted or sent, no cooldown', async () => {
+    const email = await known('handler');
+    const mint = jest.spyOn(getAdminAuth(), 'generatePasswordResetLink');
+    process.env.WSF_AUTH_ACTION_HANDLER = 'not a handler.example.test';
+    try {
+      const caught = (await wsfSendPasswordResetEmail.run(req({ email })).catch((e) => e)) as HttpsError;
+      expect(caught.code).toBe('failed-precondition');
+      expect(caught.message).toMatch(/WSF_AUTH_ACTION_HANDLER/);
+      expect(caught.message).not.toContain('handler.example.test');
+      expect(errorSpy).toHaveBeenCalledWith('[wsf mail] invalid config', 'WSF_AUTH_ACTION_HANDLER');
+      for (const call of errorSpy.mock.calls) for (const arg of call) expect(String(arg)).not.toContain('handler.example.test');
+      expect(mint).not.toHaveBeenCalled();
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(await quotaDoc(email)).toBeUndefined();
+    } finally {
+      delete process.env.WSF_AUTH_ACTION_HANDLER;
+    }
+    noAddressLogged(email);
+    await expect(wsfSendPasswordResetEmail.run(req({ email }))).resolves.toEqual({ accepted: true });
+  });
+
+  it('an unusable minted link is a definite pre-provider failure: classified, nothing POSTed, released and retryable', async () => {
+    const email = await known('minted');
+    jest.spyOn(getAdminAuth(), 'generatePasswordResetLink').mockResolvedValueOnce('not a link');
+    expect(((await wsfSendPasswordResetEmail.run(req({ email })).catch((e) => e)) as HttpsError).code).toBe('internal');
+    expect(errorSpy).toHaveBeenCalledWith('[wsfSendPasswordResetEmail] action link unusable');
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect((await quotaDoc(email))?.lastSentAt).toBeUndefined();
+    noAddressLogged(email);
     await expect(wsfSendPasswordResetEmail.run(req({ email }))).resolves.toEqual({ accepted: true });
   });
 

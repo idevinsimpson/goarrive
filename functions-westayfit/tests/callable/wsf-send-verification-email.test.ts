@@ -16,7 +16,7 @@ process.env.FIREBASE_AUTH_EMULATOR_HOST = process.env.FIREBASE_AUTH_EMULATOR_HOS
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 import { HttpsError } from 'firebase-functions/v2/https';
-import { retargetActionLink, wsfSendVerificationEmail } from '../../src/index';
+import { canonicalActionHandler, retargetActionLink, wsfSendVerificationEmail } from '../../src/index';
 
 const HANDLER = 'https://goarrive.firebaseapp.com/__/auth/action';
 
@@ -58,6 +58,26 @@ describe('retargetActionLink', () => {
   it('is idempotent — retargeting an already-correct link is a no-op', () => {
     const already = `${HANDLER}?mode=verifyEmail&oobCode=Z9`;
     expect(retargetActionLink(already, HANDLER)).toBe(already);
+  });
+});
+
+describe('canonicalActionHandler', () => {
+  it('keeps an https handler as origin + path', () => {
+    expect(canonicalActionHandler(HANDLER)).toBe(HANDLER);
+    expect(canonicalActionHandler('https://Example.TEST/__/auth/action')).toBe('https://example.test/__/auth/action');
+  });
+
+  // Operator config that cannot be a handler: refused rather than carried onto every link.
+  it.each([
+    ['empty', ''],
+    ['not a URL', 'not a url'],
+    ['relative', '/__/auth/action'],
+    ['plain http', 'http://goarrive.firebaseapp.com/__/auth/action'],
+    ['credentials', 'https://user:pw@goarrive.firebaseapp.com/__/auth/action'],
+    ['a query', 'https://goarrive.firebaseapp.com/__/auth/action?mode=x'],
+    ['a fragment', 'https://goarrive.firebaseapp.com/__/auth/action#x'],
+  ])('refuses %s', (_label, raw) => {
+    expect(canonicalActionHandler(raw)).toBeNull();
   });
 });
 
@@ -190,13 +210,66 @@ describe('wsfSendVerificationEmail send path (emulators)', () => {
     noAddressLogged(m.email);
   });
 
-  it('a network failure is classified as status 0, released, and retryable', async () => {
+  // The provider may have accepted a POST whose response never arrived: releasing would allow a duplicate.
+  it('an ambiguous network failure KEEPS the cooldown: classified, not immediately retryable', async () => {
     const m = await member('network');
     fetchSpy.mockRejectedValueOnce(new TypeError('fetch failed'));
     expect(((await m.call().catch((e) => e)) as HttpsError).code).toBe('internal');
-    expect(errorSpy).toHaveBeenCalledWith('[wsfSendVerificationEmail] provider rejected send', 0);
-    await expect(m.call()).resolves.toEqual({ sent: true });
+    expect(errorSpy).toHaveBeenCalledWith('[wsfSendVerificationEmail] provider outcome unknown');
+    expect(errorSpy).not.toHaveBeenCalledWith('[wsfSendVerificationEmail] provider rejected send', expect.anything());
+    const after = await quotaDoc(m.uid);
+    expect(after?.lastSentAt).toEqual(expect.any(Number));
+    expect(after?.countToday).toBe(1);
+    const retry = (await m.call().catch((e) => e)) as HttpsError;
+    expect(retry.code).toBe('resource-exhausted');
+    expect(retry.message).toMatch(/wait/);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
     noAddressLogged(m.email);
+  });
+
+  it('a bad action-handler config fails closed BEFORE reserving: classified, nothing minted or sent, no cooldown', async () => {
+    const m = await member('handler');
+    const bad = 'http://handler.example.test/__/auth/action?leak=1';
+    process.env.WSF_AUTH_ACTION_HANDLER = bad;
+    try {
+      const caught = (await m.call().catch((e) => e)) as HttpsError;
+      expect(caught.code).toBe('failed-precondition');
+      expect(caught.message).toMatch(/WSF_AUTH_ACTION_HANDLER/);
+      expect(caught.message).not.toContain('handler.example.test');
+      expect(errorSpy).toHaveBeenCalledWith('[wsf mail] invalid config', 'WSF_AUTH_ACTION_HANDLER');
+      for (const call of errorSpy.mock.calls) for (const arg of call) expect(String(arg)).not.toContain('handler.example.test');
+      expect(getAdminAuth().generateEmailVerificationLink).not.toHaveBeenCalled();
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(await quotaDoc(m.uid)).toBeUndefined();
+    } finally {
+      delete process.env.WSF_AUTH_ACTION_HANDLER;
+    }
+    // Once the operator value is fixed, the member's first request sends: no false cooldown.
+    await expect(m.call()).resolves.toEqual({ sent: true });
+  });
+
+  it('a valid action-handler config is used canonically for the link', async () => {
+    const m = await member('handler-ok');
+    process.env.WSF_AUTH_ACTION_HANDLER = 'https://Handler.Example.TEST/auth/action';
+    try {
+      await expect(m.call()).resolves.toEqual({ sent: true });
+    } finally {
+      delete process.env.WSF_AUTH_ACTION_HANDLER;
+    }
+    const body = JSON.parse((fetchSpy.mock.calls[0] as [string, { body: string }])[1].body) as { text: string };
+    expect(body.text).toContain('https://handler.example.test/auth/action?mode=verifyEmail&oobCode=STUB-CODE&apiKey=STUB');
+  });
+
+  it('an unusable minted link is a definite pre-provider failure: classified, nothing POSTed, released and retryable', async () => {
+    const m = await member('minted');
+    (getAdminAuth().generateEmailVerificationLink as unknown as jest.Mock).mockResolvedValueOnce('not a link');
+    expect(((await m.call().catch((e) => e)) as HttpsError).code).toBe('internal');
+    expect(errorSpy).toHaveBeenCalledWith('[wsfSendVerificationEmail] action link unusable');
+    for (const call of errorSpy.mock.calls) for (const arg of call) expect(String(arg)).not.toContain('not a link');
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect((await quotaDoc(m.uid))?.lastSentAt).toBeUndefined();
+    noAddressLogged(m.email);
+    await expect(m.call()).resolves.toEqual({ sent: true });
   });
 
   it('Admin link-minting failure: internal with the code only, nothing POSTed, released and retryable', async () => {

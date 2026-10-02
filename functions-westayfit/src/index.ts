@@ -351,17 +351,46 @@ function readSendConfig(): SendConfig {
       `WSF email sending is not configured: missing ${missing.join(', ')}.`
     );
   }
+  // Defaults to Firebase's own handler, which is always live and is precisely
+  // what the project's custom action URL overrode. Override this once a real
+  // handler route exists.
+  const actionHandler = canonicalActionHandler(
+    process.env.WSF_AUTH_ACTION_HANDLER ??
+      `https://${process.env.GCLOUD_PROJECT ?? 'goarrive'}.firebaseapp.com/__/auth/action`
+  );
+  if (!actionHandler) {
+    // EMAIL-STAGING-REPAIR: validated here, before any quota is reserved, so a
+    // bad operator value fails closed without spending a cooldown. The value
+    // itself is never logged or returned.
+    console.error('[wsf mail] invalid config', 'WSF_AUTH_ACTION_HANDLER');
+    throw new HttpsError(
+      'failed-precondition',
+      'WSF email sending is not configured: invalid WSF_AUTH_ACTION_HANDLER.'
+    );
+  }
   return {
     apiKey: apiKey as string,
     from: from as string,
     appUrl: appUrl as string,
-    // Defaults to Firebase's own handler, which is always live and is precisely
-    // what the project's custom action URL overrode. Override this once a real
-    // handler route exists.
-    actionHandler:
-      process.env.WSF_AUTH_ACTION_HANDLER ??
-      `https://${process.env.GCLOUD_PROJECT ?? 'goarrive'}.firebaseapp.com/__/auth/action`,
+    actionHandler,
   };
+}
+
+/**
+ * The action handler as origin + path, or null when it cannot be one: not an
+ * absolute https URL, or carrying credentials, a query or a fragment (the
+ * minted query string replaces the query, and anything else would ride along
+ * on every link).
+ */
+export function canonicalActionHandler(raw: string): string | null {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (u.protocol !== 'https:' || u.username || u.password || u.search || u.hash) return null;
+  return `${u.origin}${u.pathname}`;
 }
 
 /**
@@ -396,7 +425,9 @@ export function retargetActionLink(link: string, handler: string): string {
  * counts toward the daily cap, so failures cannot be used to hammer the
  * provider: at most one attempt in flight per key, at most SEND_DAILY_CAP a day,
  * successful or not. A successful send, and reset's unknown-address path, keep
- * the reservation exactly as before.
+ * the reservation exactly as before. So does a provider request that failed in
+ * transport (status 0): the provider may have accepted it, so that is not an
+ * attempt that sent nothing, and releasing would allow a duplicate.
  */
 type SendReservation = {
   ref: DocumentReference;
@@ -458,7 +489,12 @@ function adminErrorCode(e: unknown): string {
   return typeof e === 'object' && e && 'code' in e ? String((e as { code?: unknown }).code ?? '') : '';
 }
 
-/** POST to the provider. Resolves to the HTTP status, or 0 when the request itself failed. */
+/**
+ * POST to the provider. Resolves to the HTTP status, or 0 when the request
+ * itself failed — an AMBIGUOUS outcome: the provider may have accepted the POST
+ * before the client saw the reset or timeout, so it is never proof that nothing
+ * was sent.
+ */
 async function postToProvider(config: SendConfig, body: Record<string, unknown>): Promise<number> {
   try {
     const res = await fetch(RESEND_ENDPOINT, {
@@ -518,7 +554,16 @@ export const wsfSendVerificationEmail = onCall(
       await releaseSend(quota.reservation);
       throw new HttpsError('internal', 'Could not send the verification email. Try again shortly.');
     }
-    const link = retargetActionLink(minted, config.actionHandler);
+    let link: string;
+    try {
+      link = retargetActionLink(minted, config.actionHandler);
+    } catch {
+      // A definite pre-provider failure (an unparseable minted link): nothing
+      // was sent, so the reservation is given back. Never log the link.
+      console.error('[wsfSendVerificationEmail] action link unusable');
+      await releaseSend(quota.reservation);
+      throw new HttpsError('internal', 'Could not send the verification email. Try again shortly.');
+    }
 
     const status = await postToProvider(config, {
       from: config.from,
@@ -533,8 +578,15 @@ export const wsfSendVerificationEmail = onCall(
       ].join('\n'),
     });
 
+    if (status === 0) {
+      // Ambiguous: the provider may have accepted it. Keep the cooldown, so an
+      // immediate retry cannot send a second copy.
+      console.error('[wsfSendVerificationEmail] provider outcome unknown');
+      throw new HttpsError('internal', 'Could not send the verification email. Try again shortly.');
+    }
     if (status !== 200) {
-      // The response body can echo the recipient; log the status only (0 = the request itself failed).
+      // A definite rejection: nothing was sent. The response body can echo the
+      // recipient; log the status only.
       console.error('[wsfSendVerificationEmail] provider rejected send', status);
       await releaseSend(quota.reservation);
       throw new HttpsError('internal', 'Could not send the verification email. Try again shortly.');
@@ -2066,7 +2118,16 @@ export const wsfSendPasswordResetEmail = onCall<SendPasswordResetRequest>(
       throw new HttpsError('internal', 'Could not send the reset email. Try again shortly.');
     }
 
-    const link = retargetActionLink(minted, config.actionHandler);
+    let link: string;
+    try {
+      link = retargetActionLink(minted, config.actionHandler);
+    } catch {
+      // A definite pre-provider failure (an unparseable minted link): nothing
+      // was sent, so the reservation is given back. Never log the link.
+      console.error('[wsfSendPasswordResetEmail] action link unusable');
+      await releaseSend(quota.reservation);
+      throw new HttpsError('internal', 'Could not send the reset email. Try again shortly.');
+    }
 
     const status = await postToProvider(config, {
       from: config.from,
@@ -2083,8 +2144,15 @@ export const wsfSendPasswordResetEmail = onCall<SendPasswordResetRequest>(
       ].join('\n'),
     });
 
+    if (status === 0) {
+      // Ambiguous: the provider may have accepted it. Keep the cooldown, so an
+      // immediate retry cannot send a second copy.
+      console.error('[wsfSendPasswordResetEmail] provider outcome unknown');
+      throw new HttpsError('internal', 'Could not send the reset email. Try again shortly.');
+    }
     if (status !== 200) {
-      // The provider response body can echo the recipient; log the status only (0 = the request itself failed).
+      // A definite rejection: nothing was sent. The provider response body can
+      // echo the recipient; log the status only.
       console.error('[wsfSendPasswordResetEmail] provider rejected send', status);
       await releaseSend(quota.reservation);
       throw new HttpsError('internal', 'Could not send the reset email. Try again shortly.');
