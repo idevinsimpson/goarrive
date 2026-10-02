@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "7291a0c7eba89c748b49a731bfd652078803898052cf3153eb016a273d597435",
-  "eventCount": 89,
+  "ledgerHead": "78ad4e22313733e803dec51adb583af33c85b26398c497837569e1aec4407487",
+  "eventCount": 93,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -32,16 +32,28 @@
   "criticalPath": null,
   "workers": {
     "W3": {
-      "inbox": 396
+      "inbox": 396,
+      "classes": [
+        "ops-source"
+      ]
     },
     "W4": {
-      "inbox": 394
+      "inbox": 394,
+      "classes": [
+        "ops-source"
+      ]
     },
     "W5": {
-      "inbox": 395
+      "inbox": 395,
+      "classes": [
+        "security"
+      ]
     },
     "W7": {
-      "inbox": 434
+      "inbox": 434,
+      "classes": [
+        "journey-qa"
+      ]
     },
     "W9": {
       "inbox": 497
