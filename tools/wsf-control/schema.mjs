@@ -107,7 +107,11 @@ export const RE = Object.freeze({
   packet: /^[A-Z0-9][A-Z0-9-]{1,80}$/,
   worker: /^W[1-9][0-9]?$/,
   branch: /^[A-Za-z0-9._/-]{1,120}$/,
-  path: /^(\*|[A-Za-z0-9._\-/]{1,160})$/,
+  // A repository path, or `*` alone (the whole-field sentinel). Literal ( ) [ ] are allowed so exact Expo Router files
+  // (route groups `(tabs)`, parameters `[goalId]`) can be reserved; they are compared literally (reconcile inSubject).
+  path: /^(\*|[A-Za-z0-9._\-/()[\]]{1,160})$/,
+  // A contract pin's path keeps the narrower alphabet: it is passed to `git diff -- <path>` as a pathspec, where [ ] glob.
+  contractPath: /^[A-Za-z0-9._\-/]{1,160}$/,
   repo: /^[A-Za-z0-9_.-]{1,39}\/[A-Za-z0-9_.-]{1,100}$/,
   instant: /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/,
   rule: /^(?:[RA]-[A-Z0-9][A-Z0-9-]{1,40}|MANUAL)$/,
@@ -200,7 +204,7 @@ const T = {
     Array.isArray(v.workerReviews) && new Set(v.workerReviews.map((r) => r?.class)).size === v.workerReviews.length &&
     v.workerReviews.every((r) => exactKeys(r, ['class', 'count']) && REVIEW_CLASSES.includes(r.class) && Number.isInteger(r.count) && r.count >= 1 && r.count <= 3),
   contracts: (v) => Array.isArray(v) && v.length > 0 && new Set(v.map((c) => c?.id)).size === v.length &&
-    v.every((c) => exactKeys(c, ['id', 'path', 'commit']) && RE.contractId.test(c.id) && typeof c.path === 'string' && RE.path.test(c.path) && c.path !== '*' && RE.sha.test(c.commit)),
+    v.every((c) => exactKeys(c, ['id', 'path', 'commit']) && RE.contractId.test(c.id) && typeof c.path === 'string' && RE.contractPath.test(c.path) && RE.sha.test(c.commit)),
   bool: (v) => v === true,
   /** A two-valued switch (set-fastpath): true or false, nothing else. */
   onOff: (v) => v === true || v === false,
