@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "0f7937d6ad085c7c566ae94cf8d0c0673ec2ca04cd5ba26149bbc4b8a1765ed4",
-  "eventCount": 99,
+  "ledgerHead": "3c4d7db80a88cb8b6f26f7778c3836773779ae4b05503fa931360218173afd46",
+  "eventCount": 102,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -279,15 +279,17 @@
       },
       "label": "Allow exact Expo Router filenames in control packet path reservations without widening other path syntax",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
-      "pr": null,
-      "reviewers": [],
+      "pr": 552,
+      "reviewers": [
+        "W4"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "3cc44d30ee7242c29b6879dd42ad0ce87c25d398",
+        "prHeadSha": "3cc44d30ee7242c29b6879dd42ad0ce87c25d398",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -313,7 +315,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5944981792
+          "id": 5945025218
         }
       },
       "review": {
@@ -326,7 +328,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "STAGING-FASTPATH-DOCS-LINEAGE-FIX": {
@@ -773,7 +775,16 @@
       "ack": {
         "kind": "comment",
         "id": 5944981792
-      }
+      },
+      "superseded": true
+    },
+    "d30fdc1196350c88b3ddaff2ec174c851acaeb9df3f9d764f56297453a087553": {
+      "packet": "CONTROL-EXPO-ROUTE-PATH-GRAMMAR",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
