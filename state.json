@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "6d7d30b6f3a1380b055700cd76905e38c4574016cc68c55849ef3ee3c767e677",
-  "eventCount": 134,
+  "ledgerHead": "c6cdb87831cb6aaf0808419766d96b2df58a407b00e1a778f61f72f01afbb22b",
+  "eventCount": 135,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -918,8 +918,10 @@
       "packet": "KIOSK-PAIRING-CLARITY-PROOF-1",
       "worker": "W4",
       "reason": "review",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        5952393124
+      ],
       "ack": null
     }
   },
