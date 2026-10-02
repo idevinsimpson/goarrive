@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "2a3a8916a398176fa4c9b86709badeda38ac139233639943912d927a514f4acd",
-  "eventCount": 264,
+  "ledgerHead": "7cc1aa64f74e6614e39294c27e3fd2b49137f7dee5e7fdaf1b893c4f36850e79",
+  "eventCount": 266,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -61,9 +61,7 @@
     }
   },
   "queue": {
-    "W3": [
-      "WORKER-EXECUTION-PROFILES-1"
-    ],
+    "W3": [],
     "W4": [],
     "W5": [],
     "W7": [],
@@ -973,10 +971,10 @@
       },
       "label": "Finish existing PR 562 credential-mode safety and pilot readiness without activating or replacing live workers",
       "origin": "ledger",
-      "phase": "QUEUED",
+      "phase": "RELEASED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
-      "inbox": null,
+      "inbox": 396,
       "pr": null,
       "reviewers": [],
       "artifact": {
@@ -987,7 +985,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": null,
+      "releasedQueueIndex": 0,
       "reviewedBy": [],
       "subjectPaths": [
         ".github/workflows/wsf-worker-profiles.yml",
@@ -1004,11 +1002,14 @@
           "kind": "comment",
           "id": 5962904882
         },
-        "released": null,
+        "released": {
+          "kind": "comment",
+          "id": 5962925247
+        },
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5962904882
+          "id": 5962925247
         }
       },
       "review": {
@@ -1635,6 +1636,14 @@
         "id": 5962757741
       },
       "superseded": true
+    },
+    "a746440f0a4dfb0e7770052b91df361567a6e385a7dea6135d8c04aad6cd664a": {
+      "packet": "WORKER-EXECUTION-PROFILES-1",
+      "worker": "W3",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
