@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=3a785bfe93743ff71d6c19dbd8f8d8145eb406279799eeb22e7675339edca160 events=125 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=ab2144b42da27783a062a48093b10b5d37f2df847ff2b9d9defbf72bba04de7c events=126 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `3a785bfe93743ff71d6c19dbd8f8d8145eb406279799eeb22e7675339edca160` (125 events)
+- Ledger head: `ab2144b42da27783a062a48093b10b5d37f2df847ff2b9d9defbf72bba04de7c` (126 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -66,5 +66,5 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | d30fdc119635 | W4 | CONTROL-EXPO-ROUTE-PATH-GRAMMAR | review | acked | 5945036391 | comment:5945047502 |
 | 031e79b98518 | W9 | KIOSK-PAIRING-CLARITY-PROOF-1 | release | acked | 5945147405 | comment:5945165041 |
 | 1ba204ff5c02 | W7 | KIOSK-PAIRING-CLARITY-PROOF-1 | review | timed-out (wake-undelivered) | 5945337933, 5945912678 | — |
-| d5e0f4697dcf | W4 | KIOSK-PAIRING-CLARITY-PROOF-1 | review | delivered | 5951270703 | — |
+| d5e0f4697dcf | W4 | KIOSK-PAIRING-CLARITY-PROOF-1 | review | acked | 5951270703 | comment:5951307156 |
 
