@@ -381,7 +381,7 @@ export default function DashboardScreen() {
 
           <Pressable
             style={s.statCard}
-            onPress={() => router.push('/(app)/workouts')}
+            onPress={() => router.push('/(app)/build?type=Workouts' as any)}
           >
             <View style={[s.statIcon, { backgroundColor: 'rgba(125,211,252,0.1)' }]}>
               <Icon name="workouts" size={20} color="#7DD3FC" />
@@ -392,7 +392,7 @@ export default function DashboardScreen() {
 
           <Pressable
             style={s.statCard}
-            onPress={() => router.push('/(app)/movements')}
+            onPress={() => router.push('/(app)/build?type=Movements' as any)}
           >
             <View style={[s.statIcon, { backgroundColor: 'rgba(134,239,172,0.1)' }]}>
               <Icon name="movements" size={20} color="#86EFAC" />

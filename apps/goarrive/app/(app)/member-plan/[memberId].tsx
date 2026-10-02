@@ -3725,7 +3725,7 @@ export default function MemberPlanScreen() {
             onPress={() => setTabStripCollapsed(c => !c)}
             hitSlop={8}
             style={{ flexDirection: 'row', alignItems: 'center', marginBottom: tabStripCollapsed ? 0 : 6 }}>
-            <Text style={{ color: MUTED, fontSize: 11, fontWeight: '600', fontFamily: FH, flex: 1 }}>SCENARIOS</Text>
+            <Text style={{ color: MUTED, fontSize: 11, fontWeight: '600', fontFamily: FH, flex: 1 }}>PRICING OPTIONS</Text>
             <Text style={{ color: MUTED, fontSize: 12, fontWeight: '700', paddingHorizontal: 4 }}>
               {tabStripCollapsed ? '▼' : '▲'}
             </Text>
