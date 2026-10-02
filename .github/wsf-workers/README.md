@@ -1,7 +1,9 @@
 # WSF worker execution profiles
 
 Status: SOURCE PREPARED + LOCAL TESTS. Not merged, not a live worker cutover,
-not proof that an existing phone session retained a setting.
+not proof that an existing phone session retained a setting. The operator `run`
+path now refuses to launch unless it can confirm subscription-only credentials
+(see "Credential mode"); no real credential or model call has tested it.
 Owner request: 2026-10-02, recorded in #365 comment 5962595624.
 
 ## What this fixes, and what it does not
@@ -93,25 +95,143 @@ node .github/wsf-workers/launch.mjs plan W7 --tier economy
 node .github/wsf-workers/launch.mjs plan W5 --output /tmp/wsf-w5-settings.json
 ```
 
-The local test run in this PR passed 24 tests. Two process-level invocations use
-a **fake** Claude CLI to prove identical W7 settings on initial launch and resume.
+The local test run passes 30 tests (24 in the first draft). Process-level
+invocations use a **fake** Claude CLI, in an environment built from scratch:
+- identical W7 settings and the same credential preflight on the initial launch and on resume;
+- every conflicting credential, provider, endpoint, profile, stored-login,
+  settings-helper and effective-auth case refusing before the fake model is
+  reached, without a secret value in the output.
 No Anthropic request, credential read, worker wake, application test, staging
 operation or production action was performed by those tests. They do not prove
 hosted/mobile persistence or worker-reporter compatibility.
 
 For an operator-owned CLI environment, after an explicit single-executor
-handover and valid existing authentication:
+handover, with a subscription setup-token and a dedicated config directory:
 
 ```sh
 WSF_WORKER_LAUNCH_CONFIRMED=existing-executor-stopped \
+WSF_WORKER_CONFIG_DIR=/absolute/dedicated/dir \
   node .github/wsf-workers/launch.mjs run W7 --prompt-file /path/to/approved-task.txt
 ```
+
+`CLAUDE_CODE_OAUTH_TOKEN` must already be in that shell (from `claude setup-token`,
+set by the operator; never in chat, code, issues or artifacts).
+
+## Credential mode (subscription-only run path)
+
+Official precedence (authentication docs, "Authentication precedence"):
+
+1. cloud provider (`CLAUDE_CODE_USE_BEDROCK` / `_VERTEX` / `_FOUNDRY`)
+2. `ANTHROPIC_AUTH_TOKEN`
+3. `ANTHROPIC_API_KEY`, which a `-p` run always uses when present
+4. `apiKeyHelper`
+5. `CLAUDE_CODE_OAUTH_TOKEN`
+6. Anthropic profile / federation credentials
+7. the `/login` subscription
+
+A signed-in gateway session outranks all of them. Settings files can set any of
+these through `env` or `apiKeyHelper`. Removing one variable therefore proves
+nothing, and the earlier wrapper passed every one of them through. `run` now
+launches only when all three checks pass, on the initial launch and on every
+`--resume` alike:
+
+1. **Environment.** The exact child environment has a nonempty
+   `CLAUDE_CODE_OAUTH_TOKEN`. It sets no other `ANTHROPIC_*` variable (only
+   `ANTHROPIC_MODEL`, which the launcher writes). It also sets none of
+   `CLAUDE_CODE_USE_*`, `CLAUDE_CODE_PROVIDER*`, `CLAUDE_CODE_SIMPLE` (bare mode
+   ignores the OAuth token), other `CLAUDE_CODE_OAUTH_*` or `AWS_BEARER_TOKEN_BEDROCK`.
+   Variable **names** are reported, never values.
+2. **Configuration.** `WSF_WORKER_CONFIG_DIR` is an absolute, existing directory,
+   passed as `CLAUDE_CONFIG_DIR`.
+   - It holds no `.credentials.json`. This is an existence check; the file is never opened.
+   - Its `settings.json`, if any, parses and has no credential, helper, `env`,
+     provider, login, endpoint or gateway key.
+   - The run passes `--setting-sources user`, so the checkout's project and local
+     settings are not loaded.
+
+   These checks run before any CLI process starts, so a configured helper is never
+   executed to discover its output.
+3. **Effective auth.** `claude auth status`, run with that same environment, must
+   exit 0 and report:
+   - `authMethod` `oauth_token`;
+   - a first-party `apiProvider`, if it reports one;
+   - a `configDirectory` that is the dedicated directory.
+
+   Only those three fields are read, and the output is never printed. Any other
+   method (`api_key`, `api_key_helper`, `third_party`, `claude.ai`, `none`, or an
+   unknown value), or output this wrapper cannot interpret, refuses.
+
+Conflicts are refused, never deleted, overridden or worked around. Managed
+policy still applies and is not bypassed: a managed `apiKeyHelper`, provider or
+gateway shows up in check 3 as a non-`oauth_token` method and refuses.
+
+**Limits, stated rather than guaranteed:**
+- Check 3 is the CLI's own report, made moments before launch. The file checks
+  cover local files only; MDM and server-managed policy are covered only through
+  check 3.
+- None of this measures billing. A subscription token still draws on plan usage
+  and any extra-usage the owner allows.
 
 `--resume LOCAL_SESSION_ID` is optional and applies only to the CLI's local
 transcript store. It does not attach to or reconfigure a phone/cloud session.
 The confirmation variable is an operator interlock, **not a distributed lock or
 proof that another executor stopped**. Existing ledger ownership, scope, review
 and deployment contracts still govern. This wrapper does not replace them.
+
+## Pilot readiness
+
+**Implemented (source only, fake-CLI tested):**
+- Role profiles, tiers, and bounds.
+- `plan` makes no CLI or model call, even when conflicting credentials are present.
+- `run` preflights subscription-only credentials on the initial launch and on
+  every resume, with the same profile and same checks.
+- An opt-in, one-turn, tool-free GitHub smoke, disabled by default.
+
+**Unsupported / not established:**
+- Any automatic wake consumer or live worker cutover.
+- A reporter identity the ledger accepts for ACK/delivery/PASS/finding.
+- Real implementation or review work from Actions.
+- Remote Control or claude.ai connectors with a setup-token.
+- Phone-session persistence.
+- A total credit or subagent cap.
+- Observed effort/Ultracode at runtime.
+
+The fake-CLI tests and a one-turn smoke prove none of these.
+
+**Smallest owner/operator authentication action**, only when the owner chooses
+to pilot:
+1. Run `claude setup-token` on the owner's own machine.
+2. Place the token as `CLAUDE_CODE_OAUTH_TOKEN` in the single shell or protected
+   environment that will run the pilot. Never paste it anywhere else.
+3. Create an empty dedicated directory for `WSF_WORKER_CONFIG_DIR`.
+
+Nothing else (API keys, provider settings, App permissions) is needed or wanted.
+
+**Proposed first pilot (not activated):** one W3 run on the `economy` tier
+(Ultracode off) with a bounded, already-authorized prompt, to measure credit
+use. Saved role defaults are not changed by this proposal. Token use, subagent
+count, model availability and extra-usage remain unverified until measured.
+
+**Evidence needed, both from the same operator CLI execution surface:**
+
+*First launch:*
+- the `WSF_CONFIGURED … auth=oauth_token(preflight)` line;
+- the observed model from the run result;
+- the account's usage readback before and after;
+- exactly one accepted worker report.
+
+*Restart/resume:* a second launch with `--resume <id>` from the first, showing:
+- the preflight passing again;
+- the same configured line;
+- that the prior context was retained;
+- the observed model again.
+
+On either launch, stop and report a refusal, a fallback model, or lost context;
+never call those a pass.
+
+**An Actions run is not the phone conversation.** A GitHub Actions execution is
+a separate executor with its own credential. It is not the existing Claude phone
+conversation and does not change that conversation's settings.
 
 ## GitHub setup and phone-only use
 

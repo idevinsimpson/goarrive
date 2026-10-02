@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { plan, command, executionEnv, parseArgs, registry, atLeast } from './launch.mjs';
+import { plan, command, executionEnv, parseArgs, registry, atLeast, credentialProblems } from './launch.mjs';
 import { summarize } from './report-smoke.mjs';
 for (const worker of ['L0', 'W3', 'W4', 'W5', 'W7', 'W9']) {
   test(`${worker}: deterministic, serializable and role-bounded`, () => {
@@ -89,50 +89,135 @@ test('workflow is owner/main-only, manual and opt-in, with no cloud mutation gra
   assert.match(workflow,/settings: \$\{\{ needs.plan.outputs.settings \}\}/);
   for(const m of workflow.matchAll(/uses: [^@\s]+@([^\s]+)/g)) assert.match(m[1],/^[a-f0-9]{40}$/);
 });
-// Exercise the real wrapper twice with a fake CLI: no network/model call.
+// Exercise the real wrapper with a fake CLI: no network, credential or model call.
+// The child environment is built from scratch so the host's own variables
+// (a CI or cloud session's provider/endpoint settings) cannot leak in.
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+const SECRET='oat-fixture-SECRET-VALUE-0123';
+const FAKE=`#!/usr/bin/env node
+const fs=require('fs');const e=process.env;const a=process.argv.slice(2);
+if(a[0]==='--version'){console.log((e.WSF_TEST_VERSION||'2.1.288')+' (Claude Code)');process.exit(0);}
+if(a[0]==='auth'&&a[1]==='status'){
+  fs.appendFileSync(e.WSF_TEST_AUTHLOG,'auth\\n');
+  if(e.WSF_TEST_AUTH_RAW!==undefined){process.stdout.write(e.WSF_TEST_AUTH_RAW);process.exit(Number(e.WSF_TEST_AUTH_EXIT||0));}
+  // Documented precedence: provider > AUTH_TOKEN > API_KEY > apiKeyHelper > OAUTH_TOKEN > profile > /login.
+  const m=e.CLAUDE_CODE_USE_BEDROCK||e.CLAUDE_CODE_USE_VERTEX||e.CLAUDE_CODE_USE_FOUNDRY?'third_party':e.ANTHROPIC_AUTH_TOKEN||e.ANTHROPIC_API_KEY?'api_key':e.CLAUDE_CODE_OAUTH_TOKEN?'oauth_token':'none';
+  const j=Object.assign({loggedIn:m!=='none',authMethod:m,apiProvider:'firstParty',configDirectory:e.CLAUDE_CONFIG_DIR,email:'fixture@example.test'},JSON.parse(e.WSF_TEST_AUTH_OVERRIDE||'{}'));
+  console.log(JSON.stringify(j));process.exit(m==='none'?1:0);
+}
+let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{
+  const authVars=Object.keys(e).filter(k=>/^(ANTHROPIC_|CLAUDE_CODE_USE_)/.test(k)&&k!=='ANTHROPIC_MODEL');
+  fs.writeFileSync(e.WSF_TEST_TRACE,JSON.stringify({args:a,settings:JSON.parse(fs.readFileSync(a[a.indexOf('--settings')+1],'utf8')),model:e.ANTHROPIC_MODEL,effort:e.CLAUDE_CODE_EFFORT_LEVEL,configDir:e.CLAUDE_CONFIG_DIR,oauth:!!e.CLAUDE_CODE_OAUTH_TOKEN,authVars,prompt:s}));});
+`;
 function fakeCLI(version='2.1.288') {
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'wsf-cli-test-'));
-  const executable=path.join(dir,'claude');
-  fs.writeFileSync(executable,`#!/usr/bin/env node\nconst fs=require('fs');\nif(process.argv[2]==='--version'){console.log('${version} (Claude Code)');process.exit(0);}\nlet s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{const a=process.argv.slice(2);fs.writeFileSync(process.env.WSF_TEST_TRACE,JSON.stringify({args:a,settings:JSON.parse(fs.readFileSync(a[a.indexOf('--settings')+1],'utf8')),model:process.env.ANTHROPIC_MODEL,effort:process.env.CLAUDE_CODE_EFFORT_LEVEL,prompt:s}));});\n`,{mode:0o700});
+  fs.writeFileSync(path.join(dir,'claude'),FAKE,{mode:0o700});
   fs.writeFileSync(path.join(dir,'prompt.txt'),'Bounded fixture task, no real work.');
-  return {dir,env:{...process.env,PATH:dir+path.delimiter+process.env.PATH,WSF_TEST_TRACE:path.join(dir,'trace.json'),WSF_WORKER_LAUNCH_CONFIRMED:'existing-executor-stopped'}};
+  const config=path.join(dir,'worker-config'); fs.mkdirSync(config); fs.mkdirSync(path.join(dir,'home'));
+  return {dir,config,trace:path.join(dir,'trace.json'),authlog:path.join(dir,'auth.log'),env:{
+    PATH:[dir,path.dirname(process.execPath),'/usr/bin','/bin'].join(path.delimiter),HOME:path.join(dir,'home'),
+    WSF_TEST_TRACE:path.join(dir,'trace.json'),WSF_TEST_AUTHLOG:path.join(dir,'auth.log'),WSF_TEST_VERSION:version,
+    WSF_WORKER_LAUNCH_CONFIRMED:'existing-executor-stopped',WSF_WORKER_CONFIG_DIR:config,CLAUDE_CODE_OAUTH_TOKEN:SECRET}};
 }
 const launcher=fileURLToPath(new URL('./launch.mjs',import.meta.url));
-test('two real wrapper invocations reapply W7 profile across resume',()=>{
-  const f=fakeCLI();
-  try {
-    let first;
-    for(let i=0;i<2;i++){
-      const r=spawnSync(process.execPath,[launcher,'run','W7','--prompt-file',path.join(f.dir,'prompt.txt'),...(i?['--resume','session_fixture']:[])],{env:{...f.env,ANTHROPIC_MODEL:'old',CLAUDE_CODE_EFFORT_LEVEL:'medium'},encoding:'utf8'});
-      assert.equal(r.status,0,r.stderr);
-      const t=JSON.parse(fs.readFileSync(f.env.WSF_TEST_TRACE,'utf8'));
-      assert.equal(t.settings.ultracode,true);assert.equal(t.settings.effortLevel,'high');
-      assert.equal(t.model,'claude-sonnet-5-5');assert.equal(t.effort,'high');
-      assert.equal(fs.existsSync(t.args[t.args.indexOf('--settings')+1]),false,'temporary settings removed');
-      if(first)assert.deepEqual(t.settings,first);else first=t.settings;
-    }
-  } finally {fs.rmSync(f.dir,{recursive:true,force:true});}
+const launch=(f,env=f.env,extra=[])=>spawnSync(process.execPath,[launcher,'run','W7','--prompt-file',path.join(f.dir,'prompt.txt'),...extra],{env,encoding:'utf8'});
+const authCalls=(f)=>fs.existsSync(f.authlog)?fs.readFileSync(f.authlog,'utf8').split('\n').filter(Boolean).length:0;
+function withFake(fn,version){const f=fakeCLI(version);try{fn(f);}finally{fs.rmSync(f.dir,{recursive:true,force:true});}}
+/** A refusal: nonzero, no model invocation, and no secret value anywhere in the output. */
+function refused(f,r,secrets=[]){
+  assert.notEqual(r.status,0,r.stdout);
+  assert.equal(fs.existsSync(f.trace),false,'no model invocation');
+  for(const v of [SECRET,...secrets]) { assert.equal(r.stderr.includes(v),false,'secret value in stderr'); assert.equal(r.stdout.includes(v),false,'secret value in stdout'); }
+  assert.match(r.stderr,/WSF_PROFILE_REFUSED/);
+}
+test('two real wrapper invocations reapply W7 profile and the same subscription preflight across resume',()=>withFake((f)=>{
+  let first;
+  for(let i=0;i<2;i++){
+    const r=launch(f,{...f.env,ANTHROPIC_MODEL:'old',CLAUDE_CODE_EFFORT_LEVEL:'medium'},i?['--resume','session_fixture']:[]);
+    assert.equal(r.status,0,r.stderr);
+    assert.equal(authCalls(f),i+1,'auth status preflight runs on every launch');
+    const t=JSON.parse(fs.readFileSync(f.trace,'utf8'));
+    assert.equal(t.settings.ultracode,true);assert.equal(t.settings.effortLevel,'high');
+    assert.equal(t.model,'claude-sonnet-5-5');assert.equal(t.effort,'high');
+    assert.equal(t.configDir,f.config);assert.equal(t.oauth,true);assert.deepEqual(t.authVars,[]);
+    assert.deepEqual(t.args.slice(t.args.indexOf('--setting-sources'),t.args.indexOf('--setting-sources')+2),['--setting-sources','user']);
+    assert.equal(t.settings.env,undefined);assert.equal(t.settings.apiKeyHelper,undefined);
+    assert.equal(fs.existsSync(t.args[t.args.indexOf('--settings')+1]),false,'temporary settings removed');
+    assert.equal(r.stdout.includes(SECRET)||r.stderr.includes(SECRET),false);
+    if(first)assert.deepEqual(t.settings,first);else first=t.settings;
+    if(i===0)fs.rmSync(f.trace);
+  }
+}));
+test('a conflicting credential, provider, endpoint or profile never reaches the model, initial or resume',()=>{
+  const conflicts={ANTHROPIC_API_KEY:'sk-ant-fixture-SECRET-api',ANTHROPIC_AUTH_TOKEN:'fixture-SECRET-bearer',
+    CLAUDE_CODE_USE_BEDROCK:'1',CLAUDE_CODE_USE_VERTEX:'1',CLAUDE_CODE_USE_FOUNDRY:'1',CLAUDE_CODE_USE_FUTURE_CLOUD:'1',
+    ANTHROPIC_BASE_URL:'https://gateway.fixture.test/SECRET-path',ANTHROPIC_PROFILE:'fixture',ANTHROPIC_FEDERATION_RULE_ID:'fdrl_x',
+    ANTHROPIC_ORGANIZATION_ID:'org_x',CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST:'1',CLAUDE_CODE_SIMPLE:'1',AWS_BEARER_TOKEN_BEDROCK:'fixture-SECRET-aws',
+    CLAUDE_CODE_OAUTH_REFRESH_TOKEN:'fixture-SECRET-refresh'};
+  for(const [k,v] of Object.entries(conflicts)) for(const resume of [[],['--resume','session_fixture']]) withFake((f)=>{
+    const r=launch(f,{...f.env,[k]:v},resume);
+    refused(f,r,[v]); assert.match(r.stderr,new RegExp(k)); assert.equal(authCalls(f),0,`${k}: refused before any CLI auth call`);
+  });
 });
-test('plan never invokes a CLI even when a fake CLI is installed',()=>{
-  const f=fakeCLI();try{
-    const r=spawnSync(process.execPath,[launcher,'plan','W7'],{env:f.env,encoding:'utf8'});
-    assert.equal(r.status,0);assert.equal(fs.existsSync(f.env.WSF_TEST_TRACE),false);
-  }finally{fs.rmSync(f.dir,{recursive:true,force:true});}
+test('no subscription token: refused before any CLI call',()=>withFake((f)=>{
+  const env={...f.env};delete env.CLAUDE_CODE_OAUTH_TOKEN;
+  const r=launch(f,env);refused(f,r);assert.match(r.stderr,/CLAUDE_CODE_OAUTH_TOKEN/);assert.equal(authCalls(f),0);
+}));
+test('the config directory must be dedicated: absent, relative, stored login or credential settings refuse',()=>{
+  withFake((f)=>{const env={...f.env};delete env.WSF_WORKER_CONFIG_DIR;refused(f,launch(f,env));assert.equal(authCalls(f),0);});
+  // A relative path that does exist from the launch directory is still refused.
+  withFake((f)=>{const r=spawnSync(process.execPath,[launcher,'run','W7','--prompt-file',path.join(f.dir,'prompt.txt')],{cwd:f.dir,env:{...f.env,WSF_WORKER_CONFIG_DIR:'worker-config'},encoding:'utf8'});
+    refused(f,r);assert.match(r.stderr,/absolute/);assert.equal(authCalls(f),0);});
+  withFake((f)=>{refused(f,launch(f,{...f.env,WSF_WORKER_CONFIG_DIR:path.join(f.dir,'missing')}));});
+  withFake((f)=>{fs.writeFileSync(path.join(f.config,'.credentials.json'),'{"fixture":"SECRET-stored-login"}');
+    const r=launch(f);refused(f,r,['SECRET-stored-login']);assert.match(r.stderr,/stored login/);assert.equal(authCalls(f),0);});
+  for(const settings of [{apiKeyHelper:'/bin/echo fixture-SECRET-helper'},{env:{ANTHROPIC_API_KEY:'fixture-SECRET-env'}},
+    {awsAuthRefresh:'x'},{forceLoginMethod:'console'},{otelHeadersHelper:'x'}]) withFake((f)=>{
+    fs.writeFileSync(path.join(f.config,'settings.json'),JSON.stringify(settings));
+    const r=launch(f);refused(f,r,['fixture-SECRET-helper','fixture-SECRET-env']);assert.equal(authCalls(f),0,'a helper is never run to discover its output');
+  });
+  withFake((f)=>{fs.writeFileSync(path.join(f.config,'settings.json'),'{not json');refused(f,launch(f));assert.equal(authCalls(f),0);});
+  withFake((f)=>{fs.writeFileSync(path.join(f.config,'settings.json'),JSON.stringify({theme:'dark'}));assert.equal(launch(f).status,0);});
 });
-test('old runtime refuses before first model request',()=>{
-  const f=fakeCLI('2.1.203');try{
-    const r=spawnSync(process.execPath,[launcher,'run','W7','--prompt-file',path.join(f.dir,'prompt.txt')],{env:f.env,encoding:'utf8'});
-    assert.notEqual(r.status,0);assert.equal(fs.existsSync(f.env.WSF_TEST_TRACE),false);
-  }finally{fs.rmSync(f.dir,{recursive:true,force:true});}
+test('effective auth must be the subscription OAuth token for the same config directory, or the run refuses',()=>{
+  for(const override of [{authMethod:'api_key'},{authMethod:'api_key_helper'},{authMethod:'third_party'},{authMethod:'claude.ai'},
+    {authMethod:'none'},{authMethod:'future_mode'},{authMethod:null},{apiProvider:'bedrock'},{configDirectory:'/elsewhere'},{configDirectory:null}]) withFake((f)=>{
+    const r=launch(f,{...f.env,WSF_TEST_AUTH_OVERRIDE:JSON.stringify(override)});
+    refused(f,r,['fixture@example.test']);assert.equal(authCalls(f),1);
+  });
+  for(const [raw,exit] of [['not json','0'],['[]','0'],['','0'],['{"authMethod":"oauth_token"}','1']]) withFake((f)=>{
+    refused(f,launch(f,{...f.env,WSF_TEST_AUTH_RAW:raw,WSF_TEST_AUTH_EXIT:exit}));
+  });
+  // Otherwise-valid subscription output with a failing exit status is still a refusal.
+  withFake((f)=>{
+    const ok=JSON.stringify({loggedIn:true,authMethod:'oauth_token',apiProvider:'firstParty',configDirectory:f.config});
+    assert.equal(launch(f,{...f.env,WSF_TEST_AUTH_RAW:ok,WSF_TEST_AUTH_EXIT:'0'}).status,0);
+    fs.rmSync(f.trace);
+    refused(f,launch(f,{...f.env,WSF_TEST_AUTH_RAW:ok,WSF_TEST_AUTH_EXIT:'1'}));
+  });
 });
-test('unconfirmed executor handover refuses before CLI invocation',()=>{
-  const f=fakeCLI();try{
-    const env={...f.env};delete env.WSF_WORKER_LAUNCH_CONFIRMED;
-    const r=spawnSync(process.execPath,[launcher,'run','W7','--prompt-file',path.join(f.dir,'prompt.txt')],{env,encoding:'utf8'});
-    assert.notEqual(r.status,0);assert.equal(fs.existsSync(f.env.WSF_TEST_TRACE),false);
-  }finally{fs.rmSync(f.dir,{recursive:true,force:true});}
+test('auth status output is never echoed, even on refusal',()=>withFake((f)=>{
+  const r=launch(f,{...f.env,WSF_TEST_AUTH_OVERRIDE:JSON.stringify({authMethod:'api_key',email:'leak-SECRET@example.test',orgName:'SECRET-org'})});
+  refused(f,r,['leak-SECRET@example.test','SECRET-org']);assert.match(r.stderr,/api_key/);
+}));
+test('plan never invokes a CLI even with conflicting credentials and a fake CLI installed',()=>withFake((f)=>{
+  const r=spawnSync(process.execPath,[launcher,'plan','W7'],{env:{...f.env,ANTHROPIC_API_KEY:'sk-ant-fixture-SECRET'},encoding:'utf8'});
+  assert.equal(r.status,0);assert.equal(fs.existsSync(f.trace),false);assert.equal(authCalls(f),0);
+  assert.equal(r.stdout.includes('sk-ant-fixture-SECRET'),false);
+}));
+test('old runtime refuses before first model request',()=>withFake((f)=>{
+  const r=launch(f);refused(f,r);assert.equal(authCalls(f),0);
+},'2.1.203'));
+test('unconfirmed executor handover refuses before CLI invocation',()=>withFake((f)=>{
+  const env={...f.env};delete env.WSF_WORKER_LAUNCH_CONFIRMED;
+  refused(f,launch(f,env));assert.equal(authCalls(f),0);
+}));
+test('credentialProblems names variables, never values',()=>{
+  const p=credentialProblems({ANTHROPIC_API_KEY:'sk-ant-SECRET',ANTHROPIC_MODEL:'claude-sonnet-5-5',CLAUDE_CODE_OAUTH_TOKEN:SECRET,EMPTY:''});
+  assert.deepEqual(p,['conflicting credential/provider/endpoint variable ANTHROPIC_API_KEY is set']);
+  assert.deepEqual(credentialProblems({CLAUDE_CODE_OAUTH_TOKEN:SECRET,ANTHROPIC_MODEL:'x',ANTHROPIC_API_KEY:''}),[]);
+  assert.match(credentialProblems({CLAUDE_CODE_OAUTH_TOKEN:'  '}).join(),/absent/);
 });
