@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "a6ccb72bed6ac699e12cae0dcaa8257d380b2076eeca7b68703b588b6d7fdd03",
-  "eventCount": 269,
+  "ledgerHead": "fd8878b0af6af9c3d99be35cc9c1dec5e448f4ec350e926ce04671e93cdc36a6",
+  "eventCount": 270,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -65,7 +65,9 @@
     "W4": [],
     "W5": [],
     "W7": [],
-    "W9": []
+    "W9": [
+      "EXPO-ATTENDEE-JOURNEY-PROOF-1"
+    ]
   },
   "packets": {
     "AUTONOMY-ROUTER-1C": {
@@ -478,6 +480,65 @@
         "after": "director"
       },
       "deliveries": 1,
+      "pendingFinding": null
+    },
+    "EXPO-ATTENDEE-JOURNEY-PROOF-1": {
+      "owner": "W9",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Prove the existing attendee phone and two-station journey and expose only real missing seams; test and evidence source, not live expo acceptance",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "apps/westayfit/tests-e2e/expo-attendee-journey.spec.ts",
+        "apps/westayfit/tests-e2e/helpers/expo-attendee-fixtures.ts",
+        "docs/westayfit/qa/expo-attendee-journey-1.md",
+        "docs/westayfit/qa/expo-attendee-journey-1.changed-journeys.json",
+        "docs/westayfit/qa/expo-attendee-journey-1.owner-test-card.json"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 5962994387
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 5962994387
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "journey-qa",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
       "pendingFinding": null
     },
     "KIOSK-PAIRING-CLARITY-PROOF-1": {
