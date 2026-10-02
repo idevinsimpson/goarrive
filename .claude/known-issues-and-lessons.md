@@ -1,6 +1,6 @@
 # GoArrive Known Issues & Lessons Learned
 
-_Last refreshed: 2026-08-14._
+_Last refreshed: 2026-09-10._
 
 ## Resolved Issues (Reference for Future Work)
 The following issues were encountered and resolved during development. They are documented here as institutional knowledge to prevent regression and inform future decisions.
@@ -184,6 +184,25 @@ Lesson: keeping a paused media element ready means maintaining a *buffer* around
 takeover position, not repeatedly assigning `currentTime`. Seeking on a timer defeats the
 buffering it is meant to produce. Verify warmth by reading `buffered`, never by inferring
 it from the absence of a symptom.
+
+### Explicit 0-Week Phases Silently Reinflated by Truthiness Check
+`_calculatePricing` used `||` (truthiness) rather than `?? 0` (nullish coalescing) when reading per-phase week counts. A phase with an explicit `0` weeks is falsy in JavaScript, so `(phases[0]?.weeks) || Math.round(totalWeeks * 0.25)` substituted the 25/50/25 default even when the coach deliberately set a phase to 0. Caught on a live coach call: a [0, 0, 13]-phase plan (all weeks in Self-Reliant) was quoted at ~$421/mo when the correct math yielded ~$176/mo; the row-level breakdown showed zeros correctly while the monthly total diverged, a classic symptom of truthiness-vs-nullish. Fixed in PR #293 with `hasExplicitPhases ? (phases[0]?.weeks ?? 0) : Math.round(totalWeeks * 0.25)`. Lesson: never use `||` for numeric config fields where `0` is a valid intentional value — use `??` instead. When a field reads correctly in one code path but reinflates in another, check for `||` in the diverging path.
+
+### Canvas PiP Hook Was Starving Foreground Workout Music (Confirmed and Fixed)
+The entry "The Canvas PiP Path Is Not Gated on iOS" (above) established that `usePipCanvasStream` runs on every staging environment unconditionally. PR #289 confirmed the consequence: the always-on 30fps `requestAnimationFrame` loop was starving the `musicGain → destination` path and silencing foreground workout music. Hoisting `isPiP` state above the canvas hook and gating `enabled` on it fixed the regression — device-verified green by Devin on `pip-pass1-9n2zbynj` before merge. Lesson: a 30fps animation loop that runs unconditionally from player mount is a rendering-budget regression for every frame not related to PiP. Gate graphics pipelines on the feature actually being active; verify by testing foreground audio paths after any canvas hook change.
+
+### Mirror Flash from Timer-State vs Display-State Mismatch
+The swap-sides reveal window used `!isInRevealWindow` (a timer flag) to gate `isMirrored`. The timer fired before the incoming video layer reported ready and promoted to `displayedUrl`. During that gap the outgoing layer — still visible, still correctly mirrored — painted with the mirror already dropped, producing a ~10s flash at every phase boundary on swap-sides movements. Fixed in PR #303 by gating on `displayedUrl === activeVideoUrl` instead: the mirror drops only once the display has actually switched. The Tabata case the original timer gate was written for is unchanged. Lesson: visual state that depends on which video is currently displayed must be gated on the display variable, not on a timer that fires independently of the promote condition. Timer flags and display readiness can drift; use the display truth directly.
+
+### Stripe Connect `{ stripeAccount }` Required on All Subscription Mutations
+`pauseStripeSubscription` and `resumeStripeSubscription` (PR #233) called `stripe.subscriptions.update(id, params)` without the `{ stripeAccount }` option. Member subscriptions are created on the coach's Connect account, so a platform-scoped call returned "No such subscription" — a non-`HttpsError` — which the callable runtime wrapped as opaque `INTERNAL`. Coaches saw a bare "INTERNAL" alert with no actionable detail. Fixed in PR #310 by adding `{ stripeAccount: subData.stripeAccountId }`, matching every other subscription operation in the file. Lesson: **any callable that reads or mutates a Stripe object living on a Connect account must pass `{ stripeAccount }`** — platform-scoped calls are silently scoped to the platform's own objects and return "No such ..." rather than an access-denied error, making the failure look like a data problem rather than a routing one.
+
+### Auto-Heal Pattern for Legacy Firestore Fields Added After Collection Was Live
+When PR #310 added a `failed-precondition` guard on `subData.stripeAccountId`, it fired on real healthy subscriptions whose `memberSubscriptions` docs were written before that field was introduced. The fix (PR #313): fall back to a secondary authoritative source (`coachStripeAccounts/{coachId}.stripeAccountId`) already verified to belong to the correct coach, call Stripe with it, then backfill the missing field on the original doc so subsequent calls skip the lookup. If both sources are absent, surface a clear actionable error rather than a generic failure. Lesson: when adding a new mandatory field to an existing Firestore collection, expect legacy docs to be missing it and provide a safe fallback with backfill — hard-failing breaks real, working data. The fallback is safe because caller ownership was already verified before reaching it.
+
+### Platform Admin Impersonation Must Bypass Coach-Ownership Checks in Callables
+Callables that verify coach ownership (matching `subData.coachId` to the caller's `coachId` claim) silently break for platform admins using "View as Coach." An admin's token carries `role=platformAdmin` with no `coachId` claim, so the fallback `callerCoachId = callerUid` never matches any subscription's `coachId` — every admin impersonation attempt returns "Subscription belongs to a different coach." Fixed in PR #315: check `role=platformAdmin` at the top of the ownership guard, skip the match, and route all Connect account lookups through `subData.coachId` (the subscription's real coach), not the caller. Lesson: **any callable that enforces coach ownership must have an explicit platformAdmin bypass that skips the check and routes through the subscription's owning `coachId`** — denying admins based on a claim they structurally cannot carry is always wrong. Apply this pattern to every billing or member-data callable that performs a coach-match check.
+
 
 ## Known Performance Risks
 
