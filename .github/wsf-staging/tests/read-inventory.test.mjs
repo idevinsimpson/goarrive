@@ -89,19 +89,54 @@ test('with no expectation recorded, a non-empty baseline is accepted', () => {
   assert.equal(r.written.functions.length, 5);
 });
 
-test('FAST PATH: the baseline is the pin\'s verified inventory (prior + added); the pre-pin count is refused', () => {
-  const added = ['wsfadded1', 'wsfadded2', 'wsfadded3'];
-  const ok = run(0, JSON.stringify({ result: NAMES22 }), { expectedPrior: 19, added, fastpath: 'true' });
+// STAGING-FASTPATH-INVENTORY-BASELINE-FIX (#365 5953615810): run 37012494776 refused the correct 49 as "approved against 52".
+const RETAINED = ['wsfsetcommunityvisibility', 'wsfcommunitymembers', 'wsfcommunityactivity'];
+const LIVE49 = [...Array.from({ length: 46 }, (_, i) => ({ id: `wsfBase${i}` })), ...RETAINED.map((id) => ({ id }))];
+
+test('FAST PATH: the baseline is exactly expectedPriorFunctions (the measured inventory already holding the retained added functions)', () => {
+  const ok = run(0, JSON.stringify({ result: LIVE49 }), { expectedPrior: 49, added: RETAINED, fastpath: 'true' });
   assert.equal(ok.code, 0, ok.err);
-  assert.match(ok.out, /PREFLIGHT_FASTPATH_BASELINE=22 \(the pin's verified inventory: 19 prior \+ 3 added\)/);
-  const stale = run(0, JSON.stringify({ result: NAMES22.slice(0, 19) }), { expectedPrior: 19, added, fastpath: 'true' });
-  assert.equal(stale.code, 1, 'staging still at the pre-pin inventory: the pin deploy was not what the fast path assumes');
-  assert.match(stale.err, /has 19 WSF functions but this candidate was approved against 22/);
-  const bad = run(0, JSON.stringify({ result: NAMES22 }), { expectedPrior: 19, added: 'x', fastpath: 'true' });
-  assert.equal(bad.code, 1); assert.match(bad.err, /candidateAddedFunctions in the approval file is not an array/);
+  assert.match(ok.out, /PREFLIGHT_FASTPATH_BASELINE=49 \(the pin's measured inventory, which already includes the 3 retained added functions\)/);
+  assert.match(ok.out, /PREFLIGHT_BEFORE=49/);
+  assert.match(ok.out, /PREFLIGHT_BASELINE_MATCHES_APPROVAL=true/);
+  assert.equal(ok.written.functions.length, 49);
+  for (const n of [48, 50, 52]) {
+    const live = n <= 49 ? LIVE49.slice(49 - n) : [...LIVE49, ...Array.from({ length: n - 49 }, (_, i) => ({ id: `wsfExtra${i}` }))];
+    assert.equal(live.length, n);
+    const r = run(0, JSON.stringify({ result: live }), { expectedPrior: 49, added: RETAINED, fastpath: 'true' });
+    assert.equal(r.code, 1, `${n} live functions must be refused`);
+    assert.match(r.err, new RegExp(`has ${n} WSF functions but this candidate was approved against 49`));
+    assert.equal(r.written, null, 'nothing is written on a refusal');
+  }
 });
 
-test('without WSF_FASTPATH=true (the reviewed pin path) the baseline is exactly expectedPriorFunctions, as before', () => {
+test('FAST PATH: a retained added function missing from the live list is refused by name, even when the count matches', () => {
+  const swapped = [...LIVE49.filter((f) => f.id !== 'wsfcommunitymembers'), { id: 'wsfimpostor' }];
+  assert.equal(swapped.length, 49);
+  const r = run(0, JSON.stringify({ result: swapped }), { expectedPrior: 49, added: RETAINED, fastpath: 'true' });
+  assert.equal(r.code, 1);
+  assert.match(r.err, /missing retained function\(s\) wsfcommunitymembers/);
+  const upper = run(0, JSON.stringify({ result: LIVE49.map((f) => ({ id: f.id.toUpperCase() })) }), { expectedPrior: 49, added: RETAINED, fastpath: 'true' });
+  assert.equal(upper.code, 0, 'ids are compared lower-cased, as the list itself is');
+  const mixed = run(0, JSON.stringify({ result: LIVE49 }), { expectedPrior: 49, added: ['wsfSetCommunityVisibility', ...RETAINED.slice(1)], fastpath: 'true' });
+  assert.equal(mixed.code, 1, 'an approval name that is not the lower-case service name is not silently matched');
+  assert.match(mixed.err, /missing retained function\(s\) wsfSetCommunityVisibility/);
+});
+
+test('FAST PATH: a malformed added list or approval fails closed; the empty and error documents still fail', () => {
+  for (const added of ['x', [1], [''], [null], [{}]]) {
+    const r = run(0, JSON.stringify({ result: LIVE49 }), { expectedPrior: 49, added, fastpath: 'true' });
+    assert.equal(r.code, 1, JSON.stringify(added));
+    assert.match(r.err, /candidateAddedFunctions in the approval file is not an array of names/);
+  }
+  assert.equal(run(0, JSON.stringify({ result: LIVE49.slice(0, 46) }), { expectedPrior: 46, fastpath: 'true' }).code, 0, 'no added list: exactly expectedPriorFunctions');
+  assert.equal(run(0, JSON.stringify({ result: LIVE49 }), { expectedPrior: '49', added: RETAINED, fastpath: 'true' }).code, 1, 'a non-integer expectation fails');
+  assert.equal(run(1, JSON.stringify({ result: LIVE49 }), { expectedPrior: 49, added: RETAINED, fastpath: 'true' }).code, 1, 'a command error fails');
+  assert.equal(run(0, JSON.stringify({ result: [] }), { expectedPrior: 49, added: RETAINED, fastpath: 'true' }).code, 1, 'an empty baseline fails');
+  assert.equal(run(0, JSON.stringify({ error: { status: 'PERMISSION_DENIED' } }), { expectedPrior: 49, added: RETAINED, fastpath: 'true' }).code, 1);
+});
+
+test('without WSF_FASTPATH=true (the reviewed pin path) the baseline is exactly expectedPriorFunctions, as before; no retained-name check', () => {
   const added = ['wsfadded1', 'wsfadded2', 'wsfadded3'];
   assert.equal(run(0, JSON.stringify({ result: NAMES22.slice(0, 19) }), { expectedPrior: 19, added }).code, 0);
   assert.equal(run(0, JSON.stringify({ result: NAMES22.slice(0, 19) }), { expectedPrior: 19, added, fastpath: 'false' }).code, 0);

@@ -26,10 +26,17 @@
  *
  * THE FAST PATH (WSF_FASTPATH=true, set only by the gate's ledger resolver).
  * A fast-path candidate changes no functions source relative to the pin, and
- * the pin's own deploy was verified, so staging already holds the pin's
- * inventory: `expectedPriorFunctions` plus its `candidateAddedFunctions`. That
- * is the baseline here. Anything else means staging moved since the pin was
- * verified, and the run refuses rather than deploy over an unexplained state.
+ * the pin's own deploy was verified, so staging still holds the pin's measured
+ * inventory. `expectedPriorFunctions` IS that measured count (pin-candidate.mjs
+ * writes the last deploy's INVENTORY_AFTER), and it already includes the
+ * retained `candidateAddedFunctions`, so the baseline is exactly
+ * `expectedPriorFunctions`, never that plus the added names a second time
+ * (run 37012494776 refused a correct 49 as "approved against 52"). The added
+ * names are retained services, so each must also be present in the live list.
+ * Anything else means staging moved since the pin was verified, and the run
+ * refuses rather than deploy over an unexplained state. A pin whose own deploy
+ * created functions is therefore refused here until it is re-pinned with the
+ * new measured count: a false refusal, never a silent pass.
  */
 import fs from 'node:fs';
 
@@ -82,6 +89,7 @@ const names = doc.result
 
 // 5. plausibility, from the reviewed approval file
 let expected = null;
+let retained = null;
 if (approvalPath) {
   try {
     const approval = JSON.parse(fs.readFileSync(approvalPath, 'utf8'));
@@ -91,14 +99,19 @@ if (approvalPath) {
       expected = v;
       if (process.env.WSF_FASTPATH === 'true') {
         const added = approval?.candidateAddedFunctions ?? [];
-        if (!Array.isArray(added)) fail('candidateAddedFunctions in the approval file is not an array');
-        expected = v + added.length;
-        console.log(`PREFLIGHT_FASTPATH_BASELINE=${expected} (the pin's verified inventory: ${v} prior + ${added.length} added)`);
+        if (!Array.isArray(added) || added.some((n) => typeof n !== 'string' || !n)) fail('candidateAddedFunctions in the approval file is not an array of names');
+        retained = added; // lower-case service names, as verify-deployment.mjs requires; a differently-cased entry is missing
+        console.log(`PREFLIGHT_FASTPATH_BASELINE=${expected} (the pin's measured inventory, which already includes the ${added.length} retained added functions)`);
       }
     }
   } catch {
     fail('the approval file could not be read while checking the expected baseline');
   }
+}
+
+if (retained !== null) {
+  const missing = retained.filter((n) => !names.includes(n));
+  if (missing.length) fail(`the fast-path baseline is missing retained function(s) ${missing.join(', ')}; staging has changed since the pin was verified`);
 }
 
 if (expected !== null) {
