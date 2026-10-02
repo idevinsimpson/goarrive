@@ -32,9 +32,7 @@ import {
   EVENT_CHOICE_INTRO,
   EVENT_CHOICE_NOTE,
   EVENT_CHOICE_PHONE_DESCRIPTION,
-  EVENT_CHOICE_PHONE_LABEL,
   EVENT_CHOICE_QUEUE_DESCRIPTION,
-  EVENT_CHOICE_QUEUE_LABEL,
 } from '../../src/eventActivity';
 import { clearEventReturn, setEventReturn } from '../../src/eventReturn';
 import { wsfAuthEnabled } from '../../src/featureFlags';
@@ -92,7 +90,7 @@ import { WsfWordmark } from '../../src/ui/WsfWordmark';
  *   activity opened WITHOUT a scan has nothing to choose and stands answered.
  *   The whole of that rule is `initialSelection` in src/eventActivity.ts.
  *
- *   THEN, WHERE. And only then: "Use my phone" or "Join the kiosk queue".
+ *   THEN, WHERE. And only then: "Move on my phone" or "Use a kiosk".
  *   Neither control exists on the page until an activity is selected, so
  *   nothing offers a queue to somebody who has not yet said what they are
  *   doing — and a scan on its own reaches neither.
@@ -135,6 +133,17 @@ type EventState =
     }
   | { kind: 'notMember' }
   | { kind: 'error'; message: string };
+
+/**
+ * EXPO-ACCOUNT-ENTRY-1 (Director scope delta #497 `5962179622`). The event
+ * landing's own words for its two ways on. LOCAL to this route on purpose:
+ * the shared `EVENT_CHOICE_*_LABEL` constants in `src/eventActivity.ts`, the
+ * queue screen and the design targets keep theirs. Only the label changes —
+ * the phone way is still the existing `/contribute/<goal>` link, the kiosk way
+ * still opens the name control whose one confirm is the single queue write.
+ */
+const EVENT_LANDING_PHONE_LABEL = 'Move on my phone';
+const EVENT_LANDING_KIOSK_LABEL = 'Use a kiosk';
 
 export default function EventScreen() {
   const params = useLocalSearchParams<{ goalId: string; activity?: string }>();
@@ -556,19 +565,19 @@ export default function EventScreen() {
         </View>
         {/*
           EXPO-ACCOUNT-ENTRY-1. The two ways in, said BEFORE the account is
-          asked for, in the same words the buttons will use once they exist
-          (the shared constants, so this can never drift from them). Plain
+          asked for, in the same words the buttons below use once they exist
+          (the route's own EVENT_LANDING_* labels, so the two cannot drift). Plain
           text and not controls: neither is a way on until the visitor is
           signed in, a member, and has chosen an activity.
         */}
         <View style={[kit.card, styles.ways]} testID="wsf-event-ways">
           <Text style={kit.cardMeta}>Two ways to take part, once you’re signed in</Text>
           <Text style={kit.body}>
-            <Text style={styles.wayName}>{EVENT_CHOICE_PHONE_LABEL}</Text>
+            <Text style={styles.wayName}>{EVENT_LANDING_PHONE_LABEL}</Text>
             {' — count it yourself, right now.'}
           </Text>
           <Text style={kit.body}>
-            <Text style={styles.wayName}>{EVENT_CHOICE_QUEUE_LABEL}</Text>
+            <Text style={styles.wayName}>{EVENT_LANDING_KIOSK_LABEL}</Text>
             {' — take your turn at the screen in the room.'}
           </Text>
         </View>
@@ -737,9 +746,9 @@ export default function EventScreen() {
       {/*
         DECISION TWO: WHERE. Rendered ONLY once an activity is selected — not
         disabled, not greyed, not present. A scan reaches neither control, and
-        neither control is a queue write in any case: "Use my phone" is a link
-        to the contribution screen that already exists, and "Join the kiosk
-        queue" opens the name control below. The one call that creates a place
+        neither control is a queue write in any case: "Move on my phone" is a link
+        to the contribution screen that already exists, and "Use a kiosk"
+        opens the name control below. The one call that creates a place
         in the line is inside that control.
       */}
       {selectedActivity ? (
@@ -764,7 +773,7 @@ export default function EventScreen() {
               style={kit.primaryButton}
               textStyle={kit.primaryButtonText}
               testID="wsf-event-add"
-              label={EVENT_CHOICE_PHONE_LABEL}
+              label={EVENT_LANDING_PHONE_LABEL}
             />
             <Text style={kit.caption} testID="wsf-event-add-description">
               {EVENT_CHOICE_PHONE_DESCRIPTION}
@@ -776,9 +785,9 @@ export default function EventScreen() {
                   style={kit.secondaryButton}
                   testID="wsf-event-queue-start"
                   accessibilityRole="button"
-                  accessibilityLabel={`${EVENT_CHOICE_QUEUE_LABEL}. ${EVENT_CHOICE_QUEUE_DESCRIPTION}`}
+                  accessibilityLabel={`${EVENT_LANDING_KIOSK_LABEL}. ${EVENT_CHOICE_QUEUE_DESCRIPTION}`}
                 >
-                  <Text style={kit.secondaryButtonText}>{EVENT_CHOICE_QUEUE_LABEL}</Text>
+                  <Text style={kit.secondaryButtonText}>{EVENT_LANDING_KIOSK_LABEL}</Text>
                 </Pressable>
                 <Text style={kit.caption} testID="wsf-event-queue-start-description">
                   {EVENT_CHOICE_QUEUE_DESCRIPTION}

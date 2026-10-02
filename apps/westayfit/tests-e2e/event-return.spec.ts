@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdirSync as eaeMkdir } from 'node:fs';
 import eaePath from 'node:path';
 
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 /**
  * PAST THE VERIFY GATE, WITHOUT RACING IT (EXPO-ACCOUNT-ENTRY-1).
@@ -357,17 +357,20 @@ const EAE_VIEWPORTS = [
   { label: '390x844', width: 390, height: 844 },
   { label: '390x640', width: 390, height: 640 },
 ];
-// The shared event-choice labels. Copied, as ui-event-activity-choice.spec.ts
-// copies them, so a change to the product's words is a visible change here.
-const EAE_PHONE_LABEL = 'Use my phone';
-const EAE_QUEUE_LABEL = 'Join the kiosk queue';
+// The event landing's two ways on (Director scope delta #497 `5962179622`),
+// copied as ui-event-activity-choice.spec.ts copies them, so a change to the
+// product's words is a visible change here.
+const EAE_PHONE_LABEL = 'Move on my phone';
+const EAE_QUEUE_LABEL = 'Use a kiosk';
 
-async function eaeSnap(page: Page, state: string): Promise<void> {
+async function eaeSnap(page: Page, state: string, bringIntoView?: Locator): Promise<void> {
   if (!EAE_DIR) return;
   eaeMkdir(EAE_DIR, { recursive: true });
   const before = page.viewportSize();
   for (const v of EAE_VIEWPORTS) {
     await page.setViewportSize({ width: v.width, height: v.height });
+    // A state further down the page is framed so its last element is in view.
+    if (bringIntoView) await bringIntoView.scrollIntoViewIfNeeded();
     await page.waitForTimeout(250);
     await page.screenshot({ path: eaePath.join(EAE_DIR, `${state}-${v.label}.png`), fullPage: false });
   }
@@ -535,6 +538,72 @@ test('EAE not now: the cancel boundary forgets the event, so a later sign-in lan
 
   await page.goto('/signin');
   await signInAs(page, email);
-  await expect(page.getByTestId('wsf-home-signout')).toBeVisible({ timeout: 30_000 });
+  // Signed in and moved on from sign-in, to the app's own Home — which for a
+  // member of one community settles on that community — and NOT to the event.
+  // (Not `wsf-home-signout`: that control exists only until Home settles.)
+  await page.waitForURL((u) => !u.pathname.startsWith('/signin'), { timeout: 30_000 });
+  await expect(page.getByRole('link', { name: 'Home, current' })).toBeVisible({ timeout: 30_000 });
   await expect(page).not.toHaveURL(/\/event\//);
+  await expect(shown(page, 'wsf-event-member')).toHaveCount(0);
+  await expect(shown(page, 'wsf-event-signed-out')).toHaveCount(0);
+});
+
+test('EAE landing choice: a member sees Move on my phone and Use a kiosk, each goes where it always went, and neither joins a line', async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+  await page.setViewportSize({ width: 390, height: 844 });
+  const stamp = Date.now().toString(36);
+  const email = `wsf-eae-choice-${stamp}@example.com`;
+  const uid = await seedVerifiedUser(email, PASSWORD);
+  await seedProfile(uid, 'Choice Member');
+  const champUid = await seedVerifiedUser(`wsf-eae-champ6-${stamp}@example.com`, PASSWORD);
+  await seedProfile(champUid, 'Fixture Champion');
+  const { goalId } = await seedEvent('eae-choice', [
+    { uid: champUid, role: 'foundingChampion' },
+    { uid, role: 'member' },
+  ]);
+  const joins: string[] = [];
+  page.on('request', (r) => {
+    if (r.url().includes('wsfJoinTurnLine')) joins.push(r.url());
+  });
+
+  await page.goto(`/event/${goalId}`);
+  await answerOwnPhone(page);
+  await expect(shown(page, 'wsf-event-signed-out')).toBeVisible({ timeout: 20_000 });
+  await page.getByTestId('wsf-event-signin').click();
+  await signInAs(page, email);
+  await expect(shown(page, 'wsf-event-member')).toBeVisible({ timeout: 30_000 });
+  // One-activity event: the sole activity is selected, so the choice is shown.
+  const choice = shown(page, 'wsf-event-choice');
+  await expect(choice).toBeVisible({ timeout: 20_000 });
+  const phone = shown(page, 'wsf-event-add');
+  const kiosk = shown(page, 'wsf-event-queue-start');
+  if (!EAE_BEFORE) {
+    for (const v of EAE_VIEWPORTS) {
+      await page.setViewportSize({ width: v.width, height: v.height });
+      await expect(phone).toHaveText(EAE_PHONE_LABEL);
+      await expect(kiosk).toHaveText(EAE_QUEUE_LABEL);
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+  }
+  await eaeSnap(page, 'event-choice', kiosk);
+
+  // THE PHONE WAY is still the existing contribution route, unchanged.
+  await expect(phone).toHaveAttribute('href', `/contribute/${goalId}`);
+  await phone.click();
+  await expect(page.getByTestId('wsf-contribute-entry-screen')).toBeVisible({ timeout: 40_000 });
+  expect(new URL(page.url()).pathname).toBe(`/contribute/${goalId}`);
+  expect(joins, 'the phone way joins no line').toHaveLength(0);
+
+  // Back on the event, with its context, and THE KIOSK WAY: it opens the
+  // existing name control and still writes nothing until that is confirmed.
+  await page.goBack();
+  await expect(shown(page, 'wsf-event-member')).toBeVisible({ timeout: 30_000 });
+  await expect(shown(page, 'wsf-event-title')).toBeVisible();
+  await shown(page, 'wsf-event-queue-start').click();
+  await expect(shown(page, 'wsf-event-queue-panel')).toBeVisible({ timeout: 10_000 });
+  await expect(shown(page, 'wsf-event-queue-join')).toBeVisible();
+  await page.waitForTimeout(500);
+  expect(joins, 'opening the kiosk way joins no line').toHaveLength(0);
 });

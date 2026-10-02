@@ -6,8 +6,8 @@
  * the screen in the room; their phone keeps BOTH what event it was and what
  * activity that screen was running, across a real signup, a real email
  * verification, a real profile and a real join; and only AFTER they have said
- * what they are here to do are they offered "Use my phone" or "Join the kiosk
- * queue".
+ * what they are here to do are they offered "Move on my phone" or "Use a
+ * kiosk".
  *
  * WHAT THIS FILE PROVES, and how:
  *
@@ -24,7 +24,7 @@
  *      scan, after the join lands, after the activity is selected, after the
  *      choice is on screen, and after the name control is open. It is empty at
  *      all five. It holds exactly one row — under the name the person chose,
- *      never their account name — only after "Join the kiosk queue" is
+ *      never their account name — only after "Use a kiosk" is
  *      confirmed. No screen is asked whether anybody is in the line; the line
  *      is asked.
  *   4. "USE MY PHONE" IS THE CONTRIBUTION FLOW THAT ALREADY EXISTS, with no
@@ -101,8 +101,12 @@ test.use({ viewport: PHONE });
  */
 const ACTIVITY_HEADING = 'What are you here to do?';
 const CHOICE_HEADING = 'Where do you want to do it?';
-const PHONE_LABEL = 'Use my phone';
-const QUEUE_LABEL = 'Join the kiosk queue';
+// The event landing's labels (EXPO-ACCOUNT-ENTRY-1, Director scope delta #497
+// `5962179622`). Local to the event route: the shared constants in
+// src/eventActivity.ts and the queue screen keep "Use my phone" / "Join the
+// kiosk queue", and nothing here asserts on those screens.
+const PHONE_LABEL = 'Move on my phone';
+const QUEUE_LABEL = 'Use a kiosk';
 const CHOICE_NOTE =
   'Opening either one puts nobody in a line. You are in the line only once you confirm the name the screen will call.';
 
@@ -478,7 +482,7 @@ test('the scanned journey: event and activity survive a real signup, and nothing
   expect(rows[0]!.calledName).not.toContain('@');
 });
 
-test('“Use my phone” is the contribution flow that already exists, and is offered on the same terms', async ({
+test('“Move on my phone” is the contribution flow that already exists, and is offered on the same terms', async ({
   page,
 }) => {
   const unit = 'squats';
@@ -531,6 +535,6 @@ test('“Use my phone” is the contribution flow that already exists, and is of
   await snap(page, '06-use-my-phone-contribution');
 
   // Taking the phone route puts nobody in a line.
-  expect(await queueRows(goalId), '“Use my phone” must create no queue row').toEqual([]);
+  expect(await queueRows(goalId), '“Move on my phone” must create no queue row').toEqual([]);
 });
 
