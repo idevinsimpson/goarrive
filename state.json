@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "9ef3a75a619f85414d40d02d8e00e90297fd387c302d09b74b6e745c63b63ec9",
-  "eventCount": 177,
+  "ledgerHead": "8d299b8b9bd5093224ceb64d8cfa2f93e272501413e6e2f90b05e36d9356b447",
+  "eventCount": 178,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1154,8 +1154,10 @@
       "packet": "STAGING-FASTPATH-FAILED-TARGET-RETRY-FIX",
       "worker": "W3",
       "reason": "handback",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        5954697239
+      ],
       "ack": null
     }
   },
