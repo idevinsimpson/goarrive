@@ -323,6 +323,12 @@ test('authorize-retry refuses drift and anything not proved: no target, another 
   assert.equal(proving.state.packets.PROVING.phase, 'VERIFYING');
   assert.equal(proving.state.packets.PROVING.artifact.mergeSha, B);
   refused(() => add(proving, w2('authorize-retry', { ...RETRY, repairPacket: 'PROVING', repairSha: B })), /PROVING is not an INTEGRATED work packet merged as bbbbbbbb/);
+  // W4 #394 5954670197: a REFERENCE packet reaches INTEGRATED at a merge with no review; it is never a source repair.
+  let ref = [w2('queue', { packet: 'REF', owner: 'W3', completion: SOURCE_ONLY, kind: 'reference' }), w2('release', { packet: 'REF', inbox: 396 }),
+    w2('ack', { packet: 'REF', worker: 'W3' }), w2('deliver', { packet: 'REF', pr: 558, subjectSha: A }), w2('accept', { packet: 'REF', subjectSha: A })].reduce(add, r);
+  ref = add(ref, w2('integrate', { packet: 'REF', mergeSha: B, acceptance: JSON.parse(ref.eventsText.trimEnd().split('\n').at(-1)).source.id }));
+  assert.deepEqual([ref.state.packets.REF.kind, ref.state.packets.REF.phase, ref.state.packets.REF.artifact.mergeSha], ['reference', 'INTEGRATED', B]);
+  refused(() => add(ref, w2('authorize-retry', { ...RETRY, repairPacket: 'REF', repairSha: B })), /REF is not an INTEGRATED work packet merged as bbbbbbbb/);
   for (const bad of [{ failedRun: 0 }, { failedRun: -1 }, { failedRun: '37012494776' }, { failedRun: 1.5 }, { appSha: 'e' }, { extra: 1 }]) {
     refused(() => add(r, w2('authorize-retry', { ...RETRY, ...bad })), /malformed|unknown field|not allowed|extra/);
   }

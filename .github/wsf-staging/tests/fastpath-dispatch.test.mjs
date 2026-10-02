@@ -124,6 +124,7 @@ await test('RETRY refuses drift, a missing or non-failed run, an un-integrated o
     [{ state: { ...st, stagingRetry: { ...st.stagingRetry, packet: 'FIX' } } }, /is for eeeeeeee \(FIX\)/],
     [{ state: { ...st, stagingRetry: { ...st.stagingRetry, pinSha: F } } }, /against the pin ffffffff, not this target/],
     [{ state: { ...st, packets: { ...st.packets, FIX: { ...st.packets.FIX, phase: 'ACCEPTED' } } } }, /the repair FIX is not INTEGRATED at dddddddd/],
+    [{ state: { ...st, packets: { ...st.packets, FIX: { ...st.packets.FIX, kind: 'reference' } } } }, /the repair FIX is not INTEGRATED at dddddddd/],
     [{ state: { ...st, packets: { ...st.packets, FIX: { ...st.packets.FIX, artifact: { ...st.packets.FIX.artifact, mergeSha: F } } } } }, /the repair FIX is not INTEGRATED at dddddddd/],
     [{ api: retryApi({ onMain: false }) }, /the repair merge dddddddd is not on main/],
     [{ api: retryApi({ onMain: null }) }, /the repair merge dddddddd is not readably on main/],
