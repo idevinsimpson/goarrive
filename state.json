@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "50f513ba89e5f689edd46f295d1df03d95c8639ee118055d4dd7398efbbd73c0",
-  "eventCount": 150,
+  "ledgerHead": "e88ec3685c1ef0e2408ab1cf9b38f4700c5558397ffca5f9358318102eaf4720",
+  "eventCount": 152,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -61,9 +61,7 @@
     }
   },
   "queue": {
-    "W3": [
-      "STAGING-FASTPATH-INVENTORY-BASELINE-FIX"
-    ],
+    "W3": [],
     "W4": [],
     "W5": [],
     "W7": [],
@@ -481,10 +479,10 @@
       },
       "label": "Correct fast-path inventory preflight to use the reviewed complete measured baseline without double-counting retained functions",
       "origin": "ledger",
-      "phase": "QUEUED",
+      "phase": "RELEASED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
-      "inbox": null,
+      "inbox": 396,
       "pr": null,
       "reviewers": [],
       "artifact": {
@@ -495,7 +493,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": null,
+      "releasedQueueIndex": 0,
       "reviewedBy": [],
       "subjectPaths": [
         ".github/wsf-staging/read-inventory.mjs",
@@ -508,11 +506,14 @@
           "kind": "comment",
           "id": 5953615810
         },
-        "released": null,
+        "released": {
+          "kind": "comment",
+          "id": 5953663400
+        },
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5953615810
+          "id": 5953663400
         }
       },
       "review": {
@@ -1018,6 +1019,14 @@
         "id": 5952655330
       },
       "superseded": true
+    },
+    "e5632e3de432d8ed42c087f305d748774a54e3fe4a8b3fc8a4be7ae9ab8b4e63": {
+      "packet": "STAGING-FASTPATH-INVENTORY-BASELINE-FIX",
+      "worker": "W3",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
