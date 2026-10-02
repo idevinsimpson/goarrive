@@ -6,10 +6,11 @@
  *  - candidate         the NEWEST integrated, preview-eligible merge on the canonical development branch. Only the
  *                      newest is ever a target: an older one is never staged on purpose (coalescing, Phase D row 13).
  *  - fastPathReasons   the §9.3 invariants, against the last FULL-PATH pin (the reviewed approved-candidate.json):
- *                      the candidate descends from the pin, and every path changed since the pin is member-visible
- *                      source outside every protected path. The functions tree is then unchanged, so the pin's
- *                      verified inventory still holds. Any failure is a reason, and the candidate takes the full,
- *                      reviewed path (`BEHIND reason=full-path-required`).
+ *                      the candidate descends from the pin, at least one member-visible path changed, and every path
+ *                      changed since the pin is member-visible source or a named non-runtime document (nonRuntimeDoc),
+ *                      outside every protected path. The functions tree is then unchanged, so the pin's verified
+ *                      inventory still holds. Any failure is a reason, and the candidate takes the full, reviewed path
+ *                      (`BEHIND reason=full-path-required`).
  *  - targetLine        R-FASTPATH `set-target`, derived only when the pin is the recorded served full-path deploy
  *                      (set-staging, with its rollback SHA) and every invariant holds.
  *
@@ -35,6 +36,27 @@ const PROTECTED_NAMES = Object.freeze([
   /(^|\/)firebase[^/]*\.json$/, /(^|\/)\.firebaserc$/, /(^|\/)(firestore|storage)\.rules$/, /(^|\/)firestore\.indexes\.json$/,
 ]);
 
+/**
+ * Provably non-runtime documentation and agent instructions (STAGING-FASTPATH-DOCS-LINEAGE-FIX; owner #365 5944487530).
+ * A change to one of these, between the pin and the candidate, does not by itself force the full path: nothing the
+ * staging deploy builds, uploads or runs reads them. Checked against the consumers at 3c38046f:
+ *  - the build job checks out the candidate and runs only `npm ci` in apps/goarrive, functions, functions-westayfit and
+ *    apps/westayfit, the GoArrive typecheck and rules tests, `functions-westayfit` build and
+ *    scripts/westayfit/build-staging.sh (an Expo export of apps/westayfit with the default Metro config, rooted there);
+ *    no source under apps/westayfit, functions-westayfit or scripts/westayfit imports, requires or reads these files;
+ *  - the deploy job's scripts and hosting config come from the OPERATIONAL checkout (main), never the candidate's;
+ *  - the hosted bundle is apps/westayfit/dist and the functions upload is functions-westayfit; neither contains them.
+ * So exactly two shapes, nothing broader: the root agent-instruction files AGENTS.md and CLAUDE.md, and a plain .md or
+ * .txt file directly in docs/westayfit/ (no subdirectory: docs/westayfit/ops/** holds the writer's pinned control
+ * contracts and is NOT exempt). Every other path (other docs, other extensions, dot-files, odd names) still fails closed,
+ * and the protected check below runs on every path regardless. A docs-only change is never member-visible.
+ */
+export const NON_RUNTIME_DOC_FILES = Object.freeze(['AGENTS.md', 'CLAUDE.md']);
+export const NON_RUNTIME_DOC_DIR = 'docs/westayfit/';
+const NON_RUNTIME_DOC_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*\.(md|txt)$/;
+export const nonRuntimeDoc = (p) => typeof p === 'string'
+  && (NON_RUNTIME_DOC_FILES.includes(p) || (p.startsWith(NON_RUNTIME_DOC_DIR) && NON_RUNTIME_DOC_NAME.test(p.slice(NON_RUNTIME_DOC_DIR.length))));
+
 export const previewEligible = (paths) => Array.isArray(paths) && paths.some((p) => p.startsWith(MEMBER_VISIBLE));
 export const protectedPath = (p) => PROTECTED_PREFIXES.some((x) => (x.endsWith('/') ? p.startsWith(x) : p === x)) || PROTECTED_NAMES.some((re) => re.test(p));
 
@@ -55,9 +77,10 @@ export function fastPathReasons({ pinSha, candidateSha, descends, paths, functio
   else if (ft.pin !== ft.candidate) out.push(`the ${FUNCTIONS_TREE} tree changed (${ft.pin.slice(0, 8) || 'absent'} → ${ft.candidate.slice(0, 8) || 'absent'})`);
   if (descends === null || descends === undefined) out.push(`lineage: whether ${s8(candidateSha)} descends from the pin ${s8(pinSha)} could not be read`);
   else if (descends !== true) out.push(`lineage: ${s8(candidateSha)} does not descend from the pin ${s8(pinSha)}`);
-  if (!Array.isArray(paths)) { out.push(`the diff ${s8(pinSha)}..${s8(candidateSha)} could not be read in full`); return out; }
+  if (!Array.isArray(paths) || paths.some((p) => typeof p !== 'string')) { out.push(`the diff ${s8(pinSha)}..${s8(candidateSha)} could not be read in full`); return out; }
   if (!paths.length) out.push(`the diff ${s8(pinSha)}..${s8(candidateSha)} is empty`);
-  const outside = paths.filter((p) => !p.startsWith(MEMBER_VISIBLE));
+  else if (!previewEligible(paths)) out.push(`no member-visible path under ${MEMBER_VISIBLE} changed since the pin ${s8(pinSha)}`);
+  const outside = paths.filter((p) => !p.startsWith(MEMBER_VISIBLE) && !nonRuntimeDoc(p));
   if (outside.length) out.push(`paths outside ${MEMBER_VISIBLE} changed: ${some(outside)}`);
   const prot = paths.filter(protectedPath);
   if (prot.length) out.push(`protected paths changed: ${some(prot)}`);

@@ -5,11 +5,13 @@ import { checkTexts } from '../check.mjs';
 import { serialize } from '../reduce.mjs';
 import { renderCurrent } from '../render-current.mjs';
 import fs from 'node:fs';
-import { DEPLOY_TITLE, MEMBER_VISIBLE, isDeployTitle, targetTitle, PROTECTED_PREFIXES, STAGING_URL, STAGING_WORKFLOW, fastPathReasons, freshnessFacts, integrations, previewEligible, protectedPath, servedOf, targetDecision } from '../fastpath.mjs';
+import { DEPLOY_TITLE, MEMBER_VISIBLE, NON_RUNTIME_DOC_DIR, NON_RUNTIME_DOC_FILES, isDeployTitle, nonRuntimeDoc, targetTitle, PROTECTED_PREFIXES, STAGING_URL, STAGING_WORKFLOW, fastPathReasons, freshnessFacts, integrations, previewEligible, protectedPath, servedOf, targetDecision } from '../fastpath.mjs';
 import { PROTECTED_PATHS } from '../../../.github/wsf-staging/pin-candidate.mjs';
 import { A, B, C, D, E, F, GENESIS, SOURCE_ONLY, atest, boot2, done, refused, test, w2 } from './helpers.mjs';
 import { fastpathReads } from '../router-run.mjs';
 import { gitHubClient } from '../github.mjs';
+import { WRITER_BOT, resolveLedgerTarget } from '../../../.github/wsf-staging/resolve-ledger-target.mjs';
+import { dispatchDecision } from '../../../.github/wsf-staging/fastpath-dispatch.mjs';
 
 const add = (r, e) => appendEvent(r.eventsText, e, { expectHead: r.state?.ledgerHead ?? GENESIS });
 const build = (...events) => events.reduce(add, { eventsText: '', state: null });
@@ -172,6 +174,104 @@ test('the reconcile workflow\'s dispatch job: after the writer, main only, conte
   assert.match(y, /^permissions:\n  contents: read$/m, 'the workflow default stays read-only');
 });
 
+
+// ---- STAGING-FASTPATH-DOCS-LINEAGE-FIX (owner #365 5944487530; Director release 5944563639) ----------------------------
+
+/** EXACTLY `git diff --name-only a31276516e78 9a506766dce2` (19 paths, all modifications or additions): the docs and
+ *  agent-instruction lineage between the served full-path pin and current canonical development. */
+const LINEAGE_A3127651_9A506766 = Object.freeze([
+  'AGENTS.md', 'CLAUDE.md',
+  'docs/westayfit/ARCHITECTURE.md', 'docs/westayfit/CURRENT_STATE.md', 'docs/westayfit/DATA_OWNERSHIP.md', 'docs/westayfit/DECISIONS.md',
+  'docs/westayfit/DEPENDENCIES.md', 'docs/westayfit/DOCUMENT_AUTHORITY_AND_SUPERSESSION.md', 'docs/westayfit/EXPO_CRITICAL_PATH.md',
+  'docs/westayfit/EXPO_READINESS.md', 'docs/westayfit/LOVABLE_HANDOFF.md', 'docs/westayfit/MILESTONES.md', 'docs/westayfit/RELEASES.md',
+  'docs/westayfit/RISKS.md', 'docs/westayfit/UNIVERSAL_COMMUNITIES_CHARTER.md',
+  'docs/westayfit/WE_STAY_FIT_IMPLEMENTATION_OPERATIONS_CHARTER_v1_2026-09-26.md', 'docs/westayfit/WE_STAY_FIT_MASTER.md',
+  'docs/westayfit/WE_STAY_FIT_PROJECT_INSTRUCTIONS_v3_1_2026-09-26.txt', 'docs/westayfit/WE_STAY_FIT_STRATEGIC_MASTER_v3_1_ADDENDUM_2026-09-26.md',
+]);
+/** A small app-source successor integrated on top of that lineage (the shape KIOSK-PAIRING-CLARITY-PROOF-1 would take). */
+const SUCCESSOR = ['apps/westayfit/app/station/index.tsx', 'apps/westayfit/src/ui/station/PairingGuide.tsx'];
+const LT = '5a3f232e'.padEnd(40, '0');
+const lineageOk = (paths) => ({ pinSha: C, candidateSha: E, descends: true, paths, functionsTree: { pin: LT, candidate: LT } });
+
+test('docs lineage: the exact a3127651..9a506766 docs/instruction lineage plus an app-source successor holds the fast path', () => {
+  assert.equal(LINEAGE_A3127651_9A506766.length, 19);
+  for (const p of LINEAGE_A3127651_9A506766) assert.equal(nonRuntimeDoc(p), true, p);
+  for (const p of LINEAGE_A3127651_9A506766) assert.equal(protectedPath(p), false, p);
+  assert.deepEqual(fastPathReasons(lineageOk([...LINEAGE_A3127651_9A506766, ...SUCCESSOR])), []);
+  assert.deepEqual([...NON_RUNTIME_DOC_FILES], ['AGENTS.md', 'CLAUDE.md']);
+  assert.equal(NON_RUNTIME_DOC_DIR, 'docs/westayfit/');
+});
+
+test('docs lineage: a docs-only candidate is never eligible and never holds the fast path', () => {
+  assert.equal(previewEligible(LINEAGE_A3127651_9A506766), false, 'docs never make staging BEHIND');
+  assert.match(fastPathReasons(lineageOk(LINEAGE_A3127651_9A506766)).join('; '), /no member-visible path under apps\/westayfit\/ changed since the pin c+/);
+  assert.match(fastPathReasons(lineageOk(['AGENTS.md'])).join('; '), /no member-visible path/);
+});
+
+test('docs lineage: only the named root instruction files and top-level docs/westayfit/*.md|*.txt are exempt; everything else fails closed', () => {
+  const notExempt = [
+    'docs/westayfit/ops/CONTROL_STATE.md', 'docs/westayfit/ops/control/capabilities.v1.json', 'docs/westayfit/staging/x.md', 'docs/a.md',
+    'docs/design-target/ATLAS.md', 'docs/westayfit/x.json', 'docs/westayfit/x.mdx', 'docs/westayfit/x.md.js', 'docs/westayfit/X.MD',
+    'docs/westayfit/.hidden.md', 'docs/westayfit/.md', 'docs/westayfitx.md', 'docs/westayfit-old/x.md', 'docs/westayfit.md', 'docs/westayfit/', 'docs/westayfit//x.md', '/docs/westayfit/x.md', ' docs/westayfit/x.md',
+    'docs/westayfit/x.md ', 'docs/westayfit/../../firestore.rules', 'docs/westayfit/a b.md', 'README.md', 'agents.md', 'Claude.md',
+    'apps/goarrive/AGENTS.md', 'functions-westayfit/AGENTS.md', 'CLAUDE.md/x.ts', 'AGENTS.md.ts', '.claude/data-model.md', 'skills/wsf-staging-deploy/SKILL.md',
+    'tools/wsf-control/router.mjs', '.github/workflows/wsf-staging-deploy.yml', 'scripts/westayfit/build-staging.sh',
+  ];
+  for (const p of notExempt) {
+    assert.equal(nonRuntimeDoc(p), false, `${JSON.stringify(p)} must not be exempt`);
+    assert.notDeepEqual(fastPathReasons(lineageOk([...LINEAGE_A3127651_9A506766, ...SUCCESSOR, p])), [], `${JSON.stringify(p)} must force the full path`);
+  }
+  for (const p of [null, undefined, 7, {}, ['AGENTS.md']]) assert.equal(nonRuntimeDoc(p), false, String(p));
+});
+
+test('docs lineage: runtime, protected, config, dependency, backend and workflow paths still force the full path beside it', () => {
+  const runtime = [
+    'functions-westayfit/src/index.ts', 'functions/src/index.ts', 'firestore.rules', 'firestore.indexes.json', 'firebase.westayfit.json', 'firebase.json',
+    '.firebaserc', 'package.json', 'package-lock.json', 'apps/westayfit/package.json', 'apps/westayfit/app.json', 'apps/westayfit/package-lock.json',
+    'apps/westayfit/app.config.ts', '.github/workflows/wsf-staging-deploy.yml', '.github/wsf-staging/resolve-ledger-target.mjs', 'scripts/westayfit/build-staging.sh',
+    'apps/goarrive/app/index.tsx', 'tools/wsf-control/fastpath.mjs',
+    'docs/westayfit/package.json', 'docs/westayfit/firebase.westayfit.json', 'docs/westayfit/firestore.rules', 'docs/westayfit/firestore.indexes.json',
+  ];
+  for (const p of runtime) {
+    const reasons = fastPathReasons(lineageOk([...LINEAGE_A3127651_9A506766, ...SUCCESSOR, p])).join('; ');
+    assert.match(reasons, /paths outside apps\/westayfit\/ changed|protected paths changed/, p);
+    assert.equal(reasons.includes(p), true, `the reason names ${p}`);
+  }
+  // A protected path named like a doc is still protected: the protected check is independent of the exemption.
+  assert.match(fastPathReasons(lineageOk([...SUCCESSOR, 'docs/westayfit/package.json'])).join(), /protected paths changed: docs\/westayfit\/package\.json/);
+  // ...including a name that is BOTH exempt-shaped and a protected §9.3 name (app.config.*): protected wins.
+  assert.equal(nonRuntimeDoc('docs/westayfit/app.config.md'), true);
+  assert.equal(protectedPath('docs/westayfit/app.config.md'), true);
+  assert.match(fastPathReasons(lineageOk([...LINEAGE_A3127651_9A506766, ...SUCCESSOR, 'docs/westayfit/app.config.md'])).join(), /protected paths changed: docs\/westayfit\/app\.config\.md/);
+  // The other §9.3 invariants are untouched by the exemption.
+  const ok = lineageOk([...LINEAGE_A3127651_9A506766, ...SUCCESSOR]);
+  assert.match(fastPathReasons({ ...ok, functionsTree: { pin: LT, candidate: '1'.repeat(40) } }).join(), /functions-westayfit tree changed/);
+  assert.match(fastPathReasons({ ...ok, functionsTree: { pin: LT, candidate: null } }).join(), /could not be compared/);
+  assert.match(fastPathReasons({ ...ok, descends: false }).join(), /does not descend from the pin/);
+  assert.match(fastPathReasons({ ...ok, descends: null }).join(), /could not be read/);
+  assert.match(fastPathReasons({ ...ok, paths: null }).join(), /could not be read in full/);
+  assert.match(fastPathReasons({ ...ok, paths: [...ok.paths, null] }).join(), /could not be read in full/, 'a non-path entry is an unreadable diff');
+  assert.match(fastPathReasons({ ...ok, paths: [...ok.paths, 42] }).join(), /could not be read in full/);
+});
+
+test('docs lineage: renames are checked on both sides (the compare reports both)', () => {
+  const run = (from, to) => fastPathReasons(lineageOk([...LINEAGE_A3127651_9A506766, ...SUCCESSOR, from, to])).join('; ');
+  assert.match(run('functions-westayfit/src/index.ts', 'docs/westayfit/OLD_INDEX.md'), /protected paths changed: functions-westayfit\/src\/index\.ts/);
+  assert.match(run('firestore.rules', 'docs/westayfit/RULES.md'), /firestore\.rules/);
+  assert.match(run('docs/westayfit/RISKS.md', 'docs/westayfit/ops/RISKS.md'), /paths outside apps\/westayfit\/ changed: docs\/westayfit\/ops\/RISKS\.md/);
+  assert.match(run('.github/workflows/x.yml', 'AGENTS.md'), /\.github\/workflows\/x\.yml/);
+  assert.equal(run('docs/westayfit/OLD.md', 'docs/westayfit/NEW.md'), '', 'a rename inside the exempt set stays exempt');
+});
+
+test('docs lineage: the writer derives the target on the real lineage; mixed runtime lineage stays FULL_PATH_REQUIRED', () => {
+  const r = integrated();
+  const reads = (paths) => ({ pin: { sha: C }, candidate: { packet: 'ALPHA', mergeSha: E, pr: 12 }, descends: true, paths, functionsTree: { pin: LT, candidate: LT }, unknown: null });
+  const d = targetDecision(r.state, reads([...LINEAGE_A3127651_9A506766, ...SUCCESSOR]));
+  assert.deepEqual([d.line?.type, d.line?.appSha, d.line?.pinSha, d.report], ['set-target', E, C, undefined]);
+  assert.match(targetDecision(r.state, reads([...LINEAGE_A3127651_9A506766, ...SUCCESSOR, 'docs/westayfit/ops/CONTROL_STATE.md'])).report, /^FULL_PATH_REQUIRED .*docs\/westayfit\/ops\/CONTROL_STATE\.md/);
+  assert.match(targetDecision(r.state, reads(LINEAGE_A3127651_9A506766)).report, /^FULL_PATH_REQUIRED .*no member-visible path/);
+});
+
 const asyncTests = [];
 asyncTests.push(['fastpathReads: an unreadable newest merge stops the search (never an older one); a newer docs-only merge is skipped; the pin is read at the running main', async () => {
   const r = integrated(F, 'BETA', 13, integrated(E, 'ALPHA', 12));
@@ -209,6 +309,29 @@ asyncTests.push(['W4 F1: a rename reports BOTH paths, so a move out of functions
   assert.equal(await gh.treeSha(E, 'functions-westayfit'), '7'.repeat(40));
   assert.equal(await gh.treeSha(E, 'functions'), '', 'an absent directory is empty, not unknown');
   assert.ok(calls.includes(`/git/commits/${E}`));
+}]);
+asyncTests.push(['docs lineage: the staging gate (resolve-ledger-target) and the dispatcher agree with the writer on the same lineage', async () => {
+  const r = integrated();
+  const reads = { pin: { sha: C }, candidate: { packet: 'ALPHA', mergeSha: E, pr: 12 }, descends: true, paths: [...LINEAGE_A3127651_9A506766, ...SUCCESSOR], functionsTree: { pin: LT, candidate: LT }, unknown: null };
+  const state = add(add(r, targetDecision(r.state, reads).line), w2('set-fastpath', { enabled: true })).state;
+  const api = (paths) => ({
+    async descends(base, head) { if (base === E && head === 'claude/wsf-dev') return true; if (base === C && head === E) return true; throw new Error(`unexpected descends(${base}, ${head})`); },
+    async changedPaths(base, head) { if (base === C && head === E) return paths; throw new Error(`unexpected changedPaths(${base}, ${head})`); },
+    async treeSha(commit, dir) { assert.equal(dir, 'functions-westayfit'); return LT; },
+  });
+  const approval = { project: 'westayfit-staging', approvedAppSha: C };
+  const gate = (paths) => resolveLedgerTarget({ approval, state, ledgerAuthor: WRITER_BOT, requested: E, mode: 'deploy', api: api(paths) });
+  const send = (paths) => dispatchDecision({ state, ledgerAuthor: WRITER_BOT, approval, served: { ok: false, status: 'mismatch' }, runs: [], api: api(paths) });
+  assert.deepEqual(await gate(reads.paths), { ok: true, appSha: E, packet: 'ALPHA', pin: C });
+  assert.deepEqual(await send(reads.paths), { dispatch: { appSha: E, packet: 'ALPHA' } });
+  for (const extra of ['docs/westayfit/ops/CONTROL_STATE.md', 'firestore.rules', '.github/workflows/wsf-staging-deploy.yml', 'functions-westayfit/src/index.ts', 'package.json']) {
+    const g = await gate([...reads.paths, extra]);
+    assert.equal(g.ok, false, extra);
+    assert.match(g.reason, /the fast-path invariants do not hold/, extra);
+    assert.match((await send([...reads.paths, extra])).skip, /the target does not verify: the fast-path invariants do not hold/, extra);
+  }
+  assert.match((await gate(LINEAGE_A3127651_9A506766)).reason, /no member-visible path/);
+  assert.match((await gate(null)).reason, /could not be read in full/);
 }]);
 for (const [n, f] of asyncTests) await atest(n, f);
 
