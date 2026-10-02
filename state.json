@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "45b9039a213a669632cd19ab9efabe08b30aa6318add05ea53dc32a096e9a919",
-  "eventCount": 257,
+  "ledgerHead": "2bce3f83aca3d3283fcc197ad7a14e899d10b65cb94769e187b23154d097658b",
+  "eventCount": 260,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -418,15 +418,17 @@
       },
       "label": "Expo account-entry seam: preserve event context and make the existing phone/kiosk choice fast and truthful without bypassing verified identity",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
-      "pr": null,
-      "reviewers": [],
+      "pr": 561,
+      "reviewers": [
+        "W4"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "e603a39c4e9e465b65bf840bfb4ed11eaf16d319",
+        "prHeadSha": "e603a39c4e9e465b65bf840bfb4ed11eaf16d319",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -460,7 +462,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5961821621
+          "id": 5962729011
         }
       },
       "review": {
@@ -473,7 +475,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "KIOSK-PAIRING-CLARITY-PROOF-1": {
@@ -1549,7 +1551,16 @@
       "ack": {
         "kind": "comment",
         "id": 5961821621
-      }
+      },
+      "superseded": true
+    },
+    "ead5e1d14bd6d14130c4926949257166b146dd50609d67b0a04ffaf7bc77f974": {
+      "packet": "EXPO-ACCOUNT-ENTRY-1",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
