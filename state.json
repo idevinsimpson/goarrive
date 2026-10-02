@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "be54260aa8d162a64b050dd2a31aa7f9c5564f243be91f626968446b2eada5e8",
-  "eventCount": 225,
+  "ledgerHead": "c662cbd0dfe1cc611898ddd74f24461e16492d3c7c5966232e7f0bec292a66eb",
+  "eventCount": 229,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -346,15 +346,18 @@
       },
       "label": "Diagnose and repair staging verification and password-reset delivery without weakening mail security",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
-      "pr": null,
-      "reviewers": [],
+      "pr": 559,
+      "reviewers": [
+        "W4",
+        "W5"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "2c6156ad32093af61973bcc6f469cd28ff3abf79",
+        "prHeadSha": "2c6156ad32093af61973bcc6f469cd28ff3abf79",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -384,7 +387,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5959278164
+          "id": 5959654587
         }
       },
       "review": {
@@ -401,7 +404,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "KIOSK-PAIRING-CLARITY-PROOF-1": {
@@ -1398,7 +1401,24 @@
       "ack": {
         "kind": "comment",
         "id": 5959278164
-      }
+      },
+      "superseded": true
+    },
+    "096d4a65d9020ecc0e06ed1eed173898a0a7def44bdd1e45346f160ebb62b7fa": {
+      "packet": "EMAIL-STAGING-REPAIR",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
+    },
+    "846f65f02bf7dd03312ce4f682a4ae922fb40e6b391fc49c4e2a1b86f6eff5c8": {
+      "packet": "EMAIL-STAGING-REPAIR",
+      "worker": "W5",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
