@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "63213a4e6bd336c4f7a55249a1172ec7e41e38c4355fc23e16b3916f64a4e07a",
-  "eventCount": 247,
+  "ledgerHead": "9368abc1e7c1cc4a4007c40f6f997ceab432df49fe0601c3c84f2a3edde94807",
+  "eventCount": 248,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -364,7 +364,9 @@
       "proof": null,
       "served": null,
       "releasedQueueIndex": null,
-      "reviewedBy": [],
+      "reviewedBy": [
+        "W4"
+      ],
       "subjectPaths": [
         "functions-westayfit/src/index.ts",
         "functions-westayfit/tests/callable/wsf-send-verification-email.test.ts",
@@ -387,7 +389,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5960886955
+          "id": 5961050452
         }
       },
       "review": {
@@ -1455,7 +1457,8 @@
       "ack": {
         "kind": "comment",
         "id": 5960925680
-      }
+      },
+      "superseded": true
     },
     "d2400a79c8d188aafb9b7aed4ae19b5c5709f1247f41b95f5a9bfe0fc04f2ad4": {
       "packet": "EMAIL-STAGING-REPAIR",
