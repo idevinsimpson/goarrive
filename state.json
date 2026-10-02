@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "a6edef261d6821d5f839a54438b085c8f2269feca0549e2c0088c9cdd4ca6d56",
-  "eventCount": 155,
+  "ledgerHead": "0ed9c898286bb07df120a3105c350a16fb81b6e82e01bea812c90bcaf36654cf",
+  "eventCount": 158,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -479,15 +479,17 @@
       },
       "label": "Correct fast-path inventory preflight to use the reviewed complete measured baseline without double-counting retained functions",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
-      "pr": null,
-      "reviewers": [],
+      "pr": 555,
+      "reviewers": [
+        "W4"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "825b9c017e5ff0fff0eb4cf28700bab11b043176",
+        "prHeadSha": "825b9c017e5ff0fff0eb4cf28700bab11b043176",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -513,7 +515,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5953704615
+          "id": 5953795031
         }
       },
       "review": {
@@ -526,7 +528,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "STAGING-FRESHNESS-DISPATCH": {
@@ -1031,7 +1033,16 @@
       "ack": {
         "kind": "comment",
         "id": 5953704615
-      }
+      },
+      "superseded": true
+    },
+    "3abbbf51e4bd35628f4fbc73f5f47fbd0a992b2aa8f0198f09e260d6d2b68ff7": {
+      "packet": "STAGING-FASTPATH-INVENTORY-BASELINE-FIX",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
