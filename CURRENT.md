@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=15c3506f3972f5708853812398d17e99dc17cc4ecf2e14d52439ad1a5a45267a events=205 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=66b7f9fdaa8b6744e50bca1e270ff21324a28223843489c97e0a8eef912e0cec events=207 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `15c3506f3972f5708853812398d17e99dc17cc4ecf2e14d52439ad1a5a45267a` (205 events)
+- Ledger head: `66b7f9fdaa8b6744e50bca1e270ff21324a28223843489c97e0a8eef912e0cec` (207 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -29,8 +29,8 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 
 | Worker | Inbox | Active now | Reviewing | Waiting on review | Blocked | Next | Queue | WATCH |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| W3 | #396 | — | — | STAGING-PROOF-RECONCILE-ROUTING-FIX | — | — | — | off |
-| W4 | #394 | — | STAGING-PROOF-RECONCILE-ROUTING-FIX | — | — | — | — | on |
+| W3 | #396 | STAGING-PROOF-RECONCILE-ROUTING-FIX | — | — | — | — | — | on |
+| W4 | #394 | — | — | — | — | — | — | off |
 | W5 | #395 | — | — | — | — | — | — | off |
 | W7 | #434 | — | — | — | — | — | — | off |
 | W9 | #497 | — | — | — | — | — | — | off |
@@ -49,7 +49,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | STAGING-FASTPATH-INVENTORY-BASELINE-FIX | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #555 | 825b9c01 | 825b9c01 | — | 745b4f62 | — | W4 | comment:5953663400 | pull_request:555 | — | Correct fast-path inventory preflight to use the reviewed complete measured baseline without double-counting retained functions | 1×ops-source then director | — |
 | STAGING-FRESHNESS-DISPATCH | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #549 | ffe48217 | ffe48217 | — | 3c38046f | — | W4 | comment:5940812824 | pull_request:549 | — | Step 7 completion: bounded main-only workflow-token dispatch of the existing ledger fast path and unattended proof | 1×ops-source then director | — |
 | STAGING-FRESHNESS-FASTPATH | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #548 | c295d5c1 | c295d5c1 | — | 73d87d4e | — | W4 | comment:5938517396 | pull_request:548 | — | Step 7: automate preview-eligible accepted/integrated to deterministic candidate, pin, existing staging dispatch, and FRESH readback | 1×ops-source then director | — |
-| STAGING-PROOF-RECONCILE-ROUTING-FIX | W3 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #557 | a9a60edb | a9a60edb | — | — | — | W4 | comment:5956038540 | comment:5956233415 | — | Derive the exact successful staging run proof and pointer sequence when the workflow-run wake is missed | 1×ops-source then director | — |
+| STAGING-PROOF-RECONCILE-ROUTING-FIX | W3 | work | INTEGRATED (source-only) | ledger | CHANGES_REQUESTED | #557 | a9a60edb | a9a60edb | — | — | — | W4 | comment:5956038540 | comment:5956405530 | — | Derive the exact successful staging run proof and pointer sequence when the workflow-run wake is missed | 1×ops-source then director | — |
 
 ## Wakes
 
@@ -84,4 +84,5 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | 463e673a965d | W4 | STAGING-FASTPATH-FAILED-TARGET-RETRY-FIX | review | acked | 5954766753 | comment:5954775347 |
 | 0664144166e3 | W3 | STAGING-PROOF-RECONCILE-ROUTING-FIX | release | acked | 5956063211 | comment:5956070784 |
 | f13c4d257ded | W4 | STAGING-PROOF-RECONCILE-ROUTING-FIX | review | acked | 5956269103 | comment:5956283838 |
+| 75d7712d7d13 | W3 | STAGING-PROOF-RECONCILE-ROUTING-FIX | handback | requested | — | — |
 

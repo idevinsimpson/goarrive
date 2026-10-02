@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "15c3506f3972f5708853812398d17e99dc17cc4ecf2e14d52439ad1a5a45267a",
-  "eventCount": 205,
+  "ledgerHead": "66b7f9fdaa8b6744e50bca1e270ff21324a28223843489c97e0a8eef912e0cec",
+  "eventCount": 207,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -758,7 +758,7 @@
       },
       "label": "Derive the exact successful staging run proof and pointer sequence when the workflow-run wake is missed",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "CHANGES_REQUESTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -798,7 +798,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5956233415
+          "id": 5956405530
         }
       },
       "review": {
@@ -1284,7 +1284,16 @@
       "ack": {
         "kind": "comment",
         "id": 5956283838
-      }
+      },
+      "superseded": true
+    },
+    "75d7712d7d131698c2ee0ab6772bd420c5bea3e7c0fb398b29ae9f0c6b9dddfb": {
+      "packet": "STAGING-PROOF-RECONCILE-ROUTING-FIX",
+      "worker": "W3",
+      "reason": "handback",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
