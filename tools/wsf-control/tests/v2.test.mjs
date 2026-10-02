@@ -7,7 +7,7 @@ import { reduce, serialize } from '../reduce.mjs';
 import { renderCurrent, ACCEPTED_RESIDUALS } from '../render-current.mjs';
 import { DEFAULT_REVIEW, RE, canon, eventId, sha256 } from '../schema.mjs';
 import { inSubject } from '../reconcile.mjs';
-import { A, B, C, D, E, GENESIS, REPO, SOURCE_ONLY, boot, boot2, comment, commit, done, refused, test, w2 } from './helpers.mjs';
+import { A, B, C, D, E, F, GENESIS, REPO, SOURCE_ONLY, boot, boot2, comment, commit, done, refused, test, w2 } from './helpers.mjs';
 
 const add = (r, e) => appendEvent(r.eventsText, e, { expectHead: r.state?.ledgerHead ?? GENESIS });
 const build = (...events) => events.reduce(add, { eventsText: '', state: null });
@@ -276,6 +276,80 @@ test('Expo Router paths: a reservation matches literally (never as a glob) when 
     assert.equal(inSubject(sibling, EXPO_ROUTES), false, sibling);
   }
   assert.equal(inSubject('apps/westayfit/app/(tabs)/(home)/community/[groupId]/members.tsx', ['apps/westayfit/app/(tabs)/(home)/community/[groupId]']), true, 'a directory reservation still covers its own files');
+});
+
+// ---- STAGING-FASTPATH-FAILED-TARGET-RETRY-FIX (#365 5954205876; release 5954269955) ------------------------------------
+
+/** A work packet `id` taken to INTEGRATED at `merge` (PR `pr`). */
+function integrate(r, id, merge, pr, completion = SOURCE_ONLY) {
+  r = [w2('queue', { packet: id, owner: 'W3', completion }), w2('release', { packet: id, inbox: 396 }), w2('ack', { packet: id, worker: 'W3' }),
+    w2('deliver', { packet: id, pr, subjectSha: A }), w2('review', { packet: id, reviewers: ['W7'] }), w2('review-pass', { packet: id, reviewer: 'W7' }),
+    w2('accept', { packet: id, subjectSha: A })].reduce(add, r);
+  return add(r, w2('integrate', { packet: id, mergeSha: merge, acceptance: JSON.parse(r.eventsText.trimEnd().split('\n').at(-1)).source.id }));
+}
+/** The recovery case: KIOSK integrated at E and targeted against the pin C; its failed run 37012494776; FIX integrated at F. */
+function retryLedger() {
+  let r = integrate(build(boot2()), 'KIOSK', E, 553);
+  r = add(r, w2('set-target', { packet: 'KIOSK', appSha: E, pinSha: C }, { rule: 'R-FASTPATH', cls: 'derived', source: { kind: 'pull_request', id: 553, repo: REPO } }));
+  return integrate(r, 'FIX', F, 555);
+}
+const RETRY = { packet: 'KIOSK', appSha: E, failedRun: 37012494776, repairPacket: 'FIX', repairSha: F };
+
+test('authorize-retry: the owner records one re-send of the current target after its exact failed run, bound to an INTEGRATED repair', () => {
+  const r0 = retryLedger();
+  const r = add(r0, w2('authorize-retry', RETRY));
+  const decision = JSON.parse(r.eventsText.trimEnd().split('\n').at(-1)).source.id;
+  assert.deepEqual(r.state.stagingRetry, { packet: 'KIOSK', appSha: E, pinSha: C, failedRun: 37012494776, repairPacket: 'FIX', repairSha: F, decision });
+  assert.equal(r.state.packets.KIOSK.authority.lastTransition.id, r0.state.packets.KIOSK.authority.lastTransition.id, 'not a packet transition');
+  assert.ok(renderCurrent(r.state).includes(`- Staging retry authorized once (authorize-retry, decision ${decision}): \`${E}\` (KIOSK) after failed run 37012494776, repaired by FIX at \`${F}\``));
+  assert.equal(renderCurrent(r0.state).includes('Staging retry'), false, 'a ledger without one renders as before');
+  assert.equal(invariants(r.state).length, 0);
+  refused(() => add(r, w2('authorize-retry', RETRY)), /already authorized; one authorization per failed run/);
+  assert.equal(add(r, w2('authorize-retry', { ...RETRY, failedRun: 37012494999 })).state.stagingRetry.failedRun, 37012494999, 'a later failure takes a new decision');
+});
+
+test('authorize-retry refuses drift and anything not proved: no target, another target or packet, an un-integrated or mismatched repair, the target as its own repair', () => {
+  const r = retryLedger();
+  refused(() => add(integrate(integrate(build(boot2()), 'KIOSK', E, 553), 'FIX', F, 555), w2('authorize-retry', RETRY)), /holds no staging target/);
+  refused(() => add(r, w2('authorize-retry', { ...RETRY, appSha: D })), /the staging target is eeeeeeee \(KIOSK\), not dddddddd \(KIOSK\)/);
+  refused(() => add(r, w2('authorize-retry', { ...RETRY, packet: 'FIX' })), /not eeeeeeee \(FIX\)/);
+  refused(() => add(r, w2('authorize-retry', { ...RETRY, repairPacket: 'KIOSK', repairSha: E })), /separate packet/);
+  refused(() => add(r, w2('authorize-retry', { ...RETRY, repairSha: D })), /FIX is not an INTEGRATED work packet merged as dddddddd/);
+  refused(() => add(r, w2('authorize-retry', { ...RETRY, repairPacket: 'NOPE' })), /NOPE does not exist/);
+  const open = add(r, w2('queue', { packet: 'OPEN', owner: 'W3', completion: SOURCE_ONLY }));
+  refused(() => add(open, w2('authorize-retry', { ...RETRY, repairPacket: 'OPEN' })), /OPEN is not an INTEGRATED work packet/);
+  // A packet merged at the right SHA but already past INTEGRATED (its proof running) is not an integrated repair.
+  const proving = add(integrate(r, 'PROVING', B, 557, WORK), w2('begin-proof', { packet: 'PROVING', runId: 41, proofType: WORK.proofType }));
+  assert.equal(proving.state.packets.PROVING.phase, 'VERIFYING');
+  assert.equal(proving.state.packets.PROVING.artifact.mergeSha, B);
+  refused(() => add(proving, w2('authorize-retry', { ...RETRY, repairPacket: 'PROVING', repairSha: B })), /PROVING is not an INTEGRATED work packet merged as bbbbbbbb/);
+  // W4 #394 5954670197: a REFERENCE packet reaches INTEGRATED at a merge with no review; it is never a source repair.
+  let ref = [w2('queue', { packet: 'REF', owner: 'W3', completion: SOURCE_ONLY, kind: 'reference' }), w2('release', { packet: 'REF', inbox: 396 }),
+    w2('ack', { packet: 'REF', worker: 'W3' }), w2('deliver', { packet: 'REF', pr: 558, subjectSha: A }), w2('accept', { packet: 'REF', subjectSha: A })].reduce(add, r);
+  ref = add(ref, w2('integrate', { packet: 'REF', mergeSha: B, acceptance: JSON.parse(ref.eventsText.trimEnd().split('\n').at(-1)).source.id }));
+  assert.deepEqual([ref.state.packets.REF.kind, ref.state.packets.REF.phase, ref.state.packets.REF.artifact.mergeSha], ['reference', 'INTEGRATED', B]);
+  refused(() => add(ref, w2('authorize-retry', { ...RETRY, repairPacket: 'REF', repairSha: B })), /REF is not an INTEGRATED work packet merged as bbbbbbbb/);
+  for (const bad of [{ failedRun: 0 }, { failedRun: -1 }, { failedRun: '37012494776' }, { failedRun: 1.5 }, { appSha: 'e' }, { extra: 1 }]) {
+    refused(() => add(r, w2('authorize-retry', { ...RETRY, ...bad })), /malformed|unknown field|not allowed|extra/);
+  }
+  const { failedRun, ...noRun } = RETRY;
+  refused(() => add(r, w2('authorize-retry', noRun)), /failedRun/);
+});
+
+test('authorize-retry is a v2 owner decision only: never derived, never on a non-comment source, never on a v1 line', () => {
+  const r = retryLedger();
+  refused(() => add(r, w2('authorize-retry', RETRY, { rule: 'R-FASTPATH', cls: 'derived' })), /derive|R-FASTPATH/);
+  refused(() => add(r, w2('authorize-retry', RETRY, { source: { kind: 'workflow_run', id: 37012494776, repo: REPO } })), /comment|source/);
+  refused(() => add(build(boot()), { type: 'authorize-retry', actor: 'Fable', source: comment(9101), ...RETRY }), /schema v2|v2/);
+});
+
+test('a new staging target voids an authorization for the old one; the voided authorization never carries over', () => {
+  let r = add(retryLedger(), w2('authorize-retry', RETRY));
+  r = integrate(r, 'NEXT', D, 556);
+  r = add(r, w2('set-target', { packet: 'NEXT', appSha: D, pinSha: C }, { rule: 'R-FASTPATH', cls: 'derived', source: { kind: 'pull_request', id: 556, repo: REPO } }));
+  assert.equal(r.state.stagingRetry, undefined);
+  assert.equal(renderCurrent(r.state).includes('Staging retry'), false);
+  refused(() => add(r, w2('authorize-retry', RETRY)), /the staging target is dddddddd \(NEXT\), not eeeeeeee \(KIOSK\)/);
 });
 
 done('v2');

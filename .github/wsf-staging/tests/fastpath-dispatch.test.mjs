@@ -3,8 +3,8 @@
 import assert from 'node:assert/strict';
 import { appendEvent } from '../../../tools/wsf-control/append.mjs';
 import { targetTitle } from '../../../tools/wsf-control/fastpath.mjs';
-import { A, C, E, F, GENESIS, SOURCE_ONLY, boot2, w2 } from '../../../tools/wsf-control/tests/helpers.mjs';
-import { dispatchDecision, dispatchRun } from '../fastpath-dispatch.mjs';
+import { A, C, D, E, F, GENESIS, SOURCE_ONLY, boot2, w2 } from '../../../tools/wsf-control/tests/helpers.mjs';
+import { dispatchDecision, dispatchRun, retryProblem } from '../fastpath-dispatch.mjs';
 import { WRITER_BOT } from '../resolve-ledger-target.mjs';
 
 let passed = 0;
@@ -59,6 +59,91 @@ await test('every other case is a named skip, and nothing is dispatched', async 
     const d = await dispatchDecision({ ...base(), ...over });
     assert.equal(d.dispatch, undefined, String(re)); assert.match(d.skip, re);
   }
+});
+
+// ---- STAGING-FASTPATH-FAILED-TARGET-RETRY-FIX (#365 5954205876) -------------------------------------------------------
+
+const FAILED = 37012494776;
+/** The recovery case: ALPHA's target E (pin C) failed in run FAILED; FIX integrated at D (the repair); the owner authorized. */
+function retryLedger({ authorize = true, failedRun = FAILED } = {}) {
+  let r = { eventsText: '', state: null };
+  const integrateIt = (id, merge, pr) => {
+    r = [w2('queue', { packet: id, owner: 'W3', completion: SOURCE_ONLY }), w2('release', { packet: id, inbox: 396 }), w2('ack', { packet: id, worker: 'W3' }),
+      w2('deliver', { packet: id, pr, subjectSha: A }), w2('review', { packet: id, reviewers: ['W7'] }), w2('review-pass', { packet: id, reviewer: 'W7' }),
+      w2('accept', { packet: id, subjectSha: A })].reduce(add, r);
+    r = add(r, w2('integrate', { packet: id, mergeSha: merge, acceptance: JSON.parse(r.eventsText.trimEnd().split('\n').at(-1)).source.id }));
+  };
+  r = add(r, boot2());
+  integrateIt('ALPHA', E, 12);
+  r = add(r, w2('set-target', { packet: 'ALPHA', appSha: E, pinSha: C }, { rule: 'R-FASTPATH', cls: 'derived', source: { kind: 'pull_request', id: 12, repo: 'example-org/example-repo' } }));
+  r = add(r, w2('set-fastpath', { enabled: true }));
+  integrateIt('FIX', D, 555);
+  if (authorize) r = add(r, w2('authorize-retry', { packet: 'ALPHA', appSha: E, failedRun, repairPacket: 'FIX', repairSha: D }));
+  return r.state;
+}
+const retryApi = (over = {}) => ({ ...api, async descends(base, head) { if (base === D && head === 'main') return 'onMain' in over ? over.onMain : true; return api.descends(base, head); }, ...over.api });
+const failedRun = (id = FAILED, conclusion = 'failure') => ({ id, status: 'completed', conclusion, title: targetTitle(E) });
+const retryBase = () => ({ ...base(), state: retryLedger(), runs: [failedRun()], api: retryApi() });
+
+await test('RETRY: the exact recovery case dispatches once: the authorized failed run is the newest attempt, the repair is integrated and on main', async () => {
+  assert.deepEqual(await dispatchDecision(retryBase()), { dispatch: { appSha: E, packet: 'ALPHA', retryOf: FAILED } });
+  const other = await dispatchDecision({ ...retryBase(), runs: [{ id: FAILED + 5, status: 'completed', conclusion: 'success', title: targetTitle(F) }, failedRun()] });
+  assert.deepEqual(other, { dispatch: { appSha: E, packet: 'ALPHA', retryOf: FAILED } }, 'another target\'s newer run is not an attempt at this one');
+  const unsorted = await dispatchDecision({ ...retryBase(), runs: [failedRun(FAILED - 9), failedRun()] });
+  assert.equal(unsorted.dispatch?.retryOf, FAILED, 'newest is by run id, whatever the listing order');
+});
+
+await test('RETRY: without a recorded authorization a failed target stays BLOCKED (the default)', async () => {
+  const d = await dispatchDecision({ ...retryBase(), state: retryLedger({ authorize: false }) });
+  assert.match(d.skip, /already ended failure \(run 37012494776\); it is never re-sent automatically \(BLOCKED until a new target or a recorded decision\): no authorize-retry is recorded/);
+});
+
+await test('RETRY is spent by its own dispatch and is never repeated: a queued, running, failed or successful newer attempt refuses', async () => {
+  for (const [newer, re] of [
+    [{ id: FAILED + 1, status: 'queued', title: targetTitle(E) }, /already queued \(run 37012494777\)/],
+    [{ id: FAILED + 1, status: 'in_progress', title: targetTitle(E) }, /already in_progress/],
+    [{ id: FAILED + 1, status: 'completed', conclusion: 'failure', title: targetTitle(E) }, /names run 37012494776, but the newest attempt at the target is run 37012494777: spent/],
+    [{ id: FAILED + 1, status: 'completed', conclusion: 'success', title: targetTitle(E) }, /newest attempt at the target is run 37012494777/],
+    [{ id: FAILED + 1, status: 'completed', conclusion: 'cancelled', title: targetTitle(E) }, /newest attempt at the target is run 37012494777/],
+  ]) {
+    const d = await dispatchDecision({ ...retryBase(), runs: [newer, failedRun()] });
+    assert.equal(d.dispatch, undefined, String(re)); assert.match(d.skip, re);
+  }
+});
+
+await test('RETRY refuses drift, a missing or non-failed run, an un-integrated or off-main repair, and still requires full verification', async () => {
+  const st = retryLedger();
+  const cases = [
+    [{ runs: [failedRun(FAILED, 'cancelled')] }, /names run 37012494776, which ended cancelled, not failure/],
+    [{ runs: [failedRun(FAILED, 'timed_out')] }, /ended timed_out, not failure/],
+    [{ runs: [failedRun(FAILED - 1)] }, /names run 37012494776, but the newest attempt at the target is run 37012494775/],
+    [{ runs: [] }, /an authorize-retry names run 37012494776 for the target eeeeeeee, but no attempt at that target is among the recent staging runs; nothing is re-sent blind/],
+    [{ runs: [{ ...failedRun(), title: targetTitle(F) }] }, /no attempt at that target is among the recent staging runs/],
+    [{ state: retryLedger({ failedRun: FAILED - 1 }) }, /names run 37012494775, but the newest attempt at the target is run 37012494776/],
+    [{ state: { ...st, stagingRetry: { ...st.stagingRetry, appSha: F } } }, /the recorded authorize-retry is for ffffffff \(ALPHA\) against the pin cccccccc, not this target/],
+    [{ state: { ...st, stagingRetry: { ...st.stagingRetry, packet: 'FIX' } } }, /is for eeeeeeee \(FIX\)/],
+    [{ state: { ...st, stagingRetry: { ...st.stagingRetry, pinSha: F } } }, /against the pin ffffffff, not this target/],
+    [{ state: { ...st, packets: { ...st.packets, FIX: { ...st.packets.FIX, phase: 'ACCEPTED' } } } }, /the repair FIX is not INTEGRATED at dddddddd/],
+    [{ state: { ...st, packets: { ...st.packets, FIX: { ...st.packets.FIX, kind: 'reference' } } } }, /the repair FIX is not INTEGRATED at dddddddd/],
+    [{ state: { ...st, packets: { ...st.packets, FIX: { ...st.packets.FIX, artifact: { ...st.packets.FIX.artifact, mergeSha: F } } } } }, /the repair FIX is not INTEGRATED at dddddddd/],
+    [{ api: retryApi({ onMain: false }) }, /the repair merge dddddddd is not on main/],
+    [{ api: retryApi({ onMain: null }) }, /the repair merge dddddddd is not readably on main/],
+    [{ api: { ...retryApi(), async descends(b, h) { if (h === 'main') throw new Error('HTTP 502'); return api.descends(b, h); } } }, /not readably on main/],
+    [{ state: { ...st, fastpath: { enabled: false } } }, /not enabled in the ledger/],
+    [{ served: { ok: true, status: 'match' } }, /already names the target/],
+    [{ api: retryApi({ api: { async changedPaths() { return [...UI, 'firestore.rules']; } } }) }, /does not verify: .*protected paths changed: firestore\.rules/],
+    [{ ledgerAuthor: 'someone' }, /does not verify/],
+  ];
+  for (const [over, re] of cases) {
+    const d = await dispatchDecision({ ...retryBase(), ...over });
+    assert.equal(d.dispatch, undefined, String(re)); assert.match(d.skip, re);
+  }
+});
+
+await test('retryProblem is null only for the exact authorized case', async () => {
+  const st = retryLedger();
+  assert.equal(await retryProblem({ state: st, t: st.stagingTarget, mine: [failedRun()], api: retryApi() }), null);
+  assert.match(await retryProblem({ state: { ...st, stagingRetry: undefined }, t: st.stagingTarget, mine: [failedRun()], api: retryApi() }), /no authorize-retry is recorded/);
 });
 
 await test('the one write: the existing staging workflow, from main, ledger mode, confirming the target; anything but 204 fails', async () => {

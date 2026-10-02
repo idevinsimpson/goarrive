@@ -15,7 +15,11 @@
  *   3. there is a staging target, and the hosted marker does not already name it;
  *   4. no deploy of this exact target exists among the recent staging runs: queued or running (no duplicate),
  *      succeeded (never re-sent), or failed (never re-sent after a failure; a new target or a recorded decision is
- *      required, memo §9.4). A run that cannot be read is a refusal, not a guess;
+ *      required, memo §9.4). A run that cannot be read is a refusal, not a guess. The recorded decision is the owner's
+ *      one-shot `authorize-retry` (STAGING-FASTPATH-FAILED-TARGET-RETRY-FIX): it is honoured only for the current
+ *      target and pin, only while the exact failed run it names is still the NEWEST attempt at that target and ended
+ *      `failure`, and only while its repair packet is INTEGRATED at the named merge and that merge is on main. Its own
+ *      dispatch makes a newer attempt, so it is spent by the first use;
  *   5. resolve-ledger-target.mjs's own checks hold now (the same function the gate runs).
  * A running deploy of an older target does not block: GitHub's concurrency group serializes the newest behind it and
  * replaces an older pending run (coalescing, Phase D row 13).
@@ -46,15 +50,45 @@ export async function dispatchDecision({ state, ledgerAuthor, approval, served, 
   if (!t) return { skip: 'the ledger holds no staging target' };
   if (served?.ok === true) return { skip: `the hosted marker already names the target ${s8(t.appSha)} (FRESH)` };
   if (!Array.isArray(runs)) return { skip: 'the recent staging runs could not be read; nothing is dispatched blind' };
-  const mine = runs.filter((r) => r.title === targetTitle(t.appSha));
+  // Newest first by run id (ids only grow), whatever order the listing came in.
+  const mine = runs.filter((r) => r.title === targetTitle(t.appSha)).sort((x, y) => y.id - x.id);
   const active = mine.find((r) => r.status !== 'completed');
   if (active) return { skip: `a deploy of the target ${s8(t.appSha)} is already ${active.status} (run ${active.id})` };
   const failed = mine.find((r) => r.conclusion !== 'success');
-  if (failed) return { skip: `a deploy of the target ${s8(t.appSha)} already ended ${failed.conclusion} (run ${failed.id}); it is never re-sent automatically (BLOCKED until a new target or a recorded decision)` };
-  if (mine.length) return { skip: `the target ${s8(t.appSha)} was already deployed (run ${mine[0].id}) though the marker does not name it; not re-sent` };
+  let retryOf = null;
+  if (failed) {
+    const why = await retryProblem({ state, t, mine, api });
+    if (why) return { skip: `a deploy of the target ${s8(t.appSha)} already ended ${failed.conclusion} (run ${failed.id}); it is never re-sent automatically (BLOCKED until a new target or a recorded decision): ${why}` };
+    retryOf = state.stagingRetry.failedRun;
+  } else if (mine.length) return { skip: `the target ${s8(t.appSha)} was already deployed (run ${mine[0].id}) though the marker does not name it; not re-sent` };
+  else if (state.stagingRetry?.appSha === t.appSha) {
+    // An authorization for this target means an attempt failed; with none of its attempts in view, nothing is re-sent blind.
+    return { skip: `an authorize-retry names run ${state.stagingRetry.failedRun} for the target ${s8(t.appSha)}, but no attempt at that target is among the recent staging runs; nothing is re-sent blind` };
+  }
   const v = await resolveLedgerTarget({ approval, state, ledgerAuthor, requested: t.appSha, mode: 'deploy', api });
   if (!v.ok) return { skip: `the target does not verify: ${v.reason}` };
-  return { dispatch: { appSha: v.appSha, packet: v.packet } };
+  return { dispatch: { appSha: v.appSha, packet: v.packet, ...(retryOf === null ? {} : { retryOf }) } };
+}
+
+/**
+ * Why the owner's recorded one-shot retry does not apply to this failed target now, or null when it does. `mine` is
+ * every recent attempt at the target, newest first, none of them still running.
+ */
+export async function retryProblem({ state, t, mine, api }) {
+  const r = state?.stagingRetry;
+  if (!r) return 'no authorize-retry is recorded';
+  if (r.packet !== t.packet || r.appSha !== t.appSha || r.pinSha !== t.pinSha) {
+    return `the recorded authorize-retry is for ${s8(r.appSha)} (${r.packet}) against the pin ${s8(r.pinSha)}, not this target`;
+  }
+  const newest = mine[0];
+  if (newest.id !== r.failedRun) return `the authorize-retry names run ${r.failedRun}, but the newest attempt at the target is run ${newest.id}: spent, stale or never this target's`;
+  if (newest.conclusion !== 'failure') return `the authorize-retry names run ${r.failedRun}, which ended ${newest.conclusion}, not failure`;
+  const rp = state.packets?.[r.repairPacket];
+  if (!rp || rp.kind !== 'work' || rp.phase !== 'INTEGRATED' || rp.artifact?.mergeSha !== r.repairSha) return `the repair ${r.repairPacket} is not INTEGRATED at ${s8(r.repairSha)}`;
+  let onMain = null;
+  try { onMain = await api.descends(r.repairSha, 'main'); } catch { onMain = null; }
+  if (onMain !== true) return `the repair merge ${s8(r.repairSha)} is not ${onMain === null ? 'readably ' : ''}on main`;
+  return null;
 }
 
 /** The one write this job makes: the existing staging workflow, from main, in ledger mode, confirming the target. */
@@ -86,7 +120,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
     const d = await dispatchDecision({ state, ledgerAuthor: process.env.WSF_LEDGER_AUTHOR, approval, served, runs, api: gh });
     if (d.skip) skip(d.skip);
     await dispatchRun({ token, repo, appSha: d.dispatch.appSha });
-    console.log(`FASTPATH_DISPATCH=dispatched target=${d.dispatch.appSha} packet=${d.dispatch.packet} ledgerHead=${state.ledgerHead}`);
+    console.log(`FASTPATH_DISPATCH=dispatched target=${d.dispatch.appSha} packet=${d.dispatch.packet}${d.dispatch.retryOf ? ` retryOf=${d.dispatch.retryOf}` : ''} ledgerHead=${state.ledgerHead}`);
   };
   run().catch((e) => { console.error(`::error::${e?.message ?? 'fast-path dispatch failed'}`); console.log('FASTPATH_DISPATCH=error'); process.exit(1); });
 }
