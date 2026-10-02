@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "141b8b8085782e7edafc7a31138111f3f2a6aa3c01d81a8e39d0085507fff5a2",
-  "eventCount": 195,
+  "ledgerHead": "39cbfbcf4879b7ff2b77437e39b83803973ddd8da6b4ca42c8552cd56cc0671c",
+  "eventCount": 197,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -61,9 +61,7 @@
     }
   },
   "queue": {
-    "W3": [
-      "STAGING-PROOF-RECONCILE-ROUTING-FIX"
-    ],
+    "W3": [],
     "W4": [],
     "W5": [],
     "W7": [],
@@ -760,10 +758,10 @@
       },
       "label": "Derive the exact successful staging run proof and pointer sequence when the workflow-run wake is missed",
       "origin": "ledger",
-      "phase": "QUEUED",
+      "phase": "RELEASED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
-      "inbox": null,
+      "inbox": 396,
       "pr": null,
       "reviewers": [],
       "artifact": {
@@ -774,7 +772,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": null,
+      "releasedQueueIndex": 0,
       "reviewedBy": [],
       "subjectPaths": [
         "tools/wsf-control/shadow-run.mjs",
@@ -791,11 +789,14 @@
           "kind": "comment",
           "id": 5956001618
         },
-        "released": null,
+        "released": {
+          "kind": "comment",
+          "id": 5956038540
+        },
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5956001618
+          "id": 5956038540
         }
       },
       "review": {
@@ -1255,6 +1256,14 @@
         "id": 5954775347
       },
       "superseded": true
+    },
+    "0664144166e39cbbb801f2227435fcdf5a67a90421847c8061544ef79aeaaebe": {
+      "packet": "STAGING-PROOF-RECONCILE-ROUTING-FIX",
+      "worker": "W3",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
