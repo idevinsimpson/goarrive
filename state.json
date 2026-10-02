@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "14764422fdf992d5479595b76c3b05cd8cb08cc7290295e89df9112d96c7fc75",
-  "eventCount": 109,
+  "ledgerHead": "12226416128bc92e0afa5930c3781f18501ca27f373c7736c192333a31f83058",
+  "eventCount": 111,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -64,9 +64,7 @@
     "W4": [],
     "W5": [],
     "W7": [],
-    "W9": [
-      "KIOSK-PAIRING-CLARITY-PROOF-1"
-    ]
+    "W9": []
   },
   "packets": {
     "AUTONOMY-ROUTER-1C": {
@@ -347,10 +345,10 @@
       },
       "label": "Clarify venue-station pairing from the Champion's own phone and prove the existing flow end-to-end",
       "origin": "ledger",
-      "phase": "QUEUED",
+      "phase": "RELEASED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
-      "inbox": null,
+      "inbox": 497,
       "pr": null,
       "reviewers": [],
       "artifact": {
@@ -361,7 +359,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": null,
+      "releasedQueueIndex": 0,
       "reviewedBy": [],
       "subjectPaths": [
         "apps/westayfit/app/station/[goalId].tsx",
@@ -375,11 +373,14 @@
           "kind": "comment",
           "id": 5944922457
         },
-        "released": null,
+        "released": {
+          "kind": "comment",
+          "id": 5945136749
+        },
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5944922457
+          "id": 5945136749
         }
       },
       "review": {
@@ -855,6 +856,14 @@
         "id": 5945047502
       },
       "superseded": true
+    },
+    "031e79b98518de6e037ee12f4f2f85d3dd38d556b17cca700a03756d21d1ea61": {
+      "packet": "KIOSK-PAIRING-CLARITY-PROOF-1",
+      "worker": "W9",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
