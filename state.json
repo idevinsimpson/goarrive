@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "3874b3cac9d95f1012d4099c12defb9d6d912388272cdbffd2c3f1c15b182c1f",
-  "eventCount": 235,
+  "ledgerHead": "9a47ea9c50e78914e83cd962b2c0f8afe96f61d51bd0e373cd096be94f4921ce",
+  "eventCount": 237,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -346,7 +346,7 @@
       },
       "label": "Diagnose and repair staging verification and password-reset delivery without weakening mail security",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "CHANGES_REQUESTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -364,9 +364,7 @@
       "proof": null,
       "served": null,
       "releasedQueueIndex": null,
-      "reviewedBy": [
-        "W4"
-      ],
+      "reviewedBy": [],
       "subjectPaths": [
         "functions-westayfit/src/index.ts",
         "functions-westayfit/tests/callable/wsf-send-verification-email.test.ts",
@@ -389,7 +387,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5959878166
+          "id": 5960651440
         }
       },
       "review": {
@@ -1429,6 +1427,15 @@
         5959679953,
         5960538807
       ],
+      "ack": null,
+      "superseded": true
+    },
+    "7e4ed4f056580332a8f998127008b192b9f691f7a192f6f9b137c2b24349781c": {
+      "packet": "EMAIL-STAGING-REPAIR",
+      "worker": "W3",
+      "reason": "handback",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
