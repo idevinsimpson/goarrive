@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "45b9c2ecfa54a69c050ac88871b29672fb9589020b7bd25eb6af7e880bd046ad",
-  "eventCount": 164,
+  "ledgerHead": "20a6b0bb53385ccb78317b9693e700a8bb42cca09b2c2b5f93dfcd09df0c7d66",
+  "eventCount": 165,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -61,7 +61,9 @@
     }
   },
   "queue": {
-    "W3": [],
+    "W3": [
+      "STAGING-FASTPATH-FAILED-TARGET-RETRY-FIX"
+    ],
     "W4": [],
     "W5": [],
     "W7": [],
@@ -468,6 +470,68 @@
         "after": "director"
       },
       "deliveries": 1,
+      "pendingFinding": null
+    },
+    "STAGING-FASTPATH-FAILED-TARGET-RETRY-FIX": {
+      "owner": "W3",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Add a fail-closed one-shot recorded retry authorization for an exact repaired staging target and failed run",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        ".github/wsf-staging/fastpath-dispatch.mjs",
+        ".github/wsf-staging/tests/fastpath-dispatch.test.mjs",
+        "docs/westayfit/ops/CONTROL_STATE.md",
+        "tools/wsf-control/schema.mjs",
+        "tools/wsf-control/transitions.mjs",
+        "tools/wsf-control/render-current.mjs",
+        "tools/wsf-control/tests/v2.test.mjs",
+        "tools/wsf-control/tests/shadow.test.mjs"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 5954205876
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 5954205876
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
       "pendingFinding": null
     },
     "STAGING-FASTPATH-INVENTORY-BASELINE-FIX": {
