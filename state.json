@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "8b684862e6df37a5d5de43e2c84118bd1996a78d522b79b05cf94924cf523393",
-  "eventCount": 105,
+  "ledgerHead": "6d9650124f5aca109af0846e5b3cc893512f60120ac2d25241d7ad694307c700",
+  "eventCount": 106,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -279,7 +279,7 @@
       },
       "label": "Allow exact Expo Router filenames in control packet path reservations without widening other path syntax",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "ACCEPTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -314,10 +314,13 @@
           "kind": "comment",
           "id": 5944968693
         },
-        "accepted": null,
+        "accepted": {
+          "kind": "comment",
+          "id": 5945073242
+        },
         "lastTransition": {
           "kind": "comment",
-          "id": 5945069592
+          "id": 5945073242
         }
       },
       "review": {
