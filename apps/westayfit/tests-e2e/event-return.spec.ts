@@ -1,8 +1,36 @@
 import { randomBytes } from 'node:crypto';
+import { mkdirSync as eaeMkdir } from 'node:fs';
+import eaePath from 'node:path';
 
 import { expect, test, type Page } from '@playwright/test';
 
-import { clearVerifyGate } from './helpers/mobile';
+/**
+ * PAST THE VERIFY GATE, WITHOUT RACING IT (EXPO-ACCOUNT-ENTRY-1).
+ *
+ * verify-email refreshes the user on its own and moves on as soon as the
+ * address is verified. The shared `clearVerifyGate` clicks "I have verified"
+ * as soon as it is visible, which races that auto-advance: the click either
+ * waits on a button that has gone, or lands on whatever the next screen has at
+ * that spot — profile-setup's "Sign out" — and signs the new account out.
+ * Measured: about one run in three, on the base build as well. So this waits
+ * for the screen to move on by itself first, and asks only if it has not.
+ */
+async function passVerifyGate(page: Page, destination: string, timeout = 30_000): Promise<void> {
+  const target = page.getByTestId(destination);
+  try {
+    await target.waitFor({ state: 'visible', timeout: 10_000 });
+    return;
+  } catch {
+    // Still on verify-email: ask once, bounded, and only while it is there.
+  }
+  const check = page.getByTestId('wsf-verify-check');
+  if (await check.isVisible().catch(() => false)) {
+    await check.click({ timeout: 3_000 }).catch(() => {});
+  }
+  await expect(target).toBeVisible({ timeout });
+}
+
+
 
 /**
  * THE SCANNED EVENT SURVIVES THE AUTH ROUND TRIP — asserted of the PRODUCT.
@@ -255,7 +283,7 @@ test('a NEW account is returned to the scanned event after verifying, and the sc
   await expect(page).toHaveURL(/verify-email/, { timeout: 20_000 });
 
   await markEmailVerified(email);
-  await clearVerifyGate(page, 'wsf-profile', 20_000);
+  await passVerifyGate(page, 'wsf-profile', 20_000);
   await page.getByTestId('wsf-profile-displayName').fill('New At The Event');
   await page.getByTestId('wsf-profile-termsCheckbox').click();
   await page.getByTestId('wsf-profile-submit').click();
@@ -307,4 +335,206 @@ test('a stored return that cannot be vouched for sends nobody anywhere', async (
   const landed = new URL(page.url());
   const expected = new URL(String(process.env.WSF_PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:5010'));
   expect(landed.host).toBe(expected.host);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EXPO-ACCOUNT-ENTRY-1 (Director #365 `5961761581`).
+//
+// The event's own entry seam, from a fresh browser: the visitor is told the
+// two ways in before they are asked for an account, a wrong account is never
+// a dead end, and an interrupted round trip still comes back to the event.
+// Verified-email ownership is untouched: every account here is verified
+// through the Auth emulator's admin API, exactly as the cases above do.
+//
+// CAPTURES are gated on WSF_EAE_CAPTURE_DIR (full viewport, 390×640 and
+// 390×844, each after its state's assertions). WSF_EAE_STAGE=BEFORE runs the
+// same journeys against the unchanged base for ACTUAL BEFORE, skipping only
+// the assertions about controls and copy the base does not have yet.
+// ─────────────────────────────────────────────────────────────────────────────
+const EAE_DIR = process.env.WSF_EAE_CAPTURE_DIR ?? '';
+const EAE_BEFORE = process.env.WSF_EAE_STAGE === 'BEFORE';
+const EAE_VIEWPORTS = [
+  { label: '390x844', width: 390, height: 844 },
+  { label: '390x640', width: 390, height: 640 },
+];
+// The shared event-choice labels. Copied, as ui-event-activity-choice.spec.ts
+// copies them, so a change to the product's words is a visible change here.
+const EAE_PHONE_LABEL = 'Use my phone';
+const EAE_QUEUE_LABEL = 'Join the kiosk queue';
+
+async function eaeSnap(page: Page, state: string): Promise<void> {
+  if (!EAE_DIR) return;
+  eaeMkdir(EAE_DIR, { recursive: true });
+  const before = page.viewportSize();
+  for (const v of EAE_VIEWPORTS) {
+    await page.setViewportSize({ width: v.width, height: v.height });
+    await page.waitForTimeout(250);
+    await page.screenshot({ path: eaePath.join(EAE_DIR, `${state}-${v.label}.png`), fullPage: false });
+  }
+  if (before) await page.setViewportSize(before);
+}
+
+async function signInAs(page: Page, email: string): Promise<void> {
+  await expect(page.getByTestId('wsf-signin-email')).toBeVisible({ timeout: 20_000 });
+  await page.getByTestId('wsf-signin-email').fill(email);
+  await page.getByTestId('wsf-signin-password').fill(PASSWORD);
+  await page.getByTestId('wsf-signin-submit').click();
+}
+
+test('EAE signed out: the event names both ways in and says what an account takes, and no way on is a live control yet', async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+  await page.setViewportSize({ width: 390, height: 844 });
+  const stamp = Date.now().toString(36);
+  const champUid = await seedVerifiedUser(`wsf-eae-champ-${stamp}@example.com`, PASSWORD);
+  await seedProfile(champUid, 'Fixture Champion');
+  const { goalId } = await seedEvent('eae-ways', [{ uid: champUid, role: 'foundingChampion' }]);
+
+  await page.goto(`/event/${goalId}`);
+  await answerOwnPhone(page);
+  const signedOut = shown(page, 'wsf-event-signed-out');
+  await expect(signedOut).toBeVisible({ timeout: 20_000 });
+  // The member-only controls do not exist signed out: nothing here is a way on.
+  await expect(shown(page, 'wsf-event-add')).toHaveCount(0);
+  await expect(shown(page, 'wsf-event-queue-start')).toHaveCount(0);
+  if (!EAE_BEFORE) {
+    const ways = shown(page, 'wsf-event-ways');
+    await expect(ways).toBeVisible();
+    await expect(ways).toContainText(EAE_PHONE_LABEL);
+    await expect(ways).toContainText(EAE_QUEUE_LABEL);
+    await expect(ways).toContainText('once you’re signed in');
+    // Honest about the one wait an account involves, without promising it away.
+    await expect(shown(page, 'wsf-event-account-note')).toContainText('confirm your email');
+    await expect(shown(page, 'wsf-event-account-note')).toContainText('this page');
+  }
+  await expect(shown(page, 'wsf-event-signup')).toBeVisible();
+  await expect(shown(page, 'wsf-event-signin')).toBeVisible();
+  await eaeSnap(page, 'event-signed-out');
+});
+
+test('EAE wrong account: a non-member account is told which account it is and can switch, and the event comes back for the right one', async ({
+  page,
+}) => {
+  test.setTimeout(240_000);
+  await page.setViewportSize({ width: 390, height: 844 });
+  const stamp = Date.now().toString(36);
+  const rightEmail = `wsf-eae-right-${stamp}@example.com`;
+  const wrongEmail = `wsf-eae-wrong-${stamp}@example.com`;
+  const rightUid = await seedVerifiedUser(rightEmail, PASSWORD);
+  await seedProfile(rightUid, 'Right Account');
+  const wrongUid = await seedVerifiedUser(wrongEmail, PASSWORD);
+  await seedProfile(wrongUid, 'Wrong Account');
+  const champUid = await seedVerifiedUser(`wsf-eae-champ3-${stamp}@example.com`, PASSWORD);
+  await seedProfile(champUid, 'Fixture Champion');
+  const { goalId } = await seedEvent('eae-wrong', [
+    { uid: champUid, role: 'foundingChampion' },
+    { uid: rightUid, role: 'member' },
+  ]);
+
+  await page.goto(`/event/${goalId}`);
+  await answerOwnPhone(page);
+  await expect(shown(page, 'wsf-event-signed-out')).toBeVisible({ timeout: 20_000 });
+  await page.getByTestId('wsf-event-signin').click();
+  await signInAs(page, wrongEmail);
+
+  // The wrong account is returned to the event and told, honestly, it is not in.
+  await expect(page).toHaveURL(new RegExp(`/event/${goalId}(\\?|$|#)`), { timeout: 30_000 });
+  await expect(shown(page, 'wsf-event-not-member')).toBeVisible({ timeout: 30_000 });
+  await eaeSnap(page, 'event-not-member');
+  if (EAE_BEFORE) return;
+  // WHICH account this is, so a person can see they used the wrong one.
+  await expect(shown(page, 'wsf-event-not-member-account')).toContainText(wrongEmail);
+  // And a way out that is not "Back to home".
+  const sw = shown(page, 'wsf-event-switch-account');
+  await expect(sw).toBeVisible();
+  await sw.click();
+
+  // Signed out, on sign-in, with the event re-armed for the next account.
+  await expect(page.getByTestId('wsf-signin-email')).toBeVisible({ timeout: 20_000 });
+  await signInAs(page, rightEmail);
+  await expect(page).toHaveURL(new RegExp(`/event/${goalId}(\\?|$|#)`), { timeout: 30_000 });
+  await expect(shown(page, 'wsf-event-member')).toBeVisible({ timeout: 30_000 });
+  await expect(shown(page, 'wsf-event-not-member')).toHaveCount(0);
+  // Spent again: it delivered the right person and must not replay.
+  await expect
+    .poll(() => page.evaluate(() => window.sessionStorage.getItem('wsf.eventReturn')))
+    .toBeNull();
+
+  // A RETURNING member opening the event again goes straight in: no device
+  // question (remembered per browser), no sign-in, no onboarding.
+  await page.goto(`/event/${goalId}`);
+  await expect(shown(page, 'wsf-event-member')).toBeVisible({ timeout: 30_000 });
+  await expect(shown(page, 'wsf-device-choice')).toHaveCount(0);
+  await expect(page).toHaveURL(new RegExp(`/event/${goalId}(\\?|$|#)`));
+});
+
+test('EAE interrupted: a reload at verify-email and at profile-setup still returns the new account to the event', async ({
+  page,
+}) => {
+  test.setTimeout(240_000);
+  const stamp = Date.now().toString(36);
+  const champUid = await seedVerifiedUser(`wsf-eae-champ4-${stamp}@example.com`, PASSWORD);
+  await seedProfile(champUid, 'Fixture Champion');
+  const { goalId } = await seedEvent('eae-interrupt', [{ uid: champUid, role: 'foundingChampion' }]);
+  const email = `wsf-eae-interrupt-${stamp}@example.com`;
+
+  await page.goto(`/event/${goalId}`);
+  await answerOwnPhone(page);
+  await expect(shown(page, 'wsf-event-signed-out')).toBeVisible({ timeout: 20_000 });
+  await page.getByTestId('wsf-event-signup').click();
+  await expect(page.getByTestId('wsf-signup')).toBeVisible({ timeout: 20_000 });
+  await page.getByTestId('wsf-signup-displayName').fill('Interrupted Visitor');
+  await page.getByTestId('wsf-signup-email').fill(email);
+  await page.getByTestId('wsf-signup-password').fill(PASSWORD);
+  await page.getByTestId('wsf-signup-submit').click();
+  await expect(page.getByTestId('wsf-verify')).toBeVisible({ timeout: 20_000 });
+
+  // INTERRUPTION 1: the page is reloaded while waiting for the email.
+  await page.reload();
+  await expect(page.getByTestId('wsf-verify')).toBeVisible({ timeout: 30_000 });
+  expect(await page.evaluate(() => window.sessionStorage.getItem('wsf.eventReturn'))).not.toBeNull();
+
+  await markEmailVerified(email);
+  await passVerifyGate(page, 'wsf-profile', 20_000);
+  // INTERRUPTION 2: the profile form is reloaded half-filled.
+  await page.getByTestId('wsf-profile-displayName').fill('Interrupted Visitor');
+  await page.reload();
+  await expect(page.getByTestId('wsf-profile')).toBeVisible({ timeout: 30_000 });
+  await page.getByTestId('wsf-profile-displayName').fill('Interrupted Visitor');
+  await page.getByTestId('wsf-profile-termsCheckbox').click();
+  await page.getByTestId('wsf-profile-submit').click();
+
+  await expect(page).toHaveURL(new RegExp(`/event/${goalId}(\\?|$|#)`), { timeout: 30_000 });
+  await expect(shown(page, 'wsf-event-not-member')).toBeVisible({ timeout: 30_000 });
+});
+
+test('EAE not now: the cancel boundary forgets the event, so a later sign-in lands home', async ({ page }) => {
+  test.setTimeout(180_000);
+  const stamp = Date.now().toString(36);
+  const email = `wsf-eae-notnow-${stamp}@example.com`;
+  const uid = await seedVerifiedUser(email, PASSWORD);
+  await seedProfile(uid, 'Not Now');
+  const champUid = await seedVerifiedUser(`wsf-eae-champ5-${stamp}@example.com`, PASSWORD);
+  await seedProfile(champUid, 'Fixture Champion');
+  const { goalId } = await seedEvent('eae-notnow', [
+    { uid: champUid, role: 'foundingChampion' },
+    { uid, role: 'member' },
+  ]);
+
+  await page.goto(`/event/${goalId}`);
+  await answerOwnPhone(page);
+  await expect(shown(page, 'wsf-event-signed-out')).toBeVisible({ timeout: 20_000 });
+  // Starts the handoff, then thinks better of it and comes back.
+  await page.getByTestId('wsf-event-signin').click();
+  await expect(page.getByTestId('wsf-signin-email')).toBeVisible({ timeout: 20_000 });
+  await page.goBack();
+  await expect(shown(page, 'wsf-event-signed-out')).toBeVisible({ timeout: 20_000 });
+  await page.getByText('Not now — back to home', { exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.sessionStorage.getItem('wsf.eventReturn'))).toBeNull();
+
+  await page.goto('/signin');
+  await signInAs(page, email);
+  await expect(page.getByTestId('wsf-home-signout')).toBeVisible({ timeout: 30_000 });
+  await expect(page).not.toHaveURL(/\/event\//);
 });

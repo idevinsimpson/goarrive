@@ -1,5 +1,6 @@
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { FirebaseError } from 'firebase/app';
+import { signOut } from 'firebase/auth';
 import { httpsCallable } from 'firebase/functions';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -37,7 +38,7 @@ import {
 } from '../../src/eventActivity';
 import { clearEventReturn, setEventReturn } from '../../src/eventReturn';
 import { wsfAuthEnabled } from '../../src/featureFlags';
-import { getFirebaseFunctions } from '../../src/firebase';
+import { getFirebaseAuth, getFirebaseFunctions } from '../../src/firebase';
 import { CALL_NAME_MAX, callNameSuggestions, isUsableCallName } from '../../src/queueName';
 import { TURN_NAME_REFUSED } from '../../src/turnContract';
 import { ButtonLink } from '../../src/ui/ButtonLink';
@@ -312,6 +313,28 @@ export default function EventScreen() {
     setQueueError(null);
   }, []);
 
+  /**
+   * Wrong account at an event: keep the event, change the person. The return
+   * is written for this goal id before signing out (it was spent when this
+   * account arrived), so sign-in -> nextRouteAfterAuth brings the next account
+   * straight back here. Nothing else is stored and nothing is granted.
+   */
+  const [switchingAccount, setSwitchingAccount] = useState(false);
+  const onUseDifferentAccount = useCallback(async () => {
+    if (switchingAccount) return;
+    setSwitchingAccount(true);
+    setEventReturn(goalId);
+    try {
+      await signOut(getFirebaseAuth());
+    } catch {
+      // A failed sign-out leaves them signed in as before; the button says so
+      // by coming back.
+      setSwitchingAccount(false);
+      return;
+    }
+    router.replace('/signin' as never);
+  }, [goalId, switchingAccount]);
+
   const onJoinQueue = useCallback(async () => {
     if (joining) return;
     // THE ORDER IS PART OF THE PROMISE, not just part of the layout. The name
@@ -531,6 +554,24 @@ export default function EventScreen() {
             You’ll need an account, so what you add is yours and stays yours.
           </Text>
         </View>
+        {/*
+          EXPO-ACCOUNT-ENTRY-1. The two ways in, said BEFORE the account is
+          asked for, in the same words the buttons will use once they exist
+          (the shared constants, so this can never drift from them). Plain
+          text and not controls: neither is a way on until the visitor is
+          signed in, a member, and has chosen an activity.
+        */}
+        <View style={[kit.card, styles.ways]} testID="wsf-event-ways">
+          <Text style={kit.cardMeta}>Two ways to take part, once you’re signed in</Text>
+          <Text style={kit.body}>
+            <Text style={styles.wayName}>{EVENT_CHOICE_PHONE_LABEL}</Text>
+            {' — count it yourself, right now.'}
+          </Text>
+          <Text style={kit.body}>
+            <Text style={styles.wayName}>{EVENT_CHOICE_QUEUE_LABEL}</Text>
+            {' — take your turn at the screen in the room.'}
+          </Text>
+        </View>
         <View style={styles.actions}>
           {/*
             REMEMBER THE EVENT ON THE WAY INTO THE AUTH FLOW, and only on the
@@ -556,6 +597,12 @@ export default function EventScreen() {
             label="Already have an account? Sign in"
             onPress={() => setEventReturn(goalId)}
           />
+          {/* The one wait an account involves, said plainly rather than
+              discovered at verify-email. Nothing here promises it away. */}
+          <Text style={kit.caption} testID="wsf-event-account-note">
+            A new account needs you to confirm your email first. Open the link we send, then come
+            back to this page and you’ll pick up right here.
+          </Text>
           {/* The cancel boundary: somebody who says "not now" must not be
               carried back here by an auth flow they start later. */}
           <SecondaryLink
@@ -595,6 +642,30 @@ export default function EventScreen() {
           You’re signed in, but you’re not in the community running this. Ask a Champion to send you
           their invite, then come back to this page.
         </Text>
+        {/*
+          EXPO-ACCOUNT-ENTRY-1. WHICH account this is, because the usual
+          reason for landing here at an event is having signed in with the
+          wrong one. And a way to fix that which keeps the event: the return
+          was spent on arriving here, so it is re-armed for this same goal
+          BEFORE signing out, and the next sign-in comes straight back.
+        */}
+        {user?.email ? (
+          <Text style={kit.caption} testID="wsf-event-not-member-account">
+            {`Signed in as ${user.email}`}
+          </Text>
+        ) : null}
+        <Pressable
+          onPress={() => void onUseDifferentAccount()}
+          disabled={switchingAccount}
+          style={kit.secondaryButton}
+          testID="wsf-event-switch-account"
+          accessibilityRole="button"
+          accessibilityState={{ disabled: switchingAccount }}
+        >
+          <Text style={kit.secondaryButtonText}>
+            {switchingAccount ? 'Signing out…' : 'Use a different account'}
+          </Text>
+        </Pressable>
         <SecondaryLink href="/" label="Back to home" />
       </View>
     );
@@ -846,6 +917,8 @@ export default function EventScreen() {
 
 const styles = StyleSheet.create({
   actions: { gap: 10 },
+  wayName: { fontWeight: '800', color: wsfTheme.colors.text },
+  ways: { gap: 4 },
   // The second decision, as one block: its heading, its sentence, its two ways
   // on and the line that says neither of them is a queue yet.
   choice: { gap: 10, width: '100%' },

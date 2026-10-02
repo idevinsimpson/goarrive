@@ -54,7 +54,33 @@ import path from 'node:path';
 
 import { expect, test, type Page } from '@playwright/test';
 
-import { clearVerifyGate } from './helpers/mobile';
+/**
+ * PAST THE VERIFY GATE, WITHOUT RACING IT (EXPO-ACCOUNT-ENTRY-1).
+ *
+ * verify-email refreshes the user on its own and moves on as soon as the
+ * address is verified. The shared `clearVerifyGate` clicks "I have verified"
+ * as soon as it is visible, which races that auto-advance: the click either
+ * waits on a button that has gone, or lands on whatever the next screen has at
+ * that spot — profile-setup's "Sign out" — and signs the new account out.
+ * Measured: about one run in three, on the base build as well. So this waits
+ * for the screen to move on by itself first, and asks only if it has not.
+ */
+async function passVerifyGate(page: Page, destination: string, timeout = 30_000): Promise<void> {
+  const target = page.getByTestId(destination);
+  try {
+    await target.waitFor({ state: 'visible', timeout: 10_000 });
+    return;
+  } catch {
+    // Still on verify-email: ask once, bounded, and only while it is there.
+  }
+  const check = page.getByTestId('wsf-verify-check');
+  if (await check.isVisible().catch(() => false)) {
+    await check.click({ timeout: 3_000 }).catch(() => {});
+  }
+  await expect(target).toBeVisible({ timeout });
+}
+
+
 
 test.describe.configure({ timeout: 240_000 });
 
@@ -346,7 +372,7 @@ test('the scanned journey: event and activity survive a real signup, and nothing
   await expect(page.getByTestId('wsf-verify')).toBeVisible({ timeout: 30_000 });
   await sendSettled;
   await markEmailVerified(email);
-  await clearVerifyGate(page, 'wsf-profile', 30_000);
+  await passVerifyGate(page, 'wsf-profile', 30_000);
   await page.getByTestId('wsf-profile-termsCheckbox').click();
   await page.getByTestId('wsf-profile-submit').click();
 
@@ -422,7 +448,19 @@ test('the scanned journey: event and activity survive a real signup, and nothing
   // ---- 8. THE ONE TAP THAT CREATES A PLACE IN THE LINE -------------------
   await page.getByTestId('wsf-event-queue-name-initials').click();
   await expect(nameBox).toHaveValue('D.O.');
-  await page.getByTestId('wsf-event-queue-join').click();
+  // ONE TAP IS ONE PLACE (EXPO-ACCOUNT-ENTRY-1, #365 `5961761581`). The tap is
+  // doubled: a second real click sent the moment the first returns, forced
+  // past any disabled state. Exactly one join request may leave the page, and
+  // the row count below must still be one, with no error shown.
+  const joinRequests: string[] = [];
+  page.on('request', (r) => {
+    if (r.url().includes('wsfJoinTurnLine')) joinRequests.push(r.url());
+  });
+  const joinButton = page.getByTestId('wsf-event-queue-join');
+  await joinButton.click();
+  await joinButton.click({ force: true, timeout: 2_000 }).catch(() => {
+    // Already navigated away: the control is gone, which is also one tap.
+  });
   await page.waitForURL(new RegExp(`/queue/${goalId}`), { timeout: 30_000 });
   await expect(page.getByTestId('wsf-queue-screen')).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId('wsf-queue-called-as')).toHaveText('D.O.');
@@ -432,6 +470,8 @@ test('the scanned journey: event and activity survive a real signup, and nothing
   // their surname, not their address.
   const rows = await queueRows(goalId);
   expect(rows).toHaveLength(1);
+  expect(joinRequests, 'a double tap sends exactly one join').toHaveLength(1);
+  await expect(page.getByTestId('wsf-event-queue-error')).toHaveCount(0);
   expect(rows[0]!.calledName).toBe('D.O.');
   expect(rows[0]!.status).toBe('waiting');
   expect(rows[0]!.calledName).not.toContain('Okonjo');
@@ -493,3 +533,4 @@ test('“Use my phone” is the contribution flow that already exists, and is of
   // Taking the phone route puts nobody in a line.
   expect(await queueRows(goalId), '“Use my phone” must create no queue row').toEqual([]);
 });
+
