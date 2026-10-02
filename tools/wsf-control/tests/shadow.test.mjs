@@ -697,7 +697,11 @@ test('staging proof fails closed: failed, running, stale, wrong-target and wrong
     [{ runs: null, health: MARKER }, /^UNKNOWN .*could not be read/],
     [{ runs: [deploy(RUN60)], health: `{"build":"${F.slice(0, 7)}"}` }, /^NONE .*the hosted marker does not name the target; run 37025084843 is not recorded as served/],
     [{ runs: [deploy(RUN60)], health: null }, /the hosted marker could not be read/],
+    // W4 #394 5956405530: the realistic wrong marker after a success is staging still serving the previous build.
+    [{ runs: [deploy(RUN60)], health: `{"build":"${r.state.staging.servedSha.slice(0, 7)}"}` }, /the hosted marker does not name the target; run 37025084843 is not recorded as served/],
+    [{ runs: [deploy(RUN60)], health: `{"build":"${r.state.staging.rollbackSha.slice(0, 7)}"}` }, /the hosted marker does not name the target; run 37025084843 is not recorded as served/],
   ];
+  assert.deepEqual([r.state.staging.servedSha, r.state.staging.rollbackSha].map((x) => x === E), [false, false], 'the pointer and the rollback are not the target');
   for (const [facts, re] of cases) {
     const d = stagingProofLines(r.state, facts);
     assert.deepEqual(d.lines, [], String(re)); assert.match(d.report, re);
