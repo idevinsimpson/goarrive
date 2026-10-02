@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "f0dd89b1337426305ce61d59671e02470328210482e94c5448cc6cb78a0aac09",
-  "eventCount": 149,
+  "ledgerHead": "50f513ba89e5f689edd46f295d1df03d95c8639ee118055d4dd7398efbbd73c0",
+  "eventCount": 150,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -61,7 +61,9 @@
     }
   },
   "queue": {
-    "W3": [],
+    "W3": [
+      "STAGING-FASTPATH-INVENTORY-BASELINE-FIX"
+    ],
     "W4": [],
     "W5": [],
     "W7": [],
@@ -468,6 +470,62 @@
         "after": "director"
       },
       "deliveries": 1,
+      "pendingFinding": null
+    },
+    "STAGING-FASTPATH-INVENTORY-BASELINE-FIX": {
+      "owner": "W3",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Correct fast-path inventory preflight to use the reviewed complete measured baseline without double-counting retained functions",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        ".github/wsf-staging/read-inventory.mjs",
+        ".github/wsf-staging/tests/read-inventory.test.mjs"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 5953615810
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 5953615810
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
       "pendingFinding": null
     },
     "STAGING-FRESHNESS-DISPATCH": {
