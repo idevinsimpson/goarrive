@@ -337,6 +337,7 @@ const EXPO_DEFECTS = [
   ['phone-and-stations-converge', 'doubleCount', ['stations', 'phone', 'once']],
   ['station-lost-answer', 'turnLostOnError', ['kept']],
   ['station-lost-answer', 'retryDoubleCounts', ['same', 'once']],
+  ['station-lost-answer', 'retryLocalOnly', ['same']],
   ['station-lost-answer', 'offlinePhoneClaims', ['phone']],
   ['line-place-ends', 'switchKeepsPlace', ['switched', 'noShow', 'letGo']],
   ['line-place-ends', 'noShowNotEnded', ['noShow', 'letGo']],

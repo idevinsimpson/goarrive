@@ -587,7 +587,9 @@ function expoPage(be, server, bugs, ctx, context) {
             try {
               if (active) {
                 const count = Number(st.stationCount);
-                const rec = await invoke('wsfCompleteTurn', () => server.complete(stn.id, count));
+                // Defect: a retry after a lost answer is "confirmed" from memory and never re-sent.
+                const rec = bugs.retryLocalOnly && st.heldTurn ? { amount: count }
+                  : await invoke('wsfCompleteTurn', () => server.complete(stn.id, count));
                 st.localResult = { code: view.serving.code, amount: rec.amount, until: S.now + RESULT_MS };
                 st.heldTurn = null;
                 st.stationCount = '';
