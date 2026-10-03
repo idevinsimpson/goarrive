@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=dd26b927b9b5a52ad7dfad64c3f501c9cd3179b31c8718e637244030cfedd8eb events=330 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=0d07770fc2785ba88234431ae835afd7866d1c2a2de6662101fb063b6e69fc70 events=334 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `dd26b927b9b5a52ad7dfad64c3f501c9cd3179b31c8718e637244030cfedd8eb` (330 events)
+- Ledger head: `0d07770fc2785ba88234431ae835afd7866d1c2a2de6662101fb063b6e69fc70` (334 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -29,11 +29,11 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 
 | Worker | Inbox | Active now | Reviewing | Waiting on review | Blocked | Next | Queue | WATCH |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| W3 | #396 | — | — | EMAIL-STAGING-REPAIR, WORKER-EXECUTION-PROFILES-1 | EXPO-ACCOUNT-ENTRY-1-STAGING-PIN | — | — | off |
+| W3 | #396 | EXPO-ACCOUNT-ENTRY-1-STAGING-PIN | — | EMAIL-STAGING-REPAIR, WORKER-EXECUTION-PROFILES-1 | — | — | — | on |
 | W4 | #394 | — | — | — | — | — | — | off |
-| W5 | #395 | — | EMAIL-STAGING-REPAIR | — | — | — | — | on |
+| W5 | #395 | — | — | — | — | — | — | off |
 | W7 | #434 | — | — | — | — | — | — | off |
-| W9 | #497 | — | — | — | — | — | — | off |
+| W9 | #497 | — | EMAIL-STAGING-REPAIR | — | — | — | — | on |
 
 ## Packets
 
@@ -43,9 +43,9 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | AUTONOMY-ROUTER-1C-INTEGRATE | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #545 | fd697e0f | fd697e0f | — | 8ba39e19 | — | W4 | comment:5929164484 | pull_request:545 | — | Step 6 correction: derive integrate from ACCEPTED plus merged PR with same-cycle or successor reconcile and idempotency proof | 1×ops-source then director | — |
 | AUTONOMY-STATE-1B | W3 | work | INTEGRATED (source-only) | bootstrap | INTEGRATED | #538 | 073b7946 | 073b7946 | — | d42a3307 | — | — | comment:5857966052 | comment:5857966052 | — | Serial step 5: authoritative control state, App writer, bootstrap and shadow reconcile | 1×ops-source then director | — |
 | CONTROL-EXPO-ROUTE-PATH-GRAMMAR | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #552 | 3cc44d30 | 3cc44d30 | — | 6687440d | — | W4 | comment:5944968693 | pull_request:552 | — | Allow exact Expo Router filenames in control packet path reservations without widening other path syntax | 1×ops-source then director | — |
-| EMAIL-STAGING-REPAIR | W3 | work | STAGED (hosted) | ledger | UNDER_REVIEW | #559 | 44ae4898 | 44ae4898 | — | — | — | W4, W5 | comment:5959200686 | comment:5961050452 | — | Diagnose and repair staging verification and password-reset delivery without weakening mail security | 1×ops-source+1×security then director | — |
+| EMAIL-STAGING-REPAIR | W3 | work | STAGED (hosted) | ledger | UNDER_REVIEW | #559 | 44ae4898 | 44ae4898 | — | — | — | W4, W9 | comment:5959200686 | comment:5963962902 | — | Diagnose and repair staging verification and password-reset delivery without weakening mail security | 1×ops-source+1×security then director | — |
 | EXPO-ACCOUNT-ENTRY-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #561 | e603a39c | e603a39c | — | 5705dc3b | — | W4 | comment:5961789672 | pull_request:561 | — | Expo account-entry seam: preserve event context and make the existing phone/kiosk choice fast and truthful without bypassing verified identity | 1×journey-qa then director | — |
-| EXPO-ACCOUNT-ENTRY-1-STAGING-PIN | W3 | work | INTEGRATED (source-only) | ledger | BLOCKED (from ACKED) | — | — | — | — | — | — | — | comment:5963494417 | comment:5963634400 | STAGING-PIN-FASTPATH-SERVED-BASELINE-1≥INTEGRATED | Pin exact integrated expo account-entry milestone through the existing reviewed full staging path | 1×ops-source then director | — |
+| EXPO-ACCOUNT-ENTRY-1-STAGING-PIN | W3 | work | INTEGRATED (source-only) | ledger | ACKED | — | — | — | — | — | — | — | comment:5963494417 | comment:5963971375 | — | Pin exact integrated expo account-entry milestone through the existing reviewed full staging path | 1×ops-source then director | — |
 | EXPO-ATTENDEE-JOURNEY-PROOF-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #563 | 12e70c5a | 12e70c5a | — | 0669c446 | — | W4 | comment:5963015704 | pull_request:563 | — | Prove the existing attendee phone and two-station journey and expose only real missing seams; test and evidence source, not live expo acceptance | 1×journey-qa then director | — |
 | EXPO-STATION-LOST-ANSWER-COPY-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #564 | 1d290f74 | 1d290f74 | — | 5be74f3f | — | W4 | comment:5963613447 | pull_request:564 | — | Replace station vendor error text with existing product-safe callable wording without changing retry truth | 1×journey-qa then director | — |
 | KIOSK-PAIRING-CLARITY-PROOF-1 | W9 | work | STAGED (hosted) | ledger | STAGED | #553 | 4537c26c | 4537c26c | — | ab77fbfc | hosted run 37025084843: PASS | W4 | comment:5945136749 | comment:5955903159 | — | Clarify venue-station pairing from the Champion's own phone and prove the existing flow end-to-end | 1×journey-qa then director | — |
@@ -111,4 +111,6 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | acde5e63767d | W3 | STAGING-PIN-FASTPATH-SERVED-BASELINE-1 | release | acked | 5963674729 | comment:5963685160 |
 | 88c6283835fa | W4 | EXPO-STATION-LOST-ANSWER-COPY-1 | review | acked | 5963737115 | comment:5963742004 |
 | a73fe0dad472 | W9 | STAGING-PIN-FASTPATH-SERVED-BASELINE-1 | review | acked | 5963815274 | comment:5963818954 |
+| e45c6df52e38 | W9 | EMAIL-STAGING-REPAIR | review | requested | — | — |
+| bb43e7091a92 | W3 | EXPO-ACCOUNT-ENTRY-1-STAGING-PIN | release | requested | — | — |
 

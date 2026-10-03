@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "dd26b927b9b5a52ad7dfad64c3f501c9cd3179b31c8718e637244030cfedd8eb",
-  "eventCount": 330,
+  "ledgerHead": "0d07770fc2785ba88234431ae835afd7866d1c2a2de6662101fb063b6e69fc70",
+  "eventCount": 334,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -353,7 +353,7 @@
       "pr": 559,
       "reviewers": [
         "W4",
-        "W5"
+        "W9"
       ],
       "artifact": {
         "subjectSha": "44ae489810cee6b01f618175987a28bf58f5811d",
@@ -389,7 +389,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5961050452
+          "id": 5963962902
         }
       },
       "review": {
@@ -492,8 +492,8 @@
       },
       "label": "Pin exact integrated expo account-entry milestone through the existing reviewed full staging path",
       "origin": "ledger",
-      "phase": "BLOCKED",
-      "phaseBeforeBlock": "ACKED",
+      "phase": "ACKED",
+      "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
       "pr": null,
@@ -511,12 +511,7 @@
       "subjectPaths": [
         ".github/wsf-staging/approved-candidate.json"
       ],
-      "blockedBy": [
-        {
-          "packet": "STAGING-PIN-FASTPATH-SERVED-BASELINE-1",
-          "until": "INTEGRATED"
-        }
-      ],
+      "blockedBy": [],
       "importRefs": [],
       "authority": {
         "queued": {
@@ -530,7 +525,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5963634400
+          "id": 5963971375
         }
       },
       "review": {
@@ -1879,7 +1874,8 @@
         5960913077,
         5961195025
       ],
-      "ack": null
+      "ack": null,
+      "superseded": true
     },
     "b5198e757e61f91e8989497d2f5138e643dbccd77001e12cd3708c43610567a2": {
       "packet": "EXPO-ACCOUNT-ENTRY-1",
@@ -2048,6 +2044,22 @@
         "id": 5963818954
       },
       "superseded": true
+    },
+    "e45c6df52e3897f282503f94f75a0f7498679b93e899ef67fbc38d187261c886": {
+      "packet": "EMAIL-STAGING-REPAIR",
+      "worker": "W9",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
+    },
+    "bb43e7091a924efc3f4df9480f224d7d163556f1eb41557e885954f2276e8a7d": {
+      "packet": "EXPO-ACCOUNT-ENTRY-1-STAGING-PIN",
+      "worker": "W3",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
