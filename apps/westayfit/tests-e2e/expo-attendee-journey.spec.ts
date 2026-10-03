@@ -620,15 +620,14 @@ test('a goal closed mid-turn refuses the station’s Record and records nothing'
 });
 
 /**
- * J4b — WHAT THE LINE DOES ON A GOAL THAT IS ALREADY CLOSED.
+ * J4b — A GOAL THAT IS ALREADY CLOSED ADMITS NOBODY TO THE LINE.
  *
- * An OBSERVATION, not a pass: no current requirement says whether the line
- * should refuse a closed goal at join, call or start (only recording is
- * required to refuse, which J4 proves). What each step does is written to the
- * test's annotations and to the QA report as found, so the gap — if it is one
- * — is a decision for the owner and not something this packet settles.
+ * EXPO-CLOSED-GOAL-QUEUE-GATE-1 (GAP-2). This was an observation: the line
+ * used to accept join, call, ready and start on a closed goal, and only
+ * Record refused. The line now refuses at join with the contribute path's own
+ * sentence, and nothing is created: no place, no entry, nothing on the hall.
  */
-test('observation: joining, calling and starting a turn on a goal that is already closed', async ({
+test('a goal that is already closed refuses a join in the product’s sentence, and nothing reaches the line', async ({
   browser,
 }) => {
   const fx = await seedExpoEvent({
@@ -640,6 +639,7 @@ test('observation: joining, calling and starting a turn on a goal that is alread
   const [who] = fx.attendees as [(typeof fx.attendees)[number]];
   const station = await openEnrolledStation(browser, fx, 1);
   try {
+    // FIXTURE: the goal is closed in the store, as a closure would leave it.
     await firestorePatch(`wsfGoals/${fx.goalId}`, {
       status: { stringValue: 'closed' },
       updatedAt: tsField(new Date()),
@@ -648,61 +648,25 @@ test('observation: joining, calling and starting a turn on a goal that is alread
       goalId: fx.goalId,
       calledName: 'Fixture Q',
     });
-    test
-      .info()
-      .annotations.push({
-        type: 'observed:join-on-closed-goal',
-        description: JSON.stringify(join),
-      });
-    console.log(`[J4b] join on a closed goal: ${JSON.stringify(join)}`);
-    if (join.ok) {
-      await expect(station.page.getByTestId('wsf-station-queue-count')).toHaveText(
-        '1 person waiting.',
-        {
-          timeout: 25_000,
-        },
-      );
-      await station.page.getByTestId('wsf-station-call-next').click();
-      const served = station.page.getByTestId('wsf-station-queue-serving');
-      const refused = station.page.getByTestId('wsf-station-queue-error');
-      await expect(served.or(refused)).toBeVisible({ timeout: 25_000 });
-      const called = (await served.count()) > 0 ? await served.innerText() : null;
-      const callObserved = called ? `called "${called}"` : `refused: ${await refused.innerText()}`;
-      test
-        .info()
-        .annotations.push({ type: 'observed:call-on-closed-goal', description: callObserved });
-      console.log(`[J4b] call next on a closed goal: ${callObserved}`);
-      const ready = await callAs(who.email, 'wsfTurnReady', { entryId: join.result.entryId });
-      test
-        .info()
-        .annotations.push({
-          type: 'observed:ready-on-closed-goal',
-          description: JSON.stringify(ready),
-        });
-      console.log(`[J4b] ready on a closed goal: ${JSON.stringify(ready)}`);
-      if (ready.ok && called) {
-        const action = station.page.getByTestId('wsf-station-turn-action');
-        await expect(action).toBeEnabled({ timeout: 25_000 });
-        await action.click();
-        const record = station.page.getByTestId('wsf-station-turn-record');
-        await expect(record.or(refused)).toBeVisible({ timeout: 25_000 });
-        const startObserved =
-          (await record.count()) > 0
-            ? 'started: the count box is up'
-            : `refused: ${await refused.innerText()}`;
-        test
-          .info()
-          .annotations.push({ type: 'observed:start-on-closed-goal', description: startObserved });
-        console.log(`[J4b] start on a closed goal: ${startObserved}`);
-      }
-    }
-    // Whatever the line did, nothing was recorded against a closed goal.
+    expect(join).toEqual({ ok: false, status: 'FAILED_PRECONDITION', message: 'This goal is closed.' });
+    expect(await turnEntriesOf(fx.goalId, who.uid)).toEqual([]);
+
+    // The hall has nobody to call, and calling says the goal is closed.
+    await station.page.getByTestId('wsf-station-call-next').click();
+    await expect(station.page.getByTestId('wsf-station-queue-error')).toHaveText(
+      'This goal is closed.',
+      { timeout: 25_000 },
+    );
+    await expect(station.page.getByTestId('wsf-station-queue-serving')).toHaveCount(0);
+
+    // Nothing was recorded against a closed goal.
     expect(await contributionsOf(fx.goalId, who.uid)).toEqual([]);
     expect(await shardTotal(fx.goalId)).toBe(0);
     station.assertNoCrash('the station');
 
-    // And what the attendee's own event page offers on a closed goal — a
-    // second account, so the place taken above does not colour the answer.
+    // OBSERVATION, unchanged: what the attendee's own event page offers on a
+    // closed goal. The page is outside this packet; what it does is recorded,
+    // not asserted. A second account, so nothing above colours the answer.
     const second = await seedAccount(
       `wsf-expo-att-closed-${fx.stamp}@example.com`,
       'Fixture Second Closed-Goal Attendee',
@@ -742,6 +706,94 @@ test('observation: joining, calling and starting a turn on a goal that is alread
     } finally {
       await phone.context.close();
     }
+  } finally {
+    await station.context.close();
+  }
+});
+
+/**
+ * J4c — A GOAL THAT CLOSES PART-WAY THROUGH A PLACE IN THE LINE.
+ *
+ * EXPO-CLOSED-GOAL-QUEUE-GATE-1. Closed while the attendee is WAITING, the
+ * hall's call is refused and they are not called; closed after they are
+ * CALLED, their "I'm ready" is refused and the turn does not advance; closed
+ * after they are READY, the station's start is refused and no attempt is
+ * minted. Each time the place is left exactly as it was — a refusal never
+ * ends it — and nothing is ever counted.
+ *
+ * FIXTURE: between steps the goal is reopened in the store, so one attendee
+ * can be walked through all three windows. Reopening is not a product path.
+ */
+test('a goal closed while waiting, after the call, or after ready refuses the next step and leaves the place as it was', async ({
+  browser,
+}) => {
+  const fx = await seedExpoEvent({
+    tag: 'j4c',
+    attendees: ['Fixture Mid-Line Attendee'],
+    target: 1000,
+    seededTotal: 300,
+  });
+  const [who] = fx.attendees as [(typeof fx.attendees)[number]];
+  const station = await openEnrolledStation(browser, fx, 1);
+  const setStatus = (status: 'active' | 'closed') =>
+    firestorePatch(`wsfGoals/${fx.goalId}`, {
+      status: { stringValue: status },
+      updatedAt: tsField(new Date()),
+    });
+  const refused = station.page.getByTestId('wsf-station-queue-error');
+  try {
+    const join = await callAs<{ entryId: string }>(who.email, 'wsfJoinTurnLine', {
+      goalId: fx.goalId,
+      calledName: 'Fixture M',
+    });
+    expect(join.ok).toBe(true);
+    if (!join.ok) return;
+    const entryId = join.result.entryId;
+    const entry = async () => {
+      const rows = await turnEntriesOf(fx.goalId, who.uid);
+      expect(rows.map((r) => r.id)).toEqual([entryId]);
+      return rows[0]!;
+    };
+    await expect(station.page.getByTestId('wsf-station-queue-count')).toHaveText(
+      '1 person waiting.',
+      { timeout: 25_000 },
+    );
+
+    // 1. WAITING, then closed: the hall's call is refused; nobody is called.
+    await setStatus('closed');
+    await station.page.getByTestId('wsf-station-call-next').click();
+    await expect(refused).toHaveText('This goal is closed.', { timeout: 25_000 });
+    await expect(station.page.getByTestId('wsf-station-queue-serving')).toHaveCount(0);
+    expect((await entry()).status).toBe('waiting');
+    expect((await entry()).assignedStationId).toBeNull();
+
+    // 2. CALLED, then closed: the attendee's ready is refused; the turn stays called.
+    await setStatus('active');
+    await callNext(station.page, 'Fixture M');
+    await setStatus('closed');
+    const ready = await callAs(who.email, 'wsfTurnReady', { entryId });
+    expect(ready).toEqual({ ok: false, status: 'FAILED_PRECONDITION', message: 'This goal is closed.' });
+    expect((await entry()).status).toBe('assigned');
+
+    // 3. READY, then closed: the station's start is refused; no attempt is minted.
+    await setStatus('active');
+    const readyNow = await callAs(who.email, 'wsfTurnReady', { entryId });
+    expect(readyNow.ok).toBe(true);
+    const action = station.page.getByTestId('wsf-station-turn-action');
+    await expect(action).toBeEnabled({ timeout: 25_000 });
+    // The earlier refusal is gone, so the one below is this step's own.
+    await expect(refused).toHaveCount(0);
+    await setStatus('closed');
+    await action.click();
+    await expect(refused).toHaveText('This goal is closed.', { timeout: 25_000 });
+    await expect(station.page.getByTestId('wsf-station-turn-record')).toHaveCount(0);
+    expect((await entry()).status).toBe('ready');
+    expect((await entry()).attemptId).toBeNull();
+
+    // Nothing was counted at any point.
+    expect(await contributionsOf(fx.goalId, who.uid)).toEqual([]);
+    expect(await shardTotal(fx.goalId)).toBe(300);
+    station.assertNoCrash('the station');
   } finally {
     await station.context.close();
   }

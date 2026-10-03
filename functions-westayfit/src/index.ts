@@ -7750,6 +7750,34 @@ const TURN_OTHER_ACTIVITY_MESSAGE =
 const TURN_LEASE_LAPSED_MESSAGE =
   'That turn timed out. Get back in line and the screen will call you again.';
 
+/**
+ * EXPO-CLOSED-GOAL-QUEUE-GATE-1 (GAP-2). The sentence the contribute path has
+ * always given a goal that is not `active`, and the line now gives it too.
+ */
+const TURN_GOAL_CLOSED_MESSAGE = 'This goal is closed.';
+
+/**
+ * Whether a goal is open for a turn, READ INSIDE THE CALLER'S TRANSACTION.
+ *
+ * A closed goal admits nobody: join, call, ready and start each refuse it
+ * before they create or advance anything. The read is transactional on
+ * purpose. resolveTurnEvent reads the goal before the transaction begins, and
+ * a status taken from there would let a goal that closes in between still
+ * take a place, assign one, close a lease or mint an attempt. Read here, the
+ * goal document is in the transaction's read set: a closure that commits
+ * first is seen, and one that commits during the transaction conflicts with
+ * it, so the two are serialized one way or the other and never interleave.
+ *
+ * A goal that has gone missing is not open either.
+ */
+async function turnGoalOpenIn(
+  tx: FirebaseFirestore.Transaction,
+  goalId: string
+): Promise<boolean> {
+  const snap = await tx.get(getFirestore().doc(`wsfGoals/${goalId}`));
+  return snap.exists && (snap.data() as GoalDoc).status === 'active';
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // THE EVENT, RESOLVED FROM A GOAL.
 //
@@ -8213,6 +8241,14 @@ export const wsfJoinTurnLine = onCall<JoinTurnLineRequest>(
       const membership = await readActiveMembership(tx, event.communityGroupId, uid);
       if (!membership) notFound();
 
+      // A CLOSED GOAL ADMITS NOBODY — said only to a member, after the
+      // authorization, so it tells a stranger nothing the not-found did not.
+      // Refused before any read that could lead to a write, so a refused join
+      // creates no place, no entry and no line, and recovers nothing either.
+      if (!(await turnGoalOpenIn(tx, goalId))) {
+        throw new HttpsError('failed-precondition', TURN_GOAL_CLOSED_MESSAGE);
+      }
+
       const memberSnap = await tx.get(memberRef);
       const heldEntryId = normalizeStringId(
         (memberSnap.data() as TurnMemberDoc | undefined)?.entryId
@@ -8482,7 +8518,7 @@ export const wsfTurnReady = onCall<TurnReadyRequest>(
     // person their place back. So the transaction returns a verdict and
     // commits its writes; the sentence is raised afterwards.
     const outcome = await db.runTransaction(
-      async (tx): Promise<TurnReadyResponse | 'lapsed'> => {
+      async (tx): Promise<TurnReadyResponse | 'lapsed' | 'closed'> => {
         const snap = await tx.get(entryRef);
         if (!snap.exists) notFound();
         const entry = snap.data() as TurnEntryDoc;
@@ -8497,6 +8533,9 @@ export const wsfTurnReady = onCall<TurnReadyRequest>(
           };
         }
         if (entry.status !== 'assigned') return 'lapsed';
+        // A CLOSED GOAL: the tap advances nothing. Not even the lapse recovery
+        // below runs — a refusal is not a reason to end somebody's place.
+        if (!(await turnGoalOpenIn(tx, entry.goalId))) return 'closed';
         if (isTurnLeaseLapsed(entry, now)) {
           recoverLapsedTurn(tx, entryRef, entry);
           return 'lapsed';
@@ -8517,6 +8556,9 @@ export const wsfTurnReady = onCall<TurnReadyRequest>(
     );
     if (outcome === 'lapsed') {
       throw new HttpsError('failed-precondition', TURN_LEASE_LAPSED_MESSAGE);
+    }
+    if (outcome === 'closed') {
+      throw new HttpsError('failed-precondition', TURN_GOAL_CLOSED_MESSAGE);
     }
     return outcome;
   }
@@ -8685,7 +8727,7 @@ export const wsfCallNext = onCall<CallNextRequest>(
     const lineRef = db.doc(`wsfTurnLines/${lineId}`);
 
     const outcome = await db.runTransaction(
-      async (tx): Promise<'called' | 'empty' | 'blocked'> => {
+      async (tx): Promise<'called' | 'empty' | 'blocked' | 'closed'> => {
         // ── every read first, as a Firestore transaction requires ──
         const stationSnap = await tx.get(stationRef);
         if (!stationSnap.exists) return 'empty';
@@ -8695,6 +8737,16 @@ export const wsfCallNext = onCall<CallNextRequest>(
         // must not be able to call anybody.
         if (station.status !== 'active') return 'empty';
         const label = stationVisibleLabel(station);
+
+        // WHICH OF THE EVENT'S ACTIVITIES ARE OPEN, read in this transaction.
+        // Every one closed: the call is refused and writes nothing at all.
+        // Some closed: a place on a closed activity is never called — and is
+        // not ended either; the next place on an open activity is.
+        const openGoalIds = new Set<string>();
+        for (const activity of event.activities) {
+          if (await turnGoalOpenIn(tx, activity.goalId)) openGoalIds.add(activity.goalId);
+        }
+        if (openGoalIds.size === 0) return 'closed';
 
         // Read for its own sake as well as for the counter: it puts the line
         // document in this transaction's read set, which is half of the
@@ -8724,10 +8776,12 @@ export const wsfCallNext = onCall<CallNextRequest>(
             .limit(TURN_WAITING_LIMIT)
         );
         const candidates = sortTurnEntries(
-          waitingSnap.docs.map((d) => ({
-            id: d.id,
-            position: (d.data() as TurnEntryDoc).position ?? 0,
-          }))
+          waitingSnap.docs
+            .filter((d) => openGoalIds.has((d.data() as TurnEntryDoc).goalId))
+            .map((d) => ({
+              id: d.id,
+              position: (d.data() as TurnEntryDoc).position ?? 0,
+            }))
         );
         const chosen = candidates[0] ?? null;
         const chosenRef = chosen ? db.doc(`wsfTurnEntries/${chosen.id}`) : null;
@@ -8769,7 +8823,12 @@ export const wsfCallNext = onCall<CallNextRequest>(
           recoverLapsedTurn(tx, previousRef, previous);
         }
 
-        if (!chosenRef || !chosenEntry || chosenEntry.status !== 'waiting') {
+        if (
+          !chosenRef ||
+          !chosenEntry ||
+          chosenEntry.status !== 'waiting' ||
+          !openGoalIds.has(chosenEntry.goalId)
+        ) {
           // Nobody to call — an empty line, or the entry this transaction
           // picked was taken by the other station and this is the retry that
           // saw an empty line afterwards. Clearing the pointer is correct
@@ -8804,6 +8863,10 @@ export const wsfCallNext = onCall<CallNextRequest>(
         return 'called';
       }
     );
+
+    if (outcome === 'closed') {
+      throw new HttpsError('failed-precondition', TURN_GOAL_CLOSED_MESSAGE);
+    }
 
     // Read back afterwards, so what the screen paints is what the line says,
     // not what this call believed it would say.
@@ -8898,6 +8961,16 @@ export const wsfStartTurn = onCall<StartTurnRequest>(
       if (entry.status === 'active' && normalizeStringId(entry.attemptId)) {
         // Already started. The same attempt, and not a second one.
         return { kind: 'started', goalId: entry.goalId };
+      }
+      // A CLOSED GOAL: no attempt is minted and nothing advances — the lapse
+      // recovery below included. A turn started before the closure keeps its
+      // attempt (the replay above writes nothing); its Record is what refuses.
+      if (!(await turnGoalOpenIn(tx, entry.goalId))) {
+        return {
+          kind: 'refused',
+          code: 'failed-precondition',
+          message: TURN_GOAL_CLOSED_MESSAGE,
+        };
       }
       if (entry.status !== 'ready') {
         if (isTurnLeaseLapsed(entry, now)) {
