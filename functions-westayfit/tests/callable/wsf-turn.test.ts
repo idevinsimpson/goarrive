@@ -1277,6 +1277,64 @@ describe('a closed goal admits nobody (GAP-2)', () => {
     expect(await contributionCount(goalId, m)).toBe(0);
   }, 30_000);
 
+  // A REFUSAL IS NOT A REASON TO END A PLACE. The one way the line ends a
+  // place on its own is the lapse recovery (noShow + the member doc deleted).
+  // A closed goal is refused BEFORE it, so a refused tap or start leaves even a
+  // lapsed place exactly as it was (W4 finding #394 5968858147).
+  test('closed after a lease has lapsed: ready is refused as closed, and the place is NOT recovered as a no-show', async () => {
+    const { groupId, goalId, station } = await scene();
+    const m = await member(groupId, 'mem');
+    const joined = (await callAs(wsfJoinTurnLine, m, { goalId, calledName: 'Sam' })) as { entryId: string };
+    await callNext(station);
+    await lapseLease(joined.entryId);
+    await closeGoal(goalId);
+    const lineId = `goal__${goalId}`;
+    const before = await lineSnapshot({ lineId, stationId: station.stationId, memberIds: [m] });
+
+    expectClosed(await attempt(callAs(wsfTurnReady, m, { entryId: joined.entryId }) as Promise<unknown>));
+
+    expect(await lineSnapshot({ lineId, stationId: station.stationId, memberIds: [m] })).toBe(before);
+    expect((await entryOf(joined.entryId))?.status).toBe('assigned');
+    expect((await getFirestore().doc(`wsfTurnMembers/${lineId}__${m}`).get()).exists).toBe(true);
+  }, 30_000);
+
+  test('closed after a lease has lapsed: start is refused as closed, and the place is NOT recovered as a no-show', async () => {
+    const { groupId, goalId, station } = await scene();
+    const m = await member(groupId, 'mem');
+    const joined = (await callAs(wsfJoinTurnLine, m, { goalId, calledName: 'Sam' })) as { entryId: string };
+    await callNext(station);
+    await lapseLease(joined.entryId);
+    await closeGoal(goalId);
+    const lineId = `goal__${goalId}`;
+    const before = await lineSnapshot({ lineId, stationId: station.stationId, memberIds: [m] });
+
+    expectClosed(
+      await attempt(anon(wsfStartTurn, { stationId: station.stationId, secret: station.secret }) as Promise<unknown>)
+    );
+
+    expect(await lineSnapshot({ lineId, stationId: station.stationId, memberIds: [m] })).toBe(before);
+    expect((await entryOf(joined.entryId))?.status).toBe('assigned');
+    expect((await entryOf(joined.entryId))?.attemptId).toBeNull();
+    expect((await getFirestore().doc(`wsfTurnMembers/${lineId}__${m}`).get()).exists).toBe(true);
+  }, 30_000);
+
+  test('closed while called and not yet ready: start says the goal is closed, not “ask them to tap ready”', async () => {
+    const { groupId, goalId, station } = await scene();
+    const m = await member(groupId, 'mem');
+    const joined = (await callAs(wsfJoinTurnLine, m, { goalId, calledName: 'Sam' })) as { entryId: string };
+    await callNext(station);
+    await closeGoal(goalId);
+    const lineId = `goal__${goalId}`;
+    const before = await lineSnapshot({ lineId, stationId: station.stationId, memberIds: [m] });
+
+    expectClosed(
+      await attempt(anon(wsfStartTurn, { stationId: station.stationId, secret: station.secret }) as Promise<unknown>)
+    );
+
+    expect(await lineSnapshot({ lineId, stationId: station.stationId, memberIds: [m] })).toBe(before);
+    expect((await entryOf(joined.entryId))?.status).toBe('assigned');
+  }, 30_000);
+
   test('a turn already started before the closure keeps its attempt; only Record refuses it, and nothing is counted', async () => {
     const { groupId, goalId, station } = await scene();
     const m = await member(groupId, 'mem');
@@ -1344,6 +1402,22 @@ describe('a closed goal admits nobody — the decision is inside each transactio
     const lineId = `goal__${goalId}`;
     const before = await lineSnapshot({ lineId, memberIds: [m] });
     closeJustBeforeTheTransaction(goalId);
+    expectClosed(await attempt(callAs(wsfJoinTurnLine, m, { goalId, calledName: 'Sam' }) as Promise<unknown>));
+    expect(await lineSnapshot({ lineId, memberIds: [m] })).toBe(before);
+  }, 30_000);
+
+  test('join: a goal that disappears after the preflight read is not open — refused, nothing created', async () => {
+    const { groupId, goalId } = await scene();
+    const m = await member(groupId, 'mem');
+    const lineId = `goal__${goalId}`;
+    const before = await lineSnapshot({ lineId, memberIds: [m] });
+    const fs = getFirestore();
+    const proto = Object.getPrototypeOf(fs) as { runTransaction: (...a: unknown[]) => unknown };
+    const original = proto.runTransaction;
+    jest.spyOn(proto, 'runTransaction').mockImplementationOnce(async function (this: unknown, ...args: unknown[]) {
+      await fs.doc(`wsfGoals/${goalId}`).delete();
+      return original.apply(this, args);
+    });
     expectClosed(await attempt(callAs(wsfJoinTurnLine, m, { goalId, calledName: 'Sam' }) as Promise<unknown>));
     expect(await lineSnapshot({ lineId, memberIds: [m] })).toBe(before);
   }, 30_000);
