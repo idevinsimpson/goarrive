@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "7db1c8ba6fc59bc2b5410ee4a4308a2397156aefe537c585c0920787685b145e",
-  "eventCount": 377,
+  "ledgerHead": "eafd0c030f76d180315acd742290d0bcb2458032821fb1f30af81150717151bb",
+  "eventCount": 379,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1237,7 +1237,7 @@
       },
       "label": "Port the owner-selected Together completion from the frozen Lovable reference to the confirmed member receipt with truthful totals, one-time motion and reduced-motion parity",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -1251,7 +1251,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         "apps/westayfit/app/contribute/[goalId].tsx",
@@ -1279,7 +1279,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5964984624
+          "id": 5965001839
         }
       },
       "review": {
@@ -2228,11 +2228,14 @@
       "packet": "TOGETHER-COMPLETION-1",
       "worker": "W9",
       "reason": "release",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         5964997619
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 5965001839
+      }
     }
   },
   "fastpath": {
