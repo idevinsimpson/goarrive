@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "1ebc7f00c213901115193ab4b0b4097f4470053ab9ca359d7c0a044d8a10f0c0",
-  "eventCount": 391,
+  "ledgerHead": "39f7e88a0a939e9c18ba934bc17a29ad041a1c657625fb64aac450cc0500548d",
+  "eventCount": 392,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2324,8 +2324,10 @@
       "packet": "TOGETHER-COMPLETION-1",
       "worker": "W4",
       "reason": "review",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        5965459389
+      ],
       "ack": null
     }
   },
