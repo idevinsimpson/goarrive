@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "814e52e3606d48bcd734d8ee80c175e5084cc54e5546c675fa96796bb3ce5c6f",
-  "eventCount": 435,
+  "ledgerHead": "a46a8018b9f61e975fc4c5c2fc5f908c1b0cf9f951f3a79138c03cfa402d15b9",
+  "eventCount": 437,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1386,7 +1386,7 @@
       "inbox": 497,
       "pr": 567,
       "reviewers": [
-        "W7"
+        "W4"
       ],
       "artifact": {
         "subjectSha": "e4e32ed63140b62493a185962e4f2497a8bffac4",
@@ -1424,7 +1424,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5965842924
+          "id": 5966699246
         }
       },
       "review": {
@@ -2465,7 +2465,8 @@
         5965852256,
         5965986986
       ],
-      "ack": null
+      "ack": null,
+      "superseded": true
     },
     "5237c5bb6ba2b1dde55ef18365ae3de894d90747ac07a4f316c7e9c851ecf12d": {
       "packet": "EMAIL-STAGING-REPAIR-STAGING-PIN",
@@ -2494,6 +2495,14 @@
         "id": 5966226264
       },
       "superseded": true
+    },
+    "bbb96cee8584718ca0c72cdebdf80b20ae995c64140ef83dd9b0c433bd862b59": {
+      "packet": "TOGETHER-COMPLETION-1",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
