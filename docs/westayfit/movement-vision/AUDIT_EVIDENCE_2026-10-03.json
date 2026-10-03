@@ -1,0 +1,502 @@
+{
+  "schemaVersion": 1,
+  "preparedAtUtc": "2026-10-03T16:38:12Z",
+  "status": "SOURCE_AND_FOCUSED_TESTS_VERIFIED; FULL_APP_BUILD_BROWSER_HOSTED_HUMAN_DEVICE_INTEGRATION_NOT_RUN",
+  "repository": "idevinsimpson/goarrive",
+  "successorBranch": "codex/wsf-rep-counter-proof-1",
+  "scope": "Isolated research successor to PR475. Resolve the containing Git commit for the exact candidate. No deployment or app integration.",
+  "acceptedSnapshot": {
+    "head": "eda5821893937e89b2635237d42924221e00c3a9",
+    "files": [
+      {
+        "path": "apps/westayfit/app/design-target/movement-vision.tsx",
+        "blobSha": "ec87d74864bea669e1f51fae631e9caf84e8b9f3",
+        "url": "https://github.com/idevinsimpson/goarrive/blob/eda5821893937e89b2635237d42924221e00c3a9/apps/westayfit/app/design-target/movement-vision.tsx"
+      },
+      {
+        "path": "apps/westayfit/package.json",
+        "blobSha": "f5473f7774efdcd99a66936cbfa38d3d37a67097",
+        "url": "https://github.com/idevinsimpson/goarrive/blob/eda5821893937e89b2635237d42924221e00c3a9/apps/westayfit/package.json"
+      },
+      {
+        "path": "apps/westayfit/src/movement/LabParts.tsx",
+        "blobSha": "a0b40deb11f8cf348f8b97265691016b380fc571",
+        "url": "https://github.com/idevinsimpson/goarrive/blob/eda5821893937e89b2635237d42924221e00c3a9/apps/westayfit/src/movement/LabParts.tsx"
+      },
+      {
+        "path": "apps/westayfit/src/movement/MovementVisionLab.tsx",
+        "blobSha": "4112b53f334fe9699ceb9ed13fb37cc21e3117ae",
+        "url": "https://github.com/idevinsimpson/goarrive/blob/eda5821893937e89b2635237d42924221e00c3a9/apps/westayfit/src/movement/MovementVisionLab.tsx"
+      },
+      {
+        "path": "apps/westayfit/src/movement/MovementVisionLab.web.tsx",
+        "blobSha": "0563ce6d39237b186fef66b395aeba17a8c0504b",
+        "url": "https://github.com/idevinsimpson/goarrive/blob/eda5821893937e89b2635237d42924221e00c3a9/apps/westayfit/src/movement/MovementVisionLab.web.tsx"
+      },
+      {
+        "path": "apps/westayfit/src/movement/adapter.ts",
+        "blobSha": "570c1bf1b945ac2076d5350698cdc33ab4f35f97",
+        "url": "https://github.com/idevinsimpson/goarrive/blob/eda5821893937e89b2635237d42924221e00c3a9/apps/westayfit/src/movement/adapter.ts"
+      },
+      {
+        "path": "apps/westayfit/src/movement/geometry.ts",
+        "blobSha": "d0389dc59199c0a6feb70a5d710a0de884e3f588",
+        "url": "https://github.com/idevinsimpson/goarrive/blob/eda5821893937e89b2635237d42924221e00c3a9/apps/westayfit/src/movement/geometry.ts"
+      },
+      {
+        "path": "apps/westayfit/src/movement/labGate.ts",
+        "blobSha": "28c165a24b0a9560407ca51e08aa407d4d8b01c6",
+        "url": "https://github.com/idevinsimpson/goarrive/blob/eda5821893937e89b2635237d42924221e00c3a9/apps/westayfit/src/movement/labGate.ts"
+      },
+      {
+        "path": "apps/westayfit/src/movement/session.ts",
+        "blobSha": "f991f7cc18e1ffd95bed22d61847f3da60cea0df",
+        "url": "https://github.com/idevinsimpson/goarrive/blob/eda5821893937e89b2635237d42924221e00c3a9/apps/westayfit/src/movement/session.ts"
+      },
+      {
+        "path": "apps/westayfit/src/movement/squatCounter.ts",
+        "blobSha": "8185af7d3fd7e368bbc4698eaa63971456975076",
+        "url": "https://github.com/idevinsimpson/goarrive/blob/eda5821893937e89b2635237d42924221e00c3a9/apps/westayfit/src/movement/squatCounter.ts"
+      },
+      {
+        "path": "apps/westayfit/src/movement/subjectLock.ts",
+        "blobSha": "120419aef73816f2b053b4461d1dc1462659ee05",
+        "url": "https://github.com/idevinsimpson/goarrive/blob/eda5821893937e89b2635237d42924221e00c3a9/apps/westayfit/src/movement/subjectLock.ts"
+      },
+      {
+        "path": "apps/westayfit/src/movement/synthetic.ts",
+        "blobSha": "2ca25ac86d40316a994b5320319a51b848762fbe",
+        "url": "https://github.com/idevinsimpson/goarrive/blob/eda5821893937e89b2635237d42924221e00c3a9/apps/westayfit/src/movement/synthetic.ts"
+      },
+      {
+        "path": "apps/westayfit/src/movement/types.ts",
+        "blobSha": "134dca384d3b302329880d0733079e138f5b4183",
+        "url": "https://github.com/idevinsimpson/goarrive/blob/eda5821893937e89b2635237d42924221e00c3a9/apps/westayfit/src/movement/types.ts"
+      },
+      {
+        "path": "apps/westayfit/src/movement/web/mediapipe.ts",
+        "blobSha": "aaf3814e6a7e2e58bee7da8cb25f93ce9bac5318",
+        "url": "https://github.com/idevinsimpson/goarrive/blob/eda5821893937e89b2635237d42924221e00c3a9/apps/westayfit/src/movement/web/mediapipe.ts"
+      },
+      {
+        "path": "apps/westayfit/src/movement/web/overlay.ts",
+        "blobSha": "3765c15f97372b201537e25904339168a8dc9378",
+        "url": "https://github.com/idevinsimpson/goarrive/blob/eda5821893937e89b2635237d42924221e00c3a9/apps/westayfit/src/movement/web/overlay.ts"
+      },
+      {
+        "path": "apps/westayfit/src/movement/web/tasksVision.ts",
+        "blobSha": "ad285b43dfa66c4061aaa6d5e100d7cfc53d1086",
+        "url": "https://github.com/idevinsimpson/goarrive/blob/eda5821893937e89b2635237d42924221e00c3a9/apps/westayfit/src/movement/web/tasksVision.ts"
+      },
+      {
+        "path": "apps/westayfit/tests-e2e/sprint-w10-movement-vision.spec.ts",
+        "blobSha": "7d29a60c45882c60c7db103a8c3f562dc3c7b0b7",
+        "url": "https://github.com/idevinsimpson/goarrive/blob/eda5821893937e89b2635237d42924221e00c3a9/apps/westayfit/tests-e2e/sprint-w10-movement-vision.spec.ts"
+      },
+      {
+        "path": "apps/westayfit/tests/movement-fail-closed.test.ts",
+        "blobSha": "c742b765e0910ff4c86433ee92fceeafe76fac96",
+        "url": "https://github.com/idevinsimpson/goarrive/blob/eda5821893937e89b2635237d42924221e00c3a9/apps/westayfit/tests/movement-fail-closed.test.ts"
+      },
+      {
+        "path": "apps/westayfit/tests/movement-privacy.test.ts",
+        "blobSha": "bcd257d0ceda0604f63629bb68437ffa33d0268c",
+        "url": "https://github.com/idevinsimpson/goarrive/blob/eda5821893937e89b2635237d42924221e00c3a9/apps/westayfit/tests/movement-privacy.test.ts"
+      },
+      {
+        "path": "apps/westayfit/tests/movement-squat-counter.test.ts",
+        "blobSha": "4a27e73bf753c2c01800d3f68eacb49f2bf1c4d6",
+        "url": "https://github.com/idevinsimpson/goarrive/blob/eda5821893937e89b2635237d42924221e00c3a9/apps/westayfit/tests/movement-squat-counter.test.ts"
+      },
+      {
+        "path": "apps/westayfit/tests/movement-subject-lock.test.ts",
+        "blobSha": "e986c6f9b5ff6fffbb8bf98ae2d84d934402c769",
+        "url": "https://github.com/idevinsimpson/goarrive/blob/eda5821893937e89b2635237d42924221e00c3a9/apps/westayfit/tests/movement-subject-lock.test.ts"
+      },
+      {
+        "path": "docs/westayfit/movement-vision/DECISION.md",
+        "blobSha": "e662a0f4f8b4493a813937f3158e91ea2864b6a3",
+        "url": "https://github.com/idevinsimpson/goarrive/blob/eda5821893937e89b2635237d42924221e00c3a9/docs/westayfit/movement-vision/DECISION.md"
+      },
+      {
+        "path": "docs/westayfit/movement-vision/LIMITATIONS.md",
+        "blobSha": "8da21f360f621e917550af777695ba72fe962f4b",
+        "url": "https://github.com/idevinsimpson/goarrive/blob/eda5821893937e89b2635237d42924221e00c3a9/docs/westayfit/movement-vision/LIMITATIONS.md"
+      },
+      {
+        "path": "docs/westayfit/movement-vision/README.md",
+        "blobSha": "9fddf77dbc48d25c44a997f39ddf9dfa3251a65a",
+        "url": "https://github.com/idevinsimpson/goarrive/blob/eda5821893937e89b2635237d42924221e00c3a9/docs/westayfit/movement-vision/README.md"
+      },
+      {
+        "path": "AGENTS.md",
+        "blobSha": "9396db0dd993e45aa887d28608b29860cbc34a9a",
+        "url": "https://github.com/idevinsimpson/goarrive/blob/eda5821893937e89b2635237d42924221e00c3a9/AGENTS.md"
+      },
+      {
+        "path": "apps/westayfit/vitest.config.ts",
+        "blobSha": "665c77901c52abf2cea0e812db8672d1ce9a3a7d",
+        "url": "https://github.com/idevinsimpson/goarrive/blob/eda5821893937e89b2635237d42924221e00c3a9/apps/westayfit/vitest.config.ts"
+      },
+      {
+        "path": "apps/westayfit/tsconfig.json",
+        "blobSha": "d0d7e84e8b9ca0cc1a19998cdce1d9dbe655c6a2",
+        "url": "https://github.com/idevinsimpson/goarrive/blob/eda5821893937e89b2635237d42924221e00c3a9/apps/westayfit/tsconfig.json"
+      }
+    ]
+  },
+  "inspectedProductCommit": "0d3598d4a1dc72411b6d80d375335b84a497efdb",
+  "inspectedMainCommit": "01a07ef327a0efdc1b19c636f13fedaa4f6b7ac1",
+  "controlState": {
+    "branch": "wsf-control-state-2",
+    "commit": "a17fd74a4a1242dbb8e1491e8f9e41b0f2c85b95",
+    "events": 477,
+    "ledgerHead": "67430ed2c64290fad416451e752df91133efc977892e30f97e2744edd41a430b",
+    "validation": "CONTROL_STATE=valid events=477 head=67430ed2c642",
+    "currentComment": "https://github.com/idevinsimpson/goarrive/pull/365#issuecomment-5878724949",
+    "scope": "Read-only inspected snapshot. Worker assignments may subsequently advance."
+  },
+  "baseline": {
+    "corePassed": 51,
+    "privacyAdapterGatePassed": 22,
+    "failed": 0,
+    "excluded": 1,
+    "exclusion": "Whole-app no-other-screen-links scan cannot prove a negative from a partial source tree."
+  },
+  "independentFinalVerification": {
+    "acceptedCommit": "eda5821893937e89b2635237d42924221e00c3a9",
+    "acceptedBlobsStillExact": 27,
+    "unchangedEngineAndCounterPaths": [
+      "geometry.ts",
+      "subjectLock.ts",
+      "squatCounter.ts",
+      "session.ts",
+      "synthetic.ts",
+      "types.ts",
+      "adapter.ts",
+      "labGate.ts",
+      "web/mediapipe.ts",
+      "web/tasksVision.ts",
+      "web/overlay.ts"
+    ],
+    "componentRegression": {
+      "accepted": {
+        "source": "accepted snapshot / apps/westayfit/src/movement",
+        "groups": {
+          "originalFive": {
+            "passed": 0,
+            "failed": 5,
+            "total": 5
+          },
+          "focusAndPage": {
+            "passed": 0,
+            "failed": 6,
+            "total": 6
+          },
+          "failureAndManual": {
+            "passed": 2,
+            "failed": 1,
+            "total": 3
+          }
+        },
+        "passed": 2,
+        "failed": 12,
+        "proof": "exact component source with mocked hooks, focus, DOM, estimator and RAF; no browser or camera"
+      },
+      "successor": {
+        "source": "successor snapshot / apps/westayfit/src/movement",
+        "groups": {
+          "originalFive": {
+            "passed": 5,
+            "failed": 0,
+            "total": 5
+          },
+          "focusAndPage": {
+            "passed": 6,
+            "failed": 0,
+            "total": 6
+          },
+          "failureAndManual": {
+            "passed": 3,
+            "failed": 0,
+            "total": 3
+          }
+        },
+        "passed": 14,
+        "failed": 0,
+        "proof": "exact component source with mocked hooks, focus, DOM, estimator and RAF; no browser or camera"
+      },
+      "receipts": [
+        "lifecycle-regression-accepted.txt",
+        "lifecycle-regression-successor.txt"
+      ],
+      "portableHarness": "docs/westayfit/movement-vision/qa/lifecycle-component-regression.cjs"
+    },
+    "focusedVitest": {
+      "passed": 118,
+      "failed": 0,
+      "skipped": 1,
+      "files": 6,
+      "receipt": "successor-final-focused-tests.txt",
+      "groups": {
+        "originalCore": 51,
+        "privacyAdapterGate": 22,
+        "networkPolicy": 21,
+        "cameraLifecycle": 24
+      },
+      "skippedReason": "Global no-other-screen-links scan excluded because unrelated app source is absent from focused snapshot"
+    },
+    "proofLimits": [
+      "Exact component source runs with mocked React hooks, Expo focus callbacks, DOM events, camera permission, pose estimator and RAF. Not mounted React/browser/device proof.",
+      "No browser or camera run; no native build; no real-person accuracy proof.",
+      "Direct dev tool dependency versions match accepted lock; full npm-ci transitive reproduction and full app suite are not asserted."
+    ],
+    "sha256": [
+      {
+        "path": "apps/westayfit/src/movement/LabParts.tsx",
+        "sha256": "20fefdb068e3854c4192264a5e86ecbcdba4c612a0a5b59f158756fd09d76221"
+      },
+      {
+        "path": "apps/westayfit/src/movement/MovementVisionLab.tsx",
+        "sha256": "9f7a793f8e23ca0111ada92acb6546d1505a946a415d63dfa6d49f9d305c9623"
+      },
+      {
+        "path": "apps/westayfit/src/movement/MovementVisionLab.web.tsx",
+        "sha256": "b2336e431cbf00db3b8066ff8373aa00460aa7b96d0c0765a431125b964b8515"
+      },
+      {
+        "path": "apps/westayfit/src/movement/adapter.ts",
+        "sha256": "a438ec3db2560f1d545085e4b5c84cce4a845a0a4b7a14d1303e0e49a02309fe"
+      },
+      {
+        "path": "apps/westayfit/src/movement/geometry.ts",
+        "sha256": "7d1ede97153bbddaa5fe3186fd030ac2183e66f2217ebcaa308bb19a295bb52f"
+      },
+      {
+        "path": "apps/westayfit/src/movement/labGate.ts",
+        "sha256": "c167890a7f6ba205159a55e85df0c335eb90e46d812350ba725f1e80abdda0c6"
+      },
+      {
+        "path": "apps/westayfit/src/movement/session.ts",
+        "sha256": "614432144de16e35364d095b48cda1099e59a672ca95db86c1e45f70daf74603"
+      },
+      {
+        "path": "apps/westayfit/src/movement/squatCounter.ts",
+        "sha256": "123bd171656041ea30cfd094fb499bf19d4b3434cab777b7f31ec24ec08d2868"
+      },
+      {
+        "path": "apps/westayfit/src/movement/subjectLock.ts",
+        "sha256": "a82898689565c6abaa5f2a1f97188f288942ff77a4958c51f55acedb6228b6b8"
+      },
+      {
+        "path": "apps/westayfit/src/movement/synthetic.ts",
+        "sha256": "38f4c9645bbf24b39f555860b922a20b7bdddb4040a001428056f63322e00758"
+      },
+      {
+        "path": "apps/westayfit/src/movement/types.ts",
+        "sha256": "327bd8b441d410519b8bfea772eb0c6981642c2bd54890b85b0c87634a4b7958"
+      },
+      {
+        "path": "apps/westayfit/src/movement/web/cameraLifecycle.ts",
+        "sha256": "4936187a7756a74c1c5142e6c8f12c656971d54b28d5268a4916928dbcc93907"
+      },
+      {
+        "path": "apps/westayfit/src/movement/web/mediapipe.ts",
+        "sha256": "3b5e5e061166f916edbebf5c34affa69f41ac3bcd7463a867de8638a6076e493"
+      },
+      {
+        "path": "apps/westayfit/src/movement/web/overlay.ts",
+        "sha256": "13de91467d20ec99d2c712feeb042e489b8696c6133c8c4d555928eae07b9cbb"
+      },
+      {
+        "path": "apps/westayfit/src/movement/web/tasksVision.ts",
+        "sha256": "b5b465a0e965ac4486a3feef6bbbe315eb1f91434dbc81ee032c3b0aaebcf4b4"
+      },
+      {
+        "path": "apps/westayfit/tests/movement-camera-lifecycle.test.ts",
+        "sha256": "e267152cb0062d72d8816cb55467bb19600c2358209204f33e12310962a32683"
+      },
+      {
+        "path": "apps/westayfit/tests/movement-fail-closed.test.ts",
+        "sha256": "0c08808093d89be050df0ac53b50fc8758d7dc6e15641159054d008b3410345f"
+      },
+      {
+        "path": "apps/westayfit/tests/movement-network-policy.test.ts",
+        "sha256": "13e9319ea2e764b43d91fc31254c891bde0568a88e263eadc63adc81d1f11a94"
+      },
+      {
+        "path": "apps/westayfit/tests/movement-privacy.test.ts",
+        "sha256": "e441609254c5774480fdc7b10adce6c4d433340a06e6b59295a7712a4540c349"
+      },
+      {
+        "path": "apps/westayfit/tests/movement-squat-counter.test.ts",
+        "sha256": "698f53c239b4014c5e9ee35b8c92f54ea75ad908c355a9956dcb62ca8f2ad167"
+      },
+      {
+        "path": "apps/westayfit/tests/movement-subject-lock.test.ts",
+        "sha256": "384f274d50cfd9496389f995bee0794f44d327cd33e4f06651db488fa072c5b3"
+      },
+      {
+        "path": "apps/westayfit/tests/helpers/movementNetworkPolicy.ts",
+        "sha256": "eac17739f28d41cf511dd776251ee65ed16ba77734f1447dc8a7b77538da7418"
+      },
+      {
+        "path": "docs/westayfit/movement-vision/qa/lifecycle-component-regression.cjs",
+        "sha256": "b3bb08c704b3e8d12f13fefb83c6d3520d3c04edc26a3e196e052227767af3bf"
+      }
+    ]
+  },
+  "additionalVerification": {
+    "lifecycleTargetedTypecheck": "PASS: new helper and tests only, strict with skipLibCheck; not a full-app typecheck.",
+    "editedBrowserSpec": "Syntax/transpile checked; NOT browser-executed.",
+    "engineCounterAdapterUnchanged": [
+      "geometry.ts",
+      "subjectLock.ts",
+      "squatCounter.ts",
+      "session.ts",
+      "synthetic.ts",
+      "types.ts",
+      "adapter.ts",
+      "labGate.ts",
+      "web/mediapipe.ts",
+      "web/tasksVision.ts",
+      "web/overlay.ts"
+    ]
+  },
+  "runtime": {
+    "node": "v24.19.0",
+    "directVersions": {
+      "vitest": "4.1.11",
+      "vite": "8.2.2",
+      "jsdom": "29.1.1",
+      "typescript": "5.9.3",
+      "@mediapipe/tasks-vision": "0.10.35",
+      "expoBaseTsconfig": "54.0.37"
+    },
+    "limitation": "Direct versions match the accepted lock. Full npm-ci transitive installation and complete Expo runtime were not reproduced."
+  },
+  "reproduction": {
+    "component": "From an installed full checkout: node docs/westayfit/movement-vision/qa/lifecycle-component-regression.cjs [accepted-or-successor-source-root]. The same final script was run against both source snapshots.",
+    "focusedSnapshot": "From apps/westayfit with matching dev tools: npx vitest run tests/movement-squat-counter.test.ts tests/movement-subject-lock.test.ts tests/movement-fail-closed.test.ts tests/movement-privacy.test.ts tests/movement-network-policy.test.ts tests/movement-camera-lifecycle.test.ts --reporter verbose -t \"^(?!.*no other screen links).*$\"",
+    "fullCheckoutNext": "Run those six suites without the test-name exclusion in the complete checkout; then full required app/typecheck/export gates and affected browser cases. Do not assume this snapshot proves them.",
+    "lovable": "The preserved qa/lovable-counterexamples.test.ts belongs in the exact separate Lovable source project and intentionally asserts three unsafe observations; it is not a WSF acceptance suite."
+  },
+  "lovable": {
+    "auditDate": "2026-10-03",
+    "projectId": "c1b16a13-34ff-4878-b798-750cc63aa595",
+    "name": "WE STAY FIT — MOVEMENT-VISION-NORTHSTAR-1 Lab",
+    "head": "8c61cd728a909df929b48ab6053a1818fb7322b8",
+    "functionalCandidate": "a84e676423fed8008acfe549251ebd3a1945c906",
+    "base": "fdad20f997ac2b23e6d9c1db6a51140d9b867df6",
+    "lastEditedAt": "2026-09-25T03:13:36.698Z",
+    "published": false,
+    "databaseEnabled": false,
+    "editorUrl": "https://lovable.dev/projects/c1b16a13-34ff-4878-b798-750cc63aa595",
+    "previewUrl": "https://id-preview--c1b16a13-34ff-4878-b798-750cc63aa595.lovable.app",
+    "labUrl": "https://id-preview--c1b16a13-34ff-4878-b798-750cc63aa595.lovable.app/lab/movement-vision",
+    "availability": "Connector metadata says ready; current hosted app load and physical camera not tested in this audit.",
+    "diffHeadFromCandidate": "8 files under docs/movement-vision only (report, manifest, six base64 PNGs). Functional source unchanged.",
+    "existingSyntheticTests": {
+      "files": 1,
+      "tests": 21,
+      "passed": 21,
+      "runtime": "Node v24.19.0, Vitest4.1.11",
+      "command": "node ../node_modules/vitest/vitest.mjs run src/lab/vision/vision.test.ts audit-probes.test.ts --config audit-vitest.config.mjs --reporter verbose",
+      "runSourceHead": "8c61cd728a909df929b48ab6053a1818fb7322b8"
+    },
+    "independentProbes": [
+      {
+        "name": "spatial replacement before missing timeout",
+        "originalPersonReps": 3,
+        "replacementPersonReps": 3,
+        "gapMs": 100,
+        "observedCount": 6,
+        "locks": 1,
+        "losses": 0,
+        "ambiguities": 0,
+        "reportedLockSwitches": 0,
+        "status": "Synthetic counterexample reproduced"
+      },
+      {
+        "name": "identical timestamp frame replay",
+        "initial": 3,
+        "afterReplay": 6,
+        "status": "Synthetic counterexample reproduced"
+      },
+      {
+        "name": "one deep landmark error in shallow cycle",
+        "underlyingCompleteReps": 0,
+        "corruptFrames": 1,
+        "observedCount": 1,
+        "status": "Synthetic counterexample reproduced"
+      }
+    ],
+    "evidencePngsInspected": [
+      "docs/movement-vision/evidence/390x844_2_demo.png",
+      "docs/movement-vision/evidence/390x844_3_live.png",
+      "docs/movement-vision/evidence/390x844_6_receipt.png"
+    ],
+    "pngManifestDigestsVerified": true,
+    "sourceMutated": false,
+    "externalMessagesSent": false,
+    "externalDeployments": false
+  },
+  "logs": {
+    "core-test-output.txt": {
+      "rawSha256": "4e8f6386a51d57df4cb8de2d026c896c9bc17d0a9528def364cc197e862d6298",
+      "normalization": "ANSI colors removed; transient audit-root path replaced. Results unchanged.",
+      "text": "(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:\n  - ESM syntax in a file loaded as CommonJS (vitest.config.ts:1:1). Use a `.mjs` extension or set `\"type\": \"module\"` in the closest package.json\nSet `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.\n\n RUN  v4.1.11 <audit-root>/runnable/apps/westayfit\n\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > counts one full squat exactly once 2ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > counts five reps as five 0ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > does not count a half squat, and reports it as a partial 1ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > does not count a descent that stops just short of the down threshold 0ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > counts a slow squat (4 s down and up) once 0ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > counts fast squats (0.8 s each) one per rep 0ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > a long pause at the bottom is still one rep 0ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > a long pause at the top adds nothing between reps 0ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > jitter across the down threshold at the bottom cannot double count 0ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > bouncing between the thresholds without standing up is not a second rep 0ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > chatter across the UP threshold after a rep adds nothing 0ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > single noisy frames never move the phase (debounce) 0ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > a spike that dwells only just under dwellMs does not count 0ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > interrupt() mid-rep discards the rep: returning to standing counts nothing 0ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > starting in the down position counts nothing until standing is seen 0ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > null samples in the middle of a dwell cannot confirm it 1ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > reset() zeroes the count and requires standing again 0ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > refuses a configuration without hysteresis 0ms\n ✓ tests/movement-fail-closed.test.ts > fail-closed 1: two overlapping distinct poses are never one trusted person > a second, almost identical pose next to the locked member makes the frame ambiguous 4ms\n ✓ tests/movement-fail-closed.test.ts > fail-closed 1: two overlapping distinct poses are never one trusted person > two overlapping people at acquisition are two people, not one 1ms\n ✓ tests/movement-fail-closed.test.ts > fail-closed 2: an unobserved frame mid-rep voids the rep > poses=[] while down, then standing, counts nothing 1ms\n ✓ tests/movement-fail-closed.test.ts > fail-closed 2: an unobserved frame mid-rep voids the rep > a pose without a measurable leg mid-rep also voids it 1ms\n ✓ tests/movement-fail-closed.test.ts > fail-closed 3: frames must be fresh and in order > a long gap between down and standing cannot complete a rep 1ms\n ✓ tests/movement-fail-closed.test.ts > fail-closed 3: frames must be fresh and in order > a gap just over the bound breaks the cycle; one just under does not 1ms\n ✓ tests/movement-fail-closed.test.ts > fail-closed 3: frames must be fresh and in order > an out-of-order or repeated timestamp is rejected and voids the rep in progress 1ms\n ✓ tests/movement-fail-closed.test.ts > fail-closed 3: frames must be fresh and in order > SubjectLock itself ignores a non-increasing timestamp 0ms\n ✓ tests/movement-subject-lock.test.ts > geometry — the squat signal > reads ~2 standing, ~1 at parallel, and maps to depth 0 → 1 2ms\n ✓ tests/movement-subject-lock.test.ts > geometry — the squat signal > is independent of distance to the camera 0ms\n ✓ tests/movement-subject-lock.test.ts > geometry — the squat signal > is null when no leg is fully visible 0ms\n ✓ tests/movement-subject-lock.test.ts > SubjectLock — acquisition > locks one standing, full-body, centred person after holding still 2ms\n ✓ tests/movement-subject-lock.test.ts > SubjectLock — acquisition > does not lock with nobody in frame 1ms\n ✓ tests/movement-subject-lock.test.ts > SubjectLock — acquisition > does not lock when two people qualify — it refuses to choose 2ms\n ✓ tests/movement-subject-lock.test.ts > SubjectLock — acquisition > locks the centred member, not a small background person off to the side 2ms\n ✓ tests/movement-subject-lock.test.ts > SubjectLock — acquisition > does not lock someone whose legs are out of frame 1ms\n ✓ tests/movement-subject-lock.test.ts > SubjectLock — acquisition > does not lock someone who is already squatting (standing baseline required) 1ms\n ✓ tests/movement-subject-lock.test.ts > SubjectLock — acquisition > does not lock someone walking across the zone (never holds still) 1ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — counting only the locked member > counts the member’s full reps and ignores their half rep 4ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — counting only the locked member > a one-frame dropout mid-rep keeps the lock but voids that rep (unobserved = not countable) 2ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — counting only the locked member > lost tracking at the bottom voids that rep, then re-acquires and counts the next 2ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — counting only the locked member > while lost, nothing is counted even if the member squats 1ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — counting only the locked member > forgets after a long absence and must acquire from scratch 1ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — counting only the locked member > a second person exercising at the edge of frame adds nothing 3ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — counting only the locked member > with a second person exercising, only the member’s reps count 13ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — counting only the locked member > a person walking BEHIND the member pauses counting and never adds a rep 1ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — counting only the locked member > a person walking briefly IN FRONT never steals the lock 2ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — counting only the locked member > a second person arriving next to the member and staying makes it ambiguous, not a guess 1ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — counting only the locked member > the member drifting slowly (phone nudged) stays locked and keeps counting 1ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — counting only the locked member > low-confidence landmarks count as not seen — the counter pauses 1ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — manual fallback and reset > manual mode counts taps, never goes below zero, and ignores camera frames 0ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — manual fallback and reset > switching to manual carries the camera count over 1ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — manual fallback and reset > reset() returns to camera mode, zero, searching 0ms\n\n Test Files  3 passed (3)\n      Tests  51 passed (51)\n   Start at  17:20:12\n   Duration  760ms (transform 147ms, setup 0ms, import 219ms, tests 66ms, environment 1.46s)\n\n"
+    },
+    "privacy-test-output.txt": {
+      "rawSha256": "66fb4a6961d5c0c54c3b986cd6f853dcffb2dfe1a7b9c28753ec4e86b4e830f9",
+      "normalization": "ANSI colors removed; transient audit-root path replaced. Results unchanged.",
+      "text": "(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:\n  - ESM syntax in a file loaded as CommonJS (vitest.config.ts:1:1). Use a `.mjs` extension or set `\"type\": \"module\"` in the closest package.json\nSet `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.\n\n RUN  v4.1.11 <audit-root>/runnable/apps/westayfit\n\n ✓ tests/movement-privacy.test.ts > movement code: frames stay local, nothing is persisted or sent > finds the movement sources 1ms\n ✓ tests/movement-privacy.test.ts > movement code: frames stay local, nothing is persisted or sent > uses no recording (MediaRecorder) 1ms\n ✓ tests/movement-privacy.test.ts > movement code: frames stay local, nothing is persisted or sent > uses no canvas readback (toDataURL) 1ms\n ✓ tests/movement-privacy.test.ts > movement code: frames stay local, nothing is persisted or sent > uses no canvas readback (toBlob) 1ms\n ✓ tests/movement-privacy.test.ts > movement code: frames stay local, nothing is persisted or sent > uses no pixel readback (getImageData) 1ms\n ✓ tests/movement-privacy.test.ts > movement code: frames stay local, nothing is persisted or sent > uses no stream capture (captureStream) 1ms\n ✓ tests/movement-privacy.test.ts > movement code: frames stay local, nothing is persisted or sent > uses no network (fetch) 1ms\n ✓ tests/movement-privacy.test.ts > movement code: frames stay local, nothing is persisted or sent > uses no network (XMLHttpRequest) 0ms\n ✓ tests/movement-privacy.test.ts > movement code: frames stay local, nothing is persisted or sent > uses no network (sendBeacon) 1ms\n ✓ tests/movement-privacy.test.ts > movement code: frames stay local, nothing is persisted or sent > uses no network (WebSocket) 1ms\n ✓ tests/movement-privacy.test.ts > movement code: frames stay local, nothing is persisted or sent > uses no storage (localStorage) 1ms\n ✓ tests/movement-privacy.test.ts > movement code: frames stay local, nothing is persisted or sent > uses no storage (sessionStorage) 0ms\n ✓ tests/movement-privacy.test.ts > movement code: frames stay local, nothing is persisted or sent > uses no storage (indexedDB) 0ms\n ✓ tests/movement-privacy.test.ts > movement code: frames stay local, nothing is persisted or sent > uses no Firebase 1ms\n ✓ tests/movement-privacy.test.ts > movement code: frames stay local, nothing is persisted or sent > uses no the shared contribution path 1ms\n ✓ tests/movement-privacy.test.ts > movement code: frames stay local, nothing is persisted or sent > the route file writes nothing either 1ms\n ✓ tests/movement-privacy.test.ts > movement code: frames stay local, nothing is persisted or sent > the installed MediaPipe bundle is the pinned version and carries no metrics logger 1ms\n ✓ tests/movement-privacy.test.ts > the lab gate > is closed unless the emulator/capture flag is on 0ms\n ✓ tests/movement-privacy.test.ts > the lab gate > the route renders the lab only behind the gate 0ms\n ↓ tests/movement-privacy.test.ts > the lab gate > no other screen links to the lab\n ✓ tests/movement-privacy.test.ts > mapBlazePose — the web adapter mapping > maps the BlazePose indices to the named keypoints 0ms\n ✓ tests/movement-privacy.test.ts > mapBlazePose — the web adapter mapping > an off-frame (extrapolated) joint is not visible 0ms\n ✓ tests/movement-privacy.test.ts > mapBlazePose — the web adapter mapping > a joint without a reported visibility is not visible 0ms\n\n Test Files  1 passed (1)\n      Tests  22 passed | 1 skipped (23)\n   Start at  17:20:23\n   Duration  661ms (transform 32ms, setup 0ms, import 44ms, tests 13ms, environment 474ms)\n\n"
+    },
+    "lifecycle-regression-accepted.txt": {
+      "rawSha256": "10c43aead0ea59c55d3632d6cca8171598b5db78ca9365bb963c90490015e817",
+      "normalization": "ANSI colors removed; transient audit-root path replaced. Results unchanged.",
+      "text": "FAIL [originalFive] late permission after Stop stays stopped: Expected values to be strictly equal:\n\n'camera' !== 'idle'\n\nFAIL [originalFive] late permission after manual stays manual: Expected values to be strictly equal:\n\n'camera' !== 'manual'\n\nFAIL [originalFive] late permission after unmount closes stream safely: Cannot set properties of null (setting 'srcObject')\nFAIL [originalFive] late model after unmount is closed and cannot start RAF: Expected values to be strictly equal:\n\n0 !== 1\n\nFAIL [originalFive] concurrent starts plus Stop leave no stream or loop: Expected values to be strictly equal:\n\n2 !== 1\n\nFAIL [focusAndPage] route blur during permission cancels; refocus cannot reopen: Expected values to be strictly equal:\n\n'camera' !== 'idle'\n\nFAIL [focusAndPage] route blur while active closes resources; blurred start/refocus cannot reopen: Expected values to be strictly equal:\n\n0 !== 1\n\nFAIL [focusAndPage] hidden page during permission cancels; visible again cannot reopen: Expected values to be strictly equal:\n\n'camera' !== 'idle'\n\nFAIL [focusAndPage] pagehide during model load closes late model; pageshow cannot reopen: Expected values to be strictly equal:\n\n0 !== 1\n\nFAIL [focusAndPage] pagehide while active closes resources; pageshow cannot reopen: Expected values to be strictly equal:\n\n0 !== 1\n\nFAIL [focusAndPage] hidden page stops synthetic RAF; visible again cannot restart it: Expected values to be strictly equal:\n+ actual - expected\n\n+ 'synthetic'\n- 'idle'\n\nPASS [failureAndManual] permission refusal leaves visible Manual and plus controls usable\nPASS [failureAndManual] model failure releases stream and leaves Manual plus control usable\nFAIL [failureAndManual] inference failure releases resources and leaves Manual plus control usable: inference failed\n{\"source\":\"<audit-root>/accepted/apps/westayfit/src/movement\",\"groups\":{\"originalFive\":{\"passed\":0,\"failed\":5,\"total\":5},\"focusAndPage\":{\"passed\":0,\"failed\":6,\"total\":6},\"failureAndManual\":{\"passed\":2,\"failed\":1,\"total\":3}},\"passed\":2,\"failed\":12,\"proof\":\"exact component source with mocked hooks, focus, DOM, estimator and RAF; no browser or camera\"}\n"
+    },
+    "lifecycle-regression-successor.txt": {
+      "rawSha256": "c193d3772cecb0842adfc14108c685945ff928b043072a58b95210e40386fc14",
+      "normalization": "ANSI colors removed; transient audit-root path replaced. Results unchanged.",
+      "text": "PASS [originalFive] late permission after Stop stays stopped\nPASS [originalFive] late permission after manual stays manual\nPASS [originalFive] late permission after unmount closes stream safely\nPASS [originalFive] late model after unmount is closed and cannot start RAF\nPASS [originalFive] concurrent starts plus Stop leave no stream or loop\nPASS [focusAndPage] route blur during permission cancels; refocus cannot reopen\nPASS [focusAndPage] route blur while active closes resources; blurred start/refocus cannot reopen\nPASS [focusAndPage] hidden page during permission cancels; visible again cannot reopen\nPASS [focusAndPage] pagehide during model load closes late model; pageshow cannot reopen\nPASS [focusAndPage] pagehide while active closes resources; pageshow cannot reopen\nPASS [focusAndPage] hidden page stops synthetic RAF; visible again cannot restart it\nPASS [failureAndManual] permission refusal leaves visible Manual and plus controls usable\nPASS [failureAndManual] model failure releases stream and leaves Manual plus control usable\nPASS [failureAndManual] inference failure releases resources and leaves Manual plus control usable\n{\"source\":\"<audit-root>/successor/apps/westayfit/src/movement\",\"groups\":{\"originalFive\":{\"passed\":5,\"failed\":0,\"total\":5},\"focusAndPage\":{\"passed\":6,\"failed\":0,\"total\":6},\"failureAndManual\":{\"passed\":3,\"failed\":0,\"total\":3}},\"passed\":14,\"failed\":0,\"proof\":\"exact component source with mocked hooks, focus, DOM, estimator and RAF; no browser or camera\"}\n"
+    },
+    "successor-final-focused-tests.txt": {
+      "rawSha256": "d5d445845a9e3fa8641513b8ba2eb0844609b774d8900d69381d48d1f2c51369",
+      "normalization": "ANSI colors removed; transient audit-root path replaced. Results unchanged.",
+      "text": "(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:\n  - ESM syntax in a file loaded as CommonJS (vitest.config.ts:1:1). Use a `.mjs` extension or set `\"type\": \"module\"` in the closest package.json\nSet `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.\n\n RUN  v4.1.11 <audit-root>/successor/apps/westayfit\n\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > counts one full squat exactly once 2ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > counts five reps as five 1ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > does not count a half squat, and reports it as a partial 1ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > does not count a descent that stops just short of the down threshold 0ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > counts a slow squat (4 s down and up) once 0ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > counts fast squats (0.8 s each) one per rep 1ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > a long pause at the bottom is still one rep 0ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > a long pause at the top adds nothing between reps 0ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > jitter across the down threshold at the bottom cannot double count 0ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > bouncing between the thresholds without standing up is not a second rep 0ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > chatter across the UP threshold after a rep adds nothing 0ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > single noisy frames never move the phase (debounce) 0ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > a spike that dwells only just under dwellMs does not count 0ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > interrupt() mid-rep discards the rep: returning to standing counts nothing 0ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > starting in the down position counts nothing until standing is seen 0ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > null samples in the middle of a dwell cannot confirm it 1ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > reset() zeroes the count and requires standing again 0ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > refuses a configuration without hysteresis 1ms\n ✓ tests/movement-fail-closed.test.ts > fail-closed 1: two overlapping distinct poses are never one trusted person > a second, almost identical pose next to the locked member makes the frame ambiguous 7ms\n ✓ tests/movement-fail-closed.test.ts > fail-closed 1: two overlapping distinct poses are never one trusted person > two overlapping people at acquisition are two people, not one 1ms\n ✓ tests/movement-fail-closed.test.ts > fail-closed 2: an unobserved frame mid-rep voids the rep > poses=[] while down, then standing, counts nothing 1ms\n ✓ tests/movement-fail-closed.test.ts > fail-closed 2: an unobserved frame mid-rep voids the rep > a pose without a measurable leg mid-rep also voids it 2ms\n ✓ tests/movement-fail-closed.test.ts > fail-closed 3: frames must be fresh and in order > a long gap between down and standing cannot complete a rep 1ms\n ✓ tests/movement-fail-closed.test.ts > fail-closed 3: frames must be fresh and in order > a gap just over the bound breaks the cycle; one just under does not 1ms\n ✓ tests/movement-fail-closed.test.ts > fail-closed 3: frames must be fresh and in order > an out-of-order or repeated timestamp is rejected and voids the rep in progress 1ms\n ✓ tests/movement-fail-closed.test.ts > fail-closed 3: frames must be fresh and in order > SubjectLock itself ignores a non-increasing timestamp 1ms\n ✓ tests/movement-network-policy.test.ts > movement lab egress policy — exact static resources, no uploads > allows the predeclared GET resource https://lab.example.test/_expo/static/js/web/entry-abc123.js 2ms\n ✓ tests/movement-network-policy.test.ts > movement lab egress policy — exact static resources, no uploads > allows the predeclared GET resource https://lab.example.test/design-target/movement-vision?delegate=cpu 0ms\n ✓ tests/movement-network-policy.test.ts > movement lab egress policy — exact static resources, no uploads > allows the predeclared GET resource https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm/vision_wasm_internal.wasm 0ms\n ✓ tests/movement-network-policy.test.ts > movement lab egress policy — exact static resources, no uploads > allows the predeclared GET resource https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task 0ms\n ✓ tests/movement-network-policy.test.ts > movement lab egress policy — exact static resources, no uploads > rejects a same-origin upload even when its URL is an allowed static resource 0ms\n ✓ tests/movement-network-policy.test.ts > movement lab egress policy — exact static resources, no uploads > rejects an empty POST as well as an upload body 0ms\n ✓ tests/movement-network-policy.test.ts > movement lab egress policy — exact static resources, no uploads > rejects a body on an otherwise allowed GET 0ms\n ✓ tests/movement-network-policy.test.ts > movement lab egress policy — exact static resources, no uploads > rejects an unlisted URL even at a trusted origin: https://lab.example.test/upload 0ms\n ✓ tests/movement-network-policy.test.ts > movement lab egress policy — exact static resources, no uploads > rejects an unlisted URL even at a trusted origin: https://lab.example.test/frames/private-frame.jpg 0ms\n ✓ tests/movement-network-policy.test.ts > movement lab egress policy — exact static resources, no uploads > rejects an unlisted URL even at a trusted origin: https://unexpected.example.test/telemetry 0ms\n ✓ tests/movement-network-policy.test.ts > movement lab egress policy — exact static resources, no uploads > rejects an unlisted URL even at a trusted origin: https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.0/wasm/vision_wasm_internal.wasm 1ms\n ✓ tests/movement-network-policy.test.ts > movement lab egress policy — exact static resources, no uploads > rejects an unlisted URL even at a trusted origin: https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm/upload 0ms\n ✓ tests/movement-network-policy.test.ts > movement lab egress policy — exact static resources, no uploads > rejects query-carried data: https://lab.example.test/_expo/static/js/web/entry-abc123.js?frame=private-data 0ms\n ✓ tests/movement-network-policy.test.ts > movement lab egress policy — exact static resources, no uploads > rejects query-carried data: https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm/vision_wasm_internal.wasm?landmarks=private-data 0ms\n ✓ tests/movement-network-policy.test.ts > movement lab egress policy — exact static resources, no uploads > rejects query-carried data: https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task?count=10 0ms\n ✓ tests/movement-network-policy.test.ts > movement lab egress policy — exact static resources, no uploads > rejects query-carried data: https://lab.example.test/design-target/movement-vision?delegate=cpu&frame=private-data 0ms\n ✓ tests/movement-network-policy.test.ts > movement lab egress policy — exact static resources, no uploads > rejects query-carried data: https://lab.example.test/design-target/movement-vision?delegate=private-data 0ms\n ✓ tests/movement-network-policy.test.ts > movement lab egress policy — exact static resources, no uploads > rejects undeclared protocols: wss://lab.example.test/stream 0ms\n ✓ tests/movement-network-policy.test.ts > movement lab egress policy — exact static resources, no uploads > rejects undeclared protocols: data:application/json,private-data 0ms\n ✓ tests/movement-network-policy.test.ts > movement lab egress policy — exact static resources, no uploads > rejects undeclared protocols: blob:https://lab.example.test/id 0ms\n ✓ tests/movement-network-policy.test.ts > movement lab egress policy — exact static resources, no uploads > rejects credentials and malformed URLs 0ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > runs one frame loop, processes each new video frame once, and Stop releases the stream and engine 5ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > stops every late-granted track after cancellation while permission was pending 1ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > releases the camera immediately during pending playback and never starts a late model 1ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > closes a model that resolves after cancellation and does not schedule a loop 1ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > keeps only the newest of two pending starts even if the older grant arrives last 1ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > a superseded model resolves without closing or detaching the newer camera 1ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > switching to synthetic owns the loop even when permission resolves afterwards 1ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > ignores a cancelled camera callback already delivered to the event queue after switching source 1ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > ignores a queued synthetic callback when a new camera start takes over 1ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > ends a denied permission request without entering playback or model initialization 1ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > does not report a superseded permission rejection into the new camera session 1ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > treats rejected playback as a failure and stops the camera before model loading 1ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > ignores an old playback rejection after another camera has started 8ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > stops the stream on model failure and allows an explicit fresh start 1ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > ignores an obsolete model rejection without stopping the current run 1ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > ends the run after an inference exception and never repeatedly invokes the failed engine 0ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > releases camera and model if the playing video reports an error 1ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > ends the run when the camera track ends and does not resume from an obsolete frame 1ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > closes a late model after a camera track ended during initialization 2ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > refuses a stream whose video tracks are already ended 0ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > refuses a stream whose video tracks are already empty 0ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > does not leak a stream if its video element has disappeared 0ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > makes repeated Stop harmless and removes listeners before releasing resources 0ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > continues releasing other resources if a track or estimator rejects cleanup 1ms\n ✓ tests/movement-subject-lock.test.ts > geometry — the squat signal > reads ~2 standing, ~1 at parallel, and maps to depth 0 → 1 2ms\n ✓ tests/movement-subject-lock.test.ts > geometry — the squat signal > is independent of distance to the camera 2ms\n ✓ tests/movement-subject-lock.test.ts > geometry — the squat signal > is null when no leg is fully visible 0ms\n ✓ tests/movement-subject-lock.test.ts > SubjectLock — acquisition > locks one standing, full-body, centred person after holding still 2ms\n ✓ tests/movement-subject-lock.test.ts > SubjectLock — acquisition > does not lock with nobody in frame 1ms\n ✓ tests/movement-subject-lock.test.ts > SubjectLock — acquisition > does not lock when two people qualify — it refuses to choose 5ms\n ✓ tests/movement-subject-lock.test.ts > SubjectLock — acquisition > locks the centred member, not a small background person off to the side 2ms\n ✓ tests/movement-subject-lock.test.ts > SubjectLock — acquisition > does not lock someone whose legs are out of frame 1ms\n ✓ tests/movement-subject-lock.test.ts > SubjectLock — acquisition > does not lock someone who is already squatting (standing baseline required) 1ms\n ✓ tests/movement-subject-lock.test.ts > SubjectLock — acquisition > does not lock someone walking across the zone (never holds still) 1ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — counting only the locked member > counts the member’s full reps and ignores their half rep 6ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — counting only the locked member > a one-frame dropout mid-rep keeps the lock but voids that rep (unobserved = not countable) 16ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — counting only the locked member > lost tracking at the bottom voids that rep, then re-acquires and counts the next 2ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — counting only the locked member > while lost, nothing is counted even if the member squats 1ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — counting only the locked member > forgets after a long absence and must acquire from scratch 1ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — counting only the locked member > a second person exercising at the edge of frame adds nothing 3ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — counting only the locked member > with a second person exercising, only the member’s reps count 3ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — counting only the locked member > a person walking BEHIND the member pauses counting and never adds a rep 2ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — counting only the locked member > a person walking briefly IN FRONT never steals the lock 4ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — counting only the locked member > a second person arriving next to the member and staying makes it ambiguous, not a guess 1ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — counting only the locked member > the member drifting slowly (phone nudged) stays locked and keeps counting 1ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — counting only the locked member > low-confidence landmarks count as not seen — the counter pauses 1ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — manual fallback and reset > manual mode counts taps, never goes below zero, and ignores camera frames 1ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — manual fallback and reset > switching to manual carries the camera count over 1ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — manual fallback and reset > reset() returns to camera mode, zero, searching 0ms\n ✓ tests/movement-privacy.test.ts > movement code: frames stay local, nothing is persisted or sent > finds the movement sources 1ms\n ✓ tests/movement-privacy.test.ts > movement code: frames stay local, nothing is persisted or sent > uses no recording (MediaRecorder) 1ms\n ✓ tests/movement-privacy.test.ts > movement code: frames stay local, nothing is persisted or sent > uses no canvas readback (toDataURL) 0ms\n ✓ tests/movement-privacy.test.ts > movement code: frames stay local, nothing is persisted or sent > uses no canvas readback (toBlob) 1ms\n ✓ tests/movement-privacy.test.ts > movement code: frames stay local, nothing is persisted or sent > uses no pixel readback (getImageData) 0ms\n ✓ tests/movement-privacy.test.ts > movement code: frames stay local, nothing is persisted or sent > uses no stream capture (captureStream) 0ms\n ✓ tests/movement-privacy.test.ts > movement code: frames stay local, nothing is persisted or sent > uses no network (fetch) 0ms\n ✓ tests/movement-privacy.test.ts > movement code: frames stay local, nothing is persisted or sent > uses no network (XMLHttpRequest) 0ms\n ✓ tests/movement-privacy.test.ts > movement code: frames stay local, nothing is persisted or sent > uses no network (sendBeacon) 0ms\n ✓ tests/movement-privacy.test.ts > movement code: frames stay local, nothing is persisted or sent > uses no network (WebSocket) 0ms\n ✓ tests/movement-privacy.test.ts > movement code: frames stay local, nothing is persisted or sent > uses no storage (localStorage) 0ms\n ✓ tests/movement-privacy.test.ts > movement code: frames stay local, nothing is persisted or sent > uses no storage (sessionStorage) 0ms\n ✓ tests/movement-privacy.test.ts > movement code: frames stay local, nothing is persisted or sent > uses no storage (indexedDB) 0ms\n ✓ tests/movement-privacy.test.ts > movement code: frames stay local, nothing is persisted or sent > uses no Firebase 1ms\n ✓ tests/movement-privacy.test.ts > movement code: frames stay local, nothing is persisted or sent > uses no the shared contribution path 0ms\n ✓ tests/movement-privacy.test.ts > movement code: frames stay local, nothing is persisted or sent > the route file writes nothing either 1ms\n ✓ tests/movement-privacy.test.ts > movement code: frames stay local, nothing is persisted or sent > checks the executed CJS import and both pinned bundles for the reviewed metrics endpoint 7ms\n ✓ tests/movement-privacy.test.ts > the lab gate > is closed unless the emulator/capture flag is on 0ms\n ✓ tests/movement-privacy.test.ts > the lab gate > the route renders the lab only behind the gate 0ms\n ↓ tests/movement-privacy.test.ts > the lab gate > no other screen links to the lab\n ✓ tests/movement-privacy.test.ts > mapBlazePose — the web adapter mapping > maps the BlazePose indices to the named keypoints 0ms\n ✓ tests/movement-privacy.test.ts > mapBlazePose — the web adapter mapping > an off-frame (extrapolated) joint is not visible 0ms\n ✓ tests/movement-privacy.test.ts > mapBlazePose — the web adapter mapping > a joint without a reported visibility is not visible 0ms\n\n Test Files  6 passed (6)\n      Tests  118 passed | 1 skipped (119)\n   Start at  17:36:59\n   Duration  1.36s (transform 706ms, setup 0ms, import 1.18s, tests 147ms, environment 4.31s)\n\n"
+    }
+  },
+  "notEstablished": [
+    "Full successor app dependency installation, typecheck or production export",
+    "New browser e2e execution",
+    "Actual hosted model/WASM startup",
+    "Mounted React/navigation behavior or physical camera release",
+    "Real-person squat accuracy or real bystander rejection",
+    "iPhone Safari, actual kiosk, or native camera acceptance",
+    "Member or station integration, deployment, release readiness"
+  ],
+  "additionalArtifactSha256": [
+    {
+      "path": "apps/westayfit/tests-e2e/sprint-w10-movement-vision.spec.ts",
+      "sha256": "9000524db7111d69b8a35ed2542cb995147900659b24fcedfbcf3798ab66811b"
+    },
+    {
+      "path": "docs/westayfit/movement-vision/qa/lovable-counterexamples.test.ts",
+      "sha256": "b7e7a642ef95dab84213f4df38ac9deded9004ad69987b5665c5425d1f73a10e"
+    },
+    {
+      "path": "docs/westayfit/movement-vision/AUDIT_2026-10-03.md",
+      "sha256": "84d511c05493c1595820842fb289592360433a31857848975715c87cd041c1b3"
+    },
+    {
+      "path": "docs/westayfit/movement-vision/DEVICE_TEST_PLAN.md",
+      "sha256": "8748de343446da495966111b6a2513020e3932ab8ff21245612df0a829c05473"
+    },
+    {
+      "path": "docs/westayfit/movement-vision/README.md",
+      "sha256": "b76baa4ac842ce1f32ec3e1b8b981bfc5aeadb9286b58f99a0b8d07253fbb598"
+    }
+  ]
+}
