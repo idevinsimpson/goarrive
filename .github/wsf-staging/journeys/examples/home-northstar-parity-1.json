@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "milestone": "HOME-NORTHSTAR-PARITY-1",
-  "productSha": "5705dc3bf198a9490600c7e32b8bb55356defd9d",
+  "productSha": "f84346d3b902432a7152719780f0afb94ec9cc3c",
   "previousKnownGoodSha": "ab77fbfce97e60c1c22492397b2ab6b491f9e0db",
   "journeys": [
     {

@@ -2,7 +2,7 @@
 /**
  * HOME-HOSTED-JOURNEY-1 (Director #396 5849944214): the hosted Home
  * changed-journey driver and the exact HOME-NORTHSTAR-PARITY-1 manifest for
- * the approved build 5705dc3b (rolling back to the served ab77fbfc), hermetically.
+ * the approved build f84346d3 (rolling back to the served ab77fbfc), hermetically.
  *
  * - The manifest is exact: the served/approved product SHA, the previous
  *   known-good, a registered driver, and only rows the driver measures.
@@ -28,7 +28,7 @@ import { runHook } from '../hosted-changed-journeys.mjs';
 const W = path.resolve('.github/wsf-staging');
 const MANIFEST = path.join(W, 'journeys/examples/home-northstar-parity-1.json');
 const CARD = path.join(W, 'owner-test-card.mjs');
-const SERVED = '5705dc3bf198a9490600c7e32b8bb55356defd9d';
+const SERVED = 'f84346d3b902432a7152719780f0afb94ec9cc3c';
 const PREVIOUS = 'ab77fbfce97e60c1c22492397b2ab6b491f9e0db';
 const manifest = () => JSON.parse(fs.readFileSync(MANIFEST, 'utf8'));
 const home = () => manifest().journeys.find((j) => j.id === 'home');
@@ -43,7 +43,7 @@ async function drive(bugs = {}) {
 const { HOME_ROWS, HOME_SEEDED } = await import('../journeys/home.mjs').catch(() => ({ HOME_ROWS: null, HOME_SEEDED: null }));
 
 // ---- the manifest ----------------------------------------------------------------------
-await test('the Home manifest is exact: product 5705dc3b (the approved candidate), previous known-good ab77fbfc, schema-valid', () => {
+await test('the Home manifest is exact: product f84346d3 (the approved candidate), previous known-good ab77fbfc, schema-valid', () => {
   const m = manifest();
   assert.deepEqual(validateManifest(m), []);
   assert.equal(m.milestone, 'HOME-NORTHSTAR-PARITY-1');
@@ -73,7 +73,7 @@ await test('the CLI gate check accepts the Home manifest only for the served bui
   assert.match(good.stdout, /MILESTONE_MANIFEST=valid/);
   const stale = run(PREVIOUS);
   assert.equal(stale.status, 1);
-  assert.match(stale.stderr, /the manifest is for 5705dc3b/);
+  assert.match(stale.stderr, /the manifest is for f84346d3/);
 });
 
 await test('a wrong product SHA is refused rather than driven', () => {
