@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "bf38a898b23d54b0babc6affc8955385b145708386558eac2f0e7855e4d2a56d",
-  "eventCount": 419,
+  "ledgerHead": "c8ba23af6112f19c5cea3d479e006f10b4878770eff5829666c6b1d65773aa23",
+  "eventCount": 420,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2460,8 +2460,10 @@
       "packet": "EMAIL-STAGING-REPAIR-STAGING-PIN",
       "worker": "W3",
       "reason": "release",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        5965892101
+      ],
       "ack": null
     }
   },
