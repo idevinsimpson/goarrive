@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=10a769ad60fba35d4939b4bdb7f991d1cda9a98d2fefad3615bd6ddf29a0cbda events=382 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=574ec706f91045b357537f80dfe16950426d05074dda59b421a2814cc00e385e events=383 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `10a769ad60fba35d4939b4bdb7f991d1cda9a98d2fefad3615bd6ddf29a0cbda` (382 events)
+- Ledger head: `574ec706f91045b357537f80dfe16950426d05074dda59b421a2814cc00e385e` (383 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -120,6 +120,6 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | 63e649716cbc | W3 | EMAIL-STAGING-REPAIR | handback | acked | 5964906178 | comment:5964907774 |
 | 76939a4d36a6 | W4 | EXPO-ACCOUNT-ENTRY-1-STAGING-PIN | review | acked | 5964906243 | comment:5964911077 |
 | 8948c387eef6 | W4 | EMAIL-STAGING-REPAIR | review | acked | 5964977244 | comment:5964981889 |
-| 4925976176a1 | W5 | EMAIL-STAGING-REPAIR | review | retried | 5964977381 | — |
+| 4925976176a1 | W5 | EMAIL-STAGING-REPAIR | review | redelivered | 5964977381, 5965368070 | — |
 | bac3c3b6a769 | W9 | TOGETHER-COMPLETION-1 | release | acked | 5964997619 | comment:5965001839 |
 
