@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=736cbec111b15f6692df429bd9cc9231af68514f77eec31e8de9953c3f68a743 events=360 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=7755eecbfebac1b9fd79bc2883ab6690d7da6cbce2a51396961d8ced27ba84b2 events=362 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `736cbec111b15f6692df429bd9cc9231af68514f77eec31e8de9953c3f68a743` (360 events)
+- Ledger head: `7755eecbfebac1b9fd79bc2883ab6690d7da6cbce2a51396961d8ced27ba84b2` (362 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -115,6 +115,6 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | bb43e7091a92 | W3 | EXPO-ACCOUNT-ENTRY-1-STAGING-PIN | release | acked | 5963986818 | comment:5963990988 |
 | 1b956b036938 | W4 | EXPO-ACCOUNT-ENTRY-1-STAGING-PIN | review | acked | 5964030312 | comment:5964035278 |
 | 5f6ac2ab4259 | W3 | EXPO-ACCOUNT-ENTRY-1-STAGING-PIN | handback | acked | 5964095206 | comment:5964097860 |
-| 63e649716cbc | W3 | EMAIL-STAGING-REPAIR | handback | delivered | 5964906178 | — |
-| 76939a4d36a6 | W4 | EXPO-ACCOUNT-ENTRY-1-STAGING-PIN | review | delivered | 5964906243 | — |
+| 63e649716cbc | W3 | EMAIL-STAGING-REPAIR | handback | acked | 5964906178 | comment:5964907774 |
+| 76939a4d36a6 | W4 | EXPO-ACCOUNT-ENTRY-1-STAGING-PIN | review | acked | 5964906243 | comment:5964911077 |
 

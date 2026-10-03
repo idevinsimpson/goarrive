@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "736cbec111b15f6692df429bd9cc9231af68514f77eec31e8de9953c3f68a743",
-  "eventCount": 360,
+  "ledgerHead": "7755eecbfebac1b9fd79bc2883ab6690d7da6cbce2a51396961d8ced27ba84b2",
+  "eventCount": 362,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2105,21 +2105,27 @@
       "packet": "EMAIL-STAGING-REPAIR",
       "worker": "W3",
       "reason": "handback",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         5964906178
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 5964907774
+      }
     },
     "76939a4d36a6ab2a6c1cd1db0dc2bc0796b5dc8899b85d810a6f05accd139f15": {
       "packet": "EXPO-ACCOUNT-ENTRY-1-STAGING-PIN",
       "worker": "W4",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         5964906243
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 5964911077
+      }
     }
   },
   "fastpath": {
