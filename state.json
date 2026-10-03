@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "06ea0b9ed372476c86d1ab230ec1438cb193181273408177266b1e49cfc0f6e8",
-  "eventCount": 326,
+  "ledgerHead": "f049746f216ac598af5d8ea0d3856f6faf6d89cf3aa68b9ffe7107693e0abcae",
+  "eventCount": 328,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -624,7 +624,7 @@
       },
       "label": "Replace station vendor error text with existing product-safe callable wording without changing retry truth",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "ACCEPTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -658,10 +658,13 @@
           "kind": "comment",
           "id": 5963613447
         },
-        "accepted": null,
+        "accepted": {
+          "kind": "comment",
+          "id": 5963911732
+        },
         "lastTransition": {
           "kind": "comment",
-          "id": 5963815176
+          "id": 5963911732
         }
       },
       "review": {
@@ -1098,7 +1101,7 @@
       },
       "label": "Teach the existing pin generator to represent a ledger-fast-path served baseline truthfully and fail closed otherwise",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "ACCEPTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -1133,10 +1136,13 @@
           "kind": "comment",
           "id": 5963657922
         },
-        "accepted": null,
+        "accepted": {
+          "kind": "comment",
+          "id": 5963914167
+        },
         "lastTransition": {
           "kind": "comment",
-          "id": 5963833328
+          "id": 5963914167
         }
       },
       "review": {
