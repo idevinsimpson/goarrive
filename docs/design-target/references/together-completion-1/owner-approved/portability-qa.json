@@ -1,0 +1,153 @@
+{
+  "initial": {
+    "width": 372,
+    "height": 700,
+    "kicker": "YOUR ROUND",
+    "amount": "20",
+    "headline": "Every move\nbelongs here.",
+    "total": "3,700 / 5,000",
+    "detail": "74% of our goal",
+    "action": "Record 20 squats",
+    "fillY": 132.123,
+    "fillHeight": 476.877,
+    "canvasCount": 0,
+    "animationCount": 0,
+    "playing": false
+  },
+  "contribution": {
+    "width": 372,
+    "height": 700,
+    "kicker": "YOU ADDED",
+    "amount": "+20",
+    "headline": "You moved\nus closer.",
+    "total": "3,700 \u2192 3,720 / 5,000",
+    "detail": "74.4% of our goal",
+    "action": "Back to community",
+    "fillY": 130.129,
+    "fillHeight": 478.871,
+    "canvasCount": 0,
+    "animationCount": 0,
+    "playing": false
+  },
+  "reopened": {
+    "width": 372,
+    "height": 700,
+    "kicker": "YOU ADDED",
+    "amount": "+20",
+    "headline": "You moved\nus closer.",
+    "total": "3,700 \u2192 3,720 / 5,000",
+    "detail": "74.4% of our goal",
+    "action": "Back to community",
+    "fillY": 130.129,
+    "fillHeight": 478.871,
+    "canvasCount": 0,
+    "animationCount": 0,
+    "playing": false
+  },
+  "reached": {
+    "width": 372,
+    "height": 700,
+    "kicker": "YOU ADDED",
+    "amount": "+35",
+    "headline": "WE did it.\nTogether.",
+    "total": "4,980 \u2192 5,015 / 5,000",
+    "detail": "15 beyond our goal \u00b7 Still open",
+    "action": "Back to community",
+    "fillY": 0,
+    "fillHeight": 609,
+    "canvasCount": 0,
+    "animationCount": 0,
+    "playing": false
+  },
+  "reduced": {
+    "width": 372,
+    "height": 700,
+    "kicker": "YOU ADDED",
+    "amount": "+20",
+    "headline": "You moved\nus closer.",
+    "total": "3,700 \u2192 3,720 / 5,000",
+    "detail": "74.4% of our goal",
+    "action": "Back to community",
+    "fillY": 130.129,
+    "fillHeight": 478.871,
+    "canvasCount": 0,
+    "animationCount": 0,
+    "playing": false
+  },
+  "errors": [],
+  "externalRequests": [],
+  "referenceSha256": "152c7343f7424da4af55d692b790234d610ce3d89544bee2b2cdd891786035de",
+  "viewport": {
+    "width": 388,
+    "height": 990,
+    "deviceScaleFactor": 2
+  },
+  "approvedImageComparisons": [
+    {
+      "approved": "01-together-initial.png",
+      "portable": "portable-initial.png",
+      "dimensions": [
+        744,
+        1400
+      ],
+      "pixel_identical": false,
+      "difference_bounds": [
+        19,
+        0,
+        725,
+        330
+      ]
+    },
+    {
+      "approved": "03-together-contribution-settled.png",
+      "portable": "portable-contribution.png",
+      "dimensions": [
+        744,
+        1400
+      ],
+      "pixel_identical": false,
+      "difference_bounds": [
+        19,
+        0,
+        725,
+        397
+      ]
+    },
+    {
+      "approved": "04-together-goal-reached.png",
+      "portable": "portable-reached.png",
+      "dimensions": [
+        744,
+        1400
+      ],
+      "pixel_identical": false,
+      "difference_bounds": [
+        19,
+        0,
+        725,
+        1
+      ]
+    },
+    {
+      "approved": "05-together-reduced-motion.png",
+      "portable": "portable-reduced.png",
+      "dimensions": [
+        744,
+        1400
+      ],
+      "pixel_identical": false,
+      "difference_bounds": [
+        19,
+        0,
+        725,
+        372
+      ]
+    }
+  ],
+  "assetEmbedsExact": true,
+  "areaCdfExact": true,
+  "productCssExact": true,
+  "effectByteExact": true,
+  "sourceSha256": "388e6ed65333bd0f379247a906d2ad36230426800d2e18dd5c433077e0dba5e0",
+  "rasterComparisonNote": "Same approved 372 \u00d7 700 CSS-pixel phone geometry. The four stable comparisons differ by 8\u201317 edge/subpixel pixels out of 1,041,600 pixels. Product CSS, image embeds, CDF, and effect source are exact."
+}

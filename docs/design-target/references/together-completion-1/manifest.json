@@ -1,0 +1,480 @@
+{
+  "schemaVersion": 1,
+  "packet": "TOGETHER-COMPLETION-1",
+  "journey": "member contribution confirmation / Together completion",
+  "ownerSelection": {
+    "direction": "Together",
+    "sequence": [
+      "Lovable implementation and review",
+      "Claude canonical implementation via GitHub"
+    ],
+    "sourceSha256": "388e6ed65333bd0f379247a906d2ad36230426800d2e18dd5c433077e0dba5e0",
+    "portableReferenceSha256": "152c7343f7424da4af55d692b790234d610ce3d89544bee2b2cdd891786035de"
+  },
+  "lovableProjectId": "e15b9fa0-b2a0-4314-bc21-9c573b8eceb1",
+  "lovableBaselineSha": "d4f606244ba3995080fb0bcd471cbebf4cbbc56a",
+  "states": [
+    {
+      "name": "fresh under-target contribution",
+      "before": 3700,
+      "amount": 20,
+      "after": 3720,
+      "target": 5000,
+      "unit": "squats",
+      "headline": "You moved us closer.",
+      "progress": "74.4%"
+    },
+    {
+      "name": "fresh authoritative goal crossing",
+      "before": 4980,
+      "amount": 35,
+      "after": 5015,
+      "target": 5000,
+      "unit": "squats",
+      "headline": "WE did it. Together.",
+      "progress": "100%",
+      "overshoot": 15,
+      "status": "Still open"
+    },
+    {
+      "name": "already reached",
+      "motion": "Static settled receipt when the goal was already reached and this is not a new crossing; no particles, pulse, waves or fill tween.",
+      "copy": "truthful own addition and reached status"
+    },
+    {
+      "name": "reconciled / already recorded / restored / historical",
+      "motion": "static settled receipt; no automatic replay"
+    },
+    {
+      "name": "pending / unknown / rejected",
+      "motion": "no confirmed-success celebration"
+    },
+    {
+      "name": "shared visibility lost",
+      "motion": "preserve canonical own-only receipt; do not reconstruct shared totals"
+    },
+    {
+      "name": "reduced motion or preference changes while playing",
+      "motion": "instant exact result and fill; no particles, pulse or ongoing tween"
+    },
+    {
+      "name": "second supported movement or custom unit",
+      "motion": "same presentation with frozen actual movement/unit; no blending"
+    }
+  ],
+  "viewports": [
+    {
+      "width": 390,
+      "height": 844
+    },
+    {
+      "width": 390,
+      "height": 640
+    },
+    {
+      "width": 1280,
+      "height": 900
+    }
+  ],
+  "acceptedDifferences": [
+    "Canonical Expo/Firebase uses its existing server-authoritative receipt, membership/privacy and original brand assets.",
+    "Canonical retains its locked owner-derived 1200×583 monogram layers and existing livingWeCalibration table; use receipt-scoped slate/green tints and the alpha-preserving monochrome wordmark treatment. Do not mix the donor's 1282×609 mask/CDF with canonical derivatives or rewrite frozen brand files.",
+    "Canonical omits Lovable-only fixture/reviewer controls, preview Replay and local demo confirmation/storage. Preserve canonical emulator-only Sample data disclosure; this packet does not remove environment truth labels.",
+    "Native safe areas, font rendering, focus and accessibility use platform equivalents while preserving visual hierarchy and motion timing.",
+    "When a legitimate previous confirmed shared total is unavailable, show the true current fill immediately and omit the fabricated previous-total arrow/tween.",
+    "Goal crossing uses crossedTarget plus a fresh, eligible first-confirmation guard; persisted crossedTarget or total >= target alone never enables fresh celebration.",
+    "Historical/reconciled, already-reached, unknown and own-only fallback copy stays truthful, even when a fixture screenshot shows a richer live shared result."
+  ],
+  "navigationFocusMotionContract": {
+    "entry": "Existing MOVE flow receives fresh confirmed receipt; no new contribution write from animation.",
+    "primaryExit": "Return to contribution's actual Community using the existing finish behavior.",
+    "close": "Always usable; preserve original opener, focus, scroll and mounted-tab state.",
+    "eligibility": "First fresh, unreplayed eligible member confirmation observed in the same uninterrupted submitting flow. Deduplicate by confirmed attempt identity; suppress already-reached/no-crossing, restored/reconciled/alreadyRecorded/historical/reopened paths.",
+    "crossing": "Canonical crossedTarget is immutable authoritative receipt truth; it never derives from totals. Only that fact plus fresh eligibility enables a new collective animation. Static crossing/reached meaning survives share/history return.",
+    "text": "Exact own amount and current shared receipt text/accessibility are available immediately; animation never delays confirmation.",
+    "durationMs": 3400,
+    "logoPulseMs": 2700,
+    "fillDelayMs": 1450,
+    "fillDurationMs": 700,
+    "fillEasing": "1 - (1 - p)^3",
+    "fill": "Calibrated against actual WE silhouette area, capped at100%; retain exact numeric overshoot.",
+    "pieces": 24,
+    "piecesWhenCrossing": 28,
+    "scaleGather": 0.94,
+    "scalePeak": 1.1,
+    "scalePeakWhenCrossing": 1.13,
+    "waveDelaysMs": [
+      1460,
+      1640
+    ],
+    "crossingExtraWaveMs": 1810,
+    "canvasEndMs": 2900,
+    "cleanupGuardMs": 3200,
+    "settleMs": 3400,
+    "reduced": "Instant exact result; no particles/scale/fill tween. A change to reduce during playback permanently settles the instance; switching back cannot replay or regress fill.",
+    "cancellation": "Cancel RAFs, timers, animation objects and decorative nodes on Close/unmount/route exit.",
+    "scope": "Member receipt only; do not enable global LivingWE motion on Home, Community polls or shared displays."
+  },
+  "verificationStatus": "Independent exact-source and exported-visual reviews accepted this bounded Lovable reference. Canonical implementation acceptance remains a separate gate.",
+  "globalManifest": "New journey-specific reference only; existing NORTH_STAR_JOURNEY_MANIFEST.v1.json@9ca268d2500c60dddc3aba8d490a67f24b97a2cb pins remain unchanged until L0 reconciles the authorized journey index through its controlled operations path.",
+  "status": "ACCEPTED_DESIGN_REFERENCE",
+  "frozenAtUtc": "2026-10-03 03:07:48 UTC",
+  "lovableAcceptedSha": "66e53073df1f09ca727454e4186dd301865a8ad1",
+  "lovableEditorUrl": "https://lovable.dev/projects/e15b9fa0-b2a0-4314-bc21-9c573b8eceb1",
+  "lovableKnowledgeFreezeRecorded": true,
+  "lovableLocalFixtures": {
+    "ordinary": "Oak Grove Together / 500 squats together / confirmed boundary 241→261",
+    "crossing": "reviewer near-goal fixture / confirmed boundary 490→510 / verified crossing / still open",
+    "secondMovement": "controlled reviewer fixture / visible 500 push-ups together / confirmed boundary 0→12",
+    "reduced": "crossing fixture rendered immediately settled with prefers-reduced-motion"
+  },
+  "sourceDigests": {
+    "src/demo/together.tsx": "fa0621922d3953b57a1d32aa138ae9afa5e49e75fb5b10e331e83814a8f78046",
+    "src/demo/move.tsx": "44f1bf477adfdd893bb225404d16ce19aede5c6f23484c7a72c5034f1bb52df2",
+    "src/demo/store.tsx": "0618541b4697edd714d94cc957b299694c42c30486576cac733f211be21f318f",
+    "src/demo/model.ts": "596f1d4e1f314f14335090114958403e4f997ac1588e84f96a573c6f1ef6b974",
+    "src/styles.css": "26c9ce342d70bd88c66995170e50aa76fd205b37c86af29c123ef5b4111c3d6a",
+    "scripts/together-completion.test.ts": "e4cd383b2bebb995cbb27f85195bad48ff925ff7c7bd2c6498c9dfdf80a7efca"
+  },
+  "portableArtwork": {
+    "together-mark.png": {
+      "sourceSha256": "dadbdc913083bed4158da7f20bae488c56d484e83dacaf82516dd6ce88bf3982",
+      "base64Path": "together-completion-evidence/together-mark.png.b64",
+      "base64Sha256": "5f73308002b20fd344e785f620f0f9705e732f87d8b91be5efc6d794671429cf"
+    },
+    "together-wordmark.png": {
+      "sourceSha256": "46f2245ee0219e14e12298fe648fed87debb1baf260a2574741875ba2132d517",
+      "base64Path": "together-completion-evidence/together-wordmark.png.b64",
+      "base64Sha256": "efaf9a80a662d6e03c347a567b6eeb1cafc13d6b2f025a28c82237fb49787f4d"
+    }
+  },
+  "revisionAuthority": "The exact get_project final commit and verified source/evidence digests above govern this export. The unmodified implementer manifest and prose contain earlier intermediate revision labels; those do not replace the inspected final commit.",
+  "sourceDonors": [
+    "lovable/source/src/demo/together.tsx",
+    "lovable/source/src/demo/together-area.ts",
+    "lovable/source/src/styles.css",
+    "lovable/source/src/assets/together-mark.png",
+    "lovable/source/src/assets/together-wordmark.png"
+  ],
+  "integrationContextDonors": [
+    "lovable/source/src/demo/move.tsx",
+    "lovable/source/src/demo/model.ts",
+    "lovable/source/src/demo/store.tsx",
+    "lovable/source/src/demo/ui.tsx",
+    "lovable/source/src/demo/shell.tsx"
+  ],
+  "reports": {
+    "director": "review.json",
+    "source": "review/source-review.json",
+    "sourceHashes": "review/source-verification.json",
+    "visual": "review/visual-review.json",
+    "evidenceHashes": "review/hash-verification.json",
+    "geometryAndMask": "review/bounded-geometry-and-mask-check.json",
+    "implementer": "lovable/reports/implementer-manifest.json"
+  },
+  "evidenceProvenance": [
+    {
+      "path": "lovable/evidence/ordinary-settled-390x844.png",
+      "sha256": "8d71c36afca9320c14e290fffaa313a95dbfe4a0c69a3c7931505e6630097405",
+      "bytes": 61329,
+      "capturedAgainst": "66e53073df1f09ca727454e4186dd301865a8ad1",
+      "verifiedPresentAt": "66e53073df1f09ca727454e4186dd301865a8ad1",
+      "scope": "Corrected final layout"
+    },
+    {
+      "path": "lovable/evidence/ordinary-settled-390x640.png",
+      "sha256": "ad0ab30cf154b70e745ed659b41180023138a0ec4f7ffab2ff2f28ccaa044328",
+      "bytes": 57155,
+      "capturedAgainst": "66e53073df1f09ca727454e4186dd301865a8ad1",
+      "verifiedPresentAt": "66e53073df1f09ca727454e4186dd301865a8ad1",
+      "scope": "Corrected final layout"
+    },
+    {
+      "path": "lovable/evidence/ordinary-settled-1280x900.png",
+      "sha256": "475f87f9d02ead686b9bb15263499cdc3b43b72c22c0abf054698d58a5af5702",
+      "bytes": 151546,
+      "capturedAgainst": "66e53073df1f09ca727454e4186dd301865a8ad1",
+      "verifiedPresentAt": "66e53073df1f09ca727454e4186dd301865a8ad1",
+      "scope": "Corrected final layout"
+    },
+    {
+      "path": "lovable/evidence/ordinary-moving-390x844.png",
+      "sha256": "c85bdceafda1e0e6437cc7587a8d553f7ae2377f9666ced388e9f3155844f642",
+      "bytes": 124021,
+      "capturedAgainst": "d18d3aa3e65b7061598525aa0681760662763f30",
+      "verifiedPresentAt": "66e53073df1f09ca727454e4186dd301865a8ad1",
+      "scope": "Retained R2 motion/fixture evidence; not recaptured after the small final geometry patch"
+    },
+    {
+      "path": "lovable/evidence/crossing-settled-390x844.png",
+      "sha256": "2a6300d261bf0db129b940cac65a0cfc1d5a6f3e5d15024d911c4c09987fe3c0",
+      "bytes": 61711,
+      "capturedAgainst": "d18d3aa3e65b7061598525aa0681760662763f30",
+      "verifiedPresentAt": "66e53073df1f09ca727454e4186dd301865a8ad1",
+      "scope": "Retained R2 motion/fixture evidence; not recaptured after the small final geometry patch"
+    },
+    {
+      "path": "lovable/evidence/pushups-moving-390x844.png",
+      "sha256": "aa13c475477a264092b16e0e05aeefe121ee93789f568ab4a686090dfdca4e2b",
+      "bytes": 113967,
+      "capturedAgainst": "d18d3aa3e65b7061598525aa0681760662763f30",
+      "verifiedPresentAt": "66e53073df1f09ca727454e4186dd301865a8ad1",
+      "scope": "Retained R2 motion/fixture evidence; not recaptured after the small final geometry patch"
+    },
+    {
+      "path": "lovable/evidence/crossing-reduced-390x844.png",
+      "sha256": "c09cb0183342ed9989ef7f9bca79178c8d76dbb8eeb17964ef8c9302efd98520",
+      "bytes": 61723,
+      "capturedAgainst": "d18d3aa3e65b7061598525aa0681760662763f30",
+      "verifiedPresentAt": "66e53073df1f09ca727454e4186dd301865a8ad1",
+      "scope": "Retained R2 motion/fixture evidence; not recaptured after the small final geometry patch"
+    },
+    {
+      "path": "lovable/evidence/together-motion.webm",
+      "sha256": "988a8680df5c0eef5be58465662d57e36b6f2310bf601b4a512cb7608273934d",
+      "bytes": 756043,
+      "capturedAgainst": "d18d3aa3e65b7061598525aa0681760662763f30",
+      "verifiedPresentAt": "66e53073df1f09ca727454e4186dd301865a8ad1",
+      "scope": "Retained R2 motion/fixture evidence; not recaptured after the small final geometry patch"
+    }
+  ],
+  "observedTimingDifference": "The accepted Lovable hook stops requesting decorative draw frames after about 2900ms and removes/settles at 3400ms. The original donor has a 3200ms cleanup guard. Canonical keeps the approved bounded cleanup and final settlement; neither duration may depend on animationend.",
+  "files": [
+    {
+      "path": "docs/design-target/references/together-completion-1/README.md",
+      "size": 4445,
+      "sha256": "a74bc7bb6dc7840e715f2e131ae5aebb17762461f7f007edaa8313adf0430768"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/asset-map.json",
+      "size": 760,
+      "sha256": "d39267fb06031668c507080fade5c49223e2bb4b1a081364c312857e6bb0b6ea"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/lovable/context/AGENTS.md.txt",
+      "size": 1421,
+      "sha256": "db5f928703aaa310af54ae127e017b04ec45185d3ef7eaa5350bd4628cd20691"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/lovable/context/roadmap.md",
+      "size": 3209,
+      "sha256": "b6761f6983231b9795b6bc3800ee183d61291468d5c7ef89aa7dbe20e58a6b37"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/lovable/evidence/crossing-reduced-390x844.png",
+      "size": 61723,
+      "sha256": "c09cb0183342ed9989ef7f9bca79178c8d76dbb8eeb17964ef8c9302efd98520"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/lovable/evidence/crossing-settled-390x844.png",
+      "size": 61711,
+      "sha256": "2a6300d261bf0db129b940cac65a0cfc1d5a6f3e5d15024d911c4c09987fe3c0"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/lovable/evidence/final-layout-results.json",
+      "size": 8229,
+      "sha256": "d8421bbe355f5e39812b4e1504ab5bddaaf0408e60d9ecf5953584fab6437a29"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/lovable/evidence/lifecycle-results.json",
+      "size": 383,
+      "sha256": "6bc87d701a5334a8b30b0f4918cd6f15d8d341834ce194ccedaf5ea99eaff59a"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/lovable/evidence/ordinary-moving-390x844.png",
+      "size": 124021,
+      "sha256": "c85bdceafda1e0e6437cc7587a8d553f7ae2377f9666ced388e9f3155844f642"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/lovable/evidence/ordinary-settled-1280x900.png",
+      "size": 151546,
+      "sha256": "475f87f9d02ead686b9bb15263499cdc3b43b72c22c0abf054698d58a5af5702"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/lovable/evidence/ordinary-settled-390x640.png",
+      "size": 57155,
+      "sha256": "ad0ab30cf154b70e745ed659b41180023138a0ec4f7ffab2ff2f28ccaa044328"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/lovable/evidence/ordinary-settled-390x844.png",
+      "size": 61329,
+      "sha256": "8d71c36afca9320c14e290fffaa313a95dbfe4a0c69a3c7931505e6630097405"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/lovable/evidence/pushups-moving-390x844.png",
+      "size": 113967,
+      "sha256": "aa13c475477a264092b16e0e05aeefe121ee93789f568ab4a686090dfdca4e2b"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/lovable/evidence/together-motion.webm",
+      "size": 756043,
+      "sha256": "988a8680df5c0eef5be58465662d57e36b6f2310bf601b4a512cb7608273934d"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/lovable/reports/implementer-manifest.json",
+      "size": 6426,
+      "sha256": "f7fb27147570c358b8123a54b4bb6e55fb7fefb39affbb8cdf9b915b09e8e52b"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/lovable/source/scripts/together-completion.test.ts",
+      "size": 4858,
+      "sha256": "e4cd383b2bebb995cbb27f85195bad48ff925ff7c7bd2c6498c9dfdf80a7efca"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/lovable/source/src/assets/together-mark.png",
+      "size": 10147,
+      "sha256": "dadbdc913083bed4158da7f20bae488c56d484e83dacaf82516dd6ce88bf3982"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/lovable/source/src/assets/together-mark.png.asset.json",
+      "size": 457,
+      "sha256": "65ffc6deeff44ee817e2de8e02599a222c0891d5416c6e095025b3ca6729d67d"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/lovable/source/src/assets/together-wordmark.png",
+      "size": 5907,
+      "sha256": "46f2245ee0219e14e12298fe648fed87debb1baf260a2574741875ba2132d517"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/lovable/source/src/assets/together-wordmark.png.asset.json",
+      "size": 468,
+      "sha256": "b850f029ef01e927ce92a2ed75650e8cb81a2916b03f9093b0fd4dad21be1d3a"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/lovable/source/src/demo/model.ts",
+      "size": 34827,
+      "sha256": "596f1d4e1f314f14335090114958403e4f997ac1588e84f96a573c6f1ef6b974"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/lovable/source/src/demo/move.tsx",
+      "size": 24267,
+      "sha256": "44f1bf477adfdd893bb225404d16ce19aede5c6f23484c7a72c5034f1bb52df2"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/lovable/source/src/demo/shell.tsx",
+      "size": 9980,
+      "sha256": "c63017100d1a5c92a3e246b593aacbd35f892c2da7f4753d89b59438a6687b35"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/lovable/source/src/demo/store.tsx",
+      "size": 16700,
+      "sha256": "0618541b4697edd714d94cc957b299694c42c30486576cac733f211be21f318f"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/lovable/source/src/demo/together-area.ts",
+      "size": 7306,
+      "sha256": "d5fa6ac9c27f9f5cf53b501edf48e34c9fe8933bbc083664b82a4e0db0a1f5c9"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/lovable/source/src/demo/together.tsx",
+      "size": 12817,
+      "sha256": "fa0621922d3953b57a1d32aa138ae9afa5e49e75fb5b10e331e83814a8f78046"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/lovable/source/src/demo/ui.tsx",
+      "size": 8631,
+      "sha256": "c7a8511e1855becfa5830ad8a1f3a0df7671a032bb7eb16fd7c00a70e10d0a37"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/lovable/source/src/styles.css",
+      "size": 63566,
+      "sha256": "26c9ce342d70bd88c66995170e50aa76fd205b37c86af29c123ef5b4111c3d6a"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/owner-approved/01-together-initial.png",
+      "size": 131499,
+      "sha256": "bc2bff70e92b60595bb29cccc1f3d84d3d0d2e61178a6aaee2dd50ba9d2467d8"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/owner-approved/02-together-convergence-1550ms.png",
+      "size": 296671,
+      "sha256": "4b2812fb8af65130feb1088b3d56ea2a3b3b32af9f44e7384fe766ad81a12c7c"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/owner-approved/03-together-contribution-settled.png",
+      "size": 130055,
+      "sha256": "3734b595c69c4c53691415c3b936113b9bdf4305bed28546981fe4da52384969"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/owner-approved/04-together-goal-reached.png",
+      "size": 132300,
+      "sha256": "616baa32e9efdc0596c3ea881974eb2b97074e3d8feb86f1253f570ec0464d79"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/owner-approved/05-together-reduced-motion.png",
+      "size": 130054,
+      "sha256": "9405ed0ff8f39c92d335bf5790e971dfcdfd8f1cba31eb85d14e3f707fe00f8d"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/owner-approved/README.md",
+      "size": 7349,
+      "sha256": "011103a39f825b48bf79efac199dbd057e8fc4cff2632d7dccbc9d2b5dd5addd"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/owner-approved/approved-product.css",
+      "size": 8321,
+      "sha256": "148f6cffb6099f06b52f78e85ad7b1a887fef06f8b97be801b8198624052484f"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/owner-approved/approved-reference.html",
+      "size": 896713,
+      "sha256": "152c7343f7424da4af55d692b790234d610ce3d89544bee2b2cdd891786035de"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/owner-approved/files.json",
+      "size": 1804,
+      "sha256": "c21315f5bf397dc9ee76bd84092defe242535bcd7e8d07f1f0e328e7fe29c6e5"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/owner-approved/portability-qa.json",
+      "size": 3692,
+      "sha256": "27c78ec4f2306b74b60b81f34d6503923c11afc0fd4e32324ce07511a6182197"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/owner-approved/qa-receipt.json",
+      "size": 11091,
+      "sha256": "18860363d389159a6db5a8caa53b066b6fcb23ebd89e83a8d071477efd367ad5"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/owner-approved/together-effect.js",
+      "size": 7062,
+      "sha256": "813210da7416f51027b4f20738a2e266ccd6780ef8eec9dcdcbdf4856bf37c08"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/owner-approved/together-reference-controller.js",
+      "size": 12389,
+      "sha256": "6042f34206d98603cedc9b5e35264ea6869bd6863ebca77ee0ac85b0001e0a5f"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/review/bounded-geometry-and-mask-check.json",
+      "size": 978,
+      "sha256": "1b17d1f152acda3cd6d0094b9d6d3101e0619441fcaff5c78c575dae6b6ce1a2"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/review/hash-verification.json",
+      "size": 4407,
+      "sha256": "c883fb6a2d5b581640ad155f03388f7841d379574e7bbb88a1d83e18e22ab047"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/review/source-review.json",
+      "size": 13012,
+      "sha256": "a6b9227a3d045c5723dbb46710ccc66277382001057c87eda3e35ac7c05852a7"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/review/source-verification.json",
+      "size": 5650,
+      "sha256": "129a169501a26592e811fc4b0811b5406a49d43a3315d7f5994dbe5af0303690"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/review/visual-review.json",
+      "size": 5056,
+      "sha256": "1f3234dada96c79e7a884844ea22c19decd4eb219f479a837da85b4967dae6cb"
+    },
+    {
+      "path": "docs/design-target/references/together-completion-1/review.json",
+      "size": 3825,
+      "sha256": "f364978c4d50bd0d0793a20160cc3ab45e2f1ef8990f959c2edff018026bfe54"
+    }
+  ],
+  "fileInventoryNote": "Inventory excludes this manifest itself; the immutable Git commit binds the manifest and complete tree."
+}

@@ -1,0 +1,342 @@
+[
+  {
+    "mark": {
+      "x": 43,
+      "y": 213,
+      "w": 304,
+      "h": 144.40625,
+      "bottom": 357.40625
+    },
+    "headline": {
+      "x": 24,
+      "y": 377,
+      "w": 342,
+      "h": 62.09375
+    },
+    "gap": 19.59375,
+    "close": {
+      "w": 54,
+      "h": 44,
+      "bottom": 50
+    },
+    "cta": {
+      "w": 342,
+      "h": 46,
+      "bottom": 550
+    },
+    "scrollWidth": 390,
+    "clientWidth": 390,
+    "canvas": 0,
+    "cls": "together-receipt is-static ",
+    "viewport": [
+      390,
+      640
+    ],
+    "file": "ordinary-settled-390x640.png",
+    "consoleErrors": []
+  },
+  {
+    "mark": {
+      "x": 29,
+      "y": 271,
+      "w": 332,
+      "h": 157.703125,
+      "bottom": 428.703125
+    },
+    "headline": {
+      "x": 24,
+      "y": 447,
+      "w": 342,
+      "h": 66.6875
+    },
+    "gap": 18.296875,
+    "close": {
+      "w": 54,
+      "h": 44,
+      "bottom": 57.5
+    },
+    "cta": {
+      "w": 342,
+      "h": 49,
+      "bottom": 645
+    },
+    "scrollWidth": 390,
+    "clientWidth": 390,
+    "canvas": 0,
+    "cls": "together-receipt is-static ",
+    "viewport": [
+      390,
+      844
+    ],
+    "file": "ordinary-settled-390x844.png",
+    "consoleErrors": []
+  },
+  {
+    "mark": {
+      "x": 474,
+      "y": 293,
+      "w": 332,
+      "h": 157.703125,
+      "bottom": 450.703125
+    },
+    "headline": {
+      "x": 449,
+      "y": 469,
+      "w": 382,
+      "h": 66.6875
+    },
+    "gap": 18.296875,
+    "close": {
+      "w": 54,
+      "h": 44,
+      "bottom": 79.5
+    },
+    "cta": {
+      "w": 382,
+      "h": 49,
+      "bottom": 667
+    },
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "canvas": 0,
+    "cls": "together-receipt is-static ",
+    "viewport": [
+      1280,
+      900
+    ],
+    "file": "ordinary-settled-1280x900.png",
+    "consoleErrors": []
+  },
+  {
+    "moving390x844": {
+      "minimumGap": 10.46710205078125,
+      "maximumMarkWidth": 364.966796875,
+      "samples": [
+        {
+          "t": 2910.1999999999534,
+          "markBottom": 426.6840515136719,
+          "markWidth": 323.498779296875,
+          "headlineTop": 447,
+          "gap": 20.315948486328125,
+          "canvas": 1
+        },
+        {
+          "t": 2989.5999999999767,
+          "markBottom": 425.6119384765625,
+          "markWidth": 318.98468017578125,
+          "headlineTop": 447,
+          "gap": 21.3880615234375,
+          "canvas": 1
+        },
+        {
+          "t": 3068.6999999999534,
+          "markBottom": 424.96612548828125,
+          "markWidth": 316.26556396484375,
+          "headlineTop": 447,
+          "gap": 22.03387451171875,
+          "canvas": 1
+        },
+        {
+          "t": 3148.5999999999767,
+          "markBottom": 424.2353820800781,
+          "markWidth": 313.18878173828125,
+          "headlineTop": 447,
+          "gap": 22.764617919921875,
+          "canvas": 1
+        },
+        {
+          "t": 3228.9000000000233,
+          "markBottom": 429.1089782714844,
+          "markWidth": 333.70892333984375,
+          "headlineTop": 447,
+          "gap": 17.891021728515625,
+          "canvas": 1
+        },
+        {
+          "t": 3307.5,
+          "markBottom": 436.53289794921875,
+          "markWidth": 364.966796875,
+          "headlineTop": 447,
+          "gap": 10.46710205078125,
+          "canvas": 1
+        },
+        {
+          "t": 3388.6999999999534,
+          "markBottom": 433.1846923828125,
+          "markWidth": 350.869384765625,
+          "headlineTop": 447,
+          "gap": 13.8153076171875,
+          "canvas": 1
+        },
+        {
+          "t": 3467.0999999999767,
+          "markBottom": 430.8189697265625,
+          "markWidth": 340.90869140625,
+          "headlineTop": 447,
+          "gap": 16.1810302734375,
+          "canvas": 1
+        },
+        {
+          "t": 3545.8000000000466,
+          "markBottom": 428.2152099609375,
+          "markWidth": 329.94573974609375,
+          "headlineTop": 447,
+          "gap": 18.7847900390625,
+          "canvas": 1
+        },
+        {
+          "t": 3625.5999999999767,
+          "markBottom": 428.5962829589844,
+          "markWidth": 331.5501708984375,
+          "headlineTop": 447,
+          "gap": 18.403717041015625,
+          "canvas": 1
+        },
+        {
+          "t": 3707.5,
+          "markBottom": 429.2790222167969,
+          "markWidth": 334.4248046875,
+          "headlineTop": 447,
+          "gap": 17.720977783203125,
+          "canvas": 1
+        },
+        {
+          "t": 3789,
+          "markBottom": 429.87451171875,
+          "markWidth": 336.93212890625,
+          "headlineTop": 447,
+          "gap": 17.12548828125,
+          "canvas": 1
+        },
+        {
+          "t": 3868.9000000000233,
+          "markBottom": 430.0506591796875,
+          "markWidth": 337.67364501953125,
+          "headlineTop": 447,
+          "gap": 16.9493408203125,
+          "canvas": 1
+        },
+        {
+          "t": 3949.5,
+          "markBottom": 429.85675048828125,
+          "markWidth": 336.85723876953125,
+          "headlineTop": 447,
+          "gap": 17.14324951171875,
+          "canvas": 1
+        },
+        {
+          "t": 4029.6999999999534,
+          "markBottom": 429.6868591308594,
+          "markWidth": 336.1419677734375,
+          "headlineTop": 447,
+          "gap": 17.313140869140625,
+          "canvas": 1
+        },
+        {
+          "t": 4111,
+          "markBottom": 429.53826904296875,
+          "markWidth": 335.516357421875,
+          "headlineTop": 447,
+          "gap": 17.46173095703125,
+          "canvas": 1
+        },
+        {
+          "t": 4190.099999999977,
+          "markBottom": 429.40814208984375,
+          "markWidth": 334.96844482421875,
+          "headlineTop": 447,
+          "gap": 17.59185791015625,
+          "canvas": 1
+        },
+        {
+          "t": 4274.599999999977,
+          "markBottom": 429.2942199707031,
+          "markWidth": 334.48876953125,
+          "headlineTop": 447,
+          "gap": 17.705780029296875,
+          "canvas": 1
+        },
+        {
+          "t": 4358,
+          "markBottom": 429.1946105957031,
+          "markWidth": 334.06939697265625,
+          "headlineTop": 447,
+          "gap": 17.805389404296875,
+          "canvas": 1
+        },
+        {
+          "t": 4442.699999999953,
+          "markBottom": 429.1076354980469,
+          "markWidth": 333.7032470703125,
+          "headlineTop": 447,
+          "gap": 17.892364501953125,
+          "canvas": 1
+        },
+        {
+          "t": 4525.800000000047,
+          "markBottom": 429.0321960449219,
+          "markWidth": 333.38543701171875,
+          "headlineTop": 447,
+          "gap": 17.967803955078125,
+          "canvas": 1
+        },
+        {
+          "t": 4608.5,
+          "markBottom": 428.966796875,
+          "markWidth": 333.1102294921875,
+          "headlineTop": 447,
+          "gap": 18.033203125,
+          "canvas": 1
+        },
+        {
+          "t": 4692.5,
+          "markBottom": 428.91070556640625,
+          "markWidth": 332.87396240234375,
+          "headlineTop": 447,
+          "gap": 18.08929443359375,
+          "canvas": 1
+        },
+        {
+          "t": 4776.199999999953,
+          "markBottom": 428.86285400390625,
+          "markWidth": 332.672607421875,
+          "headlineTop": 447,
+          "gap": 18.13714599609375,
+          "canvas": 1
+        },
+        {
+          "t": 4858.699999999953,
+          "markBottom": 428.82257080078125,
+          "markWidth": 332.5029296875,
+          "headlineTop": 447,
+          "gap": 18.17742919921875,
+          "canvas": 1
+        },
+        {
+          "t": 4941,
+          "markBottom": 428.7890625,
+          "markWidth": 332.36187744140625,
+          "headlineTop": 447,
+          "gap": 18.2109375,
+          "canvas": 1
+        },
+        {
+          "t": 5023.400000000023,
+          "markBottom": 428.7618408203125,
+          "markWidth": 332.24725341796875,
+          "headlineTop": 447,
+          "gap": 18.2381591796875,
+          "canvas": 1
+        },
+        {
+          "t": 5102.699999999953,
+          "markBottom": 428.7442626953125,
+          "markWidth": 332.1732177734375,
+          "headlineTop": 447,
+          "gap": 18.2557373046875,
+          "canvas": 1
+        }
+      ]
+    }
+  }
+]

@@ -1,0 +1,146 @@
+{
+  "packet": "TOGETHER-COMPLETION-NORTHSTAR-1",
+  "status": "PROPOSED \u2014 focused acceptance correction",
+  "baselineProductRevision": "d18d3aa3e65b7061598525aa0681760662763f30",
+  "productRevision": "348805fe2fc680b056e02e06047ae775b2abec66",
+  "donor": {
+    "file": "user upload approved-reference.html",
+    "upstreamDeclaredSha256": "388e6ed65333bd0f379247a906d2ad36230426800d2e18dd5c433077e0dba5e0",
+    "uses": "Together-only geometry, mask, CDF, composition and timing"
+  },
+  "fixtures": {
+    "ordinary": "Oak Grove Together / 500 squats together / confirmed boundary 241\u2192261",
+    "crossing": "reviewer near-goal fixture / confirmed boundary 490\u2192510 / verified crossing / still open",
+    "secondMovement": "controlled reviewer fixture / visible 500 push-ups together / confirmed boundary 0\u219212",
+    "reduced": "crossing fixture rendered immediately settled with prefers-reduced-motion"
+  },
+  "evidence": [
+    {
+      "path": "together-completion-evidence/ordinary-settled-390x844.png",
+      "sha256": "8d71c36afca9320c14e290fffaa313a95dbfe4a0c69a3c7931505e6630097405",
+      "bytes": 61329,
+      "base64Path": "together-completion-evidence/ordinary-settled-390x844.png.b64"
+    },
+    {
+      "path": "together-completion-evidence/ordinary-settled-390x640.png",
+      "sha256": "ad0ab30cf154b70e745ed659b41180023138a0ec4f7ffab2ff2f28ccaa044328",
+      "bytes": 57155,
+      "base64Path": "together-completion-evidence/ordinary-settled-390x640.png.b64"
+    },
+    {
+      "path": "together-completion-evidence/ordinary-settled-1280x900.png",
+      "sha256": "475f87f9d02ead686b9bb15263499cdc3b43b72c22c0abf054698d58a5af5702",
+      "bytes": 151546,
+      "base64Path": "together-completion-evidence/ordinary-settled-1280x900.png.b64"
+    },
+    {
+      "path": "together-completion-evidence/ordinary-moving-390x844.png",
+      "sha256": "c85bdceafda1e0e6437cc7587a8d553f7ae2377f9666ced388e9f3155844f642",
+      "bytes": 124021,
+      "base64Path": "together-completion-evidence/ordinary-moving-390x844.png.b64"
+    },
+    {
+      "path": "together-completion-evidence/crossing-settled-390x844.png",
+      "sha256": "2a6300d261bf0db129b940cac65a0cfc1d5a6f3e5d15024d911c4c09987fe3c0",
+      "bytes": 61711,
+      "base64Path": "together-completion-evidence/crossing-settled-390x844.png.b64"
+    },
+    {
+      "path": "together-completion-evidence/pushups-moving-390x844.png",
+      "sha256": "aa13c475477a264092b16e0e05aeefe121ee93789f568ab4a686090dfdca4e2b",
+      "bytes": 113967,
+      "base64Path": "together-completion-evidence/pushups-moving-390x844.png.b64"
+    },
+    {
+      "path": "together-completion-evidence/crossing-reduced-390x844.png",
+      "sha256": "c09cb0183342ed9989ef7f9bca79178c8d76dbb8eeb17964ef8c9302efd98520",
+      "bytes": 61723,
+      "base64Path": "together-completion-evidence/crossing-reduced-390x844.png.b64"
+    },
+    {
+      "path": "together-completion-evidence/together-motion.webm",
+      "sha256": "988a8680df5c0eef5be58465662d57e36b6f2310bf601b4a512cb7608273934d",
+      "bytes": 756043,
+      "base64Path": "together-completion-evidence/together-motion.webm.b64"
+    }
+  ],
+  "browserResults": {
+    "engine": "Playwright Chromium 1.56, headless",
+    "focus": "headline initially focused; Shift+Tab reached Close; Escape closed and returned focus to Start moving",
+    "overflow": "0px at 390\u00d7640, 390\u00d7844, 1280\u00d7900",
+    "reducedMotion": "zero decorative canvases; static settled class",
+    "shareReturn": "static class after return; no replay",
+    "consoleErrors": 0,
+    "responsiveClearance": "settled gaps 19.59px at 390x640 and 18.30px at 390x844/1280x900; measured moving minimum 10.47px at 364.97px maximum transformed mark width; no overlap",
+    "controls": "Close remained 54x44px; primary CTA remained at least 46px high and visible in every corrected frame"
+  },
+  "tests": {
+    "focusedAndRelevant": "10 passed / 22 assertions",
+    "strictTypecheck": "passed",
+    "productionBuild": "passed (preview build log)"
+  },
+  "limitations": [
+    "Chromium simulation only; no Safari, native or physical-device proof.",
+    "Pointer/touch feel and native safe-area hardware are not measured.",
+    "Pending/reload invariants are covered by deterministic reducer/source tests; no service exists in this local-only prototype."
+  ],
+  "sourceDigests": {
+    "src/demo/together.tsx": "fa0621922d3953b57a1d32aa138ae9afa5e49e75fb5b10e331e83814a8f78046",
+    "src/demo/move.tsx": "44f1bf477adfdd893bb225404d16ce19aede5c6f23484c7a72c5034f1bb52df2",
+    "src/demo/store.tsx": "0618541b4697edd714d94cc957b299694c42c30486576cac733f211be21f318f",
+    "src/demo/model.ts": "596f1d4e1f314f14335090114958403e4f997ac1588e84f96a573c6f1ef6b974",
+    "src/styles.css": "26c9ce342d70bd88c66995170e50aa76fd205b37c86af29c123ef5b4111c3d6a",
+    "scripts/together-completion.test.ts": "e4cd383b2bebb995cbb27f85195bad48ff925ff7c7bd2c6498c9dfdf80a7efca"
+  },
+  "evidenceRevision": "Recorded by the managed project commit after this manifest update; intentionally not guessed.",
+  "layoutMeasurements": {
+    "ordinarySettled390x640": {
+      "mark": [
+        43,
+        213,
+        304,
+        144.40625
+      ],
+      "headlineTop": 377,
+      "gapPx": 19.59375
+    },
+    "ordinarySettled390x844": {
+      "mark": [
+        29,
+        271,
+        332,
+        157.703125
+      ],
+      "headlineTop": 447,
+      "gapPx": 18.296875
+    },
+    "ordinarySettled1280x900": {
+      "mark": [
+        474,
+        293,
+        332,
+        157.703125
+      ],
+      "headlineTop": 469,
+      "gapPx": 18.296875
+    },
+    "largestMeasuredMovingMark390x844": {
+      "widthPx": 364.966796875,
+      "minimumGapPx": 10.46710205078125,
+      "overlap": false
+    },
+    "source": "together-completion-evidence/final-layout-results.json"
+  },
+  "assetExports": {
+    "together-mark.png": {
+      "sourceSha256": "dadbdc913083bed4158da7f20bae488c56d484e83dacaf82516dd6ce88bf3982",
+      "base64Path": "together-completion-evidence/together-mark.png.b64",
+      "base64Sha256": "5f73308002b20fd344e785f620f0f9705e732f87d8b91be5efc6d794671429cf"
+    },
+    "together-wordmark.png": {
+      "sourceSha256": "46f2245ee0219e14e12298fe648fed87debb1baf260a2574741875ba2132d517",
+      "base64Path": "together-completion-evidence/together-wordmark.png.b64",
+      "base64Sha256": "efaf9a80a662d6e03c347a567b6eeb1cafc13d6b2f025a28c82237fb49787f4d"
+    }
+  }
+}

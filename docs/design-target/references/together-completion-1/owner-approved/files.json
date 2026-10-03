@@ -1,0 +1,62 @@
+[
+  {
+    "file": "approved-reference.html",
+    "bytes": 896713,
+    "sha256": "152c7343f7424da4af55d692b790234d610ce3d89544bee2b2cdd891786035de"
+  },
+  {
+    "file": "together-effect.js",
+    "bytes": 7062,
+    "sha256": "813210da7416f51027b4f20738a2e266ccd6780ef8eec9dcdcbdf4856bf37c08"
+  },
+  {
+    "file": "approved-product.css",
+    "bytes": 8321,
+    "sha256": "148f6cffb6099f06b52f78e85ad7b1a887fef06f8b97be801b8198624052484f"
+  },
+  {
+    "file": "together-reference-controller.js",
+    "bytes": 12389,
+    "sha256": "6042f34206d98603cedc9b5e35264ea6869bd6863ebca77ee0ac85b0001e0a5f"
+  },
+  {
+    "file": "README.md",
+    "bytes": 7349,
+    "sha256": "011103a39f825b48bf79efac199dbd057e8fc4cff2632d7dccbc9d2b5dd5addd"
+  },
+  {
+    "file": "01-together-initial.png",
+    "bytes": 131499,
+    "sha256": "bc2bff70e92b60595bb29cccc1f3d84d3d0d2e61178a6aaee2dd50ba9d2467d8"
+  },
+  {
+    "file": "02-together-convergence-1550ms.png",
+    "bytes": 296671,
+    "sha256": "4b2812fb8af65130feb1088b3d56ea2a3b3b32af9f44e7384fe766ad81a12c7c"
+  },
+  {
+    "file": "03-together-contribution-settled.png",
+    "bytes": 130055,
+    "sha256": "3734b595c69c4c53691415c3b936113b9bdf4305bed28546981fe4da52384969"
+  },
+  {
+    "file": "04-together-goal-reached.png",
+    "bytes": 132300,
+    "sha256": "616baa32e9efdc0596c3ea881974eb2b97074e3d8feb86f1253f570ec0464d79"
+  },
+  {
+    "file": "05-together-reduced-motion.png",
+    "bytes": 130054,
+    "sha256": "9405ed0ff8f39c92d335bf5790e971dfcdfd8f1cba31eb85d14e3f707fe00f8d"
+  },
+  {
+    "file": "qa-receipt.json",
+    "bytes": 11091,
+    "sha256": "18860363d389159a6db5a8caa53b066b6fcb23ebd89e83a8d071477efd367ad5"
+  },
+  {
+    "file": "portability-qa.json",
+    "bytes": 3692,
+    "sha256": "27c78ec4f2306b74b60b81f34d6503923c11afc0fd4e32324ce07511a6182197"
+  }
+]

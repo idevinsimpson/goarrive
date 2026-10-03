@@ -1,0 +1,43 @@
+{
+  "verdict": "ACCEPTED_DESIGN_REFERENCE",
+  "acceptedLovableSha": "66e53073df1f09ca727454e4186dd301865a8ad1",
+  "acceptedAtUtc": "2026-10-03 03:07:48 UTC",
+  "ownerSelectedDirection": "Together",
+  "sequence": "Lovable implemented first; Director reviewed and recorded its frozen reference before issuing the canonical GitHub packet.",
+  "independentReview": {
+    "source": "review/source-review.json",
+    "visual": "review/visual-review.json",
+    "rootReviewed": "Root inspected the final patch, corrected compact/desktop PNGs, exact source/evidence hashes, and the validated canonical handoff scope."
+  },
+  "resolvedFindings": [
+    "Restored monochrome wordmark, slate/green WE and two-line hierarchy.",
+    "Restored one vertical receipt at desktop and safe compact/desktop spacing.",
+    "Gated direct once-only motion; restored/reconciled/share-return receipts remain static.",
+    "Separated immutable crossing and receipt snapshots from transient animation eligibility.",
+    "Replaced endpoint-height CSS tween with ratio-to-area-CDF tween; reduced preference change permanently settles.",
+    "Restored focus initialization, Tab containment, Escape and existing return behavior.",
+    "Made second movement goal/units truthful; already-reached noncrossing results are static.",
+    "Removed unavailable-snapshot Share action so no invented 0/0 export is reachable."
+  ],
+  "reportedChecks": {
+    "final": "10 focused tests / 22 assertions, typecheck and preview build passed as reported by Lovable.",
+    "prior": "R2 reported 24 relevant tests / 69 assertions; final patch only changed the scoped component, CSS and focused tests.",
+    "directBrowserAccess": "Private preview required a separate browser sign-in. Review used authorized connector source and exported evidence; no direct private-host claim."
+  },
+  "layout": {
+    "settledCompactGapPx": 19.59375,
+    "settledNormalDesktopGapPx": 18.296875,
+    "measuredOrdinaryReboundMinimumGapPx": 10.46710205078125,
+    "crossing113Percent": "Not directly measured. Positive analytic clearance is approximately 10.21px compact and 8.05px normal/desktop, from corrected dimensions and centered scale."
+  },
+  "evidenceProvenance": "The three settled PNGs and final layout results are new final-patch evidence. Ordinary moving, crossing, push-ups, reduced screenshot and motion clip remain exact R2 bytes at d18d3aa3e65b7061598525aa0681760662763f30. They prove retained motion vocabulary and fixture semantics; they do not prove final resized motion geometry.",
+  "assetPortability": "Raw exact PNGs sit beside their original .asset.json descriptors. The descriptors are preserved source evidence with Lovable-relative URLs. asset-map.json resolves portable files; canonical uses its locked derivatives with their matching calibration.",
+  "revisionClarification": "get_project returned final 66e53073df1f09ca727454e4186dd301865a8ad1 with agentFinished=true. Source hashes match. Earlier hashes in implementer prose/manifest are intermediate labels; the outer manifest and Git export commit govern.",
+  "limitations": [
+    "Chromium exported evidence only; no native, Safari/WebKit, physical device, owner-device or production-service acceptance.",
+    "Focused tests are implementer-reported; independent review does not claim a separately rerun full application suite.",
+    "Exact frame scheduling and final 113% crossing clearance are not directly measured; the positive geometry bound is analytic.",
+    "This accepts the design/source donor; independent journey QA and Director acceptance remain required on the canonical implementation."
+  ],
+  "canonicalNext": "Issue TOGETHER-COMPLETION-1 in #365 through one queue decision and subsequent release to W9 inbox #497. The writer App owns the wake. No deploy/publication is part of this handoff."
+}

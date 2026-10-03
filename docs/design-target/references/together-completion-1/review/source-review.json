@@ -1,0 +1,207 @@
+{
+  "verdict": "ACCEPTABLE_DESIGN_REFERENCE",
+  "scope": "Final bounded source acceptance review for the owner-selected Together donor",
+  "projectId": "e15b9fa0-b2a0-4314-bc21-9c573b8eceb1",
+  "inspectedRef": "66e53073df1f09ca727454e4186dd301865a8ad1",
+  "diffBase": "d18d3aa3e65b7061598525aa0681760662763f30",
+  "approvedReferenceSha256": "152c7343f7424da4af55d692b790234d610ce3d89544bee2b2cdd891786035de",
+  "reviewBasis": [
+    "Every newly fetched file and the final diff were pinned to the exact inspectedRef.",
+    "This final patch changes only Together eligibility/Share guards, bounded responsive mark sizing, their focused tests, and evidence/artwork exports.",
+    "Unchanged source was copied byte-for-byte from the verified d18d re-review. The complete final diff establishes those source paths were unchanged; final manifest digests also verify unchanged move/model/store files.",
+    "No broad suite was rerun. The prior source passes are inherited, and only the three remaining blockers plus frozen export hashes/artwork were re-reviewed."
+  ],
+  "remainingBlockers": [],
+  "targetedResults": [
+    {
+      "id": "R2-B1",
+      "status": "PASS_SOURCE",
+      "title": "Already-reached result is static",
+      "evidence": [
+        "src/demo/together.tsx:togetherOutcome",
+        "scripts/together-completion.test.ts:already reached never claims a crossing, closer, or fresh motion",
+        "scripts/together-completion.test.ts:only genuine fresh ordinary and crossing outcomes animate"
+      ],
+      "observation": "The gate is now animate && known && (crossed || !alreadyReached). A noncrossing 515\u2192535 of 500 result is static; fresh ordinary and genuine crossing confirmations remain animated. Static/replayed ordinary and crossing results stay static."
+    },
+    {
+      "id": "R2-B2",
+      "status": "PASS_SOURCE",
+      "title": "Missing shared snapshot cannot enter the numerical Share preview",
+      "evidence": [
+        "src/demo/together.tsx:hasShareableSnapshot",
+        "src/demo/together.tsx:canShare conditional button",
+        "scripts/together-completion.test.ts:share preview is unavailable without a complete valid shared snapshot"
+      ],
+      "observation": "Share requires nonnull before and after plus a positive target, and its button is absent otherwise. The legacy unavailable receipt therefore cannot enter the old 0-of-0 fallback path. Valid frozen snapshots retain Share and static return."
+    },
+    {
+      "id": "R2-B3",
+      "status": "PASS_SOURCE_AND_BOUNDED_GEOMETRY",
+      "title": "Responsive logo and headline clear each other",
+      "evidence": [
+        "src/styles.css:.together-mark",
+        "src/styles.css:max-height700 Together rule",
+        "together-completion-evidence/final-layout-results.json",
+        "bounded-geometry-and-mask-check.json"
+      ],
+      "observation": "Normal/desktop logo width is capped at 332px. Compact width is capped at 304px, top 118px, with headline top 282px. The analytic maximum 113% crossing pulse preserves about 8.04px normal/desktop and 10.20px compact clearance. Supplied browser measurements report ordinary moving clearance of 10.47px and settled gaps of 18.30\u201319.59px.",
+      "qualification": "The 113% crossing clearance is calculated from the exact source bounds, not claimed as an independently measured browser frame. The supplied measured moving sample is the ordinary approximately 110% pulse."
+    }
+  ],
+  "inheritedPasses": [
+    "F1: direct presentation eligibility is ephemeral and tied to the uninterrupted MoveFlow; resumed, away, reloaded and recovered flows cannot inherit it.",
+    "F2: crossing is a frozen receipt fact independent of animate-once state, so a true crossing remains factual after Share return and reconciliation.",
+    "F3: exact before/after/target/status snapshot fields are used for the receipt; missing legacy facts remain unavailable. The final Share guard closes the remaining unavailable-snapshot escape.",
+    "F4: the approved 1450 ms delayed, 700 ms cubic ease-out ratio-to-CDF tween and permanent settlement prevent reduced-motion OFF from replaying or regressing fill; all effect resources are cleaned.",
+    "F5: initial headline focus, keyboard containment, Escape dismissal, share-return focus and shell-origin return are preserved.",
+    "F6: approved Together color, typography, headline breaks, local mask treatment and vertical desktop composition are preserved; final bounded sizing fixes responsive overlap.",
+    "The second-movement fixture now visibly identifies a push-ups goal."
+  ],
+  "frozenExport": {
+    "directory": "/workspace/scratch/001b680545bf/wsf-lovable-review-final/source",
+    "fullDiff": "/workspace/scratch/001b680545bf/wsf-lovable-review-final/full-diff.json",
+    "verification": "/workspace/scratch/001b680545bf/wsf-lovable-review-final/source-verification.json",
+    "implementationFiles": [
+      "src/demo/together.tsx",
+      "src/demo/together-area.ts",
+      "src/demo/move.tsx",
+      "src/demo/model.ts",
+      "src/demo/store.tsx",
+      "src/demo/shell.tsx",
+      "src/demo/ui.tsx",
+      "src/styles.css"
+    ],
+    "focusedTests": "scripts/together-completion.test.ts",
+    "artwork": [
+      "src/assets/together-mark.png",
+      "src/assets/together-wordmark.png",
+      "src/assets/together-mark.png.asset.json",
+      "src/assets/together-wordmark.png.asset.json"
+    ],
+    "artworkBindingNote": "Original Lovable metadata is preserved unchanged for provenance. Raw verified PNGs are also included so the production worker can bind the exact artwork to local app assets instead of relying on Lovable-only /__l5e URLs.",
+    "totalFiles": 20,
+    "declaredSourceDigestsMatched": 6,
+    "rawAndEncodedArtworkDigestsMatched": 4
+  },
+  "calibrationCheck": {
+    "markDimensions": [
+      1282,
+      609
+    ],
+    "wordmarkDimensions": [
+      1182,
+      157
+    ],
+    "cdfEntries": 610,
+    "maximumAbsoluteAlphaAreaRatioDifference": 5.413642518881101e-05,
+    "maximumPercentagePointDifference": 0.005413642518881101,
+    "interpretation": "The exported mark alpha-area distribution is within 0.006 percentage points of the approved raster-derived CDF. No artwork was edited during this review."
+  },
+  "exactLimits": [
+    "This accepts a frozen design/reference donor for the next authorized implementation handoff.",
+    "It is not production, hosted, native, Safari/WebKit, physical-device, or owner-feel acceptance.",
+    "Lovable confirmation and totals remain local synthetic fixtures; its reducer/storage is not production authority.",
+    "The supplied manifest reports 10 focused tests and 22 assertions plus typecheck/build passes. Those are retained as reported validation, not independently rerun here.",
+    "Actual post-confirmation result text and source rules were reviewed; this subtask did not independently replay every full app journey.",
+    "The manifest productRevision is older metadata. The exact inspected head and matching source/asset hashes define this frozen export.",
+    "No external project, repository, deployed service, or application state was changed by this subtask."
+  ],
+  "exactVerifiedHashes": {
+    "project_id": "e15b9fa0-b2a0-4314-bc21-9c573b8eceb1",
+    "inspected_ref": "66e53073df1f09ca727454e4186dd301865a8ad1",
+    "diff_base": "d18d3aa3e65b7061598525aa0681760662763f30",
+    "manifest_product_revision": "348805fe2fc680b056e02e06047ae775b2abec66",
+    "all_manifest_source_hashes_match": true,
+    "verified_source_hashes": {
+      "src/demo/together.tsx": {
+        "actual": "fa0621922d3953b57a1d32aa138ae9afa5e49e75fb5b10e331e83814a8f78046",
+        "manifest": "fa0621922d3953b57a1d32aa138ae9afa5e49e75fb5b10e331e83814a8f78046"
+      },
+      "src/demo/move.tsx": {
+        "actual": "44f1bf477adfdd893bb225404d16ce19aede5c6f23484c7a72c5034f1bb52df2",
+        "manifest": "44f1bf477adfdd893bb225404d16ce19aede5c6f23484c7a72c5034f1bb52df2"
+      },
+      "src/demo/store.tsx": {
+        "actual": "0618541b4697edd714d94cc957b299694c42c30486576cac733f211be21f318f",
+        "manifest": "0618541b4697edd714d94cc957b299694c42c30486576cac733f211be21f318f"
+      },
+      "src/demo/model.ts": {
+        "actual": "596f1d4e1f314f14335090114958403e4f997ac1588e84f96a573c6f1ef6b974",
+        "manifest": "596f1d4e1f314f14335090114958403e4f997ac1588e84f96a573c6f1ef6b974"
+      },
+      "src/styles.css": {
+        "actual": "26c9ce342d70bd88c66995170e50aa76fd205b37c86af29c123ef5b4111c3d6a",
+        "manifest": "26c9ce342d70bd88c66995170e50aa76fd205b37c86af29c123ef5b4111c3d6a"
+      },
+      "scripts/together-completion.test.ts": {
+        "actual": "e4cd383b2bebb995cbb27f85195bad48ff925ff7c7bd2c6498c9dfdf80a7efca",
+        "manifest": "e4cd383b2bebb995cbb27f85195bad48ff925ff7c7bd2c6498c9dfdf80a7efca"
+      }
+    },
+    "inherited_unchanged_files": [
+      "AGENTS.md",
+      "roadmap.md",
+      "together-completion-evidence/lifecycle-results.json",
+      "src/demo/model.ts",
+      "src/demo/shell.tsx",
+      "src/demo/together-area.ts",
+      "src/demo/move.tsx",
+      "src/demo/store.tsx",
+      "src/demo/ui.tsx",
+      "src/assets/together-wordmark.png.asset.json",
+      "src/assets/together-mark.png.asset.json"
+    ],
+    "inheritance_proof": "Exact final-vs-d18d diff changes only three implementation/test source files; all other source paths were copied byte-for-byte from the previously verified d18d export. Final manifest also verifies unchanged move/model/store digests.",
+    "asset_exports": {
+      "together-mark.png": {
+        "encoded_sha256": "5f73308002b20fd344e785f620f0f9705e732f87d8b91be5efc6d794671429cf",
+        "expected_encoded_sha256": "5f73308002b20fd344e785f620f0f9705e732f87d8b91be5efc6d794671429cf",
+        "decoded_sha256": "dadbdc913083bed4158da7f20bae488c56d484e83dacaf82516dd6ce88bf3982",
+        "expected_decoded_sha256": "dadbdc913083bed4158da7f20bae488c56d484e83dacaf82516dd6ce88bf3982",
+        "bytes": 10147,
+        "dimensions": [
+          1282,
+          609
+        ],
+        "mode": "RGBA",
+        "path": "/workspace/scratch/001b680545bf/wsf-lovable-review-final/source/src/assets/together-mark.png"
+      },
+      "together-wordmark.png": {
+        "encoded_sha256": "efaf9a80a662d6e03c347a567b6eeb1cafc13d6b2f025a28c82237fb49787f4d",
+        "expected_encoded_sha256": "efaf9a80a662d6e03c347a567b6eeb1cafc13d6b2f025a28c82237fb49787f4d",
+        "decoded_sha256": "46f2245ee0219e14e12298fe648fed87debb1baf260a2574741875ba2132d517",
+        "expected_decoded_sha256": "46f2245ee0219e14e12298fe648fed87debb1baf260a2574741875ba2132d517",
+        "bytes": 5907,
+        "dimensions": [
+          1182,
+          157
+        ],
+        "mode": "RGBA",
+        "path": "/workspace/scratch/001b680545bf/wsf-lovable-review-final/source/src/assets/together-wordmark.png"
+      }
+    },
+    "complete_export_sha256": {
+      "AGENTS.md": "db5f928703aaa310af54ae127e017b04ec45185d3ef7eaa5350bd4628cd20691",
+      "together-completion-northstar-1.json": "f7fb27147570c358b8123a54b4bb6e55fb7fefb39affbb8cdf9b915b09e8e52b",
+      "roadmap.md": "b6761f6983231b9795b6bc3800ee183d61291468d5c7ef89aa7dbe20e58a6b37",
+      "scripts/together-completion.test.ts": "e4cd383b2bebb995cbb27f85195bad48ff925ff7c7bd2c6498c9dfdf80a7efca",
+      "src/styles.css": "26c9ce342d70bd88c66995170e50aa76fd205b37c86af29c123ef5b4111c3d6a",
+      "together-completion-evidence/together-mark.png.b64": "5f73308002b20fd344e785f620f0f9705e732f87d8b91be5efc6d794671429cf",
+      "together-completion-evidence/final-layout-results.json": "d8421bbe355f5e39812b4e1504ab5bddaaf0408e60d9ecf5953584fab6437a29",
+      "together-completion-evidence/lifecycle-results.json": "6bc87d701a5334a8b30b0f4918cd6f15d8d341834ce194ccedaf5ea99eaff59a",
+      "together-completion-evidence/together-wordmark.png.b64": "efaf9a80a662d6e03c347a567b6eeb1cafc13d6b2f025a28c82237fb49787f4d",
+      "src/demo/model.ts": "596f1d4e1f314f14335090114958403e4f997ac1588e84f96a573c6f1ef6b974",
+      "src/demo/shell.tsx": "c63017100d1a5c92a3e246b593aacbd35f892c2da7f4753d89b59438a6687b35",
+      "src/demo/together-area.ts": "d5fa6ac9c27f9f5cf53b501edf48e34c9fe8933bbc083664b82a4e0db0a1f5c9",
+      "src/demo/move.tsx": "44f1bf477adfdd893bb225404d16ce19aede5c6f23484c7a72c5034f1bb52df2",
+      "src/demo/together.tsx": "fa0621922d3953b57a1d32aa138ae9afa5e49e75fb5b10e331e83814a8f78046",
+      "src/demo/store.tsx": "0618541b4697edd714d94cc957b299694c42c30486576cac733f211be21f318f",
+      "src/demo/ui.tsx": "c7a8511e1855becfa5830ad8a1f3a0df7671a032bb7eb16fd7c00a70e10d0a37",
+      "src/assets/together-mark.png": "dadbdc913083bed4158da7f20bae488c56d484e83dacaf82516dd6ce88bf3982",
+      "src/assets/together-wordmark.png.asset.json": "b850f029ef01e927ce92a2ed75650e8cb81a2916b03f9093b0fd4dad21be1d3a",
+      "src/assets/together-wordmark.png": "46f2245ee0219e14e12298fe648fed87debb1baf260a2574741875ba2132d517",
+      "src/assets/together-mark.png.asset.json": "65ffc6deeff44ee817e2de8e02599a222c0891d5416c6e095025b3ca6729d67d"
+    }
+  }
+}

@@ -1,0 +1,95 @@
+{
+  "fetchedManifestCommit": "66e53073df1f09ca727454e4186dd301865a8ad1",
+  "files": [
+    {
+      "file": "ordinary-settled-390x844.png",
+      "bytes": 61329,
+      "sha256": "8d71c36afca9320c14e290fffaa313a95dbfe4a0c69a3c7931505e6630097405",
+      "matchesCurrentManifestHashAndSize": true,
+      "provenance": "Fetched at final ref 66e53073df1f09ca727454e4186dd301865a8ad1",
+      "recapturedForFinalLayout": true
+    },
+    {
+      "file": "ordinary-settled-390x640.png",
+      "bytes": 57155,
+      "sha256": "ad0ab30cf154b70e745ed659b41180023138a0ec4f7ffab2ff2f28ccaa044328",
+      "matchesCurrentManifestHashAndSize": true,
+      "provenance": "Fetched at final ref 66e53073df1f09ca727454e4186dd301865a8ad1",
+      "recapturedForFinalLayout": true
+    },
+    {
+      "file": "ordinary-settled-1280x900.png",
+      "bytes": 151546,
+      "sha256": "475f87f9d02ead686b9bb15263499cdc3b43b72c22c0abf054698d58a5af5702",
+      "matchesCurrentManifestHashAndSize": true,
+      "provenance": "Fetched at final ref 66e53073df1f09ca727454e4186dd301865a8ad1",
+      "recapturedForFinalLayout": true
+    },
+    {
+      "file": "ordinary-moving-390x844.png",
+      "bytes": 124021,
+      "sha256": "c85bdceafda1e0e6437cc7587a8d553f7ae2377f9666ced388e9f3155844f642",
+      "matchesCurrentManifestHashAndSize": true,
+      "provenance": "Unchanged R2 capture previously fetched at d18d3aa3e65b7061598525aa0681760662763f30; reused and matched final manifest hash/size",
+      "recapturedForFinalLayout": false
+    },
+    {
+      "file": "crossing-settled-390x844.png",
+      "bytes": 61711,
+      "sha256": "2a6300d261bf0db129b940cac65a0cfc1d5a6f3e5d15024d911c4c09987fe3c0",
+      "matchesCurrentManifestHashAndSize": true,
+      "provenance": "Unchanged R2 capture previously fetched at d18d3aa3e65b7061598525aa0681760662763f30; reused and matched final manifest hash/size",
+      "recapturedForFinalLayout": false
+    },
+    {
+      "file": "pushups-moving-390x844.png",
+      "bytes": 113967,
+      "sha256": "aa13c475477a264092b16e0e05aeefe121ee93789f568ab4a686090dfdca4e2b",
+      "matchesCurrentManifestHashAndSize": true,
+      "provenance": "Unchanged R2 capture previously fetched at d18d3aa3e65b7061598525aa0681760662763f30; reused and matched final manifest hash/size",
+      "recapturedForFinalLayout": false
+    },
+    {
+      "file": "crossing-reduced-390x844.png",
+      "bytes": 61723,
+      "sha256": "c09cb0183342ed9989ef7f9bca79178c8d76dbb8eeb17964ef8c9302efd98520",
+      "matchesCurrentManifestHashAndSize": true,
+      "provenance": "Unchanged R2 capture previously fetched at d18d3aa3e65b7061598525aa0681760662763f30; reused and matched final manifest hash/size",
+      "recapturedForFinalLayout": false
+    },
+    {
+      "file": "together-motion.webm",
+      "bytes": 756043,
+      "sha256": "988a8680df5c0eef5be58465662d57e36b6f2310bf601b4a512cb7608273934d",
+      "matchesCurrentManifestHashAndSize": true,
+      "provenance": "Unchanged R2 capture previously fetched at d18d3aa3e65b7061598525aa0681760662763f30; reused and matched final manifest hash/size",
+      "recapturedForFinalLayout": false
+    }
+  ],
+  "allEvidenceMatches": true,
+  "layoutMeasurements": {
+    "file": "final-layout-results.json",
+    "sha256": "d8421bbe355f5e39812b4e1504ab5bddaaf0408e60d9ecf5953584fab6437a29",
+    "provenance": "Fetched at final ref; manifest names this file but does not declare its digest."
+  },
+  "artworkVerification": [
+    {
+      "file": "together-mark.png",
+      "bytes": 10147,
+      "sha256": "dadbdc913083bed4158da7f20bae488c56d484e83dacaf82516dd6ce88bf3982",
+      "base64Sha256": "5f73308002b20fd344e785f620f0f9705e732f87d8b91be5efc6d794671429cf",
+      "sourceAndBase64HashesMatchManifest": true,
+      "fetchedAtCommit": "66e53073df1f09ca727454e4186dd301865a8ad1",
+      "fetchVerificationBy": "Parallel source reviewer; raw bytes rechecked and copied into complete evidence here."
+    },
+    {
+      "file": "together-wordmark.png",
+      "bytes": 5907,
+      "sha256": "46f2245ee0219e14e12298fe648fed87debb1baf260a2574741875ba2132d517",
+      "base64Sha256": "efaf9a80a662d6e03c347a567b6eeb1cafc13d6b2f025a28c82237fb49787f4d",
+      "sourceAndBase64HashesMatchManifest": true,
+      "fetchedAtCommit": "66e53073df1f09ca727454e4186dd301865a8ad1",
+      "fetchVerificationBy": "Parallel source reviewer; raw bytes rechecked and copied into complete evidence here."
+    }
+  ]
+}

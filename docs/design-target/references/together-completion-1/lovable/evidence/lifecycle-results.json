@@ -1,0 +1,8 @@
+{
+  "engine": "Playwright Chromium 1.56, headless",
+  "focus": "headline initially focused; Shift+Tab reached Close; Escape closed and returned focus to Start moving",
+  "overflow": "0px at 390\u00d7640, 390\u00d7844, 1280\u00d7900",
+  "reducedMotion": "zero decorative canvases; static settled class",
+  "shareReturn": "static class after return; no replay",
+  "consoleErrors": 0
+}

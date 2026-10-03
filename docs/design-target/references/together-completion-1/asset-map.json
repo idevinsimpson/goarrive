@@ -1,0 +1,19 @@
+{
+  "purpose": "Portable byte mapping for the preserved Lovable-relative asset descriptors. Canonical ports reuse locked owner assets and their own calibration.",
+  "assets": [
+    {
+      "descriptor": "lovable/source/src/assets/together-mark.png.asset.json",
+      "portableFile": "lovable/source/src/assets/together-mark.png",
+      "width": 1282,
+      "height": 609,
+      "sha256": "dadbdc913083bed4158da7f20bae488c56d484e83dacaf82516dd6ce88bf3982"
+    },
+    {
+      "descriptor": "lovable/source/src/assets/together-wordmark.png.asset.json",
+      "portableFile": "lovable/source/src/assets/together-wordmark.png",
+      "width": 1182,
+      "height": 157,
+      "sha256": "46f2245ee0219e14e12298fe648fed87debb1baf260a2574741875ba2132d517"
+    }
+  ]
+}

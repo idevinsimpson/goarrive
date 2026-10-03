@@ -1,0 +1,32 @@
+{
+  "source_ref": "66e53073df1f09ca727454e4186dd301865a8ad1",
+  "artworkAlphaCdf": {
+    "rows": 610,
+    "maxAbsoluteRatioDifference": 5.413642518881101e-05,
+    "interpretation": "Numerical difference from approved 8-decimal CDF; no artwork modifications."
+  },
+  "geometry": [
+    {
+      "case": "normal_desktop",
+      "width": 332,
+      "height": 157.71294851794073,
+      "settled_gap": 18.28705148205927,
+      "ordinary_peak_scale": 1.1,
+      "ordinary_peak_gap": 10.401404056162221,
+      "crossing_peak_scale": 1.13,
+      "crossing_peak_gap": 8.035709828393124,
+      "analytic_not_browser_measurement": true
+    },
+    {
+      "case": "compact",
+      "width": 304,
+      "height": 144.41185647425897,
+      "settled_gap": 19.58814352574103,
+      "ordinary_peak_scale": 1.1,
+      "ordinary_peak_gap": 12.367550702028069,
+      "crossing_peak_scale": 1.13,
+      "crossing_peak_gap": 10.201372854914212,
+      "analytic_not_browser_measurement": true
+    }
+  ]
+}

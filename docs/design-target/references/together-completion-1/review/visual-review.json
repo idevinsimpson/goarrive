@@ -1,0 +1,111 @@
+{
+  "verdict": "ACCEPTABLE_DESIGN_REFERENCE",
+  "acceptedVisualCommit": "66e53073df1f09ca727454e4186dd301865a8ad1",
+  "projectId": "e15b9fa0-b2a0-4314-bc21-9c573b8eceb1",
+  "scope": "Together completion design reference, source-bound exported Chromium evidence. No private-preview, native, physical-device or production-service verification is claimed.",
+  "allPriorMaterialVisualBlockersResolved": true,
+  "remainingMaterialVisualBlockers": [],
+  "newlyFetchedFinalEvidence": [
+    "ordinary-settled-390x640.png",
+    "ordinary-settled-390x844.png",
+    "ordinary-settled-1280x900.png",
+    "final-layout-results.json",
+    "together-mark.png",
+    "together-wordmark.png"
+  ],
+  "evidenceHashVerification": {
+    "record": "hash-verification.json",
+    "all8ManifestEvidenceSha256AndByteSizesMatch": true,
+    "bothArtworkBinaryAndBase64DigestsMatchManifest": true
+  },
+  "visualFindings": [
+    "Compact 390\u00d7640 settled WE and headline are now clearly separated; all controls remain visible.",
+    "Tall 390\u00d7844 and desktop 1280\u00d7900 preserve the selected vertical amount \u2192 WE \u2192 two-line payoff \u2192 exact totals \u2192 action composition.",
+    "Monochrome wordmark, slate unfilled WE, correct green fill and bold centered payoff are retained.",
+    "Three new ordinary receipts remain numerically consistent at 241 \u2192 261 of 500 and 52.2%."
+  ],
+  "settledClearance": {
+    "evidence": "final-layout-results.json",
+    "390x640": {
+      "markWidthPx": 304,
+      "markHeightPx": 144.40625,
+      "gapPx": 19.59375
+    },
+    "390x844": {
+      "markWidthPx": 332,
+      "markHeightPx": 157.703125,
+      "gapPx": 18.296875
+    },
+    "1280x900": {
+      "markWidthPx": 332,
+      "markHeightPx": 157.703125,
+      "gapPx": 18.296875
+    },
+    "status": "Exported browser measurements read and checked against visible corrected screenshots; not measured by a new independent browser run."
+  },
+  "movingClearance": {
+    "measuredOrdinary390x844": {
+      "maximumMarkWidthPx": 364.966796875,
+      "baseWidthPx": 332,
+      "observedScale": 1.0992975809487953,
+      "minimumGapPx": 10.46710205078125,
+      "meaning": "Measured ordinary contribution rebound near 110% scale; this is not measured 113% crossing clearance."
+    },
+    "crossing113PercentAnalyticBound": {
+      "normalAndDesktopGapPx": 8.046171874999999,
+      "compactGapPx": 10.20734375,
+      "method": "For centered scale, remaining gap = settled gap \u2212 intrinsic mark height \u00d7 0.13 / 2. Uses final source geometry and maximum crossing scale 1.13.",
+      "status": "Analytic positive-clearance bound; no crossing peak was newly captured or claimed measured."
+    }
+  },
+  "controls": {
+    "close": "54\u00d744px in exported measurements",
+    "primaryCta": "46px high compact, 49px normal/desktop; visible",
+    "horizontalOverflow": "Zero in supplied measurements at all three viewports"
+  },
+  "reusedEvidenceProvenance": {
+    "originCommit": "d18d3aa3e65b7061598525aa0681760662763f30",
+    "files": [
+      "ordinary-moving-390x844.png",
+      "crossing-settled-390x844.png",
+      "pushups-moving-390x844.png",
+      "crossing-reduced-390x844.png",
+      "together-motion.webm"
+    ],
+    "binding": "Previously fetched and independently hash-verified in R2; copied without alteration and matched to the final manifest hashes and byte sizes.",
+    "notRecapturedForFinalLayout": true,
+    "scope": "Supports unchanged motion vocabulary and receipt variants; does not assert those pixels depict the final responsive geometry. New final screenshots and layout measurements carry final geometry proof."
+  },
+  "retainedClip": {
+    "file": "together-motion.webm",
+    "sha256": "988a8680df5c0eef5be58465662d57e36b6f2310bf601b4a512cb7608273934d",
+    "durationSeconds": 7.88,
+    "codec": "VP8",
+    "viewport": "390\u00d7844",
+    "fps": 25,
+    "actualScope": "R2 reviewer near-goal setup, entry of 20 squats, simulated confirmation, and fresh 490\u2192510 crossing celebration.",
+    "observations": "Inward gathering around 4.4s, rebound/outward rings around 5.6s, settled result around 6.8s. This clip was retained, not recaptured after the final layout changes."
+  },
+  "artwork": {
+    "together-mark.png": {
+      "dimensions": "1282\u00d7609 RGBA",
+      "bytes": 10147,
+      "sha256": "dadbdc913083bed4158da7f20bae488c56d484e83dacaf82516dd6ce88bf3982"
+    },
+    "together-wordmark.png": {
+      "dimensions": "1182\u00d7157 RGBA",
+      "bytes": 5907,
+      "sha256": "46f2245ee0219e14e12298fe648fed87debb1baf260a2574741875ba2132d517"
+    }
+  },
+  "reportedFocusedChecks": {
+    "tests": "10 passed / 22 assertions",
+    "typecheck": "passed",
+    "previewBuild": "passed per manifest",
+    "independentlyRerunByVisualReviewer": false
+  },
+  "separateAcceptanceStates": [
+    "Source eligibility and lifecycle gates are covered by the parallel source review.",
+    "This decision accepts the design reference; it does not claim server confirmation, hosted verification, device verification or owner device acceptance."
+  ]
+}

@@ -1,0 +1,16 @@
+<!-- LOVABLE:BEGIN -->
+> [!IMPORTANT]
+> This project is connected to [Lovable](https://lovable.dev). Avoid rewriting
+> published git history — force pushing, or rebasing/amending/squashing commits
+> that are already pushed — as it rewrites history on Lovable's side and the
+> user will likely lose their project history.
+>
+> Commits you push to the connected branch sync back to Lovable and show up in
+> the editor, so keep the branch in a working state.
+<!-- LOVABLE:END -->
+
+- Local goals store stable movement keys; pre-submit movement changes clear entered counts, and attempts copy one allowed key so recovery and receipts never infer or relabel movement. Legacy records without keys remain squats.
+- Goal count types (reps/steps/laps/custom) never share a goal; custom units are keyed by exact trimmed text; attempts copy the custom unit so identity is frozen.
+- Goal eligibility (status, exact startsAt/endsAt window judged at submit time, once-per-member policy) lives in model `eligibility()` and is re-checked at the simulated ledger commit; absent repeat = multiple, unknown = once.
+- You leads with selected-community belonging and confirmed own-vs-shared goal facts; per-community privacy controls live only in Settings.
+- Fresh direct confirmations may present Together motion once; recovery, reload, duplicate, or history receipts stay static because visual celebration never establishes ledger truth.
