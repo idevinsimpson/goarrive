@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=1643a9a2a8cdca2964c042e3cd8f6eda8c7388ec7eac6fe3227c52bdde585d5b events=293 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=ea0c8b61b587d2b34e717aaf7861f462549692553a877b8b109b1ed56ca51a04 events=295 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `1643a9a2a8cdca2964c042e3cd8f6eda8c7388ec7eac6fe3227c52bdde585d5b` (293 events)
+- Ledger head: `ea0c8b61b587d2b34e717aaf7861f462549692553a877b8b109b1ed56ca51a04` (295 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -103,6 +103,6 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | 95ba0af09ab9 | W9 | EXPO-ATTENDEE-JOURNEY-PROOF-1 | release | acked | 5963032791 | comment:5963036221 |
 | b5114d452723 | W4 | EXPO-ATTENDEE-JOURNEY-PROOF-1 | review | acked | 5963431384 | comment:5963446733 |
 | 72a007ddbcca | W3 | EXPO-ACCOUNT-ENTRY-1-STAGING-PIN | release | acked | 5963513342 | comment:5963516349 |
-| 8f948e13771d | W4 | WORKER-EXECUTION-PROFILES-1 | review | requested | — | — |
-| d40fde353cb7 | W9 | WORKER-EXECUTION-PROFILES-1 | review | requested | — | — |
+| 8f948e13771d | W4 | WORKER-EXECUTION-PROFILES-1 | review | delivered | 5963533867 | — |
+| d40fde353cb7 | W9 | WORKER-EXECUTION-PROFILES-1 | review | delivered | 5963534021 | — |
 
