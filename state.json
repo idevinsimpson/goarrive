@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "4d204a4e5f69f04bd04c5151a7ded94bd4237d73305cb39c434cc6d1843bd3ce",
-  "eventCount": 314,
+  "ledgerHead": "ae11b4e4a30f75cd87cd24d59529ef44360974c69f624bc80479fb8428850193",
+  "eventCount": 317,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -624,15 +624,17 @@
       },
       "label": "Replace station vendor error text with existing product-safe callable wording without changing retry truth",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
-      "pr": null,
-      "reviewers": [],
+      "pr": 564,
+      "reviewers": [
+        "W4"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "1d290f74b88a9ba05619c7d1d9c15e51ef01ad11",
+        "prHeadSha": "1d290f74b88a9ba05619c7d1d9c15e51ef01ad11",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -657,7 +659,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5963632669
+          "id": 5963721600
         }
       },
       "review": {
@@ -670,7 +672,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "KIOSK-PAIRING-CLARITY-PROOF-1": {
@@ -1990,7 +1992,8 @@
       "ack": {
         "kind": "comment",
         "id": 5963632669
-      }
+      },
+      "superseded": true
     },
     "acde5e63767d618642f83c8c907ca636b73fb27139c1a100b4a81ea0840ad60d": {
       "packet": "STAGING-PIN-FASTPATH-SERVED-BASELINE-1",
@@ -2004,6 +2007,14 @@
         "kind": "comment",
         "id": 5963685160
       }
+    },
+    "88c6283835fa1dce4aac808e9463ad17343b1a05ee80167900d1c884593c669c": {
+      "packet": "EXPO-STATION-LOST-ANSWER-COPY-1",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
