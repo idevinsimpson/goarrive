@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "82904ffb618912f9470b87029d516b86cb153438dc2f4c9cda2031600ad8e113",
-  "eventCount": 452,
+  "ledgerHead": "f759f18e5b03b3eae3993b37442ac87bbff55a5e4dc261ea75caa64e2b641f81",
+  "eventCount": 453,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2595,11 +2595,14 @@
       "packet": "EXPO-CLOSED-GOAL-QUEUE-GATE-1",
       "worker": "W4",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         5968552774
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 5968577994
+      }
     }
   },
   "fastpath": {
