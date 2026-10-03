@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=cb01ff2664c76d0c14912eee4c341c063b0cef203fa3ffb508c33400aead2031 events=426 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=8259cd366b8204e0358427cd6e291fabe1fcba1b2b48e348470ee17796788ed3 events=427 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `cb01ff2664c76d0c14912eee4c341c063b0cef203fa3ffb508c33400aead2031` (426 events)
+- Ledger head: `8259cd366b8204e0358427cd6e291fabe1fcba1b2b48e348470ee17796788ed3` (427 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -128,6 +128,6 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | 8b8734ebce12 | W9 | EMAIL-STAGING-REPAIR | review | acked | 5965480450 | comment:5965498912 |
 | 15a2ece9e520 | W9 | TOGETHER-COMPLETION-1 | handback | acked | 5965574494 | comment:5965578661 |
 | dbef9def72f2 | W4 | EXPO-ATTENDEE-HOSTED-DRIVERS-1 | review | acked | 5965831025 | comment:5965836487 |
-| ad6a58e5d240 | W7 | TOGETHER-COMPLETION-1 | review | redelivered | 5965852256, 5965986986 | — |
+| ad6a58e5d240 | W7 | TOGETHER-COMPLETION-1 | review | timed-out (wake-undelivered) | 5965852256, 5965986986 | — |
 | 5237c5bb6ba2 | W3 | EMAIL-STAGING-REPAIR-STAGING-PIN | release | acked | 5965892101 | comment:5965893676 |
 
