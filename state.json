@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "f61df8ebbcf24b00c1b3717977398951ef7e29eeda6cfa2e16e337871a9924f6",
-  "eventCount": 438,
+  "ledgerHead": "71a1ef27c37b39826c405e107ee8d5738650d1ff3969a186d9725778780c0caa",
+  "eventCount": 440,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1397,7 +1397,9 @@
       "proof": null,
       "served": null,
       "releasedQueueIndex": null,
-      "reviewedBy": [],
+      "reviewedBy": [
+        "W4"
+      ],
       "subjectPaths": [
         "apps/westayfit/app/contribute/[goalId].tsx",
         "apps/westayfit/src/contributionFlow.ts",
@@ -1424,7 +1426,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5966699246
+          "id": 5966771353
         }
       },
       "review": {
@@ -2500,11 +2502,15 @@
       "packet": "TOGETHER-COMPLETION-1",
       "worker": "W4",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         5966716452
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 5966720423
+      },
+      "superseded": true
     }
   },
   "fastpath": {
