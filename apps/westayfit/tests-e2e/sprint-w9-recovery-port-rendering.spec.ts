@@ -202,7 +202,11 @@ test.describe('RECOVERY-PORT-1 · the ported recovery states', () => {
     expect(Number(member.total?.integerValue ?? 0), 'counted other than once').toBe(20);
   });
 
-  test('receipt: the member’s own numbers before the community’s, and the way back is the green action', async ({ page }) => {
+  // TOGETHER-COMPLETION-1 (Director scope delta #497 5965771172): the owner-selected
+  // Together hierarchy and palette supersede RECOVERY-PORT-1's receipt order and
+  // fills. Same strength: every probe present and strictly in order, exact own
+  // credit, exact computed fills for both actions.
+  test('receipt: the Together hierarchy — amount, WE, payoff, shared total, own credit, standing, then the green way back', async ({ page }) => {
     test.setTimeout(180_000);
     const fx = await seed('r');
     const { ready } = routeContribute(page);
@@ -215,28 +219,45 @@ test.describe('RECOVERY-PORT-1 · the ported recovery states', () => {
 
     const order = await orderOf(page, 'wsf-contribute-receipt', [
       { text: 'Recorded' },
-      { id: 'wsf-contribute-result-headline' },
-      { id: 'wsf-contribute-result-subline' },
       { id: 'wsf-contribute-result-amount' },
-      { id: 'wsf-contribute-own-credit' },
+      { id: 'wsf-contribute-result-headline' },
       { id: 'wsf-contribute-we' },
+      { id: 'wsf-contribute-result-subline' },
       { id: 'wsf-contribute-shared-total' },
       { id: 'wsf-contribute-percent' },
       { id: 'wsf-contribute-status' },
+      { id: 'wsf-contribute-own-credit' },
       { id: 'wsf-contribute-result-standing' },
+      { id: 'wsf-contribute-back' },
+      { id: 'wsf-contribute-record-more' },
     ]);
-    expect(ascending(order), `receipt: not in the reference's order (${order.join(', ')})`).toBe(true);
+    expect(ascending(order), `receipt: not in the Together order (${order.join(', ')})`).toBe(true);
     await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText('Your total on this goal: 20 squats');
 
     const fills = await page.evaluate(() => {
+      const el = (id: string) => document.querySelector(`[data-testid="${id}"]`) as HTMLElement | null;
       const bg = (id: string) => {
-        const el = document.querySelector(`[data-testid="${id}"]`) as HTMLElement | null;
-        return el ? getComputedStyle(el).backgroundColor : null;
+        const e = el(id);
+        return e ? getComputedStyle(e).backgroundColor : null;
       };
-      return { back: bg('wsf-contribute-back'), more: bg('wsf-contribute-record-more') };
+      const ink = (id: string) => {
+        const e = el(id);
+        const leaf = e ? (Array.from(e.querySelectorAll('*')).find((n) => n.children.length === 0 && (n.textContent ?? '').trim()) as HTMLElement | undefined) ?? e : null;
+        return leaf ? getComputedStyle(leaf).color : null;
+      };
+      return {
+        back: bg('wsf-contribute-back'),
+        backInk: ink('wsf-contribute-back'),
+        more: bg('wsf-contribute-record-more'),
+        moreInk: ink('wsf-contribute-record-more'),
+      };
     });
-    expect(fills.back, 'the way back is not the green action').toBe('rgb(34, 197, 94)');
-    expect(fills.more, 'record-more is not the outlined one').toBe('rgb(255, 255, 255)');
+    // Together primary: #91CB7D fill, #091B30 ink.
+    expect(fills.back, 'the way back is not the Together green action').toBe('rgb(145, 203, 125)');
+    expect(fills.backInk, 'the way back does not carry the Together ink').toBe('rgb(9, 27, 48)');
+    // Together secondary: unfilled, muted #ADC0D7 text.
+    expect(fills.more, 'record-more is not the unfilled secondary').toBe('rgba(0, 0, 0, 0)');
+    expect(fills.moreInk, 'record-more is not the muted secondary text').toBe('rgb(173, 192, 215)');
   });
 
   test('review: Edit and the green Record side by side, nothing written first', async ({ page }) => {

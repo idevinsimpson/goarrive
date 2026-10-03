@@ -35,6 +35,7 @@ import {
   resultCopy,
   resultVariant,
   stepEntry,
+  togetherPresentation,
   type RefusalReason,
   type RepeatPolicy,
 } from '../../src/contributionFlow';
@@ -79,6 +80,8 @@ import { PROGRESS_GREEN } from '../../src/ui/brandAssets';
 import { ButtonLink } from '../../src/ui/ButtonLink';
 import { formatClock } from '../../src/ui/dates';
 import { LivingWeProgress } from '../../src/ui/LivingWeProgress';
+import { TogetherCompletion } from '../../src/ui/TogetherCompletion';
+import { TOGETHER_COLORS } from '../../src/ui/togetherMotion';
 import {
   fillRatio,
   formatCount,
@@ -547,6 +550,17 @@ export default function ContributeToGoal() {
   // result reads it to tell "our goal is reached" from "we were already past
   // it"; it never produces a member-specific crossing claim.
   const sharedBeforeRef = useRef<number | null>(null);
+  // The target that confirmed total was measured against. A before is only a
+  // reliable snapshot for the Together tween when it belongs to the SAME target.
+  const beforeTargetRef = useRef<number | null>(null);
+  /**
+   * TOGETHER-COMPLETION-1: the attempt whose confirmed receipt may play the
+   * one-time Together motion. Set ONLY when the first confirmed answer to a
+   * Record pressed in this uninterrupted flow is applied; consumed by the
+   * receipt the moment it appears. Never stored, never restored on reload or
+   * reconcile, and cleared with every context change.
+   */
+  const [freshAttempt, setFreshAttempt] = useState<string | null>(null);
 
   // Optional timer on the movement screen. It measures nothing the app
   // records; it is a stopwatch for the member's own reference.
@@ -595,6 +609,8 @@ export default function ContributeToGoal() {
     setLegacyOrphan(null);
     setRefusal(null);
     sharedBeforeRef.current = null;
+    beforeTargetRef.current = null;
+    setFreshAttempt(null);
     setEntry('');
     setEntryError(null);
     setReviewCount(null);
@@ -873,7 +889,7 @@ export default function ContributeToGoal() {
   }, [timerRunning, onTimerPause]);
 
   const sendContribute = useCallback(
-    async (attemptId: string, count: number) => {
+    async (attemptId: string, count: number, fresh = false) => {
       // The full context this request belongs to: account, goal AND
       // generation. Captured now, compared when the response lands.
       const owner = identityRef.current;
@@ -912,6 +928,10 @@ export default function ContributeToGoal() {
       clearPendingIfAttempt(goalId as string, owner, attemptId);
       setPending(null);
       setLastResult(data);
+      // Applied in the same batch as the receipt, so the receipt mounts already
+      // knowing whether it may move. A replay of an attempt that had landed
+      // (`alreadyRecorded`) is never fresh.
+      setFreshAttempt(fresh && !data.alreadyRecorded ? attemptId : null);
       // PACKAGE E: the shared-state fields come back only when the caller is
       // still authorized to see them. A caller who lost membership mid-session
       // and replays a landed attempt gets the server's own-only receipt: the
@@ -990,6 +1010,8 @@ export default function ContributeToGoal() {
     attemptRef.current = null;
     inFlightRef.current = false;
     sharedBeforeRef.current = null;
+    beforeTargetRef.current = null;
+    setFreshAttempt(null);
     setLastResult(null);
     setRefusal(null);
     setEntry('');
@@ -1013,6 +1035,7 @@ export default function ContributeToGoal() {
     setEntryError(null);
     setSubmitting(true);
     sharedBeforeRef.current = state.pulse.sharedTotal;
+    beforeTargetRef.current = state.pulse.target;
 
     if (!attemptRef.current) attemptRef.current = takeRoundAttemptId() ?? mintAttemptId();
     const attemptId = attemptRef.current;
@@ -1044,7 +1067,9 @@ export default function ContributeToGoal() {
       );
 
     try {
-      await sendContribute(attemptId, count);
+      // The ONE path that can produce a fresh receipt: the first confirmed
+      // answer to this Record, in this uninterrupted flow.
+      await sendContribute(attemptId, count, true);
     } catch (e) {
       const failure = classifyContributeError(e);
       if (failure.kind === 'refused') {
@@ -1095,6 +1120,7 @@ export default function ContributeToGoal() {
     // answer, and contributionFlow lets it fall to `reached`, which is true
     // whenever the confirmed total the server returns is at or beyond target.
     sharedBeforeRef.current = null;
+    beforeTargetRef.current = null;
     const generation = generationRef.current;
     const owner = uid as string;
     const startedGoal = goalId;
@@ -1329,7 +1355,7 @@ export default function ContributeToGoal() {
   // and a step that replaces the member's step re-orients focus inside it.
   useSheetFocusContainment(sheetPanelRef, asSheet, asSheet ? renderedPhase : null);
 
-  const renderChrome = (showBack: boolean, tone: 'light' | 'dark' = 'light') =>
+  const renderChrome = (showBack: boolean, tone: 'light' | 'dark' = 'light', mono = false) =>
     // In the sheet, its own header carries the title and Close: a wordmark and
     // a Back inside it would be a second masthead over the member's own tab.
     asSheet ? null : (
@@ -1338,6 +1364,8 @@ export default function ContributeToGoal() {
         variant={tone === 'dark' ? 'white' : 'navy'}
         height={22}
         testID="wsf-contribute-wordmark"
+        // TOGETHER-COMPLETION-1: the receipt-only monochrome full wordmark.
+        style={mono ? { tintColor: TOGETHER_COLORS.text } : undefined}
       />
       {/*
         ON A KIOSK THERE IS NO "BACK". The link goes to a community page that
@@ -1538,7 +1566,15 @@ export default function ContributeToGoal() {
    * celebration inside a card is a card, and the approved target has the
    * moment owning the screen.
    */
-  const screen = (children: React.ReactNode, testID?: string, tone: 'light' | 'dark' = 'light') =>
+  const screen = (
+    children: React.ReactNode,
+    testID?: string,
+    toneIn: 'light' | 'dark' | 'together' = 'light'
+  ) => {
+    // 'together' is the dark tone on the Together receipt's own navy.
+    const tone: 'light' | 'dark' = toneIn === 'light' ? 'light' : 'dark';
+    const together = toneIn === 'together' ? styles.togetherGround : null;
+    return (
     asSheet ? (
       /*
         THE SHEET. The scrim is the whole viewport, which is what keeps the
@@ -1560,6 +1596,7 @@ export default function ContributeToGoal() {
           style={[
             styles.sheetPanel,
             tone === 'dark' ? styles.sheetPanelDark : null,
+            together,
             { paddingBottom: safeArea.bottom + 8 },
           ]}
           testID="wsf-contribute-sheet-panel"
@@ -1603,6 +1640,7 @@ export default function ContributeToGoal() {
               styles.container,
               styles.sheetContainer,
               tone === 'dark' ? styles.containerDark : null,
+              together,
             ]}
             keyboardShouldPersistTaps="handled"
             testID={testID}
@@ -1618,22 +1656,24 @@ export default function ContributeToGoal() {
       when the scroll view ran underneath it -- the receipt stays navy to the
       bar's edge -- and only the overlap is gone.
     */
-    <View style={[styles.screen, tone === 'dark' ? styles.screenDark : null]}>
+    <View style={[styles.screen, tone === 'dark' ? styles.screenDark : null, together]}>
       <ScrollView
         ref={scrollRef}
         style={[
           styles.scroll,
           tone === 'dark' ? styles.scrollDark : null,
+          together,
           shellBarShown ? styles.scrollAboveMove : null,
         ]}
-        contentContainerStyle={[styles.container, tone === 'dark' ? styles.containerDark : null]}
+        contentContainerStyle={[styles.container, tone === 'dark' ? styles.containerDark : null, together]}
         keyboardShouldPersistTaps="handled"
         testID={testID}
       >
         <View style={styles.inner}>{children}</View>
       </ScrollView>
     </View>
-  );
+  ));
+  };
 
   if (!wsfAuthEnabled) {
     return <AuthFlagOffPanel title="Contribute" testID="wsf-contribute-disabled" />;
@@ -1875,6 +1915,104 @@ export default function ContributeToGoal() {
     // total, which would break inside the number; the panel stacks instead.
     const panelStacked = windowWidth < 360;
     const receiptWeWidth = windowHeight < 700 ? 96 : 104;
+
+    /*
+      TOGETHER-COMPLETION-1. The member's own receipt is the owner-selected
+      Together completion. A kiosk session keeps the receipt below exactly as
+      it was: the new completion is member-scoped, and Finish / idle clearing
+      on a shared screen are untouched.
+
+      Every figure is still the server's own receipt; `togetherPresentation`
+      only decides the words and whether this instance may move. The ids the
+      receipt specs read are the same ids.
+    */
+    if (!kiosk) {
+      const together = togetherPresentation(r, {
+        communityName,
+        unitHint: unitKnown,
+        sharedBefore: sharedBeforeRef.current,
+        beforeTarget: beforeTargetRef.current,
+        fresh: freshAttempt != null,
+      });
+      return screen(
+        <>
+          {renderChrome(false, 'dark', true)}
+          <View style={styles.togetherSheet}>
+            {/* Names the sheet's dialog; the Together receipt shows no card title of its own. */}
+            {renderSheetHead('Contribution receipt') && null}
+            <View
+              style={styles.togetherBody}
+              testID="wsf-contribute-receipt"
+              aria-live="polite"
+              {...({ dataSet: { variant } } as Record<string, unknown>)}
+            >
+              <TogetherCompletion
+                presentation={together}
+                eyebrow={r.alreadyRecorded ? 'Already recorded' : 'Recorded'}
+                amountText={r.alreadyRecorded ? formatCount(r.addedCount) : `+${formatCount(r.addedCount)}`}
+                unit={ownUnit ?? null}
+                shared={
+                  hasShared
+                    ? { total: r.sharedTotal, target: r.target, unit: r.unit, status: r.status }
+                    : null
+                }
+                context={
+                  hasShared && context.kind === 'verified'
+                    ? { communityName: context.communityName, goalTitle: context.goalTitle }
+                    : null
+                }
+                ownCredit={
+                  <Text style={styles.togetherFact} testID="wsf-contribute-own-credit">
+                    {'Your total on this goal: '}
+                    <Text style={styles.togetherFactStrong}>
+                      {formatCount(r.ownCredit)}
+                      {ownUnit ? ` ${ownUnit}` : ''}
+                    </Text>
+                  </Text>
+                }
+                standing={
+                  together.standing ? (
+                    <Text style={styles.togetherFact} testID="wsf-contribute-result-standing">
+                      {together.standing}
+                    </Text>
+                  ) : null
+                }
+                actions={
+                  <View style={styles.togetherActions}>
+                    <ReturnButton
+                      href={hasShared ? backHref : '/'}
+                      style={styles.togetherPrimary}
+                      textStyle={styles.togetherPrimaryText}
+                      testID="wsf-contribute-back"
+                      label={hasShared ? backLabel : 'Back to home'}
+                    />
+                    {addMore ? (
+                      <Pressable
+                        onPress={onAddMore}
+                        accessibilityRole="button"
+                        style={styles.togetherSecondary}
+                        testID="wsf-contribute-record-more"
+                      >
+                        <Text style={styles.togetherSecondaryText}>
+                          {recordMoreLabel(hasShared ? r.unit : unitKnown)}
+                        </Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+                }
+                fresh={freshAttempt != null}
+                onFreshConsumed={() => setFreshAttempt(null)}
+                windowWidth={windowWidth}
+                windowHeight={windowHeight}
+              />
+            </View>
+          </View>
+          {renderTestNote()}
+        </>,
+        'wsf-contribute-screen',
+        'together'
+      );
+    }
     return screen(
       <>
         {renderChrome(false)}
@@ -2713,6 +2851,24 @@ const styles = StyleSheet.create({
   // `shellBarShown`), so nothing scrollable is ever under the circle.
   scrollAboveMove: { marginBottom: MEMBER_TAB_MOVE_OVERHANG },
   containerDark: { backgroundColor: NAVY },
+  // TOGETHER-COMPLETION-1: the Together receipt's own navy, on the receipt only.
+  togetherGround: { backgroundColor: TOGETHER_COLORS.background, borderColor: TOGETHER_COLORS.background },
+  togetherSheet: { width: '100%', maxWidth: 430, alignSelf: 'center' },
+  togetherBody: { alignItems: 'center', paddingTop: 4, paddingBottom: 18, width: '100%' },
+  togetherFact: { color: TOGETHER_COLORS.muted, fontSize: 12, lineHeight: 17, textAlign: 'center' },
+  togetherFactStrong: { color: TOGETHER_COLORS.text, fontWeight: '600' },
+  togetherActions: { width: '100%', gap: 4, alignItems: 'stretch' },
+  togetherPrimary: {
+    minHeight: 49,
+    borderRadius: 15,
+    backgroundColor: TOGETHER_COLORS.fill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  togetherPrimaryText: { color: TOGETHER_COLORS.background, fontSize: 15, fontWeight: '700' },
+  togetherSecondary: { minHeight: 44, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 14 },
+  togetherSecondaryText: { color: TOGETHER_COLORS.muted, fontSize: 13, fontWeight: '700' },
   container: {
     alignItems: 'center',
     paddingHorizontal: 20,
