@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "f02ca8fb8211e7e1b7f4501729fb177697a48a90d58af7be97ccd530713b68d2",
-  "eventCount": 397,
+  "ledgerHead": "95ed1ad5d661634548eff7ba10d49ff9b2f7e915f7e784f08630bffd4f1282c5",
+  "eventCount": 399,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -365,7 +365,8 @@
       "served": null,
       "releasedQueueIndex": null,
       "reviewedBy": [
-        "W4"
+        "W4",
+        "W9"
       ],
       "subjectPaths": [
         "functions-westayfit/src/index.ts",
@@ -389,7 +390,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5965025205
+          "id": 5965498912
         }
       },
       "review": {
@@ -2338,11 +2339,15 @@
       "packet": "EMAIL-STAGING-REPAIR",
       "worker": "W9",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         5965480450
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 5965498912
+      },
+      "superseded": true
     }
   },
   "fastpath": {

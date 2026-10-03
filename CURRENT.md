@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=f02ca8fb8211e7e1b7f4501729fb177697a48a90d58af7be97ccd530713b68d2 events=397 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=95ed1ad5d661634548eff7ba10d49ff9b2f7e915f7e784f08630bffd4f1282c5 events=399 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `f02ca8fb8211e7e1b7f4501729fb177697a48a90d58af7be97ccd530713b68d2` (397 events)
+- Ledger head: `95ed1ad5d661634548eff7ba10d49ff9b2f7e915f7e784f08630bffd4f1282c5` (399 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -33,7 +33,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | W4 | #394 | — | TOGETHER-COMPLETION-1 | — | — | — | — | on |
 | W5 | #395 | — | — | — | — | — | — | off |
 | W7 | #434 | — | — | — | — | — | — | off |
-| W9 | #497 | — | EMAIL-STAGING-REPAIR | TOGETHER-COMPLETION-1 | — | — | — | on |
+| W9 | #497 | — | — | TOGETHER-COMPLETION-1 | — | — | — | off |
 
 ## Packets
 
@@ -43,7 +43,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | AUTONOMY-ROUTER-1C-INTEGRATE | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #545 | fd697e0f | fd697e0f | — | 8ba39e19 | — | W4 | comment:5929164484 | pull_request:545 | — | Step 6 correction: derive integrate from ACCEPTED plus merged PR with same-cycle or successor reconcile and idempotency proof | 1×ops-source then director | — |
 | AUTONOMY-STATE-1B | W3 | work | INTEGRATED (source-only) | bootstrap | INTEGRATED | #538 | 073b7946 | 073b7946 | — | d42a3307 | — | — | comment:5857966052 | comment:5857966052 | — | Serial step 5: authoritative control state, App writer, bootstrap and shadow reconcile | 1×ops-source then director | — |
 | CONTROL-EXPO-ROUTE-PATH-GRAMMAR | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #552 | 3cc44d30 | 3cc44d30 | — | 6687440d | — | W4 | comment:5944968693 | pull_request:552 | — | Allow exact Expo Router filenames in control packet path reservations without widening other path syntax | 1×ops-source then director | — |
-| EMAIL-STAGING-REPAIR | W3 | work | STAGED (hosted) | ledger | UNDER_REVIEW | #559 | 39484f78 | 39484f78 | — | — | — | W4, W9 | comment:5959200686 | comment:5965025205 | — | Diagnose and repair staging verification and password-reset delivery without weakening mail security | 1×ops-source+1×security then director | — |
+| EMAIL-STAGING-REPAIR | W3 | work | STAGED (hosted) | ledger | UNDER_REVIEW | #559 | 39484f78 | 39484f78 | — | — | — | W4, W9 | comment:5959200686 | comment:5965498912 | — | Diagnose and repair staging verification and password-reset delivery without weakening mail security | 1×ops-source+1×security then director | — |
 | EXPO-ACCOUNT-ENTRY-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #561 | e603a39c | e603a39c | — | 5705dc3b | — | W4 | comment:5961789672 | pull_request:561 | — | Expo account-entry seam: preserve event context and make the existing phone/kiosk choice fast and truthful without bypassing verified identity | 1×journey-qa then director | — |
 | EXPO-ACCOUNT-ENTRY-1-STAGING-PIN | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #566 | 04ca5d05 | 04ca5d05 | 04ca5d05 | 08a2f08d | — | W4 | comment:5963494417 | pull_request:566 | — | Pin exact integrated expo account-entry milestone through the existing reviewed full staging path | 1×ops-source then director | — |
 | EXPO-ATTENDEE-HOSTED-DRIVERS-1 | W3 | work | INTEGRATED (source-only) | ledger | ACKED | — | — | — | — | — | — | — | comment:5965372716 | comment:5965391205 | — | Add the missing hosted attendee drivers and generated owner-card inputs using the existing staging journey framework | 1×ops-source then director | — |
@@ -124,5 +124,5 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | bac3c3b6a769 | W9 | TOGETHER-COMPLETION-1 | release | acked | 5964997619 | comment:5965001839 |
 | 16dc80b65205 | W3 | EXPO-ATTENDEE-HOSTED-DRIVERS-1 | release | acked | 5965388642 | comment:5965391205 |
 | 6d515ae981f9 | W4 | TOGETHER-COMPLETION-1 | review | acked | 5965459389 | comment:5965466432 |
-| 8b8734ebce12 | W9 | EMAIL-STAGING-REPAIR | review | delivered | 5965480450 | — |
+| 8b8734ebce12 | W9 | EMAIL-STAGING-REPAIR | review | acked | 5965480450 | comment:5965498912 |
 
