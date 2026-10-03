@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "ddeaff73bceeb7f81fd54305a1de090aab0de72ca5d327c548561f8838d490c6",
-  "eventCount": 351,
+  "ledgerHead": "3bd7b74ea387584cd4871baa560073a416406f93334a827b114f64cc9ccd4564",
+  "eventCount": 358,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -346,7 +346,7 @@
       },
       "label": "Diagnose and repair staging verification and password-reset delivery without weakening mail security",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "CHANGES_REQUESTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -364,10 +364,7 @@
       "proof": null,
       "served": null,
       "releasedQueueIndex": null,
-      "reviewedBy": [
-        "W4",
-        "W9"
-      ],
+      "reviewedBy": [],
       "subjectPaths": [
         "functions-westayfit/src/index.ts",
         "functions-westayfit/tests/callable/wsf-send-verification-email.test.ts",
@@ -390,7 +387,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5964103067
+          "id": 5964370581
         }
       },
       "review": {
@@ -408,10 +405,7 @@
         "after": "director"
       },
       "deliveries": 2,
-      "pendingFinding": {
-        "kind": "comment",
-        "id": 5964370581
-      }
+      "pendingFinding": null
     },
     "EXPO-ACCOUNT-ENTRY-1": {
       "owner": "W9",
@@ -496,7 +490,7 @@
       },
       "label": "Pin exact integrated expo account-entry milestone through the existing reviewed full staging path",
       "origin": "ledger",
-      "phase": "CHANGES_REQUESTED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -505,9 +499,9 @@
         "W4"
       ],
       "artifact": {
-        "subjectSha": "807573c8aee1fa217ae90a6b53fe1f4a182da2be",
-        "prHeadSha": "7b7b26f3c3f0ff55cda4685c65ab03b555985aac",
-        "evidenceSha": "7b7b26f3c3f0ff55cda4685c65ab03b555985aac",
+        "subjectSha": "04ca5d05a9151cf9c7e54df3764db37f8f54d25f",
+        "prHeadSha": "04ca5d05a9151cf9c7e54df3764db37f8f54d25f",
+        "evidenceSha": "04ca5d05a9151cf9c7e54df3764db37f8f54d25f",
         "mergeSha": null
       },
       "proof": null,
@@ -531,7 +525,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5964081313
+          "id": 5964894681
         }
       },
       "review": {
@@ -544,7 +538,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 1,
+      "deliveries": 2,
       "pendingFinding": null
     },
     "EXPO-ATTENDEE-JOURNEY-PROOF-1": {
@@ -2104,7 +2098,24 @@
       "ack": {
         "kind": "comment",
         "id": 5964097860
-      }
+      },
+      "superseded": true
+    },
+    "63e649716cbc470a72637f88834cbb96403e96d922818a198390a20089e6c10d": {
+      "packet": "EMAIL-STAGING-REPAIR",
+      "worker": "W3",
+      "reason": "handback",
+      "status": "requested",
+      "comments": [],
+      "ack": null
+    },
+    "76939a4d36a6ab2a6c1cd1db0dc2bc0796b5dc8899b85d810a6f05accd139f15": {
+      "packet": "EXPO-ACCOUNT-ENTRY-1-STAGING-PIN",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
