@@ -13,6 +13,7 @@ import {
   View,
 } from 'react-native';
 
+import { describeCallableError } from '../../src/callableErrors';
 import { samePulse, type GoalPulse } from '../../src/displayPulse';
 import {
   announceHallTurn,
@@ -546,12 +547,14 @@ export default function StationScreen() {
         // but a refusal the product itself wrote ("this goal takes one
         // contribution from each member") is the product's own sentence and
         // names nobody, so it is shown rather than swallowed.
-        const message = (e as { message?: unknown })?.message;
-        setQueueError(
-          typeof message === 'string' && message && !/^[A-Z_]+$/.test(message)
-            ? message
-            : 'That didn’t go through. Try again.'
-        );
+        //
+        // The app's one rule for that, not a second one here: a request whose
+        // answer never arrived reaches this catch as the SDK's bare lower-case
+        // "internal", which the old all-caps filter let straight onto the hall
+        // screen. A lost Record may still have committed; the turn and its
+        // count stay on screen, and pressing Record again lands on the same
+        // attempt and counts it once.
+        setQueueError(describeCallableError(e, 'That didn’t go through. Try again.'));
       } finally {
         setQueueBusy(false);
       }
