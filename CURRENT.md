@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=38b55088b43b14b41497a611d15563fe92d227337f21f1486d4f3a267fce8bcf events=370 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=bc86b92db6be0661ff7b8bdab328f4a2765d8d29fe684b4b2ca7b9951228e29b events=372 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `38b55088b43b14b41497a611d15563fe92d227337f21f1486d4f3a267fce8bcf` (370 events)
+- Ledger head: `bc86b92db6be0661ff7b8bdab328f4a2765d8d29fe684b4b2ca7b9951228e29b` (372 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -118,6 +118,6 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | 5f6ac2ab4259 | W3 | EXPO-ACCOUNT-ENTRY-1-STAGING-PIN | handback | acked | 5964095206 | comment:5964097860 |
 | 63e649716cbc | W3 | EMAIL-STAGING-REPAIR | handback | acked | 5964906178 | comment:5964907774 |
 | 76939a4d36a6 | W4 | EXPO-ACCOUNT-ENTRY-1-STAGING-PIN | review | acked | 5964906243 | comment:5964911077 |
-| 8948c387eef6 | W4 | EMAIL-STAGING-REPAIR | review | requested | — | — |
-| 4925976176a1 | W5 | EMAIL-STAGING-REPAIR | review | requested | — | — |
+| 8948c387eef6 | W4 | EMAIL-STAGING-REPAIR | review | delivered | 5964977244 | — |
+| 4925976176a1 | W5 | EMAIL-STAGING-REPAIR | review | delivered | 5964977381 | — |
 
