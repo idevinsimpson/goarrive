@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "d9b6fabf918aa7dc511da527c88cb450e3d38cdd50d61f61c97bc869a0736da4",
-  "eventCount": 472,
+  "ledgerHead": "eb79c8057a7dba12ba3605bc4ebfe1a76c68a550044d380b815829e72351788c",
+  "eventCount": 475,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -834,15 +834,17 @@
       },
       "label": "Pin the latest accepted expo candidate and activate the fixed closed-goal hosted journey through the existing full staging path",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
-      "pr": null,
-      "reviewers": [],
+      "pr": 573,
+      "reviewers": [
+        "W4"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "7214a6fc9ccc0e9e8df8d822200b5685c4c6e80d",
+        "prHeadSha": "7214a6fc9ccc0e9e8df8d822200b5685c4c6e80d",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -873,7 +875,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5970619310
+          "id": 5970805025
         }
       },
       "review": {
@@ -886,7 +888,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "EXPO-STATION-LOST-ANSWER-COPY-1": {
@@ -2713,7 +2715,16 @@
       "ack": {
         "kind": "comment",
         "id": 5970619310
-      }
+      },
+      "superseded": true
+    },
+    "298a348ebd11b5af258a9792296ad3ab73eef22c323371367864e480b198f7a4": {
+      "packet": "EXPO-LATEST-FULL-STAGING-PIN-1",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
