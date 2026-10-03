@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "284bc9a9993e421b63d0c973b23f099a94bc8c27ad99e7bb11417a259e714088",
-  "eventCount": 493,
+  "ledgerHead": "4373b403f50593d564f892cd2f619a7d95617e61c49311f6e8cc59c7000ced88",
+  "eventCount": 497,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -851,7 +851,9 @@
       "proof": null,
       "served": null,
       "releasedQueueIndex": null,
-      "reviewedBy": [],
+      "reviewedBy": [
+        "W4"
+      ],
       "subjectPaths": [
         ".github/wsf-staging/approved-candidate.json",
         ".github/wsf-staging/journeys/manifest.json",
@@ -875,7 +877,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5971316770
+          "id": 5971380093
         }
       },
       "review": {
@@ -900,15 +902,17 @@
       },
       "label": "Loop approved demo media in the existing shared player with truthful fallback and no contribution side effects",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
-      "pr": null,
-      "reviewers": [],
+      "pr": 575,
+      "reviewers": [
+        "W4"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "f72549745d2ad1acc630b1821693906e16808b83",
+        "prHeadSha": "f72549745d2ad1acc630b1821693906e16808b83",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -941,7 +945,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5971344397
+          "id": 5971735579
         }
       },
       "review": {
@@ -954,7 +958,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "EXPO-STATION-LOST-ANSWER-COPY-1": {
@@ -2823,7 +2827,8 @@
       "ack": {
         "kind": "comment",
         "id": 5971343438
-      }
+      },
+      "superseded": true
     },
     "c686e1a75995860818b2a70440b5589065561b7033af05fb74f3b7dc2236d80b": {
       "packet": "EXPO-MOVEMENT-VIDEO-1",
@@ -2836,7 +2841,16 @@
       "ack": {
         "kind": "comment",
         "id": 5971344397
-      }
+      },
+      "superseded": true
+    },
+    "74d8ff3508584891004919e9e0707127354a20a030067a899d170e9b6150b4c8": {
+      "packet": "EXPO-MOVEMENT-VIDEO-1",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
