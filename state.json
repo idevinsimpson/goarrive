@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "c744bbe23bf66f40d303ad9f223be70dec08aa95ed8371d1b0e966aa0767fbd6",
-  "eventCount": 470,
+  "ledgerHead": "d9b6fabf918aa7dc511da527c88cb450e3d38cdd50d61f61c97bc869a0736da4",
+  "eventCount": 472,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -834,7 +834,7 @@
       },
       "label": "Pin the latest accepted expo candidate and activate the fixed closed-goal hosted journey through the existing full staging path",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -848,7 +848,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         ".github/wsf-staging/approved-candidate.json",
@@ -873,7 +873,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5970558946
+          "id": 5970619310
         }
       },
       "review": {
@@ -2706,11 +2706,14 @@
       "packet": "EXPO-LATEST-FULL-STAGING-PIN-1",
       "worker": "W3",
       "reason": "release",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         5970615640
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 5970619310
+      }
     }
   },
   "fastpath": {
