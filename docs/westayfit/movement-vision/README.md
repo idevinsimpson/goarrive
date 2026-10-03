@@ -10,8 +10,13 @@ changing the counting thresholds or connecting the counter to contributions.
 Read [the audit and delivery plan](AUDIT_2026-10-03.md),
 [the exact evidence manifest](AUDIT_EVIDENCE_2026-10-03.json), and
 [the proposed device test plan](DEVICE_TEST_PLAN.md) for current scope and next steps.
-This successor has focused source/test evidence only. It has not been exported,
-hosted, measured on a real person/device, integrated into the app, or accepted for release.
+The repaired Expo successor has focused source/test evidence only; its full app
+export and integration remain unrun. A separate private browser candidate now
+uses the same reviewed core for the owner's first iPhone trial. Read the
+[iPhone handoff](IPHONE_TEST_2026-10-03.md) and
+[candidate evidence](IPHONE_CANDIDATE_EVIDENCE_2026-10-03.json) for its exact
+revision, independent regressions, builder browser checks and access limits.
+Neither candidate has real-person/device accuracy evidence or release acceptance.
 
 The original packet and historical evidence below retain their original scope.
 
