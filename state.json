@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "de858c132be342c2704f6931112429b13f541b274fdf19ab3a77a5a0b3dfb64a",
-  "eventCount": 286,
+  "ledgerHead": "c0482681de93b1bd31179fa4b9250887e02a5d6a018ae877559a61e53ab862d2",
+  "eventCount": 287,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1807,8 +1807,10 @@
       "packet": "EXPO-ACCOUNT-ENTRY-1-STAGING-PIN",
       "worker": "W3",
       "reason": "release",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        5963513342
+      ],
       "ack": null
     }
   },
