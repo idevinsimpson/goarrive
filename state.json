@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "50b7499283c48d6e91813f35c361fc3e3a55cdb29d9468e3a30720ddcca9e9d9",
-  "eventCount": 276,
+  "ledgerHead": "17c67cd8a991d4852e949fb2e80b74dbaf770a237442aa6d295c2ac9796352c4",
+  "eventCount": 277,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -418,7 +418,7 @@
       },
       "label": "Expo account-entry seam: preserve event context and make the existing phone/kiosk choice fast and truthful without bypassing verified identity",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "ACCEPTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -461,10 +461,13 @@
           "kind": "comment",
           "id": 5961789672
         },
-        "accepted": null,
+        "accepted": {
+          "kind": "comment",
+          "id": 5963390962
+        },
         "lastTransition": {
           "kind": "comment",
-          "id": 5962864939
+          "id": 5963390962
         }
       },
       "review": {
