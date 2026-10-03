@@ -19,8 +19,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
-import { RUN_TAG, backend, harness, kitFor, runCleanup, serve, tmp } from './helpers/journey-model.mjs';
+import { RUN_TAG, backend, expoHarness, harness, kitFor, runCleanup, serve, tmp } from './helpers/journey-model.mjs';
 import { drivers } from '../journeys/index.mjs';
+import { EXPO_ROWS, expoDrivers } from '../journeys/expo-attendee.mjs';
+import { validateManifest } from '../milestone-manifest.mjs';
+import { checkManifestObject } from '../check-milestone-manifest.mjs';
 import { runHook } from '../hosted-changed-journeys.mjs';
 import { isOwnedRunTag } from '../run-tag.mjs';
 
@@ -251,6 +254,219 @@ await test('C4: a cleanup that cannot complete fails its step AND leaves no PASS
   assert.match(s.card.stdout, /OWNER_CARD_CLEANUP=INCOMPLETE\nOWNER_CARD_SUMMARY=INCOMPLETE/);
   assert.doesNotMatch(s.cardText, /status: PASSED/);
   assert.match(s.cardText, /every journey passed, but fixture cleanup is not complete/);
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// EXPO-ATTENDEE-HOSTED-DRIVERS-1: the eight attendee journeys.
+// ═════════════════════════════════════════════════════════════════════════════
+const LIVE = path.resolve('.github/wsf-staging/journeys/manifest.json');
+const APPROVED = JSON.parse(fs.readFileSync(path.resolve('.github/wsf-staging/approved-candidate.json'), 'utf8')).approvedAppSha;
+const EXPO_IDS = ['event-use-my-phone', 'event-join-line', 'two-station-turns', 'phone-and-stations-converge',
+  'station-lost-answer', 'line-place-ends', 'closed-goal-turn', 'shared-screen-finish'];
+const live = () => JSON.parse(fs.readFileSync(LIVE, 'utf8'));
+const tagOf = (expected) => /^\[(\w+)\]/.exec(expected)?.[1];
+
+async function driveExpo(id, bugs = {}, h = expoHarness(bugs)) {
+  const used = new Set();
+  const fixtures = new Proxy(h.fixtures, { get: (k, name) => { used.add(name); return k[name]; } });
+  const r = await drivers[id]({ page: h.page, baseUrl: 'https://staging.example.test', journey: live().journeys.find((j) => j.id === id), fixtures });
+  return { ...h, r, used, failed: r.assertions.filter((a) => !a.ok).map((a) => tagOf(a.expected)) };
+}
+
+await test('EXPO: the live manifest is the exact milestone for the approved build, rolling back to the served ab77fbfc, every journey registered', () => {
+  const m = live();
+  assert.deepEqual(validateManifest(m), []);
+  assert.equal(m.milestone, 'EXPO-ATTENDEE-JOURNEY-PROOF-1');
+  assert.equal(m.productSha, '5705dc3bf198a9490600c7e32b8bb55356defd9d');
+  assert.equal(m.productSha, APPROVED, 'the manifest names exactly the build staging is approved to serve');
+  assert.equal(m.previousKnownGoodSha, 'ab77fbfce97e60c1c22492397b2ab6b491f9e0db');
+  assert.deepEqual(m.journeys.map((j) => j.id), EXPO_IDS);
+  assert.equal(checkManifestObject(m, { approvedSha: APPROVED, drivers }).status, 'valid');
+  for (const id of EXPO_IDS) assert.equal(drivers[id], expoDrivers[id], `${id} is registered in journeys/index.mjs`);
+  const { [EXPO_IDS[0]]: _gone, ...without } = drivers;
+  assert.equal(checkManifestObject(m, { approvedSha: APPROVED, drivers: without }).status, 'refused', 'an unregistered journey is refused before deploy');
+});
+
+await test('EXPO: every expected row of every journey is a row its driver asserts, word for word and in order', () => {
+  for (const j of live().journeys) assert.deepEqual(Object.values(EXPO_ROWS[j.id]), j.expected, `${j.id}: the driver's rows are the manifest's`);
+});
+
+await test('EXPO: the store-only claims are named as exclusions and asserted by no driver; the honest boundaries are kept', () => {
+  const m = live();
+  const byId = Object.fromEntries(m.journeys.map((j) => [j.id, j]));
+  assert.match(byId['phone-and-stations-converge'].knownExclusions.join(' '), /recorded as the attempt that station started, and that the target crossing is recorded once for the goal and credited to no single member: stored facts the hosted screens do not show/);
+  assert.match(byId['station-lost-answer'].knownExclusions.join(' '), /GAP-1/);
+  assert.match(byId['closed-goal-turn'].knownExclusions.join(' '), /GAP-2/);
+  const all = JSON.stringify(EXPO_ROWS);
+  assert.doesNotMatch(all, /attempt that station started|credited to no single member|crossing is recorded/);
+});
+
+for (const id of EXPO_IDS) {
+  await test(`EXPO ${id} on a faithful model: real actions, every row asserted and held, every device closed`, async () => {
+    const d = await driveExpo(id);
+    assert.deepEqual(d.failed, [], d.r.assertions.filter((a) => !a.ok).map((a) => a.expected).join(' | '));
+    assert.deepEqual([...new Set(d.r.assertions.map((a) => tagOf(a.expected)))].sort(), Object.keys(EXPO_ROWS[id]).sort());
+    assert.ok(d.r.actionsPerformed.length >= 1 && typeof d.r.setupId === 'string');
+    assert.ok(d.opened.length >= 1 && d.opened.every((c) => c.__ctx.closed), 'every device context the driver opened is closed');
+    // The driver touches the store only through the kit, and only through these.
+    const allowed = new Set(['expoEvent', 'approveStation', 'trackPlace', 'trackContribution', 'trackStationTurn', 'closeGoal', 'signIn']);
+    for (const name of d.used) if (typeof name === 'string') assert.ok(allowed.has(name), `${id} used fixtures.${name}`);
+  });
+}
+
+await test('EXPO: the drivers read the page, never the store: no Firestore, Identity or document access in the driver source', () => {
+  const src = fs.readFileSync(path.resolve('.github/wsf-staging/journeys/expo-attendee.mjs'), 'utf8');
+  for (const forbidden of [/firestore\.googleapis/, /identitytoolkit/, /\/documents\//, /getDoc\b/, /(^|[^.\w])fetch\(/, /WSF_GOOGLE_ACCESS_TOKEN/]) assert.doesNotMatch(src, forbidden);
+});
+
+const EXPO_DEFECTS = [
+  ['event-use-my-phone', 'activityNotSaid', ['activity']],
+  ['event-use-my-phone', 'finishOnPhone', ['phone']],
+  ['event-use-my-phone', 'phoneJoinsLine', ['noPlace']],
+  ['event-use-my-phone', 'doubleCount', ['receipt']],
+  ['event-join-line', 'joinOnOpen', ['deliberate']],
+  ['event-join-line', 'noQueuePage', ['joined']],
+  ['event-join-line', 'hallShowsName', ['private']],
+  ['two-station-turns', 'sameCode', ['calls']],
+  ['two-station-turns', 'wrongStationLabel', ['phones']],
+  ['two-station-turns', 'readyOpensOther', ['ready']],
+  ['two-station-turns', 'receiptHidden', ['results']],
+  ['two-station-turns', 'hallKeepsName', ['cleared']],
+  ['phone-and-stations-converge', 'stationTotalStale', ['stations', 'once']],
+  ['phone-and-stations-converge', 'phoneStale', ['phone', 'once']],
+  ['phone-and-stations-converge', 'doubleCount', ['stations', 'phone', 'once']],
+  ['station-lost-answer', 'turnLostOnError', ['kept']],
+  ['station-lost-answer', 'retryDoubleCounts', ['same', 'once']],
+  ['station-lost-answer', 'retryLocalOnly', ['same']],
+  ['station-lost-answer', 'offlinePhoneClaims', ['phone']],
+  ['line-place-ends', 'switchKeepsPlace', ['switched', 'noShow', 'letGo']],
+  ['line-place-ends', 'noShowNotEnded', ['noShow', 'letGo']],
+  ['line-place-ends', 'noShowWording', ['noShow']],
+  ['line-place-ends', 'letGoReceipt', ['letGo', 'onlyTen']],
+  ['closed-goal-turn', 'closedRecords', ['refused', 'nothing', 'noReceipt']],
+  ['shared-screen-finish', 'finishKeepsCredit', ['finish']],
+  ['shared-screen-finish', 'finishKeepsSession', ['finish', 'next']],
+  ['shared-screen-finish', 'nextSeesPrevious', ['next']],
+  ['shared-screen-finish', 'countdownNoFinish', ['countdown']],
+  ['shared-screen-finish', 'stayIgnored', ['countdown']],
+];
+for (const [id, bug, rows] of EXPO_DEFECTS) {
+  await test(`EXPO ${id} fails on a seeded defect (${bug}), exactly on the row(s) ${rows.join(', ')}, without throwing`, async () => {
+    const d = await driveExpo(id, { [bug]: true });
+    assert.deepEqual([...new Set(d.failed)].sort(), [...rows].sort());
+    assert.ok(d.opened.every((c) => c.__ctx.closed), 'a failing journey still closes every device');
+  });
+}
+
+await test('EXPO: everything a journey makes the PRODUCT write is tracked; the REAL cleaner then leaves the store empty, read back', async () => {
+  for (const id of EXPO_IDS) {
+    const d = await driveExpo(id);
+    const before = d.be.docs.size;
+    assert.ok(before > 0);
+    const receipt = path.join(d.dir, 'cleanup-receipt.json');
+    const { server, base } = await serve(d.be);
+    const c = await runCleanup(base, d.kit.manifestPath, receipt);
+    server.close();
+    assert.equal(c.code, 0, `${id}: ${c.out}`);
+    assert.equal(c.receipt.status, 'COMPLETE', id);
+    assert.equal(d.be.docs.size, 0, `${id}: left ${[...d.be.docs.keys()].join(', ')}`);
+    assert.equal(d.be.accounts.size, 0, `${id}: left accounts`);
+  }
+});
+
+await test('EXPO: product documents with server-minted ids are claimed as LINKED to this run\'s tagged goal; nothing secret is written', async () => {
+  const d = await driveExpo('two-station-turns');
+  const text = fs.readFileSync(d.kit.manifestPath, 'utf8');
+  const m = JSON.parse(text);
+  assert.ok(m.linkedDocs.length >= 6);
+  for (const l of m.linkedDocs) {
+    assert.match(l.path, /^wsf(TurnEntries|KioskStations|KioskPairings)\//);
+    assert.ok(l.via.includes(RUN_TAG), `${l.path} is claimed through the run-tagged goal`);
+  }
+  for (const p of m.docs) assert.ok(p.includes(RUN_TAG) || /^wsfMemberProfiles\//.test(p), `${p} carries the run tag`);
+  for (const email of d.be.passwords.keys()) {
+    assert.ok(!text.includes(email), 'no email in the manifest');
+    assert.ok(!text.includes(d.be.passwords.get(email)), 'no password in the manifest');
+  }
+  assert.doesNotMatch(text, /tok:|idToken|PX\d{4}/, 'no ID token or pairing code in the manifest');
+});
+
+await test('EXPO: the kit refuses to patch a document this run did not create, and refuses a turn entry that names another goal', async () => {
+  const h = expoHarness();
+  const ev = await h.kit.expoEvent('kit', { attendees: 1, target: 10, seeded: 0 });
+  await assert.rejects(() => h.kit.closeGoal({ ...ev, goalId: 'someone-elses-goal' }), /this run did not create it/);
+  h.be.docs.set('wsfTurnEntries/foreign', { goalId: { stringValue: 'other-goal' }, attemptId: { stringValue: 'turn_x' } });
+  await assert.rejects(() => h.kit.trackStationTurn(ev, ev.attendees[0], 'foreign'), /names a different goal/);
+  await h.kit.closeGoal(ev);
+  const g = h.be.docs.get(`wsfGoals/${ev.goalId}`);
+  assert.equal(g.status.stringValue, 'closed');
+  assert.equal(g.title.stringValue, 'Fixture Expo Squats', 'a field-masked patch leaves the rest of the goal');
+});
+
+await test('EXPO: a failed cleanup is INCOMPLETE and keeps the manifest, though the journey passed', async () => {
+  const d = await driveExpo('event-use-my-phone');
+  assert.deepEqual(d.failed, []);
+  const { server, base } = await serve(d.be, { failDeletes: true });
+  const c = await runCleanup(base, d.kit.manifestPath, path.join(d.dir, 'cleanup-receipt.json'));
+  server.close();
+  assert.notEqual(c.code, 0);
+  assert.equal(c.receipt.status, 'INCOMPLETE');
+  assert.ok(fs.existsSync(d.kit.manifestPath), 'the manifest stays for recovery');
+});
+
+await test('EXPO: through the runner (live manifest, real registry), the REAL cleaner and the card CLI: all eight PASSED and cleanup COMPLETE', async () => {
+  const d = tmp();
+  const m = live();
+  const mf = path.join(d, 'manifest.json');
+  fs.writeFileSync(mf, JSON.stringify(m));
+  const changed = path.join(d, 'evidence', 'changed-journeys');
+  const h = expoHarness();
+  const browser = { newContext: async (o) => { const c = await h.page.context().browser().newContext(o); return c; }, close: async () => {} };
+  const hook = await runHook({ WSF_JOURNEY_MANIFEST: mf, WSF_STAGING_URL: 'https://staging.example.test', WSF_APPROVED_SHA: APPROVED, WSF_RESULT_DIR: path.join(d, 'evidence') }, {
+    fetch: async () => ({ ok: true, text: async () => `commit ${APPROVED.slice(0, 7)}` }),
+    launch: async () => browser,
+    fixtures: () => h.fixtures,
+  });
+  assert.deepEqual(hook.results.results.map((x) => [x.journeyId, x.status, x.reason]), EXPO_IDS.map((id) => [id, 'passed', null]));
+  const receipt = path.join(changed, 'cleanup-receipt.json');
+  const { server, base } = await serve(h.be);
+  const cleanup = await runCleanup(base, h.kit.manifestPath, receipt);
+  server.close();
+  assert.equal(cleanup.receipt.status, 'COMPLETE');
+  assert.equal(h.be.docs.size + h.be.accounts.size, 0);
+  const cardPath = path.join(changed, 'owner-test-card.md');
+  const card = spawnSync(process.execPath, [CARD, '--manifest', mf, '--results', path.join(changed, 'changed-journeys.json'),
+    '--cleanup-manifest', h.kit.manifestPath, '--cleanup-receipt', receipt, '--staging-url', 'https://staging.example.test', '--out', cardPath], { encoding: 'utf8' });
+  assert.equal(card.status, 0, card.stderr);
+  assert.match(card.stdout, /OWNER_CARD_CLEANUP=COMPLETE\nOWNER_CARD_SUMMARY=PASSED/);
+  const text = fs.readFileSync(cardPath, 'utf8');
+  assert.match(text, /Hosted changed-journey status: PASSED \(8 passed/);
+  assert.match(text, /GAP-1/);
+  assert.match(text, /GAP-2/);
+  assert.match(text, /Device review: NOT RUN/);
+});
+
+await test('EXPO: a seeded defect through the runner is a FAILED journey and a FAILED card naming the row, never PASSED', async () => {
+  const d = tmp();
+  const m = live();
+  const mf = path.join(d, 'manifest.json');
+  fs.writeFileSync(mf, JSON.stringify(m));
+  const changed = path.join(d, 'evidence', 'changed-journeys');
+  const h = expoHarness({ closedRecords: true });
+  const browser = { newContext: (o) => h.page.context().browser().newContext(o), close: async () => {} };
+  const hook = await runHook({ WSF_JOURNEY_MANIFEST: mf, WSF_STAGING_URL: 'https://staging.example.test', WSF_APPROVED_SHA: APPROVED, WSF_RESULT_DIR: path.join(d, 'evidence') }, {
+    fetch: async () => ({ ok: true, text: async () => `commit ${APPROVED.slice(0, 7)}` }), launch: async () => browser, fixtures: () => h.fixtures,
+  });
+  const closed = hook.results.results.find((x) => x.journeyId === 'closed-goal-turn');
+  assert.equal(closed.status, 'failed');
+  assert.ok(closed.assertions.some((a) => !a.ok && a.expected.startsWith('[refused] the station prints This goal is closed.')));
+  const receipt = path.join(changed, 'cleanup-receipt.json');
+  const { server, base } = await serve(h.be);
+  await runCleanup(base, h.kit.manifestPath, receipt);
+  server.close();
+  const card = spawnSync(process.execPath, [CARD, '--manifest', mf, '--results', path.join(changed, 'changed-journeys.json'),
+    '--cleanup-manifest', h.kit.manifestPath, '--cleanup-receipt', receipt, '--staging-url', 'https://staging.example.test', '--out', path.join(changed, 'card.md')], { encoding: 'utf8' });
+  assert.match(card.stdout, /OWNER_CARD_SUMMARY=FAILED/);
 });
 
 console.log(`\nchanged-journey-drivers: ${passed} passed`);
