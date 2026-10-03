@@ -18,7 +18,8 @@
  * change and takes the human path. The candidate cannot supply one.
  */
 import { community } from './community.mjs';
+import { expoDrivers } from './expo-attendee.mjs';
 import { home } from './home.mjs';
 import { settings } from './settings.mjs';
 
-export const drivers = Object.freeze({ community, home, settings });
+export const drivers = Object.freeze({ community, home, settings, ...expoDrivers });

@@ -15,6 +15,14 @@
  *   (`wsf-<runTag>-…@example.com`) is how it is found and removed by hand;
  * - nothing here deletes anything. The workflow's cleanup step, running
  *   cleanup-synthetic.mjs over this run's own manifest, is the only deleter.
+ * - documents the PRODUCT writes during a journey (a place in the line, a
+ *   station, a contribution) are tracked as soon as their name is known, and
+ *   before the next step that depends on them: a run-tagged path directly
+ *   (`wsfTurnLines/goal__<tagged goal>`, `wsfContributions/<tagged goal>_…`),
+ *   and a server-minted id as a LINKED document whose stored record names this
+ *   run's tagged goal, which the cleaner reads back before it deletes. The
+ *   one read of a turn entry and of a station here is that provenance, the
+ *   same read hosted-player-journey.mjs makes; it never feeds an assertion.
  *
  * The password is held in memory for the browser sign-in and never written:
  * not to the manifest, the results or a log line.
@@ -39,12 +47,16 @@ const fields = (record) => Object.fromEntries(Object.entries(record).map(([k, v]
  * @param {{ projectId: string, apiKey: string, token: string, runTag: string,
  *           cleanupManifest: string, fetchImpl?: typeof fetch, now?: () => Date }} opts
  */
-export function createFixtureKit({ projectId, apiKey, token, runTag, cleanupManifest, fetchImpl = fetch, now = () => new Date() }) {
-  const cleanup = { users: new Set(), docs: new Set() };
+export function createFixtureKit({
+  projectId, apiKey, token, runTag, cleanupManifest, fetchImpl = fetch, now = () => new Date(),
+  functionsBase = `https://us-central1-${projectId}.cloudfunctions.net`,
+}) {
+  const cleanup = { users: new Set(), docs: new Set(), linked: new Map() };
   function persist() {
     fs.mkdirSync(path.dirname(cleanupManifest), { recursive: true, mode: 0o700 });
     fs.writeFileSync(cleanupManifest, `${JSON.stringify({
-      project: projectId, runTag, users: [...cleanup.users], docs: [...cleanup.docs], linkedDocs: [],
+      project: projectId, runTag, users: [...cleanup.users], docs: [...cleanup.docs],
+      linkedDocs: [...cleanup.linked].map(([docPath, via]) => ({ path: docPath, via })),
     }, null, 2)}\n`, { mode: 0o600 });
     fs.chmodSync(cleanupManifest, 0o600);
   }
@@ -72,12 +84,12 @@ export function createFixtureKit({ projectId, apiKey, token, runTag, cleanupMani
     persist();
     await request(docUrl(docPath), { method: 'PATCH', admin: true, body: { fields: fields(record) } });
   }
-  async function createVerifiedUser(label) {
+  async function createVerifiedUser(label, displayName = `WSF ${label}`) {
     const email = `wsf-${runTag}-${label}-${crypto.randomBytes(2).toString('hex')}@example.com`;
     const password = `Wsf!${crypto.randomBytes(18).toString('base64url')}`;
     const body = await request(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${encodeURIComponent(apiKey)}`, {
       method: 'POST', admin: true,
-      body: { targetProjectId: projectId, email, password, displayName: `WSF ${label}`, emailVerified: true, disabled: false, returnSecureToken: false },
+      body: { targetProjectId: projectId, email, password, displayName, emailVerified: true, disabled: false, returnSecureToken: false },
     });
     const uid = body?.localId;
     if (typeof uid !== 'string' || !uid) throw new Error('the account create returned no localId');
@@ -150,5 +162,124 @@ export function createFixtureKit({ projectId, apiKey, token, runTag, cleanupMani
     await page.waitForURL((u) => !/^\/(signin|verify-email|profile-setup)\b/.test(new URL(u).pathname), { timeout: 60_000 });
   }
 
-  return { memberInTwoCommunities, signIn, manifestPath: cleanupManifest, tracked: () => ({ users: cleanup.users.size, docs: cleanup.docs.size }) };
+  // ---- the expo attendee journeys ---------------------------------------------------
+  const trackDoc = (docPath) => { cleanup.docs.add(docPath); persist(); };
+  const trackLinked = (docPath, via) => { cleanup.linked.set(docPath, via); persist(); };
+  const getDoc = (docPath) => request(docUrl(docPath), { admin: true });
+
+  /** A field-masked update of a document THIS run created: the rest of it is left exactly as it is. */
+  async function patchDoc(docPath, record) {
+    if (!cleanup.docs.has(docPath)) throw new Error(`refusing to patch ${docPath}: this run did not create it`);
+    const mask = Object.keys(record).map((f) => `updateMask.fieldPaths=${encodeURIComponent(f)}`).join('&');
+    await request(`${docUrl(docPath)}?${mask}`, { method: 'PATCH', admin: true, body: { fields: fields(record) } });
+  }
+
+  /** An end-user ID token, from the product's own password sign-in. Never logged, never written. */
+  async function idToken(account) {
+    const body = await request(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${encodeURIComponent(apiKey)}`, {
+      method: 'POST', body: { email: account.email, password: account.password, returnSecureToken: true },
+    });
+    if (typeof body?.idToken !== 'string' || !body.idToken) throw new Error('the synthetic sign-in returned no idToken');
+    return body.idToken;
+  }
+  /** A callable invoked the way the client SDK invokes it; an application refusal names its status only. */
+  async function call(name, data, account) {
+    const headers = { 'content-type': 'application/json', authorization: `Bearer ${await idToken(account)}` };
+    const response = await fetchImpl(`${functionsBase}/${name}`, { method: 'POST', headers, body: JSON.stringify({ data }) });
+    let parsed = null;
+    try { parsed = JSON.parse(await response.text()); } catch { parsed = null; }
+    if (!response.ok || parsed?.error) throw new Error(`${name} refused: ${parsed?.error?.status || `HTTP_${response.status}`}`);
+    return parsed?.result ?? parsed?.data ?? null;
+  }
+
+  /**
+   * One event: a founding Champion, `attendees` members, one community, one open
+   * single-activity goal (squats) with display authorized, and its SEEDED total.
+   * The seeded total is a fixture number, never anybody's effort.
+   */
+  async function expoEvent(label, { attendees, target, seeded }) {
+    const t = now();
+    const tag = `${runTag}-${label}`;
+    const champion = await createVerifiedUser(`${label}-champ`, 'Fixture Champion');
+    const people = [];
+    for (let i = 0; i < attendees; i += 1) people.push(await createVerifiedUser(`${label}-a${i}`, `Fixture Attendee ${i + 1}`));
+    const groupId = `e5cgrp-${tag}`;
+    const goalId = `e5cgoal-${tag}`;
+    await putDoc(`wsfCommunityGroups/${groupId}`, {
+      displayName: 'Fixture Expo Community', groupType: 'custom', joinPolicy: 'private',
+      joinCode: crypto.randomBytes(16).toString('base64url'), createdByUserId: champion.uid,
+      lifecycleStatus: 'active', isSample: false, createdAt: t, updatedAt: t,
+    });
+    for (const [who, role] of [[champion, 'foundingChampion'], ...people.map((p) => [p, 'member'])]) {
+      await putDoc(`wsfMemberships/${groupId}_${who.uid}`, {
+        groupId, userId: who.uid, role, membershipStatus: 'active',
+        communityNameVisibility: 'private', communityActivityVisibility: 'private', createdAt: t, updatedAt: t,
+      });
+      await putDoc(`wsfMemberProfiles/${who.uid}`, { displayName: who === champion ? 'Fixture Champion' : `Fixture Attendee ${people.indexOf(who) + 1}`, createdAt: t, updatedAt: t });
+    }
+    await putDoc(`wsfGoals/${goalId}`, {
+      ownerUid: champion.uid, communityGroupId: groupId, title: 'Fixture Expo Squats', target, unit: 'squats', status: 'active',
+      startsAt: new Date(t.getTime() - DAY), endsAt: new Date(t.getTime() + 7 * DAY), timezone: 'America/New_York',
+      repeatPolicy: 'multiple', aggregateDisplayAuthorized: true, crossingTracked: true, createdAt: t, updatedAt: t,
+    });
+    await shards(goalId, seeded);
+    // The event's line is named by its goal, so its rows carry this run's tag.
+    trackDoc(`wsfTurnLines/goal__${goalId}`);
+    return {
+      setupId: `${label}: one synthetic community, one open squats goal (target ${target}, seeded ${seeded}), a Champion and ${attendees} attendee${attendees === 1 ? '' : 's'}`,
+      groupId, goalId, target, seeded, champion, attendees: people,
+    };
+  }
+
+  /**
+   * The Champion approves the code a station screen is SHOWING, through the
+   * product's callable. The screen then claims its own credential in-page.
+   */
+  async function approveStation(event, code, slot) {
+    const approved = await call('wsfApproveStation', { goalId: event.goalId, code, slot }, event.champion);
+    if (typeof approved?.stationId !== 'string' || approved.slot !== slot) throw new Error(`station ${slot} was not approved into slot ${slot}`);
+    trackLinked(`wsfKioskStations/${approved.stationId}`, event.goalId);
+    const station = await getDoc(`wsfKioskStations/${approved.stationId}`);
+    const pairingId = station?.fields?.pairingId?.stringValue;
+    if (typeof pairingId !== 'string' || !pairingId) throw new Error(`station ${slot} carries no pairing to clean up`);
+    trackLinked(`wsfKioskPairings/${pairingId}`, event.goalId);
+    return { stationId: approved.stationId, slot };
+  }
+
+  /** A member's place in this event's line: tracked once they hold one. Returns their entry id. */
+  async function trackPlace(event, member) {
+    const mine = await call('wsfMyTurn', { goalId: event.goalId }, member);
+    const entryId = mine?.turn?.entryId;
+    if (typeof entryId !== 'string' || !entryId) throw new Error('the server has no place in the line for this member');
+    trackLinked(`wsfTurnEntries/${entryId}`, event.goalId);
+    trackDoc(`wsfTurnMembers/goal__${event.goalId}__${member.uid}`);
+    trackDoc(`wsfTurnReceipts/goal__${event.goalId}__${member.uid}`);
+    return entryId;
+  }
+
+  /** What a contribution under `attemptId` writes: the ledger row, the member's total and the recent addition. */
+  function trackContribution(event, member, attemptId) {
+    if (typeof attemptId !== 'string' || !attemptId) throw new Error('no attempt id to track');
+    trackDoc(`wsfContributions/${event.goalId}_${member.uid}_${attemptId}`);
+    trackDoc(`wsfGoalMemberTotals/${event.goalId}_${member.uid}`);
+    trackDoc(`wsfGoals/${event.goalId}/recentAdditions/${attemptId}`);
+  }
+
+  /** A started station turn's attempt: read from its own entry, for cleanup only. */
+  async function trackStationTurn(event, member, entryId) {
+    const entry = await getDoc(`wsfTurnEntries/${entryId}`);
+    if (entry?.fields?.goalId?.stringValue !== event.goalId) throw new Error('the turn entry names a different goal than this run\'s');
+    const attemptId = entry?.fields?.attemptId?.stringValue;
+    if (!attemptId) throw new Error('the started turn carries no attempt yet');
+    trackContribution(event, member, attemptId);
+  }
+
+  /** The goal closes, as a closure leaves it: status only, the rest untouched. */
+  const closeGoal = (event) => patchDoc(`wsfGoals/${event.goalId}`, { status: 'closed', updatedAt: now() });
+
+  return {
+    memberInTwoCommunities, signIn, expoEvent, approveStation, trackPlace, trackContribution, trackStationTurn, closeGoal,
+    manifestPath: cleanupManifest,
+    tracked: () => ({ users: cleanup.users.size, docs: cleanup.docs.size, linked: cleanup.linked.size }),
+  };
 }
