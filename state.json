@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "59971b8dc9d57f2afb6ae6bee378e86aefaadb90df0c7cee06e7065f47d305a0",
-  "eventCount": 380,
+  "ledgerHead": "10a769ad60fba35d4939b4bdb7f991d1cda9a98d2fefad3615bd6ddf29a0cbda",
+  "eventCount": 382,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -61,7 +61,9 @@
     }
   },
   "queue": {
-    "W3": [],
+    "W3": [
+      "EXPO-ATTENDEE-HOSTED-DRIVERS-1"
+    ],
     "W4": [],
     "W5": [],
     "W7": [],
@@ -546,6 +548,66 @@
         "after": "director"
       },
       "deliveries": 2,
+      "pendingFinding": null
+    },
+    "EXPO-ATTENDEE-HOSTED-DRIVERS-1": {
+      "owner": "W3",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Add the missing hosted attendee drivers and generated owner-card inputs using the existing staging journey framework",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        ".github/wsf-staging/journeys/expo-attendee.mjs",
+        ".github/wsf-staging/journeys/index.mjs",
+        ".github/wsf-staging/journeys/fixture-kit.mjs",
+        ".github/wsf-staging/journeys/manifest.json",
+        ".github/wsf-staging/tests/changed-journey-drivers.test.mjs",
+        ".github/wsf-staging/tests/helpers/journey-model.mjs"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 5965355363
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 5965355363
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
       "pendingFinding": null
     },
     "EXPO-ATTENDEE-JOURNEY-PROOF-1": {
@@ -2221,7 +2283,7 @@
       "packet": "EMAIL-STAGING-REPAIR",
       "worker": "W5",
       "reason": "review",
-      "status": "delivered",
+      "status": "retried",
       "comments": [
         5964977381
       ],
