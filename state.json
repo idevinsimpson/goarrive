@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "f53ea55d658cc9a406c728790919053dca9c876661fd39a965f017595ea50309",
-  "eventCount": 319,
+  "ledgerHead": "e5f45c309f22a28ee1441a3b063965d5a5566c42b08d7565ef53db7d9ac9d685",
+  "eventCount": 322,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1096,15 +1096,17 @@
       },
       "label": "Teach the existing pin generator to represent a ledger-fast-path served baseline truthfully and fail closed otherwise",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
-      "pr": null,
-      "reviewers": [],
+      "pr": 565,
+      "reviewers": [
+        "W9"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "a72a399e540c61a2b5c39518b9f3935dabbbd5b4",
+        "prHeadSha": "a72a399e540c61a2b5c39518b9f3935dabbbd5b4",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -1130,7 +1132,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5963685160
+          "id": 5963798361
         }
       },
       "review": {
@@ -1143,7 +1145,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "STAGING-PROOF-RECONCILE-ROUTING-FIX": {
@@ -2006,7 +2008,8 @@
       "ack": {
         "kind": "comment",
         "id": 5963685160
-      }
+      },
+      "superseded": true
     },
     "88c6283835fa1dce4aac808e9463ad17343b1a05ee80167900d1c884593c669c": {
       "packet": "EXPO-STATION-LOST-ANSWER-COPY-1",
@@ -2020,6 +2023,14 @@
         "kind": "comment",
         "id": 5963742004
       }
+    },
+    "a73fe0dad4728adfa1a2e5b64bee7f46248e8812d0ddb733fc1ecd9dbc9b1169": {
+      "packet": "STAGING-PIN-FASTPATH-SERVED-BASELINE-1",
+      "worker": "W9",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
