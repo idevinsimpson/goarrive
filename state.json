@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "c0482681de93b1bd31179fa4b9250887e02a5d6a018ae877559a61e53ab862d2",
-  "eventCount": 287,
+  "ledgerHead": "1643a9a2a8cdca2964c042e3cd8f6eda8c7388ec7eac6fe3227c52bdde585d5b",
+  "eventCount": 293,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -492,7 +492,7 @@
       },
       "label": "Pin exact integrated expo account-entry milestone through the existing reviewed full staging path",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -506,7 +506,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         ".github/wsf-staging/approved-candidate.json"
@@ -525,7 +525,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5963494417
+          "id": 5963516349
         }
       },
       "review": {
@@ -567,7 +567,9 @@
       "proof": null,
       "served": null,
       "releasedQueueIndex": null,
-      "reviewedBy": [],
+      "reviewedBy": [
+        "W4"
+      ],
       "subjectPaths": [
         "apps/westayfit/tests-e2e/expo-attendee-journey.spec.ts",
         "apps/westayfit/tests-e2e/helpers/expo-attendee-fixtures.ts",
@@ -589,7 +591,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5963411547
+          "id": 5963507481
         }
       },
       "review": {
@@ -1096,12 +1098,15 @@
       },
       "label": "Finish existing PR 562 credential-mode safety and pilot readiness without activating or replacing live workers",
       "origin": "ledger",
-      "phase": "DELIVERED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
       "pr": 562,
-      "reviewers": [],
+      "reviewers": [
+        "W4",
+        "W9"
+      ],
       "artifact": {
         "subjectSha": "0790876b25cf7fcae592d35f65871b9df8471d8d",
         "prHeadSha": "0790876b25cf7fcae592d35f65871b9df8471d8d",
@@ -1801,16 +1806,36 @@
       "ack": {
         "kind": "comment",
         "id": 5963446733
-      }
+      },
+      "superseded": true
     },
     "72a007ddbccabda02c0d3cd2770af8e9218a85f85c148020b3956c3a4b9c5f2f": {
       "packet": "EXPO-ACCOUNT-ENTRY-1-STAGING-PIN",
       "worker": "W3",
       "reason": "release",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         5963513342
       ],
+      "ack": {
+        "kind": "comment",
+        "id": 5963516349
+      }
+    },
+    "8f948e13771d5be91b79b85ef294393b647f647415f13a503999587cf44d6b79": {
+      "packet": "WORKER-EXECUTION-PROFILES-1",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
+    },
+    "d40fde353cb70b31fc1b1143cf9dfa4197a7bb7d3750594e9a84dc7767b6c087": {
+      "packet": "WORKER-EXECUTION-PROFILES-1",
+      "worker": "W9",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
