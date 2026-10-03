@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "ec7b57fb82fb90c6a56943073254b5ea316abb2584921ff1ecc41f4beb32752e",
-  "eventCount": 498,
+  "ledgerHead": "4ce6df77de7fd66c419d50b98ae861be0a4f8b41b3511349c6d7715553e8f132",
+  "eventCount": 500,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -834,7 +834,7 @@
       },
       "label": "Pin the latest accepted expo candidate and activate the fixed closed-goal hosted journey through the existing full staging path",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "ACCEPTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -874,10 +874,13 @@
           "kind": "comment",
           "id": 5970558946
         },
-        "accepted": null,
+        "accepted": {
+          "kind": "comment",
+          "id": 5971957916
+        },
         "lastTransition": {
           "kind": "comment",
-          "id": 5971380093
+          "id": 5971957916
         }
       },
       "review": {
@@ -2848,11 +2851,14 @@
       "packet": "EXPO-MOVEMENT-VIDEO-1",
       "worker": "W4",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         5971765380
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 5971771902
+      }
     }
   },
   "fastpath": {
