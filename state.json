@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "a8775b96026faa9e977210c4b3b181f9f4f4130cbe4e7f562b6c9b587c71f12d",
-  "eventCount": 338,
+  "ledgerHead": "1dab766961cd38bd88c96639b084fc09edf3e129377e5ca803bd2574c68eb378",
+  "eventCount": 341,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -492,15 +492,17 @@
       },
       "label": "Pin exact integrated expo account-entry milestone through the existing reviewed full staging path",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
-      "pr": null,
-      "reviewers": [],
+      "pr": 566,
+      "reviewers": [
+        "W4"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "807573c8aee1fa217ae90a6b53fe1f4a182da2be",
+        "prHeadSha": "807573c8aee1fa217ae90a6b53fe1f4a182da2be",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -525,7 +527,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5963971375
+          "id": 5964006803
         }
       },
       "review": {
@@ -538,7 +540,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "EXPO-ATTENDEE-JOURNEY-PROOF-1": {
@@ -2069,7 +2071,16 @@
       "ack": {
         "kind": "comment",
         "id": 5963990988
-      }
+      },
+      "superseded": true
+    },
+    "1b956b036938df9073bc50027876da3776bcda271bc29d02ca01146f52e94fd7": {
+      "packet": "EXPO-ACCOUNT-ENTRY-1-STAGING-PIN",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
