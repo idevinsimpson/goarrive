@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "a33c81f275c0f29d22b3f7bac28dbf3ec625941b52c85ec931d420508e3d8a32",
-  "eventCount": 481,
+  "ledgerHead": "22511c4d9d0eee9da88b09e008cf85aaadfb41989c17f96f473e89e409bbcc61",
+  "eventCount": 488,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -65,9 +65,7 @@
     "W4": [],
     "W5": [],
     "W7": [],
-    "W9": [
-      "EXPO-MOVEMENT-VIDEO-1"
-    ]
+    "W9": []
   },
   "packets": {
     "AUTONOMY-ROUTER-1C": {
@@ -836,7 +834,7 @@
       },
       "label": "Pin the latest accepted expo candidate and activate the fixed closed-goal hosted journey through the existing full staging path",
       "origin": "ledger",
-      "phase": "CHANGES_REQUESTED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -845,8 +843,8 @@
         "W4"
       ],
       "artifact": {
-        "subjectSha": "7214a6fc9ccc0e9e8df8d822200b5685c4c6e80d",
-        "prHeadSha": "7214a6fc9ccc0e9e8df8d822200b5685c4c6e80d",
+        "subjectSha": "a0bb252a0a19a51aea00694d1a457b93afc4a13d",
+        "prHeadSha": "a0bb252a0a19a51aea00694d1a457b93afc4a13d",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -877,7 +875,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5970985781
+          "id": 5971316770
         }
       },
       "review": {
@@ -890,7 +888,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 1,
+      "deliveries": 2,
       "pendingFinding": null
     },
     "EXPO-MOVEMENT-VIDEO-1": {
@@ -902,10 +900,10 @@
       },
       "label": "Loop approved demo media in the existing shared player with truthful fallback and no contribution side effects",
       "origin": "ledger",
-      "phase": "QUEUED",
+      "phase": "RELEASED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
-      "inbox": null,
+      "inbox": 497,
       "pr": null,
       "reviewers": [],
       "artifact": {
@@ -916,7 +914,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": null,
+      "releasedQueueIndex": 0,
       "reviewedBy": [],
       "subjectPaths": [
         "apps/westayfit/src/followAlong.ts",
@@ -936,11 +934,14 @@
           "kind": "comment",
           "id": 5971264707
         },
-        "released": null,
+        "released": {
+          "kind": "comment",
+          "id": 5971282758
+        },
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5971264707
+          "id": 5971282758
         }
       },
       "review": {
@@ -2801,10 +2802,30 @@
       "packet": "EXPO-LATEST-FULL-STAGING-PIN-1",
       "worker": "W3",
       "reason": "handback",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         5971282910
       ],
+      "ack": {
+        "kind": "comment",
+        "id": 5971285970
+      },
+      "superseded": true
+    },
+    "639b4213f4517d36cf9f0f4076dfbdb3691d3650d8a3278bbaec24f6eba54d93": {
+      "packet": "EXPO-LATEST-FULL-STAGING-PIN-1",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
+    },
+    "c686e1a75995860818b2a70440b5589065561b7033af05fb74f3b7dc2236d80b": {
+      "packet": "EXPO-MOVEMENT-VIDEO-1",
+      "worker": "W9",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
