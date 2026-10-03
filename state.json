@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "a0fae5243feb5c1c5a12604cdffb90803ff50eb55a68a55f4fa18169b351138c",
-  "eventCount": 465,
+  "ledgerHead": "20d853cbb613517cba2d511fb9a601f0eef63ecda61172008847be27539b77c2",
+  "eventCount": 466,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -767,7 +767,7 @@
       },
       "label": "Close GAP-2 by refusing queue and turn admission after a goal closes without changing the existing expo systems",
       "origin": "ledger",
-      "phase": "ACCEPTED",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -779,7 +779,7 @@
         "subjectSha": "3a3ddb5548cdffeb88238512e1ce79742faf2dea",
         "prHeadSha": "3a3ddb5548cdffeb88238512e1ce79742faf2dea",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "0d3598d4a1dc72411b6d80d375335b84a497efdb"
       },
       "proof": null,
       "served": null,
@@ -808,8 +808,8 @@
           "id": 5970424479
         },
         "lastTransition": {
-          "kind": "comment",
-          "id": 5970424479
+          "kind": "pull_request",
+          "id": 571
         }
       },
       "review": {
