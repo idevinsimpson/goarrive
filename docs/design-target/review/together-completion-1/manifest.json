@@ -18,8 +18,8 @@
   "environment": "Firebase emulators demo-wsf-local; emulator Hosting; Playwright 1.62.1 headless Chromium 141",
   "files": {
     "README.md": {
-      "sha256": "1f2ebd3123eae66bd33c47390dc28ca0244716c7ceb7e19f1c2710a19bbe9b6f",
-      "bytes": 6067
+      "sha256": "9c25e1866435596d0f86881d44917705b37b694563f85493a3c8381e66b8018c",
+      "bytes": 7577
     },
     "after/crossing-settled-390x844.png": {
       "sha256": "636bab3cdd10223957cd9ac8d4fcb59ed93fc8dcd10fdd4d1fe31d51b0ee5d50",
@@ -100,6 +100,31 @@
     "runs/unit-d9d209f4.txt": {
       "sha256": "09a11e7ea16128de6eac2264eb5f5536cf65f3d9f5fd9a77dfad52980145ec6c",
       "bytes": 597
+    },
+    "runs/evidence-intact-f024c5ab.txt": {
+      "sha256": "7b5795e9086d754e106f005bf8e84ba99f0ef1a9549d3651e28a0d51607716b7",
+      "bytes": 113
+    },
+    "runs/recovery-port-rendering-f024c5ab.txt": {
+      "sha256": "85a95e91211dd486e77a7c8d5b9863b61f32e76ef4e100b75bcf917898dcd489",
+      "bytes": 2335
+    },
+    "runs/tsc-f024c5ab.txt": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "runs/unit-all-f024c5ab.txt": {
+      "sha256": "907e3fdd3662187d752e957baba00d9cfac79367fa2ee77cc224524514c56459",
+      "bytes": 607
+    },
+    "runs/w4-set-f024c5ab.txt": {
+      "sha256": "0edfea81149f771fc8dd0d09286a6d414cf3f78841f6acf15ae6501372788baa",
+      "bytes": 14072
     }
+  },
+  "testHeadSha": "f024c5abb46501a756197b97c8eb26103a9da28b",
+  "scopeDelta": {
+    "decision": "#497 comment 5965771172",
+    "addedPath": "apps/westayfit/tests-e2e/sprint-w9-recovery-port-rendering.spec.ts"
   }
 }

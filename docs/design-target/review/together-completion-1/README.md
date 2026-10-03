@@ -39,11 +39,23 @@ The frozen Lovable TARGET frames (`lovable/evidence/*.png`, `together-motion.web
 - **Affected regressions:** 113/113.
   - `regression-1-d9d209f4.txt`: 47 tests in ui-contribute, ui-contribute-crossing, ui-contribute-repeat-policy, sprint-w9-focus-return-1, sprint-w9-contribute-exits, e4-a1-shared-goal, ui-contribute-short-phone and ui-kiosk.
   - `regression-2-d9d209f4.txt`: 66 tests in ui-a11y, sprint-w9-app-feel-parity-1, ui-contribute-torture, ui-contribute-torture-2, move-follow-along, sprint-w9-home-return and sprint-w1b-contribute-exits.
-- **One red, outside the reservation:** `sprint-w9-recovery-port-rendering.spec.ts`, the test "receipt: the member's own numbers before the community's, and the way back is the green action" → `recovery-port-rendering-d9d209f4.txt`.
-  - It asserts the RECOVERY-PORT-1 receipt order and its `rgb(34,197,94)` / white button fills.
-  - The owner-selected Together hierarchy and palette replace both on purpose.
-  - The other 5 tests in that spec pass.
-  - Updating it needs a reservation delta, or Director confirmation that it is superseded. It is **not** edited here.
+- **One red at `d9d209f4`, then outside the reservation:** `sprint-w9-recovery-port-rendering.spec.ts`, the test "receipt: the member's own numbers before the community's, and the way back is the green action" → `recovery-port-rendering-d9d209f4.txt`. It asserted the RECOVERY-PORT-1 receipt order and its `rgb(34,197,94)` / white fills, which the Together hierarchy replaces on purpose. W4 raised it as the finding (5965561445). It is resolved below.
+
+## Successor: Director scope delta 5965771172 (W4 remedy a), test-only head `f024c5ab`
+
+- **The delta:** exactly one added path, `tests-e2e/sprint-w9-recovery-port-rendering.spec.ts`. No product runtime file changed: the served product is still `d9d209f4`'s code, rebuilt with marker `f024c5ab`.
+- **What changed in it:** only the superseded receipt test, now "receipt: the Together hierarchy — amount, WE, payoff, shared total, own credit, standing, then the green way back". The other five RECOVERY-PORT-1 tests are unchanged.
+- **Same strictness as before:**
+  - Every probe must be present and strictly ascending: Recorded → amount → heading → WE → payoff → shared total → percent → status → own credit → standing → back → record more.
+  - The own credit must be exactly "Your total on this goal: 20 squats".
+  - The computed fills must be exact:
+    - back: `rgb(145, 203, 125)` (#91CB7D) with `rgb(9, 27, 48)` ink;
+    - record more: unfilled `rgba(0, 0, 0, 0)` with `rgb(173, 192, 215)` text.
+- **Results at `f024c5ab`:**
+  - `recovery-port-rendering-f024c5ab.txt`: **6/6**.
+  - `w4-set-f024c5ab.txt`: **65 passed, 3 skipped** (the gated capture and clip producers), **0 failed**. That is W4's named set: every `*contribute*` spec (both Together specs among them), `expo-attendee-journey` and `sprint-w9-recovery-port-rendering`.
+  - `unit-all-f024c5ab.txt`: vitest **1060/1060**. `tsc-f024c5ab.txt`: `tsc --noEmit` **0**.
+  - `evidence-intact-f024c5ab.txt`: frozen BEFORE intact (9), accepted TARGET/AFTER intact (20), no byte changed. Run artifacts were removed and no frame was recaptured.
 
 ### First run, reported as it happened (`first-run-wip.txt`, `regression-*-wip.txt`)
 
