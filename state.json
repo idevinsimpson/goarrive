@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "f049746f216ac598af5d8ea0d3856f6faf6d89cf3aa68b9ffe7107693e0abcae",
-  "eventCount": 328,
+  "ledgerHead": "dd26b927b9b5a52ad7dfad64c3f501c9cd3179b31c8718e637244030cfedd8eb",
+  "eventCount": 330,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -624,7 +624,7 @@
       },
       "label": "Replace station vendor error text with existing product-safe callable wording without changing retry truth",
       "origin": "ledger",
-      "phase": "ACCEPTED",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -636,7 +636,7 @@
         "subjectSha": "1d290f74b88a9ba05619c7d1d9c15e51ef01ad11",
         "prHeadSha": "1d290f74b88a9ba05619c7d1d9c15e51ef01ad11",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "5be74f3f2763e5aee21d6c20f67ea13fd7dd69cb"
       },
       "proof": null,
       "served": null,
@@ -663,8 +663,8 @@
           "id": 5963911732
         },
         "lastTransition": {
-          "kind": "comment",
-          "id": 5963911732
+          "kind": "pull_request",
+          "id": 564
         }
       },
       "review": {
@@ -1101,7 +1101,7 @@
       },
       "label": "Teach the existing pin generator to represent a ledger-fast-path served baseline truthfully and fail closed otherwise",
       "origin": "ledger",
-      "phase": "ACCEPTED",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -1113,7 +1113,7 @@
         "subjectSha": "a72a399e540c61a2b5c39518b9f3935dabbbd5b4",
         "prHeadSha": "a72a399e540c61a2b5c39518b9f3935dabbbd5b4",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "e359857874e3cc4f9520c72a621acf5db12ccaaf"
       },
       "proof": null,
       "served": null,
@@ -1141,8 +1141,8 @@
           "id": 5963914167
         },
         "lastTransition": {
-          "kind": "comment",
-          "id": 5963914167
+          "kind": "pull_request",
+          "id": 565
         }
       },
       "review": {
