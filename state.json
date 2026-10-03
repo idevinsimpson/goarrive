@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "95ed1ad5d661634548eff7ba10d49ff9b2f7e915f7e784f08630bffd4f1282c5",
-  "eventCount": 399,
+  "ledgerHead": "bae65f5ecadb83e444b9cd5bbd1f5069c81d223adf924fdce2b16eea5f940009",
+  "eventCount": 401,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1303,7 +1303,7 @@
       },
       "label": "Port the owner-selected Together completion from the frozen Lovable reference to the confirmed member receipt with truthful totals, one-time motion and reduced-motion parity",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "CHANGES_REQUESTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -1347,7 +1347,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5965445620
+          "id": 5965561445
         }
       },
       "review": {
@@ -2333,7 +2333,8 @@
       "ack": {
         "kind": "comment",
         "id": 5965466432
-      }
+      },
+      "superseded": true
     },
     "8b8734ebce12a05165755a443f3f5a0fce7c85c225d6ace626b03971b66f2b02": {
       "packet": "EMAIL-STAGING-REPAIR",
@@ -2348,6 +2349,14 @@
         "id": 5965498912
       },
       "superseded": true
+    },
+    "15a2ece9e52039a83ad248364dbdc83aa66cb1dd7c418ea5fc454d7b3a2e1c82": {
+      "packet": "TOGETHER-COMPLETION-1",
+      "worker": "W9",
+      "reason": "handback",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {

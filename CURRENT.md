@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=95ed1ad5d661634548eff7ba10d49ff9b2f7e915f7e784f08630bffd4f1282c5 events=399 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=bae65f5ecadb83e444b9cd5bbd1f5069c81d223adf924fdce2b16eea5f940009 events=401 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `95ed1ad5d661634548eff7ba10d49ff9b2f7e915f7e784f08630bffd4f1282c5` (399 events)
+- Ledger head: `bae65f5ecadb83e444b9cd5bbd1f5069c81d223adf924fdce2b16eea5f940009` (401 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -30,10 +30,10 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | Worker | Inbox | Active now | Reviewing | Waiting on review | Blocked | Next | Queue | WATCH |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | W3 | #396 | EXPO-ATTENDEE-HOSTED-DRIVERS-1 | — | EMAIL-STAGING-REPAIR, WORKER-EXECUTION-PROFILES-1 | — | — | — | on |
-| W4 | #394 | — | TOGETHER-COMPLETION-1 | — | — | — | — | on |
+| W4 | #394 | — | — | — | — | — | — | off |
 | W5 | #395 | — | — | — | — | — | — | off |
 | W7 | #434 | — | — | — | — | — | — | off |
-| W9 | #497 | — | — | TOGETHER-COMPLETION-1 | — | — | — | off |
+| W9 | #497 | TOGETHER-COMPLETION-1 | — | — | — | — | — | on |
 
 ## Packets
 
@@ -57,7 +57,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | STAGING-FRESHNESS-FASTPATH | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #548 | c295d5c1 | c295d5c1 | — | 73d87d4e | — | W4 | comment:5938517396 | pull_request:548 | — | Step 7: automate preview-eligible accepted/integrated to deterministic candidate, pin, existing staging dispatch, and FRESH readback | 1×ops-source then director | — |
 | STAGING-PIN-FASTPATH-SERVED-BASELINE-1 | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #565 | a72a399e | a72a399e | — | e3598578 | — | W9 | comment:5963657922 | pull_request:565 | — | Teach the existing pin generator to represent a ledger-fast-path served baseline truthfully and fail closed otherwise | 1×ops-source then director | — |
 | STAGING-PROOF-RECONCILE-ROUTING-FIX | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #557 | cc180898 | cc180898 | — | 9ca268d2 | — | W4 | comment:5956038540 | pull_request:557 | — | Derive the exact successful staging run proof and pointer sequence when the workflow-run wake is missed | 1×ops-source then director | — |
-| TOGETHER-COMPLETION-1 | W9 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #567 | 2e492a30 | 2e492a30 | — | — | — | W4 | comment:5964984624 | comment:5965445620 | — | Port the owner-selected Together completion from the frozen Lovable reference to the confirmed member receipt with truthful totals, one-time motion and reduced-motion parity | 1×journey-qa then director | — |
+| TOGETHER-COMPLETION-1 | W9 | work | INTEGRATED (source-only) | ledger | CHANGES_REQUESTED | #567 | 2e492a30 | 2e492a30 | — | — | — | W4 | comment:5964984624 | comment:5965561445 | — | Port the owner-selected Together completion from the frozen Lovable reference to the confirmed member receipt with truthful totals, one-time motion and reduced-motion parity | 1×journey-qa then director | — |
 | WORKER-EXECUTION-PROFILES-1 | W3 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #562 | 0790876b | 0790876b | — | — | — | W4, W9 | comment:5962925247 | comment:5963579258 | — | Finish existing PR 562 credential-mode safety and pilot readiness without activating or replacing live workers | 1×ops-source+1×security then director | — |
 
 ## Wakes
@@ -125,4 +125,5 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | 16dc80b65205 | W3 | EXPO-ATTENDEE-HOSTED-DRIVERS-1 | release | acked | 5965388642 | comment:5965391205 |
 | 6d515ae981f9 | W4 | TOGETHER-COMPLETION-1 | review | acked | 5965459389 | comment:5965466432 |
 | 8b8734ebce12 | W9 | EMAIL-STAGING-REPAIR | review | acked | 5965480450 | comment:5965498912 |
+| 15a2ece9e520 | W9 | TOGETHER-COMPLETION-1 | handback | requested | — | — |
 
