@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "191a299a45a764eccb056f6d94cb0fcf0176235cb1fca19cbe3d74d68dccb942",
-  "eventCount": 386,
+  "ledgerHead": "3760ae4499e0f3c017d28be422c8206b5b73737920893bb6114b3dba0374caab",
+  "eventCount": 388,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -557,7 +557,7 @@
       },
       "label": "Add the missing hosted attendee drivers and generated owner-card inputs using the existing staging journey framework",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -571,7 +571,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         ".github/wsf-staging/journeys/expo-attendee.mjs",
@@ -595,7 +595,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5965372716
+          "id": 5965391205
         }
       },
       "review": {
@@ -2308,11 +2308,14 @@
       "packet": "EXPO-ATTENDEE-HOSTED-DRIVERS-1",
       "worker": "W3",
       "reason": "release",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         5965388642
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 5965391205
+      }
     }
   },
   "fastpath": {

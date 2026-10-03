@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=191a299a45a764eccb056f6d94cb0fcf0176235cb1fca19cbe3d74d68dccb942 events=386 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=3760ae4499e0f3c017d28be422c8206b5b73737920893bb6114b3dba0374caab events=388 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `191a299a45a764eccb056f6d94cb0fcf0176235cb1fca19cbe3d74d68dccb942` (386 events)
+- Ledger head: `3760ae4499e0f3c017d28be422c8206b5b73737920893bb6114b3dba0374caab` (388 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -46,7 +46,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | EMAIL-STAGING-REPAIR | W3 | work | STAGED (hosted) | ledger | UNDER_REVIEW | #559 | 39484f78 | 39484f78 | — | — | — | W4, W5 | comment:5959200686 | comment:5965046943 | — | Diagnose and repair staging verification and password-reset delivery without weakening mail security | 1×ops-source+1×security then director | — |
 | EXPO-ACCOUNT-ENTRY-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #561 | e603a39c | e603a39c | — | 5705dc3b | — | W4 | comment:5961789672 | pull_request:561 | — | Expo account-entry seam: preserve event context and make the existing phone/kiosk choice fast and truthful without bypassing verified identity | 1×journey-qa then director | — |
 | EXPO-ACCOUNT-ENTRY-1-STAGING-PIN | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #566 | 04ca5d05 | 04ca5d05 | 04ca5d05 | 08a2f08d | — | W4 | comment:5963494417 | pull_request:566 | — | Pin exact integrated expo account-entry milestone through the existing reviewed full staging path | 1×ops-source then director | — |
-| EXPO-ATTENDEE-HOSTED-DRIVERS-1 | W3 | work | INTEGRATED (source-only) | ledger | RELEASED | — | — | — | — | — | — | — | comment:5965372716 | comment:5965372716 | — | Add the missing hosted attendee drivers and generated owner-card inputs using the existing staging journey framework | 1×ops-source then director | — |
+| EXPO-ATTENDEE-HOSTED-DRIVERS-1 | W3 | work | INTEGRATED (source-only) | ledger | ACKED | — | — | — | — | — | — | — | comment:5965372716 | comment:5965391205 | — | Add the missing hosted attendee drivers and generated owner-card inputs using the existing staging journey framework | 1×ops-source then director | — |
 | EXPO-ATTENDEE-JOURNEY-PROOF-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #563 | 12e70c5a | 12e70c5a | — | 0669c446 | — | W4 | comment:5963015704 | pull_request:563 | — | Prove the existing attendee phone and two-station journey and expose only real missing seams; test and evidence source, not live expo acceptance | 1×journey-qa then director | — |
 | EXPO-STATION-LOST-ANSWER-COPY-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #564 | 1d290f74 | 1d290f74 | — | 5be74f3f | — | W4 | comment:5963613447 | pull_request:564 | — | Replace station vendor error text with existing product-safe callable wording without changing retry truth | 1×journey-qa then director | — |
 | KIOSK-PAIRING-CLARITY-PROOF-1 | W9 | work | STAGED (hosted) | ledger | STAGED | #553 | 4537c26c | 4537c26c | — | ab77fbfc | hosted run 37025084843: PASS | W4 | comment:5945136749 | comment:5955903159 | — | Clarify venue-station pairing from the Champion's own phone and prove the existing flow end-to-end | 1×journey-qa then director | — |
@@ -122,5 +122,5 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | 8948c387eef6 | W4 | EMAIL-STAGING-REPAIR | review | acked | 5964977244 | comment:5964981889 |
 | 4925976176a1 | W5 | EMAIL-STAGING-REPAIR | review | redelivered | 5964977381, 5965368070 | — |
 | bac3c3b6a769 | W9 | TOGETHER-COMPLETION-1 | release | acked | 5964997619 | comment:5965001839 |
-| 16dc80b65205 | W3 | EXPO-ATTENDEE-HOSTED-DRIVERS-1 | release | delivered | 5965388642 | — |
+| 16dc80b65205 | W3 | EXPO-ATTENDEE-HOSTED-DRIVERS-1 | release | acked | 5965388642 | comment:5965391205 |
 
