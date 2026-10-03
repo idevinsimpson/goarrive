@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "ffd038b0c068ccb973ad22a0c36761ff90624f1e92a10f57739b000a9f089eee",
-  "eventCount": 456,
+  "ledgerHead": "ddaef1e224b8df7f92b3f23147bfb03b815f8afc0305cd3755c008d2011d1851",
+  "eventCount": 461,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -767,7 +767,7 @@
       },
       "label": "Close GAP-2 by refusing queue and turn admission after a goal closes without changing the existing expo systems",
       "origin": "ledger",
-      "phase": "CHANGES_REQUESTED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -776,8 +776,8 @@
         "W4"
       ],
       "artifact": {
-        "subjectSha": "7830ec156d8b93a086c1e1b222b08529ddf43760",
-        "prHeadSha": "7830ec156d8b93a086c1e1b222b08529ddf43760",
+        "subjectSha": "3a3ddb5548cdffeb88238512e1ce79742faf2dea",
+        "prHeadSha": "3a3ddb5548cdffeb88238512e1ce79742faf2dea",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -804,7 +804,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5968858147
+          "id": 5969461880
         }
       },
       "review": {
@@ -817,7 +817,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 1,
+      "deliveries": 2,
       "pendingFinding": null
     },
     "EXPO-STATION-LOST-ANSWER-COPY-1": {
@@ -2609,10 +2609,22 @@
       "packet": "EXPO-CLOSED-GOAL-QUEUE-GATE-1",
       "worker": "W9",
       "reason": "handback",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         5969399911
       ],
+      "ack": {
+        "kind": "comment",
+        "id": 5969408731
+      },
+      "superseded": true
+    },
+    "67b559da37e674b54e3b7285d7f74e9e153365c663ea2c99aa7beaf2411bdb50": {
+      "packet": "EXPO-CLOSED-GOAL-QUEUE-GATE-1",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
