@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "988e75566b7cf3909290c752a7218dc6751737ef7171bf775a1ee54532b37a9d",
-  "eventCount": 346,
+  "ledgerHead": "3679c684245998d67cd350b7e842f8f52b098c17ec158fdb33e7b8c27442dc59",
+  "eventCount": 348,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -365,7 +365,8 @@
       "served": null,
       "releasedQueueIndex": null,
       "reviewedBy": [
-        "W4"
+        "W4",
+        "W9"
       ],
       "subjectPaths": [
         "functions-westayfit/src/index.ts",
@@ -389,7 +390,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5963962902
+          "id": 5964103067
         }
       },
       "review": {
@@ -2058,7 +2059,8 @@
       "ack": {
         "kind": "comment",
         "id": 5963990921
-      }
+      },
+      "superseded": true
     },
     "bb43e7091a924efc3f4df9480f224d7d163556f1eb41557e885954f2276e8a7d": {
       "packet": "EXPO-ACCOUNT-ENTRY-1-STAGING-PIN",
@@ -2092,11 +2094,14 @@
       "packet": "EXPO-ACCOUNT-ENTRY-1-STAGING-PIN",
       "worker": "W3",
       "reason": "handback",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         5964095206
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 5964097860
+      }
     }
   },
   "fastpath": {
