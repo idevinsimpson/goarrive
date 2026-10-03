@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=17c67cd8a991d4852e949fb2e80b74dbaf770a237442aa6d295c2ac9796352c4 events=277 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=ff1197664ee1d64ae246c88df664e7aefbd058203695954605ba819fe7a8f4c1 events=281 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `17c67cd8a991d4852e949fb2e80b74dbaf770a237442aa6d295c2ac9796352c4` (277 events)
+- Ledger head: `ff1197664ee1d64ae246c88df664e7aefbd058203695954605ba819fe7a8f4c1` (281 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -30,10 +30,10 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | Worker | Inbox | Active now | Reviewing | Waiting on review | Blocked | Next | Queue | WATCH |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | W3 | #396 | — | — | EMAIL-STAGING-REPAIR, WORKER-EXECUTION-PROFILES-1 | — | — | — | off |
-| W4 | #394 | — | — | — | — | — | — | off |
+| W4 | #394 | — | EXPO-ATTENDEE-JOURNEY-PROOF-1 | — | — | — | — | on |
 | W5 | #395 | — | EMAIL-STAGING-REPAIR | — | — | — | — | on |
 | W7 | #434 | — | — | — | — | — | — | off |
-| W9 | #497 | EXPO-ATTENDEE-JOURNEY-PROOF-1 | — | — | — | — | — | on |
+| W9 | #497 | — | — | EXPO-ATTENDEE-JOURNEY-PROOF-1 | — | — | — | off |
 
 ## Packets
 
@@ -44,8 +44,8 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | AUTONOMY-STATE-1B | W3 | work | INTEGRATED (source-only) | bootstrap | INTEGRATED | #538 | 073b7946 | 073b7946 | — | d42a3307 | — | — | comment:5857966052 | comment:5857966052 | — | Serial step 5: authoritative control state, App writer, bootstrap and shadow reconcile | 1×ops-source then director | — |
 | CONTROL-EXPO-ROUTE-PATH-GRAMMAR | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #552 | 3cc44d30 | 3cc44d30 | — | 6687440d | — | W4 | comment:5944968693 | pull_request:552 | — | Allow exact Expo Router filenames in control packet path reservations without widening other path syntax | 1×ops-source then director | — |
 | EMAIL-STAGING-REPAIR | W3 | work | STAGED (hosted) | ledger | UNDER_REVIEW | #559 | 44ae4898 | 44ae4898 | — | — | — | W4, W5 | comment:5959200686 | comment:5961050452 | — | Diagnose and repair staging verification and password-reset delivery without weakening mail security | 1×ops-source+1×security then director | — |
-| EXPO-ACCOUNT-ENTRY-1 | W9 | work | INTEGRATED (source-only) | ledger | ACCEPTED | #561 | e603a39c | e603a39c | — | — | — | W4 | comment:5961789672 | comment:5963390962 | — | Expo account-entry seam: preserve event context and make the existing phone/kiosk choice fast and truthful without bypassing verified identity | 1×journey-qa then director | — |
-| EXPO-ATTENDEE-JOURNEY-PROOF-1 | W9 | work | INTEGRATED (source-only) | ledger | ACKED | — | — | — | — | — | — | — | comment:5963015704 | comment:5963036221 | — | Prove the existing attendee phone and two-station journey and expose only real missing seams; test and evidence source, not live expo acceptance | 1×journey-qa then director | — |
+| EXPO-ACCOUNT-ENTRY-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #561 | e603a39c | e603a39c | — | 5705dc3b | — | W4 | comment:5961789672 | pull_request:561 | — | Expo account-entry seam: preserve event context and make the existing phone/kiosk choice fast and truthful without bypassing verified identity | 1×journey-qa then director | — |
+| EXPO-ATTENDEE-JOURNEY-PROOF-1 | W9 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #563 | 12e70c5a | 12e70c5a | — | — | — | W4 | comment:5963015704 | comment:5963411547 | — | Prove the existing attendee phone and two-station journey and expose only real missing seams; test and evidence source, not live expo acceptance | 1×journey-qa then director | — |
 | KIOSK-PAIRING-CLARITY-PROOF-1 | W9 | work | STAGED (hosted) | ledger | STAGED | #553 | 4537c26c | 4537c26c | — | ab77fbfc | hosted run 37025084843: PASS | W4 | comment:5945136749 | comment:5955903159 | — | Clarify venue-station pairing from the Champion's own phone and prove the existing flow end-to-end | 1×journey-qa then director | — |
 | STAGING-FASTPATH-DOCS-LINEAGE-FIX | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #551 | 963dd558 | 963dd558 | — | 9825aa36 | — | W4 | comment:5944563639 | pull_request:551 | — | Step 7 correction: allow provably non-runtime docs/instruction lineage while preserving fail-closed fast-path invariants | 1×ops-source then director | — |
 | STAGING-FASTPATH-FAILED-TARGET-RETRY-FIX | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #556 | 92fdfecd | 92fdfecd | — | b4b479a6 | — | W4 | comment:5954269955 | pull_request:556 | — | Add a fail-closed one-shot recorded retry authorization for an exact repaired staging target and failed run | 1×ops-source then director | — |
@@ -100,4 +100,5 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | ead5e1d14bd6 | W4 | EXPO-ACCOUNT-ENTRY-1 | review | acked | 5962746864 | comment:5962757741 |
 | a746440f0a4d | W3 | WORKER-EXECUTION-PROFILES-1 | release | acked | 5962940661 | comment:5962947369 |
 | 95ba0af09ab9 | W9 | EXPO-ATTENDEE-JOURNEY-PROOF-1 | release | acked | 5963032791 | comment:5963036221 |
+| b5114d452723 | W4 | EXPO-ATTENDEE-JOURNEY-PROOF-1 | review | requested | — | — |
 

@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "17c67cd8a991d4852e949fb2e80b74dbaf770a237442aa6d295c2ac9796352c4",
-  "eventCount": 277,
+  "ledgerHead": "ff1197664ee1d64ae246c88df664e7aefbd058203695954605ba819fe7a8f4c1",
+  "eventCount": 281,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -418,7 +418,7 @@
       },
       "label": "Expo account-entry seam: preserve event context and make the existing phone/kiosk choice fast and truthful without bypassing verified identity",
       "origin": "ledger",
-      "phase": "ACCEPTED",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -430,7 +430,7 @@
         "subjectSha": "e603a39c4e9e465b65bf840bfb4ed11eaf16d319",
         "prHeadSha": "e603a39c4e9e465b65bf840bfb4ed11eaf16d319",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "5705dc3bf198a9490600c7e32b8bb55356defd9d"
       },
       "proof": null,
       "served": null,
@@ -466,8 +466,8 @@
           "id": 5963390962
         },
         "lastTransition": {
-          "kind": "comment",
-          "id": 5963390962
+          "kind": "pull_request",
+          "id": 561
         }
       },
       "review": {
@@ -492,15 +492,17 @@
       },
       "label": "Prove the existing attendee phone and two-station journey and expose only real missing seams; test and evidence source, not live expo acceptance",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
-      "pr": null,
-      "reviewers": [],
+      "pr": 563,
+      "reviewers": [
+        "W4"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "12e70c5aec28fcf0edc23295b7360ca941459cef",
+        "prHeadSha": "12e70c5aec28fcf0edc23295b7360ca941459cef",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -529,7 +531,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5963036221
+          "id": 5963411547
         }
       },
       "review": {
@@ -542,7 +544,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "KIOSK-PAIRING-CLARITY-PROOF-1": {
@@ -1727,7 +1729,16 @@
       "ack": {
         "kind": "comment",
         "id": 5963036221
-      }
+      },
+      "superseded": true
+    },
+    "b5114d4527239bc9ea9009e004f8d94711fa8dece017391c7a43c125a03289fb": {
+      "packet": "EXPO-ATTENDEE-JOURNEY-PROOF-1",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
