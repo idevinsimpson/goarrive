@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "f1631226b1a38c0fc1d979ad44cb5edcc3a96d69c50af7349b6f1b47c0fcc434",
-  "eventCount": 302,
+  "ledgerHead": "09d2cb848bbc1ad8e8df3cc636726ea300618865d7719ee3b28a7811fee85ca9",
+  "eventCount": 305,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -61,13 +61,13 @@
     }
   },
   "queue": {
-    "W3": [],
+    "W3": [
+      "STAGING-PIN-FASTPATH-SERVED-BASELINE-1"
+    ],
     "W4": [],
     "W5": [],
     "W7": [],
-    "W9": [
-      "EXPO-STATION-LOST-ANSWER-COPY-1"
-    ]
+    "W9": []
   },
   "packets": {
     "AUTONOMY-ROUTER-1C": {
@@ -621,10 +621,10 @@
       },
       "label": "Replace station vendor error text with existing product-safe callable wording without changing retry truth",
       "origin": "ledger",
-      "phase": "QUEUED",
+      "phase": "RELEASED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
-      "inbox": null,
+      "inbox": 497,
       "pr": null,
       "reviewers": [],
       "artifact": {
@@ -635,7 +635,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": null,
+      "releasedQueueIndex": 0,
       "reviewedBy": [],
       "subjectPaths": [
         "apps/westayfit/app/station/[goalId].tsx"
@@ -647,11 +647,14 @@
           "kind": "comment",
           "id": 5963596836
         },
-        "released": null,
+        "released": {
+          "kind": "comment",
+          "id": 5963613447
+        },
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5963596836
+          "id": 5963613447
         }
       },
       "review": {
@@ -1077,6 +1080,62 @@
         "after": "director"
       },
       "deliveries": 2,
+      "pendingFinding": null
+    },
+    "STAGING-PIN-FASTPATH-SERVED-BASELINE-1": {
+      "owner": "W3",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Teach the existing pin generator to represent a ledger-fast-path served baseline truthfully and fail closed otherwise",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        ".github/wsf-staging/pin-candidate.mjs",
+        ".github/wsf-staging/tests/pin-candidate.test.mjs"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 5963617452
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 5963617452
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
       "pendingFinding": null
     },
     "STAGING-PROOF-RECONCILE-ROUTING-FIX": {
@@ -1912,6 +1971,14 @@
         "id": 5963540260
       },
       "superseded": true
+    },
+    "c6ae6c91cff87d1495f5c80f2908c0efd2e39d92bc8c6f367a3b691d3dd59317": {
+      "packet": "EXPO-STATION-LOST-ANSWER-COPY-1",
+      "worker": "W9",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
