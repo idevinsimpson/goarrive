@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "8ba3aa309fa3fb7edb577db63acd48af30983c6f92bf59b35d0d5b24e7ab7d00",
-  "eventCount": 306,
+  "ledgerHead": "b60cbdae948179c25182e83fd0b09b274e955e4b1c7cfc26592f310ea82807c0",
+  "eventCount": 309,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -494,8 +494,8 @@
       },
       "label": "Pin exact integrated expo account-entry milestone through the existing reviewed full staging path",
       "origin": "ledger",
-      "phase": "ACKED",
-      "phaseBeforeBlock": null,
+      "phase": "BLOCKED",
+      "phaseBeforeBlock": "ACKED",
       "queueIndexBeforeBlock": null,
       "inbox": 396,
       "pr": null,
@@ -513,7 +513,12 @@
       "subjectPaths": [
         ".github/wsf-staging/approved-candidate.json"
       ],
-      "blockedBy": [],
+      "blockedBy": [
+        {
+          "packet": "STAGING-PIN-FASTPATH-SERVED-BASELINE-1",
+          "until": "INTEGRATED"
+        }
+      ],
       "importRefs": [],
       "authority": {
         "queued": {
@@ -527,7 +532,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5963516349
+          "id": 5963634400
         }
       },
       "review": {
@@ -621,7 +626,7 @@
       },
       "label": "Replace station vendor error text with existing product-safe callable wording without changing retry truth",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -635,7 +640,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         "apps/westayfit/app/station/[goalId].tsx"
@@ -654,7 +659,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5963613447
+          "id": 5963632669
         }
       },
       "review": {
@@ -1942,7 +1947,8 @@
       "ack": {
         "kind": "comment",
         "id": 5963516349
-      }
+      },
+      "superseded": true
     },
     "8f948e13771d5be91b79b85ef294393b647f647415f13a503999587cf44d6b79": {
       "packet": "WORKER-EXECUTION-PROFILES-1",
@@ -1976,11 +1982,14 @@
       "packet": "EXPO-STATION-LOST-ANSWER-COPY-1",
       "worker": "W9",
       "reason": "release",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         5963628023
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 5963632669
+      }
     }
   },
   "fastpath": {
