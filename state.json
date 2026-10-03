@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "e6a12edde1a11e09c51ca4f494201ee3c53145b518378ca4a7faad1380000428",
-  "eventCount": 409,
+  "ledgerHead": "938ad74a026246c92292354261e6c211cf3f3d0d0ea06313e4f3e454ec18bcc2",
+  "eventCount": 414,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1308,17 +1308,17 @@
       },
       "label": "Port the owner-selected Together completion from the frozen Lovable reference to the confirmed member receipt with truthful totals, one-time motion and reduced-motion parity",
       "origin": "ledger",
-      "phase": "CHANGES_REQUESTED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
       "pr": 567,
       "reviewers": [
-        "W4"
+        "W7"
       ],
       "artifact": {
-        "subjectSha": "2e492a3055e7d2bbd2f1da5e200fe44d4fd9287f",
-        "prHeadSha": "2e492a3055e7d2bbd2f1da5e200fe44d4fd9287f",
+        "subjectSha": "e4e32ed63140b62493a185962e4f2497a8bffac4",
+        "prHeadSha": "e4e32ed63140b62493a185962e4f2497a8bffac4",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -1352,7 +1352,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5965561445
+          "id": 5965842924
         }
       },
       "review": {
@@ -1365,7 +1365,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 1,
+      "deliveries": 2,
       "pendingFinding": null
     },
     "WORKER-EXECUTION-PROFILES-1": {
@@ -2367,16 +2367,28 @@
       "ack": {
         "kind": "comment",
         "id": 5965578661
-      }
+      },
+      "superseded": true
     },
     "dbef9def72f2fe069806fa09ed9f11511e45919d3d17fcc366bacee59722a96d": {
       "packet": "EXPO-ATTENDEE-HOSTED-DRIVERS-1",
       "worker": "W4",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         5965831025
       ],
+      "ack": {
+        "kind": "comment",
+        "id": 5965836487
+      }
+    },
+    "ad6a58e5d240ecd773e15c645d3fbb60f14a9515cf9a6d6215458daea25f49a4": {
+      "packet": "TOGETHER-COMPLETION-1",
+      "worker": "W7",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
