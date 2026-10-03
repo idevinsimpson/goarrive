@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "ea0c8b61b587d2b34e717aaf7861f462549692553a877b8b109b1ed56ca51a04",
-  "eventCount": 295,
+  "ledgerHead": "54cb8256cb227e309de01294e18c9ce7180ee6cf2901a0efaf84576c1947ed65",
+  "eventCount": 298,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -550,7 +550,7 @@
       },
       "label": "Prove the existing attendee phone and two-station journey and expose only real missing seams; test and evidence source, not live expo acceptance",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "ACCEPTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -588,10 +588,13 @@
           "kind": "comment",
           "id": 5963015704
         },
-        "accepted": null,
+        "accepted": {
+          "kind": "comment",
+          "id": 5963541112
+        },
         "lastTransition": {
           "kind": "comment",
-          "id": 5963507481
+          "id": 5963541112
         }
       },
       "review": {
@@ -1826,21 +1829,27 @@
       "packet": "WORKER-EXECUTION-PROFILES-1",
       "worker": "W4",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         5963533867
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 5963540126
+      }
     },
     "d40fde353cb70b31fc1b1143cf9dfa4197a7bb7d3750594e9a84dc7767b6c087": {
       "packet": "WORKER-EXECUTION-PROFILES-1",
       "worker": "W9",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         5963534021
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 5963540260
+      }
     }
   },
   "fastpath": {
