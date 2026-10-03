@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "3760ae4499e0f3c017d28be422c8206b5b73737920893bb6114b3dba0374caab",
-  "eventCount": 388,
+  "ledgerHead": "1ebc7f00c213901115193ab4b0b4097f4470053ab9ca359d7c0a044d8a10f0c0",
+  "eventCount": 391,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1302,15 +1302,17 @@
       },
       "label": "Port the owner-selected Together completion from the frozen Lovable reference to the confirmed member receipt with truthful totals, one-time motion and reduced-motion parity",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
-      "pr": null,
-      "reviewers": [],
+      "pr": 567,
+      "reviewers": [
+        "W4"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "2e492a3055e7d2bbd2f1da5e200fe44d4fd9287f",
+        "prHeadSha": "2e492a3055e7d2bbd2f1da5e200fe44d4fd9287f",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -1344,7 +1346,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5965001839
+          "id": 5965445620
         }
       },
       "review": {
@@ -1357,7 +1359,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "WORKER-EXECUTION-PROFILES-1": {
@@ -2302,7 +2304,8 @@
       "ack": {
         "kind": "comment",
         "id": 5965001839
-      }
+      },
+      "superseded": true
     },
     "16dc80b652050db206b611967bf0271c2307231d25dec2be5a9abc604c01d0c8": {
       "packet": "EXPO-ATTENDEE-HOSTED-DRIVERS-1",
@@ -2316,6 +2319,14 @@
         "kind": "comment",
         "id": 5965391205
       }
+    },
+    "6d515ae981f9d8bc5162a2df0769cdc9f16597a40653279c90680f4f8215824a": {
+      "packet": "TOGETHER-COMPLETION-1",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
