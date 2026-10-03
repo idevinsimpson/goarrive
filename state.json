@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "652715e0f589e5596807386a745d0102747e0f623481d93e47a7697652d7a94a",
-  "eventCount": 311,
+  "ledgerHead": "e76e2f19dc674b39a278bd1acaec13275137d286ec368bd2b6bee7f02ee01bea",
+  "eventCount": 312,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1996,8 +1996,10 @@
       "packet": "STAGING-PIN-FASTPATH-SERVED-BASELINE-1",
       "worker": "W3",
       "reason": "release",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        5963674729
+      ],
       "ack": null
     }
   },
