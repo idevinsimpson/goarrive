@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "bc86b92db6be0661ff7b8bdab328f4a2765d8d29fe684b4b2ca7b9951228e29b",
-  "eventCount": 372,
+  "ledgerHead": "9dc44a78500ced9bd5cef94ab31ac578485ba05323d0dcea826b355bf97cc329",
+  "eventCount": 376,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -65,9 +65,7 @@
     "W4": [],
     "W5": [],
     "W7": [],
-    "W9": [
-      "TOGETHER-COMPLETION-1"
-    ]
+    "W9": []
   },
   "packets": {
     "AUTONOMY-ROUTER-1C": {
@@ -492,7 +490,7 @@
       },
       "label": "Pin exact integrated expo account-entry milestone through the existing reviewed full staging path",
       "origin": "ledger",
-      "phase": "ACCEPTED",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -504,7 +502,7 @@
         "subjectSha": "04ca5d05a9151cf9c7e54df3764db37f8f54d25f",
         "prHeadSha": "04ca5d05a9151cf9c7e54df3764db37f8f54d25f",
         "evidenceSha": "04ca5d05a9151cf9c7e54df3764db37f8f54d25f",
-        "mergeSha": null
+        "mergeSha": "08a2f08dcc1e7d2ab67119c169110cf3eb2aae9c"
       },
       "proof": null,
       "served": null,
@@ -531,8 +529,8 @@
           "id": 5964962327
         },
         "lastTransition": {
-          "kind": "comment",
-          "id": 5964962327
+          "kind": "pull_request",
+          "id": 566
         }
       },
       "review": {
@@ -1239,10 +1237,10 @@
       },
       "label": "Port the owner-selected Together completion from the frozen Lovable reference to the confirmed member receipt with truthful totals, one-time motion and reduced-motion parity",
       "origin": "ledger",
-      "phase": "QUEUED",
+      "phase": "RELEASED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
-      "inbox": null,
+      "inbox": 497,
       "pr": null,
       "reviewers": [],
       "artifact": {
@@ -1253,7 +1251,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": null,
+      "releasedQueueIndex": 0,
       "reviewedBy": [],
       "subjectPaths": [
         "apps/westayfit/app/contribute/[goalId].tsx",
@@ -1274,11 +1272,14 @@
           "kind": "comment",
           "id": 5964956757
         },
-        "released": null,
+        "released": {
+          "kind": "comment",
+          "id": 5964984624
+        },
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5964956757
+          "id": 5964984624
         }
       },
       "review": {
@@ -2204,11 +2205,14 @@
       "packet": "EMAIL-STAGING-REPAIR",
       "worker": "W4",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         5964977244
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 5964981889
+      }
     },
     "4925976176a1320dba6ff5c4d9bcbeef7a661cf61641b369cc3e0598c5d4417f": {
       "packet": "EMAIL-STAGING-REPAIR",
@@ -2218,6 +2222,14 @@
       "comments": [
         5964977381
       ],
+      "ack": null
+    },
+    "bac3c3b6a769182212fa9cedac6967bbbf71af2a17f337524e4afd7e18b37553": {
+      "packet": "TOGETHER-COMPLETION-1",
+      "worker": "W9",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
