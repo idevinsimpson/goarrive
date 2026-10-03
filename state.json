@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "c8ba23af6112f19c5cea3d479e006f10b4878770eff5829666c6b1d65773aa23",
-  "eventCount": 420,
+  "ledgerHead": "787dae3ad832f026f5ce56f619b6f92145ed6550e8b09d40233e906d3fe424fa",
+  "eventCount": 423,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -422,7 +422,7 @@
       },
       "label": "Pin the exact integrated email repair and coalesced accepted expo lineage through the reviewed full staging path",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -436,7 +436,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         ".github/wsf-staging/approved-candidate.json",
@@ -457,7 +457,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5965875967
+          "id": 5965893676
         }
       },
       "review": {
@@ -621,7 +621,7 @@
       },
       "label": "Add the missing hosted attendee drivers and generated owner-card inputs using the existing staging journey framework",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "ACCEPTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -660,10 +660,13 @@
           "kind": "comment",
           "id": 5965372716
         },
-        "accepted": null,
+        "accepted": {
+          "kind": "comment",
+          "id": 5965896667
+        },
         "lastTransition": {
           "kind": "comment",
-          "id": 5965877307
+          "id": 5965896667
         }
       },
       "review": {
@@ -2460,11 +2463,14 @@
       "packet": "EMAIL-STAGING-REPAIR-STAGING-PIN",
       "worker": "W3",
       "reason": "release",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         5965892101
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 5965893676
+      }
     }
   },
   "fastpath": {
