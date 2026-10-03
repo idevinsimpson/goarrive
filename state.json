@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "dbdaa98e4cc9f36dd4ded3316da5e1066f1168eb8137576b3ca1059190da3a02",
-  "eventCount": 403,
+  "ledgerHead": "dd15225de5f0ab30a586be2f492834cd0d1f672897ac9da14bad9dc0e231700c",
+  "eventCount": 404,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -346,7 +346,7 @@
       },
       "label": "Diagnose and repair staging verification and password-reset delivery without weakening mail security",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "ACCEPTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -387,10 +387,13 @@
           "kind": "comment",
           "id": 5959200686
         },
-        "accepted": null,
+        "accepted": {
+          "kind": "comment",
+          "id": 5965771091
+        },
         "lastTransition": {
           "kind": "comment",
-          "id": 5965498912
+          "id": 5965771091
         }
       },
       "review": {
