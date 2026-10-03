@@ -1,6 +1,6 @@
 # GoArrive Known Issues & Lessons Learned
 
-_Last refreshed: 2026-08-14._
+_Last refreshed: 2026-09-26._
 
 ## Resolved Issues (Reference for Future Work)
 The following issues were encountered and resolved during development. They are documented here as institutional knowledge to prevent regression and inform future decisions.
@@ -196,6 +196,11 @@ The app performs client-side sorting and filtering for movement and workout libr
 ### AI Job Polling
 Runway variation jobs and Mubert music generation run as background jobs with scheduled pollers persisting outputs. Long-running external AI jobs must survive the user closing the modal/tab — the background-mode pattern from the variation pipeline (PR #190) is the template.
 
+### WSF functions-westayfit Node.js 20 Runtime Decommission (2026-10-30)
+`functions-westayfit` declares `engines.node 20`. Cloud Run printed a deprecation warning during run 49's deploy (2026-09-25) that Node.js 20 was deprecated on 2026-04-30 and will be **decommissioned on 2026-10-30** — after that date, any WSF Cloud Functions deploy will fail until the runtime is upgraded to Node.js 22 or later. GoArrive core functions are unaffected (they use a different engine pin). Actioning is required before 2026-10-30 to avoid a blocked WSF staging deploy.
+
+
+
 ## Architectural Decisions Worth Preserving
 
 ### Effective Claims Pattern
@@ -252,3 +257,160 @@ The v3 handoff has two music elements — a graph-wired `audible` one for the fo
 This bit us concretely: `ended` (which advances the playlist) lived only on the audible element. While backgrounded that element is paused, and **a paused media element never fires `ended`** — so the shadow played the current track to its end and then simply stopped, with nothing to advance it. Returning to the app resumed the audible at the shadow's position, which immediately hit the end, fired `ended`, and advanced — which is why the symptom presented as "music stops when the track switches" and recovered on re-entry. The track was never switching at all. Fixed in PR #287 by giving the shadow its own `ended`/`error` handlers, guarded by element identity and `inBackgroundRef`.
 
 Two design rules fall out. **When you add a second element that can own playback, audit every listener on the first one** and decide explicitly whether it needs a twin — the failure is silent and only appears at a boundary the tests never reach. And **a handler that can trigger a retry cascade needs a circuit breaker**: `error → advance → error` would have burned an entire playlist in seconds with the real first cause buried at the top of the log, so #287 caps consecutive failures and stops.
+
+
+### CI Verification Checks Must Fail Honestly (PR #319)
+The westayfit staging deployment CI workflow had four gaps where a verification step could complete with a "pass" status without having actually run the check — a vacuous green that provided no signal. The root causes were that check shell commands were not set to propagate exit codes, so a setup error was silently swallowed, and the privilege boundary was too broad so a single failing step did not block the job. PR #319 closed these gaps and split the privilege boundary so checks that cannot run report failure to the pipeline.
+
+Lesson: any CI gate must be written so that a skipped or errored check propagates failure. A check that can vacuously pass is worse than no check — it creates false confidence while adding process overhead. When adding a new CI verification step, explicitly test the failure path: break the thing being verified and confirm the job turns red. The same principle applies to any "verification" script in application code: if the script exits 0 on error, the caller cannot distinguish success from invisible failure.
+
+### CI Cleanup Must Record Provenance for Real Resources (PR #324)
+When a CI or test harness deletes real Firebase Auth UIDs or Firestore documents as part of uncertain-state cleanup, the cleanup log must include a traceable link between each removed document and the Auth UID that owned it. Without this, a post-run audit cannot verify completeness — you only know "N things were deleted" but cannot confirm they were the right N things.
+
+The specific failure mode: the hosted smoke harness ran cleanup when a run ended in uncertain state, removed Firestore documents, but the receipt carried no reference to the Auth UIDs. A reader of the receipt could not tell whether the cleanup covered all data for those users or only part of it.
+
+Lesson: any cleanup job that touches real user data must emit a provenance record — at minimum, a mapping of (UID → [doc paths removed]) — before deleting. Write this to an artifact or a receipt file before the delete step, not after, so a partial run still preserves evidence. The same principle applies to application code: any bulk-delete callable should write an audit doc before executing deletes, not as a post-step that may be skipped.
+
+### One-Time Recovery Modes Must Be Scoped, Gated, and Self-Removing (PRs #325, #326)
+When a CI workflow needs a temporary recovery capability (e.g. to clean up from a specific failed run), the pattern that worked here was: (a) gate the recovery path on a named `mode` input so it cannot fire accidentally, (b) pin every artifact SHA it consumes, (c) give it its own test suite verifying the recovery contract, and (d) remove it in a follow-up PR the same session the recovery completes. PRs #325 and #326 were merged the same afternoon: #325 added the recovery, the recovery run executed, #326 removed it — leaving the workflow byte-identical to before. The test suite for the removed mode was also deleted in #326.
+
+Lesson: temporary capabilities left in CI workflows become dead branches that future agents will incorrectly treat as active. If a one-time recovery is needed, make it a PR, use it, and delete it before closing the work sequence — not "sometime later." The cost of a follow-up PR is negligible compared to the confusion of a conditional branch that exists in the workflow but was never meant to survive past a single run.
+
+
+### CI Harness Verdict Rows Must Be Isolated (PR #330)
+When a CI or staging harness tests multiple claims — ruleset verdicts, deployment states, different workstreams — each distinct verdict should occupy its own isolated row or test case. If multiple claims share a single row and an earlier assertion fails, later assertions in the same row are skipped, making it impossible to tell whether the skipped checks would have passed or failed. A vacuous-green harness row that silently covers multiple verdicts is the same failure mode documented in the PR #319 entry — but at the row-composition level rather than the exit-code level.
+
+PR #330 isolated the D-5 ruleset verdict into its own dedicated row after finding that it shared a row with adjacent workstream checks. Each row now independently tracks its own contributed documents, member totals, and timestamps for cleanup; a harness mistake in the W2 or W3 row cannot affect the D-5 or D-1 verdict row.
+
+Lesson: when adding a new claim to a CI harness, resist the temptation to append it to an existing row. Give it its own row with its own setup and teardown. The cost is one extra test case; the benefit is that a failure in one claim does not silently suppress the signal from every claim that follows it in the same row. Apply the same principle when reading harness results — a combined row that ended early is not evidence that the skipped claims would have passed.
+
+
+### CI Harness Fixtures Must Match the Product's Minimum-Data Contract (PR #336)
+When a CI or staging harness row seeds test data and then asserts on a rendered product feature, the seed must satisfy every minimum-data requirement the product enforces — not just the structural fields that make a document valid.
+
+The concrete failure: the W4/W7/W8 hosted row seeded a community with one open goal and then waited for `wsf-community-momentum`. `src/communityMomentum.ts` correctly renders no momentum line for fewer than two goals. The product was right; the fixture was wrong. The harness reported a timeout rather than a meaningful assertion failure, which looked like an environment problem rather than a data problem.
+
+Lesson: before writing an assertion against a rendered product aggregate (a roll-up, a count, a computed line), read the source for the minimum input count that produces any output at all and seed at least that many items. A harness that seeds the structural minimum but misses the logical minimum will produce spurious timeouts indistinguishable from environment failures. When a harness row times out on a feature you believe works, check the seed data against the product's rendering logic before debugging the environment.
+
+
+### CI Harness Fixtures Must Also Match Product Semantic Community Types (PR #338)
+When a product feature enforces a semantic community type — such as inviteOnly vs open — the harness fixture must seed the correct type, not just the structural minimum. An open community and an inviteOnly community look structurally identical in Firestore but produce different product behaviours: invite-only communities restrict membership actions and generate distinct link types. The W8 hosted row was seeding an open community; the Champion QR code assertion expected the invite URL, which the product only generates for inviteOnly communities. The row timed out waiting for a link the community type made impossible — indistinguishable from an environment failure.
+
+Additionally, when asserting on a URL-valued field (QR code, booking link, share link), pin the comparison to the full origin constant with no trailing slash. `BASE_URL` is a constant with no trailing slash by convention; a comparison written with a trailing slash produces a silent wrong-path match that is harder to diagnose than an explicit mismatch.
+
+Lesson: when a harness row asserts on a community-type-gated feature, verify the community type in the seed as an explicit precondition — structural validity is not sufficient. And when testing derived URL artifacts, pin the full origin with its exact trailing-slash convention so partial-prefix matches cannot silently pass.
+
+
+### Shared Firestore Rules Must Pass GoArrive Gate Before WSF Staging Deployment (PRs #349, #350)
+GoArrive and westayfit share a single Firebase project, which means their Firestore security rules are the same deployed ruleset. Any WSF candidate staging deployment that modifies shared rules must validate those rules against GoArrive's rule test suite — not just WSF's own tests. PR #349 fixed the CI to run the regression against the exact candidate SHA rather than an approximate one (a wrong-SHA check is not better than no check). PR #350 added GoArrive's rule tests as a required gate for any shared-rules deploy.
+
+The concrete risk without this gate: a WSF rule change that accidentally removes a GoArrive access path deploys undetected because only WSF tests ran, and GoArrive members lose access silently. The same failure mode applies in reverse — a GoArrive rule change could break WSF access patterns.
+
+Lesson: in a shared-project multi-app setup, any change to shared security rules (Firestore, Storage) must run every app's rule test suite as a pre-deploy gate, not just the app that authored the change. When adding a CI rule-validation step, also verify it pins to the exact artifact SHA being evaluated — a check against an approximate SHA provides false confidence.
+
+### Invoker IAM Failure Does Not Block an Independent Hosting Artifact Review (PR #351)
+When a Cloud Functions deployer fails to set the  invoker IAM binding on one or more functions, the Firebase Hosting artifact is unaffected — the two deployment outputs (function code + IAM vs. hosted static bundle) are independent. PR #351 published the reviewed hosting artifact after the invoker IAM step failed for a WSF staging deploy, rather than treating the entire deployment as failed.
+
+The invoker IAM failure means specific callables will return  until the binding is repaired, but the hosting bundle serves correctly and can be reviewed on its own merits. Treating a partial IAM failure as a total deployment failure discards a valid hosting artifact and adds unnecessary re-deploy churn.
+
+Lesson: when a multi-artifact deployment fails partially, assess each artifact independently before deciding whether to block publication of the healthy ones. Record the IAM failure in the function inventory and repair it in a follow-up — do not silently discard a reviewed hosting artifact because of an unrelated IAM step. The same principle applies when reading CI job results: an IAM-step failure in one job does not invalidate a hosting-verification step in a parallel job.
+
+### Hosting Routes Must Be Verified for Cold-Reload Scenarios (PR #356)
+A Firebase Hosting route that passes SPA (in-app) navigation tests can still 404 on a cold reload — a direct URL visit with no prior JavaScript navigation — if the corresponding Hosting rewrite rule is absent. SPA navigation tests confirm that the JS router handles the path; they do not confirm that Hosting serves the SPA entry for that path as a direct HTTP request. The westayfit harness (PR #356) added explicit cold-reload probes for `/combined` and `/station` that issue direct GET requests against the hosting origin, independent of any JavaScript.
+
+Lesson: for any new dynamic public route (booking page, share link, session page, funnel step), test it as both an SPA navigation and a cold direct URL load before declaring it live. Add the route to the Hosting rewrite block in `firebase.json` and verify the rewrite resolves at the hosting layer — not just that the router handles it in-app.
+
+### CI Harness Cleanup Must Run Unconditionally (PR #357)
+A teardown block registered only inside the success path of a harness row will not execute when assertions fail or time out. The result is orphaned Firestore documents and Auth UIDs that accumulate across CI runs and contaminate future runs. The westayfit turn-service harness row (PR #357) had cleanup gated on the assertion block completing; timeouts skipped it and left docs behind.
+
+Lesson: any harness teardown that deletes real Firestore documents or Auth UIDs must be registered unconditionally — in a `finally` block, a dedicated `teardown` hook, or a separate always-runs step — never inside the assertion path. A cleanup that only runs on success provides no protection against the scenarios that need it most: timeouts, assertion failures, and partial runs.
+
+### Read Fields from the Source-of-Truth Document, Not a Downstream Mirror (PR #360)
+When a data model has a combined parent document and child documents that mirror some of the parent's fields, assertions and application code must read those fields from the parent, not the child. Child documents are downstream of the parent and can lag, especially when writes are batched or asynchronous. The westayfit harness (PR #360) was reading a state field from a child document that propagated it from the parent; under certain write sequences the child had not yet received the update when the assertion ran, producing a spurious failure.
+
+Lesson: in any parent–child Firestore model, identify which document is the authoritative source for each field. For fields that are set on the parent and propagated downward, always read from the parent. Code that reads from a downstream mirror is sensitive to propagation timing and produces unreliable results under concurrent or batched writes. Document the source of truth for each field in the data model when the propagation path is non-obvious.
+
+### Assert Time-Bounded Callable Results from the Immediate Response, Not After Processing (PR #363)
+When a callable returns a result that must be observed within a fixed time window, the harness must assert on that result immediately — before any significant processing, polling, or arithmetic that consumes the available window. The westayfit turn-service harness row was spending approximately ten seconds on arithmetic after calling `wsfCompleteTurn`, then asserting that the display showed a result within the ten-second window; the window had already expired before the assertion ran, producing a guaranteed failure on every run.
+
+Lesson: for any callable or product step with a defined time-bounded display window, assert the state change from the callable's immediate response before spending time on unrelated processing. The expiry check itself — "does the result disappear after N seconds?" — is a separate assertion that must follow the result-appeared assertion, not precede it. A test that re-orders these by accident does not test the product feature; it tests whether the harness itself fits in the allotted window. When a harness row fails repeatedly on the same claim, check whether the assertion's own execution time is consuming the window it is trying to observe.
+
+
+### Player Journey CI Must Run Within the Trusted WIF Workflow Boundary (PRs #364, #368)
+A standalone CI workflow (`wsf-player-journey.yml`) for the WSF player journey harness could not authenticate to the staging environment because the Workload Identity Federation (WIF) credentials were scoped exclusively to the existing trusted staging-deploy workflow. The standalone workflow was unauthenticatable and had to be retired; the player-journey mode was folded into `wsf-staging-deploy.yml` as a deploy-free mode, preserving the existing WIF trust boundary without requiring new credential grants.
+
+Lesson: in a WIF-authenticated CI setup, any job that needs to touch staging infrastructure (read live screens, call authenticated APIs, verify hosting artifacts) must run within the workflow that holds the WIF binding, or be explicitly granted its own WIF grant. Creating a separate workflow file does not inherit the parent's credentials. When adding a new CI job that needs staging access, extend the trusted workflow with a deploy-free or conditional mode rather than creating a standalone file that will silently lack credentials.
+
+
+### Retained CI Manifests Need an Owning Run Tag for Safe Cleanup (PR #369)
+When a CI harness creates real Firebase Auth UIDs and Firestore documents and ends in uncertain state, a subsequent recovery run must be able to identify which retained manifest belongs to which run. Without a run tag, cleanup logic cannot safely distinguish an abandoned manifest from one belonging to a currently-active run — and cleaning up the wrong manifest would delete live state from an in-progress run.
+
+PR #369 added `run-tag.mjs` to record the owning run ID on every manifest at creation time. The cleanup-recovery path gates on "this manifest's run tag matches the targeted run ID" before proceeding, preventing accidental cross-run cleanup. The recovery mode is gated on a named `mode` input (same pattern as PRs #325/#326) and has its own test suite (`validate-recovery-manifest.test.mjs`).
+
+Lesson: any CI manifest that records live infrastructure (UIDs, doc paths, function inventory) must carry an immutable run tag written atomically at creation time, before any resources it describes exist. The tag is the key that makes cross-run cleanup safe — without it, a recovery job has no way to prove it is operating on the right artifacts. Apply the same principle to application code that batches real-resource creation: write the audit record first, then create the resources.
+
+
+### Deep Links Through Auth Must Persist the Pre-Auth Destination (PR #372)
+When a westayfit user followed a QR-scanned event link while unauthenticated, the app redirected them through the auth flow and then returned them to the home screen rather than the scanned event. The originating URL was silently discarded at the auth redirect; PR #372 persists the pre-auth event context across the round trip so the user lands on the correct event after signing in.
+
+Lesson: any deep link that requires authentication must capture the destination URL before triggering the auth redirect and restore it afterward. Most auth frameworks redirect back to a generic home or dashboard by default — the return-to-origin behavior is an explicit opt-in. This applies to any surface where users arrive via a third-party link (QR code, email, SMS) pointing into an authenticated section. A user who authenticates successfully and then lands on the wrong page experiences it as the app not working, even though auth itself succeeded.
+
+### CI Harness Failure Output Must Appear Within the Accessible Log Tail (PR #379)
+When a player journey harness run failed, the root-cause assertion rows were buried mid-log in a multi-thousand-line output. CI tooling typically surfaces only the last N lines (the tail), so the failure summary was inaccessible without downloading the full artifact log. PR #379 reprints the failing rows at the end of the run output so they always fall within the tail a developer sees first.
+
+Lesson: in any long-running CI harness, structure output so that the failure summary appears last — not inline at the point of failure only. A test runner that prints FAIL at line 2,000 of a 10,000-line log provides no actionable signal to a developer who sees only the final few hundred lines. Reprint or summarize failures after the full run completes, as close to EOF as possible, so the CI tail always includes the diagnosis and a full artifact download is a last resort rather than the first step.
+
+
+
+### Multi-Workspace Email Credentials: Verify the Provider Workspace, Not Just the Domain (PR #385)
+In a project with multiple email-provider workspaces, reading the verified domain from the workspace reachable via the primary session key gives the *connected* workspace's domain — which may be entirely wrong for a different app's staging environment. The GoArrive session could see `goarrive.fit` (verified) in Resend; the westayfit staging workspace is a separate Resend account where only `westay.fit` is verified and the API key is named `WSF staging email runtime`. The inventories are mutually exclusive on both axes (distinct domains, distinct keys). A `goarrive.fit` sender line in the WSF deploy would not fail CI — it would pass any preflight that only checks whether a secret exists — but every verification and password-reset email would go undelivered, surfacing only as user complaints rather than a build error.
+
+`mail-preflight.mjs` now defaults the verified sender domain to `westay.fit` with the reasoning in-source, and `WSF_VERIFIED_SENDER_DOMAIN` overrides it for future domain changes. A new test suite (`mail-preflight-domain.test.mjs`) asserts that a `goarrive.fit` sender is explicitly refused and can never report ready — a mutation test that reverts the default fails exactly two assertions and no others, closing the regression permanently.
+
+A second lesson from this PR: email delivery acceptance is not "provider returned 2xx." The complete gate is: configured → provider accepted → inbox received → link completed → `emailVerified` flag refreshed with the intended destination retained → reset and resend/cooldown still truthful, on a controlled mailbox. Evidence recorded in `.github/wsf-staging/STAGING-EMAIL-EVIDENCE.md`. A secret existing is not mail working, and neither is a provider returning 200.
+
+Lesson: when wiring email-send credentials for a new subproject or staging environment, enumerate the API keys and verified domains from the *actual* provider workspace the deploy credential belongs to — not from a session that may be connected to a different workspace. Any domain-validation preflight must assert on the wrong domain being rejected, not just the right domain being accepted.
+
+### Hosting Route Assertions Need One-Segment Paths, Both Configs, and a Live Step (PRs #449, #450, #460)
+Three gaps were found and closed in succession for the westayfit staging hosting route verification.
+
+**Route missing from config (#449):** `/members` and `/move/{goalId}` had no dedicated rewrite rules in `firebase.westayfit.staging.json`. Both direct URL loads resolved to the catch-all and served the wrong shell. Fix: add dedicated rewrites ahead of the catch-all for every route that must render a specific page. A gap assertion in the test harness was also masking the missing `/move/{goalId}` rewrite — when a gap assertion is removed, re-verify the route is actually reachable.
+
+**Only one config checked (#450):** when both the WSF staging and GoArrive hosting configs exist in the checkout, the `check-hosting-routes.mjs` step was inspecting only the WSF config. A routing gap in the GoArrive config (or vice versa) was invisible to the check. Fix: when both checkout directories are present, verify both hosting config files independently.
+
+**Catch-all silently satisfying multi-segment probe (#460):** the assertions were using longer paths (e.g., `/members/123`) that the catch-all rule matched even when no per-route rewrite existed. A one-segment path (e.g., `/members`) is required to prove the dedicated rule rather than the catch-all. Additionally, the verification step itself must run live — a dry-run step exits 0 without issuing any HTTP request, providing false confidence identical to a vacuous-pass CI gate.
+
+Lesson: for any new route in a multi-app Firebase Hosting project, (a) add a dedicated rewrite rule, (b) verify it with a one-segment GET against the live serving config, and (c) check every app's config when multiple apps share a deployment. The cold-reload lesson (PR #356) is a prerequisite — SPA navigation is not a substitute for cold-reload proof — and this lesson adds: catch-all matches are not a substitute for per-route proof.
+
+### CI Harness Smoke Must Navigate from the Candidate's Actual Menu Surface (PR #466)
+When a CI smoke test navigates to a product screen via a menu or navigation control, the path used must match the surface the *current candidate* actually provides — not an assumed menu structure from a prior candidate version. The hosted Package E smoke (W3) was opening Manage via a path that existed on prior candidates; the 7ee70e4 candidate's persistent menu shell restructured navigation, causing the smoke to fail.
+
+Lesson: when a candidate pin advances to a version that restructures navigation (e.g. adds a persistent shell, moves a menu item to a different surface, renames a control), update the smoke harness in the same PR. A smoke that hardcodes a prior candidate's menu path is not testing the current candidate — it is testing an already-retired surface. The same principle extends beyond menus: any harness step that locates a control by position, text from a prior build, or assumed hierarchy must be re-verified whenever the candidate advances. Semantic locators (role, testID, visible label) age better than structural ones.
+
+
+### Callable Transport Classification: HTTP 401 UNAUTHENTICATED vs 403 PERMISSION_DENIED Are Not Interchangeable (PR #491)
+When probing whether a callable is correctly secured against unauthenticated access, the HTTP response shape matters. A JSON-structured 403 `PERMISSION_DENIED` means the function body ran (or Firestore security rules executed) and denied the caller — the callable IS transport-reachable. A 401 `UNAUTHENTICATED` means the Firebase Auth middleware blocked the call before the function body ran. The WSF social-privacy harness initially classified any JSON body with a string `error.status` field as OPEN (transport accessible), so a 403 `PERMISSION_DENIED` was treated as confirmation the function was working and test fixtures were written against it.
+
+The F1 correction: `classifyTransport` now returns OPEN only on HTTP 401 + callable status UNAUTHENTICATED. Any other 401/403 — JSON or not — is SHUT; 5xx, 2xx, 404, and malformed responses are UNKNOWN and never OPEN.
+
+Lesson: when asserting that a callable is "transport-open" (reachable and accepting calls), distinguish 401 UNAUTHENTICATED (auth middleware blocked before the function ran) from 403 PERMISSION_DENIED (function ran, rules denied). Only 401 UNAUTHENTICATED confirms the transport channel while enforcing auth. A probe that classifies 403 as OPEN will write fixtures against a correctly-secured endpoint and report a false positive. When writing a callable-security harness, explicitly test both the positive case (401 UNAUTHENTICATED → OPEN) and the negative cases (403 PERMISSION_DENIED → SHUT; HTML 403 → SHUT; 5xx → UNKNOWN) so the classification is validated before any fixture-writing path runs.
+
+### CI Cleanup Evidence Must Fail Closed When Drivers Ran (PR #513)
+When a CI driver (a journey smoke, a verification step, or a cleanup runner) executes to completion and produces no evidence — no receipt, no assertion result, no cleanup record — that outcome must be treated as a failure, not a silent pass. CONTROL-PLANE-CI-1 identified a case where drivers ran, the evidence they were supposed to emit was absent, and the harness continued as though the step had passed. An empty evidence slot after a driver ran is structurally different from a skipped driver: skipped means it never attempted; empty-after-running means something went wrong and the failure was swallowed.
+
+Lesson: any CI step that is supposed to emit an artifact (receipt, log, assertion result) must assert on the artifact's existence and non-emptiness before marking the step green. "Driver exited 0" is not the same as "driver produced valid evidence." Gate on the output, not the exit code.
+
+### CI Cleanup Is Part of the Verdict, Not a Post-Verdict Step (PR #513)
+Treating cleanup as a post-verdict step — something that runs after the pass/fail is already determined — means a cleanup failure can never change the verdict. CONTROL-PLANE-CI-1 reframed cleanup as integral to the verdict: if cleanup does not complete correctly (leaves orphaned docs, fails to emit a provenance receipt, or runs with missing inputs), the overall verdict is FAIL regardless of what the verification steps reported.
+
+Lesson: when designing a CI harness with both verification and cleanup phases, make cleanup part of the exit-code and verdict logic. A harness that always exits 0 after cleanup errors gives a false green and leaves the staging environment in an inconsistent state for the next run. This principle extends to application code: a bulk-write or batch job whose cleanup phase is advisory rather than required will leave partial state the next caller must reason about.
+
+### Non-Deterministic Pin Generation Produces Unreliable Comparison Artifacts (PR #513)
+If pin generation involves any non-deterministic element — a wall-clock timestamp embedded in the artifact, a hash over an unsorted set, an input that varies across equivalent invocations — two runs against the same logical state produce different pins. This makes it impossible to compare pins across runs, detect duplicate promotion of the same candidate, or use the pin as a content-addressed identity.
+
+Lesson: pin generation (and any content-addressing scheme) must be fully deterministic over its logical inputs. If the same candidate SHA, function count, and protected-path set always produce the same pin, the pin is usable as an identity. Audit every field in the generated artifact for non-determinism before treating it as an identity key.
+
+### Treat the Milestone Manifest as Release Data, Not a Build Artifact (PR #513)
+A milestone manifest records the accepted state of a deployment: candidate SHA, function inventory, index requirements, verified hosting routes, and rollback reference. If it is treated as a transient build artifact (re-generated on demand, not pinned, not validated before use), it cannot serve as the authoritative record of what was deployed and verified. CONTROL-PLANE-CI-1 re-classified the manifest as release data: written once per accepted milestone, immutable after writing, and validated before each deploy via a pre-deploy manifest check.
+
+Lesson: any artifact that records an accepted deployment state (a pin JSON, a staging receipt, a release manifest) should be treated with the same durability requirements as a release tag — written once, not regenerated, and validated before acting on it. A pre-deploy manifest check gates every deploy on "does the manifest match the candidate I am about to deploy?", preventing a stale or unvalidated manifest from silently driving a deploy.
