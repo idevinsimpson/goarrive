@@ -425,7 +425,9 @@ export function retargetActionLink(link: string, handler: string): string {
  * counts toward the daily cap, so failures cannot be used to hammer the
  * provider: at most one attempt in flight per key, at most SEND_DAILY_CAP a day,
  * successful or not. A successful send, and reset's unknown-address path, keep
- * the reservation exactly as before. So does a provider request that failed in
+ * the reservation exactly as before. So does EVERY failed reset (see
+ * resetFailed): the reset callable is public, and releasing only for a known
+ * address would make the retry an account-existence signal. So does a provider request that failed in
  * transport (status 0): the provider may have accepted it, so that is not an
  * attempt that sent nothing, and releasing would allow a duplicate.
  */
@@ -2112,21 +2114,20 @@ export const wsfSendPasswordResetEmail = onCall<SendPasswordResetRequest>(
       ) {
         return { accepted: true };
       }
-      // Anything else is a real fault. Log the code only, never the address.
+      // Anything else is a real fault. Log the code only, never the address,
+      // then answer exactly as for an unknown address (see resetFailed).
       console.error('[wsfSendPasswordResetEmail] Admin SDK failed', code || 'unknown');
-      await releaseSend(quota.reservation);
-      throw new HttpsError('internal', 'Could not send the reset email. Try again shortly.');
+      return resetFailed();
     }
 
     let link: string;
     try {
       link = retargetActionLink(minted, config.actionHandler);
     } catch {
-      // A definite pre-provider failure (an unparseable minted link): nothing
-      // was sent, so the reservation is given back. Never log the link.
+      // A definite pre-provider failure (an unparseable minted link). Never
+      // log the link.
       console.error('[wsfSendPasswordResetEmail] action link unusable');
-      await releaseSend(quota.reservation);
-      throw new HttpsError('internal', 'Could not send the reset email. Try again shortly.');
+      return resetFailed();
     }
 
     const status = await postToProvider(config, {
@@ -2145,22 +2146,40 @@ export const wsfSendPasswordResetEmail = onCall<SendPasswordResetRequest>(
     });
 
     if (status === 0) {
-      // Ambiguous: the provider may have accepted it. Keep the cooldown, so an
-      // immediate retry cannot send a second copy.
+      // Ambiguous: the provider may have accepted it.
       console.error('[wsfSendPasswordResetEmail] provider outcome unknown');
-      throw new HttpsError('internal', 'Could not send the reset email. Try again shortly.');
+      return resetFailed();
     }
     if (status !== 200) {
-      // A definite rejection: nothing was sent. The provider response body can
-      // echo the recipient; log the status only.
+      // A definite rejection. The provider response body can echo the
+      // recipient; log the status only.
       console.error('[wsfSendPasswordResetEmail] provider rejected send', status);
-      await releaseSend(quota.reservation);
-      throw new HttpsError('internal', 'Could not send the reset email. Try again shortly.');
+      return resetFailed();
     }
 
     return { accepted: true };
   }
 );
+
+/**
+ * EMAIL-STAGING-REPAIR, W9 R1 (Director #365 5964370581). The reset callable
+ * is public, so every answer after the reservation must be one an unknown
+ * address could also get. A known address whose send failed downstream (Admin
+ * link minting, an unusable link, a provider rejection or an ambiguous
+ * transport failure) used to answer `internal` while an unknown address
+ * answered `{accepted: true}`: while the provider is failing, that split names
+ * which addresses have accounts. So a failed send answers exactly as an
+ * unknown address does: the same `{accepted: true}`, and the reservation KEPT
+ * as the unknown path keeps it. Releasing it here would let the immediate
+ * retry succeed where an unknown address's retry is refused as too soon, which
+ * is the same oracle one request later. The failure is still classified in the
+ * server log (code or status only, never the address), and still counts
+ * toward the daily cap. Verification is token-bound (its caller is the
+ * account), so it keeps its truthful `internal` and its release.
+ */
+function resetFailed(): SendPasswordResetResponse {
+  return { accepted: true };
+}
 
 // ═════════════════════════════════════════════════════════════════════════════
 // E4-A1 — Goals + Contributions (quantitative shared totals).

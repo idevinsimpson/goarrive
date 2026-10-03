@@ -211,11 +211,9 @@ describe('wsfSendPasswordResetEmail', () => {
       await clearQuota(await emailHash(email));
       await createAccount(email, 'strongpassword');
 
-      const caught: unknown = await wsfSendPasswordResetEmail
-        .run(req({ email }))
-        .catch((e) => e);
-      expect(caught).toBeInstanceOf(HttpsError);
-      expect((caught as HttpsError).code).toBe('internal');
+      // W9 R1: a failed send answers exactly as an unknown address does.
+      await expect(wsfSendPasswordResetEmail.run(req({ email }))).resolves.toEqual({ accepted: true });
+      expect(errorSpy).toHaveBeenCalledWith('[wsfSendPasswordResetEmail] provider rejected send', 500);
       for (const call of errorSpy.mock.calls) {
         for (const arg of call) {
           expect(String(arg)).not.toContain(email);
@@ -264,32 +262,82 @@ describe('wsfSendPasswordResetEmail failure accounting (emulators)', () => {
     for (const call of errorSpy.mock.calls) for (const arg of call) expect(String(arg)).not.toContain(email);
   };
 
-  it('provider rejection: internal, cooldown given back, an immediate retry sends', async () => {
-    const email = await known('reject');
-    fetchSpy.mockResolvedValueOnce({ ok: false, status: 422 } as never);
-    expect(((await wsfSendPasswordResetEmail.run(req({ email })).catch((e) => e)) as HttpsError).code).toBe('internal');
-    expect(errorSpy).toHaveBeenCalledWith('[wsfSendPasswordResetEmail] provider rejected send', 422);
-    expect((await quotaDoc(email))?.lastSentAt).toBeUndefined();
-    expect((await quotaDoc(email))?.countToday).toBe(1);
-    await expect(wsfSendPasswordResetEmail.run(req({ email }))).resolves.toEqual({ accepted: true });
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
-    noAddressLogged(email);
-  });
+  /**
+   * W9 R1 (Director #365 5964370581). The reset callable is public, so a send
+   * that failed downstream for a KNOWN address must be indistinguishable from
+   * an UNKNOWN address: the same response, the same quota writes, and the same
+   * answer to the immediate retry. Otherwise a failing provider names which
+   * addresses have accounts, in the first answer or one request later.
+   */
+  const FAILURES: Array<[string, () => void, string, unknown[]]> = [
+    ['provider 422 (definite rejection)', () => fetchSpy.mockResolvedValueOnce({ ok: false, status: 422 } as never), 'provider rejected send', [422]],
+    ['provider 500', () => fetchSpy.mockResolvedValueOnce({ ok: false, status: 500 } as never), 'provider rejected send', [500]],
+    ['provider 503', () => fetchSpy.mockResolvedValueOnce({ ok: false, status: 503 } as never), 'provider rejected send', [503]],
+    ['an ambiguous transport failure', () => fetchSpy.mockRejectedValueOnce(new TypeError('fetch failed')), 'provider outcome unknown', []],
+    ['Admin link minting (auth/internal-error)', () => {
+      jest.spyOn(getAdminAuth(), 'generatePasswordResetLink')
+        .mockRejectedValueOnce(Object.assign(new Error('internal error for pw-acct-x@example.test'), { code: 'auth/internal-error' }));
+    }, 'Admin SDK failed', ['auth/internal-error']],
+    ['Admin link minting (auth/insufficient-permission, the staging gate)', () => {
+      jest.spyOn(getAdminAuth(), 'generatePasswordResetLink')
+        .mockRejectedValueOnce(Object.assign(new Error('no permission'), { code: 'auth/insufficient-permission' }));
+    }, 'Admin SDK failed', ['auth/insufficient-permission']],
+    ['an unusable minted link', () => {
+      jest.spyOn(getAdminAuth(), 'generatePasswordResetLink').mockResolvedValueOnce('not a link');
+    }, 'action link unusable', []],
+  ];
 
-  // The provider may have accepted a POST whose response never arrived: releasing would allow a duplicate.
-  it('an ambiguous network failure KEEPS the cooldown: classified, not immediately retryable', async () => {
-    const email = await known('network');
-    fetchSpy.mockRejectedValueOnce(new TypeError('fetch failed'));
-    expect(((await wsfSendPasswordResetEmail.run(req({ email })).catch((e) => e)) as HttpsError).code).toBe('internal');
-    expect(errorSpy).toHaveBeenCalledWith('[wsfSendPasswordResetEmail] provider outcome unknown');
-    expect(errorSpy).not.toHaveBeenCalledWith('[wsfSendPasswordResetEmail] provider rejected send', expect.anything());
-    expect((await quotaDoc(email))?.lastSentAt).toEqual(expect.any(Number));
-    expect((await quotaDoc(email))?.countToday).toBe(1);
-    const retry = (await wsfSendPasswordResetEmail.run(req({ email })).catch((e) => e)) as HttpsError;
-    expect(retry.code).toBe('resource-exhausted');
-    expect(retry.message).toMatch(/wait/);
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    noAddressLogged(email);
+  for (const [name, arm, log, logArgs] of FAILURES) {
+    it(`R1: ${name} for a known address is indistinguishable from an unknown address (response, quota writes, retry), and is still classified server-side`, async () => {
+      const knownEmail = await known(`r1-${name.length}`);
+      const unknownEmail = `pw-none-r1-${name.length}-${Date.now()}@example.test`;
+      await clearQuota(await emailHash(unknownEmail));
+
+      arm();
+      const k = await wsfSendPasswordResetEmail.run(req({ email: knownEmail })).catch((e) => e);
+      jest.restoreAllMocks();
+      errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+      fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({ ok: true, status: 200, json: async () => ({ id: 'stub' }) } as never);
+      const u = await wsfSendPasswordResetEmail.run(req({ email: unknownEmail })).catch((e) => e);
+
+      // 1. The same answer.
+      expect(k).toEqual({ accepted: true });
+      expect(u).toEqual({ accepted: true });
+      // 2. The same quota writes: both keep the reservation and count the attempt.
+      const [kq, uq] = [await quotaDoc(knownEmail), await quotaDoc(unknownEmail)];
+      expect(Object.keys(kq ?? {}).sort()).toEqual(Object.keys(uq ?? {}).sort());
+      expect([kq?.countToday, uq?.countToday]).toEqual([1, 1]);
+      expect(kq?.lastSentAt).toEqual(expect.any(Number));
+      expect(uq?.lastSentAt).toEqual(expect.any(Number));
+      // 3. The same immediate retry: both refused as too soon, with the same message shape.
+      const kr = (await wsfSendPasswordResetEmail.run(req({ email: knownEmail })).catch((e) => e)) as HttpsError;
+      const ur = (await wsfSendPasswordResetEmail.run(req({ email: unknownEmail })).catch((e) => e)) as HttpsError;
+      expect([kr.code, ur.code]).toEqual(['resource-exhausted', 'resource-exhausted']);
+      expect(kr.message.replace(/\d+/g, 'N')).toBe(ur.message.replace(/\d+/g, 'N'));
+      // The retries sent nothing.
+      expect(fetchSpy).not.toHaveBeenCalled();
+      noAddressLogged(knownEmail);
+      noAddressLogged(unknownEmail);
+    });
+
+    it(`R1: ${name} is classified in the server log by code or status only`, async () => {
+      const email = await known(`r1-log-${name.length}`);
+      arm();
+      await expect(wsfSendPasswordResetEmail.run(req({ email }))).resolves.toEqual({ accepted: true });
+      expect(errorSpy).toHaveBeenCalledWith(`[wsfSendPasswordResetEmail] ${log}`, ...logArgs);
+      for (const call of errorSpy.mock.calls) for (const arg of call) {
+        expect(String(arg)).not.toContain(email);
+        expect(String(arg)).not.toMatch(/oobCode|apiKey=|test-key/);
+      }
+    });
+  }
+
+  it('R1: a known address whose send fails never answers internal, so a failing provider is not an account oracle', async () => {
+    const email = await known('r1-never-internal');
+    fetchSpy.mockResolvedValue({ ok: false, status: 403 } as never);
+    const r = await wsfSendPasswordResetEmail.run(req({ email })).catch((e) => e);
+    expect(r).not.toBeInstanceOf(HttpsError);
+    expect(r).toEqual({ accepted: true });
   });
 
   it('a bad action-handler config fails closed BEFORE reserving: classified, nothing minted or sent, no cooldown', async () => {
@@ -313,30 +361,6 @@ describe('wsfSendPasswordResetEmail failure accounting (emulators)', () => {
     await expect(wsfSendPasswordResetEmail.run(req({ email }))).resolves.toEqual({ accepted: true });
   });
 
-  it('an unusable minted link is a definite pre-provider failure: classified, nothing POSTed, released and retryable', async () => {
-    const email = await known('minted');
-    jest.spyOn(getAdminAuth(), 'generatePasswordResetLink').mockResolvedValueOnce('not a link');
-    expect(((await wsfSendPasswordResetEmail.run(req({ email })).catch((e) => e)) as HttpsError).code).toBe('internal');
-    expect(errorSpy).toHaveBeenCalledWith('[wsfSendPasswordResetEmail] action link unusable');
-    expect(fetchSpy).not.toHaveBeenCalled();
-    expect((await quotaDoc(email))?.lastSentAt).toBeUndefined();
-    noAddressLogged(email);
-    await expect(wsfSendPasswordResetEmail.run(req({ email }))).resolves.toEqual({ accepted: true });
-  });
-
-  it('Admin link-minting failure (not an enumeration code): internal, code only, nothing POSTed, released', async () => {
-    const email = await known('admin');
-    const spy = jest.spyOn(getAdminAuth(), 'generatePasswordResetLink')
-      .mockRejectedValueOnce(Object.assign(new Error(`internal error for ${email}`), { code: 'auth/internal-error' }));
-    expect(((await wsfSendPasswordResetEmail.run(req({ email })).catch((e) => e)) as HttpsError).code).toBe('internal');
-    expect(fetchSpy).not.toHaveBeenCalled();
-    expect(errorSpy).toHaveBeenCalledWith('[wsfSendPasswordResetEmail] Admin SDK failed', 'auth/internal-error');
-    expect((await quotaDoc(email))?.lastSentAt).toBeUndefined();
-    noAddressLogged(email);
-    spy.mockRestore();
-    await expect(wsfSendPasswordResetEmail.run(req({ email }))).resolves.toEqual({ accepted: true });
-  });
-
   it('unknown address KEEPS the reservation exactly as a real send does (no existence signal in the quota writes)', async () => {
     const unknown = `pw-none-${Date.now()}@example.test`;
     await clearQuota(await emailHash(unknown));
@@ -351,14 +375,20 @@ describe('wsfSendPasswordResetEmail failure accounting (emulators)', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('failed attempts count toward the daily cap', async () => {
+  it('failed attempts still count toward the daily cap (the cooldown is kept, so each attempt waits it out)', async () => {
     const email = await known('cap');
     fetchSpy.mockResolvedValue({ ok: false, status: 500 } as never);
-    for (let i = 0; i < 10; i += 1) expect(((await wsfSendPasswordResetEmail.run(req({ email })).catch((e) => e)) as HttpsError).code).toBe('internal');
+    const ref = getFirestore().doc(`wsfPasswordResetSends/${await emailHash(email)}`);
+    for (let i = 0; i < 10; i += 1) {
+      await expect(wsfSendPasswordResetEmail.run(req({ email }))).resolves.toEqual({ accepted: true });
+      // Stand in for the cooldown passing; the day and its count stay as written.
+      await ref.update({ lastSentAt: Date.now() - 61_000 });
+    }
     const capped = (await wsfSendPasswordResetEmail.run(req({ email })).catch((e) => e)) as HttpsError;
     expect(capped.code).toBe('resource-exhausted');
     expect(capped.message).toMatch(/today/);
     expect(fetchSpy).toHaveBeenCalledTimes(10);
+    expect((await quotaDoc(email))?.countToday).toBe(10);
   });
 
   it('concurrent requests for one address: exactly one sends', async () => {
