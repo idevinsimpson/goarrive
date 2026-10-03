@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "787dae3ad832f026f5ce56f619b6f92145ed6550e8b09d40233e906d3fe424fa",
-  "eventCount": 423,
+  "ledgerHead": "88ae972555d26c819b1ad7dfa9a185bb60a1dc6b5a0b90f921856aaf5337f631",
+  "eventCount": 424,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -621,7 +621,7 @@
       },
       "label": "Add the missing hosted attendee drivers and generated owner-card inputs using the existing staging journey framework",
       "origin": "ledger",
-      "phase": "ACCEPTED",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -633,7 +633,7 @@
         "subjectSha": "f2c0e4e91b4b8d61c03cf3a31735d31ee93d3311",
         "prHeadSha": "f2c0e4e91b4b8d61c03cf3a31735d31ee93d3311",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "dcf86674f95f0a0c131b9ee3e3f8a9ae3fee0cd3"
       },
       "proof": null,
       "served": null,
@@ -665,8 +665,8 @@
           "id": 5965896667
         },
         "lastTransition": {
-          "kind": "comment",
-          "id": 5965896667
+          "kind": "pull_request",
+          "id": 569
         }
       },
       "review": {
