@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "caca5ab59da1f11dcb981affa43f6712ec84fa1df679aa32a7f1e50a21b05648",
-  "eventCount": 385,
+  "ledgerHead": "191a299a45a764eccb056f6d94cb0fcf0176235cb1fca19cbe3d74d68dccb942",
+  "eventCount": 386,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2308,8 +2308,10 @@
       "packet": "EXPO-ATTENDEE-HOSTED-DRIVERS-1",
       "worker": "W3",
       "reason": "release",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        5965388642
+      ],
       "ack": null
     }
   },
