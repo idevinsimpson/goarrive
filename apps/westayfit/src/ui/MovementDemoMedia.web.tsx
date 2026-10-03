@@ -115,24 +115,27 @@ export function MovementDemoMedia(props: MovementDemoMediaProps) {
     return () => document.removeEventListener('visibilitychange', onVisibility);
   }, []);
 
-  // Released on the way out: paused, source dropped, nothing left decoding.
+  // No retry outlives the slot.
   useEffect(
     () => () => {
       if (retryTimer.current) clearTimeout(retryTimer.current);
-      const v = videoRef.current;
-      if (v) {
-        v.pause();
-        v.removeAttribute('src');
-        v.load();
-      }
     },
     []
   );
 
+  // RELEASED ON THE WAY OUT — done where React detaches the element, not in an
+  // effect cleanup: on unmount the ref is detached BEFORE cleanups run, so a
+  // cleanup reading the ref finds nothing (the station spec caught exactly
+  // that). The same path releases the clip when the slot settles on the
+  // poster. Paused, source dropped, nothing left decoding.
   const setVideo = useCallback(
     (v: HTMLVideoElement | null) => {
-      if (videoRef.current && videoRef.current !== v) {
-        videoRef.current.removeEventListener('error', fail);
+      const previous = videoRef.current;
+      if (previous && previous !== v) {
+        previous.removeEventListener('error', fail);
+        previous.pause();
+        previous.removeAttribute('src');
+        previous.load();
       }
       videoRef.current = v;
       if (v) {

@@ -359,7 +359,7 @@ test('the video drives nothing: ended, timeupdate, a loop or a pause never start
   }
 });
 
-test('a station turn: the demo loops in the station player, and its events neither start the turn nor count it', async ({ browser }) => {
+test('a station turn: the demo loops in the station player, its events neither start nor count the turn, and recording releases it', async ({ browser }) => {
   const bytes = await generateFixture(browser);
   const fx = await seedExpoEvent({ tag: 'mvstation', attendees: ['Fixture Turn'], target: 1000, seededTotal: 10 });
   const station = await openEnrolledStation(browser, fx, 1);
@@ -406,6 +406,26 @@ test('a station turn: the demo loops in the station player, and its events neith
     expect(entry?.resultAmount).toBeNull();
     expect(await contributionsOf(fx.goalId, who.uid)).toEqual([]);
     expect(await shardTotal(fx.goalId)).toBe(10);
+
+    // RELEASED ON THE WAY OUT. Recording the turn — the station's own press,
+    // and the only thing that counts — takes the player off the hall screen.
+    // The clip it was looping is paused and its source dropped.
+    await station.page.getByTestId('wsf-station-move-video').evaluate((v: HTMLVideoElement) => {
+      (window as unknown as { __wsfVideo: HTMLVideoElement }).__wsfVideo = v;
+    });
+    await station.page.getByTestId('wsf-station-move-stop').click();
+    await station.page.getByTestId('wsf-station-turn-count').fill('12');
+    await station.page.getByTestId('wsf-station-turn-action').click();
+    await expect(station.page.getByTestId('wsf-station-move-video')).toHaveCount(0, { timeout: 25_000 });
+    const released = await station.page.evaluate(() => {
+      const v = (window as unknown as { __wsfVideo: HTMLVideoElement }).__wsfVideo;
+      return { paused: v.paused, src: v.getAttribute('src'), connected: v.isConnected };
+    });
+    expect(released).toEqual({ paused: true, src: null, connected: false });
+    // Exactly the one deliberate record, and none from the video.
+    const rows = await contributionsOf(fx.goalId, who.uid);
+    expect(rows).toHaveLength(1);
+    expect(await shardTotal(fx.goalId)).toBe(22);
     station.assertNoCrash('the station with the fixture');
   } finally {
     await station.context.close();
@@ -484,7 +504,7 @@ test('reduced motion shows the poster and never plays', async ({ browser }) => {
   }
 });
 
-test('a hidden tab pauses the demo with the round, and leaving the screen releases the video', async ({ browser }) => {
+test('a hidden tab pauses the demo with the round', async ({ browser }) => {
   const bytes = await generateFixture(browser);
   const fx = await seedExpoEvent({ tag: 'mvhidden', attendees: ['Fixture Mover'], target: 1000, seededTotal: 0 });
   const phone = await openMove(browser, fx);
@@ -502,21 +522,6 @@ test('a hidden tab pauses the demo with the round, and leaving the screen releas
     await expect(page.getByTestId('wsf-move-interrupted')).toBeVisible();
     await expect.poll(async () => (await videoFacts(page)).paused, { timeout: 5_000 }).toBe(true);
 
-    // Leave the screen in-app (the round's own handoff, a client-side route
-    // change): the element is released — paused, its source dropped.
-    await page.getByTestId('wsf-move-video').evaluate((v: HTMLVideoElement) => {
-      (window as unknown as { __wsfVideo: HTMLVideoElement }).__wsfVideo = v;
-    });
-    await page.getByTestId('wsf-move-start').click(); // Resume after the interruption
-    await page.getByTestId('wsf-move-stop').click();
-    await page.getByTestId('wsf-move-contribute').click();
-    await expect(page.getByTestId('wsf-move-screen')).toHaveCount(0, { timeout: 20_000 });
-    const released = await page.evaluate(() => {
-      const v = (window as unknown as { __wsfVideo: HTMLVideoElement }).__wsfVideo;
-      return { paused: v.paused, src: v.getAttribute('src'), connected: v.isConnected };
-    });
-    expect(released).toEqual({ paused: true, src: null, connected: false });
-    expect(await page.locator('video').count()).toBe(0);
   } finally {
     await phone.context.close();
   }
