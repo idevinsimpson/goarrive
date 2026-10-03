@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "67430ed2c64290fad416451e752df91133efc977892e30f97e2744edd41a430b",
-  "eventCount": 477,
+  "ledgerHead": "ec9b8b8db16dc30d0f09775f3f03a999fe3d0ca472022c3c035c1d50af157960",
+  "eventCount": 480,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -65,7 +65,9 @@
     "W4": [],
     "W5": [],
     "W7": [],
-    "W9": []
+    "W9": [
+      "EXPO-MOVEMENT-VIDEO-1"
+    ]
   },
   "packets": {
     "AUTONOMY-ROUTER-1C": {
@@ -834,7 +836,7 @@
       },
       "label": "Pin the latest accepted expo candidate and activate the fixed closed-goal hosted journey through the existing full staging path",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "CHANGES_REQUESTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -875,7 +877,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5970805025
+          "id": 5970985781
         }
       },
       "review": {
@@ -889,6 +891,69 @@
         "after": "director"
       },
       "deliveries": 1,
+      "pendingFinding": null
+    },
+    "EXPO-MOVEMENT-VIDEO-1": {
+      "owner": "W9",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Loop approved demo media in the existing shared player with truthful fallback and no contribution side effects",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "apps/westayfit/src/followAlong.ts",
+        "apps/westayfit/src/followAlongSession.ts",
+        "apps/westayfit/src/ui/FollowAlongCard.tsx",
+        "apps/westayfit/src/ui/MovementDemoMedia.tsx",
+        "apps/westayfit/src/ui/MovementDemoMedia.web.tsx",
+        "apps/westayfit/src/movementDemoMedia.ts",
+        "apps/westayfit/tests/movement-demo-media.test.ts",
+        "apps/westayfit/tests-e2e/movement-demo-media.spec.ts",
+        "docs/westayfit/qa/expo-movement-video-1.md"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 5971264707
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 5971264707
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "journey-qa",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
       "pendingFinding": null
     },
     "EXPO-STATION-LOST-ANSWER-COPY-1": {
@@ -2729,7 +2794,16 @@
       "ack": {
         "kind": "comment",
         "id": 5970830916
-      }
+      },
+      "superseded": true
+    },
+    "c1d9c6f06b0688436f501c366a73bb8d7c3dbe6c5fd3c36bb6de73402d01c9ed": {
+      "packet": "EXPO-LATEST-FULL-STAGING-PIN-1",
+      "worker": "W3",
+      "reason": "handback",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
