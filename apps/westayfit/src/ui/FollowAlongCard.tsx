@@ -23,8 +23,10 @@ import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { INTERRUPTED_NOTICE, LENGTH_LABELS, type FollowAlongLength } from '../followAlong';
 import { type FollowAlongSession } from '../followAlongSession';
+import { demoPlaybackFor } from '../movementDemoMedia';
 import { wsfTheme } from '../theme';
 import { kit, NAVY, SAMPLE_TINT } from './kit';
+import { MovementDemoMedia } from './MovementDemoMedia';
 import { moveFigureLabel, moveFigureSvgDataUriRaw } from './moveFigure';
 
 export function FollowAlongCard({
@@ -138,6 +140,37 @@ export function FollowAlongCard({
         ? styles.figureWide
         : styles.figure;
 
+  // THE DRAWN MOVEMENT GUIDE — this app's own figure, labelled as exactly
+  // that. What every movement without an approved demonstration shows, and
+  // where a demonstration that cannot load lands.
+  const illustration = (
+    <>
+      <Image
+        // NAVY INK ON A NAVY WALL IS NO INK. The figure is drawn in
+        // the brand's green on a venue screen — the same pairing the
+        // rest of that screen already uses — and in navy on cream.
+        source={{ uri: moveFigureSvgDataUriRaw({ kind, pose, accent: venue }) }}
+        style={figureStyle}
+        resizeMode="contain"
+        accessibilityLabel={moveFigureLabel(kind, pose)}
+        testID={id('figure-image')}
+      />
+      {/*
+        With reduced motion asked for, nothing alternates: both
+        positions are shown side by side instead, so the shape reads.
+      */}
+      {reducedMotion ? (
+        <Image
+          source={{ uri: moveFigureSvgDataUriRaw({ kind, pose: 'end', accent: !venue }) }}
+          style={figureStyle}
+          resizeMode="contain"
+          accessibilityLabel={moveFigureLabel(kind, 'end')}
+          testID={id('reduced-motion')}
+        />
+      ) : null}
+    </>
+  );
+
   return (
     <View style={inRow ? styles.playerColumnRow : styles.playerColumn}>
       <View style={t.card}>
@@ -163,7 +196,25 @@ export function FollowAlongCard({
         */}
         <View style={stageIsRow ? styles.venueStage : styles.stageStack} testID={id('stage')}>
           <View style={styles.figureRow} testID={id('figure')}>
-            {media.posterUri ? (
+            {media.clipUri && media.posterUri ? (
+              /*
+                AN APPROVED DEMONSTRATION (EXPO-MOVEMENT-VIDEO-1): poster
+                first, then a muted loop that runs only while the round runs.
+                It takes the round's state and gives nothing back — no
+                callback, so no video event can start, time or count a round.
+                The drawn guide is its last resort.
+              */
+              <MovementDemoMedia
+                posterUri={media.posterUri}
+                clipUri={media.clipUri}
+                label={`${media.label}: ${plan.unit}.`}
+                playback={demoPlaybackFor(phase, running)}
+                reducedMotion={reducedMotion}
+                imageStyle={figureStyle}
+                fallback={illustration}
+                testIDPrefix={testIDPrefix}
+              />
+            ) : media.posterUri ? (
               <Image
                 source={{ uri: media.posterUri }}
                 style={figureStyle}
@@ -172,31 +223,7 @@ export function FollowAlongCard({
                 testID={id('poster')}
               />
             ) : (
-              <>
-                <Image
-                  // NAVY INK ON A NAVY WALL IS NO INK. The figure is drawn in
-                  // the brand's green on a venue screen — the same pairing the
-                  // rest of that screen already uses — and in navy on cream.
-                  source={{ uri: moveFigureSvgDataUriRaw({ kind, pose, accent: venue }) }}
-                  style={figureStyle}
-                  resizeMode="contain"
-                  accessibilityLabel={moveFigureLabel(kind, pose)}
-                  testID={id('figure-image')}
-                />
-                {/*
-                  With reduced motion asked for, nothing alternates: both
-                  positions are shown side by side instead, so the shape reads.
-                */}
-                {reducedMotion ? (
-                  <Image
-                    source={{ uri: moveFigureSvgDataUriRaw({ kind, pose: 'end', accent: !venue }) }}
-                    style={figureStyle}
-                    resizeMode="contain"
-                    accessibilityLabel={moveFigureLabel(kind, 'end')}
-                    testID={id('reduced-motion')}
-                  />
-                ) : null}
-              </>
+              illustration
             )}
           </View>
           <Text style={t.timer} testID={id('timer')}>
