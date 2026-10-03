@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "ff1197664ee1d64ae246c88df664e7aefbd058203695954605ba819fe7a8f4c1",
-  "eventCount": 281,
+  "ledgerHead": "6b956584dff9baf9285ebdd25ecc82315d2b189e373ed25a33fb41aed732dded",
+  "eventCount": 282,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1736,8 +1736,10 @@
       "packet": "EXPO-ATTENDEE-JOURNEY-PROOF-1",
       "worker": "W4",
       "reason": "review",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        5963431384
+      ],
       "ack": null
     }
   },
