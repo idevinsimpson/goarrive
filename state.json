@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "7e6683fc88fa625ac0f1dacec59cf9850b8c24a8d22936f323bc8fffc4f3f8ed",
-  "eventCount": 432,
+  "ledgerHead": "6e8577469d5bd2e9c19f2cd1a949703bb97339507d2364de2a84f98cf9ed4424",
+  "eventCount": 433,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -439,7 +439,9 @@
       "proof": null,
       "served": null,
       "releasedQueueIndex": null,
-      "reviewedBy": [],
+      "reviewedBy": [
+        "W4"
+      ],
       "subjectPaths": [
         ".github/wsf-staging/approved-candidate.json",
         ".github/wsf-staging/journeys/examples/home-northstar-parity-1.json",
@@ -459,7 +461,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5966202949
+          "id": 5966284385
         }
       },
       "review": {
@@ -2487,7 +2489,8 @@
       "ack": {
         "kind": "comment",
         "id": 5966226264
-      }
+      },
+      "superseded": true
     }
   },
   "fastpath": {
