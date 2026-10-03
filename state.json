@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "8259cd366b8204e0358427cd6e291fabe1fcba1b2b48e348470ee17796788ed3",
-  "eventCount": 427,
+  "ledgerHead": "28db01421a27ea6b136416f24d8a45308b50ad6855fd1e6c4b1a495ea51db1fa",
+  "eventCount": 430,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -422,15 +422,17 @@
       },
       "label": "Pin the exact integrated email repair and coalesced accepted expo lineage through the reviewed full staging path",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
-      "pr": null,
-      "reviewers": [],
+      "pr": 570,
+      "reviewers": [
+        "W4"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "5be8f6613c7476c473ac04cfed884fed70ba9fb0",
+        "prHeadSha": "5be8f6613c7476c473ac04cfed884fed70ba9fb0",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -457,7 +459,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5965893676
+          "id": 5966202949
         }
       },
       "review": {
@@ -470,7 +472,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "EXPO-ACCOUNT-ENTRY-1": {
@@ -2471,7 +2473,16 @@
       "ack": {
         "kind": "comment",
         "id": 5965893676
-      }
+      },
+      "superseded": true
+    },
+    "8cc40fee1a415258da20792e493209bb28532f772edc46f0def0d0c0f8ab00d1": {
+      "packet": "EMAIL-STAGING-REPAIR-STAGING-PIN",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
