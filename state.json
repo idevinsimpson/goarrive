@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "66ddbbe0dbca33a310177e3c0692f4fc14efd7f8a2179fd288d4d9be208e341d",
-  "eventCount": 434,
+  "ledgerHead": "814e52e3606d48bcd734d8ee80c175e5084cc54e5546c675fa96796bb3ce5c6f",
+  "eventCount": 435,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -422,7 +422,7 @@
       },
       "label": "Pin the exact integrated email repair and coalesced accepted expo lineage through the reviewed full staging path",
       "origin": "ledger",
-      "phase": "ACCEPTED",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -434,7 +434,7 @@
         "subjectSha": "5be8f6613c7476c473ac04cfed884fed70ba9fb0",
         "prHeadSha": "5be8f6613c7476c473ac04cfed884fed70ba9fb0",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "01a07ef327a0efdc1b19c636f13fedaa4f6b7ac1"
       },
       "proof": null,
       "served": null,
@@ -463,8 +463,8 @@
           "id": 5966634146
         },
         "lastTransition": {
-          "kind": "comment",
-          "id": 5966634146
+          "kind": "pull_request",
+          "id": 570
         }
       },
       "review": {
