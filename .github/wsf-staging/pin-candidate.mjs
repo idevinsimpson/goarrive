@@ -35,6 +35,7 @@ import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { checkManifestObject } from './check-milestone-manifest.mjs';
 import { drivers as registeredDrivers } from './journeys/index.mjs';
+import { DEPLOY_TITLE, targetTitle } from '../../tools/wsf-control/fastpath.mjs';
 
 // THE PROTECTED PATHS, defined once. A pin whose candidate differs from the
 // served pin on any of these leaves the fast path and gets explicit review:
@@ -182,9 +183,21 @@ function sameFunctions(m) {
   return m.functionsTree.previous !== null && m.functionsTree.previous === m.functionsTree.candidate;
 }
 
-export function rollbackNote({ previous, run, m }) {
+/*
+ * A LEDGER-SERVED BASELINE (STAGING-PIN-FASTPATH-SERVED-BASELINE-1). A ledger
+ * fast-path run (target_source=ledger) serves the control writer's target, not
+ * the pin: the pin on its operational main stays the older SHA. Then the SHA
+ * staging serves, and the one to roll back to, is the run's target, and the
+ * pin is only historical approval ancestry. `served` (null on a full-path run)
+ * carries what generate() proved about it: { sha, pin, title, marker, mPin }.
+ */
+const servedPhrase = (run, served) => `run ${run.number} (${run.id}) served it in ledger fast-path mode (run title "${served.title}", ` +
+  `its verifier checking ${served.marker}), dispatched from operational main ${run.main}, whose approval still named the ` +
+  `historical pin ${served.pin}; that run did not deploy the pin. It printed `;
+
+export function rollbackNote({ previous, run, m, served = null }) {
   let s = `ROLLBACK TARGET (${ROLLBACK_AUTHORITY}). The previous known-good served app SHA is ${previous}: ` +
-    `run ${run.number} (${run.id}) deployed it, dispatched from operational main ${run.main}, and printed ` +
+    (served ? servedPhrase(run, served) : `run ${run.number} (${run.id}) deployed it, dispatched from operational main ${run.main}, and printed `) +
     `INVENTORY_BEFORE=${run.before}, INVENTORY_AFTER=${run.after}, CREATED_THIS_DEPLOY=${run.created}, ` +
     `HOSTED_MARKER_MATCHES=true and VERIFY=pass, with its hosted verification job green. `;
   if (sameFunctions(m)) {
@@ -200,9 +213,10 @@ export function rollbackNote({ previous, run, m }) {
   return `${s} A note, not a gate: no script reads it.`;
 }
 
-export function expectedPriorNote({ previous, run, added, m }) {
+export function expectedPriorNote({ previous, run, added, m, served = null }) {
   const base = run.after - added.length;
-  let s = `${run.after}, the measured live inventory. Run ${run.id} (run ${run.number}, ${run.date}, candidate ${s8(previous)} ` +
+  const what = served ? `served ${s8(previous)} in ledger fast-path mode over the historical pin ${s8(served.pin)}` : `candidate ${s8(previous)}`;
+  let s = `${run.after}, the measured live inventory. Run ${run.id} (run ${run.number}, ${run.date}, ${what} ` +
     `from main ${s8(run.main)}), the last deploy-mode run, printed in its own deploy-job log INVENTORY_BEFORE=${run.before}, ` +
     `INVENTORY_AFTER=${run.after}, EXPECTED_INVENTORY=${run.after}, CREATED_THIS_DEPLOY=${run.created}, ` +
     'HOSTED_MARKER_MATCHES=true and VERIFY=pass. read-inventory.mjs refuses a deploy whose live count differs from this number. ';
@@ -224,10 +238,14 @@ export function expectedPriorNote({ previous, run, added, m }) {
   return s;
 }
 
-export function boundaryNote({ previous, candidate, run, m }) {
+export function boundaryNote({ previous, candidate, run, m, served = null }) {
   const parts = [];
-  parts.push(`${candidate} is measured against ${previous}, the SHA this file previously approved, which run ${run.number} ` +
-    `(${run.id}) deployed and whose hosted marker that run observed.`);
+  parts.push(served
+    ? `${candidate} is measured against ${previous}, the SHA run ${run.number} (${run.id}) served in ledger fast-path mode and whose ` +
+      `hosted marker that run observed. The SHA this file previously approved, ${served.pin}, is historical approval ancestry ` +
+      'only: that run did not deploy it.'
+    : `${candidate} is measured against ${previous}, the SHA this file previously approved, which run ${run.number} ` +
+      `(${run.id}) deployed and whose hosted marker that run observed.`);
   if (m.ancestor) {
     parts.push(`${s8(previous)} is an ancestor of the candidate. Derived with git by pin-candidate.mjs: ` +
       `${word(m.firstParent.length)} first-parent commit${m.firstParent.length === 1 ? '' : 's'} (${m.firstParent.map(s8).join(', ') || 'none'}); ` +
@@ -249,19 +267,35 @@ export function boundaryNote({ previous, candidate, run, m }) {
     ? `The functions-westayfit tree is ${s8(m.functionsTree.candidate)} at both SHAs and src/index.ts exports ${ex}.`
     : `The functions-westayfit tree is ${m.functionsTree.previous ? s8(m.functionsTree.previous) : 'absent'} at the previous SHA and ` +
       `${m.functionsTree.candidate ? s8(m.functionsTree.candidate) : 'absent'} at the candidate, whose src/index.ts exports ${ex}.`);
+  if (served) {
+    const p = served.mPin;
+    parts.push(`Against the historical pin ${s8(served.pin)} (an ancestor of ${s8(previous)}): ` +
+      `${word(p.firstParent.length)} first-parent commit${p.firstParent.length === 1 ? '' : 's'} (${p.firstParent.map(s8).join(', ') || 'none'}); ` +
+      `${p.commits} commit${p.commits === 1 ? '' : 's'} in all; ${p.files} files, +${p.added} / -${p.deleted}, ${p.docs} of them under docs/; ` +
+      `protected-path diff ${p.protectedDelta.length ? `NOT EMPTY: ${list(p.protectedDelta)}` : 'EMPTY'}; functions-westayfit tree ` +
+      `${sameFunctions(p) ? `${s8(p.functionsTree.candidate)} at both SHAs` : 'CHANGED'}.`);
+  }
   parts.push('The staging deploy uses the OPERATIONAL firebase.westayfit.staging.json, not the candidate\'s hosting config. ' +
     'This file records the boundary, not review results.');
   return parts.join(' ');
 }
 
 // ---- invariants -----------------------------------------------------------------
-export function invariants({ previous, candidate, run, added, m, milestone = null }) {
+function lineageReasons(m, previous, candidate) {
   const reasons = [];
   if (!m.ancestor) reasons.push(`lineage: ${s8(previous)} is not an ancestor of ${s8(candidate)}`);
   if (m.protectedDelta.length) reasons.push(`protected paths changed: ${m.protectedDelta.join(', ')}`);
   if (!sameFunctions(m)) reasons.push('the functions-westayfit tree changed');
   if (m.exports.previous === null || m.exports.candidate === null) reasons.push('the exported function set cannot be measured');
   else if (m.exports.previous.join() !== m.exports.candidate.join()) reasons.push('the exported function set changed');
+  return reasons;
+}
+
+export function invariants({ previous, candidate, run, added, m, milestone = null, served = null }) {
+  const reasons = lineageReasons(m, previous, candidate);
+  // A ledger-served baseline must be clean against the historical pin too:
+  // the release gate's own fast path compares a candidate with the pin.
+  if (served) for (const r of lineageReasons(served.mPin, served.pin, candidate)) reasons.push(`historical pin ${s8(served.pin)}: ${r}`);
   const expected = m.verifier.base === null ? null : [...m.verifier.base, ...added].sort();
   if (expected === null) reasons.push(`the verifier's base inventory cannot be read at ${s8(m.verifier.ref)}`);
   else {
@@ -275,22 +309,37 @@ export function invariants({ previous, candidate, run, added, m, milestone = nul
   if (m.releaseEnvironment === null) reasons.push('the release environment was not measured (no --ops-head)');
   else if (m.releaseEnvironment.delta.length) reasons.push(`the release environment changed since run ${run.number}: ${m.releaseEnvironment.delta.join(', ')}`);
 
+  const exportCount = (x) => ({
+    previous: x.exports.previous === null ? null : x.exports.previous.length,
+    candidate: x.exports.candidate === null ? null : x.exports.candidate.length,
+  });
   return {
     generator: 'pin-candidate.mjs v1',
-    previousApprovedAppSha: previous,
+    previousApprovedAppSha: served ? served.pin : previous,
     candidate,
     run: {
       id: run.id, number: run.number, operationalMain: run.main,
       inventoryBefore: run.before, inventoryAfter: run.after, created: run.created,
       verify: 'pass', hostedMarkerMatches: true, hostedVerify: 'pass',
+      ...(served ? { mode: 'ledger', title: served.title, servedAppSha: previous, verifiedMarker: served.marker } : {}),
     },
     lineage: { previousIsAncestor: m.ancestor, firstParentCommits: m.firstParent, commits: m.commits },
     protectedPathDelta: m.protectedDelta,
     functionsTree: m.functionsTree,
-    exportCount: {
-      previous: m.exports.previous === null ? null : m.exports.previous.length,
-      candidate: m.exports.candidate === null ? null : m.exports.candidate.length,
-    },
+    exportCount: exportCount(m),
+    ...(served ? {
+      servedBaseline: {
+        servedAppSha: previous,
+        rollbackTarget: previous,
+        historicalPin: served.pin,
+        pinIsAncestorOfServed: true,
+        servedIsAncestorOfCandidate: true,
+        pinLineage: {
+          previousIsAncestor: served.mPin.ancestor, firstParentCommits: served.mPin.firstParent, commits: served.mPin.commits,
+          protectedPathDelta: served.mPin.protectedDelta, functionsTree: served.mPin.functionsTree, exportCount: exportCount(served.mPin),
+        },
+      },
+    } : {}),
     releaseEnvironment: m.releaseEnvironment,
     milestone,
     fastPath: {
@@ -317,9 +366,12 @@ function insertHistory(entries, prefix, key, value, anchor) {
 }
 
 /** The pure part: previous approval + measured facts -> next approval object. */
-export function nextApproval(prev, { candidate, run, label, acceptedOn, m, milestone = null }) {
-  const previous = prev.approvedAppSha;
-  const p8 = s8(previous);
+export function nextApproval(prev, { candidate, run, label, acceptedOn, m, milestone = null, served = null }) {
+  if (served && served.pin !== prev.approvedAppSha) refuse('the served baseline does not name this file\'s pin as its historical pin');
+  // The SHA staging serves: what the notes measure against and roll back to.
+  const previous = served ? served.sha : prev.approvedAppSha;
+  // The SHA this file approved: what the history keys rotate out.
+  const p8 = s8(prev.approvedAppSha);
   const added = Array.isArray(prev.candidateAddedFunctions) ? [...prev.candidateAddedFunctions] : [];
   for (const k of [`_previousPackageLabel${p8}`, `_previousExpectedPriorFunctionsNote${p8}`, `_previousFullCandidateNote${p8}`]) {
     if (Object.hasOwn(prev, k)) refuse(`the approval already carries ${k}: ${p8} has been rotated out once`);
@@ -327,7 +379,9 @@ export function nextApproval(prev, { candidate, run, label, acceptedOn, m, miles
   for (const k of ['packageLabel', '_expectedPriorFunctionsNote', '_fullCandidateNote']) {
     if (typeof prev[k] !== 'string' || prev[k] === '') refuse(`the approval has no ${k} to rotate into history`);
   }
-  const ran = `run ${run.number} (${run.id}) deployed ${run.before} -> ${run.after} with CREATED_THIS_DEPLOY=${run.created} and VERIFY=pass`;
+  const ran = served
+    ? `run ${run.number} (${run.id}) did not deploy: that run served ${s8(previous)} in ledger fast-path mode, ${run.before} -> ${run.after} with CREATED_THIS_DEPLOY=${run.created} and VERIFY=pass`
+    : `run ${run.number} (${run.id}) deployed ${run.before} -> ${run.after} with CREATED_THIS_DEPLOY=${run.created} and VERIFY=pass`;
 
   const entries = Object.entries(prev).filter(([k]) => k !== '_pinInvariants');
   const set = (k, v) => {
@@ -338,17 +392,19 @@ export function nextApproval(prev, { candidate, run, label, acceptedOn, m, miles
   set('packageLabel', label);
   set('sourceAcceptedOn', acceptedOn);
   set('expectedPriorFunctions', run.after);
-  set('_rollbackNote', rollbackNote({ previous, run, m }));
-  set('_expectedPriorFunctionsNote', expectedPriorNote({ previous, run, added, m }));
-  set('_fullCandidateNote', boundaryNote({ previous, candidate, run, m }));
+  set('_rollbackNote', rollbackNote({ previous, run, m, served }));
+  set('_expectedPriorFunctionsNote', expectedPriorNote({ previous, run, added, m, served }));
+  set('_fullCandidateNote', boundaryNote({ previous, candidate, run, m, served }));
   insertHistory(entries, '_previousExpectedPriorFunctionsNote', `_previousExpectedPriorFunctionsNote${p8}`,
-    `HISTORICAL, the note as it stood for the ${p8} pin, true until run ${run.number} deployed it: ${prev._expectedPriorFunctionsNote}`,
+    served
+      ? `HISTORICAL, the note as it stood for the ${p8} pin, which run ${run.number} did not deploy (it served ${s8(previous)} in ledger fast-path mode): ${prev._expectedPriorFunctionsNote}`
+      : `HISTORICAL, the note as it stood for the ${p8} pin, true until run ${run.number} deployed it: ${prev._expectedPriorFunctionsNote}`,
     '_expectedPriorFunctionsNote');
   insertHistory(entries, '_previousFullCandidateNote', `_previousFullCandidateNote${p8}`,
     `HISTORICAL, the boundary note for the ${p8} pin: ${prev._fullCandidateNote}`, '_fullCandidateNote');
   insertHistory(entries, '_previousPackageLabel', `_previousPackageLabel${p8}`,
     `HISTORICAL, the label of the ${p8} pin, which ${ran}: ${prev.packageLabel}`, null);
-  entries.push(['_pinInvariants', invariants({ previous, candidate, run, added, m, milestone })]);
+  entries.push(['_pinInvariants', invariants({ previous, candidate, run, added, m, milestone, served })]);
   return Object.fromEntries(entries);
 }
 
@@ -361,6 +417,7 @@ const FLAGS = {
   'inventory-before': 'int', 'inventory-after': 'int', created: 'created',
   verify: 'str', 'hosted-marker': 'str', 'hosted-verify': 'str',
   'label-file': 'path', 'accepted-on': 'date', out: 'path', receipt: 'path?', manifest: 'path?',
+  'run-title': 'str', 'served-sha': 'sha?', 'run-marker': 'sha?',
 };
 
 export function parseArgs(argv) {
@@ -393,6 +450,7 @@ export function parseArgs(argv) {
  * rollback SHA, so a pin is never generated that the gate would then refuse.
  */
 function milestoneFor(repo, a, { previous, candidate }) {
+  // `previous` is the SHA staging serves (the run's target on a ledger run).
   const opsRef = a['ops-head'] || a['run-main'];
   const atOps = git(repo, ['show', `${opsRef}:${MANIFEST_REL}`], { allowFail: true });
   if (a.manifest === 'none') return { declared: 'none', removesManifestAtOpsHead: atOps !== null };
@@ -414,6 +472,42 @@ function milestoneFor(repo, a, { previous, candidate }) {
     refuse(`the manifest's previousKnownGoodSha is ${mf.previousKnownGoodSha}, not the served pin ${previous} it rolls back to`);
   }
   return { declared, milestone: mf.milestone, journeys: mf.journeys.map((j) => j.id) };
+}
+
+/**
+ * What the run served, from its title (the workflow's own run-name) and the
+ * marker its verifier checked. A full-path run (`WSF staging · mode=deploy`, or
+ * the pre-run-59 `WSF staging deploy`) serves the pin: null, and every note is
+ * exactly as before. A ledger run (`… · target=<sha>`) served <sha>, which
+ * must be named again by --served-sha and --run-marker, descend from the pin,
+ * and be an ancestor of the candidate. Anything else refuses: a run whose
+ * served SHA differs from the pin never yields a note saying it deployed the pin.
+ */
+const LEGACY_DEPLOY_TITLE = 'WSF staging deploy';
+function servedBaseline(repo, a, { pin, candidate }) {
+  const title = a['run-title'];
+  const servedFlag = a['served-sha'];
+  const marker = a['run-marker'];
+  if (title === DEPLOY_TITLE || title === LEGACY_DEPLOY_TITLE) {
+    if (servedFlag !== undefined && servedFlag !== pin) refuse(`a full-path run ("${title}") serves the pin ${pin}; --served-sha names ${servedFlag}`);
+    if (marker !== undefined && marker !== pin) refuse(`a full-path run ("${title}") checks the pin ${pin}; --run-marker names ${marker}`);
+    return null;
+  }
+  const prefix = `${DEPLOY_TITLE} · target=`;
+  if (!title.startsWith(prefix)) refuse(`the run title ${JSON.stringify(title)} is not a WSF staging deploy-mode run title; only a deploy run can anchor a pin`);
+  const target = title.slice(prefix.length);
+  if (!SHA.test(target) || title !== targetTitle(target)) refuse(`the run title ${JSON.stringify(title)} does not name a full 40-character target`);
+  if (target === pin) refuse(`the ledger run's target is the pin ${pin} itself; that is ambiguous, not a served baseline`);
+  if (servedFlag === undefined) {
+    refuse(`run served ${target} in ledger fast-path mode, not the pin ${pin}: pass --served-sha ${target} and --run-marker with the SHA its verifier checked`);
+  }
+  if (servedFlag !== target) refuse(`--served-sha ${servedFlag} is not the run title's target ${target}`);
+  if (marker === undefined) refuse('a ledger-served baseline needs --run-marker, the SHA the run\'s verifier checked');
+  if (marker !== target) refuse(`--run-marker ${marker} is not the served SHA ${target}: the run's marker did not observe it`);
+  if (!isCommit(repo, target)) refuse(`the served SHA ${target} is not a commit in ${repo}`);
+  if (!isAncestor(repo, pin, target)) refuse(`the pin ${s8(pin)} is not an ancestor of the served SHA ${s8(target)}: not a fast-path baseline`);
+  if (!isAncestor(repo, target, candidate)) refuse(`the served SHA ${s8(target)} is not an ancestor of the candidate ${s8(candidate)}`);
+  return { sha: target, pin, title, marker, mPin: null };
 }
 
 export function generate(argv) {
@@ -444,6 +538,7 @@ export function generate(argv) {
   if (atRun?.approvedAppSha !== previous) {
     refuse(`run main ${s8(a['run-main'])} approved ${atRun?.approvedAppSha}, not ${previous}: that run did not deploy the pin this file replaces`);
   }
+  const served = servedBaseline(repo, a, { pin: previous, candidate });
   const run = {
     id: Number(a['run-id']), number: Number(a['run-number']), main: a['run-main'], date: a['run-date'],
     before: Number(a['inventory-before']), after: Number(a['inventory-after']), created: a.created,
@@ -456,9 +551,11 @@ export function generate(argv) {
   try { label = fs.readFileSync(a['label-file'], 'utf8').replace(/\n$/, ''); } catch { refuse('the label file is missing or unreadable'); }
   if (!label.trim() || /[\r\n]/.test(label)) refuse('the label must be one non-empty line of reviewed prose');
 
-  const m = measure(repo, { previous, candidate, runMain: a['run-main'], opsHead: a['ops-head'] });
-  const milestone = milestoneFor(repo, a, { previous, candidate });
-  const next = nextApproval(prev, { candidate, run, label, acceptedOn: a['accepted-on'], m, milestone });
+  const base = served ? served.sha : previous;
+  const m = measure(repo, { previous: base, candidate, runMain: a['run-main'], opsHead: a['ops-head'] });
+  if (served) served.mPin = measure(repo, { previous, candidate, runMain: a['run-main'], opsHead: a['ops-head'] });
+  const milestone = milestoneFor(repo, a, { previous: base, candidate });
+  const next = nextApproval(prev, { candidate, run, label, acceptedOn: a['accepted-on'], m, milestone, served });
   return { args: a, next, text: serialize(next) };
 }
 
@@ -467,6 +564,7 @@ function receiptText({ next }) {
   return [
     `PIN_CANDIDATE=${inv.candidate}`,
     `PIN_PREVIOUS=${inv.previousApprovedAppSha}`,
+    ...(inv.servedBaseline ? [`PIN_SERVED=${inv.servedBaseline.servedAppSha}`, `PIN_ROLLBACK=${inv.servedBaseline.rollbackTarget}`] : []),
     `PIN_EXPECTED_PRIOR_FUNCTIONS=${next.expectedPriorFunctions}`,
     `PIN_PROTECTED_DELTA=${inv.protectedPathDelta.length}`,
     `PIN_FAST_PATH=${inv.fastPath.eligible ? 'eligible' : 'ineligible'}`,
