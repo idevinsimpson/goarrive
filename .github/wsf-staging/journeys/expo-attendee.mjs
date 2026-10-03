@@ -60,9 +60,13 @@ export const EXPO_ROWS = Object.freeze({
     onlyTen: 'only the switched member\'s 10 is recorded; neither of the other two records anything',
   },
   'closed-goal-turn': {
-    refused: 'the station prints This goal is closed.',
+    refused: 'recording the turn started before the closure: Station 1 prints This goal is closed.',
     nothing: 'nothing is recorded and the shared total does not move',
-    noReceipt: 'the member\'s phone shows no receipt',
+    noReceipt: 'no member\'s phone shows a receipt',
+    start: 'Start their turn is refused: Station 2 prints This goal is closed., shows no count to record and still serves the same member',
+    ready: 'I\'m ready is refused: the called member\'s phone prints This goal is closed. and still shows them called to Station 3',
+    call: 'Call next is refused: Station 4 prints This goal is closed. and serves nobody, and the waiting member\'s phone still shows them in the line',
+    join: 'joining is refused: the event page prints This goal is closed., the member does not reach the queue page, and the hall\'s waiting count does not change',
   },
   'shared-screen-finish': {
     finish: 'after Finish the screen is back at its start, signed out, with no previous person\'s name, email, own credit, receipt or pending record',
@@ -496,34 +500,109 @@ async function linePlaceEnds({ page, baseUrl, fixtures }) {
 }
 
 // ---- 7. closed-goal-turn ------------------------------------------------------------------
+/*
+ * EXPO-CLOSED-GOAL-QUEUE-GATE-1 (#571): a closed goal refuses join, call, ready
+ * and start before anything advances, in the contribute path's own sentence,
+ * and a refusal leaves the place as it was. Every window is set up BEFORE the
+ * one closure (reopening is not a product path), and each is read only from
+ * the screen that shows it.
+ */
+const CLOSED = 'This goal is closed.';
 async function closedGoalTurn({ page, baseUrl, fixtures }) {
   const r = recorder();
   const row = tagged(r, EXPO_ROWS['closed-goal-turn']);
-  const ev = await fixtures.expoEvent('closed', { attendees: 1, target: 1000, seeded: 200 });
-  const [member] = ev.attendees;
+  const ev = await fixtures.expoEvent('closed', { attendees: 5, target: 1000, seeded: 200 });
+  const [started, readied, called, waiter, joiner] = ev.attendees;
   const dev = devices(page);
   try {
-    const station = (await openStation(dev, fixtures, baseUrl, ev, 1)).page;
-    const phone = (await openPhone(dev, fixtures, baseUrl, member)).page;
-    const entry = await joinLine(phone, baseUrl, fixtures, ev, member, 'Fixture Z');
-    await callNext(station, 'Fixture Z');
-    await tap(phone, 'wsf-queue-ready');
-    await enabled(station, 'wsf-station-turn-action', 25_000);
-    await startTurn(station);
-    await fixtures.trackStationTurn(ev, member, entry);
-    const before = await textWhen(station, 'wsf-station-total-line', (t) => t === '200 of 1,000 squats', 25_000);
+    const s1 = (await openStation(dev, fixtures, baseUrl, ev, 1)).page;
+    const s2 = (await openStation(dev, fixtures, baseUrl, ev, 2)).page;
+    const s3 = (await openStation(dev, fixtures, baseUrl, ev, 3)).page;
+    const s4 = (await openStation(dev, fixtures, baseUrl, ev, 4)).page;
+    const [pA, pB, pC, pW, pD] = (await Promise.all([started, readied, called, waiter, joiner]
+      .map((m) => openPhone(dev, fixtures, baseUrl, m)))).map((d) => d.page);
+
+    const entryA = await joinLine(pA, baseUrl, fixtures, ev, started, 'Fixture Z');
+    await callNext(s1, 'Fixture Z');
+    await tap(pA, 'wsf-queue-ready');
+    await enabled(s1, 'wsf-station-turn-action', 25_000);
+    await startTurn(s1);
+    await fixtures.trackStationTurn(ev, started, entryA);
+    await joinLine(pB, baseUrl, fixtures, ev, readied, 'Fixture Y');
+    await callNext(s2, 'Fixture Y');
+    await tap(pB, 'wsf-queue-ready');
+    await enabled(s2, 'wsf-station-turn-action', 25_000);
+    await joinLine(pC, baseUrl, fixtures, ev, called, 'Fixture X');
+    await callNext(s3, 'Fixture X');
+    await shown(pC, 'wsf-queue-ready', 25_000);
+    await joinLine(pW, baseUrl, fixtures, ev, waiter, 'Fixture V');
+    const waitingBefore = await textWhen(s4, 'wsf-station-queue-count', (t) => t === '1 person waiting.', 25_000);
+    const inLineBefore = await shown(pW, 'wsf-queue-waiting', 25_000);
+    // The fifth member is one tap from joining when the goal closes.
+    await openEvent(pD, baseUrl, ev);
+    await tap(pD, 'wsf-event-queue-start');
+    await shown(pD, 'wsf-event-queue-name', 15_000);
+    await type(pD, 'wsf-event-queue-name', 'Fixture U');
+    const before = await textWhen(s1, 'wsf-station-total-line', (t) => t === '200 of 1,000 squats', 25_000);
+    r.did('one event: a turn running at Station 1, a member ready at Station 2, one called to Station 3, one waiting with Station 4 idle, and a fifth on the event page with a name chosen');
     await fixtures.closeGoal(ev);
-    r.did('one member mid-turn with I\'m ready tapped; the goal was closed before the station recorded');
-    await type(station, 'wsf-station-turn-count', '12');
-    await tap(station, 'wsf-station-turn-action');
-    r.did('entered 12 on the station and recorded');
-    const said = await textWhen(station, 'wsf-station-queue-error', (t) => t === 'This goal is closed.', 25_000);
-    row('refused')(said === 'This goal is closed.', said);
+    r.did('the goal was closed');
+
+    // Station 1: the turn that started before the closure.
+    await type(s1, 'wsf-station-turn-count', '12');
+    await tap(s1, 'wsf-station-turn-action');
+    r.did('entered 12 on Station 1 and recorded');
+    const said = await textWhen(s1, 'wsf-station-queue-error', (t) => t === CLOSED, 25_000);
+    row('refused')(said === CLOSED, said);
+
+    // Station 2: a member ready; start mints nothing.
+    const pressedStart = await tap(s2, 'wsf-station-turn-action');
+    r.did('pressed Start their turn on Station 2');
+    const s2Said = await textWhen(s2, 'wsf-station-queue-error', (t) => t === CLOSED, 25_000);
+    const noRecord = !(await present(s2, 'wsf-station-turn-record')) && !(await present(s2, 'wsf-station-turn-count'));
+    const s2Serving = await textWhen(s2, 'wsf-station-queue-serving', (t) => t === 'Fixture Y', 10_000);
+    row('start')(pressedStart && s2Said === CLOSED && noRecord && s2Serving === 'Fixture Y',
+      `${s2Said}; record field ${noRecord ? 'absent' : 'shown'}; serving ${s2Serving}`);
+
+    // The member called to Station 3: ready advances nothing.
+    const pressedReady = await tap(pC, 'wsf-queue-ready');
+    r.did('tapped I\'m ready on the phone of the member called to Station 3');
+    const cSaid = await textWhen(pC, 'wsf-queue-leave-error', (t) => t === CLOSED, 25_000);
+    const stillCalled = (await present(pC, 'wsf-queue-called')) && (await present(pC, 'wsf-queue-ready'));
+    const where = await textWhen(pC, 'wsf-queue-station', (t) => t === 'Go to Station 3.', 10_000);
+    row('ready')(pressedReady && cSaid === CLOSED && stillCalled && where === 'Go to Station 3.',
+      `${cSaid}; ${stillCalled ? 'still called' : 'no longer called'}; ${where}`);
+
+    // Station 4, idle, with a member waiting: nobody is called.
+    const pressedCall = await tap(s4, 'wsf-station-call-next');
+    r.did('pressed Call next on Station 4');
+    const s4Said = await textWhen(s4, 'wsf-station-queue-error', (t) => t === CLOSED, 25_000);
+    const servesNobody = !(await present(s4, 'wsf-station-queue-serving'));
+    const stillWaiting = await shown(pW, 'wsf-queue-waiting', 10_000);
+    const wCalled = await present(pW, 'wsf-queue-called');
+    row('call')(pressedCall && s4Said === CLOSED && servesNobody && waitingBefore === '1 person waiting.' && inLineBefore && stillWaiting && !wCalled,
+      `${s4Said}; ${servesNobody ? 'serves nobody' : 'serves someone'}; waiting member ${stillWaiting && !wCalled ? 'still in the line' : 'moved'}`);
+
+    // The fifth member: no place.
+    const hallBeforeJoin = await textWhen(s4, 'wsf-station-queue-count', (t) => /waiting/.test(t), 10_000);
+    const pressedJoin = await tap(pD, 'wsf-event-queue-join');
+    r.did('the fifth member pressed join on the event page');
+    const dSaid = await textWhen(pD, 'wsf-event-queue-error', (t) => t === CLOSED, 25_000);
+    await page.waitForTimeout(4_000);
+    const stayed = pathOf(pD) === `/event/${ev.goalId}` && !(await present(pD, 'wsf-queue-screen'));
+    const hallAfterJoin = await textWhen(s4, 'wsf-station-queue-count', (t) => t === hallBeforeJoin, 10_000);
+    row('join')(pressedJoin && dSaid === CLOSED && stayed && Boolean(hallBeforeJoin) && hallAfterJoin === hallBeforeJoin,
+      `${dSaid}; ${pathOf(pD)}; hall ${hallBeforeJoin} -> ${hallAfterJoin}`);
+
     await page.waitForTimeout(6_000);
-    const after = await textWhen(station, 'wsf-station-total-line', (t) => t === '200 of 1,000 squats', 10_000);
-    const noResult = !(await present(station, 'wsf-station-queue-result'));
+    const after = await textWhen(s1, 'wsf-station-total-line', (t) => t === '200 of 1,000 squats', 10_000);
+    const noResult = !(await present(s1, 'wsf-station-queue-result'));
     row('nothing')(before === '200 of 1,000 squats' && after === '200 of 1,000 squats' && noResult, `${before} -> ${after}`);
-    row('noReceipt')(!(await present(phone, 'wsf-queue-receipt-amount')), 'no receipt on the phone');
+    const receipts = [];
+    for (const [name, p] of [['Station 1 turn', pA], ['ready', pB], ['called', pC], ['waiting', pW], ['joiner', pD]]) {
+      if (await present(p, 'wsf-queue-receipt-amount')) receipts.push(name);
+    }
+    row('noReceipt')(receipts.length === 0, receipts.length ? `a receipt on: ${receipts.join(', ')}` : 'no receipt on any phone');
   } finally {
     await dev.closeAll();
   }

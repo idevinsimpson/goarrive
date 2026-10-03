@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "milestone": "EXPO-ATTENDEE-JOURNEY-PROOF-1",
-  "productSha": "f84346d3b902432a7152719780f0afb94ec9cc3c",
+  "productSha": "0d3598d4a1dc72411b6d80d375335b84a497efdb",
   "previousKnownGoodSha": "ab77fbfce97e60c1c22492397b2ab6b491f9e0db",
   "journeys": [
     {
@@ -123,17 +123,27 @@
     {
       "id": "closed-goal-turn",
       "entry": "/station/{goalId}",
-      "setup": "one enrolled station mid-turn with a ready member; the goal is closed before the station records",
+      "setup": "one event with four enrolled stations: a member mid-turn at Station 1, a member who tapped I'm ready at Station 2, a member called to Station 3, and a member waiting while Station 4 is idle; a fifth member has the event page open with a name chosen; then the goal is closed",
       "actions": [
-        "enter 12 on the station and record"
+        "enter 12 on Station 1 and record",
+        "press Start their turn on Station 2",
+        "tap I'm ready on the phone of the member called to Station 3",
+        "press Call next on Station 4",
+        "the fifth member presses join on the event page"
       ],
       "expected": [
-        "the station prints This goal is closed.",
+        "recording the turn started before the closure: Station 1 prints This goal is closed.",
         "nothing is recorded and the shared total does not move",
-        "the member's phone shows no receipt"
+        "no member's phone shows a receipt",
+        "Start their turn is refused: Station 2 prints This goal is closed., shows no count to record and still serves the same member",
+        "I'm ready is refused: the called member's phone prints This goal is closed. and still shows them called to Station 3",
+        "Call next is refused: Station 4 prints This goal is closed. and serves nobody, and the waiting member's phone still shows them in the line",
+        "joining is refused: the event page prints This goal is closed., the member does not reach the queue page, and the hall's waiting count does not change"
       ],
       "knownExclusions": [
-        "refusal before recording: at this build a member can still join, be called, tap ready and be started on a goal that is already closed, and the event page still offers Use a kiosk (GAP-2, reproduced on emulators, a product decision not settled here)"
+        "that a refusal creates or advances no entry, place, assignment, lease or attempt document: stored facts the hosted screens do not show; proved on emulators by EXPO-CLOSED-GOAL-QUEUE-GATE-1 (#571, J4b and J4c) and the functions wsf-turn tests, not by this hosted journey",
+        "a goal that is closed and then reopened: reopening is not a product path, so each refusal here follows the one closure",
+        "whether the event page still offers Use a kiosk on a goal that is already closed when it loads: observed, not changed, by #571; this journey opens the page before the closure and asserts only that the join is refused"
       ]
     },
     {

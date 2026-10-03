@@ -314,6 +314,19 @@ export function expoServer(be, bugs = {}) {
   const stationFor = (id) => { const st = S.stations.get(id); if (!st) throw fail('not a station'); return st; };
   const serving = (st) => [...S.entries.values()].find((e) => e.stationId === st.id && live(e) && e.status !== 'waiting') || null;
   const waiting = (g) => [...S.entries.values()].filter((e) => e.goalId === g && e.status === 'waiting');
+  // EXPO-CLOSED-GOAL-QUEUE-GATE-1 (#571): a closed goal admits nobody; each gate refuses
+  // before it writes. A `closed*` defect skips one gate; an `*Advances` defect writes and
+  // then refuses (the sentence is right, the line is not).
+  const open = (g) => goal(g).status === 'active';
+  const CLOSED = 'This goal is closed.';
+  // Defects: a gate that refuses, but in other words (the copy regression #564 guarded against).
+  const OTHER_WORDS = {
+    Join: 'We couldn’t put you in the line. Try again.',
+    Call: 'That didn’t go through. Try again.',
+    Ready: 'We couldn’t tell the screen you’re ready.',
+    Start: 'That can’t be done right now.',
+  };
+  const closedFor = (gate) => (bugs[`closedWords${gate}`] ? OTHER_WORDS[gate] : CLOSED);
   const api = {
     S, total, own, goal, waiting, serving, live, lapsed,
     advance: (ms) => { S.now += ms; },
@@ -328,6 +341,7 @@ export function expoServer(be, bugs = {}) {
       const held = [...S.entries.values()].find((e) => e.goalId === g && e.uid === uid && live(e));
       if (held && bugs.joinOnOpen) { held.name = name; return held.id; }
       if (held) throw fail('already in line');
+      if (!open(g) && !bugs.closedJoin && !bugs.closedJoinCreates) throw fail(closedFor('Join'));
       if (!be.docs.has(`wsfTurnLines/${line(g)}`)) put(`wsfTurnLines/${line(g)}`, { goalId: { stringValue: g } });
       const id = rand('entry');
       // Codes are unique among this line's live entries (the product's rule); a
@@ -338,6 +352,7 @@ export function expoServer(be, bugs = {}) {
       S.entries.set(id, { id, goalId: g, uid, name, code, status: 'waiting', stationId: null, attemptId: null, leaseAt: null, result: null, endedBy: null, seq: S.entries.size });
       put(`wsfTurnEntries/${id}`, { goalId: { stringValue: g }, uid: { stringValue: uid } });
       put(`wsfTurnMembers/${line(g)}__${uid}`, { entryId: { stringValue: id } });
+      if (!open(g) && bugs.closedJoinCreates) throw fail(CLOSED);
       return id;
     },
     myTurn(g, uid) {
@@ -346,27 +361,38 @@ export function expoServer(be, bugs = {}) {
     },
     callNext(stationId) {
       const st = stationFor(stationId);
+      if (!open(st.goalId) && bugs.closedCallEndsWaiting) { for (const e of waiting(st.goalId)) end(e, 'left', 'closed'); throw fail(CLOSED); }
+      if (!open(st.goalId) && !bugs.closedCall && !bugs.closedCallAdvances) throw fail(closedFor('Call'));
       const held = serving(st);
       if (held) throw fail('This screen is still running a turn.');
       for (const e of S.entries.values()) if (e.stationId === st.id && lapsed(e)) end(e, 'noShow', 'lease');
       const next = waiting(st.goalId).sort((a, b) => a.seq - b.seq)[0];
       if (!next) throw fail('Nobody is waiting.');
       Object.assign(next, { status: 'assigned', stationId: st.id, leaseAt: S.now + (bugs.noShowNotEnded ? 1e12 : LEASE_MS) });
+      if (!open(st.goalId) && bugs.closedCallAdvances) throw fail(CLOSED);
       return next;
     },
     ready(entryId) {
       const e = S.entries.get(entryId);
-      if (!e || e.status !== 'assigned' || lapsed(e)) throw fail('not called');
+      if (!e || e.status !== 'assigned') throw fail('not called');
+      if (!open(e.goalId) && bugs.closedReadyEndsPlace) { end(e, 'left', 'closed'); throw fail(CLOSED); }
+      if (!open(e.goalId) && !bugs.closedReady && !bugs.closedReadyAdvances) throw fail(closedFor('Ready'));
+      if (lapsed(e)) throw fail('not called');
       e.status = 'ready';
+      if (!open(e.goalId) && bugs.closedReadyAdvances) throw fail(CLOSED);
       if (bugs.readyOpensOther) for (const o of S.entries.values()) if (o !== e && o.status === 'assigned') o.status = 'ready';
     },
     start(stationId) {
       const st = stationFor(stationId);
       const e = serving(st);
-      if (!e || e.status !== 'ready') throw fail('not ready');
+      if (!e) throw fail('not ready');
+      if (!open(e.goalId) && bugs.closedStartEndsPlace) { end(e, 'left', 'closed'); throw fail(CLOSED); }
+      if (!open(e.goalId) && !bugs.closedStart && !bugs.closedStartMints) throw fail(closedFor('Start'));
+      if (e.status !== 'ready') throw fail('not ready');
       e.status = 'active';
       e.attemptId = rand('turn_');
       put(`wsfTurnEntries/${e.id}`, { goalId: { stringValue: e.goalId }, uid: { stringValue: e.uid }, attemptId: { stringValue: e.attemptId } });
+      if (!open(e.goalId) && bugs.closedStartMints) throw fail(CLOSED);
       return e;
     },
     complete(stationId, count) {
@@ -432,14 +458,14 @@ function expoDevice(be, server, bugs, browser, viewport) {
 }
 
 function expoPage(be, server, bugs, ctx, context) {
-  const st = { path: 'about:blank', search: '', typed: {}, review: false, receipt: null, nameOpen: false, routes: [], listeners: [], frozen: null, pollAborted: false, lastStation: null, clock: null, deadline: null, stationError: null, stationCount: '', attemptSeq: 0, kioskSession: false };
+  const st = { path: 'about:blank', search: '', typed: {}, review: false, receipt: null, nameOpen: false, routes: [], listeners: [], frozen: null, pollAborted: false, lastStation: null, clock: null, deadline: null, stationError: null, stationCount: '', attemptSeq: 0, kioskSession: false, queueError: null, actionError: null };
   const S = server.S;
   const goalOf = () => /^\/(?:event|queue|station|contribute|kiosk)\/(.+)$/.exec(st.path)?.[1] || null;
   const kioskMode = () => new URLSearchParams(st.search).get('kiosk') === '1';
   const now = () => (st.clock ? st.clock.t : S.now);
   const emit = (url, body) => { for (const l of st.listeners) l({ url: () => url, postData: () => JSON.stringify(body) }); };
   const station = () => [...S.stations.values()].find((x) => x.pairingCode === st.pairing) || null;
-  const go = (p, search = '') => { st.path = p; st.search = search; st.review = false; st.receipt = null; st.nameOpen = false; st.stationError = null; };
+  const go = (p, search = '') => { st.path = p; st.search = search; st.review = false; st.receipt = null; st.nameOpen = false; st.stationError = null; st.queueError = null; st.actionError = null; };
   const signOut = () => { ctx.uid = null; };
   function routeFor(name) { return st.routes.find((r) => r.matches(name)) || null; }
   /** A callable from this page: honours offline and page.route() like the network does. */
@@ -476,6 +502,7 @@ function expoPage(be, server, bugs, ctx, context) {
       } });
       return N;
     }
+    if (st.path.startsWith('/event/') && st.redirectAt !== null && st.redirectAt !== undefined && S.now >= st.redirectAt) { st.redirectAt = null; go(`/queue/${g}`); }
     if (st.path.startsWith('/event/')) {
       if (!ctx.answered) { add('wsf-event-device-choice'); add('wsf-device-choice-personal', { text: 'My own phone', click: () => { ctx.answered = true; } }); return N; }
       if (!ctx.uid) { add('wsf-event-signed-out'); return N; }
@@ -485,7 +512,17 @@ function expoPage(be, server, bugs, ctx, context) {
       add('wsf-event-queue-start', { text: 'Use a kiosk', click: () => { st.nameOpen = true; if (bugs.joinOnOpen) server.join(g, ctx.uid, 'early'); } });
       if (st.nameOpen) {
         add('wsf-event-queue-name', { fill: (v) => { st.typed.name = v; } });
-        add('wsf-event-queue-join', { click: async () => { await invoke('wsfJoinTurnLine', () => server.join(g, ctx.uid, st.typed.name)); if (!bugs.noQueuePage) go(`/queue/${g}`); } });
+        add('wsf-event-queue-join', { click: async () => {
+          st.queueError = null;
+          try { await invoke('wsfJoinTurnLine', () => server.join(g, ctx.uid, st.typed.name)); } catch (e) {
+            st.queueError = e.message;
+            // Defect: the sentence shows, then the page moves on to a queue page anyway.
+            if (bugs.closedJoinNavigates) st.redirectAt = S.now + 2_000;
+            return;
+          }
+          if (!bugs.noQueuePage) go(`/queue/${g}`);
+        } });
+        if (st.queueError) add('wsf-event-queue-error', { text: st.queueError });
       }
       return N;
     }
@@ -503,8 +540,14 @@ function expoPage(be, server, bugs, ctx, context) {
           add('wsf-queue-called-name', { text: e.name });
           add('wsf-queue-code', { text: e.code });
           add('wsf-queue-station', { text: `Go to ${bugs.wrongStationLabel ? 'Station 1' : stn.label}.` });
-          if (e.status === 'assigned') add('wsf-queue-ready', { click: async () => invoke('wsfTurnReady', () => server.ready(e.id)) });
+          if (e.status === 'assigned') {
+            add('wsf-queue-ready', { click: async () => {
+              st.actionError = null;
+              try { await invoke('wsfTurnReady', () => server.ready(e.id)); } catch (err) { st.actionError = err.message; }
+            } });
+          }
         }
+        if (st.actionError) add('wsf-queue-leave-error', { text: st.actionError });
       } else {
         const noShow = e && (e.status === 'noShow' || server.lapsed(e));
         if (e && e.status === 'done' && !bugs.receiptHidden) add('wsf-queue-receipt-amount', { text: `${e.result} squats recorded.` });
@@ -606,10 +649,15 @@ function expoPage(be, server, bugs, ctx, context) {
           add('wsf-station-turn-count', { fill: (v) => { st.stationCount = v; }, value: () => st.stationCount });
         }
         add('wsf-station-turn-cancel', { text: 'Let them go', click: async () => invoke('wsfCancelTurn', () => server.cancel(stn.id)) });
-      } else if (!view.result) add('wsf-station-queue-serving-empty', { text: 'Nobody is being served.' });
+      } else if (st.paintedServing) add('wsf-station-queue-serving', { text: st.paintedServing });
+      else if (!view.result) add('wsf-station-queue-serving-empty', { text: 'Nobody is being served.' });
       add('wsf-station-call-next', { text: 'Call next', click: async () => {
         st.stationError = null;
-        try { await invoke('wsfCallNext', () => server.callNext(stn.id)); } catch (e) { st.stationError = e.message; }
+        try { await invoke('wsfCallNext', () => server.callNext(stn.id)); } catch (e) {
+          st.stationError = e.message;
+          // Defect: the screen paints the next name before the answer and keeps it after a refusal.
+          if (bugs.closedCallShowsServing) st.paintedServing = server.waiting(stn.goalId)[0]?.name || null;
+        }
       } });
       if (st.stationError) add('wsf-station-queue-error', { text: st.stationError });
       if (view.anyName) add('wsf-station-leak', { text: view.anyName });

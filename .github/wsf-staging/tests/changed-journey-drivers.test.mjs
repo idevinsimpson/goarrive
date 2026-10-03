@@ -277,7 +277,7 @@ await test('EXPO: the live manifest is the exact milestone for the approved buil
   const m = live();
   assert.deepEqual(validateManifest(m), []);
   assert.equal(m.milestone, 'EXPO-ATTENDEE-JOURNEY-PROOF-1');
-  assert.equal(m.productSha, 'f84346d3b902432a7152719780f0afb94ec9cc3c');
+  assert.equal(m.productSha, '0d3598d4a1dc72411b6d80d375335b84a497efdb');
   assert.equal(m.productSha, APPROVED, 'the manifest names exactly the build staging is approved to serve');
   assert.equal(m.previousKnownGoodSha, 'ab77fbfce97e60c1c22492397b2ab6b491f9e0db');
   assert.deepEqual(m.journeys.map((j) => j.id), EXPO_IDS);
@@ -296,7 +296,9 @@ await test('EXPO: the store-only claims are named as exclusions and asserted by 
   const byId = Object.fromEntries(m.journeys.map((j) => [j.id, j]));
   assert.match(byId['phone-and-stations-converge'].knownExclusions.join(' '), /recorded as the attempt that station started, and that the target crossing is recorded once for the goal and credited to no single member: stored facts the hosted screens do not show/);
   assert.match(byId['station-lost-answer'].knownExclusions.join(' '), /describeCallableError.*never internal.*J2b/);
-  assert.match(byId['closed-goal-turn'].knownExclusions.join(' '), /GAP-2/);
+  // GAP-2 is fixed at the approved build (#571): its exclusion is gone, and the store-only half of the gate stays named.
+  assert.doesNotMatch(JSON.stringify(m), /GAP-2/);
+  assert.match(byId['closed-goal-turn'].knownExclusions.join(' '), /creates or advances no entry, place, assignment, lease or attempt document: stored facts the hosted screens do not show; proved on emulators by EXPO-CLOSED-GOAL-QUEUE-GATE-1/);
   const all = JSON.stringify(EXPO_ROWS);
   assert.doesNotMatch(all, /attempt that station started|credited to no single member|crossing is recorded/);
 });
@@ -344,6 +346,25 @@ const EXPO_DEFECTS = [
   ['line-place-ends', 'noShowWording', ['noShow']],
   ['line-place-ends', 'letGoReceipt', ['letGo', 'onlyTen']],
   ['closed-goal-turn', 'closedRecords', ['refused', 'nothing', 'noReceipt']],
+  // EXPO-CLOSED-GOAL-QUEUE-GATE-1 (#571): each gate skipped, or saying the sentence after it advanced.
+  ['closed-goal-turn', 'closedStart', ['start']],
+  ['closed-goal-turn', 'closedStartMints', ['start']],
+  ['closed-goal-turn', 'closedReady', ['ready']],
+  ['closed-goal-turn', 'closedReadyAdvances', ['ready']],
+  ['closed-goal-turn', 'closedReadyEndsPlace', ['ready']],
+  ['closed-goal-turn', 'closedCall', ['call']],
+  ['closed-goal-turn', 'closedCallAdvances', ['call']],
+  ['closed-goal-turn', 'closedJoin', ['join']],
+  ['closed-goal-turn', 'closedJoinCreates', ['join']],
+  ['closed-goal-turn', 'closedJoinNavigates', ['join']],
+  ['closed-goal-turn', 'closedCallEndsWaiting', ['call']],
+  ['closed-goal-turn', 'closedCallShowsServing', ['call']],
+  // W4 finding (#394 5970985781): each gate refusing in other words, and a start refusal that ends the turn.
+  ['closed-goal-turn', 'closedWordsStart', ['start']],
+  ['closed-goal-turn', 'closedWordsReady', ['ready']],
+  ['closed-goal-turn', 'closedWordsCall', ['call']],
+  ['closed-goal-turn', 'closedWordsJoin', ['join']],
+  ['closed-goal-turn', 'closedStartEndsPlace', ['start']],
   ['shared-screen-finish', 'finishKeepsCredit', ['finish']],
   ['shared-screen-finish', 'finishKeepsSession', ['finish', 'next']],
   ['shared-screen-finish', 'nextSeesPrevious', ['next']],
@@ -442,7 +463,8 @@ await test('EXPO: through the runner (live manifest, real registry), the REAL cl
   const text = fs.readFileSync(cardPath, 'utf8');
   assert.match(text, /Hosted changed-journey status: PASSED \(8 passed/);
   assert.match(text, /describeCallableError/);
-  assert.match(text, /GAP-2/);
+  assert.match(text, /EXPO-CLOSED-GOAL-QUEUE-GATE-1/);
+  assert.doesNotMatch(text, /GAP-2/);
   assert.match(text, /Device review: NOT RUN/);
 });
 
@@ -459,7 +481,7 @@ await test('EXPO: a seeded defect through the runner is a FAILED journey and a F
   });
   const closed = hook.results.results.find((x) => x.journeyId === 'closed-goal-turn');
   assert.equal(closed.status, 'failed');
-  assert.ok(closed.assertions.some((a) => !a.ok && a.expected.startsWith('[refused] the station prints This goal is closed.')));
+  assert.ok(closed.assertions.some((a) => !a.ok && a.expected.startsWith('[refused] recording the turn started before the closure: Station 1 prints This goal is closed.')));
   const receipt = path.join(changed, 'cleanup-receipt.json');
   const { server, base } = await serve(h.be);
   await runCleanup(base, h.kit.manifestPath, receipt);
