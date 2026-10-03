@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "4ce6df77de7fd66c419d50b98ae861be0a4f8b41b3511349c6d7715553e8f132",
-  "eventCount": 500,
+  "ledgerHead": "aba5d3817e45a2eef4f4f46bb2f230d57f4500ca81db049acb4d1b8b49e98f3b",
+  "eventCount": 501,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -834,7 +834,7 @@
       },
       "label": "Pin the latest accepted expo candidate and activate the fixed closed-goal hosted journey through the existing full staging path",
       "origin": "ledger",
-      "phase": "ACCEPTED",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -846,7 +846,7 @@
         "subjectSha": "a0bb252a0a19a51aea00694d1a457b93afc4a13d",
         "prHeadSha": "a0bb252a0a19a51aea00694d1a457b93afc4a13d",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "65b8b79875e8264394402ed3b43118576a800313"
       },
       "proof": null,
       "served": null,
@@ -879,8 +879,8 @@
           "id": 5971957916
         },
         "lastTransition": {
-          "kind": "comment",
-          "id": 5971957916
+          "kind": "pull_request",
+          "id": 573
         }
       },
       "review": {
