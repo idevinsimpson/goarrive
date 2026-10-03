@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
+import * as ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
 import { movementLabAllowed } from '../src/movement/labGate';
@@ -10,8 +11,9 @@ import { BLAZEPOSE_INDEX, MEDIAPIPE_VERSION, mapBlazePose } from '../src/movemen
  * THE PRIVACY STATEMENT, AS CHECKS THAT CAN FAIL.
  *
  * "Camera frames stay on the device and are never recorded, stored or
- * uploaded; nothing is written to Firebase." These tests hold the movement
- * code to that sentence mechanically, so a later edit that adds a recorder,
+ * uploaded; nothing is written to Firebase." These are static guardrails, not
+ * a complete proof of runtime behavior or every dependency's behavior. They
+ * make a later edit that adds a recorder,
  * a canvas readback, a network call, storage or a Firebase import fails here
  * rather than in review.
  */
@@ -70,19 +72,41 @@ describe('movement code: frames stay local, nothing is persisted or sent', () =>
     for (const [, re] of FORBIDDEN) expect(re.test(route)).toBe(false);
   });
 
-  it('the installed MediaPipe bundle is the pinned version and carries no metrics logger', () => {
+  it('checks the executed CJS import and both pinned bundles for the reviewed metrics endpoint', () => {
     const pkg = JSON.parse(
       readFileSync(join(APP, 'node_modules', '@mediapipe', 'tasks-vision', 'package.json'), 'utf8'),
     );
     expect(pkg.version).toBe(MEDIAPIPE_VERSION);
     const appPkg = JSON.parse(readFileSync(join(APP, 'package.json'), 'utf8'));
     expect(appPkg.dependencies['@mediapipe/tasks-vision']).toBe(MEDIAPIPE_VERSION);
-    const bundle = readFileSync(
-      join(APP, 'node_modules', '@mediapipe', 'tasks-vision', 'vision_bundle.mjs'),
-      'utf8',
+    // Parse the actual runtime require, so a comment or type-only import cannot
+    // make this test inspect one artifact while Metro executes another.
+    const adapter = ts.createSourceFile(
+      'tasksVision.ts',
+      readFileSync(join(MOVEMENT, 'web', 'tasksVision.ts'), 'utf8'),
+      ts.ScriptTarget.Latest,
+      true,
     );
-    // 1.0.x POSTs usage metrics here. See docs/westayfit/movement-vision/DECISION.md.
-    expect(bundle.includes('odml.pa.googleapis.com')).toBe(false);
+    const requires: string[] = [];
+    const visit = (node: ts.Node) => {
+      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'require') {
+        const target = node.arguments[0];
+        if (node.arguments.length !== 1 || !target || !ts.isStringLiteral(target)) {
+          throw new Error('The MediaPipe runtime import must remain a literal, reviewable target');
+        }
+        requires.push(target.text);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(adapter);
+    expect(requires).toEqual(['@mediapipe/tasks-vision/vision_bundle.cjs']);
+    for (const file of ['vision_bundle.cjs', 'vision_bundle.mjs']) {
+      const bundle = readFileSync(join(APP, 'node_modules', '@mediapipe', 'tasks-vision', file), 'utf8');
+      // A narrow regression for the known endpoint, not a claim that a text
+      // scan alone proves all possible egress absent. The browser policy also
+      // rejects unexpected methods, bodies, queries and destinations.
+      expect(bundle.includes('odml.pa.googleapis.com'), file).toBe(false);
+    }
   });
 });
 
