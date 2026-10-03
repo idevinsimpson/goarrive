@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "2f87d35457c47b7cf197385b95436992dded33988924026ebbf7124e670f500a",
-  "eventCount": 442,
+  "ledgerHead": "8a90240902211c2857a37c7b2c3be4fed4d45e2992e83cabb0688865259a9fc6",
+  "eventCount": 443,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -65,7 +65,9 @@
     "W4": [],
     "W5": [],
     "W7": [],
-    "W9": []
+    "W9": [
+      "EXPO-CLOSED-GOAL-QUEUE-GATE-1"
+    ]
   },
   "packets": {
     "AUTONOMY-ROUTER-1C": {
@@ -756,6 +758,63 @@
         "after": "director"
       },
       "deliveries": 1,
+      "pendingFinding": null
+    },
+    "EXPO-CLOSED-GOAL-QUEUE-GATE-1": {
+      "owner": "W9",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Close GAP-2 by refusing queue and turn admission after a goal closes without changing the existing expo systems",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "functions-westayfit/src/index.ts",
+        "functions-westayfit/tests/callable/wsf-turn.test.ts",
+        "apps/westayfit/tests-e2e/expo-attendee-journey.spec.ts"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 5967461850
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 5967461850
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "journey-qa",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
       "pendingFinding": null
     },
     "EXPO-STATION-LOST-ANSWER-COPY-1": {
