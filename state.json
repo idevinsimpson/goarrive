@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "bb35442d612de980bf5ab65c69d06f3f90ab7ccbc785bb16699f32db246b8c42",
-  "eventCount": 416,
+  "ledgerHead": "bf38a898b23d54b0babc6affc8955385b145708386558eac2f0e7855e4d2a56d",
+  "eventCount": 419,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -61,9 +61,7 @@
     }
   },
   "queue": {
-    "W3": [
-      "EMAIL-STAGING-REPAIR-STAGING-PIN"
-    ],
+    "W3": [],
     "W4": [],
     "W5": [],
     "W7": [],
@@ -424,10 +422,10 @@
       },
       "label": "Pin the exact integrated email repair and coalesced accepted expo lineage through the reviewed full staging path",
       "origin": "ledger",
-      "phase": "QUEUED",
+      "phase": "RELEASED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
-      "inbox": null,
+      "inbox": 396,
       "pr": null,
       "reviewers": [],
       "artifact": {
@@ -438,7 +436,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": null,
+      "releasedQueueIndex": 0,
       "reviewedBy": [],
       "subjectPaths": [
         ".github/wsf-staging/approved-candidate.json",
@@ -452,11 +450,14 @@
           "kind": "comment",
           "id": 5965858630
         },
-        "released": null,
+        "released": {
+          "kind": "comment",
+          "id": 5965875967
+        },
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5965858630
+          "id": 5965875967
         }
       },
       "review": {
@@ -637,7 +638,9 @@
       "proof": null,
       "served": null,
       "releasedQueueIndex": null,
-      "reviewedBy": [],
+      "reviewedBy": [
+        "W4"
+      ],
       "subjectPaths": [
         ".github/wsf-staging/journeys/expo-attendee.mjs",
         ".github/wsf-staging/journeys/index.mjs",
@@ -660,7 +663,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5965787008
+          "id": 5965877307
         }
       },
       "review": {
@@ -2440,7 +2443,8 @@
       "ack": {
         "kind": "comment",
         "id": 5965836487
-      }
+      },
+      "superseded": true
     },
     "ad6a58e5d240ecd773e15c645d3fbb60f14a9515cf9a6d6215458daea25f49a4": {
       "packet": "TOGETHER-COMPLETION-1",
@@ -2450,6 +2454,14 @@
       "comments": [
         5965852256
       ],
+      "ack": null
+    },
+    "5237c5bb6ba2b1dde55ef18365ae3de894d90747ac07a4f316c7e9c851ecf12d": {
+      "packet": "EMAIL-STAGING-REPAIR-STAGING-PIN",
+      "worker": "W3",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
