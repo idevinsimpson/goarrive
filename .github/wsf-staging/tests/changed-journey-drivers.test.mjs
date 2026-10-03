@@ -359,6 +359,12 @@ const EXPO_DEFECTS = [
   ['closed-goal-turn', 'closedJoinNavigates', ['join']],
   ['closed-goal-turn', 'closedCallEndsWaiting', ['call']],
   ['closed-goal-turn', 'closedCallShowsServing', ['call']],
+  // W4 finding (#394 5970985781): each gate refusing in other words, and a start refusal that ends the turn.
+  ['closed-goal-turn', 'closedWordsStart', ['start']],
+  ['closed-goal-turn', 'closedWordsReady', ['ready']],
+  ['closed-goal-turn', 'closedWordsCall', ['call']],
+  ['closed-goal-turn', 'closedWordsJoin', ['join']],
+  ['closed-goal-turn', 'closedStartEndsPlace', ['start']],
   ['shared-screen-finish', 'finishKeepsCredit', ['finish']],
   ['shared-screen-finish', 'finishKeepsSession', ['finish', 'next']],
   ['shared-screen-finish', 'nextSeesPrevious', ['next']],

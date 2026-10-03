@@ -319,6 +319,14 @@ export function expoServer(be, bugs = {}) {
   // then refuses (the sentence is right, the line is not).
   const open = (g) => goal(g).status === 'active';
   const CLOSED = 'This goal is closed.';
+  // Defects: a gate that refuses, but in other words (the copy regression #564 guarded against).
+  const OTHER_WORDS = {
+    Join: 'We couldn’t put you in the line. Try again.',
+    Call: 'That didn’t go through. Try again.',
+    Ready: 'We couldn’t tell the screen you’re ready.',
+    Start: 'That can’t be done right now.',
+  };
+  const closedFor = (gate) => (bugs[`closedWords${gate}`] ? OTHER_WORDS[gate] : CLOSED);
   const api = {
     S, total, own, goal, waiting, serving, live, lapsed,
     advance: (ms) => { S.now += ms; },
@@ -333,7 +341,7 @@ export function expoServer(be, bugs = {}) {
       const held = [...S.entries.values()].find((e) => e.goalId === g && e.uid === uid && live(e));
       if (held && bugs.joinOnOpen) { held.name = name; return held.id; }
       if (held) throw fail('already in line');
-      if (!open(g) && !bugs.closedJoin && !bugs.closedJoinCreates) throw fail(CLOSED);
+      if (!open(g) && !bugs.closedJoin && !bugs.closedJoinCreates) throw fail(closedFor('Join'));
       if (!be.docs.has(`wsfTurnLines/${line(g)}`)) put(`wsfTurnLines/${line(g)}`, { goalId: { stringValue: g } });
       const id = rand('entry');
       // Codes are unique among this line's live entries (the product's rule); a
@@ -354,7 +362,7 @@ export function expoServer(be, bugs = {}) {
     callNext(stationId) {
       const st = stationFor(stationId);
       if (!open(st.goalId) && bugs.closedCallEndsWaiting) { for (const e of waiting(st.goalId)) end(e, 'left', 'closed'); throw fail(CLOSED); }
-      if (!open(st.goalId) && !bugs.closedCall && !bugs.closedCallAdvances) throw fail(CLOSED);
+      if (!open(st.goalId) && !bugs.closedCall && !bugs.closedCallAdvances) throw fail(closedFor('Call'));
       const held = serving(st);
       if (held) throw fail('This screen is still running a turn.');
       for (const e of S.entries.values()) if (e.stationId === st.id && lapsed(e)) end(e, 'noShow', 'lease');
@@ -368,7 +376,7 @@ export function expoServer(be, bugs = {}) {
       const e = S.entries.get(entryId);
       if (!e || e.status !== 'assigned') throw fail('not called');
       if (!open(e.goalId) && bugs.closedReadyEndsPlace) { end(e, 'left', 'closed'); throw fail(CLOSED); }
-      if (!open(e.goalId) && !bugs.closedReady && !bugs.closedReadyAdvances) throw fail(CLOSED);
+      if (!open(e.goalId) && !bugs.closedReady && !bugs.closedReadyAdvances) throw fail(closedFor('Ready'));
       if (lapsed(e)) throw fail('not called');
       e.status = 'ready';
       if (!open(e.goalId) && bugs.closedReadyAdvances) throw fail(CLOSED);
@@ -378,7 +386,8 @@ export function expoServer(be, bugs = {}) {
       const st = stationFor(stationId);
       const e = serving(st);
       if (!e) throw fail('not ready');
-      if (!open(e.goalId) && !bugs.closedStart && !bugs.closedStartMints) throw fail(CLOSED);
+      if (!open(e.goalId) && bugs.closedStartEndsPlace) { end(e, 'left', 'closed'); throw fail(CLOSED); }
+      if (!open(e.goalId) && !bugs.closedStart && !bugs.closedStartMints) throw fail(closedFor('Start'));
       if (e.status !== 'ready') throw fail('not ready');
       e.status = 'active';
       e.attemptId = rand('turn_');
