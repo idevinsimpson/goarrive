@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=1cce87e2029fcc1e2e7f50a5dc3a8c0a5a82e33f84e17476fbbe6daa30d701cc events=318 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=f53ea55d658cc9a406c728790919053dca9c876661fd39a965f017595ea50309 events=319 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `1cce87e2029fcc1e2e7f50a5dc3a8c0a5a82e33f84e17476fbbe6daa30d701cc` (318 events)
+- Ledger head: `f53ea55d658cc9a406c728790919053dca9c876661fd39a965f017595ea50309` (319 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -109,5 +109,5 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | d40fde353cb7 | W9 | WORKER-EXECUTION-PROFILES-1 | review | acked | 5963534021 | comment:5963540260 |
 | c6ae6c91cff8 | W9 | EXPO-STATION-LOST-ANSWER-COPY-1 | release | acked | 5963628023 | comment:5963632669 |
 | acde5e63767d | W3 | STAGING-PIN-FASTPATH-SERVED-BASELINE-1 | release | acked | 5963674729 | comment:5963685160 |
-| 88c6283835fa | W4 | EXPO-STATION-LOST-ANSWER-COPY-1 | review | delivered | 5963737115 | — |
+| 88c6283835fa | W4 | EXPO-STATION-LOST-ANSWER-COPY-1 | review | acked | 5963737115 | comment:5963742004 |
 

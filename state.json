@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "1cce87e2029fcc1e2e7f50a5dc3a8c0a5a82e33f84e17476fbbe6daa30d701cc",
-  "eventCount": 318,
+  "ledgerHead": "f53ea55d658cc9a406c728790919053dca9c876661fd39a965f017595ea50309",
+  "eventCount": 319,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2012,11 +2012,14 @@
       "packet": "EXPO-STATION-LOST-ANSWER-COPY-1",
       "worker": "W4",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         5963737115
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 5963742004
+      }
     }
   },
   "fastpath": {
