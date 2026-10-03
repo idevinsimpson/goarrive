@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "39f7e88a0a939e9c18ba934bc17a29ad041a1c657625fb64aac450cc0500548d",
-  "eventCount": 392,
+  "ledgerHead": "7929a9edabc24707eb287761918aaf596f44dbc7c75c14319127fe136ceb4acf",
+  "eventCount": 396,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -353,7 +353,7 @@
       "pr": 559,
       "reviewers": [
         "W4",
-        "W5"
+        "W9"
       ],
       "artifact": {
         "subjectSha": "39484f78eff84f689a07a4f402fa43b407d729cb",
@@ -389,7 +389,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5965046943
+          "id": 5965025205
         }
       },
       "review": {
@@ -2291,7 +2291,8 @@
         5964977381,
         5965368070
       ],
-      "ack": null
+      "ack": null,
+      "superseded": true
     },
     "bac3c3b6a769182212fa9cedac6967bbbf71af2a17f337524e4afd7e18b37553": {
       "packet": "TOGETHER-COMPLETION-1",
@@ -2324,10 +2325,21 @@
       "packet": "TOGETHER-COMPLETION-1",
       "worker": "W4",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         5965459389
       ],
+      "ack": {
+        "kind": "comment",
+        "id": 5965466432
+      }
+    },
+    "8b8734ebce12a05165755a443f3f5a0fce7c85c225d6ace626b03971b66f2b02": {
+      "packet": "EMAIL-STAGING-REPAIR",
+      "worker": "W9",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
