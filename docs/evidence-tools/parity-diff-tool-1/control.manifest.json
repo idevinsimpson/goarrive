@@ -1,0 +1,58 @@
+{
+  "tool": "parity-image-diff",
+  "toolVersion": 1,
+  "label": "control",
+  "inputs": {
+    "reference": {
+      "file": "control-reference.png",
+      "sha256": "ce05b47063e2ea583ee2b7e765fe7d21ee872f3c046c8416fd2348e48435ae43",
+      "bytes": 9662,
+      "width": 64,
+      "height": 48
+    },
+    "candidate": {
+      "file": "control-candidate.png",
+      "sha256": "ea723d82cbb0a1b0f4550a21f0ae3081be5a764a24b23239151b62ecc040c2b9",
+      "bytes": 9502,
+      "width": 64,
+      "height": 48
+    }
+  },
+  "outputs": {
+    "control.side-by-side.png": {
+      "sha256": "c0dced35201a4198681b84e41e8703fa641b5ecccccd787a72e97e5d5c1ef54a",
+      "width": 136,
+      "height": 48
+    },
+    "control.overlay-50.png": {
+      "sha256": "286667b9f84ebb48f564cc89b7e28c4d901aa803dbb1067e18e547fba97b5501",
+      "width": 64,
+      "height": 48
+    },
+    "control.diff.png": {
+      "sha256": "84d6ba13f16874109b841f7f342645e0293cc07ade95ec515530dcbb2bf43bdd",
+      "width": 64,
+      "height": 48
+    }
+  },
+  "layout": {
+    "sideBySide": "reference left, candidate right, 8 px gutter rgb(128,128,128)",
+    "overlay": "per channel (reference + candidate + 1) >> 1",
+    "diff": "per RGB channel |reference - candidate|, alpha 255"
+  },
+  "metrics": {
+    "pixels": 3072,
+    "changedPixels": 60,
+    "changedRatio": 0.019531,
+    "alphaChangedPixels": 0,
+    "meanAbsRgbDelta": 2.151693,
+    "maxChannelDelta": 175,
+    "changedBoundingBox": {
+      "x": 20,
+      "y": 10,
+      "width": 10,
+      "height": 6
+    }
+  },
+  "note": "Descriptive only. There is no threshold and no verdict: whether a difference is acceptable is a reviewer decision against the frames."
+}
