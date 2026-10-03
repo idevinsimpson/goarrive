@@ -277,7 +277,7 @@ await test('EXPO: the live manifest is the exact milestone for the approved buil
   const m = live();
   assert.deepEqual(validateManifest(m), []);
   assert.equal(m.milestone, 'EXPO-ATTENDEE-JOURNEY-PROOF-1');
-  assert.equal(m.productSha, '5705dc3bf198a9490600c7e32b8bb55356defd9d');
+  assert.equal(m.productSha, 'f84346d3b902432a7152719780f0afb94ec9cc3c');
   assert.equal(m.productSha, APPROVED, 'the manifest names exactly the build staging is approved to serve');
   assert.equal(m.previousKnownGoodSha, 'ab77fbfce97e60c1c22492397b2ab6b491f9e0db');
   assert.deepEqual(m.journeys.map((j) => j.id), EXPO_IDS);
@@ -295,7 +295,7 @@ await test('EXPO: the store-only claims are named as exclusions and asserted by 
   const m = live();
   const byId = Object.fromEntries(m.journeys.map((j) => [j.id, j]));
   assert.match(byId['phone-and-stations-converge'].knownExclusions.join(' '), /recorded as the attempt that station started, and that the target crossing is recorded once for the goal and credited to no single member: stored facts the hosted screens do not show/);
-  assert.match(byId['station-lost-answer'].knownExclusions.join(' '), /GAP-1/);
+  assert.match(byId['station-lost-answer'].knownExclusions.join(' '), /describeCallableError.*never internal.*J2b/);
   assert.match(byId['closed-goal-turn'].knownExclusions.join(' '), /GAP-2/);
   const all = JSON.stringify(EXPO_ROWS);
   assert.doesNotMatch(all, /attempt that station started|credited to no single member|crossing is recorded/);
@@ -441,7 +441,7 @@ await test('EXPO: through the runner (live manifest, real registry), the REAL cl
   assert.match(card.stdout, /OWNER_CARD_CLEANUP=COMPLETE\nOWNER_CARD_SUMMARY=PASSED/);
   const text = fs.readFileSync(cardPath, 'utf8');
   assert.match(text, /Hosted changed-journey status: PASSED \(8 passed/);
-  assert.match(text, /GAP-1/);
+  assert.match(text, /describeCallableError/);
   assert.match(text, /GAP-2/);
   assert.match(text, /Device review: NOT RUN/);
 });

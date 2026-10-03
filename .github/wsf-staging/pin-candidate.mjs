@@ -195,7 +195,7 @@ const servedPhrase = (run, served) => `run ${run.number} (${run.id}) served it i
   `its verifier checking ${served.marker}), dispatched from operational main ${run.main}, whose approval still named the ` +
   `historical pin ${served.pin}; that run did not deploy the pin. It printed `;
 
-export function rollbackNote({ previous, run, m, served = null }) {
+export function rollbackNote({ previous, run, m, served = null, superseded = null }) {
   let s = `ROLLBACK TARGET (${ROLLBACK_AUTHORITY}). The previous known-good served app SHA is ${previous}: ` +
     (served ? servedPhrase(run, served) : `run ${run.number} (${run.id}) deployed it, dispatched from operational main ${run.main}, and printed `) +
     `INVENTORY_BEFORE=${run.before}, INVENTORY_AFTER=${run.after}, CREATED_THIS_DEPLOY=${run.created}, ` +
@@ -209,6 +209,10 @@ export function rollbackNote({ previous, run, m, served = null }) {
     s += `This pin CHANGES the functions-westayfit tree (${m.functionsTree.previous ? s8(m.functionsTree.previous) : 'absent'} -> ` +
       `${m.functionsTree.candidate ? s8(m.functionsTree.candidate) : 'absent'}), so a rollback to ${s8(previous)} after this pin ` +
       'deploys needs its own inventory review before dispatch.';
+  }
+  if (superseded) {
+    s += ` The approval this pin replaces named ${superseded.sha}, which no deploy served (superseded before any deploy); ` +
+      'it is not a rollback target.';
   }
   return `${s} A note, not a gate: no script reads it.`;
 }
@@ -238,9 +242,15 @@ export function expectedPriorNote({ previous, run, added, m, served = null }) {
   return s;
 }
 
-export function boundaryNote({ previous, candidate, run, m, served = null }) {
+export function boundaryNote({ previous, candidate, run, m, served = null, superseded = null }) {
   const parts = [];
-  parts.push(served
+  if (superseded) {
+    parts.push(`${candidate} is measured against ${previous}, the SHA run ${run.number} (${run.id}) ` +
+      `${served ? 'served in ledger fast-path mode' : 'deployed'} and whose hosted marker that run observed. ` +
+      `The SHA this file previously approved, ${superseded.sha}, was NEVER SERVED: it was approved on operational main after ` +
+      `run ${run.number}, descends from ${s8(previous)}, is an ancestor of the candidate, and is superseded by this pin before any deploy.` +
+      (served ? ` The historical pin ${served.pin}, which run ${run.number}'s operational main still named, is approval ancestry only: that run did not deploy it.` : ''));
+  } else parts.push(served
     ? `${candidate} is measured against ${previous}, the SHA run ${run.number} (${run.id}) served in ledger fast-path mode and whose ` +
       `hosted marker that run observed. The SHA this file previously approved, ${served.pin}, is historical approval ancestry ` +
       'only: that run did not deploy it.'
@@ -291,8 +301,9 @@ function lineageReasons(m, previous, candidate) {
   return reasons;
 }
 
-export function invariants({ previous, candidate, run, added, m, milestone = null, served = null }) {
+export function invariants({ previous, candidate, run, added, m, milestone = null, served = null, superseded = null }) {
   const reasons = lineageReasons(m, previous, candidate);
+  if (superseded) reasons.push(`the approval this pin replaces (${s8(superseded.sha)}) was never served`);
   // A ledger-served baseline must be clean against the historical pin too:
   // the release gate's own fast path compares a candidate with the pin.
   if (served) for (const r of lineageReasons(served.mPin, served.pin, candidate)) reasons.push(`historical pin ${s8(served.pin)}: ${r}`);
@@ -315,7 +326,7 @@ export function invariants({ previous, candidate, run, added, m, milestone = nul
   });
   return {
     generator: 'pin-candidate.mjs v1',
-    previousApprovedAppSha: served ? served.pin : previous,
+    previousApprovedAppSha: superseded ? superseded.sha : served ? served.pin : previous,
     candidate,
     run: {
       id: run.id, number: run.number, operationalMain: run.main,
@@ -338,6 +349,18 @@ export function invariants({ previous, candidate, run, added, m, milestone = nul
           previousIsAncestor: served.mPin.ancestor, firstParentCommits: served.mPin.firstParent, commits: served.mPin.commits,
           protectedPathDelta: served.mPin.protectedDelta, functionsTree: served.mPin.functionsTree, exportCount: exportCount(served.mPin),
         },
+      },
+    } : {}),
+    ...(superseded ? {
+      supersededApproval: {
+        approvedAppSha: superseded.sha,
+        served: false,
+        servedAppSha: previous,
+        lastDeployedApprovalSha: superseded.deployedPin,
+        descendsFromServed: true,
+        ancestorOfCandidate: true,
+        anchoringRun: run.id,
+        matchesOperationalHead: superseded.opsHead,
       },
     } : {}),
     releaseEnvironment: m.releaseEnvironment,
@@ -366,11 +389,14 @@ function insertHistory(entries, prefix, key, value, anchor) {
 }
 
 /** The pure part: previous approval + measured facts -> next approval object. */
-export function nextApproval(prev, { candidate, run, label, acceptedOn, m, milestone = null, served = null }) {
-  if (served && served.pin !== prev.approvedAppSha) refuse('the served baseline does not name this file\'s pin as its historical pin');
+export function nextApproval(deployed, { candidate, run, label, acceptedOn, m, milestone = null, served = null, superseded = null }) {
+  if (served && served.pin !== deployed.approvedAppSha) refuse('the served baseline does not name this file\'s pin as its historical pin');
   // The SHA staging serves: what the notes measure against and roll back to.
-  const previous = served ? served.sha : prev.approvedAppSha;
-  // The SHA this file approved: what the history keys rotate out.
+  const previous = served ? served.sha : deployed.approvedAppSha;
+  // The file being replaced: the deployed approval, or (superseded) the never-served
+  // approval that already rotated the deployed one out. Its pin's notes rotate out.
+  if (superseded && superseded.approval.approvedAppSha !== superseded.sha) refuse('the superseded approval does not name the superseded SHA');
+  const prev = superseded ? superseded.approval : deployed;
   const p8 = s8(prev.approvedAppSha);
   const added = Array.isArray(prev.candidateAddedFunctions) ? [...prev.candidateAddedFunctions] : [];
   for (const k of [`_previousPackageLabel${p8}`, `_previousExpectedPriorFunctionsNote${p8}`, `_previousFullCandidateNote${p8}`]) {
@@ -379,7 +405,9 @@ export function nextApproval(prev, { candidate, run, label, acceptedOn, m, miles
   for (const k of ['packageLabel', '_expectedPriorFunctionsNote', '_fullCandidateNote']) {
     if (typeof prev[k] !== 'string' || prev[k] === '') refuse(`the approval has no ${k} to rotate into history`);
   }
-  const ran = served
+  const ran = superseded
+    ? `no deploy served: run ${run.number} (${run.id}), the last deploy-mode run, served ${s8(previous)}, and this pin supersedes it before any deploy`
+    : served
     ? `run ${run.number} (${run.id}) did not deploy: that run served ${s8(previous)} in ledger fast-path mode, ${run.before} -> ${run.after} with CREATED_THIS_DEPLOY=${run.created} and VERIFY=pass`
     : `run ${run.number} (${run.id}) deployed ${run.before} -> ${run.after} with CREATED_THIS_DEPLOY=${run.created} and VERIFY=pass`;
 
@@ -392,19 +420,21 @@ export function nextApproval(prev, { candidate, run, label, acceptedOn, m, miles
   set('packageLabel', label);
   set('sourceAcceptedOn', acceptedOn);
   set('expectedPriorFunctions', run.after);
-  set('_rollbackNote', rollbackNote({ previous, run, m, served }));
+  set('_rollbackNote', rollbackNote({ previous, run, m, served, superseded }));
   set('_expectedPriorFunctionsNote', expectedPriorNote({ previous, run, added, m, served }));
-  set('_fullCandidateNote', boundaryNote({ previous, candidate, run, m, served }));
+  set('_fullCandidateNote', boundaryNote({ previous, candidate, run, m, served, superseded }));
   insertHistory(entries, '_previousExpectedPriorFunctionsNote', `_previousExpectedPriorFunctionsNote${p8}`,
-    served
+    superseded
+      ? `HISTORICAL, the note as it stood for the ${p8} pin, which was never served (superseded before any deploy): ${prev._expectedPriorFunctionsNote}`
+      : served
       ? `HISTORICAL, the note as it stood for the ${p8} pin, which run ${run.number} did not deploy (it served ${s8(previous)} in ledger fast-path mode): ${prev._expectedPriorFunctionsNote}`
       : `HISTORICAL, the note as it stood for the ${p8} pin, true until run ${run.number} deployed it: ${prev._expectedPriorFunctionsNote}`,
     '_expectedPriorFunctionsNote');
   insertHistory(entries, '_previousFullCandidateNote', `_previousFullCandidateNote${p8}`,
-    `HISTORICAL, the boundary note for the ${p8} pin: ${prev._fullCandidateNote}`, '_fullCandidateNote');
+    `HISTORICAL, the boundary note for the ${p8} pin${superseded ? ', which was never served' : ''}: ${prev._fullCandidateNote}`, '_fullCandidateNote');
   insertHistory(entries, '_previousPackageLabel', `_previousPackageLabel${p8}`,
     `HISTORICAL, the label of the ${p8} pin, which ${ran}: ${prev.packageLabel}`, null);
-  entries.push(['_pinInvariants', invariants({ previous, candidate, run, added, m, milestone, served })]);
+  entries.push(['_pinInvariants', invariants({ previous, candidate, run, added, m, milestone, served, superseded })]);
   return Object.fromEntries(entries);
 }
 
@@ -417,7 +447,7 @@ const FLAGS = {
   'inventory-before': 'int', 'inventory-after': 'int', created: 'created',
   verify: 'str', 'hosted-marker': 'str', 'hosted-verify': 'str',
   'label-file': 'path', 'accepted-on': 'date', out: 'path', receipt: 'path?', manifest: 'path?',
-  'run-title': 'str', 'served-sha': 'sha?', 'run-marker': 'sha?',
+  'run-title': 'str', 'served-sha': 'sha?', 'run-marker': 'sha?', 'superseded-approval': 'path?',
 };
 
 export function parseArgs(argv) {
@@ -510,6 +540,69 @@ function servedBaseline(repo, a, { pin, candidate }) {
   return { sha: target, pin, title, marker, mPin: null };
 }
 
+/**
+ * A SUPERSEDED, NEVER-SERVED APPROVAL (EMAIL-STAGING-REPAIR-STAGING-PIN, Director
+ * #396 5965941193). Operational main can approve a candidate that no deploy then
+ * serves, and a newer accepted candidate replaces it. --approval stays the file
+ * the anchoring run deployed (so every run check above still holds), and
+ * --superseded-approval is the file actually being replaced. It is accepted only
+ * when it is byte-for-byte the approval at --ops-head and at no point served:
+ * generated by this script from the same anchoring run and marker, rolling back
+ * to the same served SHA, with the same measured inventory and retained set,
+ * having already rotated the deployed pin out, and naming an accepted SHA that
+ * descends from the served SHA and is an ancestor of the candidate. Anything
+ * else refuses; nothing is inferred.
+ */
+function supersededApproval(repo, a, { deployed, deployedText, served, run, candidate }) {
+  const file = a['superseded-approval'];
+  if (file === undefined) return null;
+  const opsHead = a['ops-head'];
+  if (!opsHead) refuse('--superseded-approval needs --ops-head: the file it replaces is the approval at the operational head');
+  let text;
+  try { text = fs.readFileSync(file, 'utf8'); } catch { refuse('the superseded approval file is missing or unreadable'); }
+  const atOps = git(repo, ['show', `${opsHead}:${APPROVAL_REL}`], { allowFail: true });
+  if (atOps === null || text !== atOps) refuse(`the superseded approval is not the approval at the operational head ${s8(opsHead)}, the file this pin replaces`);
+  const atRun = git(repo, ['show', `${a['run-main']}:${APPROVAL_REL}`]);
+  if (deployedText !== atRun) refuse(`--approval is not byte-for-byte the approval run main ${s8(a['run-main'])} read: with --superseded-approval it must be the deployed file`);
+  let sup;
+  try { sup = JSON.parse(text); } catch { refuse('the superseded approval is not JSON'); }
+  if (sup === null || typeof sup !== 'object' || Array.isArray(sup) || sup.project !== 'westayfit-staging') refuse('the superseded approval is not a westayfit-staging approval object');
+  const sha = String(sup.approvedAppSha || '');
+  if (!SHA.test(sha)) refuse('the superseded approval does not carry a valid approvedAppSha');
+  if (!isCommit(repo, sha)) refuse(`the superseded SHA ${sha} is not a commit in ${repo}`);
+  const servedSha = served ? served.sha : deployed.approvedAppSha;
+  if (sha === servedSha || sha === deployed.approvedAppSha) {
+    refuse(`the superseded SHA ${sha} was served or deployed by run ${run.number}: it is not superseded; generate from its own deployed approval`);
+  }
+  if (sha === candidate) refuse('the superseded SHA is the candidate; there is nothing to pin');
+  if (!isAncestor(repo, servedSha, sha)) refuse(`the superseded SHA ${s8(sha)} does not descend from the served SHA ${s8(servedSha)}`);
+  if (!isAncestor(repo, sha, candidate)) refuse(`the superseded SHA ${s8(sha)} is not an ancestor of the candidate ${s8(candidate)}: accepted ancestry would be dropped`);
+  // The evidence that it was never served: this script wrote it from the same anchoring run.
+  const inv = sup._pinInvariants;
+  if (!inv || typeof inv !== 'object' || !inv.run) refuse('the superseded approval carries no _pinInvariants: there is no evidence of the run it was generated from');
+  if (inv.candidate !== sha || inv.previousApprovedAppSha !== deployed.approvedAppSha) {
+    refuse(`the superseded approval's invariants do not record ${s8(deployed.approvedAppSha)} -> ${s8(sha)}: it did not replace the deployed approval`);
+  }
+  if (inv.run.id !== run.id || inv.run.operationalMain !== run.main) {
+    refuse(`the superseded approval was generated from run ${inv.run.id} on ${inv.run.operationalMain}, not run ${run.id} on ${run.main}: stale run evidence`);
+  }
+  const supServed = inv.run.servedAppSha ?? null;
+  const supMarker = inv.run.verifiedMarker ?? null;
+  if (served ? (supServed !== served.sha || supMarker !== served.marker) : (supServed !== null || supMarker !== null)) {
+    refuse(`the superseded approval records the run served ${supServed} (marker ${supMarker}), not this run's ${served ? served.sha : 'pin'}: stale run or marker`);
+  }
+  const rollback = inv.servedBaseline ? inv.servedBaseline.rollbackTarget : inv.previousApprovedAppSha;
+  if (rollback !== servedSha) refuse(`the superseded approval rolls back to ${rollback}, not the served ${servedSha}`);
+  if (sup.expectedPriorFunctions !== run.after || sup.expectedPriorFunctions !== deployed.expectedPriorFunctions) {
+    refuse(`the superseded approval expects ${sup.expectedPriorFunctions} prior functions, not the measured ${run.after}`);
+  }
+  const set = (x) => JSON.stringify(Array.isArray(x) ? x : null);
+  if (set(sup.candidateAddedFunctions) !== set(deployed.candidateAddedFunctions)) refuse('the superseded approval does not retain the deployed approval\'s candidateAddedFunctions exactly');
+  const d8 = s8(deployed.approvedAppSha);
+  if (!Object.hasOwn(sup, `_previousPackageLabel${d8}`)) refuse(`the superseded approval has not rotated the deployed pin ${d8} into history: its ancestry is not the deployed approval's`);
+  return { sha, approval: sup, deployedPin: deployed.approvedAppSha, opsHead };
+}
+
 export function generate(argv) {
   const a = parseArgs(argv);
   if (a.verify !== 'pass') refuse(`the run did not print VERIFY=pass (got ${a.verify}); a failed run cannot anchor a pin`);
@@ -517,7 +610,8 @@ export function generate(argv) {
   if (a['hosted-verify'] !== 'pass') refuse('the run\'s hosted verification job did not pass; the served pin is not known-good');
 
   let prev;
-  try { prev = JSON.parse(fs.readFileSync(a.approval, 'utf8')); } catch { refuse('the approval file is missing or unreadable'); }
+  let prevText;
+  try { prevText = fs.readFileSync(a.approval, 'utf8'); prev = JSON.parse(prevText); } catch { refuse('the approval file is missing or unreadable'); }
   if (prev === null || typeof prev !== 'object' || Array.isArray(prev)) refuse('the approval file is not a JSON object');
   if (prev.project !== 'westayfit-staging') refuse('the approval file does not name westayfit-staging');
   const previous = String(prev.approvedAppSha || '');
@@ -551,11 +645,12 @@ export function generate(argv) {
   try { label = fs.readFileSync(a['label-file'], 'utf8').replace(/\n$/, ''); } catch { refuse('the label file is missing or unreadable'); }
   if (!label.trim() || /[\r\n]/.test(label)) refuse('the label must be one non-empty line of reviewed prose');
 
+  const superseded = supersededApproval(repo, a, { deployed: prev, deployedText: prevText, served, run, candidate });
   const base = served ? served.sha : previous;
   const m = measure(repo, { previous: base, candidate, runMain: a['run-main'], opsHead: a['ops-head'] });
   if (served) served.mPin = measure(repo, { previous, candidate, runMain: a['run-main'], opsHead: a['ops-head'] });
   const milestone = milestoneFor(repo, a, { previous: base, candidate });
-  const next = nextApproval(prev, { candidate, run, label, acceptedOn: a['accepted-on'], m, milestone, served });
+  const next = nextApproval(prev, { candidate, run, label, acceptedOn: a['accepted-on'], m, milestone, served, superseded });
   return { args: a, next, text: serialize(next) };
 }
 
@@ -564,6 +659,7 @@ function receiptText({ next }) {
   return [
     `PIN_CANDIDATE=${inv.candidate}`,
     `PIN_PREVIOUS=${inv.previousApprovedAppSha}`,
+    ...(inv.supersededApproval ? [`PIN_SUPERSEDED_NEVER_SERVED=${inv.supersededApproval.approvedAppSha}`] : []),
     ...(inv.servedBaseline ? [`PIN_SERVED=${inv.servedBaseline.servedAppSha}`, `PIN_ROLLBACK=${inv.servedBaseline.rollbackTarget}`] : []),
     `PIN_EXPECTED_PRIOR_FUNCTIONS=${next.expectedPriorFunctions}`,
     `PIN_PROTECTED_DELTA=${inv.protectedPathDelta.length}`,

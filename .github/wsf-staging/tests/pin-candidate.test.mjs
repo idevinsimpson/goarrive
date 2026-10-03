@@ -504,6 +504,138 @@ test('REAL TOPOLOGY: run 60 served ab77fbfc over the pin a3127651; the 5705dc3b 
   assert.equal(inv.fastPath.eligible, true, inv.fastPath.reasons.join('\n'));
 });
 
+// ---- EMAIL-STAGING-REPAIR-STAGING-PIN: a superseded, never-served approval (Director #396 5965941193) --
+// Operational main approved CS over the served S (generated from run 7), no
+// deploy served it, and the next accepted candidate CS2 replaces it.
+g('checkout', '-q', 'served');
+write('apps/westayfit/app/new-route.tsx', 'after the superseded pin\n');
+const CS2 = commit('the next accepted candidate, after the never-served CS');
+g('checkout', '-q', 'dev');
+g('checkout', '-q', '-b', 'dev2', C);
+write('docs/review/b.md', 'b\n');
+const C2 = commit('the next candidate after the never-served C');
+g('checkout', '-q', 'main');
+
+let supN = 0;
+function supersededCase(json) {
+  const text = typeof json === 'string' ? json : serialize(json);
+  supN += 1;
+  const ops = opsBranch(`ops-sup-${supN}`, { '.github/wsf-staging/approved-candidate.json': text });
+  g('checkout', '-q', 'main');
+  const file = path.join(root, `superseded-${supN}.json`);
+  fs.writeFileSync(file, text);
+  return { file, ops };
+}
+const SUP_LEDGER = run(LEDGER(S, { out: path.join(root, 'sup-ledger.json') }));
+assert.equal(SUP_LEDGER.code, 0, SUP_LEDGER.err);
+const SUP_FULL = run({ out: path.join(root, 'sup-full.json') });
+assert.equal(SUP_FULL.code, 0, SUP_FULL.err);
+const supL = supersededCase(SUP_LEDGER.text);
+const SUPERSEDED = (over = {}) => LEDGER(S, { candidate: CS2, 'ops-head': supL.ops, 'superseded-approval': supL.file, ...over });
+
+test('SUPERSEDED (the defect, fail-before): from the never-served approval alone the generator refuses; it cannot say what it replaces', () => {
+  const r = run(LEDGER(S, { candidate: CS2, approval: supL.file, 'ops-head': supL.ops }));
+  assert.equal(r.code, 1);
+  assert.ok(r.err.includes(`approved ${P}, not ${CS}: that run did not deploy the pin this file replaces`), r.err);
+});
+
+test('SUPERSEDED (ledger): rolls back to the served S, names CS as previously approved but NEVER SERVED and P as historical ancestry', () => {
+  const r = run(SUPERSEDED());
+  assert.equal(r.code, 0, r.err);
+  const j = r.json;
+  const [p8, s8, cs8] = [P.slice(0, 8), S.slice(0, 8), CS.slice(0, 8)];
+  assert.equal(j.approvedAppSha, CS2);
+  assert.ok(j._fullCandidateNote.startsWith(`${CS2} is measured against ${S}, the SHA run 7 (1001) served in ledger fast-path mode and whose hosted marker that run observed. ` +
+    `The SHA this file previously approved, ${CS}, was NEVER SERVED: it was approved on operational main after run 7, descends from ${s8}, is an ancestor of the candidate, ` +
+    `and is superseded by this pin before any deploy. The historical pin ${P}, which run 7's operational main still named, is approval ancestry only: that run did not deploy it.`), j._fullCandidateNote);
+  assert.ok(j._rollbackNote.includes(`The previous known-good served app SHA is ${S}: run 7 (1001) served it`), j._rollbackNote);
+  assert.ok(j._rollbackNote.includes(`The approval this pin replaces named ${CS}, which no deploy served (superseded before any deploy); it is not a rollback target.`));
+  // The never-served pin's notes rotate out, worded as never served; the deployed pin's history is kept.
+  assert.equal(j[`_previousPackageLabel${cs8}`], `HISTORICAL, the label of the ${cs8} pin, which no deploy served: run 7 (1001), the last deploy-mode run, served ${s8}, and this pin supersedes it before any deploy: THE NEW LABEL`);
+  assert.ok(j[`_previousExpectedPriorFunctionsNote${cs8}`].startsWith(`HISTORICAL, the note as it stood for the ${cs8} pin, which was never served (superseded before any deploy): `));
+  assert.ok(j[`_previousFullCandidateNote${cs8}`].startsWith(`HISTORICAL, the boundary note for the ${cs8} pin, which was never served: ${CS} is measured against ${S}`));
+  assert.equal(j[`_previousPackageLabel${p8}`], SUP_LEDGER.json[`_previousPackageLabel${p8}`]);
+  assert.equal(j._other, 'kept');
+  // The CURRENT notes (history keeps each retired note verbatim, true when written).
+  const current = [j._fullCandidateNote, j._rollbackNote, j._expectedPriorFunctionsNote].join('\n');
+  for (const bad of [`The SHA this file previously approved, ${P}`, `previously approved, ${CS}, is historical`, `served app SHA is ${CS}`]) {
+    assert.equal(current.includes(bad), false, `the current notes must not say: ${bad}`);
+  }
+  for (const bad of [`${cs8} pin, true until`, `${cs8} pin, which run 7 (1001) did not deploy`]) {
+    assert.equal(r.text.includes(bad), false, `the output must not say: ${bad}`);
+  }
+  const inv = j._pinInvariants;
+  assert.equal(inv.previousApprovedAppSha, CS);
+  assert.equal(inv.servedBaseline.historicalPin, P);
+  assert.equal(inv.servedBaseline.rollbackTarget, S);
+  assert.deepEqual(inv.supersededApproval, {
+    approvedAppSha: CS, served: false, servedAppSha: S, lastDeployedApprovalSha: P,
+    descendsFromServed: true, ancestorOfCandidate: true, anchoringRun: 1001, matchesOperationalHead: supL.ops,
+  });
+  assert.ok(inv.fastPath.reasons.includes(`the approval this pin replaces (${cs8}) was never served`), inv.fastPath.reasons.join('\n'));
+  assert.equal(inv.fastPath.eligible, false);
+  assert.equal(j.expectedPriorFunctions, 3);
+  assert.deepEqual(j.candidateAddedFunctions, ['wsfgamma']);
+  assert.ok(r.out.includes(`PIN_PREVIOUS=${CS}\nPIN_SUPERSEDED_NEVER_SERVED=${CS}\nPIN_SERVED=${S}\nPIN_ROLLBACK=${S}\n`), r.out);
+  assert.equal(run(SUPERSEDED()).text, r.text, 'deterministic');
+});
+
+test('SUPERSEDED (full path): a never-served C over the deployed pin P rolls back to P and names C as never served', () => {
+  const sup = supersededCase(SUP_FULL.text);
+  const r = run({ candidate: C2, 'ops-head': sup.ops, 'superseded-approval': sup.file });
+  assert.equal(r.code, 0, r.err);
+  assert.ok(r.json._fullCandidateNote.startsWith(`${C2} is measured against ${P}, the SHA run 7 (1001) deployed and whose hosted marker that run observed. ` +
+    `The SHA this file previously approved, ${C}, was NEVER SERVED:`), r.json._fullCandidateNote);
+  assert.equal(r.json._pinInvariants.previousApprovedAppSha, C);
+  assert.equal(r.json._pinInvariants.supersededApproval.servedAppSha, P);
+  assert.equal(r.json._pinInvariants.servedBaseline, undefined);
+  assert.doesNotMatch(r.text, /ledger fast-path/);
+});
+
+test('SUPERSEDED leaves ordinary generation byte-identical: no flag, same output as before the option existed', () => {
+  assert.equal(run().text, SUP_FULL.text);
+  assert.equal(run(LEDGER(S)).text, SUP_LEDGER.text);
+});
+
+const supJson = () => JSON.parse(SUP_LEDGER.text);
+const with_ = (f) => { const j = supJson(); f(j); return supersededCase(j); };
+const SUPERSEDED_REFUSALS = [
+  ['no operational head', () => SUPERSEDED({ 'ops-head': undefined }), /needs --ops-head/],
+  ['a superseded file that is not the approval at the operational head (wrong file)', () => SUPERSEDED({ 'ops-head': OPS }), /is not the approval at the operational head/],
+  ['a deployed --approval that is not byte-for-byte the run main\'s file', () => {
+    const edited = path.join(root, 'approval-edited.json');
+    fs.writeFileSync(edited, serialize({ ...approval0, _other: 'edited' }));
+    return SUPERSEDED({ approval: edited });
+  }, /is not byte-for-byte the approval run main/],
+  ['a superseded SHA that the run served (S)', () => { const c = with_((j) => { j.approvedAppSha = S; }); return SUPERSEDED({ 'ops-head': c.ops, 'superseded-approval': c.file }); }, /was served or deployed by run 7/],
+  ['a superseded SHA that is the deployed pin (P)', () => { const c = with_((j) => { j.approvedAppSha = P; }); return SUPERSEDED({ 'ops-head': c.ops, 'superseded-approval': c.file }); }, /was served or deployed by run 7/],
+  ['a superseded SHA that is not a commit (wrong SHA)', () => { const c = with_((j) => { j.approvedAppSha = 'c'.repeat(40); }); return SUPERSEDED({ 'ops-head': c.ops, 'superseded-approval': c.file }); }, /is not a commit/],
+  ['a superseded SHA that does not descend from the served SHA', () => { const c = with_((j) => { j.approvedAppSha = C_SIDE; j._pinInvariants.candidate = C_SIDE; }); return SUPERSEDED({ 'ops-head': c.ops, 'superseded-approval': c.file }); }, /does not descend from the served SHA/],
+  ['a superseded SHA that is not an ancestor of the candidate', () => { const c = with_((j) => { j.approvedAppSha = CS2; j._pinInvariants.candidate = CS2; }); return SUPERSEDED({ candidate: CS, 'ops-head': c.ops, 'superseded-approval': c.file }); }, /is not an ancestor of the candidate/],
+  ['a superseded SHA that is the candidate', () => SUPERSEDED({ candidate: CS }), /is the candidate/],
+  ['missing evidence: no _pinInvariants', () => { const c = with_((j) => { delete j._pinInvariants; }); return SUPERSEDED({ 'ops-head': c.ops, 'superseded-approval': c.file }); }, /carries no _pinInvariants/],
+  ['invariants that do not record the deployed pin -> the superseded SHA', () => { const c = with_((j) => { j._pinInvariants.previousApprovedAppSha = B0; }); return SUPERSEDED({ 'ops-head': c.ops, 'superseded-approval': c.file }); }, /did not replace the deployed approval/],
+  ['stale run: generated from another run', () => { const c = with_((j) => { j._pinInvariants.run.id = 999; }); return SUPERSEDED({ 'ops-head': c.ops, 'superseded-approval': c.file }); }, /stale run evidence/],
+  ['stale run: generated on another operational main', () => { const c = with_((j) => { j._pinInvariants.run.operationalMain = OPS; }); return SUPERSEDED({ 'ops-head': c.ops, 'superseded-approval': c.file }); }, /stale run evidence/],
+  ['stale marker: the run it records served another SHA', () => { const c = with_((j) => { j._pinInvariants.run.verifiedMarker = P; }); return SUPERSEDED({ 'ops-head': c.ops, 'superseded-approval': c.file }); }, /stale run or marker/],
+  ['a superseded file from a full-path run used against a ledger run', () => { const c = with_((j) => { delete j._pinInvariants.run.servedAppSha; delete j._pinInvariants.run.verifiedMarker; }); return SUPERSEDED({ 'ops-head': c.ops, 'superseded-approval': c.file }); }, /stale run or marker/],
+  ['a different rollback target', () => { const c = with_((j) => { j._pinInvariants.servedBaseline.rollbackTarget = P; }); return SUPERSEDED({ 'ops-head': c.ops, 'superseded-approval': c.file }); }, /rolls back to .*, not the served/],
+  ['a different measured inventory', () => { const c = with_((j) => { j.expectedPriorFunctions = 4; }); return SUPERSEDED({ 'ops-head': c.ops, 'superseded-approval': c.file }); }, /expects 4 prior functions/],
+  ['a different retained function set', () => { const c = with_((j) => { j.candidateAddedFunctions = []; }); return SUPERSEDED({ 'ops-head': c.ops, 'superseded-approval': c.file }); }, /does not retain/],
+  ['ancestry that never rotated the deployed pin out', () => { const c = with_((j) => { delete j[`_previousPackageLabel${P.slice(0, 8)}`]; }); return SUPERSEDED({ 'ops-head': c.ops, 'superseded-approval': c.file }); }, /has not rotated the deployed pin/],
+  ['a superseded file that is not JSON', () => { const c = supersededCase('{'); return SUPERSEDED({ 'ops-head': c.ops, 'superseded-approval': c.file }); }, /is not JSON/],
+  ['a superseded file that does not exist', () => SUPERSEDED({ 'superseded-approval': path.join(root, 'absent.json') }), /missing or unreadable/],
+];
+for (const [name, make, re] of SUPERSEDED_REFUSALS) {
+  test(`REFUSED (superseded): ${name}`, () => {
+    const r = run(make());
+    assert.equal(r.code, 1, `expected a refusal: ${r.out}`);
+    assert.match(r.err, re);
+    assert.match(r.err, /PIN=refused/);
+    assert.equal(r.text, null, 'a refusal must not write the output');
+  });
+}
+
 // ---- helpers ----------------------------------------------------------------------------
 test('exportedFunctions counts callables only, and refuses to guess past a re-export', () => {
   assert.deepEqual(exportedFunctions(fn(['wsfB', 'wsfA'])), ['wsfa', 'wsfb']);

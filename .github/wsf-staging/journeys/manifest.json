@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "milestone": "EXPO-ATTENDEE-JOURNEY-PROOF-1",
-  "productSha": "5705dc3bf198a9490600c7e32b8bb55356defd9d",
+  "productSha": "f84346d3b902432a7152719780f0afb94ec9cc3c",
   "previousKnownGoodSha": "ab77fbfce97e60c1c22492397b2ab6b491f9e0db",
   "journeys": [
     {
@@ -98,7 +98,7 @@
         "while offline the phone claims no result; once reconnected it shows 25 squats recorded."
       ],
       "knownExclusions": [
-        "the wording the station prints for a lost answer: at this build it prints internal instead of That didn't go through. Try again. (GAP-1, reproduced on emulators, not fixed in this build)"
+        "the sentence the station prints for a lost answer: from this build (#564) the station maps it through the app's describeCallableError rule, so it prints a product sentence, That didn’t go through. Try again. or We couldn’t reach the server. Check your connection and try again., and never internal; proved on emulators by expo-attendee-journey J2b, not asserted by this hosted journey"
       ]
     },
     {
