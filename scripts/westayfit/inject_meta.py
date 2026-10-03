@@ -253,6 +253,19 @@ def _declared_hosting_origin() -> str | None:
 # --------------------------------------------------------------- route lookup
 
 BRACKET_SEGMENT = re.compile(r"^\[[^/\[\]]+\]$")
+# An Expo Router route GROUP: `(tabs)`, `(home)`. A group contributes nothing to
+# the URL, but the static export writes every route at every combination of
+# including and excluding its group segments, so `(tabs)/(home)/community/
+# [groupId].html` appears beside the `community/[groupId].html` the router
+# actually serves. Those copies are addresses with literal parentheses that no
+# navigation ever produces; demanding a Hosting rewrite for each one would fail
+# every build that has a route group (W9's migration, 5791038123 B.2).
+GROUP_SEGMENT = re.compile(r"^\([^/()]+\)$")
+
+
+def has_group_segment(rel: Path) -> bool:
+    """True when any directory segment of `rel` is a route group `(name)`."""
+    return any(GROUP_SEGMENT.match(part) for part in rel.parts[:-1])
 
 
 def _is_dynamic(rel: Path) -> bool:
@@ -427,6 +440,12 @@ def alias_dynamic_routes(html_files: list[Path]) -> int:
         rel = path.relative_to(DIST_ROOT)
         new_parts = alias_parts(rel)
         if new_parts is None:
+            continue
+        if has_group_segment(rel):
+            # The same page is also exported at the group-free path, which is
+            # the one aliased and checked above or below; this copy is never
+            # served under this address.
+            print(f"WSF dynamic route skipped: {rel.as_posix()}  [route-group export duplicate]")
             continue
         alias = DIST_ROOT.joinpath(*new_parts)
         alias.parent.mkdir(parents=True, exist_ok=True)

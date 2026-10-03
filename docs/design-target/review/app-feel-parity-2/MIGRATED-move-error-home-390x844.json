@@ -1,0 +1,51 @@
+{
+  "stage": "MIGRATED",
+  "label": "MIGRATED BUILD 91392f9d / NOT ACCEPTED",
+  "device": "390x844",
+  "journey": "move-error-home",
+  "before": {
+    "path": "/move",
+    "moveSheets": 1,
+    "communityInstances": 1,
+    "tabBars": 1,
+    "loadingPainted": 0,
+    "scroll": 120
+  },
+  "after": {
+    "path": "/community/w9afp2ca-muhf7k52-4f840dg844",
+    "moveSheets": 1,
+    "communityInstances": 2,
+    "tabBars": 2,
+    "loadingPainted": 0,
+    "scroll": 120
+  },
+  "loadingSeen": [
+    "wsf-community-loading"
+  ],
+  "frames": [
+    {
+      "file": "MIGRATED-move-error-home-000ms-390x844.png",
+      "mark": 0,
+      "shutterMs": 70,
+      "sha256": "3561a789951998e9646fbf1047968d6558ef590e6e42328a14b9ae6a68e90aa2"
+    },
+    {
+      "file": "MIGRATED-move-error-home-150ms-390x844.png",
+      "mark": 150,
+      "shutterMs": 361,
+      "sha256": "47dbb9fd03491e476980d34e37ccfe35a0484e89eb174ea85882b8581bb3f58b"
+    },
+    {
+      "file": "MIGRATED-move-error-home-400ms-390x844.png",
+      "mark": 400,
+      "shutterMs": 557,
+      "sha256": "47dbb9fd03491e476980d34e37ccfe35a0484e89eb174ea85882b8581bb3f58b"
+    },
+    {
+      "file": "MIGRATED-move-error-home-settled-390x844.png",
+      "mark": -1,
+      "shutterMs": 2087,
+      "sha256": "47dbb9fd03491e476980d34e37ccfe35a0484e89eb174ea85882b8581bb3f58b"
+    }
+  ]
+}

@@ -39,6 +39,9 @@ import path from 'node:path';
 
 import { expect, test, type Browser, type Locator, type Page } from '@playwright/test';
 
+import { clearVerifyGate } from './helpers/mobile';
+import { MANAGE_MENU_ROW, manageOffered, openMemberManage } from './helpers/memberShell';
+
 
 // This journey was already long — two browser contexts, an enrolment, a
 // revocation — and it now also writes eighteen captures across four
@@ -127,8 +130,7 @@ async function championWithGoal(page: Page): Promise<{ groupId: string; goalId: 
   await expect(page.getByTestId('wsf-verify')).toBeVisible({ timeout: 20_000 });
   await sendSettled;
   await markEmailVerified(email);
-  await page.getByTestId('wsf-verify-check').click();
-  await expect(page.getByTestId('wsf-profile')).toBeVisible({ timeout: 20_000 });
+  await clearVerifyGate(page, 'wsf-profile', 20_000);
   await page.getByTestId('wsf-profile-termsCheckbox').click();
   await page.getByTestId('wsf-profile-submit').click();
   await expect(page.getByTestId('wsf-home-signed-in')).toBeVisible({ timeout: 20_000 });
@@ -162,7 +164,7 @@ async function championWithGoal(page: Page): Promise<{ groupId: string; goalId: 
 }
 
 async function openManage(page: Page): Promise<void> {
-  await page.getByTestId('wsf-community-manage').click();
+  await openMemberManage(page);
   await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible({ timeout: 15_000 });
 }
 
@@ -336,7 +338,10 @@ test('a Champion enrols a screen, the attendee codes grant nothing, and revoking
   await expect(scannerPage.getByTestId('wsf-event-signed-out')).toBeVisible({ timeout: 25_000 });
   await noStationCredential();
   await expect(scannerPage.getByTestId('wsf-station-screen')).toHaveCount(0);
-  await expect(scannerPage.getByTestId('wsf-community-manage')).toHaveCount(0);
+  expect(
+    await manageOffered(scannerPage),
+    'Champion tools are offered to somebody who is not a Champion',
+  ).toBe(false);
 
   // SCANNING THE NEWCOMER CODE: the ordinary join page, which still asks for
   // an account. It enrols no screen either. This context has already answered
@@ -455,4 +460,212 @@ test('a station on a goal that is not authorized for display refuses in the kios
   expect((await kioskRefusal.innerText()).includes('Nothing to show here')).toBe(true);
   await kiosk.close();
   await station.context.close();
+});
+
+/*
+ * KIOSK-PAIRING-CLARITY-PROOF-1 (Director #365 `5944922457`).
+ *
+ * The pairing flow itself is unchanged; this proves that the words around it
+ * now carry the Champion through it end to end, from the Champion's OWN phone:
+ *
+ *   - the unpaired station says it is the venue screen and names the real way
+ *     there — the menu, Manage community, Screens at this event;
+ *   - every unpaired screen shows its OWN code, and the slot chosen is the one
+ *     that ends up on that screen;
+ *   - an expired code says it can't be used again, Get a new code replaces it,
+ *     and a spent code is refused, exactly as before.
+ *
+ * Expiry is made real, not simulated: the pairing's own `expiresAt` is moved
+ * into the past in the local emulator (demo-wsf-local), and the station learns
+ * it from the server through its ordinary poll.
+ *
+ * CAPTURES are gated. `WSF_KP_CAPTURE_DIR` set → full-viewport frames of each
+ * changed surface are written there, and only after that state's assertions.
+ * `WSF_KP_STAGE=BEFORE` runs the same journey against the unchanged base for
+ * ACTUAL BEFORE: every behavioural assertion still runs; only the new-copy
+ * assertions are skipped, since the base by definition does not say them yet.
+ */
+const KP_DIR = process.env.WSF_KP_CAPTURE_DIR ?? '';
+const KP_BEFORE = process.env.WSF_KP_STAGE === 'BEFORE';
+const STATION_VIEWPORT = { width: 1280, height: 800 };
+const CHAMPION_VIEWPORTS = [
+  { label: '390x844', width: 390, height: 844 },
+  { label: '390x640', width: 390, height: 640 },
+];
+
+async function kpSnapStation(page: Page, state: string): Promise<void> {
+  if (!KP_DIR) return;
+  mkdirSync(KP_DIR, { recursive: true });
+  const before = page.viewportSize();
+  for (const v of [{ label: '1280x800', ...STATION_VIEWPORT }, ...CHAMPION_VIEWPORTS]) {
+    await page.setViewportSize({ width: v.width, height: v.height });
+    // A re-layout settles before the frame; nothing is asserted on the image.
+    await page.waitForTimeout(250);
+    await page.screenshot({ path: path.join(KP_DIR, `station-${state}-${v.label}.png`), fullPage: false });
+  }
+  if (before) await page.setViewportSize(before);
+}
+
+/** The Screens card scoped to its own element (see the header: the Manage
+ * sheet also renders the community's live invite link and QR). */
+async function kpSnapChampion(page: Page, goalId: string, state: string): Promise<void> {
+  if (!KP_DIR) return;
+  mkdirSync(KP_DIR, { recursive: true });
+  const before = page.viewportSize();
+  for (const v of CHAMPION_VIEWPORTS) {
+    await page.setViewportSize({ width: v.width, height: v.height });
+    const card = page.getByTestId(`wsf-kiosk-stations-${goalId}`);
+    await card.scrollIntoViewIfNeeded();
+    await page.waitForTimeout(250);
+    await card.screenshot({ path: path.join(KP_DIR, `champion-${state}-${v.label}.png`) });
+  }
+  if (before) await page.setViewportSize(before);
+}
+
+/** A fresh, signed-out venue screen, with its pairing id read off the wire. */
+async function openPairingStation(browser: Browser, url: string) {
+  const context = await browser.newContext({ viewport: STATION_VIEWPORT });
+  const page = await context.newPage();
+  const crashes: string[] = [];
+  page.on('pageerror', (e) => crashes.push(`pageerror: ${e.message}`));
+  const requested = page.waitForResponse((r) => r.url().includes('wsfStationRequestPairing'), {
+    timeout: 30_000,
+  });
+  await page.goto(url);
+  const body = (await (await requested).json()) as { result: { pairingId: string } };
+  await expect(page.getByTestId('wsf-station-pairing-code')).toBeVisible({ timeout: 25_000 });
+  const code = (await page.getByTestId('wsf-station-pairing-code').innerText()).replace(/\s+/g, '');
+  return { context, page, crashes, pairingId: body.result.pairingId, code };
+}
+
+/** Moves one pairing's expiry into the past, in the local emulator only. */
+async function expirePairing(pairingId: string): Promise<void> {
+  const url =
+    `http://127.0.0.1:8080/v1/projects/${PROJECT_ID}/databases/(default)/documents/wsfKioskPairings/${pairingId}` +
+    '?updateMask.fieldPaths=expiresAt&currentDocument.exists=true';
+  const res = await fetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' },
+    body: JSON.stringify({ fields: { expiresAt: { timestampValue: new Date(Date.now() - 60_000).toISOString() } } }),
+  });
+  if (!res.ok) throw new Error(`could not expire pairing ${pairingId}: ${res.status} ${await res.text()}`);
+}
+
+async function approve(page: Page, goalId: string, code: string, slot: 1 | 2): Promise<void> {
+  await page.getByTestId(`wsf-kiosk-stations-code-${goalId}`).fill(code);
+  await page.getByTestId(`wsf-kiosk-stations-slot-${slot}-${goalId}`).click();
+  await page.getByTestId(`wsf-kiosk-stations-approve-${goalId}`).click();
+}
+
+test('pairing clarity: the venue screen points to the Champion’s own phone, each screen pairs by its own code and slot, and an expired code is replaced', async ({
+  page,
+  browser,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const { goalId } = await championWithGoal(page);
+
+  // THE CHAMPION'S NAVIGATION, in the words the stations now name: the menu,
+  // then Manage community, then the Screens at this event card.
+  const menuButton = page.getByTestId('wsf-member-topbar-menu-button');
+  await expect(menuButton).toHaveAccessibleName('Menu');
+  await menuButton.click();
+  const manageRow = page.getByTestId(MANAGE_MENU_ROW).last();
+  await expect(manageRow).toBeVisible({ timeout: 20_000 });
+  await expect(manageRow).toContainText('Manage community');
+  await manageRow.click();
+  await expect(page.getByTestId('wsf-community-manage-panel').last()).toBeVisible({ timeout: 20_000 });
+  await authorizeDisplay(page, goalId);
+  const card = page.getByTestId(`wsf-kiosk-stations-${goalId}`);
+  await expect(card).toContainText('Screens at this event');
+  await expect(page.getByTestId(`wsf-kiosk-stations-empty-${goalId}`)).toBeVisible({ timeout: 20_000 });
+
+  if (!KP_BEFORE) {
+    const intro = page.getByTestId(`wsf-kiosk-stations-intro-${goalId}`);
+    await expect(intro).toContainText('Every unpaired screen shows its own code');
+    await expect(intro).toContainText('approve it here, on your own phone');
+    const steps = page.getByTestId(`wsf-kiosk-stations-steps-${goalId}`);
+    await expect(steps).toContainText('Enter the code shown on the screen you’re pairing');
+    await expect(steps).toContainText('choose the station that matches where that screen stands');
+    await expect(steps).toContainText('A code works once and lasts ten minutes');
+    await expect(steps).toContainText('tap Get a new code on that screen');
+  }
+  await kpSnapChampion(page, goalId, 'screens-card');
+
+  // TWO UNPAIRED SCREENS, each showing its own code.
+  const stationUrl = `${new URL(page.url()).origin}/station/${goalId}`;
+  const a = await openPairingStation(browser, stationUrl);
+  const b = await openPairingStation(browser, stationUrl);
+  expect(a.code).toMatch(/^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/);
+  expect(b.code).toMatch(/^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/);
+  expect(a.code).not.toBe(b.code);
+
+  const waiting = a.page.getByTestId('wsf-station-pairing-instructions');
+  await expect(waiting).toBeVisible();
+  if (!KP_BEFORE) {
+    await expect(waiting).toContainText('This is the venue screen. Approve it from your own phone.');
+    await expect(waiting).toContainText('tap the menu, then Manage community');
+    await expect(waiting).toContainText('Under Screens at this event, enter the code shown on this screen');
+    await expect(waiting).toContainText('Choose Station 1 or Station 2 to match where this screen stands');
+    await expect(a.page.getByTestId('wsf-station-pairing-note')).toContainText(
+      'Each code works once and lasts ten minutes'
+    );
+  }
+  await kpSnapStation(a.page, 'waiting');
+
+  // EXPIRY, from the server: the station learns it through its own poll.
+  await expirePairing(a.pairingId);
+  const expired = a.page.getByTestId('wsf-station-pairing-expired');
+  await expect(expired).toBeVisible({ timeout: 20_000 });
+  await expect(a.page.getByTestId('wsf-station-pairing-code')).toHaveCount(0);
+  await expect(a.page.getByTestId('wsf-station-pairing-retry')).toHaveText('Get a new code');
+  if (!KP_BEFORE) {
+    await expect(expired).toContainText('That code has expired and can’t be used again');
+    await expect(expired).toContainText('Tap Get a new code');
+    await expect(expired).toContainText('within ten minutes');
+  }
+  await kpSnapStation(a.page, 'expired');
+
+  // The expired code is refused on the Champion's phone, unchanged.
+  await approve(page, goalId, a.code, 1);
+  await expect(page.getByTestId(`wsf-kiosk-stations-notice-${goalId}`)).toContainText(
+    'not valid, or it has expired',
+    { timeout: 25_000 }
+  );
+
+  // GET A NEW CODE: a replacement, approved as the slot that matches this screen.
+  await a.page.getByTestId('wsf-station-pairing-retry').click();
+  await expect(a.page.getByTestId('wsf-station-pairing-code')).toBeVisible({ timeout: 25_000 });
+  const replacement = (await a.page.getByTestId('wsf-station-pairing-code').innerText()).replace(/\s+/g, '');
+  expect(replacement).not.toBe(a.code);
+  await approve(page, goalId, replacement, 1);
+  await expect(page.getByTestId(`wsf-kiosk-stations-notice-${goalId}`)).toContainText(
+    'Station 1 is approved',
+    { timeout: 25_000 }
+  );
+  await expect(a.page.getByTestId('wsf-station-screen')).toBeVisible({ timeout: 30_000 });
+  await expect(a.page.getByTestId('wsf-station-label')).toHaveText('Station 1');
+
+  // A SPENT CODE NEVER WORKS TWICE: the replacement, now used, is refused.
+  await approve(page, goalId, replacement, 2);
+  await expect(page.getByTestId(`wsf-kiosk-stations-notice-${goalId}`)).toContainText(
+    'not valid, or it has expired',
+    { timeout: 25_000 }
+  );
+
+  // The second screen, by its own code, takes the other slot — and only it.
+  await approve(page, goalId, b.code, 2);
+  await expect(page.getByTestId(`wsf-kiosk-stations-notice-${goalId}`)).toContainText(
+    'Station 2 is approved',
+    { timeout: 25_000 }
+  );
+  await expect(b.page.getByTestId('wsf-station-screen')).toBeVisible({ timeout: 30_000 });
+  await expect(b.page.getByTestId('wsf-station-label')).toHaveText('Station 2');
+  await expect(a.page.getByTestId('wsf-station-label')).toHaveText('Station 1');
+  const list = page.getByTestId(`wsf-kiosk-stations-list-${goalId}`);
+  await expect(list).toContainText('Station 1', { timeout: 25_000 });
+  await expect(list).toContainText('Station 2');
+
+  expect([...a.crashes, ...b.crashes]).toEqual([]);
+  await a.context.close();
+  await b.context.close();
 });

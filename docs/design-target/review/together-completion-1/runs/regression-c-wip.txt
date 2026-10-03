@@ -1,0 +1,294 @@
+
+Running 55 tests using 1 worker
+
+  ✓   1 [chromium] › tests-e2e/move-follow-along.spec.ts:125:5 › ready, then a 3-second count in, then a 60-second round (15.3s)
+  ✓   2 [chromium] › tests-e2e/move-follow-along.spec.ts:200:5 › stopping early leads to Enter my reps, and the round records exactly once (10.3s)
+  ✓   3 [chromium] › tests-e2e/move-follow-along.spec.ts:273:5 › running the round to the end leads to the same Enter my reps (1.1m)
+  ✓   4 [chromium] › tests-e2e/move-follow-along.spec.ts:298:5 › a hidden tab pauses the round instead of consuming it (13.8s)
+  ✓   5 [chromium] › tests-e2e/move-follow-along.spec.ts:332:5 › the event, the activity and the way back survive the round (8.7s)
+  ✓   6 [chromium] › tests-e2e/move-follow-along.spec.ts:367:5 › a station keeps a readable panel beside the player; a phone stacks it (9.1s)
+  ✓   7 [chromium] › tests-e2e/move-follow-along.spec.ts:430:5 › a goal this screen cannot read says so, and offers nothing it cannot back up (619ms)
+  ✓   8 [chromium] › tests-e2e/sprint-w9-home-return.spec.ts:189:7 › "Back to home" returns to Home as it stands, with confirmed figures › a list the member asked for: the same list, its address, and the committed total (2.9s)
+  ✓   9 [chromium] › tests-e2e/sprint-w9-home-return.spec.ts:232:7 › "Back to home" returns to Home as it stands, with confirmed figures › a Champion's first contribution: the same Community screen, not a copy of it (4.7s)
+  ✓  10 [chromium] › tests-e2e/sprint-w9-home-return.spec.ts:283:7 › "Back to home" returns to Home as it stands, with confirmed figures › a failed list re-read leaves the list standing, and the figures still update (2.8s)
+  ✓  11 [chromium] › tests-e2e/sprint-w9-home-return.spec.ts:327:7 › "Back to home" returns to Home as it stands, with confirmed figures › Back from a community to the list stays on the list, and the list is re-read (4.7s)
+  ✓  12 [chromium] › tests-e2e/sprint-w9-home-return.spec.ts:381:7 › "Back to home" returns to Home as it stands, with confirmed figures › control: a reload keeps the list the address asks for, with the committed total (1.6s)
+  ✓  13 [chromium] › tests-e2e/sprint-w9-home-return.spec.ts:397:7 › "Back to home" returns to Home as it stands, with confirmed figures › control: reselecting Home on the list reads nothing and keeps the list (4.3s)
+  ✓  14 [chromium] › tests-e2e/ui-a11y-fixes.spec.ts:235:5 › (a) the Champion tools sheet is a dialog with an accessible name (1.4s)
+  ✓  15 [chromium] › tests-e2e/ui-a11y-fixes.spec.ts:254:5 › (b) each surface has exactly one level-1 heading (2.1s)
+  ✓  16 [chromium] › tests-e2e/ui-a11y-fixes.spec.ts:282:5 › (c) a refused entry is an alert (1.4s)
+  ✓  17 [chromium] › tests-e2e/ui-a11y-fixes.spec.ts:301:5 › (d) no interactive target is under 44 px (2.5s)
+  ✓  18 [chromium] › tests-e2e/ui-a11y-fixes.spec.ts:346:5 › (e) the entry field asks for a number and its placeholder is legible (1.3s)
+  ✓  19 [chromium] › tests-e2e/ui-a11y-fixes.spec.ts:370:7 › (f) wide display holds a long name, title and unit on screen (1.5s)
+  ✓  20 [chromium] › tests-e2e/ui-a11y-fixes.spec.ts:370:7 › (f) phone display holds a long name, title and unit on screen (1.4s)
+  ✓  21 [chromium] › tests-e2e/ui-a11y-fixes.spec.ts:402:5 › (g) two goals in the sheet do not share one accessible name (1.5s)
+  ✘  22 [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 maxima (80/120/40): no overflow and no clipping at 390px on all three surfaces (1.9s)
+  ✘  23 [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 maxima (80/120/40): no overflow and no clipping at 360px on all three surfaces (2.2s)
+  ✘  24 [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 maxima (80/120/40): no overflow and no clipping at 320px on all three surfaces (2.4s)
+  ✘  25 [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 maxima (80/120/40): no overflow and no clipping at 195px on all three surfaces (2.3s)
+  ✘  26 [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 one unbroken 90-character token: no overflow and no clipping at 390px on all three surfaces (2.1s)
+  ✘  27 [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 one unbroken 90-character token: no overflow and no clipping at 360px on all three surfaces (2.1s)
+  ✘  28 [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 one unbroken 90-character token: no overflow and no clipping at 320px on all three surfaces (2.0s)
+  ✘  29 [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 one unbroken 90-character token: no overflow and no clipping at 195px on all three surfaces (2.1s)
+  ✓  30 [chromium] › tests-e2e/ui-a11y.spec.ts:552:7 › R1b Manage: no overflow at 390px, confirmation open (1.9s)
+  ✓  31 [chromium] › tests-e2e/ui-a11y.spec.ts:552:7 › R1b Manage: no overflow at 195px, confirmation open (1.8s)
+  ✓  32 [chromium] › tests-e2e/ui-a11y.spec.ts:625:7 › R2 display contains every element at 1440×900 with maximum-length names (1.7s)
+  ✓  33 [chromium] › tests-e2e/ui-a11y.spec.ts:625:7 › R2 display contains every element at 390×844 with maximum-length names (1.8s)
+  ✓  34 [chromium] › tests-e2e/ui-a11y.spec.ts:686:5 › R3 every control is at least 44×44 across Community Home, the sheet, the contribution flow and the display (4.1s)
+  ✓  35 [chromium] › tests-e2e/ui-a11y.spec.ts:813:5 › R3 axe agrees about target size on Community Home and the contribution entry (2.5s)
+  ✓  36 [chromium] › tests-e2e/ui-a11y.spec.ts:848:5 › R4 every Tab stop shows a focus ring, and the controls that matter are on the path (2.6s)
+  ✓  37 [chromium] › tests-e2e/ui-a11y.spec.ts:927:5 › R5a the Manage sheet announces itself as a modal dialog called Champion tools (1.3s)
+  ✓  38 [chromium] › tests-e2e/ui-a11y.spec.ts:962:5 › R5b the Manage sheet traps focus, blocks the page behind it, and returns focus on Escape (3.4s)
+  ✓  39 [chromium] › tests-e2e/ui-a11y.spec.ts:1056:7 › R6 reduced motion › nothing animates on Community Home or the display, and the WE starts at its true fill (3.2s)
+  ✓  40 [chromium] › tests-e2e/ui-a11y.spec.ts:1119:7 › R6 reduced motion › while a contribution is recording, the only thing moving is inside the recording card (9.7s)
+  ✓  41 [chromium] › tests-e2e/ui-a11y.spec.ts:1203:5 › R7a axe finds no WCAG A/AA violation on any state of any surface (9.1s)
+  ✓  42 [chromium] › tests-e2e/ui-a11y.spec.ts:1266:5 › R7b every surface has a title, one level-1 heading, a named wordmark, and unambiguous controls (2.8s)
+  ✓  43 [chromium] › tests-e2e/ui-a11y.spec.ts:1346:5 › R8 the entry error is announced, and the receipt is a polite live region (1.4s)
+  ✓  44 [chromium] › tests-e2e/ui-a11y.spec.ts:1379:5 › R9 the entry field asks for a numeric keypad, a done key, and never triggers iOS zoom (1.3s)
+  ✓  45 [chromium] › tests-e2e/ui-a11y.spec.ts:1411:5 › R10 every number survives without colour (greyscale artifacts for human review) (5.7s)
+  ✓  46 [chromium] › tests-e2e/ui-app-shell.spec.ts:80:5 › the shell carries four destinations and the MOVE action, and Home is the community (9.5s)
+  ✓  47 [chromium] › tests-e2e/ui-app-shell.spec.ts:198:5 › Activity shows what this member actually recorded, and says it is private (2.2s)
+  ✓  48 [chromium] › tests-e2e/ui-app-shell.spec.ts:245:5 › the shell stays off the event surfaces and off the signed-out ones (1.6s)
+  ✓  49 [chromium] › tests-e2e/ui-contribute.spec.ts:254:5 › happy path: move → enter → review → recording → confirmed, then a concurrent peer (6.6s)
+  ✓  50 [chromium] › tests-e2e/ui-contribute.spec.ts:420:5 › mode=record starts at entry; a cold link without groupId stays generic (7.3s)
+  ✓  51 [chromium] › tests-e2e/ui-contribute.spec.ts:465:5 › unknown outcome keeps the same attempt; replaying a landed attempt is "already recorded" (4.0s)
+  ✓  52 [chromium] › tests-e2e/ui-contribute.spec.ts:591:5 › a definitive refusal retires the reminder and says what was not recorded (2.8s)
+  ✓  53 [chromium] › tests-e2e/ui-contribute.spec.ts:645:5 › closed goal, goal crossing, and contributing past the target (6.1s)
+  ✓  54 [chromium] › tests-e2e/ui-contribute.spec.ts:740:5 › sign-in and not-found states are in the same visual system and do not enumerate (2.0s)
+  ✓  55 [chromium] › tests-e2e/ui-contribute.spec.ts:771:5 › membership lost while on the entry screen: the poll ends and the goal is not found (8.6s)
+
+
+  1) [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 maxima (80/120/40): no overflow and no clipping at 390px on all three surfaces 
+
+    Error: Confirmed: no element past the right edge at 390
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 1
+    + Received  + 5
+
+    - Array []
+    + Array [
+    +   "DIV@638 [css-g5y9jx r-1awozwy r-1bymd8e r-cxgwc0] \"Maple Street Movers Neighbourhood Associ\"",
+    +   "DIV@530 [css-146c3p1 r-dnmrzs r-1udh08x r-1udbk01 r-3s2u2q r-1iln25a ] \"Maple Street Movers Neighbourhood Associ\"",
+    +   "DIV@614 [css-146c3p1 r-dnmrzs r-1udh08x r-1udbk01 r-3s2u2q r-1iln25a ] \"Squats together this week across the who\"",
+    + ]
+
+      303 |   });
+      304 |   expect(o.sw, `${label}: no horizontal scroll at ${width}`).toBeLessThanOrEqual(width);
+    > 305 |   expect(o.offenders, `${label}: no element past the right edge at ${width}`).toEqual([]);
+          |                                                                               ^
+      306 | }
+      307 |
+      308 | /**
+        at noOverflow (/home/user/goarrive/apps/westayfit/tests-e2e/ui-a11y.spec.ts:305:79)
+        at /home/user/goarrive/apps/westayfit/tests-e2e/ui-a11y.spec.ts:530:9
+
+    Error Context: test-results/ui-a11y-R1-maxima-80-120-4-9b1f9-390px-on-all-three-surfaces-chromium/error-context.md
+
+  2) [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 maxima (80/120/40): no overflow and no clipping at 360px on all three surfaces 
+
+    Error: Confirmed: no element past the right edge at 360
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 1
+    + Received  + 5
+
+    - Array []
+    + Array [
+    +   "DIV@623 [css-g5y9jx r-1awozwy r-1bymd8e r-cxgwc0] \"Maple Street Movers Neighbourhood Associ\"",
+    +   "DIV@515 [css-146c3p1 r-dnmrzs r-1udh08x r-1udbk01 r-3s2u2q r-1iln25a ] \"Maple Street Movers Neighbourhood Associ\"",
+    +   "DIV@599 [css-146c3p1 r-dnmrzs r-1udh08x r-1udbk01 r-3s2u2q r-1iln25a ] \"Squats together this week across the who\"",
+    + ]
+
+      303 |   });
+      304 |   expect(o.sw, `${label}: no horizontal scroll at ${width}`).toBeLessThanOrEqual(width);
+    > 305 |   expect(o.offenders, `${label}: no element past the right edge at ${width}`).toEqual([]);
+          |                                                                               ^
+      306 | }
+      307 |
+      308 | /**
+        at noOverflow (/home/user/goarrive/apps/westayfit/tests-e2e/ui-a11y.spec.ts:305:79)
+        at /home/user/goarrive/apps/westayfit/tests-e2e/ui-a11y.spec.ts:530:9
+
+    Error Context: test-results/ui-a11y-R1-maxima-80-120-4-71300-360px-on-all-three-surfaces-chromium/error-context.md
+
+  3) [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 maxima (80/120/40): no overflow and no clipping at 320px on all three surfaces 
+
+    Error: Confirmed: no element past the right edge at 320
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 1
+    + Received  + 5
+
+    - Array []
+    + Array [
+    +   "DIV@603 [css-g5y9jx r-1awozwy r-1bymd8e r-cxgwc0] \"Maple Street Movers Neighbourhood Associ\"",
+    +   "DIV@495 [css-146c3p1 r-dnmrzs r-1udh08x r-1udbk01 r-3s2u2q r-1iln25a ] \"Maple Street Movers Neighbourhood Associ\"",
+    +   "DIV@579 [css-146c3p1 r-dnmrzs r-1udh08x r-1udbk01 r-3s2u2q r-1iln25a ] \"Squats together this week across the who\"",
+    + ]
+
+      303 |   });
+      304 |   expect(o.sw, `${label}: no horizontal scroll at ${width}`).toBeLessThanOrEqual(width);
+    > 305 |   expect(o.offenders, `${label}: no element past the right edge at ${width}`).toEqual([]);
+          |                                                                               ^
+      306 | }
+      307 |
+      308 | /**
+        at noOverflow (/home/user/goarrive/apps/westayfit/tests-e2e/ui-a11y.spec.ts:305:79)
+        at /home/user/goarrive/apps/westayfit/tests-e2e/ui-a11y.spec.ts:530:9
+
+    Error Context: test-results/ui-a11y-R1-maxima-80-120-4-0ae3e-320px-on-all-three-surfaces-chromium/error-context.md
+
+  4) [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 maxima (80/120/40): no overflow and no clipping at 195px on all three surfaces 
+
+    Error: Confirmed: no element past the right edge at 195
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 1
+    + Received  + 5
+
+    - Array []
+    + Array [
+    +   "DIV@541 [css-g5y9jx r-1awozwy r-1bymd8e r-cxgwc0] \"Maple Street Movers Neighbourhood Associ\"",
+    +   "DIV@432 [css-146c3p1 r-dnmrzs r-1udh08x r-1udbk01 r-3s2u2q r-1iln25a ] \"Maple Street Movers Neighbourhood Associ\"",
+    +   "DIV@517 [css-146c3p1 r-dnmrzs r-1udh08x r-1udbk01 r-3s2u2q r-1iln25a ] \"Squats together this week across the who\"",
+    + ]
+
+      303 |   });
+      304 |   expect(o.sw, `${label}: no horizontal scroll at ${width}`).toBeLessThanOrEqual(width);
+    > 305 |   expect(o.offenders, `${label}: no element past the right edge at ${width}`).toEqual([]);
+          |                                                                               ^
+      306 | }
+      307 |
+      308 | /**
+        at noOverflow (/home/user/goarrive/apps/westayfit/tests-e2e/ui-a11y.spec.ts:305:79)
+        at /home/user/goarrive/apps/westayfit/tests-e2e/ui-a11y.spec.ts:530:9
+
+    Error Context: test-results/ui-a11y-R1-maxima-80-120-4-52d5a-195px-on-all-three-surfaces-chromium/error-context.md
+
+  5) [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 one unbroken 90-character token: no overflow and no clipping at 390px on all three surfaces 
+
+    Error: Confirmed: no element past the right edge at 390
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 1
+    + Received  + 5
+
+    - Array []
+    + Array [
+    +   "DIV@554 [css-g5y9jx r-1awozwy r-1bymd8e r-cxgwc0] \"Maple Street Movers Neighbourhood Associ\"",
+    +   "DIV@530 [css-146c3p1 r-dnmrzs r-1udh08x r-1udbk01 r-3s2u2q r-1iln25a ] \"Maple Street Movers Neighbourhood Associ\"",
+    +   "DIV@496 [css-146c3p1 r-dnmrzs r-1udh08x r-1udbk01 r-3s2u2q r-1iln25a ] \"Squuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu\"",
+    + ]
+
+      303 |   });
+      304 |   expect(o.sw, `${label}: no horizontal scroll at ${width}`).toBeLessThanOrEqual(width);
+    > 305 |   expect(o.offenders, `${label}: no element past the right edge at ${width}`).toEqual([]);
+          |                                                                               ^
+      306 | }
+      307 |
+      308 | /**
+        at noOverflow (/home/user/goarrive/apps/westayfit/tests-e2e/ui-a11y.spec.ts:305:79)
+        at /home/user/goarrive/apps/westayfit/tests-e2e/ui-a11y.spec.ts:530:9
+
+    Error Context: test-results/ui-a11y-R1-one-unbroken-90-0e9f1-390px-on-all-three-surfaces-chromium/error-context.md
+
+  6) [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 one unbroken 90-character token: no overflow and no clipping at 360px on all three surfaces 
+
+    Error: Confirmed: no element past the right edge at 360
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 1
+    + Received  + 5
+
+    - Array []
+    + Array [
+    +   "DIV@539 [css-g5y9jx r-1awozwy r-1bymd8e r-cxgwc0] \"Maple Street Movers Neighbourhood Associ\"",
+    +   "DIV@515 [css-146c3p1 r-dnmrzs r-1udh08x r-1udbk01 r-3s2u2q r-1iln25a ] \"Maple Street Movers Neighbourhood Associ\"",
+    +   "DIV@481 [css-146c3p1 r-dnmrzs r-1udh08x r-1udbk01 r-3s2u2q r-1iln25a ] \"Squuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu\"",
+    + ]
+
+      303 |   });
+      304 |   expect(o.sw, `${label}: no horizontal scroll at ${width}`).toBeLessThanOrEqual(width);
+    > 305 |   expect(o.offenders, `${label}: no element past the right edge at ${width}`).toEqual([]);
+          |                                                                               ^
+      306 | }
+      307 |
+      308 | /**
+        at noOverflow (/home/user/goarrive/apps/westayfit/tests-e2e/ui-a11y.spec.ts:305:79)
+        at /home/user/goarrive/apps/westayfit/tests-e2e/ui-a11y.spec.ts:530:9
+
+    Error Context: test-results/ui-a11y-R1-one-unbroken-90-a9aa6-360px-on-all-three-surfaces-chromium/error-context.md
+
+  7) [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 one unbroken 90-character token: no overflow and no clipping at 320px on all three surfaces 
+
+    Error: Confirmed: no element past the right edge at 320
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 1
+    + Received  + 5
+
+    - Array []
+    + Array [
+    +   "DIV@519 [css-g5y9jx r-1awozwy r-1bymd8e r-cxgwc0] \"Maple Street Movers Neighbourhood Associ\"",
+    +   "DIV@495 [css-146c3p1 r-dnmrzs r-1udh08x r-1udbk01 r-3s2u2q r-1iln25a ] \"Maple Street Movers Neighbourhood Associ\"",
+    +   "DIV@461 [css-146c3p1 r-dnmrzs r-1udh08x r-1udbk01 r-3s2u2q r-1iln25a ] \"Squuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu\"",
+    + ]
+
+      303 |   });
+      304 |   expect(o.sw, `${label}: no horizontal scroll at ${width}`).toBeLessThanOrEqual(width);
+    > 305 |   expect(o.offenders, `${label}: no element past the right edge at ${width}`).toEqual([]);
+          |                                                                               ^
+      306 | }
+      307 |
+      308 | /**
+        at noOverflow (/home/user/goarrive/apps/westayfit/tests-e2e/ui-a11y.spec.ts:305:79)
+        at /home/user/goarrive/apps/westayfit/tests-e2e/ui-a11y.spec.ts:530:9
+
+    Error Context: test-results/ui-a11y-R1-one-unbroken-90-4231f-320px-on-all-three-surfaces-chromium/error-context.md
+
+  8) [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 one unbroken 90-character token: no overflow and no clipping at 195px on all three surfaces 
+
+    Error: Confirmed: no element past the right edge at 195
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 1
+    + Received  + 5
+
+    - Array []
+    + Array [
+    +   "DIV@456 [css-g5y9jx r-1awozwy r-1bymd8e r-cxgwc0] \"Maple Street Movers Neighbourhood Associ\"",
+    +   "DIV@432 [css-146c3p1 r-dnmrzs r-1udh08x r-1udbk01 r-3s2u2q r-1iln25a ] \"Maple Street Movers Neighbourhood Associ\"",
+    +   "DIV@398 [css-146c3p1 r-dnmrzs r-1udh08x r-1udbk01 r-3s2u2q r-1iln25a ] \"Squuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu\"",
+    + ]
+
+      303 |   });
+      304 |   expect(o.sw, `${label}: no horizontal scroll at ${width}`).toBeLessThanOrEqual(width);
+    > 305 |   expect(o.offenders, `${label}: no element past the right edge at ${width}`).toEqual([]);
+          |                                                                               ^
+      306 | }
+      307 |
+      308 | /**
+        at noOverflow (/home/user/goarrive/apps/westayfit/tests-e2e/ui-a11y.spec.ts:305:79)
+        at /home/user/goarrive/apps/westayfit/tests-e2e/ui-a11y.spec.ts:530:9
+
+    Error Context: test-results/ui-a11y-R1-one-unbroken-90-637db-195px-on-all-three-surfaces-chromium/error-context.md
+
+  8 failed
+    [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 maxima (80/120/40): no overflow and no clipping at 390px on all three surfaces 
+    [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 maxima (80/120/40): no overflow and no clipping at 360px on all three surfaces 
+    [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 maxima (80/120/40): no overflow and no clipping at 320px on all three surfaces 
+    [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 maxima (80/120/40): no overflow and no clipping at 195px on all three surfaces 
+    [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 one unbroken 90-character token: no overflow and no clipping at 390px on all three surfaces 
+    [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 one unbroken 90-character token: no overflow and no clipping at 360px on all three surfaces 
+    [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 one unbroken 90-character token: no overflow and no clipping at 320px on all three surfaces 
+    [chromium] › tests-e2e/ui-a11y.spec.ts:487:9 › R1 one unbroken 90-character token: no overflow and no clipping at 195px on all three surfaces 
+  47 passed (4.9m)

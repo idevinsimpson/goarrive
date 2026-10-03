@@ -6,8 +6,8 @@
  * the screen in the room; their phone keeps BOTH what event it was and what
  * activity that screen was running, across a real signup, a real email
  * verification, a real profile and a real join; and only AFTER they have said
- * what they are here to do are they offered "Use my phone" or "Join the kiosk
- * queue".
+ * what they are here to do are they offered "Move on my phone" or "Use a
+ * kiosk".
  *
  * WHAT THIS FILE PROVES, and how:
  *
@@ -24,7 +24,7 @@
  *      scan, after the join lands, after the activity is selected, after the
  *      choice is on screen, and after the name control is open. It is empty at
  *      all five. It holds exactly one row — under the name the person chose,
- *      never their account name — only after "Join the kiosk queue" is
+ *      never their account name — only after "Use a kiosk" is
  *      confirmed. No screen is asked whether anybody is in the line; the line
  *      is asked.
  *   4. "USE MY PHONE" IS THE CONTRIBUTION FLOW THAT ALREADY EXISTS, with no
@@ -54,6 +54,34 @@ import path from 'node:path';
 
 import { expect, test, type Page } from '@playwright/test';
 
+/**
+ * PAST THE VERIFY GATE, WITHOUT RACING IT (EXPO-ACCOUNT-ENTRY-1).
+ *
+ * verify-email refreshes the user on its own and moves on as soon as the
+ * address is verified. The shared `clearVerifyGate` clicks "I have verified"
+ * as soon as it is visible, which races that auto-advance: the click either
+ * waits on a button that has gone, or lands on whatever the next screen has at
+ * that spot — profile-setup's "Sign out" — and signs the new account out.
+ * Measured: about one run in three, on the base build as well. So this waits
+ * for the screen to move on by itself first, and asks only if it has not.
+ */
+async function passVerifyGate(page: Page, destination: string, timeout = 30_000): Promise<void> {
+  const target = page.getByTestId(destination);
+  try {
+    await target.waitFor({ state: 'visible', timeout: 10_000 });
+    return;
+  } catch {
+    // Still on verify-email: ask once, bounded, and only while it is there.
+  }
+  const check = page.getByTestId('wsf-verify-check');
+  if (await check.isVisible().catch(() => false)) {
+    await check.click({ timeout: 3_000 }).catch(() => {});
+  }
+  await expect(target).toBeVisible({ timeout });
+}
+
+
+
 test.describe.configure({ timeout: 240_000 });
 
 const AUTH_EMULATOR = 'http://127.0.0.1:9099';
@@ -73,8 +101,12 @@ test.use({ viewport: PHONE });
  */
 const ACTIVITY_HEADING = 'What are you here to do?';
 const CHOICE_HEADING = 'Where do you want to do it?';
-const PHONE_LABEL = 'Use my phone';
-const QUEUE_LABEL = 'Join the kiosk queue';
+// The event landing's labels (EXPO-ACCOUNT-ENTRY-1, Director scope delta #497
+// `5962179622`). Local to the event route: the shared constants in
+// src/eventActivity.ts and the queue screen keep "Use my phone" / "Join the
+// kiosk queue", and nothing here asserts on those screens.
+const PHONE_LABEL = 'Move on my phone';
+const QUEUE_LABEL = 'Use a kiosk';
 const CHOICE_NOTE =
   'Opening either one puts nobody in a line. You are in the line only once you confirm the name the screen will call.';
 
@@ -344,9 +376,7 @@ test('the scanned journey: event and activity survive a real signup, and nothing
   await expect(page.getByTestId('wsf-verify')).toBeVisible({ timeout: 30_000 });
   await sendSettled;
   await markEmailVerified(email);
-  await page.getByTestId('wsf-verify-check').click();
-
-  await expect(page.getByTestId('wsf-profile')).toBeVisible({ timeout: 30_000 });
+  await passVerifyGate(page, 'wsf-profile', 30_000);
   await page.getByTestId('wsf-profile-termsCheckbox').click();
   await page.getByTestId('wsf-profile-submit').click();
 
@@ -422,7 +452,19 @@ test('the scanned journey: event and activity survive a real signup, and nothing
   // ---- 8. THE ONE TAP THAT CREATES A PLACE IN THE LINE -------------------
   await page.getByTestId('wsf-event-queue-name-initials').click();
   await expect(nameBox).toHaveValue('D.O.');
-  await page.getByTestId('wsf-event-queue-join').click();
+  // ONE TAP IS ONE PLACE (EXPO-ACCOUNT-ENTRY-1, #365 `5961761581`). The tap is
+  // doubled: a second real click sent the moment the first returns, forced
+  // past any disabled state. Exactly one join request may leave the page, and
+  // the row count below must still be one, with no error shown.
+  const joinRequests: string[] = [];
+  page.on('request', (r) => {
+    if (r.url().includes('wsfJoinTurnLine')) joinRequests.push(r.url());
+  });
+  const joinButton = page.getByTestId('wsf-event-queue-join');
+  await joinButton.click();
+  await joinButton.click({ force: true, timeout: 2_000 }).catch(() => {
+    // Already navigated away: the control is gone, which is also one tap.
+  });
   await page.waitForURL(new RegExp(`/queue/${goalId}`), { timeout: 30_000 });
   await expect(page.getByTestId('wsf-queue-screen')).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId('wsf-queue-called-as')).toHaveText('D.O.');
@@ -432,13 +474,15 @@ test('the scanned journey: event and activity survive a real signup, and nothing
   // their surname, not their address.
   const rows = await queueRows(goalId);
   expect(rows).toHaveLength(1);
+  expect(joinRequests, 'a double tap sends exactly one join').toHaveLength(1);
+  await expect(page.getByTestId('wsf-event-queue-error')).toHaveCount(0);
   expect(rows[0]!.calledName).toBe('D.O.');
   expect(rows[0]!.status).toBe('waiting');
   expect(rows[0]!.calledName).not.toContain('Okonjo');
   expect(rows[0]!.calledName).not.toContain('@');
 });
 
-test('“Use my phone” is the contribution flow that already exists, and is offered on the same terms', async ({
+test('“Move on my phone” is the contribution flow that already exists, and is offered on the same terms', async ({
   page,
 }) => {
   const unit = 'squats';
@@ -491,5 +535,6 @@ test('“Use my phone” is the contribution flow that already exists, and is of
   await snap(page, '06-use-my-phone-contribution');
 
   // Taking the phone route puts nobody in a line.
-  expect(await queueRows(goalId), '“Use my phone” must create no queue row').toEqual([]);
+  expect(await queueRows(goalId), '“Move on my phone” must create no queue row').toEqual([]);
 });
+

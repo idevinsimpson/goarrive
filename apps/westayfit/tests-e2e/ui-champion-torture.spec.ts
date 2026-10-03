@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 
 import { expect, test, type BrowserContext, type Page, type Route } from '@playwright/test';
+import { openMemberManage } from './helpers/memberShell';
 
 /**
  * CHAMPION TOOLS — the failures around the edges of the display permission.
@@ -195,10 +196,7 @@ async function signInVia(page: Page, email: string, password: string): Promise<v
 }
 
 async function openManage(page: Page): Promise<void> {
-  const manage = page.getByTestId('wsf-community-manage');
-  await expect(manage).toBeVisible({ timeout: 20_000 });
-  await manage.click();
-  await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible({ timeout: 20_000 });
+  await openMemberManage(page);
 }
 
 const RELOAD_FAILED_COPY = 'Goals could not be loaded, so there is nothing to manage yet.';

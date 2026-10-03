@@ -43,6 +43,18 @@ const FIXTURES = {
   notFound: '+not-found.html',
 } as const;
 
+/**
+ * Expo's static export also writes a route that lives inside a route group at
+ * every combination of its group segments. The router never serves these
+ * parenthesised addresses; the injector must not demand a rewrite for them.
+ * They are written into the fixture tree beside the real pages but are not
+ * routes of their own, so they carry no copy and are not in ROUTES.
+ */
+const GROUP_EXPORT_DUPLICATES = [
+  '(tabs)/(home)/community/[groupId]/challenge.html',
+  '(tabs)/(home)/index.html',
+] as const;
+
 type RouteName = keyof typeof FIXTURES;
 
 /**
@@ -78,7 +90,7 @@ type Run = {
 function runInjector(env: Record<string, string>, { expectFailure = false } = {}): Run {
   const dist = mkdtempSync(path.join(tmpdir(), 'wsf-head-'));
   temps.push(dist);
-  for (const rel of Object.values(FIXTURES)) {
+  for (const rel of [...Object.values(FIXTURES), ...GROUP_EXPORT_DUPLICATES]) {
     const abs = path.join(dist, rel);
     mkdirSync(path.dirname(abs), { recursive: true });
     writeFileSync(abs, PAGE, 'utf8');
@@ -300,6 +312,28 @@ describe('exported head — the combined movement goal route', () => {
       source: '/combined/**',
       destination: '/combined/__dynamic.html',
     });
+  });
+});
+
+describe('exported head — route-group export duplicates', () => {
+  // W9's migration puts the member destinations under `(tabs)/(home)`; the
+  // export then emits `(tabs)/(home)/community/[groupId]/challenge.html` beside
+  // the `community/[groupId]/challenge.html` the router actually serves. The
+  // guard must keep failing a real dynamic route with no rewrite (covered
+  // above) while ignoring these copies, or no build with a route group passes.
+  it('does not demand a rewrite for a dynamic route exported under a group segment', () => {
+    expect(production.status).toBe(0);
+    expect(production.stdout).toContain(
+      'WSF dynamic route skipped: (tabs)/(home)/community/[groupId]/challenge.html  [route-group export duplicate]'
+    );
+    expect(existsSync(path.join(production.dist, '(tabs)/(home)/community/__dynamic/challenge.html'))).toBe(false);
+  });
+
+  it('still aliases and routes the group-free copy of the same route', () => {
+    expect(production.stdout).toContain(
+      'WSF dynamic route aliased: community/[groupId]/challenge.html -> /community/__dynamic/challenge.html  [routed]'
+    );
+    expect(existsSync(path.join(production.dist, 'community/__dynamic/challenge.html'))).toBe(true);
   });
 });
 

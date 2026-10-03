@@ -14,6 +14,7 @@ export function ButtonLink({
   textStyle,
   testID,
   label,
+  accessibilityLabel,
   onPress,
   replace = false,
 }: {
@@ -22,6 +23,13 @@ export function ButtonLink({
   textStyle: StyleProp<TextStyle>;
   testID: string;
   label: string;
+  /**
+   * What a screen reader announces, when the visible label is not enough on
+   * its own. A list of goals can each carry a button reading "Move" -- short
+   * and clear beside its own title, and three identical announcements to
+   * somebody who cannot see which row the button is in.
+   */
+  accessibilityLabel?: string;
   /** Runs before the navigation (Link calls the child's onPress first). */
   onPress?: () => void;
   /**
@@ -37,7 +45,13 @@ export function ButtonLink({
         Flattened on purpose: Link asChild merges the child's style by object
         spread, so an ARRAY style would become {0: …, 1: …} and blank the route.
       */}
-      <Pressable style={StyleSheet.flatten(style)} testID={testID} accessibilityRole="link" onPress={onPress}>
+      <Pressable
+        style={StyleSheet.flatten(style)}
+        testID={testID}
+        accessibilityRole="link"
+        accessibilityLabel={accessibilityLabel}
+        onPress={onPress}
+      >
         <Text style={textStyle}>{label}</Text>
       </Pressable>
     </Link>

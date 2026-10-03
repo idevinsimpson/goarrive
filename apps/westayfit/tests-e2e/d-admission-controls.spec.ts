@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 
 import { expect, test, type Page } from '@playwright/test';
+import { manageOffered, openMemberManage } from './helpers/memberShell';
 
 /**
  * Package D — admission controls, driven through real authenticated browser
@@ -163,10 +164,7 @@ async function callAs(
  * are unchanged.
  */
 async function openChampionDetails(page: Page): Promise<void> {
-  const manage = page.getByTestId('wsf-community-manage');
-  await expect(manage).toBeVisible({ timeout: 20_000 });
-  if ((await page.getByTestId('wsf-community-manage-panel').count()) === 0) await manage.click();
-  await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible({ timeout: 20_000 });
+  await openMemberManage(page);
   const toggle = page.getByTestId('wsf-community-details-toggle');
   await expect(toggle).toBeVisible({ timeout: 20_000 });
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
@@ -191,7 +189,10 @@ async function expectMemberStanding(page: Page): Promise<void> {
   await expect(page.getByTestId('wsf-community-membership-toggle')).toBeVisible({
     timeout: 20_000,
   });
-  await expect(page.getByTestId('wsf-community-manage')).toHaveCount(0);
+  expect(
+    await manageOffered(page),
+    'Champion tools are offered to somebody who is not a Champion',
+  ).toBe(false);
   await expect(page.getByTestId('wsf-community-details-toggle')).toHaveCount(0);
 }
 
@@ -274,9 +275,18 @@ test.describe('D — admission controls in the interface', () => {
       await pageEarly.goto(`/join/${joinCode}`);
       await expect(pageEarly.getByTestId('wsf-join-signed-in')).toBeVisible({ timeout: 20_000 });
       // D6: the preview states the joining conditions and NOT a head count.
-      const meta = await pageEarly.getByTestId('wsf-join-meta').innerText();
-      expect(meta).toContain('Anyone with the invite link can join');
-      expect(meta).not.toMatch(/\d+\s+members?/);
+      //
+      // RE-POINTED, AND STRICTER FOR IT. Both halves used to be read off the
+      // one `wsf-join-meta` line, which carried the type and the conditions
+      // together. The invitation now separates them — the type in the meta
+      // slot, the conditions in their own — so the conditions are read from
+      // the line that states them, and the head-count rule is checked across
+      // the WHOLE invitation instead of one line of it. A count anywhere on
+      // this screen now fails; before, only a count on that line did.
+      const conditions = await pageEarly.getByTestId('wsf-join-conditions').innerText();
+      expect(conditions).toContain('Anyone with the invite link can join');
+      const invitation = await pageEarly.getByTestId('wsf-join-signed-in').innerText();
+      expect(invitation).not.toMatch(/\d+\s+members?/);
       await pageEarly.getByTestId('wsf-join-submit').click();
       await pageEarly.waitForURL(new RegExp(`/community/${groupId}`), { timeout: 20_000 });
       await expectMemberStanding(pageEarly);
@@ -284,7 +294,7 @@ test.describe('D — admission controls in the interface', () => {
       // ---- D1: the Champion resets the link ----
       // Rotation is administration, so it lives in Manage and asks first: the
       // consequence falls on everyone holding the old link.
-      await pageChampion.getByTestId('wsf-community-manage').click();
+      await openMemberManage(pageChampion);
       await expect(pageChampion.getByTestId('wsf-community-manage-panel')).toBeVisible({
         timeout: 20_000,
       });

@@ -1,94 +1,89 @@
-# We Stay Fit — Dependencies
+# We Stay Fit — Dependencies and Environment Boundaries
 
-## Runtime — App (`apps/westayfit/`)
+Reconciled: September 26, 2026.
 
-- `expo` ~54 (matches GoArrive to keep Expo/React-Native versions coherent across the monorepo).
-- `expo-router` ~6.0.23.
-- `react` 19.1.0, `react-dom` 19.1.0, `react-native` (Expo-managed version), `react-native-web`.
-- `firebase` ^11.4.0 — web SDK only, initialized in `apps/westayfit/src/firebase.ts` (no reads, no writes in M-U1).
+Exact package versions live in the relevant `package.json` / lockfiles. This document
+records load-bearing system/environment dependencies and current operational boundaries.
 
-## Runtime — Functions (`functions-westayfit/`)
+## 1. Product source
 
-- Node 20 (matches GoArrive `functions/` runtime).
-- `firebase-functions` ^4.9.0 — v2 API (`firebase-functions/v2/https`).
-- `firebase-admin` ^12.7.0 — imported for parity but not used to write claims (see zero-claims invariant).
+- App: `apps/westayfit` — Expo / React Native / Expo Router / Firebase web SDK.
+- Backend: `functions-westayfit` — Firebase Cloud Functions.
+- Shared repository: `idevinsimpson/goarrive`.
+- Shared infrastructure files include Firestore rules/index definitions; treat them as
+  cross-app release surfaces, not incidental WSF files.
 
-## Dev — App
+## 2. Environment model
 
-- `typescript` ~5.9.2 (matches GoArrive).
-- `vitest` ^4.1.2 + jsdom for the smoke suite.
-- `@playwright/test` ^1.59.1 for the e2e suite.
-- `@axe-core/playwright` ^4.12.1 for accessibility check on `/`.
+### Production architecture
+WSF remains a first-party app in the GoArrive repository with the established shared
+Firebase architecture and isolated WSF app/functions/hosting boundaries described in
+`ARCHITECTURE.md`.
 
-## Dev — Functions
+### Staging control plane
+Current WSF staging is controlled through the dedicated reviewed staging workflow and its
+approved candidate pointer. The staging control plane currently targets the
+`westayfit-staging` project/environment.
 
-- `typescript` ~5.9.2.
-- `firebase-tools` — used via `npx -y firebase-tools@latest` for deploys; not pinned as a repo dev-dep to avoid version drift with GoArrive's deploy path.
+Do not interpret the separate staging project as authority to split production
+architecture without an explicit decision.
 
-## Build / Deploy
+## 3. Only supported WSF staging path
 
-- Firebase CLI via `npx -y firebase-tools@latest`.
-- Service account key at `~/dev-westayfit/.secrets/firebase-service-account.json` (hardlinked from `~/dev-goarrive/.secrets/`), exported as `GOOGLE_APPLICATION_CREDENTIALS`.
+Do not use the old service-account-key instructions in historical documents.
 
-## External / Shared With GoArrive
+For WSF staging:
+1. read `skills/wsf-staging-deploy/SKILL.md` from operational `main`;
+2. use the reviewed `.github/workflows/wsf-staging-deploy.yml` control plane;
+3. use `.github/wsf-staging/approved-candidate.json` as the reviewed deployment pointer;
+4. use the current manifest/changed-journey/receipt discipline;
+5. do not reconstruct an alternate Firebase CLI deploy path from memory.
 
-- **Firebase project `goarrive`** — shared. WSF adds Hosting site `westayfit-app` and functions codebase `westayfit`.
-- **Firebase Auth pool** — shared. Same users can exist in both app contexts (see `DATA_OWNERSHIP.md`).
-- **`firestore.rules`, `storage.rules`** — shared files, dual-regression required.
+The workflow uses the authorized cloud identity path; no local service-account JSON file is
+the canonical WSF staging mechanism.
 
-## Project-Level Firebase Console Settings (R-9)
+## 4. Console/cloud dependencies that code alone cannot prove
 
-These are not packages and not files. They are console settings that belong to
-the Firebase project, were configured for GoArrive, do not appear anywhere in
-this repo, and that WSF inherits whether or not anyone intended it. Four
-production defects in M-U2 came from this list; none was catchable by any test,
-because nothing in the repo can see them.
+Depending on the journey, WSF can depend on:
+- Firebase Auth provider/action-link configuration;
+- real verification/password-reset delivery;
+- callable invocation/IAM transport;
+- Firestore index READY state;
+- App Check/enforcement settings;
+- Hosting/action URLs;
+- event network/device availability.
 
-They are recorded here so a future change to one of them can be *noticed*. A
-value nobody wrote down cannot be diffed.
+Record and verify these when applicable. Emulator/source tests do not establish cloud
+configuration.
 
-**Rule for this section: only record what has actually been observed.** A
-guessed value is worse than a blank, because it reads like evidence. Anything
-unconfirmed stays under Unverified until someone looks.
+## 5. Node runtime deadline
 
-### Verified
+`functions-westayfit` currently declares Node.js 20. Current deployment receipts warn
+that Node.js 20 was deprecated April 30, 2026 and is scheduled for decommissioning on
+October 30, 2026. Treat the runtime upgrade as an explicit operational dependency; do not
+wait for decommissioning to discover deploy failure.
 
-| Setting | Value | How it was established |
-|---|---|---|
-| Auth providers | Email/password enabled | Real signup succeeded on staging, 2026-09-01 |
-| Auth pool | Shared with GoArrive | `auth/email-already-in-use` on a GoArrive address (R-9) |
-| `authDomain` | `goarrive.firebaseapp.com` | `apps/westayfit/src/firebase.ts` |
-| Auth **custom action URL** | `https://goarrive.web.app/reset-password` | Read off a minted verification link. **The route does not exist** — see R-9 |
-| Default action handler | `https://goarrive.firebaseapp.com/__/auth/action` | Works; it is what the custom URL overrode |
-| App Check | Not enforced | No enforcement in source, and a live callable succeeded with `app: "MISSING"` |
-| Live Firestore ruleset | `1e14eab9-a23f-437f-8418-918b9eaefe65`, 1259 lines | Fetched from the Rules API after the M-U2 deploy |
-| Storage bucket | `goarrive.firebasestorage.app` | In WSF config; WSF never imports Storage |
-| Functions region | `us-central1` | `functions-westayfit/src/index.ts` |
-| Hosting sites | `goarrive` (default), `westayfit-app` | `firebase.json`, `firebase.westayfit.json` |
-| Resend sender domains | **`goarrive.fit` only** — verified, sending enabled, us-east-1. `westay.fit` is **not in the account at all** | Resend `list-domains`, 2026-09-01. Also: three API keys exist, all GoArrive-named; none scoped to WSF |
+## 6. Lovable
 
-### Unverified — assumptions in use, not yet checked
+Public marketing Lovable/Supabase is a separate marketing/inquiry dependency within its
+approved scope.
 
-| Setting | Why it matters | Status |
-|---|---|---|
-| Auth email sender | Verification mail did not arrive at a real Gmail address on 2026-09-01. Presumed to be Firebase's default `noreply@goarrive.firebaseapp.com`, which is routinely spam-filtered — **presumed, not observed**, since no message was received to inspect | Open (R-9) |
-| Custom SMTP | Whether one is configured on **Auth** at all. Now largely moot for WSF: `wsfSendVerificationEmail` sends through Resend directly rather than through Auth's mailer, so this only still matters for GoArrive's own password resets | Open, deprioritised |
-| Authorized domains | **Now has a named consumer.** `WSF_APP_URL` is passed as the `continueUrl` to `generateEmailVerificationLink`, and Firebase rejects a `continueUrl` whose domain is not on the authorised list. Set it to a domain that is not listed and every send fails — after the member has already created an account | Open, blocking the email path |
-| Email enumeration protection | When enabled, Firebase masks `auth/email-already-in-use`. It is surfacing, so it is probably off — probably is not verified, and turning it on would change the copy in `src/authErrors.ts` | Open |
-| Password policy | WSF enforces 8 characters client-side only. Whether a project-level policy exists is unknown; a stricter one would reject signups the UI accepted | Open |
-| **Live** Firestore index set | 48 indexes and zero `wsf*` is what the **repo file** says. The live set has never been fetched and could differ — which is the whole hazard in R-10 | Open |
+The WE Community Home Lovable project is a North Star reference dependency only. It is not
+a production runtime/backend dependency.
 
-### When to update this
+## 7. GoArrive boundary
 
-Before any milestone ships work touching auth, email, storage, or enforcement:
-list the console settings that path depends on, confirm their current values,
-and move them from Unverified to Verified with how you checked. Do not delete
-an Unverified row to tidy the table — an open question is the finding.
+WSF must preserve GoArrive behavior and shared infrastructure. Do not import from
+`apps/goarrive` or `functions/` for WSF convenience, and do not introduce WSF custom
+claims that GoArrive claim writers could clobber.
 
-## What Is NOT A Dependency
+## 8. Not implied
 
-- No EAS build service (out-of-scope for M-U1).
-- No shared UI/theme package with GoArrive — WSF has its own theme.
-- No shared functions library — WSF functions cannot import from `functions/src/`.
-- No custom-claims-based auth — see `ARCHITECTURE.md` (f).
-- No PWA/service worker/manifest tooling for M-U1.
+This document does not authorize:
+- a new Firebase project split;
+- a production release;
+- an index/rules deployment;
+- new auth providers;
+- EAS/native distribution;
+- new external SDKs;
+- R&D camera/vision integration.

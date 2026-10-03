@@ -1,5 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
 
+import { clearVerifyGate } from './helpers/mobile';
+import { openMemberManage } from './helpers/memberShell';
+
 /**
  * E3.5 supplementary — pins surfaces `mu2-flow.spec.ts` does not touch:
  *
@@ -48,10 +51,7 @@ const PROJECT_ID = 'demo-wsf-local';
  * rows are unchanged.
  */
 async function openChampionDetails(page: Page): Promise<void> {
-  const manage = page.getByTestId('wsf-community-manage');
-  await expect(manage).toBeVisible({ timeout: 20_000 });
-  if ((await page.getByTestId('wsf-community-manage-panel').count()) === 0) await manage.click();
-  await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible({ timeout: 20_000 });
+  await openMemberManage(page);
   const toggle = page.getByTestId('wsf-community-details-toggle');
   await expect(toggle).toBeVisible({ timeout: 20_000 });
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
@@ -152,9 +152,7 @@ test('A4: the terms accordion opens inline and shows the pending-approval versio
   await expect(page.getByTestId('wsf-verify')).toBeVisible({ timeout: 15_000 });
   await sendSettled;
   await markEmailVerified(email);
-  await page.getByTestId('wsf-verify-check').click();
-
-  await expect(page.getByTestId('wsf-profile')).toBeVisible({ timeout: 15_000 });
+  await clearVerifyGate(page, 'wsf-profile', 15_000);
 
   // Panel MUST be absent while collapsed — a screen reader would otherwise
   // announce stale copy. Same rationale as LegalAccordion's unmount design.
@@ -190,9 +188,7 @@ test('A4: the privacy accordion carries the same version marker', async ({ page 
   await expect(page.getByTestId('wsf-verify')).toBeVisible({ timeout: 15_000 });
   await sendSettled;
   await markEmailVerified(email);
-  await page.getByTestId('wsf-verify-check').click();
-
-  await expect(page.getByTestId('wsf-profile')).toBeVisible({ timeout: 15_000 });
+  await clearVerifyGate(page, 'wsf-profile', 15_000);
   await page.getByTestId('wsf-profile-privacy').click();
   await expect(page.getByTestId('wsf-profile-privacy-panel')).toContainText(
     'Version pending-approval-2026-08-25'
@@ -263,9 +259,7 @@ test('§6.2: re-saving the profile via ?edit=1 preserves createdAt', async ({ pa
   await expect(page.getByTestId('wsf-verify')).toBeVisible({ timeout: 15_000 });
   await sendSettled;
   await markEmailVerified(email);
-  await page.getByTestId('wsf-verify-check').click();
-
-  await expect(page.getByTestId('wsf-profile')).toBeVisible({ timeout: 15_000 });
+  await clearVerifyGate(page, 'wsf-profile', 15_000);
   await page.getByTestId('wsf-profile-termsCheckbox').click();
   await page.getByTestId('wsf-profile-submit').click();
 
@@ -372,9 +366,7 @@ test('F9: a Private community shows Private + type label + members count', async
   await expect(page.getByTestId('wsf-verify')).toBeVisible({ timeout: 15_000 });
   await sendSettled;
   await markEmailVerified(email);
-  await page.getByTestId('wsf-verify-check').click();
-
-  await expect(page.getByTestId('wsf-profile')).toBeVisible({ timeout: 15_000 });
+  await clearVerifyGate(page, 'wsf-profile', 15_000);
   await page.getByTestId('wsf-profile-termsCheckbox').click();
   await page.getByTestId('wsf-profile-submit').click();
 

@@ -299,7 +299,7 @@ test('happy path: move → enter → review → recording → confirmed, then a 
   // public display. No refresh control: nothing is waiting to be asked.
   await expect(page.getByTestId('wsf-contribute-context-percent')).toHaveText('48.2% complete');
   await expect(page.getByTestId('wsf-contribute-context-updated')).toHaveText(/^Confirmed \d{1,2}:\d{2}/);
-  await expect(page.getByTestId('wsf-contribute-back')).toHaveText('Back to community');
+  await expect(page.getByTestId('wsf-contribute-back')).toHaveText('Back');
   await page.waitForTimeout(400);
   await snap(page, '01-start-moving');
 
@@ -442,7 +442,7 @@ test('mode=record starts at entry; a cold link without groupId stays generic', a
   await page.waitForTimeout(1_500);
   await expect(page.getByTestId('wsf-contribute-community')).toHaveCount(0);
   await expect(page.getByTestId('wsf-contribute-goal-title')).toHaveCount(0);
-  await expect(page.getByTestId('wsf-contribute-back')).toHaveText('Back to home');
+  await expect(page.getByTestId('wsf-contribute-back')).toHaveText('Back');
   await expect(page.getByTestId('wsf-contribute-shared-total')).toHaveText('241 of 500 squats');
   await snap(page, '03c-cold-link-generic');
 

@@ -1,0 +1,49 @@
+{
+  "stage": "CANDIDATE",
+  "label": "CANDIDATE BUILD be21eab4 / NOT ACCEPTED",
+  "device": "390x844",
+  "journey": "wordmark-home",
+  "before": {
+    "path": "/community",
+    "moveSheets": 0,
+    "communityInstances": 1,
+    "tabBars": 1,
+    "loadingPainted": 0,
+    "scroll": null
+  },
+  "after": {
+    "path": "/community/w9afp2ca-muhf85lh-2e7544w844",
+    "moveSheets": 0,
+    "communityInstances": 1,
+    "tabBars": 1,
+    "loadingPainted": 0,
+    "scroll": null
+  },
+  "loadingSeen": [],
+  "frames": [
+    {
+      "file": "CANDIDATE-wordmark-home-000ms-390x844.png",
+      "mark": 0,
+      "shutterMs": 78,
+      "sha256": "ecfdc4d4b651078581414890fe667b0682a8cb3aef97d17a32e53ca938d73ff9"
+    },
+    {
+      "file": "CANDIDATE-wordmark-home-150ms-390x844.png",
+      "mark": 150,
+      "shutterMs": 324,
+      "sha256": "ecfdc4d4b651078581414890fe667b0682a8cb3aef97d17a32e53ca938d73ff9"
+    },
+    {
+      "file": "CANDIDATE-wordmark-home-400ms-390x844.png",
+      "mark": 400,
+      "shutterMs": 471,
+      "sha256": "ecfdc4d4b651078581414890fe667b0682a8cb3aef97d17a32e53ca938d73ff9"
+    },
+    {
+      "file": "CANDIDATE-wordmark-home-settled-390x844.png",
+      "mark": -1,
+      "shutterMs": 2003,
+      "sha256": "ecfdc4d4b651078581414890fe667b0682a8cb3aef97d17a32e53ca938d73ff9"
+    }
+  ]
+}

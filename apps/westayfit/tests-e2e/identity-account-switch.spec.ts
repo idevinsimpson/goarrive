@@ -17,6 +17,8 @@ import { randomBytes } from 'node:crypto';
 
 import { expect, test, type Page } from '@playwright/test';
 
+import { clearVerifyGate } from './helpers/mobile';
+
 const AUTH_EMULATOR = 'http://127.0.0.1:9099';
 const PROJECT_ID = 'demo-wsf-local';
 const PASSWORD = 'switch-secret-1';
@@ -116,8 +118,7 @@ async function createAccount(page: Page, email: string): Promise<string> {
   await expect(page.getByTestId('wsf-verify')).toBeVisible({ timeout: 20_000 });
   await sendSettled;
   await markEmailVerified(email);
-  await page.getByTestId('wsf-verify-check').click();
-  await expect(page.getByTestId('wsf-profile')).toBeVisible({ timeout: 20_000 });
+  await clearVerifyGate(page, 'wsf-profile', 20_000);
   await page.getByTestId('wsf-profile-termsCheckbox').click();
   await page.getByTestId('wsf-profile-submit').click();
   await expect(page.getByTestId('wsf-home-signed-in')).toBeVisible({ timeout: 20_000 });
@@ -139,14 +140,35 @@ test('signing out of one account and creating another never shows the first acco
   await page.getByTestId('wsf-start-name').fill('Harbor Walkers A');
   await page.getByTestId('wsf-start-submit').click();
   await expect(page.getByTestId('wsf-community')).toBeVisible({ timeout: 25_000 });
+  /*
+    A MEMBER WITH EXACTLY ONE COMMUNITY IS TAKEN TO IT.
+
+    This used to assert that `/` showed a "my communities" list containing
+    Harbor Walkers A. That is not a screen this member is shown any more:
+    `resolveCurrentCommunity` resolves a sole membership, and
+    `/community/[groupId]` IS home for them — `/` redirects straight there, so
+    `wsf-home-my-list` was not in the document at all and the assertion failed
+    on a screen the product had stopped rendering for A.
+
+    The setup was stale; the product was right. Nothing about the invariant
+    this test exists for is weakened: B still has no community, so B still
+    lands on Home, and every assertion about what B must not see is unchanged
+    below — and now actually runs, which it never did while setup failed.
+  */
   await page.goto('/');
-  await expect(page.getByTestId('wsf-home-my-list')).toContainText('Harbor Walkers A', {
+  await expect(page.getByTestId('wsf-community-name')).toContainText('Harbor Walkers A', {
     timeout: 20_000,
   });
-  await expect(page.getByTestId('wsf-home-identity')).toContainText(SHARED_DISPLAY_NAME);
 
   // ---- sign out ----
-  await page.getByTestId('wsf-home-signout').click();
+  // Sign out is on /you for a signed-in member; the community route carries no
+  // such control. It routes to `/`, which for a signed-out visitor is home.
+  await page.goto('/you');
+  await expect(page.getByTestId('wsf-you-name')).toContainText(SHARED_DISPLAY_NAME, {
+    timeout: 20_000,
+  });
+  await expect(page.getByTestId('wsf-you-email')).toContainText(emailA.split('@')[0]);
+  await page.getByTestId('wsf-you-signout').click();
   await expect(page.getByTestId('wsf-home-signed-out')).toBeVisible({ timeout: 20_000 });
   expect(await signedInUid(page)).toBeNull();
   // A's community must be gone the moment A is gone.

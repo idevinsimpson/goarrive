@@ -1,0 +1,116 @@
+{
+  "390x844": [
+    {
+      "route": "/",
+      "wordmarkTestId": "wsf-home-wordmark",
+      "wordmarkX": null,
+      "wordmarkY": null,
+      "wordmarkHeight": null,
+      "wordmarkVariant": "none",
+      "firstContentY": null,
+      "bar": true,
+      "move": true
+    },
+    {
+      "route": "/community",
+      "wordmarkTestId": "wsf-community-index-wordmark",
+      "wordmarkX": 18,
+      "wordmarkY": 21,
+      "wordmarkHeight": 22,
+      "wordmarkVariant": "navy",
+      "firstContentY": 66,
+      "bar": true,
+      "move": true
+    },
+    {
+      "route": "/activity",
+      "wordmarkTestId": "wsf-activity-wordmark",
+      "wordmarkX": 18,
+      "wordmarkY": 21,
+      "wordmarkHeight": 22,
+      "wordmarkVariant": "navy",
+      "firstContentY": 66,
+      "bar": true,
+      "move": true
+    },
+    {
+      "route": "/you",
+      "wordmarkTestId": "wsf-you-wordmark",
+      "wordmarkX": 20,
+      "wordmarkY": 33,
+      "wordmarkHeight": 17,
+      "wordmarkVariant": "white",
+      "firstContentY": 68,
+      "bar": true,
+      "move": true
+    },
+    {
+      "route": "/move",
+      "wordmarkTestId": null,
+      "wordmarkX": null,
+      "wordmarkY": null,
+      "wordmarkHeight": null,
+      "wordmarkVariant": "none",
+      "firstContentY": null,
+      "bar": true,
+      "move": true
+    }
+  ],
+  "390x640": [
+    {
+      "route": "/",
+      "wordmarkTestId": "wsf-home-wordmark",
+      "wordmarkX": null,
+      "wordmarkY": null,
+      "wordmarkHeight": null,
+      "wordmarkVariant": "none",
+      "firstContentY": null,
+      "bar": true,
+      "move": true
+    },
+    {
+      "route": "/community",
+      "wordmarkTestId": "wsf-community-index-wordmark",
+      "wordmarkX": 18,
+      "wordmarkY": 21,
+      "wordmarkHeight": 22,
+      "wordmarkVariant": "navy",
+      "firstContentY": 66,
+      "bar": true,
+      "move": true
+    },
+    {
+      "route": "/activity",
+      "wordmarkTestId": "wsf-activity-wordmark",
+      "wordmarkX": 18,
+      "wordmarkY": 21,
+      "wordmarkHeight": 22,
+      "wordmarkVariant": "navy",
+      "firstContentY": 66,
+      "bar": true,
+      "move": true
+    },
+    {
+      "route": "/you",
+      "wordmarkTestId": "wsf-you-wordmark",
+      "wordmarkX": 20,
+      "wordmarkY": 33,
+      "wordmarkHeight": 17,
+      "wordmarkVariant": "white",
+      "firstContentY": 68,
+      "bar": true,
+      "move": true
+    },
+    {
+      "route": "/move",
+      "wordmarkTestId": null,
+      "wordmarkX": null,
+      "wordmarkY": null,
+      "wordmarkHeight": null,
+      "wordmarkVariant": "none",
+      "firstContentY": null,
+      "bar": true,
+      "move": true
+    }
+  ]
+}

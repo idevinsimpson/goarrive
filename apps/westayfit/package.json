@@ -14,6 +14,7 @@
     "test:e2e": "playwright test --config=playwright.config.ts"
   },
   "dependencies": {
+    "@react-navigation/bottom-tabs": "7.18.18",
     "expo": "~54.0.0",
     "expo-constants": "~18.0.13",
     "expo-linking": "~8.0.11",

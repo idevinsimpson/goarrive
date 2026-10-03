@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { expect, test, type Page } from '@playwright/test';
+import { manageOffered, openMemberManage } from './helpers/memberShell';
 
 /**
  * COMMUNITY HOME — phone-first visual checkpoint.
@@ -331,7 +332,10 @@ test('Community Home at phone size — member view, Champion view, full page', a
   // ---- member ---------------------------------------------------------------
   await signInVia(page, memberEmail, password);
   await page.goto(`/community/${groupId}`);
-  await expect(page.getByTestId('wsf-community-wordmark')).toBeVisible({ timeout: 20_000 });
+  // THE WORDMARK IS THE SHELL'S NOW. Community Home drew its own until the
+  // member shell landed; the persistent top bar carries the one wordmark for
+  // every tab, so this asks the same question of the control that answers it.
+  await expect(page.getByTestId('wsf-member-topbar-wordmark')).toBeVisible({ timeout: 20_000 });
   await expect(page.getByTestId('wsf-community-name')).toHaveText('Maple Street Movers');
   await waitForProgress(page, featured);
 
@@ -410,7 +414,10 @@ test('Community Home at phone size — member view, Champion view, full page', a
   await expect(page.getByTestId('wsf-community-invite')).toHaveCount(0);
   // No Champion tools for a member: no Manage, no link rotation, and none of
   // the administrative rows — a member's page carries no role label.
-  await expect(page.getByTestId('wsf-community-manage')).toHaveCount(0);
+  expect(
+    await manageOffered(page),
+    'Champion tools are offered to somebody who is not a Champion',
+  ).toBe(false);
   await expect(page.getByTestId('wsf-community-reset')).toHaveCount(0);
   await expect(page.getByTestId('wsf-community-details-toggle')).toHaveCount(0);
   await expect(page.getByTestId('wsf-community-role')).toHaveCount(0);
@@ -456,8 +463,9 @@ test('Community Home at phone size — member view, Champion view, full page', a
   await signInVia(page, championEmail, password);
   await page.goto(`/community/${groupId}`);
   await waitForProgress(page, featured);
-  const manage = page.getByTestId('wsf-community-manage');
-  await expect(manage).toBeVisible();
+  // THE CHAMPION'S ONE EXTRA CONTROL IS IN THE SHELL'S MENU NOW, not in a
+  // chrome row of the page's own. Offered, and the sheet not yet open.
+  expect(await manageOffered(page), 'a Champion is offered Champion tools').toBe(true);
   await expect(page.getByTestId('wsf-community-manage-panel')).toHaveCount(0);
   // The Champion's own view of the community is the member view plus one control.
   await expect(page.getByTestId(`wsf-community-your-part-${featured}`)).toContainText(
@@ -469,8 +477,7 @@ test('Community Home at phone size — member view, Champion view, full page', a
   await scrollTo(page, 0);
   await snapViewport(page, 'champion-01-top-manage-closed');
   const heroBoxBefore = await page.getByTestId('wsf-community-goal-hero').boundingBox();
-  await manage.click();
-  await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible();
+  await openMemberManage(page);
   await expect(page.getByTestId(`wsf-goal-display-auth-toggle-${featured}`)).toBeVisible();
   await expect(page.getByTestId(`wsf-goal-display-auth-toggle-${closed}`)).toBeVisible();
   // Management is a surface over the page: the hero has not moved.
@@ -496,8 +503,7 @@ test('Community Home at phone size — member view, Champion view, full page', a
 
   // "Start another goal" from inside the sheet leaves for the new-goal
   // screen and takes the sheet with it: nothing stays overlaid on the form.
-  await manage.click();
-  await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible();
+  await openMemberManage(page);
   await page.getByTestId('wsf-community-start-goal').click();
   await expect(page.getByTestId('wsf-new-goal-form')).toBeVisible({ timeout: 20_000 });
   await expect(page.getByTestId('wsf-community-manage-panel')).toHaveCount(0);
@@ -541,6 +547,55 @@ const STATES: Array<{
   { key: '29999-of-30000', total: 29999, target: 30000, percent: '99.9%', status: 'Only 1 to go', ratio: '0.9999' },
 ];
 
+test('a failed pulse read says so on the hero, and its retry can be read', async ({ page }) => {
+  test.setTimeout(120_000);
+  const stamp = `${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`;
+  const password = 'uiA-password';
+  const email = `wsf-uiA-pulsefail-${stamp}@example.com`;
+  const uid = await seedVerifiedUser(email, password);
+  await seedProfile(uid, 'Fixture Champion');
+  const groupId = await seedCommunity(`pulsefail-${stamp}`, 'WE pulse failure', [
+    { uid, role: 'foundingChampion' },
+  ]);
+  const goalId = `uiA-pulsefail-${stamp}`;
+  await seedGoal(groupId, uid, {
+    goalId,
+    title: 'Fixture goal 241 of 500',
+    target: 500,
+    unit: 'squats',
+    total: 241,
+    status: 'active',
+    endsInMs: 2 * 24 * 60 * 60_000,
+  });
+  await signInVia(page, email, password);
+
+  // The goal list answers; only the pulse fails. The hero keeps the goal's
+  // title and says the numbers could not be read — no mark, no zero.
+  await page.route('**/wsfGoalPulse', (route) => route.abort('failed'));
+  await page.goto(`/community/${groupId}`);
+  const error = page.getByTestId(`wsf-community-goal-progress-error-${goalId}`);
+  await expect(error).toBeVisible({ timeout: 30_000 });
+  await expect(error).toContainText('Progress couldn’t be loaded just now.');
+  await expect(page.getByTestId(`wsf-community-goal-we-${goalId}`)).toHaveCount(0);
+  await expect(page.getByTestId(`wsf-community-goal-percent-${goalId}`)).toHaveCount(0);
+
+  // READABLE, NOT MERELY PRESENT. The retry sits inside the navy hero. For
+  // one pass its label was navy as well — the DOM had the words, a test
+  // could click them, and a person saw an empty outlined pill. The label is
+  // the hero's light ink, asserted as the colour that actually rendered.
+  const retry = page.getByTestId(`wsf-community-goal-progress-retry-${goalId}`);
+  await expect(retry).toHaveText('Try again');
+  await expect(retry.locator('div').first()).toHaveCSS('color', 'rgb(247, 245, 240)');
+
+  // And it works: once the read can succeed, the retry brings the numbers.
+  await page.unroute('**/wsfGoalPulse');
+  await retry.click();
+  await expect(page.getByTestId(`wsf-community-goal-percent-${goalId}`)).toHaveText('48.2% complete', {
+    timeout: 30_000,
+  });
+  await expect(error).toHaveCount(0);
+});
+
 test('Living WE static states through the real data path', async ({ page }) => {
   test.setTimeout(300_000);
   const stamp = `${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`;
@@ -580,11 +635,15 @@ test('Living WE static states through the real data path', async ({ page }) => {
     );
     await expect(page.getByTestId(`wsf-community-goal-status-${goalId}`)).toHaveText(state.status);
     // A3. The hero eyebrow is the one place this surface says the target is
-    // met while the goal is still open. Every other state keeps the neutral
-    // "What we're doing".
-    // SLICE 1. The neutral label is gone — it named what the card already
-    // said. "Goal reached" is real news and keeps the slot, so the eyebrow is
-    // now present ONLY in that state.
+    // met while the goal is still open.
+    //
+    // THE EYEBROW CARRIES REAL STATE NEWS, OR NOTHING.
+    //
+    // A standing communal line held this slot for one pass and has been
+    // removed: it is not part of the approved verbal hierarchy. Both branches
+    // are still asserted — exact text where the news exists, and the ABSENCE
+    // of the element where it does not, which is what "no standing slogan"
+    // actually means and what would catch one creeping back in.
     if (state.key === '500-of-500') {
       await expect(page.getByTestId('wsf-community-goal-eyebrow')).toHaveText('Goal reached');
     } else {

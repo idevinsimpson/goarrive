@@ -1,0 +1,28 @@
+{
+  "lovableRef": "642f830baa1153b0d9465dc75690028768083fb7",
+  "source": "app/(tabs)/you.tsx on 87997c58 (PERF ad3d2f88 + Phase A 02f86fc2 / 92993f09) + YouParityView",
+  "frames": [
+    {
+      "state": "normal",
+      "viewport": "390x844",
+      "route": "route/route-you-normal-390x844.png",
+      "routeSha256": "1275d25d9f6b51aa54688879931c61f3e1a61ebe59d594f39d36634cd822af0f",
+      "lovable": "lovable-642f830b/you-normal-390x844.png",
+      "lovableSha256": "86f270cb9a0bf86fe84240f86a1e819468e9d1534a37fb118516be32ae33b671",
+      "sideBySide": "route/cmp-route-you-normal-390x844-full-side-by-side.png",
+      "differingPixelShareFullFrame": 0.3965,
+      "note": "full viewport, no crop, no alignment; shell masthead and tab bar are the real ones"
+    },
+    {
+      "state": "normal",
+      "viewport": "390x640",
+      "route": "route/route-you-normal-390x640.png",
+      "routeSha256": "bba6560ca62f3209f650f51b5cad75e000e9c26635d4f78d0f3450ff796a8fd5",
+      "lovable": "lovable-642f830b/you-normal-390x640.png",
+      "lovableSha256": "87063a31aa66222d205f4c73d9a2157a41845965f8385299e2ae14ca2914eb2b",
+      "sideBySide": "route/cmp-route-you-normal-390x640-full-side-by-side.png",
+      "differingPixelShareFullFrame": 0.4302,
+      "note": "full viewport, no crop, no alignment; shell masthead and tab bar are the real ones"
+    }
+  ]
+}

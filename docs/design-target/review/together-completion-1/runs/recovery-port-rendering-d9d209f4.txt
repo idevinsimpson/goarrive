@@ -1,0 +1,40 @@
+
+Running 6 tests using 1 worker
+
+  ✓  1 [chromium] › tests-e2e/sprint-w9-recovery-port-rendering.spec.ts:148:7 › RECOVERY-PORT-1 · the ported recovery states › unknown: the reference order on the accepted words, one action, no discard, no shared figure (1.6s)
+  ✓  2 [chromium] › tests-e2e/sprint-w9-recovery-port-rendering.spec.ts:182:7 › RECOVERY-PORT-1 · the ported recovery states › Confirm is a write: an attempt that never reached the server is recorded by it, once (1.5s)
+  ✘  3 [chromium] › tests-e2e/sprint-w9-recovery-port-rendering.spec.ts:205:7 › RECOVERY-PORT-1 · the ported recovery states › receipt: the member’s own numbers before the community’s, and the way back is the green action (1.4s)
+  ✓  4 [chromium] › tests-e2e/sprint-w9-recovery-port-rendering.spec.ts:242:7 › RECOVERY-PORT-1 · the ported recovery states › review: Edit and the green Record side by side, nothing written first (1.5s)
+MEASURE hero launcher → chrome Back: {"path":"/community/w9rpr-murvcuzq-8b30d2x","focus":"a[wsf-community-goal-record-w9rprgoal-murvcuzq-8b30d2x]","homeTabCurrent":"true"}
+MEASURE unknown → labelled exit: {"path":"/community/w9rpr-murvcuzq-8b30d2x","focus":"a[wsf-community-goal-record-w9rprgoal-murvcuzq-8b30d2x]","communityScreens":1}
+MEASURE return through the launcher: {"restoredSameAttempt":true,"sendsOnReturn":0}
+MEASURE receipt → labelled exit: {"path":"/community/w9rpr-murvcuzq-8b30d2x","focus":"a[wsf-community-goal-record-w9rprgoal-murvcuzq-8b30d2x]","communityScreens":1}
+MEASURE MOVE centre (from You) → contribute: {"path":"/contribute/w9rprgoal-murvcuzq-8b30d2x","ownBackLabel":"Close"}
+MEASURE MOVE centre (from You) → the route's own Back: {"path":"/you","focus":"button[wsf-member-tab-move]","youTabCurrent":"true","moveLauncherFocused":true}
+  ✓  5 [chromium] › tests-e2e/sprint-w9-recovery-port-rendering.spec.ts:258:7 › RECOVERY-PORT-1 · the ported recovery states › exits, measured: the kept attempt survives a round trip; where each way out lands, and focus (9.8s)
+  ✓  6 [chromium] › tests-e2e/sprint-w9-recovery-port-rendering.spec.ts:383:7 › RECOVERY-PORT-1 · the ported recovery states › the route's own Back, opened cold: it says "Back" and still lands on its fallback, replacing (5.0s)
+
+
+  1) [chromium] › tests-e2e/sprint-w9-recovery-port-rendering.spec.ts:205:7 › RECOVERY-PORT-1 · the ported recovery states › receipt: the member’s own numbers before the community’s, and the way back is the green action 
+
+    Error: receipt: not in the reference's order (6, 8, 23, 7, 34, 10, 27, 31, 32, 36)
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: true
+    Received: false
+
+      226 |       { id: 'wsf-contribute-result-standing' },
+      227 |     ]);
+    > 228 |     expect(ascending(order), `receipt: not in the reference's order (${order.join(', ')})`).toBe(true);
+          |                                                                                             ^
+      229 |     await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText('Your total on this goal: 20 squats');
+      230 |
+      231 |     const fills = await page.evaluate(() => {
+        at /home/user/goarrive/apps/westayfit/tests-e2e/sprint-w9-recovery-port-rendering.spec.ts:228:93
+
+    Error Context: test-results/sprint-w9-recovery-port-re-e7898-ay-back-is-the-green-action-chromium/error-context.md
+
+  1 failed
+    [chromium] › tests-e2e/sprint-w9-recovery-port-rendering.spec.ts:205:7 › RECOVERY-PORT-1 · the ported recovery states › receipt: the member’s own numbers before the community’s, and the way back is the green action 
+  5 passed (22.7s)

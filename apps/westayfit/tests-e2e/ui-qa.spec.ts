@@ -3,6 +3,7 @@ import path from 'node:path';
 import { mkdirSync } from 'node:fs';
 
 import { expect, test, type Page } from '@playwright/test';
+import { openMemberManage } from './helpers/memberShell';
 
 /**
  * PHONE / ACCESSIBILITY QA across the three surfaces.
@@ -142,7 +143,7 @@ test('Manage sheet: focus stays inside, background is blocked, Escape closes', a
     await signInVia(page, fx.championEmail, fx.password);
     await page.goto(`/community/${fx.groupId}`);
     await expect(page.getByTestId(`wsf-community-goal-percent-${fx.goalId}`)).toBeVisible({ timeout: 30_000 });
-    await page.getByTestId('wsf-community-manage').click();
+    await openMemberManage(page);
     await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible();
     // Tab several times: focus never leaves the sheet, and lands on real controls.
     const seen: string[] = [];
