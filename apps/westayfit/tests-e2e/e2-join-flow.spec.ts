@@ -2,7 +2,33 @@ import { randomBytes } from 'node:crypto';
 
 import { expect, test, type Page } from '@playwright/test';
 
-import { clearVerifyGate } from './helpers/mobile';
+/**
+ * PAST THE VERIFY GATE, WITHOUT RACING IT (EXPO-ACCOUNT-ENTRY-1).
+ *
+ * verify-email refreshes the user on its own and moves on as soon as the
+ * address is verified. The shared `clearVerifyGate` clicks "I have verified"
+ * as soon as it is visible, which races that auto-advance: the click either
+ * waits on a button that has gone, or lands on whatever the next screen has at
+ * that spot — profile-setup's "Sign out" — and signs the new account out.
+ * Measured: about one run in three, on the base build as well. So this waits
+ * for the screen to move on by itself first, and asks only if it has not.
+ */
+async function passVerifyGate(page: Page, destination: string, timeout = 30_000): Promise<void> {
+  const target = page.getByTestId(destination);
+  try {
+    await target.waitFor({ state: 'visible', timeout: 10_000 });
+    return;
+  } catch {
+    // Still on verify-email: ask once, bounded, and only while it is there.
+  }
+  const check = page.getByTestId('wsf-verify-check');
+  if (await check.isVisible().catch(() => false)) {
+    await check.click({ timeout: 3_000 }).catch(() => {});
+  }
+  await expect(target).toBeVisible({ timeout });
+}
+
+
 
 /**
  * E2 end-to-end: a signed-out visitor with only a `/join/<code>` URL reaches
@@ -209,7 +235,7 @@ test('E2 §3.1/§3.4/§3.5: a signed-out visitor with only a join URL reaches /c
   await expect(page.getByTestId('wsf-verify')).toBeVisible({ timeout: 15_000 });
   await sendSettled;
   await markEmailVerified(email);
-  await clearVerifyGate(page, 'wsf-profile', 15_000);
+  await passVerifyGate(page, 'wsf-profile', 15_000);
   // E3.5 A4: the 18+ checkbox is gone from profile-setup.
   await expect(page.getByTestId('wsf-profile-adultCheckbox')).toHaveCount(0);
   await page.getByTestId('wsf-profile-termsCheckbox').click();
