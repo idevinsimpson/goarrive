@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "38296e5cbafc0dc20dad252ea15e84f2caa4030cf7dce090f0afdf95e4d7dfe9",
-  "eventCount": 284,
+  "ledgerHead": "de858c132be342c2704f6931112429b13f541b274fdf19ab3a77a5a0b3dfb64a",
+  "eventCount": 286,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -61,9 +61,7 @@
     }
   },
   "queue": {
-    "W3": [
-      "EXPO-ACCOUNT-ENTRY-1-STAGING-PIN"
-    ],
+    "W3": [],
     "W4": [],
     "W5": [],
     "W7": [],
@@ -494,10 +492,10 @@
       },
       "label": "Pin exact integrated expo account-entry milestone through the existing reviewed full staging path",
       "origin": "ledger",
-      "phase": "QUEUED",
+      "phase": "RELEASED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
-      "inbox": null,
+      "inbox": 396,
       "pr": null,
       "reviewers": [],
       "artifact": {
@@ -508,7 +506,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": null,
+      "releasedQueueIndex": 0,
       "reviewedBy": [],
       "subjectPaths": [
         ".github/wsf-staging/approved-candidate.json"
@@ -520,11 +518,14 @@
           "kind": "comment",
           "id": 5963456061
         },
-        "released": null,
+        "released": {
+          "kind": "comment",
+          "id": 5963494417
+        },
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5963456061
+          "id": 5963494417
         }
       },
       "review": {
@@ -1801,6 +1802,14 @@
         "kind": "comment",
         "id": 5963446733
       }
+    },
+    "72a007ddbccabda02c0d3cd2770af8e9218a85f85c148020b3956c3a4b9c5f2f": {
+      "packet": "EXPO-ACCOUNT-ENTRY-1-STAGING-PIN",
+      "worker": "W3",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
