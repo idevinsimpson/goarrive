@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "f759f18e5b03b3eae3993b37442ac87bbff55a5e4dc261ea75caa64e2b641f81",
-  "eventCount": 453,
+  "ledgerHead": "7e60529cec3d33f15a9a5f6d787a88456d4687d3b299f7ac43db5190b424e088",
+  "eventCount": 455,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -767,7 +767,7 @@
       },
       "label": "Close GAP-2 by refusing queue and turn admission after a goal closes without changing the existing expo systems",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "CHANGES_REQUESTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -804,7 +804,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5968061899
+          "id": 5968858147
         }
       },
       "review": {
@@ -2602,7 +2602,16 @@
       "ack": {
         "kind": "comment",
         "id": 5968577994
-      }
+      },
+      "superseded": true
+    },
+    "c5a5ccb39664890406402807544018477dc94c1aa62530feb59df63e67ccaa05": {
+      "packet": "EXPO-CLOSED-GOAL-QUEUE-GATE-1",
+      "worker": "W9",
+      "reason": "handback",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {

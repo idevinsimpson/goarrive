@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=f759f18e5b03b3eae3993b37442ac87bbff55a5e4dc261ea75caa64e2b641f81 events=453 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=7e60529cec3d33f15a9a5f6d787a88456d4687d3b299f7ac43db5190b424e088 events=455 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `f759f18e5b03b3eae3993b37442ac87bbff55a5e4dc261ea75caa64e2b641f81` (453 events)
+- Ledger head: `7e60529cec3d33f15a9a5f6d787a88456d4687d3b299f7ac43db5190b424e088` (455 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -30,10 +30,10 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | Worker | Inbox | Active now | Reviewing | Waiting on review | Blocked | Next | Queue | WATCH |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | W3 | #396 | — | — | WORKER-EXECUTION-PROFILES-1 | — | — | — | off |
-| W4 | #394 | — | EXPO-CLOSED-GOAL-QUEUE-GATE-1 | — | — | — | — | on |
+| W4 | #394 | — | — | — | — | — | — | off |
 | W5 | #395 | — | — | — | — | — | — | off |
 | W7 | #434 | — | — | — | — | — | — | off |
-| W9 | #497 | — | — | EXPO-CLOSED-GOAL-QUEUE-GATE-1 | — | — | — | off |
+| W9 | #497 | EXPO-CLOSED-GOAL-QUEUE-GATE-1 | — | — | — | — | — | on |
 
 ## Packets
 
@@ -49,7 +49,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | EXPO-ACCOUNT-ENTRY-1-STAGING-PIN | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #566 | 04ca5d05 | 04ca5d05 | 04ca5d05 | 08a2f08d | — | W4 | comment:5963494417 | pull_request:566 | — | Pin exact integrated expo account-entry milestone through the existing reviewed full staging path | 1×ops-source then director | — |
 | EXPO-ATTENDEE-HOSTED-DRIVERS-1 | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #569 | f2c0e4e9 | f2c0e4e9 | — | dcf86674 | — | W4 | comment:5965372716 | pull_request:569 | — | Add the missing hosted attendee drivers and generated owner-card inputs using the existing staging journey framework | 1×ops-source then director | — |
 | EXPO-ATTENDEE-JOURNEY-PROOF-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #563 | 12e70c5a | 12e70c5a | — | 0669c446 | — | W4 | comment:5963015704 | pull_request:563 | — | Prove the existing attendee phone and two-station journey and expose only real missing seams; test and evidence source, not live expo acceptance | 1×journey-qa then director | — |
-| EXPO-CLOSED-GOAL-QUEUE-GATE-1 | W9 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #571 | 7830ec15 | 7830ec15 | — | — | — | W4 | comment:5967515210 | comment:5968061899 | — | Close GAP-2 by refusing queue and turn admission after a goal closes without changing the existing expo systems | 1×journey-qa then director | — |
+| EXPO-CLOSED-GOAL-QUEUE-GATE-1 | W9 | work | INTEGRATED (source-only) | ledger | CHANGES_REQUESTED | #571 | 7830ec15 | 7830ec15 | — | — | — | W4 | comment:5967515210 | comment:5968858147 | — | Close GAP-2 by refusing queue and turn admission after a goal closes without changing the existing expo systems | 1×journey-qa then director | — |
 | EXPO-STATION-LOST-ANSWER-COPY-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #564 | 1d290f74 | 1d290f74 | — | 5be74f3f | — | W4 | comment:5963613447 | pull_request:564 | — | Replace station vendor error text with existing product-safe callable wording without changing retry truth | 1×journey-qa then director | — |
 | KIOSK-PAIRING-CLARITY-PROOF-1 | W9 | work | STAGED (hosted) | ledger | STAGED | #553 | 4537c26c | 4537c26c | — | ab77fbfc | hosted run 37025084843: PASS | W4 | comment:5945136749 | comment:5955903159 | — | Clarify venue-station pairing from the Champion's own phone and prove the existing flow end-to-end | 1×journey-qa then director | — |
 | STAGING-FASTPATH-DOCS-LINEAGE-FIX | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #551 | 963dd558 | 963dd558 | — | 9825aa36 | — | W4 | comment:5944563639 | pull_request:551 | — | Step 7 correction: allow provably non-runtime docs/instruction lineage while preserving fail-closed fast-path invariants | 1×ops-source then director | — |
@@ -135,4 +135,5 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | bbb96cee8584 | W4 | TOGETHER-COMPLETION-1 | review | acked | 5966716452 | comment:5966720423 |
 | fc57d7509e59 | W9 | EXPO-CLOSED-GOAL-QUEUE-GATE-1 | release | acked | 5967569216 | comment:5967575943 |
 | 1def1466c4df | W4 | EXPO-CLOSED-GOAL-QUEUE-GATE-1 | review | acked | 5968552774 | comment:5968577994 |
+| c5a5ccb39664 | W9 | EXPO-CLOSED-GOAL-QUEUE-GATE-1 | handback | requested | — | — |
 
