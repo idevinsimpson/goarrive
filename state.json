@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "a921bf25f57fac146fd5039a4742c4a1b29d9aecd83cb3831dc25411551e5151",
-  "eventCount": 363,
+  "ledgerHead": "38b55088b43b14b41497a611d15563fe92d227337f21f1486d4f3a267fce8bcf",
+  "eventCount": 370,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -65,7 +65,9 @@
     "W4": [],
     "W5": [],
     "W7": [],
-    "W9": []
+    "W9": [
+      "TOGETHER-COMPLETION-1"
+    ]
   },
   "packets": {
     "AUTONOMY-ROUTER-1C": {
@@ -346,18 +348,18 @@
       },
       "label": "Diagnose and repair staging verification and password-reset delivery without weakening mail security",
       "origin": "ledger",
-      "phase": "CHANGES_REQUESTED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
       "pr": 559,
       "reviewers": [
         "W4",
-        "W9"
+        "W5"
       ],
       "artifact": {
-        "subjectSha": "44ae489810cee6b01f618175987a28bf58f5811d",
-        "prHeadSha": "44ae489810cee6b01f618175987a28bf58f5811d",
+        "subjectSha": "39484f78eff84f689a07a4f402fa43b407d729cb",
+        "prHeadSha": "39484f78eff84f689a07a4f402fa43b407d729cb",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -387,7 +389,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5964370581
+          "id": 5964965515
         }
       },
       "review": {
@@ -404,7 +406,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 2,
+      "deliveries": 3,
       "pendingFinding": null
     },
     "EXPO-ACCOUNT-ENTRY-1": {
@@ -490,7 +492,7 @@
       },
       "label": "Pin exact integrated expo account-entry milestone through the existing reviewed full staging path",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "ACCEPTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -524,10 +526,13 @@
           "kind": "comment",
           "id": 5963494417
         },
-        "accepted": null,
+        "accepted": {
+          "kind": "comment",
+          "id": 5964962327
+        },
         "lastTransition": {
           "kind": "comment",
-          "id": 5964925987
+          "id": 5964962327
         }
       },
       "review": {
@@ -1223,6 +1228,70 @@
         "after": "director"
       },
       "deliveries": 2,
+      "pendingFinding": null
+    },
+    "TOGETHER-COMPLETION-1": {
+      "owner": "W9",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Port the owner-selected Together completion from the frozen Lovable reference to the confirmed member receipt with truthful totals, one-time motion and reduced-motion parity",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "apps/westayfit/app/contribute/[goalId].tsx",
+        "apps/westayfit/src/contributionFlow.ts",
+        "apps/westayfit/src/ui/LivingWeProgress.tsx",
+        "apps/westayfit/src/ui/TogetherCompletion.tsx",
+        "apps/westayfit/src/ui/togetherMotion.ts",
+        "apps/westayfit/tests/contribution-flow.test.ts",
+        "apps/westayfit/tests/together-completion.test.ts",
+        "apps/westayfit/tests-e2e/ui-contribute-together.spec.ts",
+        "apps/westayfit/tests-e2e/ui-contribute-crossing.spec.ts",
+        "docs/design-target/review/together-completion-1"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 5964956757
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 5964956757
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "journey-qa",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
       "pendingFinding": null
     },
     "WORKER-EXECUTION-PROFILES-1": {
@@ -2114,7 +2183,8 @@
       "ack": {
         "kind": "comment",
         "id": 5964907774
-      }
+      },
+      "superseded": true
     },
     "76939a4d36a6ab2a6c1cd1db0dc2bc0796b5dc8899b85d810a6f05accd139f15": {
       "packet": "EXPO-ACCOUNT-ENTRY-1-STAGING-PIN",
@@ -2129,6 +2199,22 @@
         "id": 5964911077
       },
       "superseded": true
+    },
+    "8948c387eef60ddfa23e154555e3fcb5651dafba6661e752894183664a737387": {
+      "packet": "EMAIL-STAGING-REPAIR",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
+    },
+    "4925976176a1320dba6ff5c4d9bcbeef7a661cf61641b369cc3e0598c5d4417f": {
+      "packet": "EMAIL-STAGING-REPAIR",
+      "worker": "W5",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
