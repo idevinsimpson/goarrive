@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "71a1ef27c37b39826c405e107ee8d5738650d1ff3969a186d9725778780c0caa",
-  "eventCount": 440,
+  "ledgerHead": "4e2a6cd2afcf2f7ddc84f0a4d140e1d59bf9c10646707d96562d6f3f3a4b1b57",
+  "eventCount": 441,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1380,7 +1380,7 @@
       },
       "label": "Port the owner-selected Together completion from the frozen Lovable reference to the confirmed member receipt with truthful totals, one-time motion and reduced-motion parity",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "ACCEPTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -1423,10 +1423,13 @@
           "kind": "comment",
           "id": 5964984624
         },
-        "accepted": null,
+        "accepted": {
+          "kind": "comment",
+          "id": 5967005269
+        },
         "lastTransition": {
           "kind": "comment",
-          "id": 5966771353
+          "id": 5967005269
         }
       },
       "review": {
