@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "0b9fd1f78073bdeddf20393879fb6c0022be758211568a2f6c3c76dd526d7a19",
-  "eventCount": 323,
+  "ledgerHead": "d988574cbbda9a25a05a179594a02a1a088cdb6a6dcd70e00e97279bb373db1d",
+  "eventCount": 325,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -641,7 +641,9 @@
       "proof": null,
       "served": null,
       "releasedQueueIndex": null,
-      "reviewedBy": [],
+      "reviewedBy": [
+        "W4"
+      ],
       "subjectPaths": [
         "apps/westayfit/app/station/[goalId].tsx"
       ],
@@ -659,7 +661,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5963721600
+          "id": 5963815176
         }
       },
       "review": {
@@ -2022,17 +2024,21 @@
       "ack": {
         "kind": "comment",
         "id": 5963742004
-      }
+      },
+      "superseded": true
     },
     "a73fe0dad4728adfa1a2e5b64bee7f46248e8812d0ddb733fc1ecd9dbc9b1169": {
       "packet": "STAGING-PIN-FASTPATH-SERVED-BASELINE-1",
       "worker": "W9",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         5963815274
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 5963818954
+      }
     }
   },
   "fastpath": {
