@@ -636,6 +636,95 @@ for (const [name, make, re] of SUPERSEDED_REFUSALS) {
   });
 }
 
+// ---- EXPO-LATEST-FULL-STAGING-PIN-1: a bounded two-link chain (Director #396 5970631460) ------
+// P deployed (served S by run 7) -> CS never served -> CS2 never served -> candidate CS3.
+g('checkout', '-q', 'served');
+write('apps/westayfit/app/new-route.tsx', 'after the second never-served pin\n');
+const CS3 = commit('the candidate after two never-served pins');
+g('checkout', '-q', 'main');
+const SUP_CHAIN1 = run(SUPERSEDED({ out: path.join(root, 'sup-chain1.json') })); // CS2 superseding CS
+assert.equal(SUP_CHAIN1.code, 0, SUP_CHAIN1.err);
+const chainL = supersededCase(SUP_CHAIN1.text);
+const CHAIN = (over = {}) => LEDGER(S, { candidate: CS3, 'ops-head': chainL.ops, 'superseded-approval': chainL.file, ...over });
+
+test('CHAIN (fail-before shape): the single-link rule alone cannot accept an approval that superseded a never-served one', () => {
+  const inv = SUP_CHAIN1.json._pinInvariants;
+  assert.equal(inv.previousApprovedAppSha, CS, 'the CS2 approval says it replaced CS, not the deployed P');
+  assert.equal(inv.supersededApproval.lastDeployedApprovalSha, P);
+  assert.equal(inv.supersededApproval.priorNeverServed, undefined, 'a single link records no prior');
+});
+
+test('CHAIN: P deployed -> CS never served -> CS2 never served -> CS3 rolls back to S and names both never-served pins', () => {
+  const r = run(CHAIN());
+  assert.equal(r.code, 0, r.err);
+  const j = r.json;
+  const [s8, cs8, cs28] = [S.slice(0, 8), CS.slice(0, 8), CS2.slice(0, 8)];
+  assert.equal(j.approvedAppSha, CS3);
+  assert.ok(j._fullCandidateNote.startsWith(`${CS3} is measured against ${S}, the SHA run 7 (1001) served in ledger fast-path mode and whose hosted marker that run observed. ` +
+    `The SHA this file previously approved, ${CS2}, was NEVER SERVED: it was approved on operational main after run 7, descends from ${s8}, is an ancestor of the candidate, ` +
+    `and is superseded by this pin before any deploy. It had itself superseded ${CS}, also NEVER SERVED. The historical pin ${P}, which run 7's operational main still named, is approval ancestry only: that run did not deploy it.`), j._fullCandidateNote);
+  assert.ok(j._rollbackNote.includes(`The previous known-good served app SHA is ${S}:`));
+  assert.equal(j[`_previousPackageLabel${cs28}`], `HISTORICAL, the label of the ${cs28} pin, which no deploy served: run 7 (1001), the last deploy-mode run, served ${s8}, and this pin supersedes it before any deploy: THE NEW LABEL`);
+  assert.equal(j[`_previousPackageLabel${cs8}`], SUP_CHAIN1.json[`_previousPackageLabel${cs8}`], 'the first never-served label is kept as written');
+  assert.equal(j[`_previousPackageLabel${P.slice(0, 8)}`], SUP_LEDGER.json[`_previousPackageLabel${P.slice(0, 8)}`], 'the deployed pin\'s label is kept as written');
+  const inv = j._pinInvariants;
+  assert.equal(inv.previousApprovedAppSha, CS2);
+  assert.equal(inv.servedBaseline.historicalPin, P);
+  assert.equal(inv.servedBaseline.rollbackTarget, S);
+  assert.deepEqual(inv.supersededApproval, {
+    approvedAppSha: CS2, served: false, servedAppSha: S, lastDeployedApprovalSha: P,
+    descendsFromServed: true, ancestorOfCandidate: true, anchoringRun: 1001, matchesOperationalHead: chainL.ops, priorNeverServed: CS,
+  });
+  assert.equal(j.expectedPriorFunctions, 3);
+  assert.deepEqual(j.candidateAddedFunctions, ['wsfgamma']);
+  assert.ok(r.out.includes(`PIN_PREVIOUS=${CS2}\nPIN_SUPERSEDED_NEVER_SERVED=${CS2}\nPIN_SERVED=${S}\nPIN_ROLLBACK=${S}\n`), r.out);
+  assert.equal(run(CHAIN()).text, r.text, 'deterministic');
+});
+
+test('CHAIN leaves ordinary and single-link output byte-identical', () => {
+  assert.equal(run().text, SUP_FULL.text);
+  assert.equal(run(LEDGER(S)).text, SUP_LEDGER.text);
+  assert.equal(run(SUPERSEDED()).text, SUP_CHAIN1.text, 'the single link is generated exactly as before');
+  assert.doesNotMatch(SUP_CHAIN1.text, /priorNeverServed|It had itself superseded/);
+});
+
+const chainJson = () => JSON.parse(SUP_CHAIN1.text);
+const chainWith = (f) => { const j = chainJson(); f(j, j._pinInvariants.supersededApproval); const c = supersededCase(j); return CHAIN({ 'ops-head': c.ops, 'superseded-approval': c.file }); };
+const CHAIN_REFUSALS = [
+  ['an inner link recorded as served', () => chainWith((j, i) => { i.served = true; }), /is not recorded as never served/],
+  ['an inner link with no served flag at all', () => chainWith((j, i) => { delete i.served; }), /has no served/],
+  ['an inner SHA that is not the approval\'s previous one', () => chainWith((j, i) => { i.approvedAppSha = S; }), /names .* but the approval says it replaced/],
+  ['a previous SHA that is not the inner one', () => chainWith((j) => { j._pinInvariants.previousApprovedAppSha = B0; }), /names .* but the approval says it replaced/],
+  ['a wrong lastDeployedApprovalSha', () => chainWith((j, i) => { i.lastDeployedApprovalSha = B0; }), /measured from the deployed pin/],
+  ['a wrong inner served SHA', () => chainWith((j, i) => { i.servedAppSha = P; }), /records the served SHA/],
+  ['a wrong inner anchoring run', () => chainWith((j, i) => { i.anchoringRun = 999; }), /anchored on run 999/],
+  ['inner lineage checks not recorded as held', () => chainWith((j, i) => { i.descendsFromServed = false; }), /does not record its own lineage checks/],
+  ['an inner link that does not descend from the served SHA', () => chainWith((j, i) => { i.approvedAppSha = C_SIDE; j._pinInvariants.previousApprovedAppSha = C_SIDE; j[`_previousPackageLabel${C_SIDE.slice(0, 8)}`] = 'x'; }), /does not descend from the served SHA/],
+  ['an inner link that is not an ancestor of the superseded SHA', () => chainWith((j, i) => { i.approvedAppSha = CS3; j._pinInvariants.previousApprovedAppSha = CS3; j[`_previousPackageLabel${CS3.slice(0, 8)}`] = 'x'; }), /is not an ancestor of the superseded SHA/],
+  ['an inner SHA that is not a commit', () => chainWith((j, i) => { i.approvedAppSha = 'd'.repeat(40); j._pinInvariants.previousApprovedAppSha = 'd'.repeat(40); }), /is not a commit/],
+  ['an inner SHA that is the served SHA', () => chainWith((j, i) => { i.approvedAppSha = S; j._pinInvariants.previousApprovedAppSha = S; }), /is the served SHA, the deployed pin or the superseded SHA/],
+  ['an inner link never rotated into history', () => chainWith((j) => { delete j[`_previousPackageLabel${CS.slice(0, 8)}`]; }), /has not rotated/],
+  ['a three-link chain (an inner link that is itself a chain)', () => chainWith((j, i) => { i.priorNeverServed = CS; }), /is itself a chain/],
+  ['a malformed inner record', () => chainWith((j) => { j._pinInvariants.supersededApproval = 'f84346d3'; }), /record is malformed/],
+  ['an inner record with an unknown key', () => chainWith((j, i) => { i.trusted = true; }), /carries an unknown trusted/],
+  ['a missing inner record', () => chainWith((j) => { delete j._pinInvariants.supersededApproval; }), /did not replace the deployed approval/],
+  ['stale run evidence on the chained approval', () => chainWith((j) => { j._pinInvariants.run.id = 999; }), /stale run evidence/],
+  ['a stale marker on the chained approval', () => chainWith((j) => { j._pinInvariants.run.verifiedMarker = P; }), /stale run or marker/],
+  ['a different rollback on the chained approval', () => chainWith((j) => { j._pinInvariants.servedBaseline.rollbackTarget = P; }), /rolls back to .*, not the served/],
+  ['a different inventory on the chained approval', () => chainWith((j) => { j.expectedPriorFunctions = 4; }), /expects 4 prior functions/],
+  ['a different retained set on the chained approval', () => chainWith((j) => { j.candidateAddedFunctions = ['wsfother']; }), /does not retain/],
+  ['a chained approval that is not an ancestor of the candidate', () => CHAIN({ candidate: CS2 }), /is the candidate/],
+];
+for (const [name, make, re] of CHAIN_REFUSALS) {
+  test(`REFUSED (chain): ${name}`, () => {
+    const r = run(make());
+    assert.equal(r.code, 1, `expected a refusal: ${r.out}`);
+    assert.match(r.err, re);
+    assert.match(r.err, /PIN=refused/);
+    assert.equal(r.text, null, 'a refusal must not write the output');
+  });
+}
+
 // ---- helpers ----------------------------------------------------------------------------
 test('exportedFunctions counts callables only, and refuses to guess past a re-export', () => {
   assert.deepEqual(exportedFunctions(fn(['wsfB', 'wsfA'])), ['wsfa', 'wsfb']);

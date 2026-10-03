@@ -353,6 +353,7 @@ export function expoServer(be, bugs = {}) {
     },
     callNext(stationId) {
       const st = stationFor(stationId);
+      if (!open(st.goalId) && bugs.closedCallEndsWaiting) { for (const e of waiting(st.goalId)) end(e, 'left', 'closed'); throw fail(CLOSED); }
       if (!open(st.goalId) && !bugs.closedCall && !bugs.closedCallAdvances) throw fail(CLOSED);
       const held = serving(st);
       if (held) throw fail('This screen is still running a turn.');
@@ -492,6 +493,7 @@ function expoPage(be, server, bugs, ctx, context) {
       } });
       return N;
     }
+    if (st.path.startsWith('/event/') && st.redirectAt !== null && st.redirectAt !== undefined && S.now >= st.redirectAt) { st.redirectAt = null; go(`/queue/${g}`); }
     if (st.path.startsWith('/event/')) {
       if (!ctx.answered) { add('wsf-event-device-choice'); add('wsf-device-choice-personal', { text: 'My own phone', click: () => { ctx.answered = true; } }); return N; }
       if (!ctx.uid) { add('wsf-event-signed-out'); return N; }
@@ -503,7 +505,12 @@ function expoPage(be, server, bugs, ctx, context) {
         add('wsf-event-queue-name', { fill: (v) => { st.typed.name = v; } });
         add('wsf-event-queue-join', { click: async () => {
           st.queueError = null;
-          try { await invoke('wsfJoinTurnLine', () => server.join(g, ctx.uid, st.typed.name)); } catch (e) { st.queueError = e.message; return; }
+          try { await invoke('wsfJoinTurnLine', () => server.join(g, ctx.uid, st.typed.name)); } catch (e) {
+            st.queueError = e.message;
+            // Defect: the sentence shows, then the page moves on to a queue page anyway.
+            if (bugs.closedJoinNavigates) st.redirectAt = S.now + 2_000;
+            return;
+          }
           if (!bugs.noQueuePage) go(`/queue/${g}`);
         } });
         if (st.queueError) add('wsf-event-queue-error', { text: st.queueError });
@@ -633,10 +640,15 @@ function expoPage(be, server, bugs, ctx, context) {
           add('wsf-station-turn-count', { fill: (v) => { st.stationCount = v; }, value: () => st.stationCount });
         }
         add('wsf-station-turn-cancel', { text: 'Let them go', click: async () => invoke('wsfCancelTurn', () => server.cancel(stn.id)) });
-      } else if (!view.result) add('wsf-station-queue-serving-empty', { text: 'Nobody is being served.' });
+      } else if (st.paintedServing) add('wsf-station-queue-serving', { text: st.paintedServing });
+      else if (!view.result) add('wsf-station-queue-serving-empty', { text: 'Nobody is being served.' });
       add('wsf-station-call-next', { text: 'Call next', click: async () => {
         st.stationError = null;
-        try { await invoke('wsfCallNext', () => server.callNext(stn.id)); } catch (e) { st.stationError = e.message; }
+        try { await invoke('wsfCallNext', () => server.callNext(stn.id)); } catch (e) {
+          st.stationError = e.message;
+          // Defect: the screen paints the next name before the answer and keeps it after a refusal.
+          if (bugs.closedCallShowsServing) st.paintedServing = server.waiting(stn.goalId)[0]?.name || null;
+        }
       } });
       if (st.stationError) add('wsf-station-queue-error', { text: st.stationError });
       if (view.anyName) add('wsf-station-leak', { text: view.anyName });

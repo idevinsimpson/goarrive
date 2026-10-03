@@ -249,6 +249,7 @@ export function boundaryNote({ previous, candidate, run, m, served = null, super
       `${served ? 'served in ledger fast-path mode' : 'deployed'} and whose hosted marker that run observed. ` +
       `The SHA this file previously approved, ${superseded.sha}, was NEVER SERVED: it was approved on operational main after ` +
       `run ${run.number}, descends from ${s8(previous)}, is an ancestor of the candidate, and is superseded by this pin before any deploy.` +
+      (superseded.chainedFrom ? ` It had itself superseded ${superseded.chainedFrom}, also NEVER SERVED.` : '') +
       (served ? ` The historical pin ${served.pin}, which run ${run.number}'s operational main still named, is approval ancestry only: that run did not deploy it.` : ''));
   } else parts.push(served
     ? `${candidate} is measured against ${previous}, the SHA run ${run.number} (${run.id}) served in ledger fast-path mode and whose ` +
@@ -361,6 +362,7 @@ export function invariants({ previous, candidate, run, added, m, milestone = nul
         ancestorOfCandidate: true,
         anchoringRun: run.id,
         matchesOperationalHead: superseded.opsHead,
+        ...(superseded.chainedFrom ? { priorNeverServed: superseded.chainedFrom } : {}),
       },
     } : {}),
     releaseEnvironment: m.releaseEnvironment,
@@ -552,6 +554,15 @@ function servedBaseline(repo, a, { pin, candidate }) {
  * having already rotated the deployed pin out, and naming an accepted SHA that
  * descends from the served SHA and is an ancestor of the candidate. Anything
  * else refuses; nothing is inferred.
+ *
+ * A BOUNDED CHAIN (EXPO-LATEST-FULL-STAGING-PIN-1, Director #396 5970631460). The
+ * superseded approval may itself have superseded one never-served approval,
+ * which it records in its own _pinInvariants.supersededApproval. That inner link
+ * is accepted only as written there and re-proved against git here: never served,
+ * the same deployed pin, served SHA and anchoring run, descended from the served
+ * SHA and an ancestor of the superseded SHA, rotated into its history, and NOT
+ * itself chained. So at most two never-served approvals stand between the
+ * deployed pin and the candidate, and nothing older is trusted.
  */
 function supersededApproval(repo, a, { deployed, deployedText, served, run, candidate }) {
   const file = a['superseded-approval'];
@@ -580,8 +591,13 @@ function supersededApproval(repo, a, { deployed, deployedText, served, run, cand
   // The evidence that it was never served: this script wrote it from the same anchoring run.
   const inv = sup._pinInvariants;
   if (!inv || typeof inv !== 'object' || !inv.run) refuse('the superseded approval carries no _pinInvariants: there is no evidence of the run it was generated from');
-  if (inv.candidate !== sha || inv.previousApprovedAppSha !== deployed.approvedAppSha) {
-    refuse(`the superseded approval's invariants do not record ${s8(deployed.approvedAppSha)} -> ${s8(sha)}: it did not replace the deployed approval`);
+  const didNotReplace = () => refuse(`the superseded approval's invariants do not record ${s8(deployed.approvedAppSha)} -> ${s8(sha)}: it did not replace the deployed approval`);
+  if (inv.candidate !== sha) didNotReplace();
+  let chainedFrom = null;
+  if (inv.previousApprovedAppSha !== deployed.approvedAppSha) {
+    const inner = inv.supersededApproval;
+    if (inner === undefined) didNotReplace();
+    chainedFrom = innerLink(repo, { inner, inv, sup, sha, deployed, servedSha, run });
   }
   if (inv.run.id !== run.id || inv.run.operationalMain !== run.main) {
     refuse(`the superseded approval was generated from run ${inv.run.id} on ${inv.run.operationalMain}, not run ${run.id} on ${run.main}: stale run evidence`);
@@ -600,7 +616,31 @@ function supersededApproval(repo, a, { deployed, deployedText, served, run, cand
   if (set(sup.candidateAddedFunctions) !== set(deployed.candidateAddedFunctions)) refuse('the superseded approval does not retain the deployed approval\'s candidateAddedFunctions exactly');
   const d8 = s8(deployed.approvedAppSha);
   if (!Object.hasOwn(sup, `_previousPackageLabel${d8}`)) refuse(`the superseded approval has not rotated the deployed pin ${d8} into history: its ancestry is not the deployed approval's`);
-  return { sha, approval: sup, deployedPin: deployed.approvedAppSha, opsHead };
+  return { sha, approval: sup, deployedPin: deployed.approvedAppSha, opsHead, chainedFrom };
+}
+
+/** The one inner never-served link a superseded approval may carry, re-proved; see supersededApproval(). */
+function innerLink(repo, { inner, inv, sup, sha, deployed, servedSha, run }) {
+  const bad = (why) => refuse(`the superseded approval's inner link cannot be proved: ${why}`);
+  if (inner === null || typeof inner !== 'object' || Array.isArray(inner)) bad('its supersededApproval record is malformed');
+  const keys = ['approvedAppSha', 'served', 'servedAppSha', 'lastDeployedApprovalSha', 'descendsFromServed', 'ancestorOfCandidate', 'anchoringRun', 'matchesOperationalHead'];
+  for (const k of keys) if (!Object.hasOwn(inner, k)) bad(`its supersededApproval record has no ${k}`);
+  if (Object.hasOwn(inner, 'priorNeverServed')) bad('it is itself a chain; at most two never-served approvals may be superseded');
+  for (const k of Object.keys(inner)) if (!keys.includes(k)) bad(`its supersededApproval record carries an unknown ${k}`);
+  const p = inner.approvedAppSha;
+  if (typeof p !== 'string' || !SHA.test(p)) bad('it names no valid SHA');
+  if (p !== inv.previousApprovedAppSha) bad(`it names ${p}, but the approval says it replaced ${inv.previousApprovedAppSha}`);
+  if (inner.served !== false) bad(`${s8(p)} is not recorded as never served`);
+  if (inner.lastDeployedApprovalSha !== deployed.approvedAppSha) bad(`it was measured from the deployed pin ${inner.lastDeployedApprovalSha}, not ${deployed.approvedAppSha}`);
+  if (inner.servedAppSha !== servedSha) bad(`it records the served SHA ${inner.servedAppSha}, not ${servedSha}`);
+  if (inner.anchoringRun !== run.id) bad(`it was anchored on run ${inner.anchoringRun}, not run ${run.id}`);
+  if (inner.descendsFromServed !== true || inner.ancestorOfCandidate !== true) bad('it does not record its own lineage checks as held');
+  if (!isCommit(repo, p)) bad(`${p} is not a commit in ${repo}`);
+  if (p === servedSha || p === deployed.approvedAppSha || p === sha) bad(`${s8(p)} is the served SHA, the deployed pin or the superseded SHA itself`);
+  if (!isAncestor(repo, servedSha, p)) bad(`${s8(p)} does not descend from the served SHA ${s8(servedSha)}`);
+  if (!isAncestor(repo, p, sha)) bad(`${s8(p)} is not an ancestor of the superseded SHA ${s8(sha)}`);
+  if (!Object.hasOwn(sup, `_previousPackageLabel${s8(p)}`)) bad(`the approval has not rotated ${s8(p)} into its history`);
+  return p;
 }
 
 export function generate(argv) {
