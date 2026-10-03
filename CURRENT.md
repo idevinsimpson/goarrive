@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=22511c4d9d0eee9da88b09e008cf85aaadfb41989c17f96f473e89e409bbcc61 events=488 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=004ab9a55418a60c3ac55c9379e107eadc89764d94df8543968699d78c6e4ae4 events=490 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `22511c4d9d0eee9da88b09e008cf85aaadfb41989c17f96f473e89e409bbcc61` (488 events)
+- Ledger head: `004ab9a55418a60c3ac55c9379e107eadc89764d94df8543968699d78c6e4ae4` (490 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -142,6 +142,6 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | 9d92a765d5fd | W3 | EXPO-LATEST-FULL-STAGING-PIN-1 | release | acked | 5970615640 | comment:5970619310 |
 | 298a348ebd11 | W4 | EXPO-LATEST-FULL-STAGING-PIN-1 | review | acked | 5970822479 | comment:5970830916 |
 | c1d9c6f06b06 | W3 | EXPO-LATEST-FULL-STAGING-PIN-1 | handback | acked | 5971282910 | comment:5971285970 |
-| 639b4213f451 | W4 | EXPO-LATEST-FULL-STAGING-PIN-1 | review | requested | — | — |
-| c686e1a75995 | W9 | EXPO-MOVEMENT-VIDEO-1 | release | requested | — | — |
+| 639b4213f451 | W4 | EXPO-LATEST-FULL-STAGING-PIN-1 | review | delivered | 5971339022 | — |
+| c686e1a75995 | W9 | EXPO-MOVEMENT-VIDEO-1 | release | delivered | 5971339122 | — |
 

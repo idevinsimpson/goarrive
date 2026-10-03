@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "22511c4d9d0eee9da88b09e008cf85aaadfb41989c17f96f473e89e409bbcc61",
-  "eventCount": 488,
+  "ledgerHead": "004ab9a55418a60c3ac55c9379e107eadc89764d94df8543968699d78c6e4ae4",
+  "eventCount": 490,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2816,16 +2816,20 @@
       "packet": "EXPO-LATEST-FULL-STAGING-PIN-1",
       "worker": "W4",
       "reason": "review",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        5971339022
+      ],
       "ack": null
     },
     "c686e1a75995860818b2a70440b5589065561b7033af05fb74f3b7dc2236d80b": {
       "packet": "EXPO-MOVEMENT-VIDEO-1",
       "worker": "W9",
       "reason": "release",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        5971339122
+      ],
       "ack": null
     }
   },
