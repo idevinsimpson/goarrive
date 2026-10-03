@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "e76e2f19dc674b39a278bd1acaec13275137d286ec368bd2b6bee7f02ee01bea",
-  "eventCount": 312,
+  "ledgerHead": "4d204a4e5f69f04bd04c5151a7ded94bd4237d73305cb39c434cc6d1843bd3ce",
+  "eventCount": 314,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1094,7 +1094,7 @@
       },
       "label": "Teach the existing pin generator to represent a ledger-fast-path served baseline truthfully and fail closed otherwise",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -1108,7 +1108,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         ".github/wsf-staging/pin-candidate.mjs",
@@ -1128,7 +1128,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5963657922
+          "id": 5963685160
         }
       },
       "review": {
@@ -1996,11 +1996,14 @@
       "packet": "STAGING-PIN-FASTPATH-SERVED-BASELINE-1",
       "worker": "W3",
       "reason": "release",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         5963674729
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 5963685160
+      }
     }
   },
   "fastpath": {

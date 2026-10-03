@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=e76e2f19dc674b39a278bd1acaec13275137d286ec368bd2b6bee7f02ee01bea events=312 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=4d204a4e5f69f04bd04c5151a7ded94bd4237d73305cb39c434cc6d1843bd3ce events=314 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `e76e2f19dc674b39a278bd1acaec13275137d286ec368bd2b6bee7f02ee01bea` (312 events)
+- Ledger head: `4d204a4e5f69f04bd04c5151a7ded94bd4237d73305cb39c434cc6d1843bd3ce` (314 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -54,7 +54,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | STAGING-FASTPATH-INVENTORY-BASELINE-FIX | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #555 | 825b9c01 | 825b9c01 | — | 745b4f62 | — | W4 | comment:5953663400 | pull_request:555 | — | Correct fast-path inventory preflight to use the reviewed complete measured baseline without double-counting retained functions | 1×ops-source then director | — |
 | STAGING-FRESHNESS-DISPATCH | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #549 | ffe48217 | ffe48217 | — | 3c38046f | — | W4 | comment:5940812824 | pull_request:549 | — | Step 7 completion: bounded main-only workflow-token dispatch of the existing ledger fast path and unattended proof | 1×ops-source then director | — |
 | STAGING-FRESHNESS-FASTPATH | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #548 | c295d5c1 | c295d5c1 | — | 73d87d4e | — | W4 | comment:5938517396 | pull_request:548 | — | Step 7: automate preview-eligible accepted/integrated to deterministic candidate, pin, existing staging dispatch, and FRESH readback | 1×ops-source then director | — |
-| STAGING-PIN-FASTPATH-SERVED-BASELINE-1 | W3 | work | INTEGRATED (source-only) | ledger | RELEASED | — | — | — | — | — | — | — | comment:5963657922 | comment:5963657922 | — | Teach the existing pin generator to represent a ledger-fast-path served baseline truthfully and fail closed otherwise | 1×ops-source then director | — |
+| STAGING-PIN-FASTPATH-SERVED-BASELINE-1 | W3 | work | INTEGRATED (source-only) | ledger | ACKED | — | — | — | — | — | — | — | comment:5963657922 | comment:5963685160 | — | Teach the existing pin generator to represent a ledger-fast-path served baseline truthfully and fail closed otherwise | 1×ops-source then director | — |
 | STAGING-PROOF-RECONCILE-ROUTING-FIX | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #557 | cc180898 | cc180898 | — | 9ca268d2 | — | W4 | comment:5956038540 | pull_request:557 | — | Derive the exact successful staging run proof and pointer sequence when the workflow-run wake is missed | 1×ops-source then director | — |
 | WORKER-EXECUTION-PROFILES-1 | W3 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #562 | 0790876b | 0790876b | — | — | — | W4, W9 | comment:5962925247 | comment:5963579258 | — | Finish existing PR 562 credential-mode safety and pilot readiness without activating or replacing live workers | 1×ops-source+1×security then director | — |
 
@@ -108,5 +108,5 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | 8f948e13771d | W4 | WORKER-EXECUTION-PROFILES-1 | review | acked | 5963533867 | comment:5963540126 |
 | d40fde353cb7 | W9 | WORKER-EXECUTION-PROFILES-1 | review | acked | 5963534021 | comment:5963540260 |
 | c6ae6c91cff8 | W9 | EXPO-STATION-LOST-ANSWER-COPY-1 | release | acked | 5963628023 | comment:5963632669 |
-| acde5e63767d | W3 | STAGING-PIN-FASTPATH-SERVED-BASELINE-1 | release | delivered | 5963674729 | — |
+| acde5e63767d | W3 | STAGING-PIN-FASTPATH-SERVED-BASELINE-1 | release | acked | 5963674729 | comment:5963685160 |
 
