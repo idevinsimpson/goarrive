@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "004ab9a55418a60c3ac55c9379e107eadc89764d94df8543968699d78c6e4ae4",
-  "eventCount": 490,
+  "ledgerHead": "284bc9a9993e421b63d0c973b23f099a94bc8c27ad99e7bb11417a259e714088",
+  "eventCount": 493,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -900,7 +900,7 @@
       },
       "label": "Loop approved demo media in the existing shared player with truthful fallback and no contribution side effects",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -914,7 +914,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         "apps/westayfit/src/followAlong.ts",
@@ -941,7 +941,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5971282758
+          "id": 5971344397
         }
       },
       "review": {
@@ -2816,21 +2816,27 @@
       "packet": "EXPO-LATEST-FULL-STAGING-PIN-1",
       "worker": "W4",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         5971339022
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 5971343438
+      }
     },
     "c686e1a75995860818b2a70440b5589065561b7033af05fb74f3b7dc2236d80b": {
       "packet": "EXPO-MOVEMENT-VIDEO-1",
       "worker": "W9",
       "reason": "release",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         5971339122
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 5971344397
+      }
     }
   },
   "fastpath": {
