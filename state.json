@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "aae3203480ea95ee739976949e96b673ad2d57c12bbb728a420aa58ccfb3be4d",
-  "eventCount": 301,
+  "ledgerHead": "f1631226b1a38c0fc1d979ad44cb5edcc3a96d69c50af7349b6f1b47c0fcc434",
+  "eventCount": 302,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -65,7 +65,9 @@
     "W4": [],
     "W5": [],
     "W7": [],
-    "W9": []
+    "W9": [
+      "EXPO-STATION-LOST-ANSWER-COPY-1"
+    ]
   },
   "packets": {
     "AUTONOMY-ROUTER-1C": {
@@ -608,6 +610,61 @@
         "after": "director"
       },
       "deliveries": 1,
+      "pendingFinding": null
+    },
+    "EXPO-STATION-LOST-ANSWER-COPY-1": {
+      "owner": "W9",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Replace station vendor error text with existing product-safe callable wording without changing retry truth",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "apps/westayfit/app/station/[goalId].tsx"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 5963596836
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 5963596836
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "journey-qa",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
       "pendingFinding": null
     },
     "KIOSK-PAIRING-CLARITY-PROOF-1": {
