@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "fba7a3e0e45e8a4757e6b680d7dc32a261ab05ac508d7b6cb9f9ef3848535b2b",
-  "eventCount": 467,
+  "ledgerHead": "68b1e0284e08a9e8bf6f6b34a2a2b51fcef2345d4357bdb05116c6bdcc950207",
+  "eventCount": 469,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -61,9 +61,7 @@
     }
   },
   "queue": {
-    "W3": [
-      "EXPO-LATEST-FULL-STAGING-PIN-1"
-    ],
+    "W3": [],
     "W4": [],
     "W5": [],
     "W7": [],
@@ -836,10 +834,10 @@
       },
       "label": "Pin the latest accepted expo candidate and activate the fixed closed-goal hosted journey through the existing full staging path",
       "origin": "ledger",
-      "phase": "QUEUED",
+      "phase": "RELEASED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
-      "inbox": null,
+      "inbox": 396,
       "pr": null,
       "reviewers": [],
       "artifact": {
@@ -850,7 +848,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": null,
+      "releasedQueueIndex": 0,
       "reviewedBy": [],
       "subjectPaths": [
         ".github/wsf-staging/approved-candidate.json",
@@ -868,11 +866,14 @@
           "kind": "comment",
           "id": 5970530753
         },
-        "released": null,
+        "released": {
+          "kind": "comment",
+          "id": 5970558946
+        },
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5970530753
+          "id": 5970558946
         }
       },
       "review": {
@@ -2700,6 +2701,14 @@
         "id": 5969912322
       },
       "superseded": true
+    },
+    "9d92a765d5fd2adf4296fb6fcbbb4711e0c69be69fdc764ec6c97cd31320c9d9": {
+      "packet": "EXPO-LATEST-FULL-STAGING-PIN-1",
+      "worker": "W3",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
