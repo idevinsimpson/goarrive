@@ -1,0 +1,81 @@
+
+Running 13 tests using 1 worker
+
+  -   1 [chromium] › tests-e2e/ui-contribute-together.spec.ts:78:7 › captures › ordinary: 3,700 + 20 → 3,720 of 5,000 squats, at three sizes
+  -   2 [chromium] › tests-e2e/ui-contribute-together.spec.ts:95:7 › captures › crossing (controlled fixture): 4,980 + 35 → 5,015 of 5,000 squats
+  ✘   3 [chromium] › tests-e2e/ui-contribute-together.spec.ts:126:7 › behaviour › ordinary: the exact receipt is there at once, the motion plays once, settles, and nothing replays (6.8s)
+  ✓   4 [chromium] › tests-e2e/ui-contribute-together.spec.ts:165:7 › behaviour › the receipt is a snapshot: a later live change does not rewrite it (13.5s)
+  ✘   5 [chromium] › tests-e2e/ui-contribute-together.spec.ts:185:7 › behaviour › authoritative crossing (controlled fixture): communal payoff, exact overshoot, plays once (6.6s)
+  ✓   6 [chromium] › tests-e2e/ui-contribute-together.spec.ts:207:7 › behaviour › a reconciled crossing (answer lost, then confirmed) keeps the fact, counts once, and never moves (1.8s)
+  ✓   7 [chromium] › tests-e2e/ui-contribute-together.spec.ts:245:7 › behaviour › reached WITHOUT the server signal: truthful reached standing, no crossing, no motion (1.6s)
+  ✓   8 [chromium] › tests-e2e/ui-contribute-together.spec.ts:262:7 › behaviour › reduced motion: the same exact receipt at once; switched ON mid-motion settles for good; OFF never replays (4.9s)
+  ✓   9 [chromium] › tests-e2e/ui-contribute-together.spec.ts:295:7 › behaviour › a double tap records once and plays one motion (5.4s)
+  ✓  10 [chromium] › tests-e2e/ui-contribute-together.spec.ts:318:7 › behaviour › leaving during the motion: no error, nothing lost, and coming back shows no receipt to replay (5.8s)
+  ✓  11 [chromium] › tests-e2e/ui-contribute-together.spec.ts:338:7 › behaviour › a second movement: its own unit throughout (1.5s)
+  ✓  12 [chromium] › tests-e2e/ui-contribute-together.spec.ts:355:7 › behaviour › own-only receipt (controlled fixture: shared fields withheld): no WE, no motion, own facts only (1.5s)
+  -  13 [chromium] › tests-e2e/ui-contribute-together.spec.ts:391:7 › motion clip › ordinary and crossing motion, recorded
+
+
+  1) [chromium] › tests-e2e/ui-contribute-together.spec.ts:126:7 › behaviour › ordinary: the exact receipt is there at once, the motion plays once, settles, and nothing replays 
+
+    Error: expect(locator).toHaveAttribute(expected) failed
+
+    Locator:  getByTestId('wsf-together')
+    Expected: "eligible"
+    Received: "static"
+    Timeout:  5000ms
+
+    Call log:
+      - Expect "toHaveAttribute" with timeout 5000ms
+      - waiting for getByTestId('wsf-together')
+        11 × locator resolved to <div data-testid="wsf-together" data-together-phase="playing" data-together-crossed="false" data-together-animate="static" class="css-g5y9jx r-1awozwy r-1kihuf0 r-b8co6g r-xd6kpl r-13qz1uu">…</div>
+           - unexpected value "static"
+        3 × locator resolved to <div data-testid="wsf-together" data-together-phase="settled" data-together-crossed="false" data-together-animate="static" class="css-g5y9jx r-1awozwy r-1kihuf0 r-b8co6g r-xd6kpl r-13qz1uu">…</div>
+          - unexpected value "static"
+
+
+      137 |       await expect(page.getByTestId('wsf-together-before')).toHaveText('3,700 → ');
+      138 |       await expect(page.getByTestId('wsf-contribute-own-credit')).toHaveText('Your total on this goal: 20 squats');
+    > 139 |       await expect(together(page)).toHaveAttribute('data-together-animate', 'eligible');
+          |                                    ^
+      140 |       expect(await phase(page)).toBe('playing');
+      141 |       // The decoration is pointer-transparent and hidden from assistive tech.
+      142 |       const canvas = page.getByTestId('wsf-together-canvas');
+        at /home/user/goarrive/apps/westayfit/tests-e2e/ui-contribute-together.spec.ts:139:36
+
+    Error Context: test-results/ui-contribute-together-beh-3c776-settles-and-nothing-replays-chromium/error-context.md
+
+  2) [chromium] › tests-e2e/ui-contribute-together.spec.ts:185:7 › behaviour › authoritative crossing (controlled fixture): communal payoff, exact overshoot, plays once 
+
+    Error: expect(locator).toHaveAttribute(expected) failed
+
+    Locator:  getByTestId('wsf-together')
+    Expected: "eligible"
+    Received: "static"
+    Timeout:  5000ms
+
+    Call log:
+      - Expect "toHaveAttribute" with timeout 5000ms
+      - waiting for getByTestId('wsf-together')
+        11 × locator resolved to <div data-testid="wsf-together" data-together-crossed="true" data-together-phase="playing" data-together-animate="static" class="css-g5y9jx r-1awozwy r-1kihuf0 r-b8co6g r-xd6kpl r-13qz1uu">…</div>
+           - unexpected value "static"
+        3 × locator resolved to <div data-testid="wsf-together" data-together-crossed="true" data-together-phase="settled" data-together-animate="static" class="css-g5y9jx r-1awozwy r-1kihuf0 r-b8co6g r-xd6kpl r-13qz1uu">…</div>
+          - unexpected value "static"
+
+
+      191 |       await record(page, fx, '35');
+      192 |       await expect(together(page)).toHaveAttribute('data-together-crossed', 'true');
+    > 193 |       await expect(together(page)).toHaveAttribute('data-together-animate', 'eligible');
+          |                                    ^
+      194 |       await expect(page.getByTestId('wsf-contribute-result-subline')).toHaveText('WE did it. Together.');
+      195 |       await expect(page.getByTestId('wsf-contribute-shared-total')).toHaveText('5,015 of 5,000 squats');
+      196 |       await expect(page.getByTestId('wsf-contribute-percent')).toHaveText('100% complete');
+        at /home/user/goarrive/apps/westayfit/tests-e2e/ui-contribute-together.spec.ts:193:36
+
+    Error Context: test-results/ui-contribute-together-beh-bc6c6--exact-overshoot-plays-once-chromium/error-context.md
+
+  2 failed
+    [chromium] › tests-e2e/ui-contribute-together.spec.ts:126:7 › behaviour › ordinary: the exact receipt is there at once, the motion plays once, settles, and nothing replays 
+    [chromium] › tests-e2e/ui-contribute-together.spec.ts:185:7 › behaviour › authoritative crossing (controlled fixture): communal payoff, exact overshoot, plays once 
+  3 skipped
+  8 passed (52.1s)

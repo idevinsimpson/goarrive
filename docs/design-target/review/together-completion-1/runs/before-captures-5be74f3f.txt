@@ -1,0 +1,7 @@
+
+Running 2 tests using 1 worker
+
+  ✓  1 [chromium] › tests-e2e/ui-contribute-together.spec.ts:70:7 › captures › ordinary: 3,700 + 20 → 3,720 of 5,000 squats, at three sizes (14.2s)
+  ✓  2 [chromium] › tests-e2e/ui-contribute-together.spec.ts:87:7 › captures › crossing (controlled fixture): 4,980 + 35 → 5,015 of 5,000 squats (5.8s)
+
+  2 passed (21.4s)

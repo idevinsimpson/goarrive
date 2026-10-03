@@ -1,0 +1,105 @@
+{
+  "packet": "TOGETHER-COMPLETION-1",
+  "baseSha": "5be74f3f2763e5aee21d6c20f67ea13fd7dd69cb",
+  "productSha": "d9d209f4ca96b7faca58334ca36457a58e19740e",
+  "servedMarkers": {
+    "before": "5be74f3f",
+    "after": "d9d209f4"
+  },
+  "target": {
+    "referenceExport": "bdd6935877c9160dab2081e734dec690c9553b87",
+    "path": "docs/design-target/references/together-completion-1",
+    "lovableHead": "66e53073df1f09ca727454e4186dd301865a8ad1"
+  },
+  "fixtures": {
+    "ordinary": "seeded 3700 + 20 squats -> 3720 / 5000",
+    "crossing": "seeded 4980 + 35 squats -> 5015 / 5000; crossedTarget set on the real response by a labelled controlled fixture"
+  },
+  "environment": "Firebase emulators demo-wsf-local; emulator Hosting; Playwright 1.62.1 headless Chromium 141",
+  "files": {
+    "README.md": {
+      "sha256": "1f2ebd3123eae66bd33c47390dc28ca0244716c7ceb7e19f1c2710a19bbe9b6f",
+      "bytes": 6067
+    },
+    "after/crossing-settled-390x844.png": {
+      "sha256": "636bab3cdd10223957cd9ac8d4fcb59ed93fc8dcd10fdd4d1fe31d51b0ee5d50",
+      "bytes": 58347
+    },
+    "after/ordinary-settled-1280x900.png": {
+      "sha256": "f5ee2bf81d9e4298f6e2c293db2c175631ba85a0d11027fe9be87be746765e17",
+      "bytes": 60285
+    },
+    "after/ordinary-settled-390x640.png": {
+      "sha256": "a99e73ca077343ba0776795ffa0ba5e54a14dbd761a033422c90736cad378884",
+      "bytes": 46545
+    },
+    "after/ordinary-settled-390x844.png": {
+      "sha256": "2b51fcd0401fd2f395fa4a86c020d2346f614d77e64be031bcc217b57d9ee39a",
+      "bytes": 54536
+    },
+    "after/together-motion-ordinary-390x844.webm": {
+      "sha256": "4c4d2d11cd2c78508c749c6e06c3fc510023e7b368ac1d2f2f01971738ba49e9",
+      "bytes": 419493
+    },
+    "before/crossing-settled-390x844.png": {
+      "sha256": "96929960974f8ea163a6e656661fd431da70cd1b68ba08f2aced992e02f47331",
+      "bytes": 61737
+    },
+    "before/ordinary-settled-1280x900.png": {
+      "sha256": "989f0e2cd10868466550b1002155f48a47238505341206a27341e6f4fc36136b",
+      "bytes": 63464
+    },
+    "before/ordinary-settled-390x640.png": {
+      "sha256": "7ebbe7ed1a27898f2f3e1deaca511efa02ff77c2fe24275ca3a7c1e322be2b4b",
+      "bytes": 56419
+    },
+    "before/ordinary-settled-390x844.png": {
+      "sha256": "d61c596446977ca199b94f7455c7e1798a17c36045a6db7fd05ca60020864281",
+      "bytes": 57591
+    },
+    "runs/before-captures-5be74f3f.txt": {
+      "sha256": "c445ea2a99dbed3a11886ea8d861efd1192b00b22e72df795d8c4512b16edf63",
+      "bytes": 373
+    },
+    "runs/first-run-wip.txt": {
+      "sha256": "5710a231a5fc4073fdf61e9deea1257877fbf5c498f4c281860b59083929abdc",
+      "bytes": 6357
+    },
+    "runs/recovery-port-rendering-d9d209f4.txt": {
+      "sha256": "367d30757695fcd9e6a638e36db6281f2bf8374be39b62baf4458f959ad55e63",
+      "bytes": 3704
+    },
+    "runs/regression-1-d9d209f4.txt": {
+      "sha256": "655007396074c3d56b1ffb21df0ddf3a506968ff8b7b9728c8e2dfb32e343e7d",
+      "bytes": 11573
+    },
+    "runs/regression-2-d9d209f4.txt": {
+      "sha256": "813eb0a6722f75631ed3126d7d47683a0f31414ffc69c59fab61af9b75e3e4c6",
+      "bytes": 17127
+    },
+    "runs/regression-a-wip.txt": {
+      "sha256": "0ae08e5669d33985ef4fef0c757d83b9a0a17d60eed3d408638e37f6d87625b0",
+      "bytes": 16538
+    },
+    "runs/regression-a11y-shortphone-wip.txt": {
+      "sha256": "8324aa8871a2107a72da76308aa3beb5c2a2d053c01d02c5d437bb9e934563bd",
+      "bytes": 5039
+    },
+    "runs/regression-b-wip.txt": {
+      "sha256": "f55974eea2babfe6003a0552ea2d34046e9131d5cbce68d644c767de5269fe24",
+      "bytes": 17965
+    },
+    "runs/regression-c-wip.txt": {
+      "sha256": "a505cc2ab2443a3fea9ff85530e6aae4c0d3e547cb4ff6341204135ab7f9f7a2",
+      "bytes": 20598
+    },
+    "runs/together-spec-d9d209f4.txt": {
+      "sha256": "b177165a9dd28bcb192a91bb280d6c6f4cfd3693dff09f5cf5163e26a098fcb7",
+      "bytes": 2317
+    },
+    "runs/unit-d9d209f4.txt": {
+      "sha256": "09a11e7ea16128de6eac2264eb5f5536cf65f3d9f5fd9a77dfad52980145ec6c",
+      "bytes": 597
+    }
+  }
+}
