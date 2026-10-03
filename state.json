@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "ff9b734083e0884bfebe62c20720e61d1c51d419fdab88eee1f76a5ca0776dac",
-  "eventCount": 448,
+  "ledgerHead": "09bea151d54882c08862f27544972d45474cd9700bc2a354e5dc0d9fe2e4c669",
+  "eventCount": 451,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -767,15 +767,17 @@
       },
       "label": "Close GAP-2 by refusing queue and turn admission after a goal closes without changing the existing expo systems",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
-      "pr": null,
-      "reviewers": [],
+      "pr": 571,
+      "reviewers": [
+        "W4"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "7830ec156d8b93a086c1e1b222b08529ddf43760",
+        "prHeadSha": "7830ec156d8b93a086c1e1b222b08529ddf43760",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -802,7 +804,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5967575943
+          "id": 5968061899
         }
       },
       "review": {
@@ -815,7 +817,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "EXPO-STATION-LOST-ANSWER-COPY-1": {
@@ -2586,7 +2588,16 @@
       "ack": {
         "kind": "comment",
         "id": 5967575943
-      }
+      },
+      "superseded": true
+    },
+    "1def1466c4dfc40ada175794f1beb727c8bf3bacb15636a467d2d9d2e5fe0365": {
+      "packet": "EXPO-CLOSED-GOAL-QUEUE-GATE-1",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
