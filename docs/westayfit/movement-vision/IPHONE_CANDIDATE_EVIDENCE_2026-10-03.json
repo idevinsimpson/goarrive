@@ -1,0 +1,262 @@
+{
+  "schema_version": 1,
+  "recorded_at_utc": "2026-10-03T17:20:59.838456+00:00",
+  "status": "READY_FOR_OWNER_IPHONE_TRIAL; REAL_DEVICE_AND_HUMAN_PROOF_PENDING",
+  "github_core": {
+    "repository": "idevinsimpson/goarrive",
+    "pr": 574,
+    "commit": "c4c241b6722886b8d01c027b5dd57539af04d818",
+    "role": "Reviewed pure counter/core and web lifecycle controller; full Expo export remains unrun"
+  },
+  "phone_candidate": {
+    "provider": "Lovable",
+    "project_id": "c1b16a13-34ff-4878-b798-750cc63aa595",
+    "r1_commit": "1cf152cb8be0e398654b73f5dab338ce7f992b3d",
+    "r2_commit": "041e94b5f1ee8c98c6f2fe8465b4adcc9ee433ba",
+    "wrapper_revision": "REP-COUNTER-PROOF-1-r2",
+    "preview_url": "https://id-preview--c1b16a13-34ff-4878-b798-750cc63aa595.lovable.app/lab/rep-counter-proof",
+    "project_status_observed": "ready",
+    "agent_finished": true,
+    "published": false,
+    "visibility": "workspace_edit",
+    "hosted_access": "Owner authentication and served r2 revision not independently confirmed. Builder unauthenticated request returned 401; Director browser encountered project sign-in wall. Owner must check Details on iPhone."
+  },
+  "source_parity": {
+    "method": "Director fetched eight files at exact r1 ref and compared to PR574 SHA256; final connector diff r1..r2 has no core changes. Independent reviewer also compared all eight local source hashes.",
+    "files": [
+      {
+        "path": "src/lab/rep-counter-proof/core/types.ts",
+        "sha256": "327bd8b441d410519b8bfea772eb0c6981642c2bd54890b85b0c87634a4b7958",
+        "matches": true
+      },
+      {
+        "path": "src/lab/rep-counter-proof/core/geometry.ts",
+        "sha256": "7d1ede97153bbddaa5fe3186fd030ac2183e66f2217ebcaa308bb19a295bb52f",
+        "matches": true
+      },
+      {
+        "path": "src/lab/rep-counter-proof/core/squatCounter.ts",
+        "sha256": "123bd171656041ea30cfd094fb499bf19d4b3434cab777b7f31ec24ec08d2868",
+        "matches": true
+      },
+      {
+        "path": "src/lab/rep-counter-proof/core/subjectLock.ts",
+        "sha256": "a82898689565c6abaa5f2a1f97188f288942ff77a4958c51f55acedb6228b6b8",
+        "matches": true
+      },
+      {
+        "path": "src/lab/rep-counter-proof/core/session.ts",
+        "sha256": "614432144de16e35364d095b48cda1099e59a672ca95db86c1e45f70daf74603",
+        "matches": true
+      },
+      {
+        "path": "src/lab/rep-counter-proof/core/adapter.ts",
+        "sha256": "a438ec3db2560f1d545085e4b5c84cce4a845a0a4b7a14d1303e0e49a02309fe",
+        "matches": true
+      },
+      {
+        "path": "src/lab/rep-counter-proof/core/synthetic.ts",
+        "sha256": "38f4c9645bbf24b39f555860b922a20b7bdddb4040a001428056f63322e00758",
+        "matches": true
+      },
+      {
+        "path": "src/lab/rep-counter-proof/core/web/cameraLifecycle.ts",
+        "sha256": "4936187a7756a74c1c5142e6c8f12c656971d54b28d5268a4916928dbcc93907",
+        "matches": true
+      }
+    ],
+    "r2_changed_paths": [
+      "docs/movement-vision/REP_COUNTER_PROOF_1.md",
+      "scripts/verify-rep-counter-proof.sh",
+      "src/assets/rcp/vision_wasm_internal.js.asset.json",
+      "src/lab/rep-counter-proof/RepCounterProof.tsx",
+      "src/lab/rep-counter-proof/mediapipeVite.ts",
+      "src/lab/rep-counter-proof/runControl.ts",
+      "src/lab/rep-counter-proof/wrapper-tests/runControl.test.ts",
+      "tests-browser/rep_counter_proof_r2.py",
+      "tests-browser/rep_counter_proof_r2.result.txt"
+    ]
+  },
+  "independent_core_tests": {
+    "passed": 75,
+    "files": 4,
+    "breakdown": {
+      "core_count_lock_fail_closed": 51,
+      "camera_lifecycle": 24
+    },
+    "boundary": "Synthetic/core/controller tests using original accepted imports against copied source. No browser or human proof. Core/controller unchanged in r2."
+  },
+  "independent_actual_wrapper_before_after": {
+    "recordedAt": "2026-10-03T17:17:47.895200+00:00",
+    "kind": "Independent actual component-source regression before/after, with mocked environment",
+    "instrument": "/workspace/scratch/19bf55e774b3/rep-counter-audit/iphone-independent-probes/rep-counter-wrapper-regression.cjs",
+    "instrumentSha256": "84a0dbc9fbee8ffab872167e08b688296efc364fa970aeb016e1b72c0ae1d560",
+    "environmentOnlyChangeForR2": "Added '@tanstack/react-router': { Link: 'a' } import stub; assertions unchanged; both candidates rerun with the same final instrument.",
+    "cwd": "/workspace/scratch/19bf55e774b3/rep-counter-audit",
+    "nodeVersion": "v24.19.0",
+    "cases": [
+      {
+        "name": "Stop/start cannot complete the previous partial; fresh observed rep still counts",
+        "r1": "FAIL: rendered count 1 after restart; requires 0",
+        "r2": "PASS: count 0 after restart and exactly 1 after a fully observed fresh rep",
+        "assertions": [
+          "Before stop, actual session phase is down and count is zero.",
+          "Actual Stop ends track and clears RAF.",
+          "Restart followed by standing frames cannot complete the pre-stop partial.",
+          "After reacquisition, a fully observed fresh squat counts exactly once."
+        ]
+      },
+      {
+        "name": "Pagehide alone stops resources and returns actual UI to Start camera",
+        "r1": "FAIL: track and RAF stopped but Start camera missing",
+        "r2": "PASS: track ended, RAF cleared, Start camera present, Stop absent",
+        "assertions": [
+          "Dispatch the actual registered pagehide listener with document still visible.",
+          "Track ends and RAF clears.",
+          "Actual rendered controls show Start camera and do not show Stop."
+        ]
+      }
+    ],
+    "runs": [
+      {
+        "sourceDirectory": "/workspace/scratch/19bf55e774b3/rep-counter-audit/iphone-candidate",
+        "commit": "1cf152cb8be0e398654b73f5dab338ce7f992b3d",
+        "command": "node iphone-independent-probes/rep-counter-wrapper-regression.cjs iphone-candidate",
+        "exitCode": 1,
+        "passed": 0,
+        "failed": 2,
+        "total": 2,
+        "output": "/workspace/scratch/19bf55e774b3/rep-counter-audit/iphone-independent-probes/1cf-wrapper-regression-final.txt",
+        "outputSha256": "608bfbb4965a4fd17da1e871a1ba357efa1a0a3560a761f35e3b6167bee0eacc",
+        "sourceSha256": {
+          "src/lab/rep-counter-proof/RepCounterProof.tsx": "f11634370a608e908c042c84ee87dba8ddb65be6512f00b08b72bd9577f4ab5a",
+          "src/lab/rep-counter-proof/mediapipeVite.ts": "fd18511e82ee94f80da89ecd36b8406c834be3114e1837f9d492756b737c002f",
+          "src/lab/rep-counter-proof/core/adapter.ts": "a438ec3db2560f1d545085e4b5c84cce4a845a0a4b7a14d1303e0e49a02309fe",
+          "src/lab/rep-counter-proof/core/geometry.ts": "7d1ede97153bbddaa5fe3186fd030ac2183e66f2217ebcaa308bb19a295bb52f",
+          "src/lab/rep-counter-proof/core/session.ts": "614432144de16e35364d095b48cda1099e59a672ca95db86c1e45f70daf74603",
+          "src/lab/rep-counter-proof/core/squatCounter.ts": "123bd171656041ea30cfd094fb499bf19d4b3434cab777b7f31ec24ec08d2868",
+          "src/lab/rep-counter-proof/core/subjectLock.ts": "a82898689565c6abaa5f2a1f97188f288942ff77a4958c51f55acedb6228b6b8",
+          "src/lab/rep-counter-proof/core/synthetic.ts": "38f4c9645bbf24b39f555860b922a20b7bdddb4040a001428056f63322e00758",
+          "src/lab/rep-counter-proof/core/types.ts": "327bd8b441d410519b8bfea772eb0c6981642c2bd54890b85b0c87634a4b7958",
+          "src/lab/rep-counter-proof/core/web/cameraLifecycle.ts": "4936187a7756a74c1c5142e6c8f12c656971d54b28d5268a4916928dbcc93907"
+        }
+      },
+      {
+        "sourceDirectory": "/workspace/scratch/19bf55e774b3/rep-counter-audit/iphone-candidate-r2",
+        "commit": "041e94b5f1ee8c98c6f2fe8465b4adcc9ee433ba",
+        "command": "node iphone-independent-probes/rep-counter-wrapper-regression.cjs iphone-candidate-r2",
+        "exitCode": 0,
+        "passed": 2,
+        "failed": 0,
+        "total": 2,
+        "output": "/workspace/scratch/19bf55e774b3/rep-counter-audit/iphone-independent-probes/041e-wrapper-regression-final.txt",
+        "outputSha256": "7241cbd06c9c03a7b520b475fe7e12e3828c8e23fa410c91cd2676d5b5a4937c",
+        "sourceSha256": {
+          "src/lab/rep-counter-proof/RepCounterProof.tsx": "8c9dfa74c4763ecd48439f49be67069fef9ef26e19ae1fff588b776baa455ae6",
+          "src/lab/rep-counter-proof/mediapipeVite.ts": "06e5d7f6c76af09412edd7fa1ff1d19f52c20e788250343d7ca3be283105f86f",
+          "src/lab/rep-counter-proof/runControl.ts": "775687728410c184d96993df961c65e27c9cff3bc75471a28d0d0577748ab69f",
+          "src/lab/rep-counter-proof/core/adapter.ts": "a438ec3db2560f1d545085e4b5c84cce4a845a0a4b7a14d1303e0e49a02309fe",
+          "src/lab/rep-counter-proof/core/geometry.ts": "7d1ede97153bbddaa5fe3186fd030ac2183e66f2217ebcaa308bb19a295bb52f",
+          "src/lab/rep-counter-proof/core/session.ts": "614432144de16e35364d095b48cda1099e59a672ca95db86c1e45f70daf74603",
+          "src/lab/rep-counter-proof/core/squatCounter.ts": "123bd171656041ea30cfd094fb499bf19d4b3434cab777b7f31ec24ec08d2868",
+          "src/lab/rep-counter-proof/core/subjectLock.ts": "a82898689565c6abaa5f2a1f97188f288942ff77a4958c51f55acedb6228b6b8",
+          "src/lab/rep-counter-proof/core/synthetic.ts": "38f4c9645bbf24b39f555860b922a20b7bdddb4040a001428056f63322e00758",
+          "src/lab/rep-counter-proof/core/types.ts": "327bd8b441d410519b8bfea772eb0c6981642c2bd54890b85b0c87634a4b7958",
+          "src/lab/rep-counter-proof/core/web/cameraLifecycle.ts": "4936187a7756a74c1c5142e6c8f12c656971d54b28d5268a4916928dbcc93907"
+        }
+      }
+    ],
+    "coreParity": {
+      "files": 8,
+      "allSha256EqualBetweenR1AndR2": true
+    },
+    "bounds": [
+      "Executes actual selected RepCounterProof.tsx plus its actual runControl (r2), cameraLifecycle and counter core.",
+      "Mocks React hooks, DOM, camera acquisition, MediaPipe estimator and RAF; this is not a mounted React/browser test.",
+      "No new physical-camera, iPhone/Safari, human accuracy, browser route-exit, asset-loader or network evidence.",
+      "Synthetic pose objects are transient; no poses, frames, video or personal data were saved.",
+      "Selected candidate source trees were read only."
+    ]
+  },
+  "independent_instrument_in_this_repository": {
+    "path": "docs/westayfit/movement-vision/qa/rep-counter-wrapper-regression.cjs",
+    "sha256": "84a0dbc9fbee8ffab872167e08b688296efc364fa970aeb016e1b72c0ae1d560"
+  },
+  "builder_reported_verification": {
+    "message_id": "umsg_01m41bpye1fvq8snydm026ggjj",
+    "source": "Lovable build response and retained project report/script fetched at exact r2 commit. Director did not rerun this full app in its environment.",
+    "original_core_tests": 75,
+    "wrapper_tests": 3,
+    "old_lab_tests": 21,
+    "verification_script": "scripts/verify-rep-counter-proof.sh",
+    "verification_script_sha256": "38f987d01ef41c5d21d6ef23d5ec2754af80f7393b0b9e492e27f44ef7ec9e1e",
+    "verification_script_reported_exit": 0,
+    "typechecks": {
+      "bunx tsgo --noEmit -p .": 0,
+      "bunx tsgo --noEmit -p tsconfig.rep-counter-proof.json": 0
+    },
+    "build": {
+      "command": "bun run build",
+      "reported_exit": 0,
+      "scope": "Lovable app; separate command from verification script"
+    },
+    "typescript_scope": "Core byte parity requires separate strict config aligned to upstream: noUncheckedIndexedAccess, exactOptionalPropertyTypes, noPropertyAccessFromIndexSignature disabled there; experiment excluded from root config and imported through typed entry. Both checks reported clean.",
+    "browser": {
+      "passed": 15,
+      "total": 15,
+      "environment": "Headless Chromium, fake camera, local development server at localhost:8080",
+      "instrument_path": "tests-browser/rep_counter_proof_r2.py",
+      "instrument_sha256": "ab05a3760c35df50d2ae039e23ca490607d32b1e96da61420cda403447a49fa7",
+      "result_path": "tests-browser/rep_counter_proof_r2.result.txt",
+      "boundaries": [
+        "No person in fake camera; no browser squat counted",
+        "Late model close not directly observed; controller unit tests cover disposal",
+        "Real permission prompt denial untested",
+        "No cross-origin requests observed in local instrument, not a statement about authenticated hosted platform traffic",
+        "Physical Safari/GPU behavior and hosted asset response untested"
+      ]
+    }
+  },
+  "runtime": {
+    "version": "0.10.35",
+    "npm_alias": "mp-tasks-vision-01035",
+    "model": "pose_landmarker_lite float16 v1",
+    "max_poses": 3,
+    "delegate": "GPU default with CPU fallback",
+    "simd_only": true,
+    "loader_asset_id": "f9dccb92-d295-4857-a259-954fdef28d64",
+    "loader_metadata_content_type": "text/javascript",
+    "loader_sha256": "e7fd9858e8e8f221d9b96eddc11f8e077f263e0b7bbd79d3cbe882b134274f8c",
+    "loader_observation": "Builder reports served bytes and Content-Type checked through local dev proxy. Hosted owner preview/Safari not checked. Blob URL removed in r2."
+  },
+  "retained_logs": {
+    "independent_core": {
+      "sha256": "de4d84f1cb01504fbd2e7b3b9c5ee721f83c352ab1185dd8b5cdf07ed4de6b08",
+      "content": "\n RUN  v4.1.11 /workspace/scratch/19bf55e774b3/rep-counter-audit/iphone-validation\n\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > counts one full squat exactly once 2ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > counts five reps as five 0ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > does not count a half squat, and reports it as a partial 3ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > does not count a descent that stops just short of the down threshold 0ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > counts a slow squat (4 s down and up) once 0ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > counts fast squats (0.8 s each) one per rep 0ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > a long pause at the bottom is still one rep 1ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > a long pause at the top adds nothing between reps 0ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > jitter across the down threshold at the bottom cannot double count 0ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > bouncing between the thresholds without standing up is not a second rep 0ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > chatter across the UP threshold after a rep adds nothing 0ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > single noisy frames never move the phase (debounce) 0ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > a spike that dwells only just under dwellMs does not count 0ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > interrupt() mid-rep discards the rep: returning to standing counts nothing 0ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > starting in the down position counts nothing until standing is seen 0ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > null samples in the middle of a dwell cannot confirm it 1ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > reset() zeroes the count and requires standing again 0ms\n ✓ tests/movement-squat-counter.test.ts > SquatCounter — the rep state machine > refuses a configuration without hysteresis 0ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > runs one frame loop, processes each new video frame once, and Stop releases the stream and engine 4ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > stops every late-granted track after cancellation while permission was pending 1ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > releases the camera immediately during pending playback and never starts a late model 1ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > closes a model that resolves after cancellation and does not schedule a loop 1ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > keeps only the newest of two pending starts even if the older grant arrives last 0ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > a superseded model resolves without closing or detaching the newer camera 0ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > switching to synthetic owns the loop even when permission resolves afterwards 0ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > ignores a cancelled camera callback already delivered to the event queue after switching source 0ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > ignores a queued synthetic callback when a new camera start takes over 0ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > ends a denied permission request without entering playback or model initialization 1ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > does not report a superseded permission rejection into the new camera session 1ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > treats rejected playback as a failure and stops the camera before model loading 1ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > ignores an old playback rejection after another camera has started 0ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > stops the stream on model failure and allows an explicit fresh start 0ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > ignores an obsolete model rejection without stopping the current run 0ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > ends the run after an inference exception and never repeatedly invokes the failed engine 1ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > releases camera and model if the playing video reports an error 1ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > ends the run when the camera track ends and does not resume from an obsolete frame 2ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > closes a late model after a camera track ended during initialization 1ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > refuses a stream whose video tracks are already ended 1ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > refuses a stream whose video tracks are already empty 1ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > does not leak a stream if its video element has disappeared 0ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > makes repeated Stop harmless and removes listeners before releasing resources 0ms\n ✓ tests/movement-camera-lifecycle.test.ts > camera lifecycle — actual I/O owner used by the web lab > continues releasing other resources if a track or estimator rejects cleanup 1ms\n ✓ tests/movement-fail-closed.test.ts > fail-closed 1: two overlapping distinct poses are never one trusted person > a second, almost identical pose next to the locked member makes the frame ambiguous 5ms\n ✓ tests/movement-fail-closed.test.ts > fail-closed 1: two overlapping distinct poses are never one trusted person > two overlapping people at acquisition are two people, not one 1ms\n ✓ tests/movement-fail-closed.test.ts > fail-closed 2: an unobserved frame mid-rep voids the rep > poses=[] while down, then standing, counts nothing 1ms\n ✓ tests/movement-fail-closed.test.ts > fail-closed 2: an unobserved frame mid-rep voids the rep > a pose without a measurable leg mid-rep also voids it 1ms\n ✓ tests/movement-fail-closed.test.ts > fail-closed 3: frames must be fresh and in order > a long gap between down and standing cannot complete a rep 1ms\n ✓ tests/movement-fail-closed.test.ts > fail-closed 3: frames must be fresh and in order > a gap just over the bound breaks the cycle; one just under does not 1ms\n ✓ tests/movement-fail-closed.test.ts > fail-closed 3: frames must be fresh and in order > an out-of-order or repeated timestamp is rejected and voids the rep in progress 1ms\n ✓ tests/movement-fail-closed.test.ts > fail-closed 3: frames must be fresh and in order > SubjectLock itself ignores a non-increasing timestamp 0ms\n ✓ tests/movement-subject-lock.test.ts > geometry — the squat signal > reads ~2 standing, ~1 at parallel, and maps to depth 0 → 1 2ms\n ✓ tests/movement-subject-lock.test.ts > geometry — the squat signal > is independent of distance to the camera 0ms\n ✓ tests/movement-subject-lock.test.ts > geometry — the squat signal > is null when no leg is fully visible 0ms\n ✓ tests/movement-subject-lock.test.ts > SubjectLock — acquisition > locks one standing, full-body, centred person after holding still 2ms\n ✓ tests/movement-subject-lock.test.ts > SubjectLock — acquisition > does not lock with nobody in frame 1ms\n ✓ tests/movement-subject-lock.test.ts > SubjectLock — acquisition > does not lock when two people qualify — it refuses to choose 2ms\n ✓ tests/movement-subject-lock.test.ts > SubjectLock — acquisition > locks the centred member, not a small background person off to the side 2ms\n ✓ tests/movement-subject-lock.test.ts > SubjectLock — acquisition > does not lock someone whose legs are out of frame 1ms\n ✓ tests/movement-subject-lock.test.ts > SubjectLock — acquisition > does not lock someone who is already squatting (standing baseline required) 1ms\n ✓ tests/movement-subject-lock.test.ts > SubjectLock — acquisition > does not lock someone walking across the zone (never holds still) 1ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — counting only the locked member > counts the member’s full reps and ignores their half rep 5ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — counting only the locked member > a one-frame dropout mid-rep keeps the lock but voids that rep (unobserved = not countable) 2ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — counting only the locked member > lost tracking at the bottom voids that rep, then re-acquires and counts the next 2ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — counting only the locked member > while lost, nothing is counted even if the member squats 1ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — counting only the locked member > forgets after a long absence and must acquire from scratch 1ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — counting only the locked member > a second person exercising at the edge of frame adds nothing 3ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — counting only the locked member > with a second person exercising, only the member’s reps count 6ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — counting only the locked member > a person walking BEHIND the member pauses counting and never adds a rep 1ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — counting only the locked member > a person walking briefly IN FRONT never steals the lock 2ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — counting only the locked member > a second person arriving next to the member and staying makes it ambiguous, not a guess 1ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — counting only the locked member > the member drifting slowly (phone nudged) stays locked and keeps counting 1ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — counting only the locked member > low-confidence landmarks count as not seen — the counter pauses 1ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — manual fallback and reset > manual mode counts taps, never goes below zero, and ignores camera frames 1ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — manual fallback and reset > switching to manual carries the camera count over 1ms\n ✓ tests/movement-subject-lock.test.ts > MovementSession — manual fallback and reset > reset() returns to camera mode, zero, searching 0ms\n\n Test Files  4 passed (4)\n      Tests  75 passed (75)\n   Start at  18:04:30\n   Duration  281ms (transform 215ms, setup 0ms, import 329ms, tests 83ms, environment 0ms)\n\n"
+    },
+    "independent_r1": {
+      "sha256": "608bfbb4965a4fd17da1e871a1ba357efa1a0a3560a761f35e3b6167bee0eacc",
+      "content": "FAIL stop/start cannot complete the previous partial; fresh observed rep still counts: An unobserved old down phase became a credited local rep after restart.\n\n1 !== 0\n\nFAIL pagehide alone stops resources and returns the actual UI to Start camera: Stopped controller still has a live-stage UI after pagehide.\n{\"source\":\"/workspace/scratch/19bf55e774b3/rep-counter-audit/iphone-candidate\",\"passed\":0,\"failed\":2,\"total\":2,\"proof\":\"Actual RepCounterProof source, actual controller and core, mocked hooks/DOM/estimator/RAF. No browser or camera proof.\"}\n"
+    },
+    "independent_r2": {
+      "sha256": "7241cbd06c9c03a7b520b475fe7e12e3828c8e23fa410c91cd2676d5b5a4937c",
+      "content": "PASS stop/start cannot complete the previous partial; fresh observed rep still counts\nPASS pagehide alone stops resources and returns the actual UI to Start camera\n{\"source\":\"/workspace/scratch/19bf55e774b3/rep-counter-audit/iphone-candidate-r2\",\"passed\":2,\"failed\":0,\"total\":2,\"proof\":\"Actual RepCounterProof source, actual controller and core, mocked hooks/DOM/estimator/RAF. No browser or camera proof.\"}\n"
+    },
+    "builder_browser_r2": {
+      "sha256": "d8d4f1da720a479eb3cd82b77f5fdd989ab7d25386f267c0a33099d7fcbe6eca",
+      "content": "Skipping host requirements validation logic because `PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS` env variable is set.\nPASS details shows wrapper r2 + core separately :: ok\nPASS A permission-pending route exit: late stream ended :: ['ended']\nPASS A no video element after exit :: \nPASS B model-pending route exit: stream ended :: ['ended']\nPASS B no frame loop revived (rAF/s on /lab) :: 0\nPASS C live with pinned model (loop running; headless software GPU is slow) :: {'status': 'Step into frame — counting paused', 'rafPerSec': 2}\nPASS C active route exit: tracks ended :: ['ended']\nPASS C loop stopped :: 0\nPASS D pagehide→pageshow: stopped UI, no auto restart :: {'status': 'Camera stopped because you left the page. Your completed count is kept for Finish. Start camera begins a fresh set at zero.', 'tracks': ['ended']}\nPASS E manual count visible :: 3\nPASS E new camera start is a fresh set :: 0\nPASS E stopped guidance explains fresh set :: Camera stopped. Your completed count is kept for Finish. Start camera begins a fresh set at zero.\nPASS E finish shows local estimate :: Detected by camera — experimental local estimate |  | 0 |  | squats |  | Nothing was counted. You can start fresh or count manually. |  | Start fresh | Count manually\nPASS no cross-origin requests :: []\nPASS F model failure → manual usable :: \nSUMMARY 15/15 passed\n"
+    }
+  },
+  "unrun": [
+    "Authenticated owner access and exact r2 details on hosted iPhone preview",
+    "Real iPhone/Safari camera and model startup",
+    "Real-person count accuracy and repeatability",
+    "Real bystanders, lighting, camera placement, orientation, physical GPU speed",
+    "Screen reader",
+    "Full repaired Expo app dependency install/typecheck/export/browser verification",
+    "Canonical member/station integration",
+    "Native camera support"
+  ],
+  "concurrency_scope": "Only isolated research project and draft PR574 changed. No canonical branch, deployment, publication, audience, backend, human control-thread message or worker assignment changed.",
+  "next": "Owner iPhone smoke per IPHONE_TEST_2026-10-03.md; reproduce observed failure before new features, then scored device pilot and reviewed app integration."
+}

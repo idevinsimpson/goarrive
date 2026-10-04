@@ -1,11 +1,12 @@
+import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 
-import type { PoseEstimator } from './adapter';
 import { CountPanel, LabBanner, LabButton, PRIVACY_LINE, Row, labStyles, stateColor } from './LabParts';
 import { MovementSession, type SessionSnapshot } from './session';
 import { labDemoScene } from './synthetic';
 import type { Pose } from './types';
+import { MovementCameraLifecycle, type CameraFailureStage } from './web/cameraLifecycle';
 import { createMediaPipeEstimator } from './web/mediapipe';
 import { drawOverlay } from './web/overlay';
 
@@ -21,7 +22,8 @@ import { drawOverlay } from './web/overlay';
  * nowhere else. There is no canvas readback, no MediaRecorder, no network
  * call and no storage in this module (tests/movement-privacy.test.ts scans
  * src/movement for exactly those APIs). Stopping, leaving the route or
- * switching source stops every camera track.
+ * switching source stops every camera track. Hiding the page stops the run;
+ * returning to it never opens the camera automatically.
  */
 
 /** `?delegate=cpu` in the URL forces the CPU path (see createMediaPipeEstimator). */
@@ -42,9 +44,21 @@ export function MovementVisionLab() {
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const estimatorRef = useRef<PoseEstimator | null>(null);
-  const rafRef = useRef<number | null>(null);
+  const lifecycleRef = useRef<MovementCameraLifecycle | null>(null);
+  if (!lifecycleRef.current) {
+    lifecycleRef.current = new MovementCameraLifecycle({
+      getVideo: () => videoRef.current,
+      getUserMedia: () => navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+        audio: false,
+      }),
+      createEstimator: () => createMediaPipeEstimator({ maxPoses: 3, delegate: requestedDelegate() }),
+      requestFrame: (callback) => requestAnimationFrame(callback),
+      cancelFrame: (id) => cancelAnimationFrame(id),
+    });
+  }
+  const lifecycle = lifecycleRef.current;
+  const focusedRef = useRef(false);
   const debugRef = useRef(true);
 
   const [status, setStatus] = useState<Status>('idle');
@@ -57,26 +71,53 @@ export function MovementVisionLab() {
   const [debug, setDebug] = useState(true);
   const [flash, setFlash] = useState<string | null>(null);
 
-  const stopLoop = useCallback(() => {
-    if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
-    rafRef.current = null;
-  }, []);
+  const clearLiveView = useCallback(() => {
+    setPeople(0);
+    setFps(0);
+    setEngine(null);
+    setFlash(null);
+    // Keep the completed count visible without claiming a stopped camera is
+    // still tracking. Starting either source resets the underlying session.
+    setSnap({
+      ...session.snapshot,
+      lockState: 'searching', lockReason: null, phase: 'unknown',
+      depth: null, event: null, subject: null, subjectBox: null,
+      candidates: [], progress: 0, counting: false, frameIssue: null,
+    });
+    canvasRef.current?.getContext('2d')?.clearRect(0, 0, 9999, 9999);
+  }, [session]);
 
-  const stopCamera = useCallback(() => {
-    stopLoop();
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
-    if (videoRef.current) videoRef.current.srcObject = null;
-  }, [stopLoop]);
+  const pauseRun = useCallback((reason: string) => {
+    if (!lifecycle.active) return;
+    lifecycle.stop();
+    clearLiveView();
+    setStatus('idle');
+    setMessage(`${reason} Start again when you are ready.`);
+  }, [clearLiveView, lifecycle]);
 
-  useEffect(
-    () => () => {
-      stopCamera();
-      estimatorRef.current?.close();
-      estimatorRef.current = null;
-    },
-    [stopCamera],
-  );
+  // Stack navigation can leave this screen mounted under another route.
+  // Losing focus must cancel just as completely as unmounting the screen.
+  useFocusEffect(useCallback(() => {
+    focusedRef.current = true;
+    return () => {
+      focusedRef.current = false;
+      pauseRun('The run stopped when you left this screen.');
+    };
+  }, [pauseRun]));
+
+  useEffect(() => {
+    const pause = () => pauseRun('The run stopped when this page was hidden.');
+    const visibilityChanged = () => {
+      if (document.visibilityState === 'hidden') pause();
+    };
+    document.addEventListener('visibilitychange', visibilityChanged);
+    window.addEventListener('pagehide', pause);
+    return () => {
+      document.removeEventListener('visibilitychange', visibilityChanged);
+      window.removeEventListener('pagehide', pause);
+      lifecycle.stop();
+    };
+  }, [lifecycle, pauseRun]);
 
   const onFrame = useCallback(
     (s: SessionSnapshot, poses: Pose[]) => {
@@ -107,79 +148,66 @@ export function MovementVisionLab() {
     }
   }, []);
 
-  const startCamera = useCallback(async () => {
-    stopCamera();
+  const prepareSource = useCallback(() => {
+    lifecycle.stop();
     session.reset();
+    clearLiveView();
     setStreamGaps(0);
-    setSnap(session.snapshot);
+    fpsMeter.current = { n: 0, since: performance.now() };
     setMessage(null);
+  }, [clearLiveView, lifecycle, session]);
+
+  const onCameraError = useCallback((stage: CameraFailureStage, error: unknown) => {
+    clearLiveView();
+    const name = (error as { name?: string })?.name;
+    const detail = (error as Error)?.message ?? String(error);
+    setStatus(stage === 'permission' && name === 'NotAllowedError' ? 'denied' : 'error');
+    const reason = stage === 'permission'
+      ? name === 'NotAllowedError'
+        ? 'Camera permission was refused.'
+        : `The camera could not start (${name ?? 'unknown error'}).`
+      : stage === 'playback'
+        ? 'The camera preview could not play.'
+        : stage === 'model'
+          ? `The pose model could not load: ${detail}`
+          : stage === 'ended'
+            ? 'The camera stream ended.'
+            : 'Movement tracking stopped because the pose engine failed.';
+    setMessage(`${reason} You can still count by hand.`);
+  }, [clearLiveView]);
+
+  const startCamera = useCallback(async () => {
+    if (!focusedRef.current || document.visibilityState === 'hidden') return;
+    prepareSource();
     setStatus('starting');
     if (!navigator.mediaDevices?.getUserMedia) {
       setStatus('error');
       setMessage('This browser cannot open a camera here (it needs HTTPS or localhost).');
       return;
     }
-    let stream: MediaStream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
-        audio: false,
-      });
-    } catch (e) {
-      const name = (e as { name?: string })?.name;
-      setStatus('denied');
-      setMessage(
-        name === 'NotAllowedError'
-          ? 'Camera permission was refused. You can still count by hand.'
-          : `The camera could not start (${name ?? 'unknown error'}). You can still count by hand.`,
-      );
-      return;
-    }
-    streamRef.current = stream;
-    const video = videoRef.current!;
-    video.srcObject = stream;
-    await video.play().catch(() => undefined);
-
-    try {
-      if (!estimatorRef.current) {
-        setMessage('Loading the pose model…');
-        estimatorRef.current = await createMediaPipeEstimator({ maxPoses: 3, delegate: requestedDelegate() });
-      }
-      setEngine(estimatorRef.current.engine);
-      setMessage(null);
-    } catch (e) {
-      stopCamera();
-      setStatus('error');
-      setMessage(`The pose model could not load: ${(e as Error)?.message ?? String(e)}`);
-      return;
-    }
-    setStatus('camera');
-
-    let lastVideoTime = -1;
-    const loop = (now: number) => {
-      rafRef.current = requestAnimationFrame(loop);
-      const v = videoRef.current;
-      const est = estimatorRef.current;
-      if (!v || !est || v.readyState < 2 || v.currentTime === lastVideoTime) return;
-      lastVideoTime = v.currentTime;
-      const canvas = canvasRef.current;
-      if (canvas && (canvas.width !== v.videoWidth || canvas.height !== v.videoHeight)) {
-        canvas.width = v.videoWidth;
-        canvas.height = v.videoHeight;
-      }
-      const frame = est.estimate(v, now);
-      onFrame(session.update(frame), frame.poses);
-      tick(now);
-    };
-    rafRef.current = requestAnimationFrame(loop);
-  }, [onFrame, session, stopCamera, tick]);
+    await lifecycle.startCamera({
+      onLoading: () => setMessage('Loading the pose model…'),
+      onReady: (engineName) => {
+        setEngine(engineName);
+        setMessage(null);
+        setStatus('camera');
+      },
+      onFrame: (frame, video, now) => {
+        const canvas = canvasRef.current;
+        if (canvas && (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight)) {
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+        }
+        onFrame(session.update(frame), frame.poses);
+        tick(now);
+      },
+      onError: onCameraError,
+    });
+  }, [lifecycle, onCameraError, onFrame, prepareSource, session, tick]);
 
   const startSynthetic = useCallback(() => {
-    stopCamera();
-    session.reset();
-    setStreamGaps(0);
-    setSnap(session.snapshot);
-    setMessage(null);
+    if (!focusedRef.current || document.visibilityState === 'hidden') return;
+    prepareSource();
     setEngine('synthetic scene (scripted landmarks, no camera)');
     setStatus('synthetic');
     const canvas = canvasRef.current;
@@ -188,28 +216,28 @@ export function MovementVisionLab() {
       canvas.height = 480;
     }
     const start = performance.now();
-    const loop = (now: number) => {
-      rafRef.current = requestAnimationFrame(loop);
+    lifecycle.startSynthetic((now) => {
       const t = now - start;
       const poses = labDemoScene(t);
       onFrame(session.update({ timestampMs: t, poses, aspect: 640 / 480 }), poses);
       tick(now);
-    };
-    rafRef.current = requestAnimationFrame(loop);
-  }, [onFrame, session, stopCamera, tick]);
+    }, onCameraError);
+  }, [lifecycle, onCameraError, onFrame, prepareSource, session, tick]);
 
   const stop = useCallback(() => {
-    stopCamera();
+    lifecycle.stop();
+    clearLiveView();
     setStatus('idle');
-    setPeople(0);
-    canvasRef.current?.getContext('2d')?.clearRect(0, 0, 9999, 9999);
-  }, [stopCamera]);
+    setMessage(null);
+  }, [clearLiveView, lifecycle]);
 
   const switchToManual = useCallback(() => {
-    stopCamera();
+    lifecycle.stop();
+    clearLiveView();
     setSnap(session.useManual());
+    setMessage(null);
     setStatus('manual');
-  }, [session, stopCamera]);
+  }, [clearLiveView, lifecycle, session]);
 
   const reset = useCallback(() => {
     const wasManual = session.snapshot.mode === 'manual';

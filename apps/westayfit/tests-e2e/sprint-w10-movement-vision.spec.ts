@@ -1,8 +1,11 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { chromium, expect, test, type Page } from '@playwright/test';
+
+import { MEDIAPIPE_VERSION } from '../src/movement/web/mediapipe';
+import { movementRequestViolation, type MovementLabRequest } from '../tests/helpers/movementNetworkPolicy';
 
 /**
  * MOVEMENT-VISION-1 — BROWSER EVIDENCE FOR THE DEV LAB.
@@ -12,6 +15,9 @@ import { chromium, expect, test, type Page } from '@playwright/test';
  *   npx expo serve --port 8765
  *   WSF_PLAYWRIGHT_BASE_URL=http://127.0.0.1:8765 \
  *     npx playwright test tests-e2e/sprint-w10-movement-vision.spec.ts
+ * The local dist/ directory must be the exact export served at that URL. Set
+ * WSF_MV_STATIC_ASSET_DIR if it is elsewhere; it supplies an a-priori list of
+ * static app URLs, never a list learned from the page's own requests.
  *
  * What each block proves, and what it does NOT:
  *   - synthetic: the UI, lock and counter behave end to end in a browser on
@@ -20,13 +26,15 @@ import { chromium, expect, test, type Page } from '@playwright/test';
  *   - fake camera: the real getUserMedia → MediaPipe → lock → counter path
  *     runs in Chromium on a camera feed built from a real photograph of a
  *     standing person (a MediaPipe test asset). The "squat" frames are that
- *     photo WARPED (thighs compressed), not a person squatting — so a count
- *     here shows the pipeline counts when the engine reports a squat-shaped
- *     body, not that it counts real squats accurately.
+ *     photo WARPED (thighs compressed), not a person squatting. The accepted
+ *     negative fixture must count zero. This supplies no positive evidence
+ *     of real squat accuracy, real crowd rejection or a real device camera.
  *
  * Downloads (not committed): the pose model and the photo, into test-results/.
  * The WASM runtime is served from node_modules, because this sandbox's proxy
  * blocks the jsDelivr CDN that the lab uses by default.
+ * These are controlled pipeline tests, NOT live-host/CDN availability proof.
+ * Missing required fixtures fail with BLOCKED; they never silently skip.
  */
 
 const BASE = process.env.WSF_PLAYWRIGHT_BASE_URL;
@@ -39,29 +47,76 @@ const MODEL_URL =
   'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task';
 const PHOTO_URL = 'https://storage.googleapis.com/mediapipe-assets/male_full_height_hands.jpg';
 const ROUTE = '/design-target/movement-vision';
+const WASM_BASE = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_VERSION}/wasm`;
+const WASM_FILES = [
+  'vision_wasm_internal.js',
+  'vision_wasm_internal.wasm',
+  'vision_wasm_module_internal.js',
+  'vision_wasm_module_internal.wasm',
+  'vision_wasm_nosimd_internal.js',
+  'vision_wasm_nosimd_internal.wasm',
+];
 
-function download(url: string, file: string): string | null {
+function download(url: string, file: string): string {
   const p = path.join(OUT, file);
-  if (existsSync(p)) return p;
+  if (existsSync(p) && statSync(p).size > 0) return p;
+  const partial = `${p}.${process.pid}.partial`;
   try {
-    execFileSync('curl', ['-sSf', '-o', p, url], { stdio: 'ignore', timeout: 60_000 });
+    execFileSync('curl', ['-sSfL', '--connect-timeout', '15', '--max-time', '45', '-o', partial, url], {
+      stdio: 'ignore', timeout: 60_000,
+    });
+    if (!statSync(partial).size) throw new Error('Empty fixture');
+    renameSync(partial, p);
     return p;
   } catch {
-    return null;
+    if (existsSync(partial)) unlinkSync(partial);
+    throw new Error(`BLOCKED: required controlled-camera fixture ${file} is unavailable from ${url}. No browser evidence was produced.`);
   }
 }
 
-/** Serve the MediaPipe WASM from node_modules and the model from a local copy. */
+/**
+ * Exact URLs from the export under test; all requests still require GET/no
+ * body and an exact URL match. In particular, sharing the app origin is never
+ * permission to upload, call a dynamic endpoint or add query-carried data.
+ */
+function expectedStaticUrls(): Set<string> {
+  const dist = path.resolve(process.env.WSF_MV_STATIC_ASSET_DIR || path.join(APP, 'dist'));
+  if (!existsSync(dist) || !statSync(dist).isDirectory()) {
+    throw new Error(`BLOCKED: exact app export is missing at ${dist}. Set WSF_MV_STATIC_ASSET_DIR to the export served at WSF_PLAYWRIGHT_BASE_URL.`);
+  }
+  const urls = new Set<string>();
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name.startsWith('.')) continue;
+      const file = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(file);
+      else if (entry.isFile()) {
+        const relative = path.relative(dist, file).split(path.sep).map(encodeURIComponent).join('/');
+        urls.add(new URL(`/${relative}`, BASE!).href);
+      }
+    }
+  };
+  walk(dist);
+  if (!urls.size) throw new Error('BLOCKED: the exact app export contains no static assets.');
+  urls.add(new URL(ROUTE, BASE!).href);
+  urls.add(new URL(`${ROUTE}?delegate=cpu`, BASE!).href);
+  for (const file of WASM_FILES) urls.add(`${WASM_BASE}/${file}`);
+  urls.add(MODEL_URL);
+  return urls;
+}
+
+/** Controlled asset fulfillment; a separate real-host test must fetch them without interception. */
 async function routeEngineAssets(page: Page, modelPath: string) {
-  await page.route(/cdn\.jsdelivr\.net\/npm\/@mediapipe\/tasks-vision@[^/]+\/wasm\/(.+)$/, (route) => {
-    const name = /wasm\/([^/?#]+)/.exec(route.request().url())![1];
-    const body = readFileSync(path.join(WASM_DIR, name));
-    return route.fulfill({
-      body,
-      contentType: name.endsWith('.wasm') ? 'application/wasm' : 'text/javascript',
-      headers: { 'access-control-allow-origin': '*' },
+  for (const name of WASM_FILES) {
+    await page.route(`${WASM_BASE}/${name}`, (route) => {
+      const body = readFileSync(path.join(WASM_DIR, name));
+      return route.fulfill({
+        body,
+        contentType: name.endsWith('.wasm') ? 'application/wasm' : 'text/javascript',
+        headers: { 'access-control-allow-origin': '*' },
+      });
     });
-  });
+  }
   await page.route(MODEL_URL, (route) =>
     route.fulfill({ body: readFileSync(modelPath), contentType: 'application/octet-stream' }),
   );
@@ -246,6 +301,7 @@ test.describe('fake camera through the real engine (MediaPipe in Chromium)', () 
   }
 
   async function openWithFeed(feed: string, modelPath: string) {
+    const expected = expectedStaticUrls();
     const browser = await chromium.launch({
       executablePath: process.env.WSF_PLAYWRIGHT_CHROMIUM || undefined,
       args: [
@@ -254,19 +310,29 @@ test.describe('fake camera through the real engine (MediaPipe in Chromium)', () 
         `--use-file-for-fake-video-capture=${feed}`,
       ],
     });
-    const ctx = await browser.newContext({ baseURL: BASE, permissions: ['camera'] });
-    const page = await ctx.newPage();
-    const requests: string[] = [];
-    page.on('request', (r) => requests.push(r.url()));
-    await routeEngineAssets(page, modelPath);
-    // Headless Chromium has no real GPU; its emulated one runs the model at
-    // ~1 fps. The CPU (XNNPACK) path is the honest fast path here.
-    await page.goto(`${ROUTE}?delegate=cpu`);
-    await page.getByTestId('mv-start-camera').click();
-    await expect(page.getByTestId('mv-debug-readout')).toContainText('engine: mediapipe-tasks-vision@', {
-      timeout: 60_000,
-    });
-    return { browser, page, requests };
+    try {
+      const ctx = await browser.newContext({ baseURL: BASE, permissions: ['camera'], serviceWorkers: 'block' });
+      const requests: MovementLabRequest[] = [];
+      ctx.on('request', (r) => requests.push({ url: r.url(), method: r.method(), bodyBytes: r.postDataBuffer()?.byteLength ?? 0 }));
+      const page = await ctx.newPage();
+      page.on('websocket', (socket) => requests.push({ url: socket.url(), method: 'WEBSOCKET', bodyBytes: 0 }));
+      await routeEngineAssets(page, modelPath);
+      // Headless Chromium has no real GPU; its emulated one runs the model at
+      // ~1 fps. The CPU (XNNPACK) path is the honest fast path here.
+      await page.goto(`${ROUTE}?delegate=cpu`);
+      await page.getByTestId('mv-start-camera').click();
+      await expect(page.getByTestId('mv-debug-readout')).toContainText('engine: mediapipe-tasks-vision@', {
+        timeout: 60_000,
+      });
+      const close = async () => {
+        await browser.close();
+        expect(requests.map((r) => movementRequestViolation(r, expected)).filter(Boolean)).toEqual([]);
+      };
+      return { page, close };
+    } catch (error) {
+      await browser.close();
+      throw error;
+    }
   }
 
   /**
@@ -286,13 +352,12 @@ test.describe('fake camera through the real engine (MediaPipe in Chromium)', () 
     return 0;
   }
 
-  test('one person: the engine sees them, the lock holds, warped frames never invent a rep, nothing leaves the page', async () => {
+  test('controlled negative fixture: the real engine locks on the photo and warped cycles count exactly zero', async () => {
     test.setTimeout(180_000);
     const model = download(MODEL_URL, 'pose_landmarker_lite.task');
     const photo = download(PHOTO_URL, 'person.jpg');
-    test.skip(!model || !photo, 'Could not download the model or the test photo.');
-    const feed = await makeFeed('one-person.mjpeg', photo!, 10.5, (t) => [{ cx: 0.5, h: 0.9, squat: squatCycle(t) }]);
-    const { browser, page, requests } = await openWithFeed(feed, model!);
+    const feed = await makeFeed('one-person.mjpeg', photo, 10.5, (t) => [{ cx: 0.5, h: 0.9, squat: squatCycle(t) }]);
+    const { page, close } = await openWithFeed(feed, model);
     try {
       await expect.poll(async () => (await readout(page)).match(/people detected: (\d+)/)?.[1], { timeout: 30_000 }).toBe('1');
       await expect(page.getByTestId('mv-state')).toHaveText('Tracking you', { timeout: 30_000 });
@@ -310,28 +375,15 @@ test.describe('fake camera through the real engine (MediaPipe in Chromium)', () 
       }
       const fps = Number((await readout(page)).match(/fps: (\d+)/)?.[1]);
       expect(fps).toBeGreaterThanOrEqual(5);
-      // No invention: never more counts than cycles shown. (What the engine
-      // reports for a WARPED photo is recorded, not asserted: see the header.)
-      expect(await reps(page)).toBeLessThanOrEqual(5);
+      // A photo warp is a negative fixture, not a ground-truth squat. The
+      // previous <= 5 check could pass one through five invented counts.
+      expect(await reps(page)).toBe(0);
       writeFileSync(
         path.join(OUT, 'fake-camera-one-person-trace.txt'),
         `max depth seen: ${maxDepth}\n${trace.join('\n')}\n`,
       );
-
-      // Privacy, observed: every request the page made went to the app's own
-      // origin or to the two engine assets (served locally here).
-      const base = new URL(BASE!).host;
-      const foreign = requests.filter((u) => {
-        const url = new URL(u);
-        if (url.protocol === 'data:' || url.protocol === 'blob:') return false;
-        if (url.host === base) return false;
-        if (url.host === 'cdn.jsdelivr.net' && url.pathname.includes('/@mediapipe/tasks-vision@')) return false;
-        if (u === MODEL_URL) return false;
-        return true;
-      });
-      expect(foreign).toEqual([]);
     } finally {
-      await browser.close();
+      await close();
     }
   });
 
@@ -339,12 +391,11 @@ test.describe('fake camera through the real engine (MediaPipe in Chromium)', () 
     test.setTimeout(180_000);
     const model = download(MODEL_URL, 'pose_landmarker_lite.task');
     const photo = download(PHOTO_URL, 'person.jpg');
-    test.skip(!model || !photo, 'Could not download the model or the test photo.');
-    const feed = await makeFeed('two-people.mjpeg', photo!, 2, () => [
+    const feed = await makeFeed('two-people.mjpeg', photo, 2, () => [
       { cx: 0.32, h: 0.85, squat: 0 },
       { cx: 0.68, h: 0.85, squat: 0 },
     ]);
-    const { browser, page } = await openWithFeed(feed, model!);
+    const { page, close } = await openWithFeed(feed, model);
     try {
       await expect.poll(async () => (await readout(page)).match(/people detected: (\d+)/)?.[1], { timeout: 30_000 }).toBe('2');
       await expect(page.getByTestId('mv-state')).toContainText('More than one person', { timeout: 10_000 });
@@ -353,26 +404,32 @@ test.describe('fake camera through the real engine (MediaPipe in Chromium)', () 
       await page.screenshot({ path: path.join(OUT, 'fake-camera-03-two-people-refused.png') });
       writeFileSync(path.join(OUT, 'fake-camera-two-people.txt'), `${await readout(page)}\n`);
     } finally {
-      await browser.close();
+      await close();
     }
   });
 
-  test('member centred, a smaller person at the edge: the lock takes the member only', async () => {
+  test('controlled edge-person fixture: lite misses the small bystander; this does not prove crowd rejection', async () => {
     test.setTimeout(180_000);
     const model = download(MODEL_URL, 'pose_landmarker_lite.task');
     const photo = download(PHOTO_URL, 'person.jpg');
-    test.skip(!model || !photo, 'Could not download the model or the test photo.');
-    const feed = await makeFeed('member-and-bystander.mjpeg', photo!, 10.5, (t) => [
+    const feed = await makeFeed('member-and-bystander.mjpeg', photo, 10.5, (t) => [
       { cx: 0.5, h: 0.9, squat: squatCycle(t) },
       { cx: 0.9, h: 0.5, squat: 0 },
     ]);
-    const { browser, page } = await openWithFeed(feed, model!);
+    const { page, close } = await openWithFeed(feed, model);
     try {
       await expect(page.getByTestId('mv-state')).toHaveText('Tracking you', { timeout: 30_000 });
+      await expect.poll(async () => (await readout(page)).match(/people detected: (\d+)/)?.[1], { timeout: 10_000 }).toBe('1');
+      // Record the known limitation explicitly. A future model detecting both
+      // people needs a new assertion and evidence, not an inherited "pass".
+      await page.waitForTimeout(3_000);
+      expect(await readout(page)).toContain('people detected: 1');
+      expect(await reps(page)).toBe(0);
       await page.screenshot({ path: path.join(OUT, 'fake-camera-04-member-with-bystander.png') });
-      writeFileSync(path.join(OUT, 'fake-camera-bystander.txt'), `${await readout(page)}\nreps: ${await reps(page)}\n`);
+      writeFileSync(path.join(OUT, 'fake-camera-bystander.txt'),
+        `OBSERVED LIMITATION: the engine reported one person although this fixture contains two.\nThis is NOT evidence of rejecting a detected bystander or real-person crowd safety.\n${await readout(page)}\nreps: ${await reps(page)}\n`);
     } finally {
-      await browser.close();
+      await close();
     }
   });
 });

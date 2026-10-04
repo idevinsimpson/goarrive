@@ -1,5 +1,25 @@
 # MOVEMENT-VISION-1: camera squat counting, dev-only proof of concept
 
+## October 3 research successor
+
+Devin's dedicated rep-counter thread audited the exact accepted predecessor
+`eda5821893937e89b2635237d42924221e00c3a9` and prepared this isolated successor.
+It repairs asynchronous camera ownership and tightens the proof checks without
+changing the counting thresholds or connecting the counter to contributions.
+
+Read [the audit and delivery plan](AUDIT_2026-10-03.md),
+[the exact evidence manifest](AUDIT_EVIDENCE_2026-10-03.json), and
+[the proposed device test plan](DEVICE_TEST_PLAN.md) for current scope and next steps.
+The repaired Expo successor has focused source/test evidence only; its full app
+export and integration remain unrun. A separate private browser candidate now
+uses the same reviewed core for the owner's first iPhone trial. Read the
+[iPhone handoff](IPHONE_TEST_2026-10-03.md) and
+[candidate evidence](IPHONE_CANDIDATE_EVIDENCE_2026-10-03.json) for its exact
+revision, independent regressions, builder browser checks and access limits.
+Neither candidate has real-person/device accuracy evidence or release acceptance.
+
+The original packet and historical evidence below retain their original scope.
+
 Packet: Director comment `5825748052` on #365, relayed by L0. Worker: W10. PR: #475 into `claude/wsf-app-shell`. Base: `6b96ba1bf8e3bf7f86e6bdd98fc087232546ae25`.
 
 This is a **test instrument**. It is not a member feature, and it is not linked from any screen. It writes nothing anywhere. **Do not call it accurate.** It has been exercised on synthetic landmarks and on a fake camera feed. It has not been exercised on a real person squatting (see [Evidence](#evidence)).
@@ -15,7 +35,8 @@ npx expo serve --port 8765          # or: EXPO_PUBLIC_WSF_USE_EMULATORS=1 npx ex
 # open http://localhost:8765/design-target/movement-vision
 ```
 
-- **Start camera.** The browser asks for camera permission, then shows a mirrored self-view. The first start also downloads two static files: the MediaPipe WASM runtime (jsDelivr) and the `pose_landmarker_lite` model (Google Cloud Storage). Both URLs can be overridden with `EXPO_PUBLIC_WSF_MV_WASM_BASE` and `EXPO_PUBLIC_WSF_MV_MODEL_URL`, for example to self-host them.
+- **Start camera.** The browser asks for camera permission, then shows a mirrored self-view. It loads static runtime assets from jsDelivr and the `pose_landmarker_lite` model from Google Cloud Storage. Their locations can be overridden with `EXPO_PUBLIC_WSF_MV_WASM_BASE` and `EXPO_PUBLIC_WSF_MV_MODEL_URL`, for example to self-host them.
+- **Stop or leave.** Stop, manual fallback, source changes, page hiding and route exit invalidate the active run and release its resources. Late permission/model results cannot restart it. Returning to the page does not automatically start the camera.
 - **Camera access needs HTTPS or `localhost`.** To test on a phone, the page must be served over HTTPS.
 - **`?delegate=cpu`** forces the CPU (WASM/XNNPACK) path. Use it on machines whose GPU is emulated: headless browsers and VMs ran at about 1 fps on the "GPU" path and about 14 fps on CPU.
 - **Synthetic scene** plays a scripted scene without a camera, labelled on screen, and loops every 24 s:
@@ -134,6 +155,10 @@ All files are new. The only edits to existing files are the dependency lines in 
 **Dependency:** `@mediapipe/tasks-vision` at exact version `0.10.35`. It is Apache-2.0, has no transitive dependencies, and is not a paid or vendor SDK. It needs no API key.
 
 ## Evidence
+
+This section records the original September 25 evidence at `eda58218`.
+The October 3 successor's fresh and deliberately unrun checks are listed in
+[AUDIT_EVIDENCE_2026-10-03.json](AUDIT_EVIDENCE_2026-10-03.json).
 
 These claims are separate. Each one says exactly what was and was not shown.
 
