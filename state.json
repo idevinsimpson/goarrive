@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "aba5d3817e45a2eef4f4f46bb2f230d57f4500ca81db049acb4d1b8b49e98f3b",
-  "eventCount": 501,
+  "ledgerHead": "5c49cc93d134a9ab969cf3adf8813fdc2019059a89d03af020c5bbd9ea251c02",
+  "eventCount": 504,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -61,7 +61,9 @@
     }
   },
   "queue": {
-    "W3": [],
+    "W3": [
+      "CONTROL-RECENT-COMMENTS-SAFE-READ-1"
+    ],
     "W4": [],
     "W5": [],
     "W7": [],
@@ -335,6 +337,62 @@
         "after": "director"
       },
       "deliveries": 1,
+      "pendingFinding": null
+    },
+    "CONTROL-RECENT-COMMENTS-SAFE-READ-1": {
+      "owner": "W3",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Bound recent-comment reads so the control App can consume current decisions without socket failure",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "tools/wsf-control/github.mjs",
+        "tools/wsf-control/tests/shadow.test.mjs"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 5972575649
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 5972575649
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
       "pendingFinding": null
     },
     "EMAIL-STAGING-REPAIR": {
@@ -905,7 +963,7 @@
       },
       "label": "Loop approved demo media in the existing shared player with truthful fallback and no contribution side effects",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "CHANGES_REQUESTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -948,7 +1006,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5971735579
+          "id": 5972165575
         }
       },
       "review": {
@@ -2858,7 +2916,16 @@
       "ack": {
         "kind": "comment",
         "id": 5971771902
-      }
+      },
+      "superseded": true
+    },
+    "2816280f22f4e09cd4bf0f1a847ce62450871ba97a05521928266b023b76b15d": {
+      "packet": "EXPO-MOVEMENT-VIDEO-1",
+      "worker": "W9",
+      "reason": "handback",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
