@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "77592103c9c0f2fd46dfa43dcdea23daf0ad97556006972d2037268afe50b9ad",
-  "eventCount": 505,
+  "ledgerHead": "a5360f6413bdd320628da74a7d973ce008ac2ae8f77ef50de438a08a18c9c9ad",
+  "eventCount": 510,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -963,7 +963,7 @@
       },
       "label": "Loop approved demo media in the existing shared player with truthful fallback and no contribution side effects",
       "origin": "ledger",
-      "phase": "CHANGES_REQUESTED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -972,8 +972,8 @@
         "W4"
       ],
       "artifact": {
-        "subjectSha": "f72549745d2ad1acc630b1821693906e16808b83",
-        "prHeadSha": "f72549745d2ad1acc630b1821693906e16808b83",
+        "subjectSha": "526cea95d284f7441e28f0ad35dd9a89251a3508",
+        "prHeadSha": "526cea95d284f7441e28f0ad35dd9a89251a3508",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -1006,7 +1006,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5972165575
+          "id": 5980202506
         }
       },
       "review": {
@@ -1019,7 +1019,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 1,
+      "deliveries": 2,
       "pendingFinding": null
     },
     "EXPO-STATION-LOST-ANSWER-COPY-1": {
@@ -2923,10 +2923,22 @@
       "packet": "EXPO-MOVEMENT-VIDEO-1",
       "worker": "W9",
       "reason": "handback",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         5980141629
       ],
+      "ack": {
+        "kind": "comment",
+        "id": 5980152156
+      },
+      "superseded": true
+    },
+    "a89e696d63159befa78306f8ebb6b35fb3a16b54603a60c4eadb200cf9d315f9": {
+      "packet": "EXPO-MOVEMENT-VIDEO-1",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },

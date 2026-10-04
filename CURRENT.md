@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=77592103c9c0f2fd46dfa43dcdea23daf0ad97556006972d2037268afe50b9ad events=505 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=a5360f6413bdd320628da74a7d973ce008ac2ae8f77ef50de438a08a18c9c9ad events=510 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `77592103c9c0f2fd46dfa43dcdea23daf0ad97556006972d2037268afe50b9ad` (505 events)
+- Ledger head: `a5360f6413bdd320628da74a7d973ce008ac2ae8f77ef50de438a08a18c9c9ad` (510 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -30,10 +30,10 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | Worker | Inbox | Active now | Reviewing | Waiting on review | Blocked | Next | Queue | WATCH |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | W3 | #396 | — | — | WORKER-EXECUTION-PROFILES-1 | — | CONTROL-RECENT-COMMENTS-SAFE-READ-1 | CONTROL-RECENT-COMMENTS-SAFE-READ-1 | off |
-| W4 | #394 | — | — | — | — | — | — | off |
+| W4 | #394 | — | EXPO-MOVEMENT-VIDEO-1 | — | — | — | — | on |
 | W5 | #395 | — | — | — | — | — | — | off |
 | W7 | #434 | — | — | — | — | — | — | off |
-| W9 | #497 | EXPO-MOVEMENT-VIDEO-1 | — | — | — | — | — | on |
+| W9 | #497 | — | — | EXPO-MOVEMENT-VIDEO-1 | — | — | — | off |
 
 ## Packets
 
@@ -52,7 +52,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | EXPO-ATTENDEE-JOURNEY-PROOF-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #563 | 12e70c5a | 12e70c5a | — | 0669c446 | — | W4 | comment:5963015704 | pull_request:563 | — | Prove the existing attendee phone and two-station journey and expose only real missing seams; test and evidence source, not live expo acceptance | 1×journey-qa then director | — |
 | EXPO-CLOSED-GOAL-QUEUE-GATE-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #571 | 3a3ddb55 | 3a3ddb55 | — | 0d3598d4 | — | W4 | comment:5967515210 | pull_request:571 | — | Close GAP-2 by refusing queue and turn admission after a goal closes without changing the existing expo systems | 1×journey-qa then director | — |
 | EXPO-LATEST-FULL-STAGING-PIN-1 | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #573 | a0bb252a | a0bb252a | — | 65b8b798 | — | W4 | comment:5970558946 | pull_request:573 | — | Pin the latest accepted expo candidate and activate the fixed closed-goal hosted journey through the existing full staging path | 1×ops-source then director | — |
-| EXPO-MOVEMENT-VIDEO-1 | W9 | work | INTEGRATED (source-only) | ledger | CHANGES_REQUESTED | #575 | f7254974 | f7254974 | — | — | — | W4 | comment:5971282758 | comment:5972165575 | — | Loop approved demo media in the existing shared player with truthful fallback and no contribution side effects | 1×journey-qa then director | — |
+| EXPO-MOVEMENT-VIDEO-1 | W9 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #575 | 526cea95 | 526cea95 | — | — | — | W4 | comment:5971282758 | comment:5980202506 | — | Loop approved demo media in the existing shared player with truthful fallback and no contribution side effects | 1×journey-qa then director | — |
 | EXPO-STATION-LOST-ANSWER-COPY-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #564 | 1d290f74 | 1d290f74 | — | 5be74f3f | — | W4 | comment:5963613447 | pull_request:564 | — | Replace station vendor error text with existing product-safe callable wording without changing retry truth | 1×journey-qa then director | — |
 | KIOSK-PAIRING-CLARITY-PROOF-1 | W9 | work | STAGED (hosted) | ledger | STAGED | #553 | 4537c26c | 4537c26c | — | ab77fbfc | hosted run 37025084843: PASS | W4 | comment:5945136749 | comment:5955903159 | — | Clarify venue-station pairing from the Champion's own phone and prove the existing flow end-to-end | 1×journey-qa then director | — |
 | STAGING-FASTPATH-DOCS-LINEAGE-FIX | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #551 | 963dd558 | 963dd558 | — | 9825aa36 | — | W4 | comment:5944563639 | pull_request:551 | — | Step 7 correction: allow provably non-runtime docs/instruction lineage while preserving fail-closed fast-path invariants | 1×ops-source then director | — |
@@ -146,5 +146,6 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | 639b4213f451 | W4 | EXPO-LATEST-FULL-STAGING-PIN-1 | review | acked | 5971339022 | comment:5971343438 |
 | c686e1a75995 | W9 | EXPO-MOVEMENT-VIDEO-1 | release | acked | 5971339122 | comment:5971344397 |
 | 74d8ff350858 | W4 | EXPO-MOVEMENT-VIDEO-1 | review | acked | 5971765380 | comment:5971771902 |
-| 2816280f22f4 | W9 | EXPO-MOVEMENT-VIDEO-1 | handback | delivered | 5980141629 | — |
+| 2816280f22f4 | W9 | EXPO-MOVEMENT-VIDEO-1 | handback | acked | 5980141629 | comment:5980152156 |
+| a89e696d6315 | W4 | EXPO-MOVEMENT-VIDEO-1 | review | requested | — | — |
 
