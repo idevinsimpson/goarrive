@@ -122,11 +122,12 @@ async function generateFixture(browser: Browser): Promise<FixtureBytes> {
 async function useFixture(
   context: BrowserContext,
   bytes: FixtureBytes,
-  opts: { variant?: string; clipStatus?: number; posterStatus?: number; clipUri?: string } = {},
+  opts: { variant?: string; clipStatus?: number; posterStatus?: number; clipUri?: string; clipDelayMs?: number } = {},
 ): Promise<void> {
   await context.route(`**${FIXTURE_PREFIX}**`, async (route) => {
     const url = route.request().url();
     if (url.endsWith('.webm')) {
+      if (opts.clipDelayMs) await new Promise((r) => setTimeout(r, opts.clipDelayMs));
       if (opts.clipStatus && opts.clipStatus !== 200) return route.fulfill({ status: opts.clipStatus, body: '' });
       return route.fulfill({ status: 200, contentType: 'video/webm', body: bytes.clip });
     }
@@ -452,6 +453,34 @@ test('a rejected play() retries a bounded number of times, then settles on the p
     await expect(page.getByTestId('wsf-move-video')).toHaveCount(0);
     expect(await page.getByTestId('wsf-move-screen').getAttribute('data-phase')).toBe('round');
     await expect(page.getByTestId('wsf-move-pause')).toBeVisible();
+  } finally {
+    await phone.context.close();
+  }
+});
+
+test('pausing over a play() that is still loading is not a failure: after repeated Start/Pause the clip still plays', async ({ browser }) => {
+  // W4 finding #394 5972165575. A pause() over a pending play() rejects that
+  // play with AbortError. That is the person pausing, not the clip failing —
+  // counting it would spend the two retries and settle the slot on the poster
+  // for good, so the clip would never play for them again.
+  const bytes = await generateFixture(browser);
+  const fx = await seedExpoEvent({ tag: 'mvabort', attendees: ['Fixture Mover'], target: 1000, seededTotal: 0 });
+  const phone = await openMove(browser, fx);
+  try {
+    await useFixture(phone.context, bytes, { clipDelayMs: 3_000 });
+    await gotoMove(phone.page, fx.goalId);
+    const { page } = phone;
+    for (let i = 0; i < 3; i += 1) {
+      await page.getByTestId('wsf-move-start').click();
+      await page.waitForTimeout(250);
+      await page.getByTestId('wsf-move-pause').click();
+      await page.waitForTimeout(250);
+      expect(await demoState(page), `round ${i + 1}: a pause is not a failure`).not.toBe('fallback');
+    }
+    await page.getByTestId('wsf-move-start').click();
+    await expect.poll(() => demoState(page), { timeout: 20_000 }).toBe('playing');
+    await expect(page.getByTestId('wsf-move-video')).toHaveCount(1);
+    await expect.poll(async () => (await videoFacts(page)).paused, { timeout: 5_000 }).toBe(false);
   } finally {
     await phone.context.close();
   }
