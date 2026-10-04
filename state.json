@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "bb5c8fd9886bc08e489ee8aa7dee567bedd7ff6f039187b8d050f63d8be584d5",
-  "eventCount": 511,
+  "ledgerHead": "2f709294ecececcc87dd22adc349411448acc948827e0c762a1046ac2f1ec8eb",
+  "eventCount": 512,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2937,11 +2937,14 @@
       "packet": "EXPO-MOVEMENT-VIDEO-1",
       "worker": "W4",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         5984088201
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 5984100414
+      }
     }
   },
   "fastpath": {
