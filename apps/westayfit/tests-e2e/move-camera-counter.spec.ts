@@ -20,7 +20,14 @@ import path from 'node:path';
 
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 
-import { contributionsOf, firestorePatch, openPhone, seedExpoEvent, type ExpoFixture } from './helpers/expo-attendee-fixtures';
+import {
+  contributionsOf,
+  firestorePatch,
+  FIXTURE_PASSWORD,
+  openPhone,
+  seedExpoEvent,
+  type ExpoFixture,
+} from './helpers/expo-attendee-fixtures';
 
 test.describe.configure({ timeout: 240_000 });
 
@@ -130,6 +137,38 @@ let fx: ExpoFixture;
 
 test.beforeAll(async () => {
   fx = await seedExpoEvent({ tag: 'camflow', attendees: ['Fixture Mover', 'Fixture Second'], target: 1000, seededTotal: 120 });
+});
+
+test('the suite fixture is test-context only: a context with no stored choice gets the real product default ON/ON', async ({ browser }) => {
+  // 1. The harness default (playwright.config.ts, Director #497 5999288273)
+  //    stores the counter OFF in ordinary test contexts...
+  const harness = await openPhone(browser, fx.attendees[0]!);
+  try {
+    expect(await harness.page.evaluate(() => localStorage.getItem('wsf.moveCamera.v1'))).toBe(
+      '{"cameraCounter":false,"stickFigure":true}',
+    );
+    await harness.page.goto('/settings');
+    await expect(harness.page.getByTestId('wsf-settings-camera-counter')).toHaveAttribute('aria-checked', 'false', { timeout: 40_000 });
+  } finally {
+    await harness.context.close();
+  }
+  // 2. ...but a context created WITHOUT that storage — a real member's device
+  //    that never chose — gets the product default from the app itself.
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, storageState: { cookies: [], origins: [] } });
+  try {
+    const page = await ctx.newPage();
+    await page.goto('/signin');
+    expect(await page.evaluate(() => localStorage.getItem('wsf.moveCamera.v1'))).toBeNull();
+    await page.getByTestId('wsf-signin-email').fill(fx.attendees[0]!.email);
+    await page.getByTestId('wsf-signin-password').fill(FIXTURE_PASSWORD);
+    await page.getByTestId('wsf-signin-submit').click();
+    await page.waitForURL((u) => !u.pathname.startsWith('/signin'), { timeout: 40_000 });
+    await page.goto('/settings');
+    await expect(page.getByTestId('wsf-settings-camera-counter')).toHaveAttribute('aria-checked', 'true', { timeout: 40_000 });
+    await expect(page.getByTestId('wsf-settings-stick-figure')).toHaveAttribute('aria-checked', 'true');
+  } finally {
+    await ctx.close();
+  }
 });
 
 test('Settings: MOVE section defaults ON/ON; stick figure hidden while the counter is off; both persist', async ({ browser }) => {

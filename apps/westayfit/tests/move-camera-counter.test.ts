@@ -898,6 +898,20 @@ describe('camera settings', () => {
   });
 });
 
+describe('the Playwright manual-flow fixture is test-harness only', () => {
+  it('the product default stays ON/ON, and no product source reads the harness or the test default', () => {
+    expect(DEFAULT_MOVE_CAMERA_SETTINGS).toEqual({ cameraCounter: true, stickFigure: true });
+    const product = ['src/movement-camera/flow.ts', 'src/movement-camera/settingsStore.ts', 'src/movement-camera/MoveCameraSettingsSection.tsx', 'app/settings.tsx', 'app/contribute/[goalId].tsx'];
+    for (const f of product) expect(read(f), f).not.toMatch(/playwright|storageState|MANUAL_SQUAT_FLOW/i);
+  });
+  it('the harness default lives only in playwright.config.ts, as test-context storage', () => {
+    const cfg = read('playwright.config.ts');
+    expect(cfg).toMatch(/storageState: manualSquatFlow/);
+    expect(cfg).toMatch(/TEST CONTEXT ONLY/);
+    expect(cfg).toContain(`'{"cameraCounter":false,"stickFigure":true}'`);
+  });
+});
+
 describe('camera entry', () => {
   const base = { settings: DEFAULT_MOVE_CAMERA_SETTINGS, unit: 'squats', mode: 'start' as const, resumed: false, supported: true };
   it('opens for a fresh squat Start moving with the counter on', () => {
