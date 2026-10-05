@@ -19,7 +19,7 @@
  * dropped. No recording, no storage, no upload.
  */
 import { createElement, useCallback, useEffect, useRef, useState } from 'react';
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
@@ -53,6 +53,10 @@ interface Ui {
 export function CameraRepCounter(props: CameraRepCounterProps) {
   const { factory, showFigure, reducedMotion } = props;
   const insets = useSafeAreaInsets();
+  // The reference's clamp(112px, 34vw, 156px) and clamp(120px, 38vw, 170px).
+  const vw = Math.min(useWindowDimensions().width, 430);
+  const countSize = Math.max(112, Math.min(156, 0.34 * vw));
+  const countdownSize = Math.max(120, Math.min(170, 0.38 * vw));
   const [status, setStatus] = useState<CameraStatus>('starting');
   const [failure, setFailure] = useState<CameraFailure | null>(null);
   const [ui, setUi] = useState<Ui>({ view: null, countdown: null, aspect: 9 / 16 });
@@ -296,7 +300,7 @@ export function CameraRepCounter(props: CameraRepCounterProps) {
           </View>
         ) : counting ? (
           <View style={st.countWrap}>
-            <Text style={st.count} testID="wsf-camera-count">
+            <Text style={[st.count, { fontSize: countSize, lineHeight: countSize * 1.07 }]} testID="wsf-camera-count">
               {String(view!.setReps)}
             </Text>
             <Text style={st.unit}>SQUATS</Text>
@@ -304,7 +308,11 @@ export function CameraRepCounter(props: CameraRepCounterProps) {
         ) : ui.countdown !== null ? (
           <Text
             key={`cd${ui.countdown}`}
-            style={[st.countdown, reducedMotion ? null : (st.pop as object)]}
+            style={[
+              st.countdown,
+              { fontSize: countdownSize, lineHeight: countdownSize * 1.07 },
+              reducedMotion ? null : (st.pop as object),
+            ]}
             testID="wsf-camera-countdown"
           >
             {String(ui.countdown)}
@@ -441,7 +449,15 @@ const st = StyleSheet.create({
     textShadowRadius: 24,
   },
   unit: { color: PROGRESS_GREEN, fontSize: 18, fontWeight: '800', letterSpacing: 2.5, marginTop: 6 },
-  countdown: { color: PROGRESS_GREEN, fontSize: 150, lineHeight: 160, fontWeight: '800' },
+  countdown: {
+    color: PROGRESS_GREEN,
+    fontSize: 150,
+    lineHeight: 160,
+    fontWeight: '800',
+    textShadowColor: 'rgba(0,0,0,.55)',
+    textShadowOffset: { width: 0, height: 4 },
+    textShadowRadius: 24,
+  },
   pop: { animationName: { '0%': { transform: 'scale(1.35)', opacity: 0 }, '30%': { opacity: 1 }, '100%': { transform: 'scale(1)' } }, animationDuration: '900ms', animationTimingFunction: 'ease-out' } as never,
   cue: {
     paddingVertical: 10,

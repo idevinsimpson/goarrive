@@ -19,7 +19,7 @@ import path from 'node:path';
 
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 
-import { contributionsOf, openPhone, seedExpoEvent, type ExpoFixture } from './helpers/expo-attendee-fixtures';
+import { contributionsOf, firestorePatch, openPhone, seedExpoEvent, type ExpoFixture } from './helpers/expo-attendee-fixtures';
 
 test.describe.configure({ timeout: 240_000 });
 
@@ -109,6 +109,9 @@ const setPlan = (page: Page, plan: Plan) =>
   page.evaluate((p) => {
     (window as unknown as { __WSF_TEST_POSE__: { plan: unknown } }).__WSF_TEST_POSE__.plan = p;
   }, plan);
+
+const cameraStarts = (page: Page) =>
+  page.evaluate(() => (window as unknown as { __WSF_TEST_POSE__?: { starts?: number } }).__WSF_TEST_POSE__?.starts ?? 0);
 
 const cameraActive = (page: Page) =>
   page.evaluate(() => (window as unknown as { __WSF_TEST_POSE__?: { active?: boolean } }).__WSF_TEST_POSE__?.active === true);
@@ -339,6 +342,49 @@ test('Camera rep counter OFF keeps the existing manual squat flow', async ({ bro
     await page.waitForTimeout(1_000);
     await expect(page.getByTestId('wsf-camera-screen')).toHaveCount(0);
     expect(await cameraActive(page)).toBe(false);
+  } finally {
+    await phone.context.close();
+  }
+});
+
+test('a non-squat goal keeps its existing flow and never opens the squat counter', async ({ browser }) => {
+  const other = await seedExpoEvent({ tag: 'camnonsq', attendees: ['Fixture Pusher'], target: 500, seededTotal: 40 });
+  await firestorePatch(`wsfGoals/${other.goalId}`, { unit: { stringValue: 'push-ups' } });
+  const phone = await openPhone(browser, other.attendees[0]!);
+  try {
+    const { page, context } = phone;
+    await withPoses(context);
+    await setSettings(page, {});
+    await openMove(page);
+    await expect(page.getByTestId('wsf-contribute-move-screen')).toBeVisible({ timeout: 40_000 });
+    await page.waitForTimeout(1_000);
+    await expect(page.getByTestId('wsf-camera-screen')).toHaveCount(0);
+    expect(await cameraStarts(page)).toBe(0);
+  } finally {
+    await phone.context.close();
+  }
+});
+
+test('an unresolved (pending/unknown) attempt keeps its recovery; the camera is not reopened over it', async ({ browser }) => {
+  const who = fx.attendees[1]!;
+  const phone = await openPhone(browser, who);
+  try {
+    const { page, context } = phone;
+    await withPoses(context);
+    await setSettings(page, {});
+    await page.evaluate(
+      ({ goalId, uid }) =>
+        localStorage.setItem(
+          `wsf.pendingContribution.${goalId}.${uid}`,
+          JSON.stringify({ goalId, attemptId: `fixture-unresolved-${Date.now()}`, count: 6, ts: Date.now(), state: 'unknown' }),
+        ),
+      { goalId: fx.goalId, uid: who.uid },
+    );
+    await openMove(page);
+    await expect(page.getByTestId('wsf-contribute-pending')).toBeVisible({ timeout: 40_000 });
+    await page.waitForTimeout(1_000);
+    await expect(page.getByTestId('wsf-camera-screen')).toHaveCount(0);
+    expect(await cameraStarts(page)).toBe(0);
   } finally {
     await phone.context.close();
   }
