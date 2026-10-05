@@ -10,7 +10,7 @@
  */
 import { useSyncExternalStore } from 'react';
 
-import { moveCameraSettingsOf, type MoveCameraSettings } from './flow';
+import { DEFAULT_MOVE_CAMERA_SETTINGS, moveCameraSettingsOf, type MoveCameraSettings } from './flow';
 
 export const MOVE_CAMERA_SETTINGS_KEY = 'wsf.moveCamera.v1';
 
@@ -56,8 +56,12 @@ function subscribe(l: () => void): () => void {
   return () => listeners.delete(l);
 }
 
+// The static export prerenders with no storage, so hydration must start from
+// the defaults too; the stored value takes over on the next render.
+const serverSnapshot = (): MoveCameraSettings => DEFAULT_MOVE_CAMERA_SETTINGS;
+
 export function useMoveCameraSettings(): MoveCameraSettings {
-  return useSyncExternalStore(subscribe, readMoveCameraSettings, readMoveCameraSettings);
+  return useSyncExternalStore(subscribe, readMoveCameraSettings, serverSnapshot);
 }
 
 /** Tests only: forget the cached value so the next read goes to storage. */
