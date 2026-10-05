@@ -8,31 +8,34 @@ Technical donor only: PR #475 commit `eda5821893937e89b2635237d42924221e00c3a9` 
 
 | Layer | Where | What it does |
 |---|---|---|
-| Counting core | `apps/westayfit/src/movement-camera/{types,adapter,geometry,squatCounter,subjectLock,session,synthetic}.ts` | The donor's runtime-independent squat counter and subject lock, ported unchanged except for imports and doc paths. |
-| Flow rules | `src/movement-camera/flow.ts` | Settings defaults, the entry rule, readiness (600 ms of stable full body), the automatic 3-2-1, the GO baseline, pause banking, the frozen Finish estimate, the 0..500 clamp, and plain cues. |
-| Body guide | `src/movement-camera/figure.ts`, `src/ui/CameraSkeletonOverlay.tsx` | Head ring, both arms and legs, torso sides and hips, no neck, rounded `#91CB7D` lines over a navy under-stroke, mirrored. |
-| Sources | `src/movement-camera/source.ts` | The on-device engine (**absent**, see below) and the emulator-only synthetic test source. |
-| Camera screen | `src/ui/CameraRepCounter.tsx` | Full-screen camera, count, Finish, Count by hand, failure and paused panels. It releases the camera on every way out. |
-| Settings | `src/movement-camera/{settingsStore.ts,MoveCameraSettingsSection.tsx}`, `app/settings.tsx` | A MOVE section with Camera rep counter, and under it Show stick figure. Both default ON and are stored on this device only. |
-| Routing, Adjust | `app/contribute/[goalId].tsx` | A squat "Start moving" goes to the camera, then Adjust, then the EXISTING review and Record. |
+| **Counter (frozen)** | `apps/westayfit/src/movement-camera/frozen/rep-counter-proof/**` | The owner-accepted live candidate `makeSessionR1421`, all 32 files, never edited:<br>• r14.2.1 startup arm and camera-height calibration<br>• r14.1 measurement-gap grace<br>• r13.3 camera-transform-invariant skeleton-phase counter<br>• `SubjectLockR14` transient continuity<br>See `src/movement-camera/FROZEN-SOURCE.md` for provenance. |
+| Typed boundary | `frozen.js`, `frozen.d.ts` | The reference's own pattern. The app never imports the frozen files directly; a test pins this. |
+| Orchestration | `orchestrator.ts` | The reference orchestrator, ported:<br>• **ready = locked + armed + 600 ms stable full body** (nose plus one complete side chain, edge 0.02)<br>• the GO baseline does not reset the session<br>• pause banks the count<br>• Finish freezes the estimate (`camera-estimate`, unverified) |
+| Controller | `controller.ts`, `support.ts` | The reference controller, running on the frozen `MovementCameraLifecycle`:<br>• front camera at 640x480, 60 fps; no audio<br>• pauses on `visibilitychange`/`pagehide`<br>• disposes on every exit |
+| Engine (web) | `engine.ts`, `tasksVision.ts` | `@mediapipe/tasks-vision` **exactly 0.10.35** (scope delta `5997885276`):<br>• settings as the reference: VIDEO, lite float16 v1, numPoses 3, 0.5 confidences, no masks, GPU→CPU<br>• lazily imported into its own chunk |
+| Mapping | `visual.ts` | The frozen `BLAZEPOSE_INDEX`/`mapBlazePose`, held text-equal to the frozen file. Ears, elbows and wrists ride beside each pose in a WeakMap and never reach counting. |
+| Flow rules | `flow.ts` | Settings defaults, the entry rule, the 0..500 clamp, the automatic 3-2-1 and the plain cues. These mirror the reference's `camera-flow.ts`. |
+| Camera screen | `src/ui/CameraRepCounter.tsx`, `CameraSkeletonOverlay.tsx`, `figure.ts` | The full-screen camera, count, Finish, Count by hand, failure and paused panels, and the body guide (head ring, arms, legs, `#91CB7D`). Lazy-loaded together with the counter (165 KB chunk). |
+| Settings | `settingsStore.ts`, `MoveCameraSettingsSection.tsx`, `app/settings.tsx` | MOVE section first, as in the reference: **Camera rep counter**, and under it **Show stick figure**. Both ON by default and stored on this device only. |
+| Routing, Adjust | `app/contribute/[goalId].tsx` | A fresh squat **Start moving** goes camera → Adjust → the **existing** review → Record. |
 
-## The one thing not in this PR: the on-device engine
+**PR #475 is a technical donor only.** Its `MovementSession`/`SquatCounter` counter is **not** on the product path. Its suites now run against the frozen `core/*`, which is byte-identical.
 
-The repo has no pose model or camera dependency. The scope delta for `@mediapipe/tasks-vision` pinned exact at `0.10.35`, plus its lockfile, was asked on #497 `5997633763` and is **unanswered**.
+## Known differences from the reference, stated plainly
 
-Until that lands, `enginePoseSourceFactory` is `null`, so `cameraEntryAllowed(..., supported: false)` is false everywhere outside the emulator test gate. A real member's squat MOVE is therefore the existing manual flow. That is pinned by the e2e "without the test source … stays manual — fail closed".
-
-Native fails closed the same way: no vision-camera, no permissions, no EAS change.
-
-**Nothing here is evidence that counting works on a real body.** The donor's real-camera evidence remains the donor's.
+- **Asset hosting.** The reference served the WASM and model **same-origin** from its asset store. This build fetches the **same pinned bytes** from the version-pinned jsDelivr path (`@0.10.35/wasm`) and the GCS `float16/1` model URL, which are the donor #475 URLs. Same-origin hosting needs those bytes in the hosted build, which is a separate scoped change.
+- **Native.** No camera there yet; the manual flow stays (fail closed). See the NATIVE ADAPTER proposal, `#497 5998835467`.
+- **tsc.** Strict `tsc` reports 5 type-only errors **inside the frozen files**. The reference never typechecks them. The exclude is requested at `#497 5998544943`.
+- **Older e2e suites.** Specs that walk the manual squat flow need the counter OFF in their test context. A one-file `playwright.config.ts` default is requested at `#497 5999027969`; with it applied locally, those suites pass.
 
 ## Synthetic test source (emulator + loopback only)
 
-`window.__WSF_TEST_POSE__` is read only when `EXPO_PUBLIC_WSF_USE_EMULATORS` is `1`/`true` AND the page is served from loopback. This is the same gate as the demo-media test catalog.
+`window.__WSF_TEST_POSE__` (`support.ts`) is read only when `EXPO_PUBLIC_WSF_USE_EMULATORS` is `1`/`true` AND the page is served from loopback. This is the same gate as the demo-media test catalog.
 
-- It draws a scripted stick figure and never opens a camera.
-- It keeps `active` truthful, so the specs can prove the camera was released.
-- Unit tests pin the gate: a production host, a missing flag or a malformed hook all read as null.
+- It supplies raw BlazePose 33-point lists for a scripted stick figure, which pass through the same `mapPerson` → orchestrator → **real frozen `makeSessionR1421`** as engine output.
+- It never opens a camera, and keeps `active` truthful so the specs can prove the camera was released.
+- Without the hook, the web build takes the real camera path. Headless Chromium refuses the camera, so that e2e lands on "Camera isn't available" → manual entry.
+- **Not evidence that counting works on a real body.**
 
 ## Frozen target states → proof
 
@@ -41,13 +44,13 @@ Native fails closed the same way: no vision-camera, no permissions, no EAS chang
 | 1 | Settings defaults ON/ON; stick figure hidden while the counter is off | unit `camera settings`; e2e `Settings: MOVE section …` (value kept while hidden, persisted across reload) |
 | 2 | Squat + camera ON opens the camera directly | e2e happy path: no `wsf-contribute-move-screen` |
 | 3 | Plain step-back guidance, no diagnostics | unit `camera cues are plain`; e2e `Step back so I can see you` |
-| 4 | Countdown starts only on stable full body | unit `is ready only after FULL_BODY_STABLE_MS`; `GO is refused before ready` |
+| 4 | Countdown starts only on stable full body (plus the frozen arm) | unit: orchestrator `ready requires armed AND 600 ms`, `ready only once full body has been stable for 600 ms` (fails under a stable-window mutant), and the real frozen session `arms on a standing plateau` |
 | 5 | Readiness loss cancels the countdown | unit `losing readiness mid-countdown …`; e2e `readiness loss cancels the countdown` |
-| 6 | Baseline at GO; count starts at 0; pre-GO motion excluded | unit `squats before GO never reach the set` (fails under a zero-baseline mutant); e2e counting `0` after a pre-GO squat |
+| 6 | Baseline at GO; count starts at 0; pre-GO motion excluded | unit: fake session `reps observed before GO never appear`, and the **real frozen session** `pre-GO squats never reach the set` (raw 4, set 3). Both fail under a zero-baseline mutant; e2e counting `0` after a pre-GO squat |
 | 7 | Full-height camera, large count, one Finish, brief reacquire cue | e2e `Step back into view` while counting, count unchanged |
 | 8 | Body guide ON: one figure, head ring, arms, legs, `#91CB7D` | unit `the body guide geometry`; e2e `data-head=ring`, `data-lines=8` |
-| 9 | Body guide OFF: identical counting, no overlay | unit counts are identical with or without visuals; e2e `data-figure=off`, no `wsf-camera-figure` |
-| 10 | Finish freezes and releases | unit `Finish freezes`; e2e `active === false` after Finish |
+| 9 | Body guide OFF: identical counting, no overlay | unit `mapBlazePose ignores the visual indices entirely`, plus the visuals-merge mutant; e2e `data-figure=off`, no `wsf-camera-figure` |
+| 10 | Finish freezes and releases | unit orchestrator `Finish freezes the number`; e2e `active === false` after Finish |
 | 11 | Adjust: minus / number / plus, 0..500 | unit `adjust bounds`; e2e Adjust 3 → 4 |
 | 12 | Continue enters the EXISTING review; nothing before confirm | e2e: zero contributions through Finish, Adjust, Continue and Edit; exactly `[4]` after Record |
 | 13 | Failure offers manual entry | e2e `camera failure offers manual entry` (scripted permission failure) |
@@ -57,7 +60,7 @@ Native fails closed the same way: no vision-camera, no permissions, no EAS chang
 | 17 | Close/background/unmount release; nothing invented | e2e hidden page → `Camera paused`, `2 squats kept so far.`, `active === false`, a fresh 3-2-1 resumes at 2; Close → released, zero contributions |
 | 18 | No frame storage or upload; estimate unverified | unit `privacy: nothing leaves the device` (no MediaRecorder, canvas capture, fetch, Firestore or `odml.pa.googleapis`); `finish()` returns `source: 'camera-estimate', verified: false` |
 
-Visual-only points (ears, elbows, wrists) are stripped before the session. A spy test proves the session only ever receives the nine counting keypoints, and a visuals-merge mutant fails it.
+Visual-only points (ears, elbows, wrists) never reach the frozen session: `mapPerson` gives it exactly the nine frozen keypoints, and a visuals-merge mutant fails the suite. The frozen closure is sha256-pinned file by file, and a repeated (out-of-order) frame mid-rep voids that rep.
 
 ## Frames
 
@@ -72,6 +75,6 @@ The capture producer is `tests-e2e/move-camera-counter.spec.ts` with `WSF_CAMERA
 METADATA_SERVER_DETECTION=none npx -y firebase-tools emulators:start --config firebase.westayfit.emulators.json --project demo-wsf-local
 EXPO_PUBLIC_WSF_AUTH_ENABLED=1 EXPO_PUBLIC_WSF_USE_EMULATORS=1 npm --prefix apps/westayfit run build:web
 cd apps/westayfit
-npx vitest run tests/move-camera-counter.test.ts
+npx vitest run tests/move-camera-counter.test.ts   # 127 tests
 WSF_PLAYWRIGHT_BASE_URL=http://127.0.0.1:5010 npx playwright test tests-e2e/move-camera-counter.spec.ts --workers=1
 ```
