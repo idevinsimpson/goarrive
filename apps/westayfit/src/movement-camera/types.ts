@@ -1,67 +1,16 @@
 /**
- * MOVEMENT-VISION-1 — THE ENGINE-NEUTRAL POSE VOCABULARY.
- *
- * Everything under src/movement-camera/ except the files in `web/` is pure
- * TypeScript: no React, no DOM, no camera, no ML engine. An engine adapter
- * (MediaPipe on web today; a native frame-processor later) turns its own
- * output into these shapes, and the subject lock and squat counter only ever
- * see these shapes. That is what keeps the counting logic testable with
- * synthetic landmark sequences and portable to a native build.
- *
- * COORDINATES. Normalised image coordinates of the UNMIRRORED camera frame:
- * x in [0, 1] left→right, y in [0, 1] top→bottom. A self-view that is shown
- * mirrored mirrors the drawing, never the data.
+ * The pose vocabulary the camera flow uses. Counting shapes come from the
+ * frozen core (through the typed boundary); the visual-only points are app
+ * code and never reach counting.
  */
+import type { Keypoint, Landmark, Pose, PoseFrame } from './frozen';
 
-/** The only keypoints the squat POC needs. Engines with more map down to these. */
-export const KEYPOINTS = [
-  'nose',
-  'leftShoulder',
-  'rightShoulder',
-  'leftHip',
-  'rightHip',
-  'leftKnee',
-  'rightKnee',
-  'leftAnkle',
-  'rightAnkle',
-] as const;
-
-export type Keypoint = (typeof KEYPOINTS)[number];
-
-export interface Landmark {
-  x: number;
-  y: number;
-  /** 0..1, the engine's own confidence that this point is visible in frame. */
-  visibility: number;
-}
-
-/** One detected person in one frame. Missing keys mean "not reported". */
-export type Pose = Partial<Record<Keypoint, Landmark>>;
-
-/** Everything one camera frame produced. `poses` is unordered and carries no identity. */
-export interface PoseFrame {
-  timestampMs: number;
-  poses: Pose[];
-  /** Frame width / height, so distances in x and y are comparable. Defaults to 1. */
-  aspect?: number;
-}
-
-export interface Box {
-  minX: number;
-  minY: number;
-  maxX: number;
-  maxY: number;
-  cx: number;
-  cy: number;
-  w: number;
-  h: number;
-}
+export type { Keypoint, Landmark, Pose, PoseFrame };
 
 /**
  * VISUAL-ONLY POINTS, for the body guide (head ring, elbows, wrists). They are
- * carried NEXT TO a counting pose, never inside it: the counting path only
- * ever receives `Pose`, which has no key for any of these, and the camera flow
- * strips every pose down to KEYPOINTS before the session sees it.
+ * carried NEXT TO a counting pose, never inside it: the frozen session only
+ * ever receives the nine counting keypoints.
  */
 export const VISUAL_KEYPOINTS = [
   'leftEar',
@@ -75,8 +24,3 @@ export const VISUAL_KEYPOINTS = [
 export type VisualKeypoint = (typeof VISUAL_KEYPOINTS)[number];
 
 export type VisualPose = Partial<Record<VisualKeypoint, Landmark>>;
-
-/** What an engine adapter hands the camera flow: counting poses plus, index-aligned, their visual-only points. */
-export interface CameraFrame extends PoseFrame {
-  visuals?: VisualPose[];
-}

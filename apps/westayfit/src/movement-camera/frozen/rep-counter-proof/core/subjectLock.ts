@@ -34,7 +34,7 @@ import type { Box, Pose, PoseFrame } from './types';
  * people means no lock at all. Standing is required so the squat counter's
  * baseline (the member's own standing ratio) is measured on a standing body.
  *
- * WHAT IT CANNOT DO (see docs/westayfit/qa/move-camera-native-port-1.md): if the
+ * WHAT IT CANNOT DO (see docs/westayfit/movement-vision/LIMITATIONS.md): if the
  * member leaves and a different person steps into the same spot, at the same
  * apparent size, inside `forgetAfterMs`, that person is re-acquired. Without
  * identity, "same place, same size" is the whole of the evidence.

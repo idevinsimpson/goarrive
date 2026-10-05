@@ -1,11 +1,12 @@
 /**
  * MOVE-CAMERA-NATIVE-PORT-1 — the camera-assisted squat MOVE flow.
  *
- * SYNTHETIC POSES, NO CAMERA. Every test here installs the emulator-only,
+ * SYNTHETIC POSES, NO CAMERA. The camera tests install the emulator-only,
  * loopback-only test pose source (`window.__WSF_TEST_POSE__`, read by
- * src/movement-camera/source.ts only on an emulator build served from
- * loopback). It draws a scripted stick figure; it is NOT evidence that the
- * counter works on a real body, only that the flow does what the frozen
+ * src/movement-camera/controller.ts only on an emulator build served from
+ * loopback). It feeds a scripted stick figure, as raw BlazePose landmarks,
+ * into the REAL frozen r14.2.1 session. It is NOT evidence that the counter
+ * works on a real body; only that the flow and the frozen counter do what the
  * reference says on inputs whose truth is known exactly.
  *
  * Captures (WSF_CAMERA_LABEL=before|after) are written to
@@ -41,7 +42,9 @@ type Plan = { kind: 'stand' } | { kind: 'away' } | { kind: 'squats'; n: number; 
  */
 function installPoseHook(arg: { fail?: string }) {
   type L = { x: number; y: number; visibility: number };
-  const pose = (depth: number) => {
+  // One scripted person as a raw BlazePose list (33 points), so the page maps it
+  // exactly as it maps the engine's output (visual.ts mapPerson).
+  const person = (depth: number): L[] => {
     const H = 0.7, cx = 0.5, v = 0.95, ankleY = 0.92, shin = 0.26 * H;
     const kneeY = ankleY - shin;
     const hipY = ankleY - (2 - depth) * shin;
@@ -50,52 +53,41 @@ function installPoseHook(arg: { fail?: string }) {
     const noseY = shoulderY - 0.12 * H;
     const kneeOut = 0.07 * H + depth * 0.03 * H;
     const p = (x: number, y: number): L => ({ x, y, visibility: v });
-    return {
-      poses: [
-        {
-          nose: p(cx, noseY),
-          leftShoulder: p(cx + 0.08 * H, shoulderY),
-          rightShoulder: p(cx - 0.08 * H, shoulderY),
-          leftHip: p(cx + 0.06 * H, hipY),
-          rightHip: p(cx - 0.06 * H, hipY),
-          leftKnee: p(cx + kneeOut, kneeY),
-          rightKnee: p(cx - kneeOut, kneeY),
-          leftAnkle: p(cx + 0.06 * H, ankleY),
-          rightAnkle: p(cx - 0.06 * H, ankleY),
-        },
-      ],
-      visuals: [
-        {
-          leftEar: p(cx + 0.035, noseY + 0.01),
-          rightEar: p(cx - 0.035, noseY + 0.01),
-          leftElbow: p(cx + 0.11 * H, shoulderY + 0.15 * H),
-          rightElbow: p(cx - 0.11 * H, shoulderY + 0.15 * H),
-          leftWrist: p(cx + 0.1 * H, shoulderY + 0.28 * H),
-          rightWrist: p(cx - 0.1 * H, shoulderY + 0.28 * H),
-        },
-      ],
-    };
+    const raw: L[] = Array.from({ length: 33 }, () => ({ x: 0, y: 0, visibility: 0 }));
+    raw[0] = p(cx, noseY);
+    raw[7] = p(cx + 0.035, noseY + 0.01);
+    raw[8] = p(cx - 0.035, noseY + 0.01);
+    raw[11] = p(cx + 0.08 * H, shoulderY);
+    raw[12] = p(cx - 0.08 * H, shoulderY);
+    raw[13] = p(cx + 0.13 * H, shoulderY + 0.14 * H);
+    raw[14] = p(cx - 0.13 * H, shoulderY + 0.14 * H);
+    raw[15] = p(cx + 0.11 * H, shoulderY + 0.27 * H);
+    raw[16] = p(cx - 0.11 * H, shoulderY + 0.27 * H);
+    raw[23] = p(cx + 0.06 * H, hipY);
+    raw[24] = p(cx - 0.06 * H, hipY);
+    raw[25] = p(cx + kneeOut, kneeY);
+    raw[26] = p(cx - kneeOut, kneeY);
+    raw[27] = p(cx + 0.06 * H, ankleY);
+    raw[28] = p(cx - 0.06 * H, ankleY);
+    return raw;
   };
-  const PERIOD = 1600, REST = 400;
-  const hook: Record<string, unknown> & { plan: Plan; lastT: number } = {
+  const PERIOD = 1600, REST = 600;
+  const hook: Record<string, unknown> & { plan: Plan } = {
     plan: { kind: 'stand' },
-    lastT: 0,
     fail: arg.fail,
     scene(t: number) {
-      hook.lastT = t;
       const plan = hook.plan;
-      if (plan.kind === 'away') return { poses: [], visuals: [] };
+      if (plan.kind === 'away') return [];
       if (plan.kind === 'squats') {
         if (plan.start === undefined) plan.start = t;
         const rel = t - plan.start;
         const i = Math.floor(rel / (PERIOD + REST));
         if (i < plan.n) {
           const u = rel - i * (PERIOD + REST);
-          const d = u > PERIOD ? 0 : 0.95 * Math.sin((u / PERIOD) * Math.PI);
-          return pose(d);
+          return [person(u > PERIOD ? 0 : 0.95 * Math.sin((u / PERIOD) * Math.PI))];
         }
       }
-      return pose(0);
+      return [person(0)];
     },
   };
   (window as unknown as { __WSF_TEST_POSE__: unknown }).__WSF_TEST_POSE__ = hook;
@@ -390,15 +382,18 @@ test('an unresolved (pending/unknown) attempt keeps its recovery; the camera is 
   }
 });
 
-test('without the test source (no on-device engine in this build) squat MOVE stays manual — fail closed', async ({ browser }) => {
+test('without the test source, squat MOVE opens the real camera path; no camera here → manual entry, nothing written', async ({ browser }) => {
   const phone = await openPhone(browser, fx.attendees[1]!);
   try {
     const { page } = phone;
     await setSettings(page, {});
     await openMove(page);
-    await expect(page.getByTestId('wsf-contribute-move-screen')).toBeVisible({ timeout: 40_000 });
-    await page.waitForTimeout(1_000);
-    await expect(page.getByTestId('wsf-camera-screen')).toHaveCount(0);
+    // Headless Chromium has no camera grant: getUserMedia is refused, and the
+    // member is offered manual entry rather than a dead screen.
+    await expect(page.getByTestId('wsf-camera-failed')).toContainText('Camera isn’t available', { timeout: 40_000 });
+    await page.getByTestId('wsf-camera-manual').click();
+    await expect(page.getByTestId('wsf-contribute-entry')).toBeVisible({ timeout: 10_000 });
+    expect(await contributionsOf(fx.goalId, fx.attendees[1]!.uid)).toHaveLength(0);
   } finally {
     await phone.context.close();
   }

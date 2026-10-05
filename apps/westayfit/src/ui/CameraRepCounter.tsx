@@ -22,21 +22,13 @@ import { createElement, useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import {
-  ACQUIRING,
-  CameraSquatSet,
-  cameraCue,
-  stepCountdown,
-  type CameraStatus,
-  type CameraView,
-  type CountdownState,
-} from '../movement-camera/flow';
-import { CameraSourceError, type CameraFailure, type PoseSource, type PoseSourceFactory } from '../movement-camera/source';
+import { RepCounterController, type RepCounterView } from '../movement-camera/controller';
+import { ACQUIRING, cameraCue, stepCountdown, type CountdownState } from '../movement-camera/flow';
+import type { CameraFailure } from '../movement-camera/orchestrator';
 import { CameraSkeletonOverlay } from './CameraSkeletonOverlay';
 import { NAVY, PROGRESS_GREEN } from './kit';
 
 export interface CameraRepCounterProps {
-  factory: PoseSourceFactory;
   showFigure: boolean;
   reducedMotion: boolean;
   onClose: () => void;
@@ -44,163 +36,81 @@ export interface CameraRepCounterProps {
   onFinish: (estimatedReps: number) => void;
 }
 
-interface Ui {
-  view: CameraView | null;
-  countdown: number | null;
-  aspect: number;
-}
+/** The reference polls the countdown every 100 ms on performance.now(). */
+const COUNTDOWN_TICK_MS = 100;
 
 export function CameraRepCounter(props: CameraRepCounterProps) {
-  const { factory, showFigure, reducedMotion } = props;
+  const { showFigure, reducedMotion } = props;
   const insets = useSafeAreaInsets();
   // The reference's clamp(112px, 34vw, 156px) and clamp(120px, 38vw, 170px).
   const vw = Math.min(useWindowDimensions().width, 430);
   const countSize = Math.max(112, Math.min(156, 0.34 * vw));
   const countdownSize = Math.max(120, Math.min(170, 0.38 * vw));
-  const [status, setStatus] = useState<CameraStatus>('starting');
-  const [failure, setFailure] = useState<CameraFailure | null>(null);
-  const [ui, setUi] = useState<Ui>({ view: null, countdown: null, aspect: 9 / 16 });
 
-  const setRef = useRef<CameraSquatSet>(new CameraSquatSet());
-  const sourceRef = useRef<PoseSource | null>(null);
+  const [ctl] = useState(() => new RepCounterController());
+  const [view, setView] = useState<RepCounterView>(() => ctl.snapshot);
+  const [countdown, setCountdown] = useState<{ state: CountdownState; display: number | null }>({
+    state: ACQUIRING,
+    display: null,
+  });
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const rafRef = useRef<number | null>(null);
-  const countdownRef = useRef<CountdownState>(ACQUIRING);
-  const runRef = useRef(0);
   const doneRef = useRef(false);
   const propsRef = useRef(props);
   propsRef.current = props;
 
-  /** Stop everything this screen opened. Safe to call any number of times. */
-  const release = useCallback(() => {
-    runRef.current += 1;
-    if (rafRef.current !== null && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(rafRef.current);
-    rafRef.current = null;
-    const v = videoRef.current;
-    if (v) {
-      v.pause();
-      v.srcObject = null;
-    }
-    sourceRef.current?.stream?.getTracks().forEach((t) => t.stop());
-    sourceRef.current?.stop();
-    sourceRef.current = null;
-  }, []);
-
-  const loop = useCallback((run: number) => {
-    const tick = (now: number) => {
-      if (run !== runRef.current) return;
-      const source = sourceRef.current;
-      const set = setRef.current;
-      const v = videoRef.current;
-      const frame = source?.estimate(v, now) ?? null;
-      let view = set.view();
-      if (frame) view = set.update(frame);
-      let cd = countdownRef.current;
-      if (cd.phase === 'counting' && view.phase !== 'counting') cd = ACQUIRING;
-      const step = stepCountdown(cd, view.ready, now);
-      cd = step.state;
-      if (step.go) {
-        if (set.beginSet()) view = set.view();
-        else cd = ACQUIRING;
-      }
-      countdownRef.current = cd;
-      const aspect = v && v.videoWidth > 0 && v.videoHeight > 0 ? v.videoWidth / v.videoHeight : 9 / 16;
-      setUi({ view, countdown: step.display, aspect });
-      rafRef.current = requestAnimationFrame(tick);
-    };
-    rafRef.current = requestAnimationFrame(tick);
-  }, []);
-
-  const start = useCallback(async () => {
+  const start = useCallback(() => {
     if (doneRef.current) return;
-    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
-    release();
-    const run = runRef.current;
-    countdownRef.current = ACQUIRING;
-    setFailure(null);
-    setStatus('starting');
-    let source: PoseSource;
-    try {
-      source = await factory();
-    } catch (e) {
-      if (run !== runRef.current) return;
-      setFailure(e instanceof CameraSourceError ? e.stage : 'unsupported');
-      setStatus('failed');
-      return;
-    }
-    if (run !== runRef.current) {
-      source.stream?.getTracks().forEach((t) => t.stop());
-      source.stop();
-      return;
-    }
-    sourceRef.current = source;
-    const v = videoRef.current;
-    if (source.stream && v) {
-      v.srcObject = source.stream;
-      try {
-        await v.play();
-      } catch {
-        if (run !== runRef.current) return;
-        release();
-        setFailure('playback');
-        setStatus('failed');
-        return;
-      }
-    }
-    if (run !== runRef.current) return;
-    setStatus('live');
-    loop(run);
-  }, [factory, loop, release]);
+    setCountdown({ state: ACQUIRING, display: null });
+    void ctl.startCamera(videoRef.current);
+  }, [ctl]);
 
-  // Start on arrival; release on the way out.
+  // Start on arrival; release everything on the way out.
   useEffect(() => {
-    void start();
+    const unsubscribe = ctl.subscribe(setView);
+    start();
     return () => {
       doneRef.current = true;
-      release();
+      unsubscribe();
+      ctl.dispose();
     };
-  }, [start, release]);
+  }, [ctl, start]);
 
-  // A hidden page never keeps the camera: bank, release, and say so.
+  // THE AUTOMATIC 3-2-1. Starts only from ready; any readiness loss resets it;
+  // at GO the controller's beginSet() decides, and a refusal returns to acquiring.
   useEffect(() => {
-    if (typeof document === 'undefined' || typeof window === 'undefined') return undefined;
-    const pause = () => {
-      if (doneRef.current) return;
-      release();
-      setRef.current.pause();
-      countdownRef.current = ACQUIRING;
-      setUi((u) => ({ ...u, view: setRef.current.view(), countdown: null }));
-      setStatus((s) => (s === 'failed' ? s : 'paused'));
-    };
-    const onVisibility = () => {
-      if (document.visibilityState === 'hidden') pause();
-    };
-    document.addEventListener('visibilitychange', onVisibility);
-    window.addEventListener('pagehide', pause);
-    return () => {
-      document.removeEventListener('visibilitychange', onVisibility);
-      window.removeEventListener('pagehide', pause);
-    };
-  }, [release]);
+    const id = setInterval(() => {
+      setCountdown((cd) => {
+        const snap = ctl.snapshot;
+        let state = cd.state;
+        if (state.phase === 'counting' && snap.phase !== 'counting' && snap.phase !== 'finished') state = ACQUIRING;
+        const step = stepCountdown(state, snap.readyForCountdown, performance.now());
+        let next = step.state;
+        if (step.go && !ctl.beginSet()) next = ACQUIRING;
+        if (next === cd.state && step.display === cd.display) return cd;
+        return { state: next, display: step.display };
+      });
+    }, COUNTDOWN_TICK_MS);
+    return () => clearInterval(id);
+  }, [ctl]);
 
   const leave = useCallback(
     (how: 'close' | 'manual') => {
       if (doneRef.current) return;
       doneRef.current = true;
-      release();
+      ctl.dispose();
       if (how === 'close') propsRef.current.onClose();
       else propsRef.current.onManual();
     },
-    [release],
+    [ctl],
   );
 
   const finish = useCallback(() => {
     if (doneRef.current) return;
-    const est = setRef.current.finish();
+    const est = ctl.finishSet();
     doneRef.current = true;
-    release();
+    ctl.dispose();
     propsRef.current.onFinish(est.estimatedReps);
-  }, [release]);
+  }, [ctl]);
 
   // Escape closes, and focus starts on Close.
   const closeRef = useRef<View>(null);
@@ -216,23 +126,22 @@ export function CameraRepCounter(props: CameraRepCounterProps) {
     return () => document.removeEventListener('keydown', onKey);
   }, [leave]);
 
-  const view = ui.view;
-  const counting = view?.phase === 'counting';
-  const cue =
-    status === 'failed' || status === 'paused'
-      ? null
-      : cameraCue({
-          status,
-          countingNow: counting,
-          countdown: ui.countdown,
-          locked: !!view?.locked,
-          fullBody: !!view?.fullBody,
-        });
-  const phase =
-    status !== 'live' ? status : counting ? 'counting' : ui.countdown !== null ? 'countdown' : 'acquiring';
+  const status = view.camera;
+  const live = status === 'live';
+  const counting = view.phase === 'counting';
+  const failed = status === 'failed';
+  const paused = status === 'paused';
+  const cue = cameraCue({
+    status,
+    countingNow: counting,
+    countdown: countdown.display,
+    locked: view.locked,
+    fullBody: view.fullBodyVisible,
+  });
+  const phase = !live ? status : counting ? 'counting' : countdown.display !== null ? 'countdown' : 'acquiring';
   const figure =
-    showFigure && status === 'live' && view?.subject ? (
-      <CameraSkeletonOverlay subject={view.subject} visual={view.subjectVisual} aspect={ui.aspect} />
+    showFigure && live && view.keypoints ? (
+      <CameraSkeletonOverlay subject={view.keypoints} visual={view.visual} aspect={view.aspect} />
     ) : null;
 
   return (
@@ -243,7 +152,7 @@ export function CameraRepCounter(props: CameraRepCounterProps) {
         role: 'dialog',
         'aria-modal': true,
         'aria-label': 'Squat camera counter',
-        dataSet: { phase, figure: showFigure ? 'on' : 'off' },
+        dataSet: { phase, figure: showFigure ? 'on' : 'off', armed: view.armed ? 'true' : 'false' },
       } as Record<string, unknown>)}
     >
       {Platform.OS === 'web'
@@ -253,7 +162,6 @@ export function CameraRepCounter(props: CameraRepCounterProps) {
             },
             muted: true,
             playsInline: true,
-            autoPlay: false,
             'aria-hidden': true,
             'data-testid': 'wsf-camera-video',
             style: videoStyle,
@@ -283,15 +191,15 @@ export function CameraRepCounter(props: CameraRepCounterProps) {
       </View>
 
       <View style={st.center} {...({ 'aria-live': 'polite' } as Record<string, unknown>)}>
-        {status === 'failed' ? (
-          <FailurePanel failure={failure} onRetry={() => void start()} onManual={() => leave('manual')} />
-        ) : status === 'paused' ? (
+        {failed ? (
+          <FailurePanel failure={view.failure} onRetry={start} onManual={() => leave('manual')} />
+        ) : paused ? (
           <View style={st.panel} testID="wsf-camera-paused" {...({ role: 'alert' } as Record<string, unknown>)}>
             <Text style={st.panelTitle}>Camera paused</Text>
             <Text style={st.panelBody}>
-              {(view?.setReps ?? 0) > 0 ? `${view!.setReps} squats kept so far.` : 'Nothing was counted while paused.'}
+              {counting || view.setReps > 0 ? `${view.setReps} squats kept so far.` : 'Nothing was counted while paused.'}
             </Text>
-            <Pressable onPress={() => void start()} accessibilityRole="button" style={st.primary} testID="wsf-camera-resume">
+            <Pressable onPress={start} accessibilityRole="button" style={st.primary} testID="wsf-camera-resume">
               <Text style={st.primaryText}>Resume camera</Text>
             </Pressable>
             <Pressable onPress={() => leave('manual')} accessibilityRole="button" style={st.secondary} testID="wsf-camera-manual">
@@ -301,13 +209,13 @@ export function CameraRepCounter(props: CameraRepCounterProps) {
         ) : counting ? (
           <View style={st.countWrap}>
             <Text style={[st.count, { fontSize: countSize, lineHeight: countSize * 1.07 }]} testID="wsf-camera-count">
-              {String(view!.setReps)}
+              {String(view.setReps)}
             </Text>
             <Text style={st.unit}>SQUATS</Text>
           </View>
-        ) : ui.countdown !== null ? (
+        ) : countdown.display !== null ? (
           <Text
-            key={`cd${ui.countdown}`}
+            key={`cd${countdown.display}`}
             style={[
               st.countdown,
               { fontSize: countdownSize, lineHeight: countdownSize * 1.07 },
@@ -315,7 +223,7 @@ export function CameraRepCounter(props: CameraRepCounterProps) {
             ]}
             testID="wsf-camera-countdown"
           >
-            {String(ui.countdown)}
+            {String(countdown.display)}
           </Text>
         ) : null}
         {cue ? (
@@ -328,12 +236,12 @@ export function CameraRepCounter(props: CameraRepCounterProps) {
       </View>
 
       <View style={[st.bottom, { paddingBottom: Math.max(16, insets.bottom) }]}>
-        {counting && status === 'live' ? (
+        {counting && live ? (
           <Pressable onPress={finish} accessibilityRole="button" style={st.finish} testID="wsf-camera-finish">
             <Text style={st.finishText}>Finish</Text>
           </Pressable>
         ) : null}
-        {!counting && status !== 'failed' && status !== 'paused' ? (
+        {!counting && !failed && !paused ? (
           <Pressable onPress={() => leave('manual')} accessibilityRole="button" style={st.link} testID="wsf-camera-by-hand">
             <Text style={st.linkText}>Count by hand instead</Text>
           </Pressable>

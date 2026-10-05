@@ -68,7 +68,7 @@ import {
 import { moveAttemptIdFor } from '../../src/moveSession';
 import { cameraEntryAllowed, clampReps, ADJUST_MAX } from '../../src/movement-camera/flow';
 import { useMoveCameraSettings } from '../../src/movement-camera/settingsStore';
-import { poseSourceFactory } from '../../src/movement-camera/source';
+import { cameraCounterSupported } from '../../src/movement-camera/controller';
 import { CameraRepCounter } from '../../src/ui/CameraRepCounter';
 import {
   clearPendingIfAttempt,
@@ -498,7 +498,7 @@ export default function ContributeToGoal() {
     camera does not reopen behind them.
   */
   const moveCameraSettings = useMoveCameraSettings();
-  const [cameraFactory] = useState(() => poseSourceFactory());
+  const [cameraSupported] = useState(() => cameraCounterSupported());
   const [cameraDeclined, setCameraDeclined] = useState(false);
   const [cameraEstimate, setCameraEstimate] = useState<number | null>(null);
   const [adjusted, setAdjusted] = useState(0);
@@ -2584,8 +2584,8 @@ export default function ContributeToGoal() {
     movement, never over a resumed, pending, unknown, refused or confirmed
     attempt (those branches return above, and `beforeWrite` holds only when
     there is none), never for an attempt carried in from a round, and never
-    where the counter is unsupported (native; or web without the on-device
-    engine) -- there the existing manual flow below is all there is.
+    where the counter is unsupported (native, which fails closed until a native
+    adapter is approved) -- there the existing manual flow below is all there is.
   */
   const cameraOpen =
     step === 'move' &&
@@ -2599,12 +2599,11 @@ export default function ContributeToGoal() {
       unit,
       mode: params.mode === 'move' ? 'start' : 'already',
       resumed: roundAttemptRef.current != null,
-      supported: cameraFactory != null,
+      supported: cameraSupported,
     });
-  if (cameraOpen && cameraFactory) {
+  if (cameraOpen) {
     return (
       <CameraRepCounter
-        factory={cameraFactory}
         showFigure={moveCameraSettings.stickFigure}
         reducedMotion={reducedMotion}
         onClose={() => {

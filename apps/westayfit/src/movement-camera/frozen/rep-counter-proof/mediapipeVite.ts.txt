@@ -1,0 +1,73 @@
+// Vite-compatible adapter derived from reference/web/mediapipe.ts.txt (PR574 c4c241b).
+// Only change: asset loading (same-origin pinned assets instead of process.env / jsDelivr).
+// Landmark mapping, VIDEO mode, lite float16 v1, numPoses 3, confidences 0.5, no masks,
+// GPU default with CPU fallback, and explicit CPU option are preserved.
+import type { PoseEstimator } from './core/adapter';
+import type { Keypoint, Landmark, Pose, PoseFrame } from './core/types';
+import wasmLoader from '@/assets/rcp/vision_wasm_internal.js.asset.json';
+import wasmBinary from '@/assets/rcp/vision_wasm_internal.wasm.asset.json';
+import model from '@/assets/vision/pose_landmarker_lite.task.asset.json';
+
+export const MEDIAPIPE_VERSION = '0.10.35';
+export const ASSET_URLS = { wasmLoader: wasmLoader.url, wasmBinary: wasmBinary.url, model: model.url };
+
+export const BLAZEPOSE_INDEX: Record<Keypoint, number> = {
+  nose: 0, leftShoulder: 11, rightShoulder: 12, leftHip: 23, rightHip: 24,
+  leftKnee: 25, rightKnee: 26, leftAnkle: 27, rightAnkle: 28,
+};
+interface RawLandmark { x: number; y: number; visibility?: number }
+const EDGE = 0.02;
+
+export function mapBlazePose(raw: RawLandmark[]): Pose {
+  const pose: Pose = {};
+  for (const key of Object.keys(BLAZEPOSE_INDEX) as Keypoint[]) {
+    const p = raw[BLAZEPOSE_INDEX[key]];
+    if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
+    const inFrame = p.x >= -EDGE && p.x <= 1 + EDGE && p.y >= -EDGE && p.y <= 1 + EDGE;
+    const lm: Landmark = { x: p.x, y: p.y, visibility: inFrame && typeof p.visibility === 'number' ? p.visibility : 0 };
+    pose[key] = lm;
+  }
+  return pose;
+}
+
+export interface MediaPipeOptions { maxPoses?: number; delegate?: 'GPU' | 'CPU' }
+
+export async function createMediaPipeEstimator(options: MediaPipeOptions = {}): Promise<PoseEstimator> {
+  const maxPoses = options.maxPoses ?? 3;
+  const { PoseLandmarker } = await import('mp-tasks-vision-01035');
+  const abs = (u: string) => new URL(u, location.origin).toString();
+  // Loader bytes are hosted with Content-Type text/javascript, so no Blob URL is needed.
+  const fileset = { wasmLoaderPath: abs(ASSET_URLS.wasmLoader), wasmBinaryPath: abs(ASSET_URLS.wasmBinary) };
+  const make = (delegate: 'GPU' | 'CPU') =>
+    PoseLandmarker.createFromOptions(fileset, {
+      baseOptions: { modelAssetPath: abs(ASSET_URLS.model), delegate },
+      runningMode: 'VIDEO',
+      numPoses: maxPoses,
+      minPoseDetectionConfidence: 0.5,
+      minPosePresenceConfidence: 0.5,
+      minTrackingConfidence: 0.5,
+      outputSegmentationMasks: false,
+    });
+  let delegate: 'GPU' | 'CPU' = options.delegate ?? 'GPU';
+  let landmarker;
+  try {
+    landmarker = await make(delegate);
+  } catch (e) {
+    if (delegate === 'CPU') throw e;
+    delegate = 'CPU';
+    landmarker = await make('CPU');
+  }
+  const lm = landmarker;
+  return {
+    engine: `mediapipe-tasks-vision@${MEDIAPIPE_VERSION} pose_landmarker_lite (${delegate}, numPoses=${maxPoses})`,
+    maxPoses,
+    estimate(input: unknown, timestampMs: number): PoseFrame {
+      const video = input as HTMLVideoElement;
+      const result = lm.detectForVideo(video, timestampMs);
+      const poses = (result.landmarks ?? []).map((raw) => mapBlazePose(raw));
+      const aspect = video.videoWidth && video.videoHeight ? video.videoWidth / video.videoHeight : 1;
+      return { timestampMs, poses, aspect };
+    },
+    close() { lm.close(); },
+  };
+}
