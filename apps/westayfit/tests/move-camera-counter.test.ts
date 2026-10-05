@@ -668,6 +668,22 @@ describe('the frozen r14.2.1 closure is byte-for-byte what was accepted', () => 
     for (const code of appFiles) expect(code).not.toMatch(/from '[^']*rep-counter-proof/);
     expect(read('src/movement-camera/frozen.js')).toMatch(/makeSessionR1421 \} from '\.\/frozen\/rep-counter-proof\/r14_2\/sessionR142'/);
   });
+  it('the tsconfig exclusion is exactly the frozen directory: no other source escapes strict tsc', () => {
+    const cfg = JSON.parse(read('tsconfig.json'));
+    expect(cfg.exclude).toEqual(['node_modules', 'dist', 'src/movement-camera/frozen']);
+    expect(cfg.compilerOptions.strict).toBe(true);
+    expect(cfg.compilerOptions.allowJs).toBeUndefined();
+    expect(cfg.compilerOptions.checkJs).toBeUndefined();
+    // The excluded directory holds only the pinned frozen files (asserted above),
+    // and the only non-TS file the app adds beside it is the typed boundary.
+    expect(read('src/movement-camera/frozen.js').split('\n').filter((l) => l.startsWith('export ')).length).toBe(3);
+  });
+  it('the frozen runtime is the one executing: the live session object is a SessionR142 with the r14.2.1 arm', () => {
+    const o = new RepCounterOrchestrator();
+    const session = (o as unknown as { session: { constructor: { name: string }; engine: { constructor: { name: string } } } }).session;
+    expect(session.constructor.name).toBe('SessionR142');
+    expect(session.engine.constructor.name).toBe('R142Engine');
+  });
   it('the orchestrator constructs the frozen live session, makeSessionR1421', () => {
     expect(read('src/movement-camera/orchestrator.ts')).toMatch(/opts\.makeSession \?\? makeSessionR1421/);
   });

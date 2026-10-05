@@ -180,6 +180,9 @@ test('squat MOVE opens the camera; pre-GO squats excluded; Finish → Adjust →
     await setPlan(page, { kind: 'squats', n: 1 });
     await page.waitForTimeout(2_200);
     await setPlan(page, { kind: 'stand' });
+    // The frozen r14.2.1 session armed in the page (the startup arm is its
+    // own logic; nothing in app code sets this).
+    await expect(page.getByTestId('wsf-camera-screen')).toHaveAttribute('data-armed', 'true', { timeout: 15_000 });
     await toCounting(page);
     await expect(page.getByTestId('wsf-camera-cue')).toHaveCount(0);
     // The body guide: one figure with a head ring and its 8 chains (no neck).
