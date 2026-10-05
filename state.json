@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "f319c3c8e925f1cace8dc2bb7f259d71157a1de2fd9bb9a29ac011aa69ba2abb",
-  "eventCount": 513,
+  "ledgerHead": "04c6e453ec7cefda2944070d0564fad694df33c689f6bb2cf5d35cfc8bd581cf",
+  "eventCount": 516,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1165,6 +1165,73 @@
         "after": "director"
       },
       "deliveries": 3,
+      "pendingFinding": null
+    },
+    "MOVE-CAMERA-NATIVE-PORT-1": {
+      "owner": "W9",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Port the owner-accepted camera-assisted squat MOVE North Star into the current Expo app without automatic contribution credit",
+      "origin": "ledger",
+      "phase": "RELEASED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": 497,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": 0,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "apps/westayfit/app/contribute/[goalId].tsx",
+        "apps/westayfit/app/move/[goalId].tsx",
+        "apps/westayfit/app/move/index.tsx",
+        "apps/westayfit/app/settings.tsx",
+        "apps/westayfit/src/movement-camera",
+        "apps/westayfit/src/ui/CameraRepCounter.tsx",
+        "apps/westayfit/src/ui/CameraSkeletonOverlay.tsx",
+        "apps/westayfit/tests/move-camera-counter.test.ts",
+        "apps/westayfit/tests-e2e/move-camera-counter.spec.ts",
+        "docs/westayfit/qa/move-camera-native-port-1.md"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 5997524401
+        },
+        "released": {
+          "kind": "comment",
+          "id": 5997538756
+        },
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 5997538756
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "journey-qa",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
       "pendingFinding": null
     },
     "STAGING-FASTPATH-DOCS-LINEAGE-FIX": {
@@ -2948,6 +3015,14 @@
         "id": 5984100414
       },
       "superseded": true
+    },
+    "9b6184715f9df255d76b33a26885a4847f3a750998d8003739335f93047a6fe6": {
+      "packet": "MOVE-CAMERA-NATIVE-PORT-1",
+      "worker": "W9",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
