@@ -136,6 +136,9 @@ test('Settings: MOVE section defaults ON/ON; stick figure hidden while the count
   const phone = await openPhone(browser, fx.attendees[0]!);
   try {
     const { page } = phone;
+    // A member who has never chosen: no stored setting at all (the suite's
+    // default context stores the counter OFF for the older manual-flow specs).
+    await page.evaluate(() => localStorage.removeItem('wsf.moveCamera.v1'));
     await page.goto('/settings');
     const counter = page.getByTestId('wsf-settings-camera-counter');
     const figure = page.getByTestId('wsf-settings-stick-figure');
