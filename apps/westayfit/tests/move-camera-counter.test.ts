@@ -904,6 +904,31 @@ describe('the Playwright manual-flow fixture is test-harness only', () => {
     const product = ['src/movement-camera/flow.ts', 'src/movement-camera/settingsStore.ts', 'src/movement-camera/MoveCameraSettingsSection.tsx', 'app/settings.tsx', 'app/contribute/[goalId].tsx'];
     for (const f of product) expect(read(f), f).not.toMatch(/playwright|storageState|MANUAL_SQUAT_FLOW/i);
   });
+  it('the harness storage is pinned: one origin (the configured base URL), one key, one value, no cookies', async () => {
+    const prev = process.env.WSF_PLAYWRIGHT_BASE_URL;
+    process.env.WSF_PLAYWRIGHT_BASE_URL = 'http://127.0.0.1:5010/some/path';
+    try {
+      vi.resetModules();
+      const cfg = (await import('../playwright.config')).default as { use?: { storageState?: unknown } };
+      expect(cfg.use?.storageState).toEqual({
+        cookies: [],
+        origins: [
+          {
+            origin: 'http://127.0.0.1:5010',
+            localStorage: [{ name: 'wsf.moveCamera.v1', value: '{"cameraCounter":false,"stickFigure":true}' }],
+          },
+        ],
+      });
+      delete process.env.WSF_PLAYWRIGHT_BASE_URL;
+      vi.resetModules();
+      const none = (await import('../playwright.config')).default as { use?: { storageState?: unknown } };
+      expect(none.use?.storageState).toBeUndefined();
+    } finally {
+      if (prev === undefined) delete process.env.WSF_PLAYWRIGHT_BASE_URL;
+      else process.env.WSF_PLAYWRIGHT_BASE_URL = prev;
+      vi.resetModules();
+    }
+  });
   it('the harness default lives only in playwright.config.ts, as test-context storage', () => {
     const cfg = read('playwright.config.ts');
     expect(cfg).toMatch(/storageState: manualSquatFlow/);
