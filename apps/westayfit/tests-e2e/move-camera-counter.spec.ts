@@ -454,6 +454,8 @@ test('capture: Settings and squat MOVE at 390x844 and 390x640', async ({ browser
     const phone = await openPhone(browser, cap.attendees[0]!);
     try {
       if (LABEL === 'after') await withPoses(phone.context);
+      // Frames show the product default (ON/ON), not the suite's manual-flow harness value.
+      await phone.page.evaluate(() => localStorage.removeItem('wsf.moveCamera.v1'));
       await phone.page.setViewportSize(vp);
       await phone.page.goto('/settings');
       await expect(phone.page.getByTestId('wsf-settings-screen')).toBeVisible({ timeout: 40_000 });
