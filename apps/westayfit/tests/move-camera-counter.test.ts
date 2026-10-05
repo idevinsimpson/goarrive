@@ -36,6 +36,22 @@ import {
   type CountdownState,
 } from '../src/movement-camera/flow';
 import { KEYPOINTS, type CameraFrame, type VisualPose } from '../src/movement-camera/types';
+import { figureGeometry } from '../src/movement-camera/figure';
+import {
+  CameraSourceError,
+  enginePoseSourceFactory,
+  syntheticPoseSourceFactory,
+  testPoseHook,
+  type TestPoseHook,
+} from '../src/movement-camera/source';
+import {
+  __resetMoveCameraSettingsCache,
+  MOVE_CAMERA_SETTINGS_KEY,
+  readMoveCameraSettings,
+  writeMoveCameraSettings,
+} from '../src/movement-camera/settingsStore';
+import { readFileSync } from 'node:fs';
+import * as nodePath from 'node:path';
 
 // ─── ported from PR #475 tests/movement-squat-counter.test.ts (donor eda58218) ───
 /** Feed a depth function at 30 fps over [0, endMs). Returns every output. */
@@ -825,5 +841,110 @@ describe('camera cues are plain', () => {
       ),
     );
     for (const s of all) expect(s ?? '').not.toMatch(/confidence|lock|track|pose|landmark|%|debug|model/i);
+  });
+});
+
+describe('the body guide geometry', () => {
+  it('one figure: head ring, both arms and legs, torso sides and hips, no neck', () => {
+    const g = figureGeometry(flowMember(0), flowVisual, 9 / 16);
+    expect(g.width).toBe(563);
+    expect(g.lines).toHaveLength(8);
+    expect(g.lines.map((l) => l.length).sort()).toEqual([2, 2, 2, 2, 3, 3, 3, 3]);
+    expect(g.head).not.toBeNull();
+    // Centred between the ears, not on the nose.
+    expect(g.head!.cx).toBeCloseTo(0.5 * 563, 5);
+    expect(g.head!.r).toBeGreaterThanOrEqual(26);
+    expect(g.head!.r).toBeLessThanOrEqual(150);
+  });
+  it('a missing joint lifts the pen; a one-point chain is not drawn; no ears falls back to the nose', () => {
+    const p = flowMember(0);
+    delete p.leftKnee;
+    const g = figureGeometry(p, { rightElbow: flowVisual.rightElbow }, 1);
+    // left leg splits into hip alone + ankle alone → dropped; left arm has no elbow/wrist → shoulder alone, dropped.
+    expect(g.lines).toHaveLength(6);
+    expect(g.head!.cx).toBeCloseTo(p.nose!.x * 1000, 5);
+  });
+});
+
+describe('the pose source is fail-closed', () => {
+  const hook: TestPoseHook = { scene: () => ({ poses: [] }) };
+  const win = (hostname: string) => ({ location: { hostname }, __WSF_TEST_POSE__: hook });
+  it('ships no on-device engine yet: the counter is unsupported outside the test gate', () => {
+    expect(enginePoseSourceFactory).toBeNull();
+  });
+  it('the synthetic source is read only on an emulator build served from loopback', () => {
+    expect(testPoseHook('1', win('127.0.0.1'))).toBe(hook);
+    expect(testPoseHook('true', win('localhost'))).toBe(hook);
+    expect(testPoseHook(undefined, win('127.0.0.1'))).toBeNull();
+    expect(testPoseHook('0', win('127.0.0.1'))).toBeNull();
+    expect(testPoseHook('1', win('westayfit-app.web.app'))).toBeNull();
+    expect(testPoseHook('1', { location: { hostname: '127.0.0.1' }, __WSF_TEST_POSE__: { scene: 'x' } })).toBeNull();
+  });
+  it('the synthetic source keeps `active` truthful and raises its scripted failure', async () => {
+    const h: TestPoseHook = { scene: () => ({ poses: [] }) };
+    const src = await syntheticPoseSourceFactory(h)();
+    expect(h.active).toBe(true);
+    expect(src.stream).toBeNull();
+    src.stop();
+    expect(h.active).toBe(false);
+    expect(src.estimate(null, 10)).toBeNull();
+    await expect(syntheticPoseSourceFactory({ ...h, fail: 'permission' })()).rejects.toBeInstanceOf(CameraSourceError);
+  });
+});
+
+describe('MOVE camera settings storage', () => {
+  it('reads defaults with no storage, and a stored choice survives a fresh read', () => {
+    const mem = new Map<string, string>();
+    const ls = {
+      getItem: (k: string) => mem.get(k) ?? null,
+      setItem: (k: string, v: string) => void mem.set(k, v),
+    };
+    vi.stubGlobal('window', { localStorage: ls });
+    try {
+      __resetMoveCameraSettingsCache();
+      expect(readMoveCameraSettings()).toEqual({ cameraCounter: true, stickFigure: true });
+      writeMoveCameraSettings({ stickFigure: false });
+      __resetMoveCameraSettingsCache();
+      expect(readMoveCameraSettings()).toEqual({ cameraCounter: true, stickFigure: false });
+      mem.set(MOVE_CAMERA_SETTINGS_KEY, '{not json');
+      __resetMoveCameraSettingsCache();
+      expect(readMoveCameraSettings()).toEqual({ cameraCounter: true, stickFigure: true });
+    } finally {
+      vi.unstubAllGlobals();
+      __resetMoveCameraSettingsCache();
+    }
+  });
+});
+
+describe('privacy: nothing leaves the device', () => {
+  const src = (p: string) => readFileSync(nodePath.resolve(__dirname, '..', p), 'utf8');
+  const files = [
+    'src/ui/CameraRepCounter.tsx',
+    'src/ui/CameraSkeletonOverlay.tsx',
+    'src/movement-camera/source.ts',
+    'src/movement-camera/flow.ts',
+    'src/movement-camera/settingsStore.ts',
+  ];
+  it('no recording, canvas capture, upload, network or Firestore in the camera path', () => {
+    for (const f of files) {
+      const code = src(f).replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
+      expect(code, f).not.toMatch(/MediaRecorder|captureStream|toDataURL|toBlob|getImageData|fetch\(|XMLHttpRequest|sendBeacon|httpsCallable|firebase|firestore|odml\.pa\.googleapis/i);
+    }
+  });
+  it('the camera screen releases on every way out', () => {
+    const code = src('src/ui/CameraRepCounter.tsx');
+    expect(code).toMatch(/getTracks\(\)\.forEach\(\(t\) => t\.stop\(\)\)/);
+    expect(code).toMatch(/srcObject = null/);
+    expect(code).toMatch(/visibilitychange/);
+    expect(code).toMatch(/pagehide/);
+  });
+  it('the contribute screen opens the camera only before any write, never on a kiosk or over a round attempt', () => {
+    const code = src('app/contribute/[goalId].tsx');
+    const block = code.slice(code.indexOf('const cameraOpen ='), code.indexOf('if (cameraOpen && cameraFactory)'));
+    for (const need of ["step === 'move'", '!cameraDeclined', '!kiosk', 'beforeWrite', '!legacyOrphan', "state.kind === 'ready'", 'roundAttemptRef.current != null', 'cameraFactory != null']) {
+      expect(block, need).toContain(need);
+    }
+    // The pending/sending branches return before the camera can.
+    expect(code.indexOf('if (pending) {')).toBeLessThan(code.indexOf('const cameraOpen ='));
   });
 });
