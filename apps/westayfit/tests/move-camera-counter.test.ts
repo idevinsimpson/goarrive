@@ -22,6 +22,7 @@ import {
   squatDepth,
   repeatedSquats,
   labDemoScene,
+  type SyntheticPerson,
 } from '../src/movement-camera/synthetic';
 import type { Pose } from '../src/movement-camera/types';
 import {
@@ -38,7 +39,7 @@ import {
 } from '../src/movement-camera/flow';
 import type { VisualPose } from '../src/movement-camera/types';
 import { figureGeometry } from '../src/movement-camera/figure';
-import { cameraCounterSupported, testPoseHook, type TestPoseHook } from '../src/movement-camera/controller';
+import { cameraCounterSupported, testPoseHook, type TestPoseHook } from '../src/movement-camera/support';
 import { isFullBodyVisible, RepCounterOrchestrator, DEFAULT_FULL_BODY_STABLE_MS } from '../src/movement-camera/orchestrator';
 import type { FrozenSession, FrozenSnapshot } from '../src/movement-camera/frozen';
 import { BLAZEPOSE_INDEX, mapBlazePose, mapPerson, visualFor } from '../src/movement-camera/visual';
@@ -700,6 +701,13 @@ describe('the engine: pinned version, no metrics logger, lazy', () => {
       expect(code, need).toContain(need);
     }
     expect(read('src/movement-camera/controller.ts')).toMatch(/createPoseEstimator\(3\)/);
+  });
+  it('the camera screen (and with it the controller, frozen counter and engine) is lazy on the contribute screen', () => {
+    const code = read('app/contribute/[goalId].tsx');
+    expect(code).toMatch(/lazy\(\(\) =>\s+import\('\.\.\/\.\.\/src\/ui\/CameraRepCounter'\)/);
+    expect(code).not.toMatch(/^import .*CameraRepCounter/m);
+    expect(code).not.toMatch(/^import .*movement-camera\/(controller|orchestrator|engine|frozen)/m);
+    expect(read('src/movement-camera/support.ts')).not.toMatch(/^import (?!type).*'\.\/(controller|orchestrator|engine|frozen|visual)'/m);
   });
   it('the engine is reached only by dynamic import (its own chunk), never statically', () => {
     const all = ['src/movement-camera/controller.ts', 'src/ui/CameraRepCounter.tsx', 'app/contribute/[goalId].tsx', 'src/movement-camera/visual.ts'].map(read).join('\n');

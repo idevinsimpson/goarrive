@@ -18,8 +18,6 @@
  * Native has neither, so the counter is unsupported there and the existing
  * manual flow is all a member sees (fail closed).
  */
-import { Platform } from 'react-native';
-
 import { MovementCameraLifecycle, type CameraFailureStage, type PoseEstimator } from './frozen';
 import {
   RepCounterOrchestrator,
@@ -29,51 +27,12 @@ import {
   type RepSetResult,
 } from './orchestrator';
 import type { VisualPose } from './types';
-import { mapPerson, visualFor, type RawLandmark } from './visual';
+import { pageTestPoseHook, type TestPoseHook } from './support';
+import { mapPerson, visualFor } from './visual';
 
 export const REQUESTED_CAMERA = { facingMode: 'user', width: 640, height: 480, frameRate: 60 } as const;
 
 export type RepCounterView = RepCounterSnapshot & { visual: VisualPose | null };
-
-// ── The synthetic test source (emulator + loopback only) ─────────────────────
-
-const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
-
-/**
- * What a test installs on `window.__WSF_TEST_POSE__`: a scene from
- * milliseconds-since-start to raw BlazePose landmark lists (one per person),
- * an optional failure to raise at start, and `active` / `starts`, which the
- * controller keeps truthful so a test can see the camera was released.
- */
-export interface TestPoseHook {
-  scene: (tMs: number) => RawLandmark[][];
-  fail?: CameraFailure;
-  active?: boolean;
-  starts?: number;
-}
-
-export function testPoseHook(
-  emulatorFlag: string | undefined,
-  win: { location?: { hostname?: string }; __WSF_TEST_POSE__?: unknown } | undefined,
-): TestPoseHook | null {
-  const flag = (emulatorFlag ?? '').trim().toLowerCase();
-  if (flag !== '1' && flag !== 'true') return null;
-  if (!win || !LOOPBACK.has(win.location?.hostname ?? '')) return null;
-  const raw = win.__WSF_TEST_POSE__ as Partial<TestPoseHook> | undefined;
-  if (!raw || typeof raw !== 'object' || typeof raw.scene !== 'function') return null;
-  return raw as TestPoseHook;
-}
-
-function pageTestPoseHook(): TestPoseHook | null {
-  const win = typeof window === 'undefined' ? undefined : (window as unknown as Parameters<typeof testPoseHook>[1]);
-  return testPoseHook(process.env.EXPO_PUBLIC_WSF_USE_EMULATORS, win);
-}
-
-/** Whether this runtime can run the counter at all. Native: no (fail closed). */
-export function cameraCounterSupported(): boolean {
-  if (pageTestPoseHook()) return true;
-  return Platform.OS === 'web' && typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
-}
 
 // ── The controller ────────────────────────────────────────────────────────────
 

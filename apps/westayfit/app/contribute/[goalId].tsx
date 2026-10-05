@@ -2,7 +2,7 @@ import { router, useLocalSearchParams, useNavigation, usePathname } from 'expo-r
 import { FirebaseError } from 'firebase/app';
 import { signOut } from 'firebase/auth';
 import { httpsCallable } from 'firebase/functions';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -68,8 +68,7 @@ import {
 import { moveAttemptIdFor } from '../../src/moveSession';
 import { cameraEntryAllowed, clampReps, ADJUST_MAX } from '../../src/movement-camera/flow';
 import { useMoveCameraSettings } from '../../src/movement-camera/settingsStore';
-import { cameraCounterSupported } from '../../src/movement-camera/controller';
-import { CameraRepCounter } from '../../src/ui/CameraRepCounter';
+import { cameraCounterSupported } from '../../src/movement-camera/support';
 import {
   clearPendingIfAttempt,
   isSameContext,
@@ -231,6 +230,12 @@ function knownGoal(
 
 // The pre-write steps. Everything after "Record" is derived from the
 // attempt's own state (sending, unknown, refused, confirmed), not from here.
+// MOVE-CAMERA-NATIVE-PORT-1: the camera screen, its controller, the frozen
+// counter and the pose engine load only when a squat camera actually opens.
+const CameraRepCounter = lazy(() =>
+  import('../../src/ui/CameraRepCounter').then((m) => ({ default: m.CameraRepCounter }))
+);
+
 // MOVE-CAMERA-NATIVE-PORT-1: 'adjust' is the camera estimate's member-owned
 // correction, between the camera and the existing review.
 type Step = 'move' | 'enter' | 'adjust' | 'review';
@@ -2603,26 +2608,28 @@ export default function ContributeToGoal() {
     });
   if (cameraOpen) {
     return (
-      <CameraRepCounter
-        showFigure={moveCameraSettings.stickFigure}
-        reducedMotion={reducedMotion}
-        onClose={() => {
-          setCameraDeclined(true);
-          closeSheet();
-        }}
-        onManual={() => {
-          setCameraDeclined(true);
-          setCameraEstimate(null);
-          setStep('enter');
-        }}
-        onFinish={(n) => {
-          setCameraDeclined(true);
-          const v = clampReps(n);
-          setCameraEstimate(v);
-          setAdjusted(v);
-          setStep('adjust');
-        }}
-      />
+      <Suspense fallback={<View style={styles.cameraLoading} testID="wsf-camera-loading" />}>
+        <CameraRepCounter
+          showFigure={moveCameraSettings.stickFigure}
+          reducedMotion={reducedMotion}
+          onClose={() => {
+            setCameraDeclined(true);
+            closeSheet();
+          }}
+          onManual={() => {
+            setCameraDeclined(true);
+            setCameraEstimate(null);
+            setStep('enter');
+          }}
+          onFinish={(n) => {
+            setCameraDeclined(true);
+            const v = clampReps(n);
+            setCameraEstimate(v);
+            setAdjusted(v);
+            setStep('adjust');
+          }}
+        />
+      </Suspense>
     );
   }
 
@@ -3294,6 +3301,8 @@ const styles = StyleSheet.create({
   reviewBox: { backgroundColor: CREAM, borderRadius: 14, padding: 16, gap: 8 },
   // The camera estimate's Adjust (frozen reference: 64 px round buttons, a
   // 64 px number, 22 px apart).
+  // The camera's own ground while its chunk loads (the reference's #050d18).
+  cameraLoading: { flex: 1, backgroundColor: '#050d18' },
   adjustRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 22, marginTop: 18, marginBottom: 8 },
   adjustButton: {
     width: 64,
