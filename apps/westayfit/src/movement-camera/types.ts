@@ -56,3 +56,27 @@ export interface Box {
   w: number;
   h: number;
 }
+
+/**
+ * VISUAL-ONLY POINTS, for the body guide (head ring, elbows, wrists). They are
+ * carried NEXT TO a counting pose, never inside it: the counting path only
+ * ever receives `Pose`, which has no key for any of these, and the camera flow
+ * strips every pose down to KEYPOINTS before the session sees it.
+ */
+export const VISUAL_KEYPOINTS = [
+  'leftEar',
+  'rightEar',
+  'leftElbow',
+  'rightElbow',
+  'leftWrist',
+  'rightWrist',
+] as const;
+
+export type VisualKeypoint = (typeof VISUAL_KEYPOINTS)[number];
+
+export type VisualPose = Partial<Record<VisualKeypoint, Landmark>>;
+
+/** What an engine adapter hands the camera flow: counting poses plus, index-aligned, their visual-only points. */
+export interface CameraFrame extends PoseFrame {
+  visuals?: VisualPose[];
+}

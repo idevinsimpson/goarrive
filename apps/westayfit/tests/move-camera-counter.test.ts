@@ -6,7 +6,7 @@
  * merged. Its tests come with it, unchanged in substance, so the port is held
  * to exactly the behaviour that was reviewed.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { depthFromRatio, squatRatio } from '../src/movement-camera/geometry';
 import { MovementSession, type SessionSnapshot } from '../src/movement-camera/session';
@@ -20,6 +20,22 @@ import {
   type SyntheticPerson,
 } from '../src/movement-camera/synthetic';
 import type { Pose } from '../src/movement-camera/types';
+import {
+  ACQUIRING,
+  ADJUST_MAX,
+  CameraSquatSet,
+  cameraCue,
+  cameraEntryAllowed,
+  clampReps,
+  COUNTDOWN_MS,
+  countingPose,
+  DEFAULT_MOVE_CAMERA_SETTINGS,
+  FULL_BODY_STABLE_MS,
+  moveCameraSettingsOf,
+  stepCountdown,
+  type CountdownState,
+} from '../src/movement-camera/flow';
+import { KEYPOINTS, type CameraFrame, type VisualPose } from '../src/movement-camera/types';
 
 // ─── ported from PR #475 tests/movement-squat-counter.test.ts (donor eda58218) ───
 /** Feed a depth function at 30 fps over [0, endMs). Returns every output. */
@@ -559,5 +575,255 @@ describe('fail-closed 3: frames must be fresh and in order', () => {
     for (let t = 0; t <= 1000; t += 50) lock.update({ timestampMs: t, poses: [p()] });
     const out = lock.update({ timestampMs: 900, poses: [p()] });
     expect(out.subject).toBeNull();
+  });
+});
+
+// ── MOVE-CAMERA-NATIVE-PORT-1: the camera flow rules ─────────────────────────
+
+
+const flowMember = (depth: number) => syntheticPose({ cx: 0.5, footY: 0.92, height: 0.7, depth });
+const flowVisual: VisualPose = {
+  leftEar: { x: 0.53, y: 0.2, visibility: 0.9 },
+  rightEar: { x: 0.47, y: 0.2, visibility: 0.9 },
+  leftElbow: { x: 0.62, y: 0.45, visibility: 0.9 },
+  rightElbow: { x: 0.38, y: 0.45, visibility: 0.9 },
+  leftWrist: { x: 0.64, y: 0.55, visibility: 0.9 },
+  rightWrist: { x: 0.36, y: 0.55, visibility: 0.9 },
+};
+
+/** Feed `set` 30 fps frames over [from, to) of a scene; returns the last view. */
+function feed(set: CameraSquatSet, from: number, to: number, depthAt: (t: number) => number, visual = true) {
+  let v = set.view();
+  for (let t = from; t < to; t += 1000 / 30) {
+    const ts = Math.round(t * 1000) / 1000;
+    const f: CameraFrame = { timestampMs: ts, poses: [flowMember(depthAt(ts))], visuals: visual ? [flowVisual] : undefined };
+    v = set.update(f);
+  }
+  return v;
+}
+
+describe('camera settings', () => {
+  it('default ON/ON, and a missing or malformed save reads as ON', () => {
+    expect(DEFAULT_MOVE_CAMERA_SETTINGS).toEqual({ cameraCounter: true, stickFigure: true });
+    expect(moveCameraSettingsOf(undefined)).toEqual({ cameraCounter: true, stickFigure: true });
+    expect(moveCameraSettingsOf({ cameraCounter: 'no', stickFigure: 0 })).toEqual({ cameraCounter: true, stickFigure: true });
+  });
+  it('each toggle is kept independently', () => {
+    expect(moveCameraSettingsOf({ cameraCounter: false })).toEqual({ cameraCounter: false, stickFigure: true });
+    expect(moveCameraSettingsOf({ stickFigure: false })).toEqual({ cameraCounter: true, stickFigure: false });
+  });
+});
+
+describe('camera entry', () => {
+  const base = { settings: DEFAULT_MOVE_CAMERA_SETTINGS, unit: 'squats', mode: 'start' as const, resumed: false, supported: true };
+  it('opens for a fresh squat Start moving with the counter on', () => {
+    expect(cameraEntryAllowed(base)).toBe(true);
+    expect(cameraEntryAllowed({ ...base, unit: ' Squats ' })).toBe(true);
+  });
+  it('never for another movement, a near-name, the counter off, Already moved, a resumed attempt, or an unsupported runtime', () => {
+    for (const unit of ['push-ups', 'squat', 'jump squats', 'steps', '', null]) {
+      expect(cameraEntryAllowed({ ...base, unit })).toBe(false);
+    }
+    expect(cameraEntryAllowed({ ...base, settings: { cameraCounter: false, stickFigure: true } })).toBe(false);
+    expect(cameraEntryAllowed({ ...base, mode: 'already' })).toBe(false);
+    expect(cameraEntryAllowed({ ...base, resumed: true })).toBe(false);
+    expect(cameraEntryAllowed({ ...base, supported: false })).toBe(false);
+  });
+  it('the stick figure setting alone never opens the camera', () => {
+    expect(cameraEntryAllowed({ ...base, settings: { cameraCounter: false, stickFigure: true } })).toBe(false);
+    expect(cameraEntryAllowed({ ...base, settings: { cameraCounter: true, stickFigure: false } })).toBe(true);
+  });
+});
+
+describe('adjust bounds', () => {
+  it('clamps to 0..500 and rounds', () => {
+    expect(ADJUST_MAX).toBe(500);
+    expect(clampReps(-3)).toBe(0);
+    expect(clampReps(600)).toBe(500);
+    expect(clampReps(7.6)).toBe(8);
+    expect(clampReps(Number.NaN)).toBe(0);
+    expect(clampReps(Number.POSITIVE_INFINITY)).toBe(0);
+  });
+});
+
+describe('the automatic 3-2-1', () => {
+  it('shows 3, 2, 1 and fires GO at 3000 ms', () => {
+    let s: CountdownState = ACQUIRING;
+    let r = stepCountdown(s, true, 1000);
+    expect(r.display).toBe(3);
+    s = r.state;
+    expect(stepCountdown(s, true, 1000 + 900).display).toBe(3);
+    expect(stepCountdown(s, true, 1000 + 1100).display).toBe(2);
+    expect(stepCountdown(s, true, 1000 + 2100).display).toBe(1);
+    r = stepCountdown(s, true, 1000 + COUNTDOWN_MS);
+    expect(r.go).toBe(true);
+    expect(r.state.phase).toBe('counting');
+  });
+  it('losing readiness mid-countdown returns to acquisition, and the next countdown starts over from 3', () => {
+    const s = stepCountdown(ACQUIRING, true, 0).state;
+    const lost = stepCountdown(s, false, 2500);
+    expect(lost.state).toEqual(ACQUIRING);
+    expect(lost.go).toBe(false);
+    const again = stepCountdown(lost.state, true, 2600);
+    expect(again.display).toBe(3);
+    expect(stepCountdown(again.state, true, 2600 + 2999).go).toBe(false);
+  });
+  it('never fires GO without readiness', () => {
+    expect(stepCountdown(ACQUIRING, false, 99999).go).toBe(false);
+  });
+});
+
+describe('the camera set: readiness, GO baseline, banking, finish', () => {
+  it('is ready only after FULL_BODY_STABLE_MS locked with the whole body in view', () => {
+    const set = new CameraSquatSet();
+    let v = feed(set, 0, 200, () => 0);
+    expect(v.ready).toBe(false);
+    v = feed(set, 200, 3000, () => 0);
+    expect(v.locked).toBe(true);
+    expect(v.ready).toBe(true);
+    expect(FULL_BODY_STABLE_MS).toBe(600);
+  });
+
+  it('GO is refused before ready', () => {
+    const set = new CameraSquatSet();
+    feed(set, 0, 100, () => 0);
+    expect(set.beginSet()).toBe(false);
+    expect(set.view().phase).toBe('acquiring');
+  });
+
+  it('squats before GO never reach the set: 2 before, 3 after → 3', () => {
+    const set = new CameraSquatSet();
+    feed(set, 0, 1500, () => 0);
+    feed(set, 1500, 6000, (t) => repeatedSquats(t, 1500, 2, 1600, 0.95, 400));
+    feed(set, 6000, 7000, () => 0);
+    expect(set.view().setReps).toBe(0);
+    expect(set.beginSet()).toBe(true);
+    expect(set.view().setReps).toBe(0);
+    feed(set, 7000, 13000, (t) => repeatedSquats(t, 7000, 3, 1600, 0.95, 400));
+    const v = feed(set, 13000, 13500, () => 0);
+    expect(v.phase).toBe('counting');
+    expect(v.setReps).toBe(3);
+    expect(set.finish()).toEqual({ estimatedReps: 3, source: 'camera-estimate', verified: false });
+  });
+
+  it('a pause banks the set, and after a fresh GO it resumes from the banked count', () => {
+    const set = new CameraSquatSet();
+    feed(set, 0, 1500, () => 0);
+    expect(set.beginSet()).toBe(true);
+    feed(set, 1500, 5500, (t) => repeatedSquats(t, 1500, 2, 1600, 0.95, 400));
+    feed(set, 5500, 6000, () => 0);
+    expect(set.view().setReps).toBe(2);
+    set.pause();
+    expect(set.view()).toMatchObject({ phase: 'acquiring', setReps: 2, ready: false });
+    // Back in view: not ready until locked and stable again, and GO adds to the bank.
+    feed(set, 20000, 21500, () => 0);
+    expect(set.beginSet()).toBe(true);
+    feed(set, 21500, 23500, (t) => repeatedSquats(t, 21500, 1, 1600, 0.95, 400));
+    feed(set, 23500, 24000, () => 0);
+    expect(set.view().setReps).toBe(3);
+  });
+
+  it('Finish freezes: later frames change nothing', () => {
+    const set = new CameraSquatSet();
+    feed(set, 0, 1500, () => 0);
+    set.beginSet();
+    feed(set, 1500, 3500, (t) => repeatedSquats(t, 1500, 1, 1600, 0.95, 400));
+    feed(set, 3500, 4000, () => 0);
+    const est = set.finish();
+    expect(est.estimatedReps).toBe(1);
+    const v = feed(set, 4000, 9000, (t) => repeatedSquats(t, 4000, 2, 1600, 0.95, 400));
+    expect(v).toMatchObject({ phase: 'finished', setReps: 1 });
+  });
+
+  it('a brief loss while counting keeps the count on screen; nothing is invented', () => {
+    const set = new CameraSquatSet();
+    feed(set, 0, 1500, () => 0);
+    set.beginSet();
+    feed(set, 1500, 3500, (t) => repeatedSquats(t, 1500, 1, 1600, 0.95, 400));
+    feed(set, 3500, 4000, () => 0);
+    // Out of frame for 2 s.
+    let v = set.view();
+    for (let t = 4000; t < 6000; t += 1000 / 30) v = set.update({ timestampMs: Math.round(t), poses: [] });
+    expect(v.locked).toBe(false);
+    expect(v.setReps).toBe(1);
+    expect(cameraCue({ status: 'live', countingNow: true, countdown: null, locked: v.locked, fullBody: v.fullBody })).toBe('Step back into view');
+  });
+});
+
+describe('visual-only points never count', () => {
+  it('countingPose keeps exactly the nine counting keypoints', () => {
+    const p = { ...flowMember(0), ...flowVisual, leftEye: { x: 0, y: 0, visibility: 1 } } as never;
+    expect(Object.keys(countingPose(p)).sort()).toEqual([...KEYPOINTS].sort());
+  });
+
+  it('the session only ever receives the nine counting keypoints', () => {
+    const spy = vi.spyOn(MovementSession.prototype, 'update');
+    try {
+      const set = new CameraSquatSet();
+      feed(set, 0, 500, () => 0);
+      expect(spy).toHaveBeenCalled();
+      for (const [frame] of spy.mock.calls) {
+        expect(Object.keys(frame).sort()).toEqual(['aspect', 'poses', 'timestampMs']);
+        for (const pose of frame.poses) {
+          for (const k of Object.keys(pose)) expect(KEYPOINTS as readonly string[]).toContain(k);
+        }
+      }
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('the same motion counts the same with or without visual points, and wild visuals change nothing', () => {
+    const run = (visual: boolean, wild = false) => {
+      const set = new CameraSquatSet();
+      const vis: VisualPose = wild
+        ? { leftWrist: { x: 0.5, y: 0.99, visibility: 1 }, leftEar: { x: 0.1, y: 0.95, visibility: 1 } }
+        : flowVisual;
+      const step = (from: number, to: number, d: (t: number) => number) => {
+        for (let t = from; t < to; t += 1000 / 30) {
+          const ts = Math.round(t * 1000) / 1000;
+          set.update({ timestampMs: ts, poses: [flowMember(d(ts))], visuals: visual ? [vis] : undefined });
+        }
+      };
+      step(0, 1500, () => 0);
+      set.beginSet();
+      step(1500, 8000, (t) => repeatedSquats(t, 1500, 3, 1600, 0.95, 400));
+      return set.view().setReps;
+    };
+    expect(run(true)).toBe(3);
+    expect(run(false)).toBe(3);
+    expect(run(true, true)).toBe(3);
+  });
+
+  it('the body guide gets the locked subject and its visuals, and nothing when not locked', () => {
+    const set = new CameraSquatSet();
+    let v = set.update({ timestampMs: 0, poses: [flowMember(0)], visuals: [flowVisual] });
+    expect(v.subject).toBeNull();
+    expect(v.subjectVisual).toBeNull();
+    v = feed(set, 33, 1500, () => 0);
+    expect(v.subject).not.toBeNull();
+    expect(v.subjectVisual).toEqual(flowVisual);
+  });
+});
+
+describe('camera cues are plain', () => {
+  const base = { status: 'live' as const, countingNow: false, countdown: null, locked: true, fullBody: true };
+  it('maps each state to one plain line', () => {
+    expect(cameraCue({ ...base, status: 'starting' })).toBe('Starting camera…');
+    expect(cameraCue({ ...base, locked: false })).toBe('Step back so I can see you');
+    expect(cameraCue({ ...base, fullBody: false })).toBe('Step back so I can see you');
+    expect(cameraCue(base)).toBe('Stand tall — getting ready');
+    expect(cameraCue({ ...base, countdown: 2 })).toBe('Get ready');
+    expect(cameraCue({ ...base, countingNow: true })).toBeNull();
+  });
+  it('never shows diagnostics or R&D language', () => {
+    const all = [true, false].flatMap((locked) =>
+      [true, false].flatMap((countingNow) =>
+        (['starting', 'live', 'paused', 'failed'] as const).map((status) =>
+          cameraCue({ status, countingNow, countdown: null, locked, fullBody: locked }),
+        ),
+      ),
+    );
+    for (const s of all) expect(s ?? '').not.toMatch(/confidence|lock|track|pose|landmark|%|debug|model/i);
   });
 });
