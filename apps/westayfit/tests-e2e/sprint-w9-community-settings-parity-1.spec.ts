@@ -197,6 +197,10 @@ test.describe('COMMUNITY-SETTINGS-PARITY-1 cp3 · hardening', () => {
 
     // Keyboard: Tab from Close reaches the first switch, which shows a ring.
     await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute('data-testid'))).toBe('wsf-settings-close');
+    // MOVE-CAMERA-NATIVE-PORT-1: the reference's MOVE section (Camera rep counter,
+    // Show stick figure) now precedes the privacy name switch.
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Tab');
     await page.keyboard.press('Tab');
     const ring = await page.evaluate(() => {
       const a = document.activeElement as HTMLElement | null;
