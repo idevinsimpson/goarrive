@@ -197,6 +197,10 @@ test.describe('COMMUNITY-SETTINGS-PARITY-1 cp3 · hardening', () => {
 
     // Keyboard: Tab from Close reaches the first switch, which shows a ring.
     await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute('data-testid'))).toBe('wsf-settings-close');
+    // MOVE-CAMERA-NATIVE-PORT-1: the reference's MOVE section now precedes the
+    // privacy name switch. The Playwright harness stores Camera rep counter OFF,
+    // so only one MOVE switch (Show stick figure is hidden) comes first.
+    await page.keyboard.press('Tab');
     await page.keyboard.press('Tab');
     const ring = await page.evaluate(() => {
       const a = document.activeElement as HTMLElement | null;

@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useWsfAuth } from '../src/auth';
+import { MoveCameraSettingsSection } from '../src/movement-camera/MoveCameraSettingsSection';
 import { CommunityPrivacyControls } from '../src/ui/CommunityPrivacyControls';
 import {
   CREAM,
@@ -138,7 +139,19 @@ export default function SettingsScreen() {
     separate Privacy page stays for a direct link (`/settings/privacy`) and
     draws the same panel.
   */
-  const rows = <CommunityPrivacyControls compact={asPanel} />;
+  /*
+    MOVE-CAMERA-NATIVE-PORT-1. The frozen camera-squat reference adds a MOVE
+    section to this panel: Camera rep counter, and under it Show stick
+    figure. It sits above the privacy controls, which scroll themselves.
+  */
+  const rows = (
+    <>
+      <MoveCameraSettingsSection />
+      <View style={st.panelFill}>
+        <CommunityPrivacyControls compact={asPanel} />
+      </View>
+    </>
+  );
 
   if (asPanel) return panel(rows);
 

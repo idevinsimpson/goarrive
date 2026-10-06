@@ -2,7 +2,7 @@ import { router, useLocalSearchParams, useNavigation, usePathname } from 'expo-r
 import { FirebaseError } from 'firebase/app';
 import { signOut } from 'firebase/auth';
 import { httpsCallable } from 'firebase/functions';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -66,6 +66,9 @@ import {
   readOwnCredit,
 } from '../../src/memberReads';
 import { moveAttemptIdFor } from '../../src/moveSession';
+import { cameraEntryAllowed, clampReps, ADJUST_MAX } from '../../src/movement-camera/flow';
+import { useMoveCameraSettings } from '../../src/movement-camera/settingsStore';
+import { cameraCounterSupported } from '../../src/movement-camera/support';
 import {
   clearPendingIfAttempt,
   isSameContext,
@@ -227,7 +230,15 @@ function knownGoal(
 
 // The pre-write steps. Everything after "Record" is derived from the
 // attempt's own state (sending, unknown, refused, confirmed), not from here.
-type Step = 'move' | 'enter' | 'review';
+// MOVE-CAMERA-NATIVE-PORT-1: the camera screen, its controller, the frozen
+// counter and the pose engine load only when a squat camera actually opens.
+const CameraRepCounter = lazy(() =>
+  import('../../src/ui/CameraRepCounter').then((m) => ({ default: m.CameraRepCounter }))
+);
+
+// MOVE-CAMERA-NATIVE-PORT-1: 'adjust' is the camera estimate's member-owned
+// correction, between the camera and the existing review.
+type Step = 'move' | 'enter' | 'adjust' | 'review';
 
 type Refusal = { reason: RefusalReason; count: number };
 
@@ -484,6 +495,18 @@ export default function ContributeToGoal() {
   const [pulseAt, setPulseAt] = useState<Date | null>(null);
   const [context, setContext] = useState<ScreenContext>({ kind: 'none' });
   const [step, setStep] = useState<Step>(initialStep);
+  /*
+    MOVE-CAMERA-NATIVE-PORT-1. The camera squat counter. `cameraEstimate` is
+    the frozen number Finish produced (null: the camera was not used), and
+    `adjusted` the member's correction of it. `cameraDeclined` is set once the
+    member closes the camera for this flow or chooses to count by hand; the
+    camera does not reopen behind them.
+  */
+  const moveCameraSettings = useMoveCameraSettings();
+  const [cameraSupported] = useState(() => cameraCounterSupported());
+  const [cameraDeclined, setCameraDeclined] = useState(false);
+  const [cameraEstimate, setCameraEstimate] = useState<number | null>(null);
+  const [adjusted, setAdjusted] = useState(0);
   const [entry, setEntry] = useState('');
   const [entryError, setEntryError] = useState<string | null>(null);
   const [reviewCount, setReviewCount] = useState<number | null>(null);
@@ -614,6 +637,9 @@ export default function ContributeToGoal() {
     setEntry('');
     setEntryError(null);
     setReviewCount(null);
+    setCameraDeclined(false);
+    setCameraEstimate(null);
+    setAdjusted(0);
     setActivityGuideKey(recorded?.guideKey ?? null);
     setGuideOpen(false);
     setSubmitting(false);
@@ -997,9 +1023,11 @@ export default function ContributeToGoal() {
     setStep('review');
   }, [state.kind, entry]);
 
+  // Edit returns to where the number came from: Adjust for a camera
+  // estimate, the typed entry otherwise.
   const onEdit = useCallback(() => {
-    setStep('enter');
-  }, []);
+    setStep(cameraEstimate != null ? 'adjust' : 'enter');
+  }, [cameraEstimate]);
 
   // A real second contribution, offered only under 'multiple'. It returns the
   // screen to entry with NOTHING carried over from the confirmed one: no
@@ -1017,6 +1045,7 @@ export default function ContributeToGoal() {
     setEntry('');
     setEntryError(null);
     setReviewCount(null);
+    setCameraEstimate(null);
     setSubmitting(false);
     setStep('enter');
   }, []);
@@ -2553,6 +2582,129 @@ export default function ContributeToGoal() {
     );
   }
 
+  // ---- the camera squat counter (MOVE-CAMERA-NATIVE-PORT-1) ------------------
+  /*
+    A FRESH squat "Start moving" with Camera rep counter on opens the camera
+    directly: no chooser, no wizard. Never on a kiosk, never for another
+    movement, never over a resumed, pending, unknown, refused or confirmed
+    attempt (those branches return above, and `beforeWrite` holds only when
+    there is none), never for an attempt carried in from a round, and never
+    where the counter is unsupported (native, which fails closed until a native
+    adapter is approved) -- there the existing manual flow below is all there is.
+  */
+  const cameraOpen =
+    step === 'move' &&
+    !cameraDeclined &&
+    !kiosk &&
+    beforeWrite &&
+    !legacyOrphan &&
+    state.kind === 'ready' &&
+    cameraEntryAllowed({
+      settings: moveCameraSettings,
+      unit,
+      mode: params.mode === 'move' ? 'start' : 'already',
+      resumed: roundAttemptRef.current != null,
+      supported: cameraSupported,
+    });
+  if (cameraOpen) {
+    return (
+      <Suspense fallback={<View style={styles.cameraLoading} testID="wsf-camera-loading" />}>
+        <CameraRepCounter
+          showFigure={moveCameraSettings.stickFigure}
+          reducedMotion={reducedMotion}
+          onClose={() => {
+            setCameraDeclined(true);
+            closeSheet();
+          }}
+          onManual={() => {
+            setCameraDeclined(true);
+            setCameraEstimate(null);
+            setStep('enter');
+          }}
+          onFinish={(n) => {
+            setCameraDeclined(true);
+            const v = clampReps(n);
+            setCameraEstimate(v);
+            setAdjusted(v);
+            setStep('adjust');
+          }}
+        />
+      </Suspense>
+    );
+  }
+
+  // ---- adjust the camera estimate --------------------------------------------
+  /*
+    The camera's number is an estimate on this device, and the member owns
+    it: minus, the number, plus (0..500), then Continue into the EXISTING
+    review. Nothing is created here; the first write is still Record.
+  */
+  if (step === 'adjust' && cameraEstimate != null) {
+    const one = (n: number) => (n === 1 ? unit.replace(/s$/, '') : unit);
+    return screen(
+      <>
+        {renderChrome(false)}
+        {renderGoalAnchor()}
+        <View style={styles.sheet} testID="wsf-contribute-adjust-screen">
+          {renderSheetHead('Start moving')}
+          <View style={styles.sheetBody}>
+            <Text style={styles.stepHeading} {...HEADING_1} testID="wsf-contribute-adjust-heading">
+              {`We counted ${formatCount(cameraEstimate)} ${one(cameraEstimate)}`}
+            </Text>
+            <Text style={styles.body}>Adjust if needed.</Text>
+            <View style={styles.adjustRow} accessibilityLabel={`${unit} to add`} {...({ role: 'group' } as Record<string, unknown>)}>
+              <Pressable
+                onPress={() => setAdjusted((a) => clampReps(a - 1))}
+                disabled={adjusted <= 0}
+                accessibilityRole="button"
+                accessibilityLabel="One fewer"
+                style={[styles.adjustButton, adjusted <= 0 ? styles.adjustButtonOff : null]}
+                testID="wsf-contribute-adjust-minus"
+              >
+                <Text style={styles.adjustButtonText}>−</Text>
+              </Pressable>
+              <Text style={styles.adjustValue} testID="wsf-contribute-adjust-value" aria-live="polite">
+                {String(adjusted)}
+              </Text>
+              <Pressable
+                onPress={() => setAdjusted((a) => clampReps(a + 1))}
+                disabled={adjusted >= ADJUST_MAX}
+                accessibilityRole="button"
+                accessibilityLabel="One more"
+                style={[styles.adjustButton, adjusted >= ADJUST_MAX ? styles.adjustButtonOff : null]}
+                testID="wsf-contribute-adjust-plus"
+              >
+                <Text style={styles.adjustButtonText}>+</Text>
+              </Pressable>
+            </View>
+            <Text style={styles.caption} testID="wsf-contribute-adjust-note">
+              {adjusted < 1
+                ? `Add at least 1 ${one(1)} to continue.`
+                : 'Camera estimate on this device — you review it before anything is added.'}
+            </Text>
+            <View style={styles.sheetActionsInline}>
+              <Pressable
+                onPress={() => {
+                  if (adjusted < 1) return;
+                  setReviewCount(adjusted);
+                  setStep('review');
+                }}
+                disabled={adjusted < 1}
+                accessibilityRole="button"
+                style={[styles.primaryButton, adjusted < 1 ? styles.adjustButtonOff : null]}
+                testID="wsf-contribute-adjust-continue"
+              >
+                <Text style={styles.primaryButtonText}>Continue</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+        {renderTestNote()}
+      </>,
+      'wsf-contribute-screen'
+    );
+  }
+
   // ---- start moving -----------------------------------------------------------
   if (step === 'move') {
     return screen(
@@ -3147,6 +3299,23 @@ const styles = StyleSheet.create({
 
   // The review's amount in its own box, with what it will be recorded as.
   reviewBox: { backgroundColor: CREAM, borderRadius: 14, padding: 16, gap: 8 },
+  // The camera estimate's Adjust (frozen reference: 64 px round buttons, a
+  // 64 px number, 22 px apart).
+  // The camera's own ground while its chunk loads (the reference's #050d18).
+  cameraLoading: { flex: 1, backgroundColor: '#050d18' },
+  adjustRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 22, marginTop: 18, marginBottom: 8 },
+  adjustButton: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    borderWidth: 2,
+    borderColor: NAVY,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  adjustButtonOff: { opacity: 0.35 },
+  adjustButtonText: { color: NAVY, fontSize: 30, lineHeight: 34, fontWeight: '700' },
+  adjustValue: { color: NAVY, fontSize: 64, lineHeight: 72, fontWeight: '800', minWidth: 112, textAlign: 'center' },
   reviewUnit: { color: wsfTheme.colors.textMuted, fontSize: 15, fontWeight: '800', letterSpacing: 0 },
   reviewNote: { color: wsfTheme.colors.textMuted, fontSize: 13, lineHeight: 19 },
   eyebrowMuted: {
