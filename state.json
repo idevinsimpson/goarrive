@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "88fcdc9da2a332095d8a6374d9f358311b996090d68a447ee362ec82220938d3",
-  "eventCount": 546,
+  "ledgerHead": "da68cbfb1bdd589e72c76aa71ca880ed58a6b098e3fdf9e660fd5ed2f21ba0fa",
+  "eventCount": 548,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1241,7 +1241,7 @@
       },
       "label": "Port the owner-accepted camera-assisted squat MOVE North Star into the current Expo app without automatic contribution credit",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -1253,7 +1253,7 @@
         "subjectSha": "d6d478793126ad53fd4f7ef8de1b64900ebbaa51",
         "prHeadSha": "d6d478793126ad53fd4f7ef8de1b64900ebbaa51",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "856e20e01416e99a8a09194c9d34cd463063b107"
       },
       "proof": null,
       "served": null,
@@ -1284,10 +1284,13 @@
           "kind": "comment",
           "id": 5997538756
         },
-        "accepted": null,
-        "lastTransition": {
+        "accepted": {
           "kind": "comment",
-          "id": 6025044424
+          "id": 6021328284
+        },
+        "lastTransition": {
+          "kind": "pull_request",
+          "id": 577
         }
       },
       "review": {
