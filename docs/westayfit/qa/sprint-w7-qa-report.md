@@ -6448,3 +6448,72 @@ After reassignment, 45 idle minutes produced no W7 post and no W7 timer line. W7
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0.
 
 **Status:** **PASS at `1bad799e` with zero unresolved findings. C78-F1 is closed.** W7 did no integration, live writer run, state-ref mutation, deploy or Step 7.
+
+## §80. Check 80: #577 MOVE-CAMERA-NATIVE-PORT-1 at `d6d47879`
+
+**Assignment:** router wake `283b9ce7ac6004dc8f555d3dd9d066b0ed321398cd55928dcd086ac8a58e92de` (#434 `6024568998`), under the owner's standing approval to ACK and perform valid W7 router reviews. I refreshed `wsf-control-state-2` first: `check` passed (540 events), `worker-view W7` showed `WATCH=on`, and W7 was the sole reviewer of the packet at this exact subject. ACK: #434 `6024595043`.
+
+**Subject:** #577 at exactly `d6d478793126ad53fd4f7ef8de1b64900ebbaa51`, 18 commits on `0745c732` (`claude/wsf-app-shell`), 60 files, +9919/−7. I verified it in a detached worktree. Emulators only (`demo-wsf-local`), and nothing was pushed from it.
+
+### Process fact, stated first
+
+#577 was **already merged** before the wake: merge commit `856e20e0` (parents `0745c732` and `d6d47879`), by the owner account at 2026-10-06T17:03:24Z. Its tree `212fd420` is identical to the head's tree, so what I reviewed is exactly what sits at the tip of `claude/wsf-app-shell`. The ledger still held the packet at `UNDER_REVIEW`, with no accept or integrate event. This review therefore cannot gate that merge; it is post-merge independent evidence.
+
+### Reproduced
+
+| Check | Result |
+|---|---|
+| `tests/move-camera-counter.test.ts` | **132 / 132** (the PR and its QA record say 127) |
+| Full vitest | **1215 / 1215**, 63 files (the PR says 1210) |
+| `tsc --noEmit` | exit **0** |
+| `move-camera-counter.spec.ts` on the head | **10 passed, 1 skipped** (the capture-only test, which I do not run); 11 tests (the PR says 9/9) |
+| The same spec on the PR's base `0745c732` | **7 fail**: all seven feature tests (settings defaults, camera opens, readiness cancel, hide/resume, failure, real-camera path); the OFF, non-squat and unresolved-attempt tests pass on both builds, as they pin unchanged behaviour |
+| Regression batch on the head, 9 specs: `sprint-w9-community-settings-parity-1`, `ui-device-choice`, `ui-contribute`, `ui-contribute-repeat-policy`, `sprint-w9-contribute-exits`, `sprint-w1b-contribute-exits`, `ui-contribute-together`, `ui-contribute-crossing`, `ui-kiosk` | **48 passed, 3 skipped** (capture and motion-clip tests gated by environment variables I do not set), exit 0 |
+
+### Items
+
+1. **Scope.** All 60 files are the packet's or its Director-authorised deltas. Six files fall outside the ledger's `subjectPaths`: `package.json`, `package-lock.json`, `playwright.config.ts`, `tsconfig.json` and two e2e specs. I read each Director comment through `gh api`: `5997885276` (the engine pin), `5998882594` (the tsc exclusion), `5999288273` and `5999303787` (the harness default), `6000149196` and `5998266023` (the H1 tab count), and `6009679048` (the final correction). Every one is owner-authored, unedited and says what the PR claims. The final commit `d6d47879` is **one file, 4 added lines**, as `6009679048` allows, and the `wsf.deviceMode` assertion is untouched.
+2. **Frozen counter.** 32 files under `frozen/rep-counter-proof`.
+   - The six `core/*` files are sha256-identical to #475 `eda58218` in git.
+   - The other 26 come from the Lovable reference, which is not in this repo, so I **cannot** compare them to it.
+   - The sha256 pin lives in the same PR, so it proves the files unchanged since transcription, not equal to the reference. A mutation of one appended byte in `r14_2/startupArm.ts` fails exactly `r14_2/startupArm.ts is unchanged`.
+   - Only `frozen.js` and `frozen.d.ts` import from `frozen/`, and three symbols cross.
+3. **The tsc exclusion (`5998882594`).**
+   - A deliberate type error in non-frozen `movement-camera/flow.ts` fails `tsc` (exit 2), so the exclusion is no escape hatch.
+   - Removing the exclude yields **exactly 5 errors, all inside the frozen files** (1 in `r14/lockR14.ts`, 4 in `r14_2/sessionR142.ts`), as the PR says.
+4. **The frozen runtime is bundled and executed.** In the real build, the pose engine (137 KB) and its 1.4 KB loader, and the camera screen with the frozen counter (165 KB), are **separate lazy chunks**. The entry bundle holds only the settings key. The frozen counter runs in the e2e (pre-GO squats excluded, counts matched).
+5. **No automatic credit.** `finishSet()` returns `source: 'camera-estimate', verified: false`. The route is camera → Adjust (member-owned, 0..500, Continue disabled below 1) → the **existing** review → Record. The e2e shows zero contributions through Finish, Adjust, Continue and Edit, and exactly one after Record.
+6. **Entry guards.** The PR's spec covers counter OFF, a non-squat goal and an unresolved attempt end to end. **"Never on a kiosk" and "never for already-done" were covered structurally only**, so I drove them against the real build with the counter ON by default (the instrument is in `sprint-w7-move-camera-entry-guards-spec.md`): a control opens the camera, a kiosk URL does not, an already-done URL does not. The mutant "remove `!kiosk` from `cameraOpen`" is **killed** by the kiosk test.
+7. **Privacy.**
+   - A grep of the whole camera tree, frozen files included, finds no `fetch`, `XMLHttpRequest`, `sendBeacon`, `WebSocket`, `MediaRecorder`, canvas capture, Firestore or callable.
+   - The camera call is `getUserMedia({audio: false})`.
+   - The settings are device-local (`wsf.moveCamera.v1`).
+   - The installed engine is **0.10.35**, with 0 `odml` and 0 beacon hits in its CommonJS bundle.
+   - The only network use is the pinned WASM and model fetch (jsDelivr and Google Storage). The hosting config carries no CSP that would block them.
+8. **Release on every exit.** Unmount, Close, Escape, "Count by hand", Finish and page hide all call `dispose` or `pause`. The e2e shows a hidden page → "Camera paused" with the count banked and `active === false`, and a fresh 3-2-1 on resume.
+9. **The final commit's proof (`6009679048`).** The pre-fix `ui-device-choice.spec.ts` (`ba76a6be`) against the head build **fails twice** on `repeat-each=2`, with `wsf.moveCamera.v1` left in storage. The head's version **passes twice**.
+
+### Mutants and instruments
+
+- **Frozen pin:** 1 appended byte → killed by the pin test.
+- **tsc escape hatch:** a type error in `flow.ts` → `tsc` fails.
+- **Kiosk guard removed:** the camera opens → killed by my kiosk test.
+- **My instrument:** 4 tests on the head, **4 / 4**.
+
+### Precision notes (non-blocking)
+
+- **PN-1 (measured, low severity).** If the camera screen mounts while the page is **hidden**, `startCamera` returns early and nothing restarts it when the page becomes visible. The `visibilitychange` handler only pauses. Measured: `startsWhileHidden=0`, cue "Starting camera…", and after the page reports visible, still `startsAfterVisible=0` and "Starting camera…" at 4 s. The member is **not trapped**: "Count by hand instead" and Close are offered, and nothing is written. It is probably reference parity, since the controller is a port, but the reference is not in this repo, so I could not confirm that. A plausible trigger is backgrounding the app while the contribute data loads after Start moving.
+- **PN-2 (documents).** The PR body and QA record are stale. They say 127 unit and 1210 total tests and 9/9 e2e (now 132, 1215 and 10 passed plus 1 skipped of 11). They also still describe the `tsconfig` exclude and the `playwright.config.ts` default as "requested", although both are now implemented.
+- **PN-3 (ledger).** The packet's `subjectPaths` omit the six delta files.
+- **PN-4 (disclosed).** The first camera open fetches the WASM runtime and the model from jsDelivr and Google Storage, so those hosts see the member's address. The PR discloses this, and same-origin hosting is its planned change.
+
+### Limits, stated plainly (not findings)
+
+- The camera tests use a **scripted stick figure** fed into the real frozen session. They prove the flow, not that counting is accurate on a real body. Device acceptance is still to come, as the PR says.
+- **26 of the 32 frozen files** cannot be compared with the Lovable reference from this repo.
+- **Native** fails closed to the manual flow and was not exercised.
+- I could not delete a stray 2 KB log, `/reg-d6d4.log`, which my own batch script wrote at the filesystem root. A safety check blocked the removal, so I left it. It holds only Playwright output.
+
+- **Gates:** `ts:check` 0; `check-evidence-intact` 0 (re-run before push).
+
+**Status:** **PASS at `d6d47879` with zero unresolved findings.** PN-1 to PN-4 are non-blocking. W7 made no product edit, merge, deploy, live-data change, credential or permission change, and did not touch any state ref or comment other than its own GitHub replies.
