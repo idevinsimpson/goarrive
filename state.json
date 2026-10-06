@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "99f3ad8e587f975896cedce52b35ff00ff9a323aabf7dc6751c193fe6f407aae",
-  "eventCount": 525,
+  "ledgerHead": "82ed8aa507ca0e188d2069a302722c79fd97f5fddbeb8b1f8d0b802d85301826",
+  "eventCount": 527,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1233,7 +1233,7 @@
       },
       "label": "Port the owner-accepted camera-assisted squat MOVE North Star into the current Expo app without automatic contribution credit",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "CHANGES_REQUESTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -1277,7 +1277,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6000226507
+          "id": 6009620416
         }
       },
       "review": {
@@ -3100,7 +3100,16 @@
       "ack": {
         "kind": "comment",
         "id": 6009248820
-      }
+      },
+      "superseded": true
+    },
+    "e2fea6086a179cbf02c8ed68e5cb604b9bed8a902e48667d05743cc50a765c02": {
+      "packet": "MOVE-CAMERA-NATIVE-PORT-1",
+      "worker": "W9",
+      "reason": "handback",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
