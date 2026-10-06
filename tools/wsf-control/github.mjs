@@ -7,8 +7,12 @@
  * data; errors carry the HTTP status and path, never a header or a body echo.
  */
 const API = 'https://api.github.com';
-/** Comments per page, the endpoint's maximum. */
-const PAGE = 100;
+/**
+ * Comments per page: a fixed 25, not the endpoint's 100. Runs 37493661423 and 37494992451 still lost the socket after
+ * ~249 KB with 100-comment pages of #365's long comments; a quarter-size page keeps every single response small. The
+ * newest-`count` window costs more requests (still bounded), never a larger body.
+ */
+export const PAGE = 25;
 /** Extra pages read past the counted end for comments that arrive mid-read, and back for ones deleted mid-read. */
 const ROLLOVER_PAGES = 2;
 
@@ -20,11 +24,24 @@ export function gitHubClient({ token, repo, fetchImpl = globalThis.fetch }) {
   if (!token) throw new Error('an installation token is required');
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) throw new Error('repo must be owner/name');
   const headers = { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'wsf-control-writer' };
-  async function call(method, route, body, what) {
+  async function once(method, route, body, what) {
     const res = await fetchImpl(`${API}${route}`, { method, headers: body ? { ...headers, 'Content-Type': 'application/json' } : headers, body: body ? JSON.stringify(body) : undefined });
     if (res.status === 404) return null;
     if (!res.ok) throw new GitHubError(res.status, what);
     return res.status === 204 ? null : res.json();
+  }
+  /**
+   * One request. A GET that fails in TRANSPORT (the socket closed, the body cut off: anything but an HTTP answer) is
+   * tried exactly once more, at once; a second transport failure surfaces. An HTTP answer, 4xx or 5xx, is never
+   * retried, and a POST or PATCH is never retried at all, so no mutation is ever replayed.
+   */
+  async function call(method, route, body, what) {
+    try {
+      return await once(method, route, body, what);
+    } catch (e) {
+      if (method !== 'GET' || e instanceof GitHubError) throw e;
+      return once(method, route, body, what);
+    }
   }
   const r = `/repos/${repo}`;
   return {
