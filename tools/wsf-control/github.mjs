@@ -89,13 +89,18 @@ export function gitHubClient({ token, repo, fetchImpl = globalThis.fetch }) {
      * The newest `count` comments of an issue or PR conversation, oldest first (the endpoint pages oldest-first).
      *
      * BOUNDED (CONTROL-RECENT-COMMENTS-SAFE-READ-1). Walking from page 1 to the end read ~1.6 MB of #365 per run until
-     * GitHub closed the socket. Instead: read the conversation's comment count, then only the pages at its end. The
-     * counted last page is read first, then forward while pages are full (a comment that lands after the count rolls
-     * onto a further page, read up to ROLLOVER_PAGES), then BACKWARDS one page at a time until `count` comments are
-     * held. Reading later pages before earlier ones means a comment deleted mid-read can only shift one already held
-     * onto an earlier page (a duplicate, dropped by id), never skip one. A conversation that keeps growing past the
-     * rollover, an unreadable count, or a window that cannot be filled within its bound is refused, never cut short.
-     * An absent conversation is [].
+     * GitHub closed the socket. Instead: read the conversation's comment count, then only the pages at its end.
+     *
+     * 1. PROBE forward from the counted last page while pages are full, only to find the actual end: a comment that
+     *    lands after the count rolls onto a further page (up to ROLLOVER_PAGES).
+     * 2. Build the window from a fresh DESCENDING read, the end page toward older pages, until `count` are held. The
+     *    probe's copies of the pages below the end are discarded: an arrival plus an older deletion between two probes
+     *    can move the newest comment onto a page already probed (W9, #497 6019310772), and only a page read after every
+     *    later page is trusted. Read newest-to-oldest, a mid-read deletion can only shift a held comment onto an
+     *    earlier page (a duplicate, dropped by id), never skip one.
+     *
+     * A conversation that keeps growing past the rollover, an unreadable count, or a window that cannot be filled
+     * within its bound is refused, never cut short. An absent conversation is [].
      */
     async recentComments(issue, count = 100) {
       const meta = await call('GET', `${r}/issues/${issue}`, null, `issue #${issue}`);
@@ -104,20 +109,22 @@ export function gitHubClient({ token, repo, fetchImpl = globalThis.fetch }) {
       if (!Number.isInteger(total) || total < 0) throw new Error(`GitHub issue #${issue} returned no readable comment count; refusing to guess a window`);
       const lastPage = Math.max(1, Math.ceil(total / PAGE));
       const read = async (n) => (await call('GET', `${r}/issues/${issue}/comments?per_page=${PAGE}&page=${n}`, null, `comments of #${issue}`)) ?? [];
-      const pages = new Map();
-      for (let n = lastPage; ; n += 1) {
-        if (n > lastPage + ROLLOVER_PAGES) throw new Error(`comments of #${issue} kept growing past ${ROLLOVER_PAGES} extra pages during the read; refusing a partial window`);
-        const batch = await read(n);
-        pages.set(n, batch);
-        if (batch.length < PAGE) break;
+      let end = lastPage;
+      let endBatch;
+      for (;; end += 1) {
+        if (end > lastPage + ROLLOVER_PAGES) throw new Error(`comments of #${issue} kept growing past ${ROLLOVER_PAGES} extra pages during the read; refusing a partial window`);
+        endBatch = await read(end);
+        if (endBatch.length < PAGE) break;
       }
+      // The descending pass starts from the end page's read (the newest read of all); no earlier probe copy is kept.
+      const pages = new Map([[end, endBatch]]);
       const held = () => {
         const byId = new Map();
         for (const n of [...pages.keys()].sort((x, y) => x - y)) for (const c of pages.get(n)) if (!byId.has(c.id)) byId.set(c.id, c);
         return [...byId.values()];
       };
       const floor = Math.max(1, lastPage - Math.ceil(count / PAGE) - ROLLOVER_PAGES);
-      let first = lastPage;
+      let first = end;
       while (held().length < count && first > 1) {
         if (first <= floor) throw new Error(`the newest ${count} comments of #${issue} could not be read in a bounded window; refusing a partial one`);
         first -= 1;

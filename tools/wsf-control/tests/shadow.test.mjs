@@ -335,10 +335,10 @@ atest('SAFE-READ: a partial final page (1,050): the newest 100 span pages 10 and
   assert.equal(c.pages(), 2);
 });
 
-atest('SAFE-READ: an exact 100-page boundary (1,000): the full page 10 holds the newest 100 and the empty page 11 proves it is the end', async () => {
+atest('SAFE-READ: an exact 100-page boundary (1,000): the empty page 11 proves the end, then page 10 is read again, newest first', async () => {
   const c = conversation(1000);
   assert.deepEqual(await gitHubClient({ token: 't', repo: REPO, fetchImpl: c.fetchImpl }).recentComments(365), newest(c.comments));
-  assert.deepEqual(c.log.slice(1).map((l) => /[?&]page=(\d+)/.exec(l)[1]), ['10', '11']);
+  assert.deepEqual(c.log.slice(1).map((l) => /[?&]page=(\d+)/.exec(l)[1]), ['10', '11', '10'], 'the probe copy of page 10 is not trusted');
 });
 
 atest('SAFE-READ: a comment deleted between two page reads is never a gap: the shifted one is read twice and kept once', async () => {
@@ -359,6 +359,21 @@ atest('SAFE-READ: a comment that arrives between the count and the pages rolls o
   assert.equal(new Set(got.map((x) => x.id)).size, 100);
   const d = conversation(999, { afterCount: (cs) => cs.push(mkComment(1000), mkComment(1001), mkComment(1002)) });
   assert.deepEqual(await gitHubClient({ token: 't', repo: REPO, fetchImpl: d.fetchImpl }).recentComments(365), newest(d.comments));
+});
+
+atest('SAFE-READ (W9 finding #497 6019310772): an arrival after the count plus an older deletion between the forward probes never drops the newest', async () => {
+  // Count 1000; comment 1001 arrives after the count; page 10 is probed (full); an older comment is deleted before the
+  // page-11 probe, so 1001 shifts onto page 10. The window must still be the true newest 100: 902..1001.
+  let deleted = false;
+  const c = conversation(1000, {
+    afterCount: (cs) => cs.push(mkComment(1001)),
+    afterPage: (pg, cs) => { if (pg === 10 && !deleted) { deleted = true; cs.splice(0, 1); } },
+  });
+  const got = await gitHubClient({ token: 't', repo: REPO, fetchImpl: c.fetchImpl }).recentComments(365);
+  assert.ok(deleted);
+  assert.deepEqual(got.map((x) => x.id), Array.from({ length: 100 }, (_, i) => 902 + i), 'exactly 902..1001: no omission');
+  assert.equal(new Set(got.map((x) => x.id)).size, 100, 'no duplicate');
+  assert.deepEqual(got, newest(c.comments));
 });
 
 atest('SAFE-READ: comments deleted between the count and the pages widen the window backwards instead of cutting it short', async () => {
