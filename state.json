@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "98c5068ba4a23d74d6235370fe6b770b2b66f7026047718efc5d68b496f19abe",
-  "eventCount": 528,
+  "ledgerHead": "84c78d828e2ef12d40d038e306a97a011e14faeb6badd7fa08dc042324b41c03",
+  "eventCount": 529,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1965,12 +1965,12 @@
     {
       "id": "writer",
       "path": "tools/wsf-control",
-      "commit": "9ca268d2500c60dddc3aba8d490a67f24b97a2cb"
+      "commit": "e5416da1491d3e6220fa3e89a796da2f569fcb94"
     },
     {
       "id": "writer-workflow",
       "path": ".github/workflows/wsf-control-reconcile.yml",
-      "commit": "9ca268d2500c60dddc3aba8d490a67f24b97a2cb"
+      "commit": "e5416da1491d3e6220fa3e89a796da2f569fcb94"
     }
   ],
   "supersedes": {
