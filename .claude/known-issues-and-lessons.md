@@ -1,6 +1,6 @@
 # GoArrive Known Issues & Lessons Learned
 
-_Last refreshed: 2026-10-03._
+_Last refreshed: 2026-10-06._
 
 ## Resolved Issues (Reference for Future Work)
 The following issues were encountered and resolved during development. They are documented here as institutional knowledge to prevent regression and inform future decisions.
@@ -280,4 +280,11 @@ The EXPO-LATEST-FULL-STAGING-PIN-1 suite (PR #573) added closed-goal journey dri
 The root cause: boolean coverage (refused / did not refuse) proves the gate exists; it does not prove the gate says the right thing. A user who hits a refusal that says "No seats available" when the event is closed, or whose turn ends instead of being held at a Start refusal, sees a broken product even if the gate fired. Five additional wording-variant defects (one per gate: start, ready, call, join, closedStartEndsPlace) corrected this — each fails exactly its own row, and W4 mutants D1, D3, D4, D7, and D11 are now killed.
 
 Lesson: when seeding defects for any gate that produces user-visible copy, always include at least one wording-variant defect alongside the boolean skip. The two failure modes — gate absent vs. gate present but wrong copy — are independent, and a suite that only kills one is half-verified. This applies to any error, refusal, or confirmation message the suite reads from the screen rather than from Firestore directly.
+
+### WSF Control Writer: Ascending-Page Probe Copies Are Unsafe for Window-Building Under Concurrent Arrivals and Deletions
+The GitHub `recentComments` reader (`tools/wsf-control/github.mjs`) builds a bounded window of the N newest comments for a conversation. The original approach probed pages in ascending order starting from the estimated last page, keeping each page's response as the window was filled backward. A W9 finding (#497, comment 6019310772) identified a correctness gap: if a new comment arrives after the initial count read (rolling onto a further page that the ascending probe then reads), and an older comment is deleted between two probe page requests, the newest comment can shift onto a page already consumed by the probe — silently absent from the window with no error or signal.
+
+The fix (PR #579, CONTROL-RECENT-COMMENTS-SAFE-READ-1) separates the end-finding step from the window-building step. The forward ascending probe runs only to find the actual last page and its result copies are immediately discarded. The window is then built from a fresh descending read starting at that end page, walking toward older pages. Reading newest-to-oldest means a mid-read deletion can only shift a held comment onto an earlier page (caught by dedup on comment id) — the newest comment is always on an already-read page and cannot be skipped. The regression test for W9's exact case fails on the prior commit and passes on the fix; a mutant that trusts the probe copies again is killed by that test alone.
+
+Lesson: when reading a paginated API feed with an estimated starting page, the ascending probe is safe for end-detection but not for content collection — probe copies can be stale relative to later pages by the time the window is assembled. Separate end-finding (forward probe, disposable results) from window-building (fresh descending read), so every page in the final window is read after every later page.
 
