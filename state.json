@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "c03f1c46c9116078f6d11586baba21e09c7d4ce8c50ddd13b388eca787822e70",
-  "eventCount": 543,
+  "ledgerHead": "88fcdc9da2a332095d8a6374d9f358311b996090d68a447ee362ec82220938d3",
+  "eventCount": 546,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -348,7 +348,7 @@
       },
       "label": "Bound recent-comment reads so the control App can consume current decisions without socket failure",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -360,7 +360,7 @@
         "subjectSha": "758d686f1facd1d21744be9b78db1c37a8987628",
         "prHeadSha": "758d686f1facd1d21744be9b78db1c37a8987628",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "e5416da1491d3e6220fa3e89a796da2f569fcb94"
       },
       "proof": null,
       "served": null,
@@ -383,10 +383,13 @@
           "kind": "comment",
           "id": 6020607329
         },
-        "accepted": null,
-        "lastTransition": {
+        "accepted": {
           "kind": "comment",
-          "id": 6024627196
+          "id": 6020336248
+        },
+        "lastTransition": {
+          "kind": "pull_request",
+          "id": 579
         }
       },
       "review": {
@@ -1255,7 +1258,9 @@
       "proof": null,
       "served": null,
       "releasedQueueIndex": null,
-      "reviewedBy": [],
+      "reviewedBy": [
+        "W7"
+      ],
       "subjectPaths": [
         "apps/westayfit/app/contribute/[goalId].tsx",
         "apps/westayfit/app/move/[goalId].tsx",
@@ -1282,7 +1287,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6020611952
+          "id": 6025044424
         }
       },
       "review": {
@@ -3144,7 +3149,8 @@
       "ack": {
         "kind": "comment",
         "id": 6024595043
-      }
+      },
+      "superseded": true
     }
   },
   "fastpath": {
