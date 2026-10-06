@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "68170ebba6c796fc6a338a5be6082c9acbdb87adba1063c81f354c4baaf0d8ea",
-  "eventCount": 530,
+  "ledgerHead": "9420fc933bc857dac64b97430f6c5f87b4328145a809ed3f061ebd166e00cc68",
+  "eventCount": 538,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -61,9 +61,7 @@
     }
   },
   "queue": {
-    "W3": [
-      "CONTROL-RECENT-COMMENTS-SAFE-READ-1"
-    ],
+    "W3": [],
     "W4": [],
     "W5": [],
     "W7": [],
@@ -350,15 +348,17 @@
       },
       "label": "Bound recent-comment reads so the control App can consume current decisions without socket failure",
       "origin": "ledger",
-      "phase": "QUEUED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
-      "inbox": null,
-      "pr": null,
-      "reviewers": [],
+      "inbox": 396,
+      "pr": 579,
+      "reviewers": [
+        "W4"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "758d686f1facd1d21744be9b78db1c37a8987628",
+        "prHeadSha": "758d686f1facd1d21744be9b78db1c37a8987628",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -377,11 +377,14 @@
           "kind": "comment",
           "id": 5972575649
         },
-        "released": null,
+        "released": {
+          "kind": "comment",
+          "id": 6020607329
+        },
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5972575649
+          "id": 6020610384
         }
       },
       "review": {
@@ -394,7 +397,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "EMAIL-STAGING-REPAIR": {
@@ -1233,17 +1236,17 @@
       },
       "label": "Port the owner-accepted camera-assisted squat MOVE North Star into the current Expo app without automatic contribution credit",
       "origin": "ledger",
-      "phase": "CHANGES_REQUESTED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
       "pr": 577,
       "reviewers": [
-        "W4"
+        "W7"
       ],
       "artifact": {
-        "subjectSha": "ba76a6bebb87115da9ccc735de7b66cff3c2d1df",
-        "prHeadSha": "ba76a6bebb87115da9ccc735de7b66cff3c2d1df",
+        "subjectSha": "d6d478793126ad53fd4f7ef8de1b64900ebbaa51",
+        "prHeadSha": "d6d478793126ad53fd4f7ef8de1b64900ebbaa51",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -1277,7 +1280,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6009620416
+          "id": 6020611952
         }
       },
       "review": {
@@ -1290,7 +1293,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 1,
+      "deliveries": 2,
       "pendingFinding": null
     },
     "STAGING-FASTPATH-DOCS-LINEAGE-FIX": {
@@ -3111,6 +3114,23 @@
       "comments": [
         6019689592
       ],
+      "ack": null,
+      "superseded": true
+    },
+    "a0fb1d7864a479271ff942f7e92adb350dc6c99954605aa5487b4464e6fc7183": {
+      "packet": "CONTROL-RECENT-COMMENTS-SAFE-READ-1",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
+    },
+    "283b9ce7ac6004dc8f555d3dd9d066b0ed321398cd55928dcd086ac8a58e92de": {
+      "packet": "MOVE-CAMERA-NATIVE-PORT-1",
+      "worker": "W7",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
