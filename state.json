@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "ebbb3f7c83d102eec86cc2c356883fa9f4e88e8a01d8c17117dfe7cf288af2ec",
-  "eventCount": 519,
+  "ledgerHead": "31487a2aa485046ed42831556bd88678b731e8c8c75b6e7c1709f07b8c8e72da",
+  "eventCount": 523,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -67,7 +67,9 @@
     "W4": [],
     "W5": [],
     "W7": [],
-    "W9": []
+    "W9": [
+      "EVERGREEN-MARKER-ENTRY-1"
+    ]
   },
   "packets": {
     "AUTONOMY-ROUTER-1C": {
@@ -536,6 +538,61 @@
         "after": "director"
       },
       "deliveries": 1,
+      "pendingFinding": null
+    },
+    "EVERGREEN-MARKER-ENTRY-1": {
+      "owner": "W9",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Evergreen physical marker entry: permanent QR resolves to configured community and goal, then phone or optional kiosk participation",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "*"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 5999340795
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 5999340795
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "journey-qa",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
       "pendingFinding": null
     },
     "EXPO-ACCOUNT-ENTRY-1": {
@@ -1176,15 +1233,17 @@
       },
       "label": "Port the owner-accepted camera-assisted squat MOVE North Star into the current Expo app without automatic contribution credit",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
-      "pr": null,
-      "reviewers": [],
+      "pr": 577,
+      "reviewers": [
+        "W4"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "ba76a6bebb87115da9ccc735de7b66cff3c2d1df",
+        "prHeadSha": "ba76a6bebb87115da9ccc735de7b66cff3c2d1df",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -1218,7 +1277,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5997687652
+          "id": 6000226507
         }
       },
       "review": {
@@ -1231,7 +1290,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "STAGING-FASTPATH-DOCS-LINEAGE-FIX": {
@@ -3027,7 +3086,16 @@
       "ack": {
         "kind": "comment",
         "id": 5997687652
-      }
+      },
+      "superseded": true
+    },
+    "25c8cd7a750244b8dd61e9850e58171048e41f63fbc505566bed7dabb726d130": {
+      "packet": "MOVE-CAMERA-NATIVE-PORT-1",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {

@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=ebbb3f7c83d102eec86cc2c356883fa9f4e88e8a01d8c17117dfe7cf288af2ec events=519 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=31487a2aa485046ed42831556bd88678b731e8c8c75b6e7c1709f07b8c8e72da events=523 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `ebbb3f7c83d102eec86cc2c356883fa9f4e88e8a01d8c17117dfe7cf288af2ec` (519 events)
+- Ledger head: `31487a2aa485046ed42831556bd88678b731e8c8c75b6e7c1709f07b8c8e72da` (523 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -30,10 +30,10 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | Worker | Inbox | Active now | Reviewing | Waiting on review | Blocked | Next | Queue | WATCH |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | W3 | #396 | — | — | WORKER-EXECUTION-PROFILES-1 | — | CONTROL-RECENT-COMMENTS-SAFE-READ-1 | CONTROL-RECENT-COMMENTS-SAFE-READ-1 | off |
-| W4 | #394 | — | — | — | — | — | — | off |
+| W4 | #394 | — | MOVE-CAMERA-NATIVE-PORT-1 | — | — | — | — | on |
 | W5 | #395 | — | — | — | — | — | — | off |
 | W7 | #434 | — | — | — | — | — | — | off |
-| W9 | #497 | MOVE-CAMERA-NATIVE-PORT-1 | — | EXPO-MOVEMENT-VIDEO-1 | — | — | — | on |
+| W9 | #497 | — | — | EXPO-MOVEMENT-VIDEO-1, MOVE-CAMERA-NATIVE-PORT-1 | — | EVERGREEN-MARKER-ENTRY-1 | EVERGREEN-MARKER-ENTRY-1 | off |
 
 ## Packets
 
@@ -46,6 +46,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | CONTROL-RECENT-COMMENTS-SAFE-READ-1 | W3 | work | INTEGRATED (source-only) | ledger | QUEUED | — | — | — | — | — | — | — | — | comment:5972575649 | — | Bound recent-comment reads so the control App can consume current decisions without socket failure | 1×ops-source then director | — |
 | EMAIL-STAGING-REPAIR | W3 | work | STAGED (hosted) | ledger | INTEGRATED | #559 | 39484f78 | 39484f78 | — | f84346d3 | — | W4, W9 | comment:5959200686 | pull_request:559 | — | Diagnose and repair staging verification and password-reset delivery without weakening mail security | 1×ops-source+1×security then director | — |
 | EMAIL-STAGING-REPAIR-STAGING-PIN | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #570 | 5be8f661 | 5be8f661 | — | 01a07ef3 | — | W4 | comment:5965875967 | pull_request:570 | — | Pin the exact integrated email repair and coalesced accepted expo lineage through the reviewed full staging path | 1×ops-source then director | — |
+| EVERGREEN-MARKER-ENTRY-1 | W9 | work | INTEGRATED (source-only) | ledger | QUEUED | — | — | — | — | — | — | — | — | comment:5999340795 | — | Evergreen physical marker entry: permanent QR resolves to configured community and goal, then phone or optional kiosk participation | 1×journey-qa then director | — |
 | EXPO-ACCOUNT-ENTRY-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #561 | e603a39c | e603a39c | — | 5705dc3b | — | W4 | comment:5961789672 | pull_request:561 | — | Expo account-entry seam: preserve event context and make the existing phone/kiosk choice fast and truthful without bypassing verified identity | 1×journey-qa then director | — |
 | EXPO-ACCOUNT-ENTRY-1-STAGING-PIN | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #566 | 04ca5d05 | 04ca5d05 | 04ca5d05 | 08a2f08d | — | W4 | comment:5963494417 | pull_request:566 | — | Pin exact integrated expo account-entry milestone through the existing reviewed full staging path | 1×ops-source then director | — |
 | EXPO-ATTENDEE-HOSTED-DRIVERS-1 | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #569 | f2c0e4e9 | f2c0e4e9 | — | dcf86674 | — | W4 | comment:5965372716 | pull_request:569 | — | Add the missing hosted attendee drivers and generated owner-card inputs using the existing staging journey framework | 1×ops-source then director | — |
@@ -55,7 +56,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | EXPO-MOVEMENT-VIDEO-1 | W9 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #575 | 526cea95 | 526cea95 | — | — | — | W4 | comment:5971282758 | comment:5984165834 | — | Loop approved demo media in the existing shared player with truthful fallback and no contribution side effects | 1×journey-qa then director | — |
 | EXPO-STATION-LOST-ANSWER-COPY-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #564 | 1d290f74 | 1d290f74 | — | 5be74f3f | — | W4 | comment:5963613447 | pull_request:564 | — | Replace station vendor error text with existing product-safe callable wording without changing retry truth | 1×journey-qa then director | — |
 | KIOSK-PAIRING-CLARITY-PROOF-1 | W9 | work | STAGED (hosted) | ledger | STAGED | #553 | 4537c26c | 4537c26c | — | ab77fbfc | hosted run 37025084843: PASS | W4 | comment:5945136749 | comment:5955903159 | — | Clarify venue-station pairing from the Champion's own phone and prove the existing flow end-to-end | 1×journey-qa then director | — |
-| MOVE-CAMERA-NATIVE-PORT-1 | W9 | work | INTEGRATED (source-only) | ledger | ACKED | — | — | — | — | — | — | — | comment:5997538756 | comment:5997687652 | — | Port the owner-accepted camera-assisted squat MOVE North Star into the current Expo app without automatic contribution credit | 1×journey-qa then director | — |
+| MOVE-CAMERA-NATIVE-PORT-1 | W9 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #577 | ba76a6be | ba76a6be | — | — | — | W4 | comment:5997538756 | comment:6000226507 | — | Port the owner-accepted camera-assisted squat MOVE North Star into the current Expo app without automatic contribution credit | 1×journey-qa then director | — |
 | STAGING-FASTPATH-DOCS-LINEAGE-FIX | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #551 | 963dd558 | 963dd558 | — | 9825aa36 | — | W4 | comment:5944563639 | pull_request:551 | — | Step 7 correction: allow provably non-runtime docs/instruction lineage while preserving fail-closed fast-path invariants | 1×ops-source then director | — |
 | STAGING-FASTPATH-FAILED-TARGET-RETRY-FIX | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #556 | 92fdfecd | 92fdfecd | — | b4b479a6 | — | W4 | comment:5954269955 | pull_request:556 | — | Add a fail-closed one-shot recorded retry authorization for an exact repaired staging target and failed run | 1×ops-source then director | — |
 | STAGING-FASTPATH-INVENTORY-BASELINE-FIX | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #555 | 825b9c01 | 825b9c01 | — | 745b4f62 | — | W4 | comment:5953663400 | pull_request:555 | — | Correct fast-path inventory preflight to use the reviewed complete measured baseline without double-counting retained functions | 1×ops-source then director | — |
@@ -150,4 +151,5 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | 2816280f22f4 | W9 | EXPO-MOVEMENT-VIDEO-1 | handback | acked | 5980141629 | comment:5980152156 |
 | a89e696d6315 | W4 | EXPO-MOVEMENT-VIDEO-1 | review | acked | 5984088201 | comment:5984100414 |
 | 9b6184715f9d | W9 | MOVE-CAMERA-NATIVE-PORT-1 | release | acked | 5997646784 | comment:5997687652 |
+| 25c8cd7a7502 | W4 | MOVE-CAMERA-NATIVE-PORT-1 | review | requested | — | — |
 
