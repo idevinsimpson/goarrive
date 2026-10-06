@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "da68cbfb1bdd589e72c76aa71ca880ed58a6b098e3fdf9e660fd5ed2f21ba0fa",
-  "eventCount": 548,
+  "ledgerHead": "52aa331e3f56390641638f709b2f5e13f40d5d65b37bb7440c89e5c6992acc7e",
+  "eventCount": 550,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1028,7 +1028,7 @@
       },
       "label": "Loop approved demo media in the existing shared player with truthful fallback and no contribution side effects",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -1040,7 +1040,7 @@
         "subjectSha": "526cea95d284f7441e28f0ad35dd9a89251a3508",
         "prHeadSha": "526cea95d284f7441e28f0ad35dd9a89251a3508",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "0745c7323eed24fbb5e1e9b8fc2bac4a6d1fea7e"
       },
       "proof": null,
       "served": null,
@@ -1070,10 +1070,13 @@
           "kind": "comment",
           "id": 5971282758
         },
-        "accepted": null,
-        "lastTransition": {
+        "accepted": {
           "kind": "comment",
-          "id": 5984165834
+          "id": 6026295977
+        },
+        "lastTransition": {
+          "kind": "pull_request",
+          "id": 575
         }
       },
       "review": {
