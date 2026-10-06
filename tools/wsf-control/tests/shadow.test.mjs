@@ -16,7 +16,7 @@ import { shadowSurfaceEvent, DECISION_OWNER, decisionBlock, decisionIntake, deri
 import { appendAll } from '../append-all.mjs';
 import { targetTitle } from '../fastpath.mjs';
 import { redact, tokenGitEnv, STATE_REF, predecessorRef } from '../gitstate.mjs';
-import { gitHubClient } from '../github.mjs';
+import { GitHubError, PAGE, gitHubClient, isTransportError } from '../github.mjs';
 import { STEP5_PERMISSIONS, appJwt, installationToken, AppTokenError } from '../app-token.mjs';
 import { health } from '../health-view.mjs';
 import { freshness } from '../freshness-view.mjs';
@@ -264,17 +264,26 @@ atest('Check 71 F1: the comment-reading path carries each author\'s login and au
 // ---- CONTROL-RECENT-COMMENTS-SAFE-READ-1: newest-comment reads are bounded ----------------------------------------
 /**
  * A conversation as the REST API serves it: GET /issues/N gives its comment count, GET /issues/N/comments pages it
- * oldest-first, 100 to a page. Every request and the bytes served are counted. `afterCount` runs once, right after the
+ * oldest-first. Every request, every attempt and the bytes served are counted. `afterCount` runs once, right after the
  * count is read, to model a comment that lands (or is deleted) between the count and the pages; `afterPage` runs after
- * every page served, to model one deleted between two page reads.
+ * every page served, to model one deleted between two page reads. Transport models (runs 37493661423, 37494992451):
+ * `socketLimit` loses the socket on any single response body larger than that many bytes; `dropOnce(u)` loses it once,
+ * on the first request it matches (a pooled connection the server closed). A lost socket throws, as undici does.
  */
-function conversation(n, { afterCount = null, afterPage = null, failOn = null, count = undefined } = {}) {
+function conversation(n, { afterCount = null, afterPage = null, failOn = null, count = undefined, socketLimit = Infinity, dropOnce = null } = {}) {
   const comments = Array.from({ length: n }, (_, i) => mkComment(i + 1));
-  const log = []; let bytes = 0; let hook = afterCount;
-  const reply = (status, data) => { const text = JSON.stringify(data); bytes += text.length; return { ok: status < 400, status, json: async () => JSON.parse(text) }; };
+  const log = []; let bytes = 0; let hook = afterCount; let dropped = false; let maxPage = 0;
+  const lost = () => Object.assign(new TypeError('fetch failed'), { cause: { code: 'UND_ERR_SOCKET' } });
+  const reply = (status, data) => {
+    const text = JSON.stringify(data);
+    if (text.length > socketLimit) throw lost();
+    bytes += text.length;
+    return { ok: status < 400, status, json: async () => JSON.parse(text) };
+  };
   const fetchImpl = async (url) => {
     const u = new URL(url);
     log.push(u.pathname + u.search);
+    if (dropOnce && !dropped && dropOnce(u)) { dropped = true; throw lost(); }
     if (failOn && failOn(u)) return reply(500, {});
     if (u.pathname === `/repos/${REPO}/issues/365`) {
       const out = reply(200, { number: 365, comments: count === undefined ? comments.length : count });
@@ -283,17 +292,20 @@ function conversation(n, { afterCount = null, afterPage = null, failOn = null, c
     }
     if (u.pathname === `/repos/${REPO}/issues/365/comments`) {
       const per = Number(u.searchParams.get('per_page')); const pg = Number(u.searchParams.get('page'));
-      const out = reply(200, comments.slice((pg - 1) * per, pg * per));
+      const page = comments.slice((pg - 1) * per, pg * per);
+      maxPage = Math.max(maxPage, page.length);
+      const out = reply(200, page);
       if (afterPage) afterPage(pg, comments);
       return out;
     }
     return reply(404, {});
   };
-  return { comments, log, pages: () => log.filter((l) => l.includes('/comments?')).length, bytes: () => bytes, fetchImpl };
+  const pageList = () => log.filter((l) => l.includes('/comments?')).map((l) => Number(/[?&]page=(\d+)/.exec(l)[1]));
+  return { comments, log, pages: () => pageList().length, pageList, bytes: () => bytes, maxPage: () => maxPage, dropped: () => dropped, fetchImpl };
 }
 const mkComment = (id) => ({ id, body: `comment ${id} ${'x'.repeat(1200)}`, user: { login: id % 2 ? 'idevinsimpson' : 'wsf-control-writer[bot]' }, author_association: id % 2 ? 'OWNER' : 'NONE', created_at: '2026-10-01T00:00:00Z', updated_at: '2026-10-01T00:00:00Z' });
 const shape = (c) => ({ id: c.id, body: c.body, author: c.user?.login ?? null, association: c.author_association ?? null, createdAt: c.created_at ?? null, updatedAt: c.updated_at ?? null });
-/** The implementation this packet replaced, verbatim in behaviour: walk from page 1 to the end, keep the newest `count`. */
+/** The original walk this packet replaced: from page 1 to the end, keep the newest `count`. */
 async function unboundedRecentComments(fetchImpl, issue, count = 100) {
   let window = [];
   for (let page = 1; page <= 100; page += 1) {
@@ -304,104 +316,212 @@ async function unboundedRecentComments(fetchImpl, issue, count = 100) {
   }
   return window.map(shape);
 }
+/**
+ * The #579 reader as integrated at e5416da1 (100-comment pages, no retry), kept to reproduce the residual: the same
+ * descending window, with `per` comments to a page and no second attempt on a lost socket.
+ */
+async function hundredPageReader(fetchImpl, issue, count = 100, per = 100) {
+  const get = async (route) => { const res = await fetchImpl(`https://api.github.com${route}`); if (res.status === 404) return null; if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); };
+  const meta = await get(`/repos/${REPO}/issues/${issue}`);
+  const lastPage = Math.max(1, Math.ceil(meta.comments / per));
+  const read = async (n) => (await get(`/repos/${REPO}/issues/${issue}/comments?per_page=${per}&page=${n}`)) ?? [];
+  let end = lastPage; let endBatch;
+  for (;; end += 1) { endBatch = await read(end); if (endBatch.length < per) break; }
+  const pages = new Map([[end, endBatch]]);
+  const held = () => [...new Map([...pages.keys()].sort((x, y) => x - y).flatMap((k) => pages.get(k)).map((c) => [c.id, c])).values()];
+  for (let first = end; held().length < count && first > 1;) { first -= 1; pages.set(first, await read(first)); }
+  return held().slice(-count).map(shape);
+}
 const newest = (cs, k = 100) => cs.slice(-k).map(shape);
+const client = (c) => gitHubClient({ token: 't', repo: REPO, fetchImpl: c.fetchImpl });
 
-atest('SAFE-READ: on a 1,234-comment conversation the old walk reads all 13 pages; the bounded read returns the same newest 100 from the last 2', async () => {
+atest('SAFE-READ residual (runs 37493661423, 37494992451): the 100-comment, no-retry reader loses the socket; the 25-comment reader with one GET retry does not', async () => {
+  // A socket that dies on any single body over 40 KB: 100 of #365's long comments (~130 KB here) kill it, 25 (~33 KB) do not.
+  await assert.rejects(hundredPageReader(conversation(1234, { socketLimit: 40_000 }).fetchImpl, 365), /fetch failed/);
+  const big = conversation(1234, { socketLimit: 40_000 });
+  assert.deepEqual(await client(big).recentComments(365), newest(big.comments));
+  // A pooled socket the server closed before the count request (the failing line in both runs): one GET retry recovers.
+  await assert.rejects(hundredPageReader(conversation(1234, { dropOnce: (u) => u.pathname.endsWith('/issues/365') }).fetchImpl, 365), /fetch failed/);
+  const pooled = conversation(1234, { dropOnce: (u) => u.pathname.endsWith('/issues/365') });
+  assert.deepEqual(await client(pooled).recentComments(365), newest(pooled.comments));
+  assert.ok(pooled.dropped());
+  assert.equal(pooled.log.filter((l) => l.endsWith('/issues/365')).length, 2, 'the count request attempted exactly twice');
+});
+
+atest('SAFE-READ: no single comment response carries more than 25 comments, on any conversation size', async () => {
+  assert.equal(PAGE, 25);
+  for (const n of [0, 24, 25, 26, 99, 100, 101, 1000, 1234, 5060]) {
+    const c = conversation(n);
+    assert.deepEqual(await client(c).recentComments(365), newest(c.comments), `${n} comments`);
+    assert.ok(c.maxPage() <= 25, `${n}: a page of ${c.maxPage()}`);
+    assert.ok(c.log.filter((l) => l.includes('/comments?')).every((l) => l.includes('per_page=25&')), `${n}: every page asks for 25`);
+  }
+});
+
+atest('SAFE-READ page math at 25: 0, 24, 25, 26, exact boundaries and the newest 100', async () => {
+  const cases = [
+    [0, [1]], [1, [1]], [24, [1]],
+    [25, [1, 2, 1]], // a full final page: probe the empty next page, then read the window descending
+    [26, [2, 1]],
+    [99, [4, 3, 2, 1]], [100, [4, 5, 4, 3, 2, 1]], [101, [5, 4, 3, 2, 1]],
+    [1000, [40, 41, 40, 39, 38, 37]], // exact boundary: the probe copy of page 40 is not trusted
+    [1060, [43, 42, 41, 40, 39]], // partial final page of 10: the newest 100 span five pages
+    [1234, [50, 49, 48, 47, 46]],
+  ];
+  for (const [n, pages] of cases) {
+    const c = conversation(n);
+    assert.deepEqual(await client(c).recentComments(365), newest(c.comments), `${n} comments`);
+    assert.deepEqual(c.pageList(), pages, `${n}: pages read`);
+  }
+});
+
+atest('SAFE-READ: on a 1,234-comment conversation the original walk reads all 13 hundred-pages; the bounded read returns the same newest 100 from 5 small pages', async () => {
   const old = conversation(1234);
   assert.deepEqual(await unboundedRecentComments(old.fetchImpl, 365), newest(old.comments));
-  assert.equal(old.pages(), 13, 'the replaced implementation walks the whole conversation');
+  assert.equal(old.pages(), 13, 'the original implementation walks the whole conversation');
   const c = conversation(1234);
-  const got = await gitHubClient({ token: 't', repo: REPO, fetchImpl: c.fetchImpl }).recentComments(365, 100);
+  const got = await client(c).recentComments(365, 100);
   assert.deepEqual(got, newest(c.comments), 'the newest 100, oldest first, every field carried');
-  assert.deepEqual(c.log, [`/repos/${REPO}/issues/365`, `/repos/${REPO}/issues/365/comments?per_page=100&page=13`, `/repos/${REPO}/issues/365/comments?per_page=100&page=12`], 'the end first, then one page back');
+  assert.deepEqual(c.log[0], `/repos/${REPO}/issues/365`);
+  assert.equal(c.log.length, 6, 'the count and five 25-comment pages');
   assert.ok(c.bytes() * 5 < old.bytes(), `bounded ${c.bytes()} bytes vs unbounded ${old.bytes()}`);
   assert.equal(new Set(got.map((x) => x.id)).size, got.length, 'no duplicates');
 });
 
-atest('SAFE-READ: a conversation of 5,050 comments costs the same three requests as one of 350', async () => {
-  for (const n of [350, 5050]) {
+atest('SAFE-READ: a conversation of 5,060 comments costs the same six requests as one of 360', async () => {
+  for (const n of [360, 5060]) {
     const c = conversation(n);
-    assert.deepEqual(await gitHubClient({ token: 't', repo: REPO, fetchImpl: c.fetchImpl }).recentComments(365), newest(c.comments));
-    assert.equal(c.pages(), 2, `${n}: two comment pages`);
-    assert.equal(c.log.length, 3);
+    assert.deepEqual(await client(c).recentComments(365), newest(c.comments));
+    assert.equal(c.pages(), 5, `${n}: five comment pages`);
+    assert.equal(c.log.length, 6);
   }
-});
-
-atest('SAFE-READ: a partial final page (1,050): the newest 100 span pages 10 and 11', async () => {
-  const c = conversation(1050);
-  const got = await gitHubClient({ token: 't', repo: REPO, fetchImpl: c.fetchImpl }).recentComments(365);
-  assert.deepEqual(got, newest(c.comments));
-  assert.deepEqual(got.map((x) => x.id).slice(0, 1).concat(got.map((x) => x.id).slice(-1)), [951, 1050]);
-  assert.equal(c.pages(), 2);
-});
-
-atest('SAFE-READ: an exact 100-page boundary (1,000): the empty page 11 proves the end, then page 10 is read again, newest first', async () => {
-  const c = conversation(1000);
-  assert.deepEqual(await gitHubClient({ token: 't', repo: REPO, fetchImpl: c.fetchImpl }).recentComments(365), newest(c.comments));
-  assert.deepEqual(c.log.slice(1).map((l) => /[?&]page=(\d+)/.exec(l)[1]), ['10', '11', '10'], 'the probe copy of page 10 is not trusted');
 });
 
 atest('SAFE-READ: a comment deleted between two page reads is never a gap: the shifted one is read twice and kept once', async () => {
   let deleted = false;
-  const c = conversation(1234, { afterPage: (pg, cs) => { if (pg === 13 && !deleted) { deleted = true; cs.splice(0, 1); } } });
-  const got = await gitHubClient({ token: 't', repo: REPO, fetchImpl: c.fetchImpl }).recentComments(365);
+  const c = conversation(1234, { afterPage: (pg, cs) => { if (pg === 50 && !deleted) { deleted = true; cs.splice(0, 1); } } });
+  const got = await client(c).recentComments(365);
   assert.ok(deleted);
   assert.deepEqual(got, newest(c.comments), 'exactly the newest 100 that exist');
   assert.equal(new Set(got.map((x) => x.id)).size, 100, 'the comment that shifted onto the earlier page is not doubled');
-  assert.equal(c.pages(), 2);
 });
 
 atest('SAFE-READ: a comment that arrives between the count and the pages rolls onto a new page and is read; none is lost or doubled', async () => {
   const c = conversation(1000, { afterCount: (cs) => cs.push(mkComment(1001)) });
-  const got = await gitHubClient({ token: 't', repo: REPO, fetchImpl: c.fetchImpl }).recentComments(365);
+  const got = await client(c).recentComments(365);
   assert.deepEqual(got, newest(c.comments), 'the newest decision is the arrival itself');
   assert.equal(got.at(-1).id, 1001);
   assert.equal(new Set(got.map((x) => x.id)).size, 100);
   const d = conversation(999, { afterCount: (cs) => cs.push(mkComment(1000), mkComment(1001), mkComment(1002)) });
-  assert.deepEqual(await gitHubClient({ token: 't', repo: REPO, fetchImpl: d.fetchImpl }).recentComments(365), newest(d.comments));
+  assert.deepEqual(await client(d).recentComments(365), newest(d.comments));
 });
 
 atest('SAFE-READ (W9 finding #497 6019310772): an arrival after the count plus an older deletion between the forward probes never drops the newest', async () => {
-  // Count 1000; comment 1001 arrives after the count; page 10 is probed (full); an older comment is deleted before the
-  // page-11 probe, so 1001 shifts onto page 10. The window must still be the true newest 100: 902..1001.
+  // Count 1000; comment 1001 arrives after the count; the counted last page (40 at 25 a page) is probed full; an older
+  // comment is deleted before the next probe, so 1001 shifts back. The window must still be the true newest 100: 902..1001.
   let deleted = false;
   const c = conversation(1000, {
     afterCount: (cs) => cs.push(mkComment(1001)),
-    afterPage: (pg, cs) => { if (pg === 10 && !deleted) { deleted = true; cs.splice(0, 1); } },
+    afterPage: (pg, cs) => { if (pg === 40 && !deleted) { deleted = true; cs.splice(0, 1); } },
   });
-  const got = await gitHubClient({ token: 't', repo: REPO, fetchImpl: c.fetchImpl }).recentComments(365);
+  const got = await client(c).recentComments(365);
   assert.ok(deleted);
   assert.deepEqual(got.map((x) => x.id), Array.from({ length: 100 }, (_, i) => 902 + i), 'exactly 902..1001: no omission');
   assert.equal(new Set(got.map((x) => x.id)).size, 100, 'no duplicate');
   assert.deepEqual(got, newest(c.comments));
 });
 
-atest('SAFE-READ: comments deleted between the count and the pages widen the window backwards instead of cutting it short', async () => {
-  const c = conversation(1000, { afterCount: (cs) => cs.splice(100, 150) });
-  const got = await gitHubClient({ token: 't', repo: REPO, fetchImpl: c.fetchImpl }).recentComments(365);
+atest('SAFE-READ: comments deleted between the count and the pages widen the window backwards; more than the bound absorbs is refused', async () => {
+  const c = conversation(1000, { afterCount: (cs) => cs.splice(100, 40) });
+  const got = await client(c).recentComments(365);
   assert.deepEqual(got, newest(c.comments));
   assert.equal(got.length, 100);
+  await assert.rejects(client(conversation(1000, { afterCount: (cs) => cs.splice(100, 150) })).recentComments(365), /could not be read in a bounded window/);
 });
 
 atest('SAFE-READ: small, empty and absent conversations', async () => {
-  for (const n of [0, 1, 99, 100, 101]) {
+  for (const n of [0, 1, 24, 25, 26, 99, 100, 101]) {
     const c = conversation(n);
-    assert.deepEqual(await gitHubClient({ token: 't', repo: REPO, fetchImpl: c.fetchImpl }).recentComments(365), newest(c.comments), `${n} comments`);
+    assert.deepEqual(await client(c).recentComments(365), newest(c.comments), `${n} comments`);
   }
   const gone = conversation(5);
-  assert.deepEqual(await gitHubClient({ token: 't', repo: REPO, fetchImpl: gone.fetchImpl }).recentComments(999), [], 'an absent conversation is empty, as before');
+  assert.deepEqual(await client(gone).recentComments(999), [], 'an absent conversation is empty, as before');
   const few = conversation(250);
-  assert.deepEqual(await gitHubClient({ token: 't', repo: REPO, fetchImpl: few.fetchImpl }).recentComments(365, 30), newest(few.comments, 30), 'a smaller count');
+  assert.deepEqual(await client(few).recentComments(365, 30), newest(few.comments, 30), 'a smaller count');
 });
 
 atest('SAFE-READ fails closed: a failing count or page, an unreadable count, a conversation that keeps growing, never a partial window', async () => {
-  const read = (c) => gitHubClient({ token: 't', repo: REPO, fetchImpl: c.fetchImpl }).recentComments(365);
+  const read = (c) => client(c).recentComments(365);
   await assert.rejects(read(conversation(1234, { failOn: (u) => u.pathname.endsWith('/issues/365') })), /HTTP 500/);
-  await assert.rejects(read(conversation(1234, { failOn: (u) => u.searchParams.get('page') === '13' })), /HTTP 500/);
+  await assert.rejects(read(conversation(1234, { failOn: (u) => u.searchParams.get('page') === '50' })), /HTTP 500/);
   for (const bad of [null, -1, 1.5, '1234']) await assert.rejects(read(conversation(1234, { count: bad })), /no readable comment count/, String(bad));
-  await assert.rejects(read(conversation(1000, { afterCount: (cs) => { for (let i = 1; i <= 350; i += 1) cs.push(mkComment(1000 + i)); } })), /kept growing/);
+  await assert.rejects(read(conversation(1000, { afterCount: (cs) => { for (let i = 1; i <= 75; i += 1) cs.push(mkComment(1000 + i)); } })), /kept growing/);
   // A count that claims far more than exists cannot be satisfied in the bounded window: refused, not returned short.
   await assert.rejects(read(conversation(150, { count: 2000 })), /could not be read in a bounded window/);
+});
+
+atest('GET-ONLY RETRY: one transport failure on a GET is retried once; a second surfaces; HTTP answers and mutations are never retried', async () => {
+  const lost = () => Object.assign(new TypeError('fetch failed'), { cause: { code: 'UND_ERR_SOCKET' } });
+  const ok = (data) => ({ ok: true, status: 200, json: async () => data });
+  const raw = { id: 7, body: 'b', user: { login: 'idevinsimpson' }, author_association: 'OWNER', created_at: 't', updated_at: 't' };
+  /** A fake that answers by a script, one entry per attempt, recording each attempt's method. */
+  const scripted = (...steps) => { const seen = []; return { seen, fetchImpl: async (url, init) => { seen.push(init.method); const s = steps.shift(); if (s === 'lost') throw lost(); return s; } }; };
+  const gh = (f) => gitHubClient({ token: 't', repo: REPO, fetchImpl: f.fetchImpl });
+
+  const once = scripted('lost', ok(raw));
+  assert.deepEqual(await gh(once).comment(7), { id: 7, body: 'b', author: 'idevinsimpson', association: 'OWNER', createdAt: 't', updatedAt: 't' }, 'the exact response, once');
+  assert.deepEqual(once.seen, ['GET', 'GET']);
+
+  // undici's own form for a body cut off mid-read: TypeError('terminated') caused by the socket error.
+  const bodyCut = scripted({ ok: true, status: 200, json: async () => { throw Object.assign(new TypeError('terminated'), { cause: { code: 'UND_ERR_SOCKET' } }); } }, ok(raw));
+  assert.equal((await gh(bodyCut).comment(7)).id, 7, 'a body cut off mid-read is a transport failure too');
+  assert.deepEqual(bodyCut.seen, ['GET', 'GET']);
+
+  const twice = scripted('lost', 'lost', ok(raw));
+  await assert.rejects(gh(twice).comment(7), /fetch failed/);
+  assert.deepEqual(twice.seen, ['GET', 'GET'], 'a second transport failure surfaces; there is no third attempt');
+
+  for (const [name, run, method] of [['POST', (g) => g.createComment(396, 'x'), 'POST'], ['PATCH', (g) => g.editComment(5, 'x'), 'PATCH']]) {
+    const m = scripted('lost', ok({ id: 1 }));
+    await assert.rejects(run(gh(m)), /fetch failed/, name);
+    assert.deepEqual(m.seen, [method], `${name} is attempted exactly once`);
+  }
+
+  for (const status of [400, 403, 422, 500, 502, 503]) {
+    const h = scripted({ ok: false, status, json: async () => ({}) }, ok(raw));
+    await assert.rejects(gh(h).comment(7), new RegExp(`HTTP ${status}`));
+    assert.deepEqual(h.seen, ['GET'], `HTTP ${status} is attempted exactly once`);
+  }
+  const absent = scripted({ ok: false, status: 404, json: async () => ({}) }, ok(raw));
+  assert.equal(await gh(absent).comment(7), null);
+  assert.deepEqual(absent.seen, ['GET'], '404 stays an answer: null, once');
+
+  // W4 finding (#394 6021437625): only a TRANSPORT failure is retried. Programmer and application errors, and a body
+  // that is not JSON, are thrown on their first attempt (a retry would hide them, not cure them).
+  for (const [name, make] of [
+    ['ReferenceError', () => { throw new ReferenceError('x is not defined'); }],
+    ['RangeError', () => { throw new RangeError('out of range'); }],
+    ['plain application Error', () => { throw new Error('application bug'); }],
+    ['programmer TypeError', () => { throw new TypeError("Cannot read properties of undefined (reading 'x')"); }],
+    ['SyntaxError from json()', () => ({ ok: true, status: 200, json: async () => { throw new SyntaxError('Unexpected token < in JSON'); } })],
+  ]) {
+    const seen = [];
+    const g = gitHubClient({ token: 't', repo: REPO, fetchImpl: async (url, init) => { seen.push(init.method); if (seen.length > 1) return ok(raw); return make(); } });
+    await assert.rejects(g.comment(7), (e) => !(e instanceof GitHubError) && !isTransportError(e), name);
+    assert.deepEqual(seen, ['GET'], `${name}: attempted exactly once, never retried`);
+  }
+});
+
+atest('isTransportError: undici transport forms only', () => {
+  const sock = { code: 'UND_ERR_SOCKET' };
+  for (const e of [Object.assign(new TypeError('fetch failed'), { cause: sock }), new TypeError('fetch failed'), Object.assign(new TypeError('terminated'), { cause: sock }), new TypeError('terminated'),
+    Object.assign(new Error('other side closed'), { code: 'UND_ERR_SOCKET' }), Object.assign(new Error('x'), { cause: { code: 'UND_ERR_CONNECT_TIMEOUT' } })]) {
+    assert.equal(isTransportError(e), true, `${e.constructor.name}: ${e.message}`);
+  }
+  for (const e of [new ReferenceError('x'), new RangeError('x'), new Error('application bug'), new SyntaxError('Unexpected token'), new TypeError("Cannot read properties of undefined"),
+    Object.assign(new Error('x'), { code: 'ECONNRESET_LIKE' }), new GitHubError(500, 'x'), Object.assign(new GitHubError(502, 'x'), { cause: sock }), null, 'fetch failed', { message: 'fetch failed' }]) {
+    assert.equal(isTransportError(e), false, String(e?.message ?? e));
+  }
 });
 
 // ---- stale-bootstrap recovery (run 50: the first bootstrap imported a 28-hour-old input) ----------------------
