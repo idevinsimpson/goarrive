@@ -16,7 +16,7 @@ import { shadowSurfaceEvent, DECISION_OWNER, decisionBlock, decisionIntake, deri
 import { appendAll } from '../append-all.mjs';
 import { targetTitle } from '../fastpath.mjs';
 import { redact, tokenGitEnv, STATE_REF, predecessorRef } from '../gitstate.mjs';
-import { PAGE, gitHubClient } from '../github.mjs';
+import { GitHubError, PAGE, gitHubClient, isTransportError } from '../github.mjs';
 import { STEP5_PERMISSIONS, appJwt, installationToken, AppTokenError } from '../app-token.mjs';
 import { health } from '../health-view.mjs';
 import { freshness } from '../freshness-view.mjs';
@@ -472,7 +472,8 @@ atest('GET-ONLY RETRY: one transport failure on a GET is retried once; a second 
   assert.deepEqual(await gh(once).comment(7), { id: 7, body: 'b', author: 'idevinsimpson', association: 'OWNER', createdAt: 't', updatedAt: 't' }, 'the exact response, once');
   assert.deepEqual(once.seen, ['GET', 'GET']);
 
-  const bodyCut = scripted({ ok: true, status: 200, json: async () => { throw lost(); } }, ok(raw));
+  // undici's own form for a body cut off mid-read: TypeError('terminated') caused by the socket error.
+  const bodyCut = scripted({ ok: true, status: 200, json: async () => { throw Object.assign(new TypeError('terminated'), { cause: { code: 'UND_ERR_SOCKET' } }); } }, ok(raw));
   assert.equal((await gh(bodyCut).comment(7)).id, 7, 'a body cut off mid-read is a transport failure too');
   assert.deepEqual(bodyCut.seen, ['GET', 'GET']);
 
@@ -494,6 +495,33 @@ atest('GET-ONLY RETRY: one transport failure on a GET is retried once; a second 
   const absent = scripted({ ok: false, status: 404, json: async () => ({}) }, ok(raw));
   assert.equal(await gh(absent).comment(7), null);
   assert.deepEqual(absent.seen, ['GET'], '404 stays an answer: null, once');
+
+  // W4 finding (#394 6021437625): only a TRANSPORT failure is retried. Programmer and application errors, and a body
+  // that is not JSON, are thrown on their first attempt (a retry would hide them, not cure them).
+  for (const [name, make] of [
+    ['ReferenceError', () => { throw new ReferenceError('x is not defined'); }],
+    ['RangeError', () => { throw new RangeError('out of range'); }],
+    ['plain application Error', () => { throw new Error('application bug'); }],
+    ['programmer TypeError', () => { throw new TypeError("Cannot read properties of undefined (reading 'x')"); }],
+    ['SyntaxError from json()', () => ({ ok: true, status: 200, json: async () => { throw new SyntaxError('Unexpected token < in JSON'); } })],
+  ]) {
+    const seen = [];
+    const g = gitHubClient({ token: 't', repo: REPO, fetchImpl: async (url, init) => { seen.push(init.method); if (seen.length > 1) return ok(raw); return make(); } });
+    await assert.rejects(g.comment(7), (e) => !(e instanceof GitHubError) && !isTransportError(e), name);
+    assert.deepEqual(seen, ['GET'], `${name}: attempted exactly once, never retried`);
+  }
+});
+
+atest('isTransportError: undici transport forms only', () => {
+  const sock = { code: 'UND_ERR_SOCKET' };
+  for (const e of [Object.assign(new TypeError('fetch failed'), { cause: sock }), new TypeError('fetch failed'), Object.assign(new TypeError('terminated'), { cause: sock }), new TypeError('terminated'),
+    Object.assign(new Error('other side closed'), { code: 'UND_ERR_SOCKET' }), Object.assign(new Error('x'), { cause: { code: 'UND_ERR_CONNECT_TIMEOUT' } })]) {
+    assert.equal(isTransportError(e), true, `${e.constructor.name}: ${e.message}`);
+  }
+  for (const e of [new ReferenceError('x'), new RangeError('x'), new Error('application bug'), new SyntaxError('Unexpected token'), new TypeError("Cannot read properties of undefined"),
+    Object.assign(new Error('x'), { code: 'ECONNRESET_LIKE' }), new GitHubError(500, 'x'), Object.assign(new GitHubError(502, 'x'), { cause: sock }), null, 'fetch failed', { message: 'fetch failed' }]) {
+    assert.equal(isTransportError(e), false, String(e?.message ?? e));
+  }
 });
 
 // ---- stale-bootstrap recovery (run 50: the first bootstrap imported a 28-hour-old input) ----------------------

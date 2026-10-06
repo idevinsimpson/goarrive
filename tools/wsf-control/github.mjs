@@ -20,6 +20,19 @@ export class GitHubError extends Error {
   constructor(status, what) { super(`GitHub ${what} returned HTTP ${status}`); this.status = status; }
 }
 
+/**
+ * A TRANSPORT failure, and nothing else: an undici error code (`UND_ERR_*`, on the error or as its cause), or one of
+ * undici's own TypeError forms for it, `fetch failed` (the request never got an answer) and `terminated` (the body was
+ * cut off mid-read). A programmer error (ReferenceError, RangeError, any other TypeError), a plain application Error,
+ * a SyntaxError from a non-JSON body, and every HTTP answer are not transport.
+ */
+export function isTransportError(e) {
+  if (!(e instanceof Error) || e instanceof GitHubError) return false;
+  const code = e.code ?? e.cause?.code;
+  if (typeof code === 'string' && code.startsWith('UND_ERR_')) return true;
+  return e instanceof TypeError && (e.message === 'fetch failed' || e.message === 'terminated');
+}
+
 export function gitHubClient({ token, repo, fetchImpl = globalThis.fetch }) {
   if (!token) throw new Error('an installation token is required');
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) throw new Error('repo must be owner/name');
@@ -31,15 +44,16 @@ export function gitHubClient({ token, repo, fetchImpl = globalThis.fetch }) {
     return res.status === 204 ? null : res.json();
   }
   /**
-   * One request. A GET that fails in TRANSPORT (the socket closed, the body cut off: anything but an HTTP answer) is
-   * tried exactly once more, at once; a second transport failure surfaces. An HTTP answer, 4xx or 5xx, is never
-   * retried, and a POST or PATCH is never retried at all, so no mutation is ever replayed.
+   * One request. A GET that fails in TRANSPORT (isTransportError: the socket closed, the body cut off) is tried
+   * exactly once more, at once; a second transport failure surfaces. Any other exception is thrown on its first
+   * attempt. An HTTP answer, 4xx or 5xx, is never retried, and a POST or PATCH is never retried at all, so no mutation
+   * is ever replayed.
    */
   async function call(method, route, body, what) {
     try {
       return await once(method, route, body, what);
     } catch (e) {
-      if (method !== 'GET' || e instanceof GitHubError) throw e;
+      if (method !== 'GET' || !isTransportError(e)) throw e;
       return once(method, route, body, what);
     }
   }
