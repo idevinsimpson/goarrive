@@ -7,6 +7,10 @@
  * data; errors carry the HTTP status and path, never a header or a body echo.
  */
 const API = 'https://api.github.com';
+/** Comments per page, the endpoint's maximum. */
+const PAGE = 100;
+/** Extra pages read past the counted end for comments that arrive mid-read, and back for ones deleted mid-read. */
+const ROLLOVER_PAGES = 2;
 
 export class GitHubError extends Error {
   constructor(status, what) { super(`GitHub ${what} returned HTTP ${status}`); this.status = status; }
@@ -81,15 +85,45 @@ export function gitHubClient({ token, repo, fetchImpl = globalThis.fetch }) {
       const c = await call('GET', `${r}/issues/comments/${id}`, null, `comment ${id}`);
       return c && { id: c.id, body: c.body ?? '', author: c.user?.login ?? null, association: c.author_association ?? null, createdAt: c.created_at ?? null, updatedAt: c.updated_at ?? null };
     },
-    /** The newest `count` comments of an issue or PR conversation, oldest first (the endpoint pages oldest-first). */
+    /**
+     * The newest `count` comments of an issue or PR conversation, oldest first (the endpoint pages oldest-first).
+     *
+     * BOUNDED (CONTROL-RECENT-COMMENTS-SAFE-READ-1). Walking from page 1 to the end read ~1.6 MB of #365 per run until
+     * GitHub closed the socket. Instead: read the conversation's comment count, then only the pages at its end. The
+     * counted last page is read first, then forward while pages are full (a comment that lands after the count rolls
+     * onto a further page, read up to ROLLOVER_PAGES), then BACKWARDS one page at a time until `count` comments are
+     * held. Reading later pages before earlier ones means a comment deleted mid-read can only shift one already held
+     * onto an earlier page (a duplicate, dropped by id), never skip one. A conversation that keeps growing past the
+     * rollover, an unreadable count, or a window that cannot be filled within its bound is refused, never cut short.
+     * An absent conversation is [].
+     */
     async recentComments(issue, count = 100) {
-      let window = [];
-      for (let page = 1; page <= 100; page += 1) {
-        const batch = (await call('GET', `${r}/issues/${issue}/comments?per_page=100&page=${page}`, null, `comments of #${issue}`)) ?? [];
-        window = window.concat(batch).slice(-count);
-        if (batch.length < 100) break;
+      const meta = await call('GET', `${r}/issues/${issue}`, null, `issue #${issue}`);
+      if (meta === null) return [];
+      const total = meta.comments;
+      if (!Number.isInteger(total) || total < 0) throw new Error(`GitHub issue #${issue} returned no readable comment count; refusing to guess a window`);
+      const lastPage = Math.max(1, Math.ceil(total / PAGE));
+      const read = async (n) => (await call('GET', `${r}/issues/${issue}/comments?per_page=${PAGE}&page=${n}`, null, `comments of #${issue}`)) ?? [];
+      const pages = new Map();
+      for (let n = lastPage; ; n += 1) {
+        if (n > lastPage + ROLLOVER_PAGES) throw new Error(`comments of #${issue} kept growing past ${ROLLOVER_PAGES} extra pages during the read; refusing a partial window`);
+        const batch = await read(n);
+        pages.set(n, batch);
+        if (batch.length < PAGE) break;
       }
-      return window.map((c) => ({ id: c.id, body: c.body ?? '', author: c.user?.login ?? null, association: c.author_association ?? null, createdAt: c.created_at ?? null, updatedAt: c.updated_at ?? null }));
+      const held = () => {
+        const byId = new Map();
+        for (const n of [...pages.keys()].sort((x, y) => x - y)) for (const c of pages.get(n)) if (!byId.has(c.id)) byId.set(c.id, c);
+        return [...byId.values()];
+      };
+      const floor = Math.max(1, lastPage - Math.ceil(count / PAGE) - ROLLOVER_PAGES);
+      let first = lastPage;
+      while (held().length < count && first > 1) {
+        if (first <= floor) throw new Error(`the newest ${count} comments of #${issue} could not be read in a bounded window; refusing a partial one`);
+        first -= 1;
+        pages.set(first, await read(first));
+      }
+      return held().slice(-count).map((c) => ({ id: c.id, body: c.body ?? '', author: c.user?.login ?? null, association: c.author_association ?? null, createdAt: c.created_at ?? null, updatedAt: c.updated_at ?? null }));
     },
     async createComment(issue, body) {
       const c = await call('POST', `${r}/issues/${issue}/comments`, { body }, `create comment on #${issue}`);
