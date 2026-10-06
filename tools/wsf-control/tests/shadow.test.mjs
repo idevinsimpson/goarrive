@@ -251,7 +251,7 @@ atest('Check 71 F1: the comment-reading path carries each author\'s login and au
     { id: 2, body: 'b', user: { login: 'external-user' }, author_association: 'NONE', created_at: '2026-09-28T12:00:00Z', updated_at: '2026-09-28T12:07:00Z' },
     { id: 3, body: 'c', user: null },
   ];
-  const fetchImpl = async (url) => ({ ok: true, status: 200, json: async () => (url.includes('/issues/comments/') ? raw[0] : raw) });
+  const fetchImpl = async (url) => ({ ok: true, status: 200, json: async () => (url.includes('/issues/comments/') ? raw[0] : /\/issues\/365$/.test(url) ? { comments: raw.length } : raw) });
   const gh = gitHubClient({ token: 't', repo: REPO, fetchImpl });
   assert.deepEqual(await gh.recentComments(365), [
     { id: 1, body: 'a', author: 'idevinsimpson', association: 'OWNER', createdAt: '2026-09-28T12:00:00Z', updatedAt: '2026-09-28T12:00:00Z' },
@@ -259,6 +259,149 @@ atest('Check 71 F1: the comment-reading path carries each author\'s login and au
     { id: 3, body: 'c', author: null, association: null, createdAt: null, updatedAt: null },
   ]);
   assert.deepEqual(await gh.comment(1), { id: 1, body: 'a', author: 'idevinsimpson', association: 'OWNER', createdAt: '2026-09-28T12:00:00Z', updatedAt: '2026-09-28T12:00:00Z' });
+});
+
+// ---- CONTROL-RECENT-COMMENTS-SAFE-READ-1: newest-comment reads are bounded ----------------------------------------
+/**
+ * A conversation as the REST API serves it: GET /issues/N gives its comment count, GET /issues/N/comments pages it
+ * oldest-first, 100 to a page. Every request and the bytes served are counted. `afterCount` runs once, right after the
+ * count is read, to model a comment that lands (or is deleted) between the count and the pages; `afterPage` runs after
+ * every page served, to model one deleted between two page reads.
+ */
+function conversation(n, { afterCount = null, afterPage = null, failOn = null, count = undefined } = {}) {
+  const comments = Array.from({ length: n }, (_, i) => mkComment(i + 1));
+  const log = []; let bytes = 0; let hook = afterCount;
+  const reply = (status, data) => { const text = JSON.stringify(data); bytes += text.length; return { ok: status < 400, status, json: async () => JSON.parse(text) }; };
+  const fetchImpl = async (url) => {
+    const u = new URL(url);
+    log.push(u.pathname + u.search);
+    if (failOn && failOn(u)) return reply(500, {});
+    if (u.pathname === `/repos/${REPO}/issues/365`) {
+      const out = reply(200, { number: 365, comments: count === undefined ? comments.length : count });
+      if (hook) { const h = hook; hook = null; h(comments); }
+      return out;
+    }
+    if (u.pathname === `/repos/${REPO}/issues/365/comments`) {
+      const per = Number(u.searchParams.get('per_page')); const pg = Number(u.searchParams.get('page'));
+      const out = reply(200, comments.slice((pg - 1) * per, pg * per));
+      if (afterPage) afterPage(pg, comments);
+      return out;
+    }
+    return reply(404, {});
+  };
+  return { comments, log, pages: () => log.filter((l) => l.includes('/comments?')).length, bytes: () => bytes, fetchImpl };
+}
+const mkComment = (id) => ({ id, body: `comment ${id} ${'x'.repeat(1200)}`, user: { login: id % 2 ? 'idevinsimpson' : 'wsf-control-writer[bot]' }, author_association: id % 2 ? 'OWNER' : 'NONE', created_at: '2026-10-01T00:00:00Z', updated_at: '2026-10-01T00:00:00Z' });
+const shape = (c) => ({ id: c.id, body: c.body, author: c.user?.login ?? null, association: c.author_association ?? null, createdAt: c.created_at ?? null, updatedAt: c.updated_at ?? null });
+/** The implementation this packet replaced, verbatim in behaviour: walk from page 1 to the end, keep the newest `count`. */
+async function unboundedRecentComments(fetchImpl, issue, count = 100) {
+  let window = [];
+  for (let page = 1; page <= 100; page += 1) {
+    const res = await fetchImpl(`https://api.github.com/repos/${REPO}/issues/${issue}/comments?per_page=100&page=${page}`);
+    const batch = (await res.json()) ?? [];
+    window = window.concat(batch).slice(-count);
+    if (batch.length < 100) break;
+  }
+  return window.map(shape);
+}
+const newest = (cs, k = 100) => cs.slice(-k).map(shape);
+
+atest('SAFE-READ: on a 1,234-comment conversation the old walk reads all 13 pages; the bounded read returns the same newest 100 from the last 2', async () => {
+  const old = conversation(1234);
+  assert.deepEqual(await unboundedRecentComments(old.fetchImpl, 365), newest(old.comments));
+  assert.equal(old.pages(), 13, 'the replaced implementation walks the whole conversation');
+  const c = conversation(1234);
+  const got = await gitHubClient({ token: 't', repo: REPO, fetchImpl: c.fetchImpl }).recentComments(365, 100);
+  assert.deepEqual(got, newest(c.comments), 'the newest 100, oldest first, every field carried');
+  assert.deepEqual(c.log, [`/repos/${REPO}/issues/365`, `/repos/${REPO}/issues/365/comments?per_page=100&page=13`, `/repos/${REPO}/issues/365/comments?per_page=100&page=12`], 'the end first, then one page back');
+  assert.ok(c.bytes() * 5 < old.bytes(), `bounded ${c.bytes()} bytes vs unbounded ${old.bytes()}`);
+  assert.equal(new Set(got.map((x) => x.id)).size, got.length, 'no duplicates');
+});
+
+atest('SAFE-READ: a conversation of 5,050 comments costs the same three requests as one of 350', async () => {
+  for (const n of [350, 5050]) {
+    const c = conversation(n);
+    assert.deepEqual(await gitHubClient({ token: 't', repo: REPO, fetchImpl: c.fetchImpl }).recentComments(365), newest(c.comments));
+    assert.equal(c.pages(), 2, `${n}: two comment pages`);
+    assert.equal(c.log.length, 3);
+  }
+});
+
+atest('SAFE-READ: a partial final page (1,050): the newest 100 span pages 10 and 11', async () => {
+  const c = conversation(1050);
+  const got = await gitHubClient({ token: 't', repo: REPO, fetchImpl: c.fetchImpl }).recentComments(365);
+  assert.deepEqual(got, newest(c.comments));
+  assert.deepEqual(got.map((x) => x.id).slice(0, 1).concat(got.map((x) => x.id).slice(-1)), [951, 1050]);
+  assert.equal(c.pages(), 2);
+});
+
+atest('SAFE-READ: an exact 100-page boundary (1,000): the empty page 11 proves the end, then page 10 is read again, newest first', async () => {
+  const c = conversation(1000);
+  assert.deepEqual(await gitHubClient({ token: 't', repo: REPO, fetchImpl: c.fetchImpl }).recentComments(365), newest(c.comments));
+  assert.deepEqual(c.log.slice(1).map((l) => /[?&]page=(\d+)/.exec(l)[1]), ['10', '11', '10'], 'the probe copy of page 10 is not trusted');
+});
+
+atest('SAFE-READ: a comment deleted between two page reads is never a gap: the shifted one is read twice and kept once', async () => {
+  let deleted = false;
+  const c = conversation(1234, { afterPage: (pg, cs) => { if (pg === 13 && !deleted) { deleted = true; cs.splice(0, 1); } } });
+  const got = await gitHubClient({ token: 't', repo: REPO, fetchImpl: c.fetchImpl }).recentComments(365);
+  assert.ok(deleted);
+  assert.deepEqual(got, newest(c.comments), 'exactly the newest 100 that exist');
+  assert.equal(new Set(got.map((x) => x.id)).size, 100, 'the comment that shifted onto the earlier page is not doubled');
+  assert.equal(c.pages(), 2);
+});
+
+atest('SAFE-READ: a comment that arrives between the count and the pages rolls onto a new page and is read; none is lost or doubled', async () => {
+  const c = conversation(1000, { afterCount: (cs) => cs.push(mkComment(1001)) });
+  const got = await gitHubClient({ token: 't', repo: REPO, fetchImpl: c.fetchImpl }).recentComments(365);
+  assert.deepEqual(got, newest(c.comments), 'the newest decision is the arrival itself');
+  assert.equal(got.at(-1).id, 1001);
+  assert.equal(new Set(got.map((x) => x.id)).size, 100);
+  const d = conversation(999, { afterCount: (cs) => cs.push(mkComment(1000), mkComment(1001), mkComment(1002)) });
+  assert.deepEqual(await gitHubClient({ token: 't', repo: REPO, fetchImpl: d.fetchImpl }).recentComments(365), newest(d.comments));
+});
+
+atest('SAFE-READ (W9 finding #497 6019310772): an arrival after the count plus an older deletion between the forward probes never drops the newest', async () => {
+  // Count 1000; comment 1001 arrives after the count; page 10 is probed (full); an older comment is deleted before the
+  // page-11 probe, so 1001 shifts onto page 10. The window must still be the true newest 100: 902..1001.
+  let deleted = false;
+  const c = conversation(1000, {
+    afterCount: (cs) => cs.push(mkComment(1001)),
+    afterPage: (pg, cs) => { if (pg === 10 && !deleted) { deleted = true; cs.splice(0, 1); } },
+  });
+  const got = await gitHubClient({ token: 't', repo: REPO, fetchImpl: c.fetchImpl }).recentComments(365);
+  assert.ok(deleted);
+  assert.deepEqual(got.map((x) => x.id), Array.from({ length: 100 }, (_, i) => 902 + i), 'exactly 902..1001: no omission');
+  assert.equal(new Set(got.map((x) => x.id)).size, 100, 'no duplicate');
+  assert.deepEqual(got, newest(c.comments));
+});
+
+atest('SAFE-READ: comments deleted between the count and the pages widen the window backwards instead of cutting it short', async () => {
+  const c = conversation(1000, { afterCount: (cs) => cs.splice(100, 150) });
+  const got = await gitHubClient({ token: 't', repo: REPO, fetchImpl: c.fetchImpl }).recentComments(365);
+  assert.deepEqual(got, newest(c.comments));
+  assert.equal(got.length, 100);
+});
+
+atest('SAFE-READ: small, empty and absent conversations', async () => {
+  for (const n of [0, 1, 99, 100, 101]) {
+    const c = conversation(n);
+    assert.deepEqual(await gitHubClient({ token: 't', repo: REPO, fetchImpl: c.fetchImpl }).recentComments(365), newest(c.comments), `${n} comments`);
+  }
+  const gone = conversation(5);
+  assert.deepEqual(await gitHubClient({ token: 't', repo: REPO, fetchImpl: gone.fetchImpl }).recentComments(999), [], 'an absent conversation is empty, as before');
+  const few = conversation(250);
+  assert.deepEqual(await gitHubClient({ token: 't', repo: REPO, fetchImpl: few.fetchImpl }).recentComments(365, 30), newest(few.comments, 30), 'a smaller count');
+});
+
+atest('SAFE-READ fails closed: a failing count or page, an unreadable count, a conversation that keeps growing, never a partial window', async () => {
+  const read = (c) => gitHubClient({ token: 't', repo: REPO, fetchImpl: c.fetchImpl }).recentComments(365);
+  await assert.rejects(read(conversation(1234, { failOn: (u) => u.pathname.endsWith('/issues/365') })), /HTTP 500/);
+  await assert.rejects(read(conversation(1234, { failOn: (u) => u.searchParams.get('page') === '13' })), /HTTP 500/);
+  for (const bad of [null, -1, 1.5, '1234']) await assert.rejects(read(conversation(1234, { count: bad })), /no readable comment count/, String(bad));
+  await assert.rejects(read(conversation(1000, { afterCount: (cs) => { for (let i = 1; i <= 350; i += 1) cs.push(mkComment(1000 + i)); } })), /kept growing/);
+  // A count that claims far more than exists cannot be satisfied in the bounded window: refused, not returned short.
+  await assert.rejects(read(conversation(150, { count: 2000 })), /could not be read in a bounded window/);
 });
 
 // ---- stale-bootstrap recovery (run 50: the first bootstrap imported a 28-hour-old input) ----------------------
