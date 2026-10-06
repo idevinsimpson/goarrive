@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "9420fc933bc857dac64b97430f6c5f87b4328145a809ed3f061ebd166e00cc68",
-  "eventCount": 538,
+  "ledgerHead": "e20e7f4551270c17a8f490706cbc57313aefe6c664165d6d7ae9ad661aad8758",
+  "eventCount": 540,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -3121,16 +3121,20 @@
       "packet": "CONTROL-RECENT-COMMENTS-SAFE-READ-1",
       "worker": "W4",
       "reason": "review",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        6024568757
+      ],
       "ack": null
     },
     "283b9ce7ac6004dc8f555d3dd9d066b0ed321398cd55928dcd086ac8a58e92de": {
       "packet": "MOVE-CAMERA-NATIVE-PORT-1",
       "worker": "W7",
       "reason": "review",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        6024568998
+      ],
       "ack": null
     }
   },

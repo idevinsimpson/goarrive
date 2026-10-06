@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=9420fc933bc857dac64b97430f6c5f87b4328145a809ed3f061ebd166e00cc68 events=538 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=e20e7f4551270c17a8f490706cbc57313aefe6c664165d6d7ae9ad661aad8758 events=540 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `9420fc933bc857dac64b97430f6c5f87b4328145a809ed3f061ebd166e00cc68` (538 events)
+- Ledger head: `e20e7f4551270c17a8f490706cbc57313aefe6c664165d6d7ae9ad661aad8758` (540 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -153,6 +153,6 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | 9b6184715f9d | W9 | MOVE-CAMERA-NATIVE-PORT-1 | release | acked | 5997646784 | comment:5997687652 |
 | 25c8cd7a7502 | W4 | MOVE-CAMERA-NATIVE-PORT-1 | review | acked | 6009235376 | comment:6009248820 |
 | e2fea6086a17 | W9 | MOVE-CAMERA-NATIVE-PORT-1 | handback | delivered | 6019689592 | — |
-| a0fb1d7864a4 | W4 | CONTROL-RECENT-COMMENTS-SAFE-READ-1 | review | requested | — | — |
-| 283b9ce7ac60 | W7 | MOVE-CAMERA-NATIVE-PORT-1 | review | requested | — | — |
+| a0fb1d7864a4 | W4 | CONTROL-RECENT-COMMENTS-SAFE-READ-1 | review | delivered | 6024568757 | — |
+| 283b9ce7ac60 | W7 | MOVE-CAMERA-NATIVE-PORT-1 | review | delivered | 6024568998 | — |
 
