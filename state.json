@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "e20e7f4551270c17a8f490706cbc57313aefe6c664165d6d7ae9ad661aad8758",
-  "eventCount": 540,
+  "ledgerHead": "c03f1c46c9116078f6d11586baba21e09c7d4ce8c50ddd13b388eca787822e70",
+  "eventCount": 543,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -365,7 +365,9 @@
       "proof": null,
       "served": null,
       "releasedQueueIndex": null,
-      "reviewedBy": [],
+      "reviewedBy": [
+        "W4"
+      ],
       "subjectPaths": [
         "tools/wsf-control/github.mjs",
         "tools/wsf-control/tests/shadow.test.mjs"
@@ -384,7 +386,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6020610384
+          "id": 6024627196
         }
       },
       "review": {
@@ -3121,21 +3123,28 @@
       "packet": "CONTROL-RECENT-COMMENTS-SAFE-READ-1",
       "worker": "W4",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6024568757
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6024592026
+      },
+      "superseded": true
     },
     "283b9ce7ac6004dc8f555d3dd9d066b0ed321398cd55928dcd086ac8a58e92de": {
       "packet": "MOVE-CAMERA-NATIVE-PORT-1",
       "worker": "W7",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6024568998
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6024595043
+      }
     }
   },
   "fastpath": {
