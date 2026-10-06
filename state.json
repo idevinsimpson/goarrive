@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "82ed8aa507ca0e188d2069a302722c79fd97f5fddbeb8b1f8d0b802d85301826",
-  "eventCount": 527,
+  "ledgerHead": "98c5068ba4a23d74d6235370fe6b770b2b66f7026047718efc5d68b496f19abe",
+  "eventCount": 528,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -3107,8 +3107,10 @@
       "packet": "MOVE-CAMERA-NATIVE-PORT-1",
       "worker": "W9",
       "reason": "handback",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        6019689592
+      ],
       "ack": null
     }
   },
