@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "b98d32b989758540fedf8d95fc6735885ffd8d4ec66e0a57ed4491340657c94e",
-  "eventCount": 659,
+  "ledgerHead": "c1a9ec7daaa6427cf506d6ee456e46d7e0d97aac92b1fe87fea6280f0cc571af",
+  "eventCount": 666,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -61,7 +61,9 @@
     }
   },
   "queue": {
-    "W3": [],
+    "W3": [
+      "LOVABLE-KIOSK-HOSTED-PROOF-1"
+    ],
     "W4": [],
     "W5": [],
     "W7": [],
@@ -282,7 +284,7 @@
       },
       "label": "Repair CURRENT comment acknowledgment and verify uncertain PATCH by exact readback without mutation retries",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "ACCEPTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -317,10 +319,13 @@
           "kind": "comment",
           "id": 6044037834
         },
-        "accepted": null,
+        "accepted": {
+          "kind": "comment",
+          "id": 6044596793
+        },
         "lastTransition": {
           "kind": "comment",
-          "id": 6044453646
+          "id": 6044596793
         }
       },
       "review": {
@@ -609,6 +614,71 @@
         "after": "director"
       },
       "deliveries": 1,
+      "pendingFinding": null
+    },
+    "EVENT-LIFECYCLE-BACKEND-1": {
+      "owner": "W5",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Implement canonical event lifecycle transactions and authorization in an isolated module without competing with kiosk receipt ownership",
+      "origin": "ledger",
+      "phase": "RELEASED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": 395,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": 0,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "functions-westayfit/src/eventLifecycle.ts",
+        "functions-westayfit/tests/callable/wsf-event-lifecycle.test.ts",
+        "functions-westayfit/tests/callable/wsf-event-lifecycle-privacy.test.ts",
+        "docs/westayfit/qa/event-lifecycle-backend-1.md"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6044547053
+        },
+        "released": {
+          "kind": "comment",
+          "id": 6044610796
+        },
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6044610796
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "journey-qa",
+            "count": 1
+          },
+          {
+            "class": "security",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
       "pendingFinding": null
     },
     "EVERGREEN-MARKER-ENTRY-1": {
@@ -1249,7 +1319,7 @@
       ],
       "artifact": {
         "subjectSha": "a3f38e228bbd55214656a500e5d30a9300425f7f",
-        "prHeadSha": "a3f38e228bbd55214656a500e5d30a9300425f7f",
+        "prHeadSha": "4bc9a0b83168fdd5a990fe6db1fd3763a01a8c53",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -1633,6 +1703,69 @@
         "workerReviews": [
           {
             "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
+      "pendingFinding": null
+    },
+    "LOVABLE-KIOSK-HOSTED-PROOF-1": {
+      "owner": "W3",
+      "kind": "work",
+      "completion": {
+        "terminal": "VERIFIED",
+        "proofType": "hosted"
+      },
+      "label": "Run the pinned Lovable kiosk journey with bounded real staging fixtures and cleanup inside the existing trusted runner",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        ".github/workflows/wsf-staging-deploy.yml",
+        ".github/wsf-staging/hosted-lovable-kiosk.mjs",
+        ".github/wsf-staging/tests/hosted-lovable-kiosk.test.mjs",
+        ".github/wsf-staging/tests/workflow-contract.test.mjs",
+        "docs/westayfit/qa/lovable-kiosk-hosted-proof-1.md"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6044515892
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6044515892
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          },
+          {
+            "class": "security",
             "count": 1
           }
         ],
@@ -4065,10 +4198,21 @@
       "packet": "KIOSK-EXPECTED-TURN-1",
       "worker": "W9",
       "reason": "handback",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6044557669
       ],
+      "ack": {
+        "kind": "comment",
+        "id": 6044566138
+      }
+    },
+    "5031a01de83a07d4fc7c0ec68006ab2d0312d494a80f3da02654b5c56a6ba2b1": {
+      "packet": "EVENT-LIFECYCLE-BACKEND-1",
+      "worker": "W5",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
