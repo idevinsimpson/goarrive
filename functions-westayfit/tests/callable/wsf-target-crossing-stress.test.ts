@@ -1,12 +1,16 @@
 /**
  * CONTENTION under the one-time target-crossing event.
  *
- * Before a goal crosses its target, every wsfContribute transaction reads all
- * ten counter shards so it can decide whether THIS attempt crossed. That is a
- * read set every concurrent shard write can invalidate, so this file measures
- * what that costs: N simultaneous, unique, valid attempts on one below-target
- * goal (N = 20 and N = 50), and the same N on a goal that has already crossed
- * (the cheap single-shard path) as the baseline.
+ * MEMBER-TRUTH-BACKEND-1. Before a goal crosses its target, every
+ * wsfContribute transaction reads and writes the goal's crossing gate
+ * (wsfGoalCrossingGates) so it can decide, from an authoritative before and
+ * after, whether THIS attempt crossed. That serialises pre-crossing
+ * contributions on one document, so this file measures what it costs: N
+ * simultaneous, unique, valid attempts on one below-target goal (N = 20 and
+ * N = 50), for a goal whose gate was opened with it (every goal wsfCreateGoal
+ * creates) and for a goal whose gate is built lazily from the shards (a goal
+ * from before the gate), and the same N on a goal that has already crossed
+ * (the single-shard path, which never touches the gate) as the baseline.
  *
  * What is pinned, per batch:
  *   • every attempt is accepted after Firestore's normal transaction retries —
@@ -65,7 +69,7 @@ function uniq(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-async function seedGoal(target: number): Promise<{ goalId: string; communityGroupId: string }> {
+async function seedGoal(target: number, gateAtCreation: boolean): Promise<{ goalId: string; communityGroupId: string }> {
   const communityGroupId = uniq('grp');
   const now = new Date();
   const ref = getFirestore().collection('wsfGoals').doc();
@@ -82,6 +86,9 @@ async function seedGoal(target: number): Promise<{ goalId: string; communityGrou
     crossingTracked: true,
     createdAt: new Date(),
   });
+  if (gateAtCreation) {
+    await getFirestore().doc(`wsfGoalCrossingGates/${ref.id}`).set({ total: 0, crossed: false, crossedAttemptId: null });
+  }
   return { goalId: ref.id, communityGroupId };
 }
 
@@ -142,24 +149,31 @@ describe('wsfContribute — contention around the target crossing', () => {
     await getFirestore().doc('_warmup/wsf-target-crossing-stress').set({ at: Date.now() });
   }, 30_000);
 
-  for (const n of [20, 50]) {
-    test(`${n} simultaneous unique attempts on a below-target goal: all count once, exactly one crossing`, async () => {
+  for (const gateAtCreation of [true, false]) for (const n of [20, 50]) {
+    const variant = gateAtCreation ? 'gate opened with the goal' : 'gate built lazily';
+    test(`${n} simultaneous unique attempts on a below-target goal (${variant}): all count once, exactly one fresh crossing`, async () => {
       const target = 500;
       const count = Math.ceil(600 / n); // the batch crosses as a whole
-      const { goalId, communityGroupId } = await seedGoal(target);
+      const { goalId, communityGroupId } = await seedGoal(target, gateAtCreation);
       const uids = await seedMembers(communityGroupId, n);
 
-      const pre = await runBatch(`pre-crossing (reachedAt null)`, goalId, uids, count, `a${n}`);
+      const pre = await runBatch(`pre-crossing (${variant})`, goalId, uids, count, `a${n}`);
       expect(pre.failed).toEqual([]);
       expect(pre.ok.length).toBe(n);
       const sum = await shardSum(goalId);
       expect(sum).toBe(n * count);
-      // Nobody is credited (see recordTargetCrossing); the event itself is recorded exactly once.
-      expect(pre.crossed).toBe(0);
+      // Exactly one attempt committed the crossing, it alone is told so, and
+      // the goal's one event names it.
+      expect(pre.crossed).toBe(1);
+      const crossingIndex = pre.results.findIndex((r) => r.ok && r.value.crossedTarget === true);
+      const crossingAttempt = `stress-a${n}-${crossingIndex}`;
 
       const goal = (await getFirestore().doc(`wsfGoals/${goalId}`).get()).data() as Record<string, unknown>;
       expect(goal.reachedAt).toBeDefined();
-        expect(goal.reachedAttemptId).toBeNull();
+      expect(goal.reachedAttemptId).toBe(crossingAttempt);
+      const gate = (await getFirestore().doc(`wsfGoalCrossingGates/${goalId}`).get()).data() as Record<string, unknown>;
+      expect(gate.crossed).toBe(true);
+      expect(gate.crossedAttemptId).toBe(crossingAttempt);
       expect(typeof goal.reachedSharedTotal).toBe('number');
       expect(goal.reachedSharedTotal as number).toBeGreaterThanOrEqual(target);
       expect(goal.reachedSharedTotal as number).toBeLessThanOrEqual(n * count);
@@ -171,14 +185,22 @@ describe('wsfContribute — contention around the target crossing', () => {
       const replayOk = replays.filter((r) => r.ok) as Array<{ ok: true; value: ContributeValue }>;
       expect(replayOk.length).toBe(n);
       expect(replayOk.every((r) => r.value.alreadyRecorded)).toBe(true);
-      expect(replayOk.filter((r) => r.value.crossedTarget === true).length).toBe(pre.crossed);
+      // A replay never grants the fresh crossing; the crossing attempt alone
+      // reports it as history.
+      expect(replayOk.filter((r) => r.value.crossedTarget === true).length).toBe(0);
+      const recorded = replayOk.filter((r) => (r.value as { crossingRecorded?: boolean }).crossingRecorded === true);
+      expect(recorded.length).toBe(1);
+      expect(replays.indexOf(recorded[0]!)).toBe(crossingIndex);
       expect(await shardSum(goalId)).toBe(n * count);
 
       // Baseline: the same N on the SAME goal now that it has crossed (single-shard path).
-      const post = await runBatch(`post-crossing (reachedAt set)`, goalId, uids, count, `b${n}`);
+      const post = await runBatch(`post-crossing (${variant})`, goalId, uids, count, `b${n}`);
       expect(post.failed).toEqual([]);
       expect(post.crossed).toBe(0);
       expect(await shardSum(goalId)).toBe(2 * n * count);
+      // The gate was not touched after the crossing.
+      const gateAfter = (await getFirestore().doc(`wsfGoalCrossingGates/${goalId}`).get()).data() as Record<string, unknown>;
+      expect(gateAfter.total).toBe(gate.total);
     }, 180_000);
   }
 });

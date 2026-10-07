@@ -1130,6 +1130,113 @@ export const wsfJoinViaMarker = onCall<JoinViaMarkerRequest>(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+// wsfPublicPreviewLabel (MEMBER-TRUTH-BACKEND-1 B) — the two labels an
+// internet link preview may show, or nothing.
+//
+// A shared link's unfurl (iMessage, Slack, WhatsApp, a server-rendered head)
+// is a stranger reading a goal. The ONLY permission that covers it is the one
+// a Champion already gives per goal for exactly this audience:
+// `aggregateDisplayAuthorized === true`, through the same evaluator and the
+// same sample suppression `wsfGoalPulse` uses — which already publishes these
+// same two labels to anyone holding the goal id. Nothing here widens that.
+//
+// What does NOT publish a label: a community's join policy or link
+// admission, possession of a link or marker, discoverability, membership, or
+// a marker pointing at the goal. A marker is resolved only to find its goal;
+// the goal's own authorization still decides.
+//
+// ONE DENIAL SHAPE. Missing, false or malformed authorization, an unknown
+// goal, a bad, inactive or repointed marker, a sample community, a community
+// id on its own, two ids at once, anything malformed — all return the same
+// `{visibility:'none'}`, so the answer is never an existence oracle. It never
+// throws not-found. Only the per-IP rate limit answers differently, and it
+// fires before any lookup, so it says nothing about any goal.
+//
+// The labels are trimmed and capped at 60 characters. `maxAgeSeconds` is the
+// longest a consumer may cache EITHER answer, so a revocation or a repoint is
+// honoured within a minute; a goal's own id never changes meaning.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const PREVIEW_LABEL_MAX = 60;
+const PREVIEW_LABEL_MAX_AGE_SECONDS = 60;
+
+type PublicPreviewLabelRequest = { goalId?: unknown; markerSlug?: unknown };
+type PublicPreviewLabelResponse =
+  | { visibility: 'public'; communityName: string; goalTitle: string; maxAgeSeconds: number }
+  | { visibility: 'none'; maxAgeSeconds: number };
+
+function previewLabel(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (trimmed === '') return null;
+  return trimmed.slice(0, PREVIEW_LABEL_MAX).trim();
+}
+
+async function resolvePublicPreviewLabel(
+  data: PublicPreviewLabelRequest
+): Promise<PublicPreviewLabelResponse> {
+  const none: PublicPreviewLabelResponse = { visibility: 'none', maxAgeSeconds: PREVIEW_LABEL_MAX_AGE_SECONDS };
+  const db = getFirestore();
+  const hasGoal = data.goalId !== undefined;
+  const hasMarker = data.markerSlug !== undefined;
+  // Exactly one target. There is no community-only lookup.
+  if (hasGoal === hasMarker) return none;
+
+  let goalId: string | null = null;
+  let markerCommunityId: string | null = null;
+  if (hasMarker) {
+    const slug = normalizeMarkerSlug(data.markerSlug);
+    if (!slug) return none;
+    const markerSnap = await db.doc(`wsfMarkers/${slug}`).get();
+    const marker = markerSnap.exists ? readMarkerDoc(markerSnap.data()) : null;
+    if (!marker) return none;
+    goalId = marker.goalId;
+    markerCommunityId = marker.communityGroupId;
+  } else {
+    goalId = normalizeStringId(data.goalId);
+  }
+  if (!goalId) return none;
+
+  const goalSnap = await db.doc(`wsfGoals/${goalId}`).get();
+  if (!goalSnap.exists) return none;
+  const goal = goalSnap.data() as GoalDoc;
+  // A marker must point at a goal of the community it names.
+  if (markerCommunityId !== null && goal.communityGroupId !== markerCommunityId) return none;
+  if (!isAggregateDisplayAuthorized(goal)) return none;
+
+  // The display route, with no caller: sample suppression and the
+  // community's display name come from the same evaluator wsfGoalPulse uses.
+  const access = await evaluateGoalAggregateAccess(goal, null);
+  if (!access.allowed || !access.asDisplay) return none;
+  const communityName = previewLabel(access.communityDisplayName);
+  const goalTitle = previewLabel(goal.title);
+  if (!communityName || !goalTitle) return none;
+  return { visibility: 'public', communityName, goalTitle, maxAgeSeconds: PREVIEW_LABEL_MAX_AGE_SECONDS };
+}
+
+export const wsfPublicPreviewLabel = onCall<PublicPreviewLabelRequest>(
+  // Public: a link unfurler and a server-rendered head have no account.
+  // No-op in the emulator; enforced by Cloud Run IAM at deploy.
+  { region: 'us-central1', invoker: 'public' },
+  async (request): Promise<PublicPreviewLabelResponse> => {
+    const ip = extractIp(request.rawRequest as any);
+    // Rate limit FIRST, before any lookup, on the shared preview bucket.
+    await enforcePreviewRateLimit(ip, Date.now());
+    const data =
+      request.data && typeof request.data === 'object' && !Array.isArray(request.data)
+        ? (request.data as PublicPreviewLabelRequest)
+        : {};
+    try {
+      return await resolvePublicPreviewLabel(data);
+    } catch {
+      // A read that fails is a denial, never an `internal` that differs from
+      // the denial shape.
+      return { visibility: 'none', maxAgeSeconds: PREVIEW_LABEL_MAX_AGE_SECONDS };
+    }
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // D — ADMISSION CONTROLS
 //
 // Everything below changes who may enter or remain in a community. None of it
@@ -2554,14 +2661,11 @@ type GoalDoc = {
    */
   activityGuideKey?: string;
   /**
-   * Set by wsfCreateGoal on every goal created since the crossing event
-   * exists. A goal that carries it may record an UNCREDITED event (reachedAt
-   * and reachedSharedTotal, reachedAttemptId null) when the total is observed
-   * at or beyond the target with no attributable attempt — the only way a
-   * crossing can be missed is several attempts landing in the same instant at
-   * the line. A goal without it (created before this field) never gets an
-   * uncredited event: it may already have been beyond its target for weeks,
-   * and "reached today" would be a false date.
+   * RETIRED (MEMBER-TRUTH-BACKEND-1). This was documented as set by
+   * wsfCreateGoal, but nothing ever wrote it, so the rule it was meant to
+   * control never ran. The crossing gate (wsfGoalCrossingGates) replaced the
+   * post-commit claim it belonged to. Nothing reads it any more; documents
+   * that happen to carry it are neither rewritten nor backfilled.
    */
   crossingTracked?: boolean;
   /**
@@ -2762,6 +2866,62 @@ async function sumGoalShards(goalId: string): Promise<number> {
     refs.push(db.doc(`wsfGoalCounters/${goalId}/shards/${i}`));
   }
   const snaps = await db.getAll(...refs);
+  let total = 0;
+  for (const snap of snaps) {
+    const data = snap.data() as { count?: number } | undefined;
+    if (typeof data?.count === 'number') total += data.count;
+  }
+  return total;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE CROSSING GATE (MEMBER-TRUTH-BACKEND-1).
+//
+// `wsfGoalCrossingGates/{goalId}` holds the goal's exact shared total for as
+// long as the goal has NOT crossed its target, so the contribution that takes
+// it from below the target to at or beyond it is known INSIDE the transaction
+// that records it — from an authoritative before and after, never from a
+// racing post-commit read of the ten shards.
+//
+//   • It is read and written only while `goal.reachedAt` is unset. The moment
+//     a contribution crosses, the same commit sets `reachedAt`, and every
+//     later contribution skips the gate entirely: the post-target hot path is
+//     the single-shard path it always was.
+//   • It is created lazily, by the first pre-crossing contribution, from ONE
+//     in-transaction read of the ten shards (the pre-contribution total), so
+//     it starts exactly equal to them; this contribution is then added once.
+//   • Only two code paths move a goal's shards — performContribution and
+//     wsfAdjustGoal — and both move an OPEN gate in the same transaction as
+//     the shard write, so the gate cannot drift from the shards.
+//   • `crossed` is permanent. A downward correction and a later re-crossing
+//     never open it again: one goal, one first crossing.
+//
+// Admin-SDK only: the client rules' WSF catch-all denies the collection.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type CrossingGateDoc = {
+  total: number;
+  crossed: boolean;
+  crossedAttemptId: string | null;
+};
+
+function crossingGateRef(goalId: string) {
+  return getFirestore().doc(`wsfGoalCrossingGates/${goalId}`);
+}
+
+/** A stored gate is used only when its shape is exact; anything else is rebuilt from the shards. */
+function readCrossingGate(snap: FirebaseFirestore.DocumentSnapshot): CrossingGateDoc | null {
+  if (!snap.exists) return null;
+  const d = snap.data() as Partial<CrossingGateDoc>;
+  if (typeof d.total !== 'number' || !Number.isFinite(d.total) || typeof d.crossed !== 'boolean') return null;
+  return {
+    total: d.total,
+    crossed: d.crossed,
+    crossedAttemptId: typeof d.crossedAttemptId === 'string' ? d.crossedAttemptId : null,
+  };
+}
+
+function shardTotalOf(snaps: FirebaseFirestore.DocumentSnapshot[]): number {
   let total = 0;
   for (const snap of snaps) {
     const data = snap.data() as { count?: number } | undefined;
@@ -3106,6 +3266,15 @@ export const wsfCreateGoal = onCall<CreateGoalRequest>(
         timezone,
         repeatPolicy,
         createdAt: FieldValue.serverTimestamp(),
+      });
+      // THE CROSSING GATE, opened with the goal at an exact zero: a new goal
+      // has no shards yet, so its first contributions never pay the one-time
+      // shard sum that builds a gate lazily.
+      tx.set(crossingGateRef(goalRef.id), {
+        total: 0,
+        crossed: false,
+        crossedAttemptId: null,
+        updatedAt: FieldValue.serverTimestamp(),
       });
     });
 
@@ -3608,16 +3777,21 @@ type ContributeResponse = {
   unit?: string;
   status?: GoalStatus;
   /**
-   * Per-attempt credit for the crossing. ALWAYS false today, and stored as
-   * false on every attempt: the crossing is learned from a post-commit
-   * observation of the sharded total, which cannot prove which concurrent
-   * contribution crossed the line, so no member is told "this one took us
-   * past our goal". The goal-level event (GoalDoc.reachedAt) is still
-   * recorded once; Community Home and the display celebrate WE reaching it.
-   * The field stays in the contract so a mechanism that can prove the order
-   * can light it without a shape change; until then it is never true.
+   * THE FRESH CROSSING (MEMBER-TRUTH-BACKEND-1). True on exactly ONE call per
+   * goal: the call whose transaction moved the shared total from below the
+   * target to at or beyond it, decided from an authoritative before and after
+   * inside that same transaction (the crossing gate). It is the only
+   * permission to play the Together moment. Every replay of that attempt —
+   * a retry after a lost reply, a reconcile — reports `false` here.
    */
   crossedTarget?: boolean;
+  /**
+   * THE HISTORICAL FACT, on a REPLAY only: this attempt is the one that
+   * crossed. Present (and true) only then, and never permission to play
+   * anything fresh. Withheld, like `crossedTarget` and the rest of the shared
+   * state, from a caller who may not be told the community's state.
+   */
+  crossingRecorded?: boolean;
 };
 
 export const wsfContribute = onCall<ContributeRequest>(
@@ -3719,9 +3893,8 @@ async function performContribution(args: {
   const {
     addedCount,
     alreadyRecorded,
-    crossedTarget: storedCrossedTarget,
-    goalHadNoEvent,
-    goalTracked,
+    crossedTarget: freshCrossedTarget,
+    crossingRecorded,
     goalTarget,
     goalUnit,
     goalStatus,
@@ -3744,12 +3917,17 @@ async function performContribution(args: {
       // read inside the transaction is what makes the boundary hold: a claim
       // taken or released concurrently aborts this contribution rather than
       // letting it credit a parent that no longer owns this child.
-      const [contribSnap, memberTotalSnap, membershipSnap, claimSnap] =
+      // THE CROSSING GATE joins the same batch, and only while the goal has
+      // not crossed: once `reachedAt` is set nothing here reads it again.
+      const gateRef = crossingGateRef(goalId);
+      const gateOpenCandidate = goal.reachedAt == null;
+      const [contribSnap, memberTotalSnap, membershipSnap, claimSnap, gateSnap] =
         await Promise.all([
           tx.get(contribRef),
           tx.get(memberTotalRef),
           tx.get(membershipRef),
           tx.get(claimRef),
+          gateOpenCandidate ? tx.get(gateRef) : Promise.resolve(null),
         ]);
 
       // Idempotency wins over closure, window end, AND membership drift.
@@ -3781,15 +3959,16 @@ async function performContribution(args: {
         return {
           addedCount: typeof prev.count === 'number' ? prev.count : 0,
           alreadyRecorded: true as const,
-          // Read from the ATTEMPT, never recomputed. The stored outcome is
-          // what this attempt did when it landed; recomputing it from the
-          // current total would let a replay claim a crossing someone else
-          // made, or deny one this attempt really made after a correction.
-          // An attempt recorded before this field existed carries no value
-          // and is reported as false — it is not evidence of a crossing.
-          crossedTarget: prev.crossedTarget === true,
-          goalHadNoEvent: false,
-          goalTracked: goal.crossingTracked === true,
+          // A REPLAY NEVER GRANTS THE FRESH CROSSING. `crossedTarget:true`
+          // is permission to play the moment, and it belongs to the one call
+          // that committed the crossing. A retry after a lost reply, a
+          // reconcile or any later replay of that same attempt reports the
+          // HISTORICAL fact instead, read from the ATTEMPT and never
+          // recomputed: recomputing it from the current total would let a
+          // replay claim a crossing someone else made. An attempt recorded
+          // before this field existed carries no value and is not evidence.
+          crossedTarget: false,
+          crossingRecorded: prev.crossedTarget === true,
           goalTarget: goal.target,
           goalUnit: goal.unit,
           goalStatus: goal.status,
@@ -3882,6 +4061,47 @@ async function performContribution(args: {
         );
       }
 
+      // ── THE CROSSING DECISION, from an authoritative before and after ──
+      //
+      // Still before any write (the transaction's read-before-write rule).
+      // A gate that does not exist yet is built from ONE read of the ten
+      // shards: that sum IS the shared total before this contribution, and
+      // this contribution is added to it exactly once below. A goal already
+      // standing at or beyond its target when its gate is first built (a
+      // goal from before the gate) is marked crossed with no attempt and no
+      // `reachedAt`: it never receives a dated event it cannot honestly
+      // carry, and it never celebrates.
+      let gateWrite: CrossingGateDoc | null = null;
+      let crossedNow = false;
+      if (gateOpenCandidate) {
+        let gate = gateSnap ? readCrossingGate(gateSnap) : null;
+        if (!gate) {
+          const shardSnaps = await Promise.all(
+            Array.from({ length: GOAL_SHARD_COUNT }, (_, i) => tx.get(goalShardRef(goalId, i)))
+          );
+          const before = shardTotalOf(shardSnaps);
+          gate = {
+            total: before,
+            crossed: goal.target > 0 && before >= goal.target,
+            crossedAttemptId: null,
+          };
+        }
+        if (!gate.crossed) {
+          const before = gate.total;
+          const after = before + count;
+          crossedNow = goal.target > 0 && before < goal.target && after >= goal.target;
+          gateWrite = {
+            total: after,
+            crossed: crossedNow,
+            crossedAttemptId: crossedNow ? attemptId : null,
+          };
+        } else if (!gateSnap?.exists || !readCrossingGate(gateSnap)) {
+          // Freshly built, already beyond the target: record that once so
+          // the shards are not summed again on every contribution.
+          gateWrite = gate;
+        }
+      }
+
       const shardIndex = randomGoalShardIndex();
       const shard = goalShardRef(goalId, shardIndex);
 
@@ -3894,9 +4114,9 @@ async function performContribution(args: {
         unit: goal.unit,
         communityGroupId: goal.communityGroupId,
         // Part of the attempt's stored outcome, exactly like `count`: a
-        // replay reports it rather than deciding it again. False until the
-        // post-commit claim below credits this attempt.
-        crossedTarget: false,
+        // replay reports it (as `crossingRecorded`) rather than deciding it
+        // again. True on exactly one attempt per goal.
+        crossedTarget: crossedNow,
         createdAt: FieldValue.serverTimestamp(),
       });
       tx.set(
@@ -3904,6 +4124,20 @@ async function performContribution(args: {
         { count: FieldValue.increment(count) },
         { merge: true }
       );
+
+      // The gate moves in the SAME commit as the shard, so the two cannot
+      // disagree; and the crossing attempt writes the goal's one event here,
+      // naming itself, instead of a post-commit observer guessing.
+      if (gateWrite) {
+        tx.set(gateRef, { ...gateWrite, updatedAt: FieldValue.serverTimestamp() });
+      }
+      if (crossedNow && gateWrite) {
+        tx.update(goalRef, {
+          reachedAt: FieldValue.serverTimestamp(),
+          reachedSharedTotal: gateWrite.total,
+          reachedAttemptId: attemptId,
+        });
+      }
 
       tx.set(
         memberTotalRef,
@@ -4032,9 +4266,8 @@ async function performContribution(args: {
       return {
         addedCount: count,
         alreadyRecorded: false as const,
-        crossedTarget: false,
-        goalHadNoEvent: goal.reachedAt == null,
-        goalTracked: goal.crossingTracked === true,
+        crossedTarget: crossedNow,
+        crossingRecorded: false,
         goalTarget: goal.target,
         goalUnit: goal.unit,
         goalStatus: goal.status,
@@ -4061,17 +4294,8 @@ async function performContribution(args: {
   // guessed entry written is not.
   if (!alreadyRecorded) goalPulseCacheInvalidate(goalId);
 
-  // THE TARGET-CROSSING EVENT — claimed after the commit, on the goal
-  // document only. See claimTargetCrossing for the rule.
-  // `crossedTarget` is never raised here: see ContributeResponse.
-  const crossedTarget = storedCrossedTarget === true;
-  let observedSharedTotal: number | null = null;
-  if (!alreadyRecorded && goalHadNoEvent && goalTarget > 0) {
-    observedSharedTotal = await sumGoalShards(goalId);
-    if (observedSharedTotal >= goalTarget) {
-      await recordTargetCrossing({ goalRef, count, observedSharedTotal, goalTracked });
-    }
-  }
+  // THE TARGET-CROSSING EVENT is decided inside the transaction above (the
+  // crossing gate). Nothing is claimed after the commit any more.
 
   // May this caller be told the community's CURRENT shared state? Decided by
   // evaluateGoalAggregateAccess — the SAME policy wsfGoalPulse uses — so a
@@ -4100,14 +4324,14 @@ async function performContribution(args: {
     // A removed member replaying a valid attempt. They keep the honest
     // answer about their own contribution — it happened, it counted once,
     // here is what it was — and learn nothing about where the community
-    // stands now. sumGoalShards is not even called, and `crossedTarget` is
-    // withheld with the rest: whether the community's total reached its
+    // stands now. sumGoalShards is not even called, and `crossedTarget` and
+    // `crossingRecorded` are withheld with the rest: whether the community's total reached its
     // target is the community's state, and this caller is not entitled to
     // it. Nothing false is said; a fact they may not see is not shown.
     return { addedCount, ownCredit, alreadyRecorded };
   }
 
-  const sharedTotal = observedSharedTotal ?? (await sumGoalShards(goalId));
+  const sharedTotal = await sumGoalShards(goalId);
 
   return {
     addedCount,
@@ -4117,70 +4341,9 @@ async function performContribution(args: {
     unit: goalUnit,
     status: goalStatus,
     alreadyRecorded,
-    crossedTarget,
+    crossedTarget: freshCrossedTarget,
+    ...(crossingRecorded ? { crossingRecorded: true } : {}),
   };
-}
-
-/**
- * Record the one-time target-crossing event for a goal whose shard total was
- * just observed at or beyond the target by a contribution that has committed.
- *
- * WHY AFTER THE COMMIT. The shared total lives in ten shards so that
- * concurrent contributions never touch the same document. Deciding the
- * crossing inside the contribution transaction meant reading all ten shards
- * there, which turned every pre-crossing contribution into a conflict with
- * every other (measured: 20 simultaneous attempts took 13 s and 48 of 50
- * aborted). This record touches ONLY the goal document, once.
- *
- * WHAT IS RECORDED, AND WHAT IS NOT. The event is a fact about the goal:
- * reachedAt and reachedSharedTotal. No attempt is named (reachedAttemptId is
- * written null) because a post-commit observation cannot prove which of
- * several concurrent contributions crossed the line — A +30 and B +70 against
- * a target of 100 may both observe 100 whichever landed first. A goal-level
- * "WE reached it" is true either way; "this one took us past" might not be.
- *
- * WHEN. Exactly once, the first time an observer sees the total at or beyond
- * the target with no event on the goal:
- *   • when the observer's own count spans the line
- *     (observed − count < target ≤ observed) — the crossing happened in this
- *     batch, so the date is honest — on any goal; or
- *   • on a goal created since this field exists (`crossingTracked`), whenever
- *     observed ≥ target — the only way a crossing is otherwise missed is
- *     several attempts landing in one instant, and the moment must not be
- *     lost. A goal from before could have stood beyond its target for weeks,
- *     so it never gets a dated event it cannot honestly carry.
- * A plain read first: once the goal carries an event the transaction is not
- * opened, so the post-crossing hot path pays one document read and nothing
- * else. Returns whether this call recorded the event.
- */
-async function recordTargetCrossing(args: {
-  goalRef: FirebaseFirestore.DocumentReference;
-  count: number;
-  observedSharedTotal: number;
-  goalTracked: boolean;
-}): Promise<boolean> {
-  const { goalRef, count, observedSharedTotal, goalTracked } = args;
-  const db = getFirestore();
-  const peek = (await goalRef.get()).data() as GoalDoc | undefined;
-  if (!peek || peek.reachedAt != null) return false;
-  const spansLine =
-    observedSharedTotal - count < peek.target && observedSharedTotal >= peek.target;
-  if (!spansLine && !goalTracked) return false;
-
-  return await db.runTransaction(async (tx) => {
-    const snap = await tx.get(goalRef);
-    const goal = snap.data() as GoalDoc | undefined;
-    if (!goal || goal.reachedAt != null) return false;
-    const spans = observedSharedTotal - count < goal.target && observedSharedTotal >= goal.target;
-    if (!spans && goal.crossingTracked !== true) return false;
-    if (observedSharedTotal < goal.target) return false;
-    tx.update(goalRef, {
-      reachedAt: FieldValue.serverTimestamp(),
-      reachedSharedTotal: observedSharedTotal,
-      reachedAttemptId: null,
-    });
-    return true;
-  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -5222,7 +5385,10 @@ export const wsfAdjustGoal = onCall<AdjustGoalRequest>(
         ? db.doc(`wsfGoalMemberTotals/${goalId}_${targetUid}`)
         : null;
 
-      const [shardSnaps, targetTotalSnap, existingAdjustmentSnap, contributionSnap, creditSnap] =
+      // THE CROSSING GATE, while the goal has not crossed: a correction moves
+      // the shards, so it must move an open gate in this same transaction.
+      const adjustGateRef = crossingGateRef(goalId);
+      const [shardSnaps, targetTotalSnap, existingAdjustmentSnap, contributionSnap, creditSnap, adjustGateSnap] =
         await Promise.all([
           Promise.all(shardRefs.map((r) => tx.get(r))),
           targetMemberTotalRef
@@ -5237,6 +5403,7 @@ export const wsfAdjustGoal = onCall<AdjustGoalRequest>(
             ? tx.get(correctedContributionRef)
             : Promise.resolve(null),
           correctedCreditRef ? tx.get(correctedCreditRef) : Promise.resolve(null),
+          goal.reachedAt == null ? tx.get(adjustGateRef) : Promise.resolve(null),
         ]);
 
       // ── THE REPLAY BRANCH ───────────────────────────────────────────────
@@ -5376,6 +5543,27 @@ export const wsfAdjustGoal = onCall<AdjustGoalRequest>(
             "Adjustment would drive the member's total below zero."
           );
         }
+      }
+
+      // THE OPEN CROSSING GATE follows the shards exactly. This transaction
+      // has just read all ten, so the gate is set to the AUTHORITATIVE
+      // projected total rather than nudged by the delta: it cannot drift.
+      // A correction never credits an attempt, never celebrates and never
+      // dates an event: a correction is not a moment anyone moved through.
+      // If it is what takes the total to or past the target, the gate simply
+      // closes for good (crossed, no attempt, no `reachedAt`) — so no later
+      // contribution, downward correction or re-crossing can produce a
+      // "first" crossing afterwards. No gate yet: nothing to do, the first
+      // contribution builds it from these same shards.
+      const openGate = adjustGateSnap ? readCrossingGate(adjustGateSnap) : null;
+      if (delta !== 0 && openGate && !openGate.crossed) {
+        const correctionCrossed = goal.target > 0 && projectedSharedTotal >= goal.target;
+        tx.set(adjustGateRef, {
+          total: projectedSharedTotal,
+          crossed: correctionCrossed,
+          crossedAttemptId: null,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
       }
 
       // Immutable audit doc. Written once; never updated.
