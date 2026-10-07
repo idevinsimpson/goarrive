@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "805c976277ec8e0c0efbb0c7fdcd3d6661a6b730adbf5fc2088ea24bf7c4bdf0",
-  "eventCount": 574,
+  "ledgerHead": "3df5069f0f3f0281b85d23dc6ae6a1f6b6ae82ed5dcdd8dfa92500565ad2a471",
+  "eventCount": 579,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1252,7 +1252,7 @@
       },
       "label": "Deliver the isolated privacy-safe public preview label without waiting for crossing attribution",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -1266,7 +1266,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         "functions-westayfit/src/index.ts",
@@ -1287,7 +1287,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6035517752
+          "id": 6035601782
         }
       },
       "review": {
@@ -1440,6 +1440,72 @@
         "after": "director"
       },
       "deliveries": 2,
+      "pendingFinding": null
+    },
+    "NORTHSTAR-MIRROR-INTAKE-1": {
+      "owner": "W3",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Complete the existing automatic Lovable delta receiver so Devin never has to relay native handoffs",
+      "origin": "ledger",
+      "phase": "RELEASED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": 396,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": 0,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "tools/wsf-control/northstar.mjs",
+        "tools/wsf-control/tests/northstar.test.mjs",
+        "tools/wsf-control/schema.mjs",
+        "tools/wsf-control/rules.mjs",
+        "tools/wsf-control/reduce.mjs",
+        "tools/wsf-control/router.mjs",
+        "tools/wsf-control/shadow-run.mjs",
+        "tools/wsf-control/app-token.mjs",
+        ".github/workflows/wsf-control-reconcile.yml"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6035531184
+        },
+        "released": {
+          "kind": "comment",
+          "id": 6035534615
+        },
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6035534615
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
       "pendingFinding": null
     },
     "STAGING-FASTPATH-DOCS-LINEAGE-FIX": {
@@ -3337,10 +3403,21 @@
       "packet": "MEMBER-PREVIEW-LABEL-1",
       "worker": "W9",
       "reason": "release",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6035573927
       ],
+      "ack": {
+        "kind": "comment",
+        "id": 6035601782
+      }
+    },
+    "80177860322ca41fea5707569c4a0b7ab72a9f495df47a960a4bddd59667792f": {
+      "packet": "NORTHSTAR-MIRROR-INTAKE-1",
+      "worker": "W3",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
