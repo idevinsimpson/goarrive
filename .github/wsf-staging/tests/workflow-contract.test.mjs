@@ -96,14 +96,14 @@ test('no npx invocation exists in any job', () => {
 });
 
 test('the browser jobs run the candidate-local Playwright binary', () => {
-  for (const j of ['hosted-verify', 'player-journey', 'journey-activation']) {
+  for (const j of ['hosted-verify', 'player-journey', 'journey-activation', 'lovable-kiosk']) {
     assert.match(jobs[j], /apps\/westayfit\/node_modules\/\.bin\/playwright/, `${j}: not the candidate's CLI`);
     assert.match(jobs[j], /install --with-deps chromium/, `${j}: browsers not installed from that CLI`);
   }
 });
 
 test('privileged dependency installs keep --ignore-scripts', () => {
-  for (const j of ['config', 'deploy', 'hosted-verify', 'player-journey', 'social-privacy', 'journey-activation', 'cleanup-recovery']) {
+  for (const j of ['config', 'deploy', 'hosted-verify', 'player-journey', 'social-privacy', 'journey-activation', 'lovable-kiosk', 'cleanup-recovery']) {
     const installs = jobs[j].split('\n').filter((l) => /npm (install|--prefix .* ci)/.test(l));
     for (const line of installs) {
       assert.match(line, /--ignore-scripts/, `${j}: privileged install without --ignore-scripts: ${line.trim()}`);
@@ -328,7 +328,7 @@ function reachedJobs(mode) {
     'needs.build.result': 'success',
     'needs.deploy.result': 'success',
   };
-  const order = ['gate', 'config', 'build', 'deploy', 'hosted-verify', 'player-journey', 'social-privacy', 'journey-activation', 'cleanup-recovery'];
+  const order = ['gate', 'config', 'build', 'deploy', 'hosted-verify', 'player-journey', 'social-privacy', 'journey-activation', 'lovable-kiosk', 'cleanup-recovery'];
   const reached = {};
   for (const name of order) {
     const cond = jobCondition(name);
@@ -389,6 +389,7 @@ test('player mode reaches only gate, config and the player journey', () => {
     'player-journey': true,
     'social-privacy': false,
     'journey-activation': false,
+    'lovable-kiosk': false,
     'cleanup-recovery': false,
   });
 });
@@ -429,6 +430,7 @@ test('deploy mode still reaches build, deploy and hosted verification', () => {
     'player-journey': false,
     'social-privacy': false,
     'journey-activation': false,
+    'lovable-kiosk': false,
     'cleanup-recovery': false,
   });
 });
@@ -447,6 +449,7 @@ test('social-privacy mode reaches only gate, config and the privacy verification
     'player-journey': false,
     'social-privacy': true,
     'journey-activation': false,
+    'lovable-kiosk': false,
     'cleanup-recovery': false,
   });
 });
@@ -519,6 +522,7 @@ test('mail-preflight mode reaches NOTHING that builds, deploys or verifies', () 
     'player-journey': false,
     'social-privacy': false,
     'journey-activation': false,
+    'lovable-kiosk': false,
     'cleanup-recovery': false,
   });
 });
@@ -538,8 +542,8 @@ test('deploy is the default mode, so an unset input runs the normal path', () =>
   */
   assert.deepEqual(
     options,
-    ['deploy', 'player-journey', 'cleanup-recovery', 'mail-preflight', 'social-privacy', 'journey-activation'],
-    'exactly these six modes exist'
+    ['deploy', 'player-journey', 'cleanup-recovery', 'mail-preflight', 'social-privacy', 'journey-activation', 'lovable-kiosk'],
+    'exactly these seven modes exist'
   );
 });
 
@@ -656,6 +660,7 @@ test('recovery mode reaches the recovery job and nothing else — not even the g
     'player-journey': false,
     'social-privacy': false,
     'journey-activation': false,
+    'lovable-kiosk': false,
     'cleanup-recovery': true,
   });
 });
@@ -1218,6 +1223,7 @@ await test('journey-activation mode reaches only gate, config and the activation
     'player-journey': false,
     'social-privacy': false,
     'journey-activation': true,
+    'lovable-kiosk': false,
     'cleanup-recovery': false,
   });
   const needs = /^ {4}needs: (.*)$/m.exec(jobs['journey-activation'])[1];
@@ -1404,6 +1410,65 @@ test('FAST PATH: the inventory baseline flag comes only from the gate output, th
   assert.match(pre, /env:\n\s+(?:#.*\n\s+)*WSF_FASTPATH: \$\{\{ needs\.gate\.outputs\.fastpath \}\}/);
   assert.equal((code.match(/needs\.gate\.outputs\.fastpath/g) ?? []).length, 1, 'no other step reads the flag');
   assert.equal(/\$\{\{[^}]*fastpath[^}]*\}\}[^\n]*node /.test(code), false, 'never interpolated into a shell line');
+});
+
+// ---- the lovable-kiosk mode (LOVABLE-KIOSK-HOSTED-PROOF-1, Director #365 6044515892) -------------
+// Proof only, on exactly the Lovable host and westayfit-staging: the served build is bound to reviewed digests in
+// the credential-free gate and again before authentication; blocking cleanup; a verdict recomputed afterwards.
+const LOVABLE = 'https://we-stay-fit-foundation-trial.lovable.app';
+test('lovable-kiosk mode reaches only gate, config and the proof job; every other mode never reaches it', () => {
+  const reached = reachedJobs('lovable-kiosk');
+  assert.deepEqual(Object.entries(reached).filter(([, v]) => v).map(([k]) => k), ['gate', 'config', 'lovable-kiosk']);
+  for (const m of ['deploy', 'player-journey', 'cleanup-recovery', 'mail-preflight', 'social-privacy', 'journey-activation']) assert.equal(reachedJobs(m)['lovable-kiosk'], false, m);
+  assert.equal(jobCondition('lovable-kiosk'), "${{ inputs.mode == 'lovable-kiosk' }}", 'exact equality, never a negation');
+  assert.equal(/^ {4}needs: (.*)$/m.exec(jobs['lovable-kiosk'])[1].replace(/[[\]\s]/g, ''), 'gate,config');
+});
+
+test('lovable-kiosk: the gate binds the served build before any credentialed job, on the one allowed host', () => {
+  const step = stepBlock('gate', "Bind the Lovable host's served build before any credentialed job");
+  assert.match(step, /if: \$\{\{ inputs\.mode == 'lovable-kiosk' \}\}/);
+  assert.match(step, /node \.github\/wsf-staging\/hosted-lovable-kiosk\.mjs --bind/);
+  assert.match(step, new RegExp(`WSF_LOVABLE_URL: ${LOVABLE.replace(/[./]/g, '\\$&')}\n`));
+  assert.match(step, /WSF_PROJECT: westayfit-staging/);
+  assert.equal(/continue-on-error/.test(step), false, 'an unbound build must stop the gate');
+  assert.equal(/id-token/.test(jobs.gate), false, 'the gate stays credential-free');
+});
+
+test('lovable-kiosk: the job binds again before authenticating, never mints after a failed bind, and builds or deploys nothing', () => {
+  const names = [...jobs['lovable-kiosk'].matchAll(/^      - (?:name: (.+)|uses: (\S+))$/gm)].map((m) => (m[1] || m[2]).trim());
+  const at = (n) => { const i = names.indexOf(n); assert.ok(i >= 0, `missing step ${n}`); return i; };
+  const bind = at('Bind the served build again before any credential or fixture');
+  assert.ok(bind < at('Authenticate to Google Cloud') && bind < at('Run the Lovable kiosk proof'));
+  const live = (n) => stepBlock('lovable-kiosk', n).split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+  assert.match(live('Bind the served build again before any credential or fixture'), /^\s+id: bind$/m);
+  assert.equal(/^\s+if:/m.test(live('Authenticate to Google Cloud')), false, 'success-gated: skipped after a failed bind');
+  assert.match(live('Re-authenticate before cleanup'), /if: \$\{\{ always\(\) && steps\.bind\.outcome == 'success' \}\}/);
+  const body = jobCode('lovable-kiosk');
+  for (const [re, what] of [[/firebase deploy|hosting:channel:deploy|--only (functions|hosting|firestore)/, 'a deploy'], [/build-staging\.sh|expo export/, 'a build'],
+    [/gcloud|setIamPolicy|invoker|indexes|firestore\.rules/, 'a transport, IAM, rules or index change'], [/journeys\/manifest\.json/, 'the live deploy manifest'], [/firebase-tools|FIREBASE_TOOLS|\.bin\/firebase\b/, 'deployment tooling'],
+    [/WSF_TEST_PASSWORD|WSF_ORGANIZER_STORAGE|secrets\./, 'a stored password, organizer storage or repository secret']]) {
+    assert.equal(re.test(body), false, `lovable-kiosk must not use ${what}`);
+  }
+  const hosts = [...body.matchAll(/WSF_LOVABLE_URL: (\S+)/g)].map((m) => m[1]);
+  assert.ok(hosts.length >= 2 && hosts.every((h) => h === LOVABLE), 'every step names exactly the one allowed host');
+  const block = /^ {4}permissions:\n((?: {6}[^\n]*\n)+)/m.exec(jobs['lovable-kiosk']);
+  assert.deepEqual(block[1].trim().split('\n').map((l) => l.trim()).sort(), ['contents: read', 'id-token: write']);
+  assert.match(jobs['lovable-kiosk'], /^ {4}environment: wsf-staging$/m);
+});
+
+test('lovable-kiosk: cleanup is blocking and always runs, the scan precedes the upload, and the verdict reads both', () => {
+  for (const n of ['Remove the Lovable proof fixtures', 'Scan evidence before upload', 'Require the Lovable kiosk proof to have passed']) assert.match(stepBlock('lovable-kiosk', n), /if: always\(\)/, n);
+  assert.equal(/continue-on-error/.test(stepBlock('lovable-kiosk', 'Remove the Lovable proof fixtures')), false, 'cleanup is blocking');
+  assert.match(stepBlock('lovable-kiosk', 'Remove the Lovable proof fixtures'), /cleanup-synthetic\.mjs/);
+  const body = jobs['lovable-kiosk'];
+  let prev = -1;
+  for (const marker of ['id: proof', 'id: cleanup', 'id: scan-lovable-evidence', 'name: wsf-lovable-evidence', 'hosted-lovable-kiosk.mjs --require']) {
+    const i = body.indexOf(marker); assert.ok(i > prev, `out of order or missing: ${marker}`); prev = i;
+  }
+  assert.match(body, /if: \$\{\{ always\(\) && steps\.scan-lovable-evidence\.outcome == 'success' \}\}\n\s+with:\n\s+name: wsf-lovable-evidence/);
+  const req = stepBlock('lovable-kiosk', 'Require the Lovable kiosk proof to have passed');
+  assert.match(req, /WSF_CLEANUP_OUTCOME: \$\{\{ steps\.cleanup\.outcome \}\}/);
+  assert.match(req, /WSF_SCAN_OUTCOME: \$\{\{ steps\.scan-lovable-evidence\.outcome \}\}/);
 });
 
 console.log(`\nworkflow-contract: ${passed} passed`);
