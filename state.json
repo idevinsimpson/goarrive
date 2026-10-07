@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "943ee36838b2b127c4386824dba4f38bff28f0734ab32e57c7304f570449de68",
-  "eventCount": 555,
+  "ledgerHead": "c8ee6bb0dc73771cbc678fbfa880faa6340bd1cc6f094a3ac45303b85aaf2718",
+  "eventCount": 558,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -555,15 +555,17 @@
       },
       "label": "Evergreen physical marker entry: permanent QR resolves to configured community and goal, then phone or optional kiosk participation",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
-      "pr": null,
-      "reviewers": [],
+      "pr": 583,
+      "reviewers": [
+        "W4"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "1545f36deb726da340e136a54ed6b353bde682a0",
+        "prHeadSha": "1545f36deb726da340e136a54ed6b353bde682a0",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -588,7 +590,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6027932645
+          "id": 6028901349
         }
       },
       "review": {
@@ -601,7 +603,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "EXPO-ACCOUNT-ENTRY-1": {
@@ -3170,7 +3172,16 @@
       "ack": {
         "kind": "comment",
         "id": 6027932645
-      }
+      },
+      "superseded": true
+    },
+    "686c1307a737880482449258ada8908e3a1fb9367a3ab34aedf57bcdf1564e04": {
+      "packet": "EVERGREEN-MARKER-ENTRY-1",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
