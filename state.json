@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "6c2e946865bd0668e5f38016fd014cc842ac49256107497715eeca2d5a52e326",
-  "eventCount": 600,
+  "ledgerHead": "ffc53624ad1ff803c48627003d48e68f6002c70d1eaa4271bd31eefee4b2b1bd",
+  "eventCount": 601,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -65,7 +65,9 @@
     "W4": [],
     "W5": [],
     "W7": [],
-    "W9": []
+    "W9": [
+      "KIOSK-UNVERIFIED-PARTICIPANT-1"
+    ]
   },
   "packets": {
     "AUTONOMY-ROUTER-1C": {
@@ -1241,6 +1243,68 @@
         "after": "director"
       },
       "deliveries": 3,
+      "pendingFinding": null
+    },
+    "KIOSK-UNVERIFIED-PARTICIPANT-1": {
+      "owner": "W9",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Allow real authenticated unverified attendees to complete the ordinary WSF event participation backend journey",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "functions-westayfit/src/index.ts",
+        "functions-westayfit/tests/callable/wsf-save-profile.test.ts",
+        "functions-westayfit/tests/callable/wsf-join-community.test.ts",
+        "functions-westayfit/tests/callable/wsf-marker-entry.test.ts",
+        "functions-westayfit/tests/callable/wsf-contribute.test.ts",
+        "functions-westayfit/tests/callable/wsf-package-e-member-access.test.ts",
+        "functions-westayfit/tests/callable/wsf-turn.test.ts",
+        "docs/westayfit/qa/kiosk-unverified-participant-1.md"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6041743819
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6041743819
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "journey-qa",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
       "pendingFinding": null
     },
     "MEMBER-PREVIEW-LABEL-1": {
