@@ -11,7 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   FIXED_BLOCKED, LOVABLE_URL, REVIEWED_BUILD, ROWS, allPassed, bindBuild, bindLines, checkBase, idHash, mergeIntoManifest,
-  receiptVerdict, requireVerdict, results, runJourney, servedManifest,
+  ownCreditOf, receiptVerdict, requireVerdict, results, runJourney, servedManifest, sharedOf, showsNumber,
 } from '../hosted-lovable-kiosk.mjs';
 
 let passed = 0;
@@ -59,29 +59,69 @@ test('the served manifest walks same-origin assets only and hashes each one', as
   await assert.rejects(servedManifest(site({ '/': '<html></html>' }).fetchImpl), /names no asset/);
 });
 
-test('binding: empty reviewed manifest BLOCKED; exact PASS; changed, extra or missing FAIL', () => {
+test('binding: empty reviewed manifest BLOCKED; exact PASS; a changed entry page, or changed, extra or missing assets FAIL', () => {
   assert.equal(Object.keys(REVIEWED_BUILD.assets).length, 0, 'nothing is reviewed yet, so every run stops in the gate');
-  assert.equal(bindBuild({ assets: OBSERVED }).status, 'BLOCKED');
-  const reviewed = { assets: { ...OBSERVED } };
-  assert.equal(bindBuild({ assets: OBSERVED }, reviewed).status, 'PASS');
-  assert.equal(bindBuild({ assets: { ...OBSERVED, 'shell-AAA.js': sha('changed') } }, reviewed).status, 'FAIL');
-  assert.equal(bindBuild({ assets: { ...OBSERVED, 'extra-ZZZ.js': sha('x') } }, reviewed).status, 'FAIL');
+  assert.equal(REVIEWED_BUILD.indexSha256, null);
+  const INDEX = sha(SITE['/']);
+  const seen = { indexSha256: INDEX, assets: OBSERVED };
+  assert.equal(bindBuild(seen).status, 'BLOCKED');
+  assert.equal(bindBuild(seen, { assets: { ...OBSERVED } }).status, 'BLOCKED', 'assets without the entry page digest are not a reviewed manifest');
+  assert.equal(bindBuild(seen, { indexSha256: INDEX, assets: {} }).status, 'BLOCKED', 'an entry page digest without assets is not a reviewed manifest');
+  const reviewed = { indexSha256: INDEX, assets: { ...OBSERVED } };
+  assert.equal(bindBuild(seen, reviewed).status, 'PASS');
+  assert.equal(bindBuild({ indexSha256: sha(SITE['/'] + '<script>alert(1)</script>'), assets: OBSERVED }, reviewed).status, 'FAIL', 'identical assets behind a changed entry page (inline script) do not pass');
+  assert.equal(bindBuild({ assets: OBSERVED }, reviewed).status, 'FAIL', 'no observed entry digest');
+  assert.equal(bindBuild({ indexSha256: INDEX, assets: { ...OBSERVED, 'shell-AAA.js': sha('changed') } }, reviewed).status, 'FAIL');
+  assert.equal(bindBuild({ indexSha256: INDEX, assets: { ...OBSERVED, 'extra-ZZZ.js': sha('x') } }, reviewed).status, 'FAIL');
   const { 'index-CCC.css': _, ...missing } = OBSERVED;
-  assert.equal(bindBuild({ assets: missing }, reviewed).status, 'FAIL');
-  const lines = bindLines({ assets: OBSERVED }, bindBuild({ assets: OBSERVED }));
+  assert.equal(bindBuild({ indexSha256: INDEX, assets: missing }, reviewed).status, 'FAIL');
+  const lines = bindLines(seen, bindBuild(seen));
   assert.match(lines[0], /^LOVABLE_BUILD=BLOCKED/);
-  assert.deepEqual(lines.slice(1), Object.entries(OBSERVED).map(([n, d]) => `LOVABLE_OBSERVED_ASSET ${n} ${d}`), 'names and digests only, never content');
+  assert.equal(lines[1], `LOVABLE_OBSERVED_INDEX ${INDEX}`);
+  assert.deepEqual(lines.slice(2), Object.entries(OBSERVED).map(([n, d]) => `LOVABLE_OBSERVED_ASSET ${n} ${d}`), 'names and digests only, never content');
 });
 
 // ---- receipt, results and verdict ------------------------------------------------------------------
-test('receipt: only this goal, an attempt, exactly 7 added and a shared total the screen shows', () => {
-  const ok = { receipt: { goalId: 'g', attemptId: 'at1', addedCount: 7, sharedTotal: 1107 } };
-  assert.equal(receiptVerdict(ok, { goalId: 'g', amount: 7, screenText: 'Together 1,107 squats' }).ok, true);
-  for (const [name, r, screen] of [
-    ['6 added', { receipt: { ...ok.receipt, addedCount: 6 } }, '1,107'], ['another goal', { receipt: { ...ok.receipt, goalId: 'h' } }, '1,107'],
-    ['no attempt', { receipt: { ...ok.receipt, attemptId: undefined } }, '1,107'], ['screen disagrees', ok, '1,100'], ['no result', null, '1,107'],
-    ['fractional total', { receipt: { ...ok.receipt, sharedTotal: 1107.5 } }, '1107.5'],
-  ]) assert.equal(receiptVerdict(r, { goalId: 'g', amount: 7, screenText: screen }).ok, false, name);
+// The connected app's canonical wsfContribute exchange: the request carries goal, attempt and count; the response
+// carries only {addedCount, ownCredit, alreadyRecorded, sharedTotal, target, unit, status, crossedTarget}.
+const CANON_REQ = { goalId: 'g', attemptId: 'at1', count: 7 };
+const CANON_RES = { addedCount: 7, ownCredit: 7, alreadyRecorded: false, sharedTotal: 107, target: 5000, unit: 'squats', status: 'active', crossedTarget: false };
+const want = (screenText) => ({ goalId: 'g', amount: 7, unit: 'squats', screenText });
+
+test('receipt (reproducer #365 6045688233): the canonical response is accepted; a replay or the wrong screen total is not', () => {
+  const ok = receiptVerdict({ data: CANON_REQ, result: CANON_RES }, want('+7 squats · Together 107 squats'));
+  assert.equal(ok.ok, true, ok.seen);
+  assert.equal(ok.attemptId, 'at1', 'the attempt comes from the request');
+  assert.equal(ok.shared, 107);
+  assert.equal(receiptVerdict({ data: CANON_REQ, result: { ...CANON_RES, alreadyRecorded: true } }, want('Together 107 squats')).ok, false, 'replay');
+  for (const screen of ['Together 100 squats', 'Together 1,107 squats', 'Together 1070 squats', 'Together 10.7 squats']) {
+    assert.equal(receiptVerdict({ data: CANON_REQ, result: CANON_RES }, want(screen)).ok, false, screen);
+  }
+});
+
+test('receipt: request this goal, count 7 and an attempt; response 7 added, not a replay, integer totals, the goal unit', () => {
+  const screen = 'Together 107 squats';
+  for (const [name, data, result] of [
+    ['6 added', CANON_REQ, { ...CANON_RES, addedCount: 6 }],
+    ['another goal', { ...CANON_REQ, goalId: 'h' }, CANON_RES],
+    ['count 6 sent', { ...CANON_REQ, count: 6 }, CANON_RES],
+    ['no attempt', { ...CANON_REQ, attemptId: undefined }, CANON_RES],
+    ['empty attempt', { ...CANON_REQ, attemptId: '' }, CANON_RES],
+    ['alreadyRecorded missing', CANON_REQ, { ...CANON_RES, alreadyRecorded: undefined }],
+    ['other unit', CANON_REQ, { ...CANON_RES, unit: 'reps' }],
+    ['fractional total', CANON_REQ, { ...CANON_RES, sharedTotal: 107.5 }],
+    ['no own credit', CANON_REQ, { ...CANON_RES, ownCredit: undefined }],
+    ['no result', CANON_REQ, null],
+    ['no request', null, CANON_RES],
+  ]) assert.equal(receiptVerdict({ data, result }, want(screen)).ok, false, name);
+  assert.equal(receiptVerdict(null, want(screen)).ok, false, 'no exchange');
+  assert.equal(receiptVerdict({ data: CANON_REQ, result: CANON_RES }, want('Together 107 reps')).ok, false, 'screen without the unit');
+});
+
+test('showsNumber: the exact whole number, en-US grouped or plain, never a fragment of another number', () => {
+  assert.equal(showsNumber('Together 1,107 squats', 1107), true);
+  assert.equal(showsNumber('Together 1107 squats', 1107), true);
+  for (const [t, n] of [['11,107', 1107], ['1,1070', 1107], ['1107.5', 1107], ['107', 1107], ['x', 1.5]]) assert.equal(showsNumber(t, n), false, t);
 });
 
 test('results: every row in order; the station rows and the unverified account are BLOCKED by name unless measured', () => {
@@ -119,123 +159,220 @@ test('cleanup merge: run-tagged product documents are added once; anything untag
 });
 
 // ---- the journey against a scripted Lovable UI ------------------------------------------------------
-/** A fake of the Lovable UI and backend: one server, many contexts; per-context localStorage holds the signed-in uid. */
-function lovable({ addedCount = 7, replayReceipt = false, joinShown = true, bSeesA = false, resendOnReload = false, aReturnsAs = null, qrOrigin = LOVABLE_URL } = {}) {
-  const server = { shared: 100, own: {}, members: new Set(), contributions: 0, pairCode: 'ABC123', approved: false };
+/**
+ * A fake of the connected Lovable app and its backend, built from the app's own source (connected-kiosk, join, move,
+ * together, progress, menu). One server; each context has its own storage. Every callable is a request object with
+ * its OWN response, delivered to the page's listeners in that order. `bug` switches on one defect at a time.
+ */
+function lovable(bug = {}) {
+  const goalId = 'e5cgoal-e5c-t-1-lk';
+  const groupId = 'e5cgrp-e5c-t-1-lk';
+  const server = { shared: 100, own: {}, members: new Set(), contributions: 0, approved: false, requests: [] };
   const accounts = {};
-  const signIns = {};
+  let ctxCount = 0;
   const browser = {
-    contexts: 0,
     async newContext() {
-      browser.contexts += 1;
-      const storage = {};
-      return {
-        async newPage() { return page(storage); },
-        async close() {},
-      };
+      ctxCount += 1;
+      const store = { local: {}, session: {}, idbUid: null };
+      let closed = false;
+      return { async newPage() { return page(store); }, async close() { closed = true; browser.closed += 1; }, get closed() { return closed; } };
     },
+    closed: 0,
   };
-  function page(storage) {
-    let url = '';
-    let view = 'none';
-    let receipt = false;
+  function page(store) {
+    let view = 'blank';
+    let move = null; // null | 'camera' | 'count' | 'review' | 'receipt'
+    let attempt = null;
     let typed = 0;
-    const listeners = [];
-    const reply = (name, result) => { for (const f of listeners) f({ url: () => `${LOVABLE_URL}/api/${name}`, request: () => ({ method: () => 'POST' }), json: async () => ({ result }) }); };
-    const uid = () => storage.uid ?? null;
-    const readOwn = () => { if (uid()) reply('wsfMyContribution', { total: server.own[uid()] ?? 0 }); reply('wsfGoalPulse', { sharedTotal: server.shared }); };
     let email = '';
-    const el = (key) => ({
-      async waitFor() { if (!(await this.count())) throw new Error(`${key} never appeared`); },
-      async count() {
-        if (key === 'testid:kiosk-pair-code') return view === 'kiosk' ? 1 : 0;
-        if (key === 'testid:kiosk-qr') return view === 'kiosk' && server.approved ? 1 : 0;
-        if (key === 'role:Join') return joinShown && uid() && !server.members.has(uid()) && view === 'join' ? 1 : 0;
-        if (key === 'testid:join-move-phone') return view === 'joined' ? 1 : 0;
-        if (key === 'css:.together-receipt') return receipt ? 1 : 0;
-        return 1;
-      },
-      first() { return this; },
-      async innerText() { return key === 'testid:kiosk-pair-code' ? ` ${server.pairCode} ` : `Together ${server.shared.toLocaleString('en-US')} squats`; },
-      async getAttribute() { return `${qrOrigin}/join?join=CODE&goal=${server.goalId}`; },
-      async fill(v) {
-        if (key === 'label:Email') email = v;
-        else if (key === 'label:Password') { if (accounts[email]?.password !== v) throw new Error('wrong password'); }
-        else typed = Number(v);
-      },
-      async click() {
-        if (key === 'role:Sign in') { signIns[email] = (signIns[email] ?? 0) + 1; storage.uid = aReturnsAs && signIns[email] > 1 && email.includes('lka') ? aReturnsAs : accounts[email].uid; if (storage.uid === aReturnsAs) server.own[aReturnsAs] = server.own['uid-lka']; readOwn(); }
-        else if (key === 'role:Join') { server.members.add(uid()); view = 'joined'; }
-        else if (key === 'role:Contribute') {
-          server.contributions += 1; server.shared += typed; server.own[uid()] = (server.own[uid()] ?? 0) + typed; receipt = true;
-          reply('wsfContribute', { receipt: { goalId: server.goalId, attemptId: `at${server.contributions}`, addedCount, sharedTotal: server.shared } });
-        } else if (key === 'role:Sign out') { delete storage.uid; receipt = bSeesA; }
-      },
-    });
+    let lastReceipt = null;
+    const listeners = { request: [], response: [] };
+    const uid = () => store.idbUid;
+    const call = (name, data, result) => {
+      const req = { url: () => `https://us-central1-westayfit-staging.cloudfunctions.net/${name}`, method: () => 'POST', postData: () => JSON.stringify({ data }) };
+      server.requests.push({ name, data, uid: uid() });
+      for (const f of listeners.request) f(req);
+      const res = { request: () => req, json: async () => ({ result }) };
+      for (const f of listeners.response) f(res);
+    };
+    const hydrate = () => {
+      if (!uid()) return;
+      const chosen = store.local[`wsf.currentCommunity.${uid()}`] ?? store.local[`wsf.pinnedDestination.${uid()}`];
+      if (server.members.has(uid()) && chosen === groupId) {
+        const drift = bug.aOwnOnReturn && uid() === 'uid-lka' && server.aSignIns >= 2 ? bug.aOwnOnReturn : 0;
+        call('wsfMyContribution', { goalId }, { ownCredit: (server.own[uid()] ?? 0) + drift, unit: 'squats', repeatPolicy: 'multiple' });
+        call('wsfGoalPulse', { goalId }, { sharedTotal: server.shared + (bug.pulseDrift ?? 0), target: 1000, unit: 'squats', status: 'active' });
+      }
+      if (bug.bReadsA && uid() === 'uid-lkb') call('wsfMyContribution', { goalId }, { ownCredit: 7, unit: 'squats', repeatPolicy: 'multiple' });
+    };
+    const fmt = (n) => n.toLocaleString('en-US');
+    const progressText = () => {
+      const show = (uid() && server.members.has(uid()) && (server.own[uid()] ?? 0) > 0) || (bug.bSeesRow && uid() === 'uid-lkb');
+      return show ? `Fixture Expo Squats Yours ${fmt(server.own['uid-lka'] ?? 0)} squats Shared ${fmt(bug.rowTotal ?? server.shared + (bug.pulseDrift ?? 0))} / 1,000 squats` : null;
+    };
+    const el = (key, scope = null) => {
+      const self = {
+        first() { return self; },
+        filter() { return self; },
+        getByRole: (_, o) => el(`role:${o.name instanceof RegExp ? 'community' : o.name}`, key),
+        async waitFor() { if (!(await self.count())) throw new Error(`${key} never appeared`); },
+        async count() {
+          switch (key) {
+            case 'testid:kiosk-pair-code': return view === 'kiosk' ? 1 : 0;
+            case 'css:svg[data-testid="kiosk-qr"]': return view === 'kiosk' && server.approved && !bug.noJoinCode ? 1 : 0;
+            case 'text:This goal has no join code to show.': return view === 'kiosk' && bug.noJoinCode ? 1 : 0;
+            case 'css:[data-connected-join]': case 'role:Join': return uid() && store.session['wsf.pendingJoinCode'] && !bug.noJoinButton ? 1 : 0;
+            case 'testid:join-move-phone': return view === 'choose' ? 1 : 0;
+            case 'css:section.together-receipt': return move === 'receipt' ? 1 : 0;
+            case 'css:ul.goal-history li': return progressText() ? 1 : 0;
+            case 'role:Skip tour': return 0;
+            case 'role:Count by hand instead': return move === 'camera' ? 1 : 0;
+            case 'role:Enter reps manually': case 'role:I’m done — enter my count': return 0;
+            case 'nav:Your communities': return uid() && !store.local[`wsf.currentCommunity.${uid()}`] ? 1 : 0;
+            default: return 1;
+          }
+        },
+        async innerText() {
+          if (key === 'testid:kiosk-pair-code') return 'ABC234';
+          if (key === 'css:section.together-receipt') return lastReceipt;
+          if (key === 'css:ul.goal-history li') return progressText();
+          return '';
+        },
+        async getAttribute(name) {
+          if (name === 'data-join-url') return `${bug.qrOrigin ?? LOVABLE_URL}/?join=JOINCODE0123456789&goal=${goalId}`;
+          if (name === 'data-attempt') return bug.otherAttempt ? 'attempt-other0000' : attempt;
+          return null;
+        },
+        async fill(v) {
+          if (key === 'label:Email') email = v;
+          else if (key === 'label:Password') { if (accounts[email]?.password !== v) throw new Error('wrong password'); }
+          else typed = Number(v);
+        },
+        async click() {
+          if (key === 'role:Sign in') { store.idbUid = bug.aReturnsAs && email.includes('lka') && server.signedA ? bug.aReturnsAs : accounts[email].uid; if (email.includes('lka')) { server.signedA = true; server.aSignIns = (server.aSignIns ?? 0) + 1; } if (store.idbUid === bug.aReturnsAs) { server.own[bug.aReturnsAs] = server.own['uid-lka']; server.members.add(bug.aReturnsAs); } hydrate(); }
+          else if (key === 'role:Join') {
+            const already = server.members.has(uid());
+            server.members.add(uid());
+            call('wsfJoinCommunity', { joinCode: store.session['wsf.pendingJoinCode'] }, { groupId: bug.otherGroup ? 'other-group' : groupId, alreadyMember: bug.alreadyMember ?? already });
+            view = 'choose';
+          } else if (key === 'testid:join-move-phone') {
+            store.local[`wsf.pinnedDestination.${uid()}`] = groupId; delete store.session['wsf.pendingJoinCode']; delete store.session['wsf.pendingJoinGoal'];
+            view = 'home'; hydrate(); move = 'camera'; attempt = `attempt-${server.contributions + 1}abcdefgh`;
+          } else if (key === 'role:Count by hand instead') move = 'count';
+          else if (key === 'role:Review') move = 'review';
+          else if (key === 'testid:confirm') {
+            server.contributions += 1;
+            const added = bug.addedCount ?? typed;
+            server.shared += added; server.own[uid()] = (server.own[uid()] ?? 0) + added;
+            call('wsfContribute', { goalId: bug.otherGoal ? 'e5cgoal-other' : goalId, attemptId: attempt, count: typed },
+              { addedCount: added, ownCredit: bug.receiptOwn ?? server.own[uid()], alreadyRecorded: !!bug.alreadyRecorded, sharedTotal: server.shared, target: 1000, unit: bug.unit ?? 'squats', status: 'active', crossedTarget: false });
+            if (bug.doubleSend) call('wsfContribute', { goalId, attemptId: attempt, count: typed }, { addedCount: 0, ownCredit: server.own[uid()], alreadyRecorded: true, sharedTotal: server.shared, target: 1000, unit: 'squats', status: 'active', crossedTarget: false });
+            if (bug.pendingLeft) store.local[`wsf.pendingContribution.${goalId}.${uid()}`] = '{}';
+            move = 'receipt';
+            lastReceipt = `YOU ADDED +${fmt(added)} squats ${fmt(bug.screenTotal ?? server.shared)} / 1,000 · shared total from the server`;
+          } else if (key === 'testid:together-done') move = null;
+          else if (key === 'role:MOVE — add a contribution') {
+            move = bug.replayReceipt ? 'receipt' : 'camera'; attempt = `attempt-${server.contributions + 1}abcdefgh`;
+            if (bug.resendOnReopen) call('wsfContribute', { goalId, attemptId: attempt, count: typed }, { addedCount: typed, ownCredit: server.own[uid()], alreadyRecorded: true, sharedTotal: server.shared, unit: 'squats' });
+          } else if (key === 'role:Open menu') { /* opens the sheet */ }
+          else if (key === 'role:/^Sign out/' || key === 'role:Sign out') { store.idbUid = null; }
+          else if (key === 'role:community' && scope === 'nav:Your communities') { store.local[`wsf.currentCommunity.${uid()}`] = groupId; hydrate(); }
+        },
+      };
+      return self;
+    };
     return {
-      on(_, f) { listeners.push(f); },
-      async goto(u) { url = u; view = u.includes('/kiosk/') ? 'kiosk' : u.includes('join=') ? 'join' : 'home'; if (!u.includes('/kiosk/')) readOwn(); },
-      async reload() { receipt = replayReceipt; if (resendOnReload) reply('wsfContribute', { receipt: { goalId: server.goalId, attemptId: 'at-again', addedCount, sharedTotal: server.shared } }); readOwn(); },
+      on(type, f) { listeners[type]?.push(f); },
+      async goto(u) {
+        const url = new URL(u, LOVABLE_URL);
+        if (url.pathname.startsWith('/kiosk/')) { view = 'kiosk'; return; }
+        if (url.searchParams.get('join')) { store.session['wsf.pendingJoinCode'] = url.searchParams.get('join'); store.session['wsf.pendingJoinGoal'] = url.searchParams.get('goal'); }
+        view = 'home'; move = null; hydrate();
+      },
+      async reload() { move = null; hydrate(); },
       async waitForTimeout() {},
-      async evaluate() { return uid(); },
+      async evaluate(fn, arg) {
+        const src = String(fn);
+        if (src.includes('firebaseLocalStorageDb')) return uid();
+        if (src.includes('sessionStorage')) return ['wsf.pendingJoinCode', 'wsf.pendingJoinGoal'].filter((k) => store.session[k] !== undefined).length;
+        if (src.includes('localStorage.getItem')) return store.local[arg] ?? null;
+        throw new Error('unexpected evaluate');
+      },
+      keyboard: { async press() { move = null; } },
       getByTestId: (id) => el(`testid:${id}`),
-      getByRole: (_, o) => el(`role:${o.name}`),
+      getByRole: (role, o) => el(role === 'navigation' ? `nav:${o.name}` : `role:${o.name instanceof RegExp ? o.name.toString() : o.name}`),
       getByLabel: (l) => el(`label:${l}`),
+      getByText: (t) => el(`text:${t}`),
       locator: (css) => el(`css:${css}`),
-      url: () => url,
     };
   }
   const tracked = { contributions: [], approvals: 0 };
   const fixtures = {
-    async expoEvent(label) { server.goalId = `e5cgoal-e5c-t-1-${label}`; return { setupId: `${label}: one synthetic community`, groupId: `e5cgrp-e5c-t-1-${label}`, goalId: server.goalId }; },
+    async expoEvent(label) { return { setupId: `${label}: one synthetic community`, groupId, goalId }; },
     async memberInTwoCommunities(label) { const m = { uid: `uid-${label}`, email: `wsf-e5c-t-1-${label}@example.com`, password: `pw-${label}` }; accounts[m.email] = m; return { member: m }; },
-    async approveStation(ev, code, slot) { assert.equal(code, server.pairCode); assert.equal(slot, 1); server.approved = true; tracked.approvals += 1; return { stationId: 's1', slot }; },
+    async approveStation(ev, code, slot) { assert.equal(code, 'ABC234'); assert.equal(slot, 1); server.approved = !bug.approvalLost; tracked.approvals += 1; return { stationId: 's1', slot }; },
     trackContribution(ev, member, attemptId) { tracked.contributions.push([member.uid, attemptId]); },
   };
-  return { browser, fixtures, server, tracked };
+  return { browser, fixtures, server, tracked, opened: () => ctxCount };
 }
 const statusOf = (rows, id) => rows[id]?.status;
+const PASSING = ['fixture-provenance', 'qr-join', 'contribution-7', 'operation-receipt', 'own-history-shared', 'reopen-static', 'account-isolation'];
 
-test('journey: A joins through the QR, records 7 once, re-reads, reopens static, and A -> B -> A stays isolated', async () => {
+test('journey: A joins through the QR, records 7 once (bound to its request), re-reads, reopens static, and A -> B -> A stays isolated', async () => {
   const L = lovable();
   const { rows, productDocs } = await runJourney({ browser: L.browser, fixtures: L.fixtures, base: LOVABLE_URL });
-  for (const id of ['fixture-provenance', 'qr-join', 'contribution-7', 'operation-receipt', 'own-history-shared', 'reopen-static', 'account-isolation']) assert.equal(statusOf(rows, id), 'PASS', `${id}: ${rows[id]?.seen}`);
+  for (const id of PASSING) assert.equal(statusOf(rows, id), 'PASS', `${id}: ${rows[id]?.seen}`);
   assert.equal(L.server.contributions, 1, 'exactly one contribution');
-  assert.deepEqual(L.tracked.contributions, [['uid-lka', 'at1']], 'the attempt is tracked for cleanup');
-  assert.deepEqual(productDocs, ['wsfMemberships/e5cgrp-e5c-t-1-lk_uid-lka'], 'the join\'s membership is tracked for cleanup');
-  assert.equal(L.tracked.approvals, 1);
+  assert.deepEqual(L.tracked.contributions, [['uid-lka', 'attempt-1abcdefgh']], 'the attempt is tracked from its request');
+  assert.deepEqual(productDocs, ['wsfMemberships/e5cgrp-e5c-t-1-lk_uid-lka'], 'the join\'s membership is tracked from its request');
+  assert.equal(L.browser.closed, L.opened(), 'every context is closed');
   for (const id of Object.keys(FIXED_BLOCKED)) assert.equal(rows[id], undefined, `${id} is never measured by the journey`);
-  assert.doesNotMatch(JSON.stringify(results(rows)), /pw-lk|@example\.com|uid-lk/, 'no password, email or raw uid in the results');
+  assert.doesNotMatch(JSON.stringify(results(rows)), /pw-lk|@example\.com|uid-lk|JOINCODE/, 'no password, email, raw uid or join code in the results');
 });
 
-test('journey: a wrong receipt, a replayed receipt, a missing Join and a leaking switch each fail their own row', async () => {
-  let r = await runJourney({ ...lovable({ addedCount: 6 }), base: LOVABLE_URL });
+test('journey negatives: each defect fails exactly the row that measures it; nothing is passed by default', async () => {
+  const cases = [
+    [{ addedCount: 6 }, 'operation-receipt'], [{ alreadyRecorded: true }, 'operation-receipt'], [{ screenTotal: 7 }, 'operation-receipt'],
+    [{ unit: 'reps' }, 'operation-receipt'], [{ otherAttempt: true }, 'contribution-7'], [{ otherGoal: true }, 'contribution-7'],
+    [{ rowTotal: 1 }, 'own-history-shared'], [{ replayReceipt: true }, 'reopen-static'], [{ resendOnReopen: true }, 'reopen-static'],
+    [{ pendingLeft: true }, 'reopen-static'], [{ bReadsA: true }, 'account-isolation'], [{ bSeesRow: true }, 'account-isolation'],
+    [{ aReturnsAs: 'uid-someone-else' }, 'account-isolation'], [{ otherGroup: true }, 'qr-join'], [{ noJoinButton: true }, 'qr-join'],
+    [{ qrOrigin: 'https://evil.example.test' }, 'qr-join'], [{ alreadyMember: true }, 'qr-join'], [{ doubleSend: true }, 'contribution-7'],
+    [{ receiptOwn: 8 }, 'own-history-shared'], [{ pulseDrift: 5 }, 'own-history-shared'], [{ aOwnOnReturn: 3 }, 'account-isolation'],
+  ];
+  for (const [bug, row] of cases) {
+    const L = lovable(bug);
+    const { rows } = await runJourney({ browser: L.browser, fixtures: L.fixtures, base: LOVABLE_URL });
+    assert.equal(statusOf(rows, row), 'FAIL', `${JSON.stringify(bug)} must fail ${row}: ${rows[row]?.seen}`);
+    assert.equal(L.browser.closed, L.opened(), `${JSON.stringify(bug)}: every context is closed`);
+  }
+});
+
+test('journey: a contribution whose assertions fail is still tracked for cleanup; an early stop closes the kiosk', async () => {
+  let L = lovable({ addedCount: 6 });
+  let r = await runJourney({ browser: L.browser, fixtures: L.fixtures, base: LOVABLE_URL });
   assert.equal(statusOf(r.rows, 'operation-receipt'), 'FAIL');
-  assert.equal(statusOf(r.rows, 'contribution-7'), 'FAIL');
-  r = await runJourney({ ...lovable({ replayReceipt: true }), base: LOVABLE_URL });
-  assert.equal(statusOf(r.rows, 'reopen-static'), 'FAIL');
-  r = await runJourney({ ...lovable({ joinShown: false }), base: LOVABLE_URL });
+  assert.equal(L.tracked.contributions.length, 1, 'tracked though the receipt failed');
+  L = lovable({ approvalLost: true });
+  r = await runJourney({ browser: L.browser, fixtures: L.fixtures, base: LOVABLE_URL });
   assert.equal(statusOf(r.rows, 'qr-join'), 'FAIL');
-  assert.equal(r.rows['contribution-7'], undefined, 'nothing is contributed without the join');
+  assert.equal(L.server.contributions, 0);
   assert.deepEqual(r.productDocs, []);
-  r = await runJourney({ ...lovable({ bSeesA: true }), base: LOVABLE_URL });
-  assert.equal(statusOf(r.rows, 'account-isolation'), 'FAIL');
-  r = await runJourney({ ...lovable({ resendOnReload: true }), base: LOVABLE_URL });
-  assert.equal(statusOf(r.rows, 'reopen-static'), 'FAIL', 'a second contribution on reopen fails');
-  r = await runJourney({ ...lovable({ aReturnsAs: 'uid-someone-else' }), base: LOVABLE_URL });
-  assert.equal(statusOf(r.rows, 'account-isolation'), 'FAIL', 'A must come back as the same identity');
-  r = await runJourney({ ...lovable({ qrOrigin: 'https://evil.example.test' }), base: LOVABLE_URL });
-  assert.equal(statusOf(r.rows, 'qr-join'), 'FAIL', 'a QR pointing at another host is never followed');
-  assert.deepEqual(r.productDocs, []);
+  assert.equal(L.browser.closed, L.opened(), 'the kiosk context is closed on the early return');
+  L = lovable({ noJoinCode: true });
+  r = await runJourney({ browser: L.browser, fixtures: L.fixtures, base: LOVABLE_URL });
+  assert.equal(statusOf(r.rows, 'qr-join'), 'BLOCKED', 'a community the kit cannot make link-joinable is BLOCKED, not passed');
 });
 
-test('journey: a kiosk that never shows its QR stops before any visitor signs in', async () => {
-  const L = lovable();
-  L.fixtures.approveStation = async () => ({ stationId: 's1', slot: 1 }); // approval never lands
-  const { rows, productDocs } = await runJourney({ browser: L.browser, fixtures: L.fixtures, base: LOVABLE_URL });
-  assert.equal(statusOf(rows, 'qr-join'), 'FAIL');
-  assert.equal(L.server.contributions, 0);
-  assert.deepEqual(productDocs, []);
+test('canonical shapes: ownCredit is read for the selected goal only, and null is never a number', () => {
+  assert.equal(ownCreditOf({ data: { goalId: 'g' }, result: { ownCredit: 7, unit: 'squats' } }, 'g'), 7);
+  assert.equal(ownCreditOf({ data: { goalId: 'h' }, result: { ownCredit: 7 } }, 'g'), null, 'another goal');
+  assert.equal(ownCreditOf({ data: { goalId: 'g' }, result: { total: 7 } }, 'g'), null, 'no invented field');
+  assert.equal(ownCreditOf(null, 'g'), null);
+  assert.equal(sharedOf({ data: { goalId: 'g' }, result: { sharedTotal: 107 } }, 'g'), 107);
+  assert.equal(sharedOf({ data: { goalId: 'g' }, result: {} }, 'g'), null);
+  assert.equal(sharedOf({ data: { goalId: 'h' }, result: { sharedTotal: 107 } }, 'g'), null, 'another goal');
+  assert.equal(sharedOf({ data: { goalId: 'g' }, result: { sharedTotal: 107.5 } }, 'g'), null, 'not a whole number');
 });
 
 for (const [name, fn] of pending) { await fn(); passed += 1; console.log(`  ok  ${name}`); }
