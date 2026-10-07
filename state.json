@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "a408ba0d45b37956eac1a15600b48664f65e8aa759609adc85852dbfd8dad840",
-  "eventCount": 677,
+  "ledgerHead": "84238aa90e985fb8dd9d5f4270aa6f46f2d38be5206524a56162e110da86ea5b",
+  "eventCount": 679,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -61,7 +61,9 @@
     }
   },
   "queue": {
-    "W3": [],
+    "W3": [
+      "CONTROL-CURRENT-PATCH-TRANSPORT-2"
+    ],
     "W4": [],
     "W5": [],
     "W7": [],
@@ -337,6 +339,62 @@
         "after": "director"
       },
       "deliveries": 1,
+      "pendingFinding": null
+    },
+    "CONTROL-CURRENT-PATCH-TRANSPORT-2": {
+      "owner": "W3",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Make the single CURRENT PATCH complete through a bounded transport while preserving exact readback and no resend",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "tools/wsf-control/github.mjs",
+        "tools/wsf-control/tests/shadow.test.mjs"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6045160033
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6045160033
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
       "pendingFinding": null
     },
     "CONTROL-EXPO-ROUTE-PATH-GRAMMAR": {
@@ -1719,15 +1777,15 @@
       },
       "label": "Run the pinned Lovable kiosk journey with bounded real staging fixtures and cleanup inside the existing trusted runner",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "DELIVERED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
-      "pr": null,
+      "pr": 589,
       "reviewers": [],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "404c3ba34c21779f923fde4ef8974d4ead51417e",
+        "prHeadSha": "404c3ba34c21779f923fde4ef8974d4ead51417e",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -1756,7 +1814,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6044994583
+          "id": 6045147996
         }
       },
       "review": {
@@ -1773,7 +1831,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "MEMBER-PREVIEW-LABEL-1": {
@@ -4230,7 +4288,8 @@
       "ack": {
         "kind": "comment",
         "id": 6044994583
-      }
+      },
+      "superseded": true
     }
   },
   "fastpath": {

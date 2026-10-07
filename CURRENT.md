@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=a408ba0d45b37956eac1a15600b48664f65e8aa759609adc85852dbfd8dad840 events=677 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=84238aa90e985fb8dd9d5f4270aa6f46f2d38be5206524a56162e110da86ea5b events=679 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `a408ba0d45b37956eac1a15600b48664f65e8aa759609adc85852dbfd8dad840` (677 events)
+- Ledger head: `84238aa90e985fb8dd9d5f4270aa6f46f2d38be5206524a56162e110da86ea5b` (679 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -29,7 +29,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 
 | Worker | Inbox | Active now | Reviewing | Waiting on review | Blocked | Next | Queue | WATCH |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| W3 | #396 | LOVABLE-KIOSK-HOSTED-PROOF-1 | — | WORKER-EXECUTION-PROFILES-1 | KIOSK-UNVERIFIED-STAGING-RECOVERY-1, NORTHSTAR-MIRROR-INTAKE-1 | — | — | on |
+| W3 | #396 | — | — | LOVABLE-KIOSK-HOSTED-PROOF-1, WORKER-EXECUTION-PROFILES-1 | KIOSK-UNVERIFIED-STAGING-RECOVERY-1, NORTHSTAR-MIRROR-INTAKE-1 | CONTROL-CURRENT-PATCH-TRANSPORT-2 | CONTROL-CURRENT-PATCH-TRANSPORT-2 | off |
 | W4 | #394 | — | — | — | — | — | — | off |
 | W5 | #395 | EVENT-LIFECYCLE-BACKEND-1 | — | — | — | — | — | on |
 | W7 | #434 | KIOSK-EXPECTED-TURN-NATIVE-CALLER-1 | — | — | — | — | — | on |
@@ -43,6 +43,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | AUTONOMY-ROUTER-1C-INTEGRATE | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #545 | fd697e0f | fd697e0f | — | 8ba39e19 | — | W4 | comment:5929164484 | pull_request:545 | — | Step 6 correction: derive integrate from ACCEPTED plus merged PR with same-cycle or successor reconcile and idempotency proof | 1×ops-source then director | — |
 | AUTONOMY-STATE-1B | W3 | work | INTEGRATED (source-only) | bootstrap | INTEGRATED | #538 | 073b7946 | 073b7946 | — | d42a3307 | — | — | comment:5857966052 | comment:5857966052 | — | Serial step 5: authoritative control state, App writer, bootstrap and shadow reconcile | 1×ops-source then director | — |
 | CONTROL-CURRENT-PATCH-ACK-1 | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #588 | 85e1d35f | 85e1d35f | — | cc33f4e7 | — | W9 | comment:6044037834 | pull_request:588 | — | Repair CURRENT comment acknowledgment and verify uncertain PATCH by exact readback without mutation retries | 1×ops-source then director | — |
+| CONTROL-CURRENT-PATCH-TRANSPORT-2 | W3 | work | INTEGRATED (source-only) | ledger | QUEUED | — | — | — | — | — | — | — | — | comment:6045160033 | — | Make the single CURRENT PATCH complete through a bounded transport while preserving exact readback and no resend | 1×ops-source then director | — |
 | CONTROL-EXPO-ROUTE-PATH-GRAMMAR | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #552 | 3cc44d30 | 3cc44d30 | — | 6687440d | — | W4 | comment:5944968693 | pull_request:552 | — | Allow exact Expo Router filenames in control packet path reservations without widening other path syntax | 1×ops-source then director | — |
 | CONTROL-RECENT-COMMENTS-SAFE-READ-1 | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #579 | 758d686f | 758d686f | — | e5416da1 | — | W4 | comment:6020607329 | pull_request:579 | — | Bound recent-comment reads so the control App can consume current decisions without socket failure | 1×ops-source then director | — |
 | EMAIL-STAGING-REPAIR | W3 | work | STAGED (hosted) | ledger | INTEGRATED | #559 | 39484f78 | 39484f78 | — | f84346d3 | — | W4, W9 | comment:5959200686 | pull_request:559 | — | Diagnose and repair staging verification and password-reset delivery without weakening mail security | 1×ops-source+1×security then director | — |
@@ -63,7 +64,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | KIOSK-UNVERIFIED-PARTICIPANT-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #586 | a17ee3e2 | a17ee3e2 | — | 819c26f0 | — | W4 | comment:6041849013 | pull_request:586 | — | Allow real authenticated unverified attendees to complete the ordinary WSF event participation backend journey | 1×journey-qa then director | — |
 | KIOSK-UNVERIFIED-PARTICIPANT-1-STAGING-PIN | W3 | work | INTEGRATED (source-only) | ledger | WITHDRAWN | — | — | — | — | — | — | — | comment:6043102398 | comment:6043983205 | — | Pin and prove the integrated unverified-attendee backend through the reviewed full staging path | 1×ops-source then director | — |
 | KIOSK-UNVERIFIED-STAGING-RECOVERY-1 | W3 | work | INTEGRATED (source-only) | ledger | BLOCKED (from RELEASED) | — | — | — | — | — | — | — | comment:6043993150 | comment:6044034555 | CONTROL-CURRENT-PATCH-ACK-1≥INTEGRATED | Finish the blocked staging pin with verified approval ancestry and tracked unverified synthetic fixtures | 1×ops-source then director | — |
-| LOVABLE-KIOSK-HOSTED-PROOF-1 | W3 | work | VERIFIED (hosted) | ledger | ACKED | — | — | — | — | — | — | — | comment:6044894488 | comment:6044994583 | — | Run the pinned Lovable kiosk journey with bounded real staging fixtures and cleanup inside the existing trusted runner | 1×ops-source+1×security then director | — |
+| LOVABLE-KIOSK-HOSTED-PROOF-1 | W3 | work | VERIFIED (hosted) | ledger | DELIVERED | #589 | 404c3ba3 | 404c3ba3 | — | — | — | — | comment:6044894488 | comment:6045147996 | — | Run the pinned Lovable kiosk journey with bounded real staging fixtures and cleanup inside the existing trusted runner | 1×ops-source+1×security then director | — |
 | MEMBER-PREVIEW-LABEL-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #584 | 37529ea3 | 37529ea3 | — | 245c7717 | — | W4 | comment:6035517752 | pull_request:584 | — | Deliver the isolated privacy-safe public preview label without waiting for crossing attribution | 1×journey-qa then director | — |
 | MEMBER-TRUTH-BACKEND-1 | W9 | work | INTEGRATED (source-only) | ledger | BLOCKED (from ACKED) | — | — | — | — | — | — | — | comment:6029989725 | comment:6035507739 | TOGETHER-CROSSING-DESIGN-DECISION (Director and Owner) | Unblock real member Together crossing and privacy-safe public preview labels for the shared Firebase backend and Lovable Web Twin | 1×journey-qa then director | — |
 | MOVE-CAMERA-NATIVE-PORT-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #577 | d6d47879 | d6d47879 | — | 856e20e0 | — | W7 | comment:5997538756 | pull_request:577 | — | Port the owner-accepted camera-assisted squat MOVE North Star into the current Expo app without automatic contribution credit | 1×journey-qa then director | — |
