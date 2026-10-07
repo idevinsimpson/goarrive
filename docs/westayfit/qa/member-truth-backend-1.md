@@ -67,6 +67,7 @@ These cases all return the `none` body:
 - unknown goal;
 - sample community, missing community, or blank title;
 - bad, unknown or inactive marker slug;
+- a Firestore-reserved id such as `__abc__`, which passes the shape check, but the read fails;
 - a marker whose goal belongs to another community;
 - a marker repointed to an unauthorized goal;
 - a community id alone, both ids at once, or `{}`, `null`, a string, an array, or a malformed id;
@@ -108,7 +109,8 @@ That is HTTP 429, from the shared per-IP preview bucket (100 requests per rollin
 - label cap removed;
 - marker shape validation bypassed;
 - rate limit removed;
-- display-route check removed.
+- display-route check removed;
+- the handler's `catch` removed. The W4 finding (#394 `6035952721`) was that this mutant went uncaught; it is now killed by Firestore-reserved ids such as `__abc__`, which pass the id shape check but make the read throw.
 
 **Equivalent survivor.** Removing the explicit `isAggregateDisplayAuthorized` check still passes. `evaluateGoalAggregateAccess(goal, null)` grants the display route only to an authorized goal, so the evaluator enforces the same rule and no behaviour changes.
 

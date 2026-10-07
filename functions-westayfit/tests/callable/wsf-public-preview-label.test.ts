@@ -170,6 +170,10 @@ describe('every denial is the same brand-only answer', () => {
       [authorized],
       { goalId: 'a/b' },
       { goalId: { id: authorized } },
+      // Firestore-reserved ids (`__.*__`) pass the id shape check but make the
+      // document read itself throw; the answer must still be the one denial.
+      { goalId: '__abc__' },
+      { goalId: '__x__' },
     ]) {
       expect(await label(data)).toEqual(NONE);
     }
