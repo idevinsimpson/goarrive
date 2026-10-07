@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=8f594d1ef54e2f9ea13bdd86714b7e07682084843cb2a07094fda8a2e49fbe83 events=606 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=1dd2dd714f01975b7e41a707d71092009e1fa99b783cad50f9da899508266874 events=609 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `8f594d1ef54e2f9ea13bdd86714b7e07682084843cb2a07094fda8a2e49fbe83` (606 events)
+- Ledger head: `1dd2dd714f01975b7e41a707d71092009e1fa99b783cad50f9da899508266874` (609 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -30,10 +30,10 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | Worker | Inbox | Active now | Reviewing | Waiting on review | Blocked | Next | Queue | WATCH |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | W3 | #396 | — | — | WORKER-EXECUTION-PROFILES-1 | NORTHSTAR-MIRROR-INTAKE-1 | — | — | off |
-| W4 | #394 | — | — | — | — | — | — | off |
+| W4 | #394 | — | KIOSK-UNVERIFIED-PARTICIPANT-1 | — | — | — | — | on |
 | W5 | #395 | — | — | — | — | — | — | off |
 | W7 | #434 | — | — | — | — | — | — | off |
-| W9 | #497 | KIOSK-UNVERIFIED-PARTICIPANT-1 | — | — | MEMBER-TRUTH-BACKEND-1 | — | — | on |
+| W9 | #497 | — | — | KIOSK-UNVERIFIED-PARTICIPANT-1 | MEMBER-TRUTH-BACKEND-1 | — | — | off |
 
 ## Packets
 
@@ -56,7 +56,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | EXPO-MOVEMENT-VIDEO-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #575 | 526cea95 | 526cea95 | — | 0745c732 | — | W4 | comment:5971282758 | pull_request:575 | — | Loop approved demo media in the existing shared player with truthful fallback and no contribution side effects | 1×journey-qa then director | — |
 | EXPO-STATION-LOST-ANSWER-COPY-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #564 | 1d290f74 | 1d290f74 | — | 5be74f3f | — | W4 | comment:5963613447 | pull_request:564 | — | Replace station vendor error text with existing product-safe callable wording without changing retry truth | 1×journey-qa then director | — |
 | KIOSK-PAIRING-CLARITY-PROOF-1 | W9 | work | STAGED (hosted) | ledger | STAGED | #553 | 4537c26c | 4537c26c | — | ab77fbfc | hosted run 37025084843: PASS | W4 | comment:5945136749 | comment:5955903159 | — | Clarify venue-station pairing from the Champion's own phone and prove the existing flow end-to-end | 1×journey-qa then director | — |
-| KIOSK-UNVERIFIED-PARTICIPANT-1 | W9 | work | INTEGRATED (source-only) | ledger | ACKED | — | — | — | — | — | — | — | comment:6041849013 | comment:6042073922 | — | Allow real authenticated unverified attendees to complete the ordinary WSF event participation backend journey | 1×journey-qa then director | — |
+| KIOSK-UNVERIFIED-PARTICIPANT-1 | W9 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #586 | a17ee3e2 | a17ee3e2 | — | — | — | W4 | comment:6041849013 | comment:6042204036 | — | Allow real authenticated unverified attendees to complete the ordinary WSF event participation backend journey | 1×journey-qa then director | — |
 | MEMBER-PREVIEW-LABEL-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #584 | 37529ea3 | 37529ea3 | — | 245c7717 | — | W4 | comment:6035517752 | pull_request:584 | — | Deliver the isolated privacy-safe public preview label without waiting for crossing attribution | 1×journey-qa then director | — |
 | MEMBER-TRUTH-BACKEND-1 | W9 | work | INTEGRATED (source-only) | ledger | BLOCKED (from ACKED) | — | — | — | — | — | — | — | comment:6029989725 | comment:6035507739 | TOGETHER-CROSSING-DESIGN-DECISION (Director and Owner) | Unblock real member Together crossing and privacy-safe public preview labels for the shared Firebase backend and Lovable Web Twin | 1×journey-qa then director | — |
 | MOVE-CAMERA-NATIVE-PORT-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #577 | d6d47879 | d6d47879 | — | 856e20e0 | — | W7 | comment:5997538756 | pull_request:577 | — | Port the owner-accepted camera-assisted squat MOVE North Star into the current Expo app without automatic contribution credit | 1×journey-qa then director | — |
@@ -168,4 +168,5 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | f4ea622a1226 | W9 | MEMBER-PREVIEW-LABEL-1 | handback | acked | 6035992343 | comment:6036001486 |
 | a3a1ba72e3e3 | W4 | MEMBER-PREVIEW-LABEL-1 | review | acked | 6036066074 | comment:6036085110 |
 | f60e1371d95c | W9 | KIOSK-UNVERIFIED-PARTICIPANT-1 | release | acked | 6042042985 | comment:6042073922 |
+| f46e958912c6 | W4 | KIOSK-UNVERIFIED-PARTICIPANT-1 | review | requested | — | — |
 

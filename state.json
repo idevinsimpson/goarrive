@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "8f594d1ef54e2f9ea13bdd86714b7e07682084843cb2a07094fda8a2e49fbe83",
-  "eventCount": 606,
+  "ledgerHead": "1dd2dd714f01975b7e41a707d71092009e1fa99b783cad50f9da899508266874",
+  "eventCount": 609,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1252,15 +1252,17 @@
       },
       "label": "Allow real authenticated unverified attendees to complete the ordinary WSF event participation backend journey",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
-      "pr": null,
-      "reviewers": [],
+      "pr": 586,
+      "reviewers": [
+        "W4"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "a17ee3e271b25974c13aeeeac209c69dbf231a7e",
+        "prHeadSha": "a17ee3e271b25974c13aeeeac209c69dbf231a7e",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -1292,7 +1294,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6042073922
+          "id": 6042204036
         }
       },
       "review": {
@@ -1305,7 +1307,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "MEMBER-PREVIEW-LABEL-1": {
@@ -3559,7 +3561,16 @@
       "ack": {
         "kind": "comment",
         "id": 6042073922
-      }
+      },
+      "superseded": true
+    },
+    "f46e958912c6cc7f258f2ef4d4fe8f9447f0b35fc08493a6743ea975bf4a6ea2": {
+      "packet": "KIOSK-UNVERIFIED-PARTICIPANT-1",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
