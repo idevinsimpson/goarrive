@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "1dd2dd714f01975b7e41a707d71092009e1fa99b783cad50f9da899508266874",
-  "eventCount": 609,
+  "ledgerHead": "3d0851f868b587bcfb03ad827c78a7116e0cad2cd4731e5e4acf69d9f0462bed",
+  "eventCount": 610,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -3568,8 +3568,10 @@
       "packet": "KIOSK-UNVERIFIED-PARTICIPANT-1",
       "worker": "W4",
       "reason": "review",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        6042281043
+      ],
       "ack": null
     }
   },
