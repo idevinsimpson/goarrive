@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "fe1c35773955ccb9fd0d90f58df67c778319f4c37b85d594d8f09759e6f88f5c",
-  "eventCount": 623,
+  "ledgerHead": "c1c50f25623cd3d58780b2511e134ae530cbf2d061e8863e0a584bad9b78be0f",
+  "eventCount": 624,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -3726,8 +3726,10 @@
       "packet": "KIOSK-UNVERIFIED-PARTICIPANT-1-STAGING-PIN",
       "worker": "W3",
       "reason": "release",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        6043175500
+      ],
       "ack": null
     }
   },
