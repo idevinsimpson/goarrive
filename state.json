@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "d2dbbdcc7f0b641166efcd46492b7e9aefa6cb2d43015dbec3856ac443f7f62d",
-  "eventCount": 626,
+  "ledgerHead": "a3e57ab79efe93216994476378c5631f13038cfbac6a30df18f7772f7b4ac168",
+  "eventCount": 627,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -65,7 +65,9 @@
     "W4": [],
     "W5": [],
     "W7": [],
-    "W9": []
+    "W9": [
+      "PROFILE-PHOTOS-FIREBASE-1"
+    ]
   },
   "packets": {
     "AUTONOMY-ROUTER-1C": {
@@ -1711,6 +1713,65 @@
         "workerReviews": [
           {
             "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
+      "pendingFinding": null
+    },
+    "PROFILE-PHOTOS-FIREBASE-1": {
+      "owner": "W9",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Canonical private profile photos and permitted community roster for native and Lovable staging",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "functions-westayfit/src/index.ts",
+        "functions-westayfit/src/profilePhotos.ts",
+        "functions-westayfit/tests/callable/wsf-profile-photos.test.ts",
+        "functions-westayfit/tests/callable/wsf-profile-photo-privacy.test.ts",
+        "docs/westayfit/qa/profile-photos-firebase-1.md"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6043554729
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6043554729
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "journey-qa",
             "count": 1
           }
         ],
