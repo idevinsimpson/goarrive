@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "c1c50f25623cd3d58780b2511e134ae530cbf2d061e8863e0a584bad9b78be0f",
-  "eventCount": 624,
+  "ledgerHead": "d2dbbdcc7f0b641166efcd46492b7e9aefa6cb2d43015dbec3856ac443f7f62d",
+  "eventCount": 626,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1387,7 +1387,7 @@
       },
       "label": "Pin and prove the integrated unverified-attendee backend through the reviewed full staging path",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -1401,7 +1401,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         ".github/wsf-staging/approved-candidate.json",
@@ -1425,7 +1425,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6043102398
+          "id": 6043195547
         }
       },
       "review": {
@@ -3726,11 +3726,14 @@
       "packet": "KIOSK-UNVERIFIED-PARTICIPANT-1-STAGING-PIN",
       "worker": "W3",
       "reason": "release",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6043175500
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6043195547
+      }
     }
   },
   "fastpath": {
