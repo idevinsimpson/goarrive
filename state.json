@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "a3e57ab79efe93216994476378c5631f13038cfbac6a30df18f7772f7b4ac168",
-  "eventCount": 627,
+  "ledgerHead": "2a1af7bd1d0436386b568508c2b8f86d7861c99a41c4924d307f20e51aa36c06",
+  "eventCount": 631,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1389,7 +1389,7 @@
       },
       "label": "Pin and prove the integrated unverified-attendee backend through the reviewed full staging path",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "WITHDRAWN",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -1427,7 +1427,72 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6043195547
+          "id": 6043983205
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
+      "pendingFinding": null
+    },
+    "KIOSK-UNVERIFIED-STAGING-RECOVERY-1": {
+      "owner": "W3",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Finish the blocked staging pin with verified approval ancestry and tracked unverified synthetic fixtures",
+      "origin": "ledger",
+      "phase": "RELEASED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": 396,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": 0,
+      "reviewedBy": [],
+      "subjectPaths": [
+        ".github/wsf-staging/approved-candidate.json",
+        ".github/wsf-staging/journeys/manifest.json",
+        ".github/wsf-staging/journeys/expo-attendee.mjs",
+        ".github/wsf-staging/tests/changed-journey-drivers.test.mjs",
+        ".github/wsf-staging/tests/pin-candidate.test.mjs",
+        "docs/westayfit/qa/kiosk-unverified-participant-staging-pin-1.md",
+        ".github/wsf-staging/pin-candidate.mjs",
+        ".github/wsf-staging/journeys/fixture-kit.mjs"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6043989729
+        },
+        "released": {
+          "kind": "comment",
+          "id": 6043993150
+        },
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6043993150
         }
       },
       "review": {
@@ -3794,7 +3859,16 @@
       "ack": {
         "kind": "comment",
         "id": 6043195547
-      }
+      },
+      "superseded": true
+    },
+    "8f6be434c744a351db2de47fb9bc988d8ef65a02d10cfe50f1f3b3f2a2cb7153": {
+      "packet": "KIOSK-UNVERIFIED-STAGING-RECOVERY-1",
+      "worker": "W3",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
