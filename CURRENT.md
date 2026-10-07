@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=3ab567093ee6676d672135b9636676496dd6e0722f68d876790209f516b9bcb8 events=680 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=5c52b7e83474f7200bdf87aed9376ae2402c5807aaadaa16ca1890c42189bc2f events=683 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `3ab567093ee6676d672135b9636676496dd6e0722f68d876790209f516b9bcb8` (680 events)
+- Ledger head: `5c52b7e83474f7200bdf87aed9376ae2402c5807aaadaa16ca1890c42189bc2f` (683 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -30,10 +30,10 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | Worker | Inbox | Active now | Reviewing | Waiting on review | Blocked | Next | Queue | WATCH |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | W3 | #396 | — | — | LOVABLE-KIOSK-HOSTED-PROOF-1, WORKER-EXECUTION-PROFILES-1 | KIOSK-UNVERIFIED-STAGING-RECOVERY-1, NORTHSTAR-MIRROR-INTAKE-1 | CONTROL-CURRENT-PATCH-TRANSPORT-2 | CONTROL-CURRENT-PATCH-TRANSPORT-2 | off |
-| W4 | #394 | — | — | — | — | — | — | off |
+| W4 | #394 | — | KIOSK-EXPECTED-TURN-1 | — | — | — | — | on |
 | W5 | #395 | EVENT-LIFECYCLE-BACKEND-1 | — | — | — | — | — | on |
 | W7 | #434 | KIOSK-EXPECTED-TURN-NATIVE-CALLER-1 | — | — | — | — | — | on |
-| W9 | #497 | KIOSK-EXPECTED-TURN-1 | — | — | MEMBER-TRUTH-BACKEND-1 | PROFILE-PHOTOS-FIREBASE-1 | PROFILE-PHOTOS-FIREBASE-1 | on |
+| W9 | #497 | — | — | KIOSK-EXPECTED-TURN-1 | MEMBER-TRUTH-BACKEND-1 | PROFILE-PHOTOS-FIREBASE-1 | PROFILE-PHOTOS-FIREBASE-1 | off |
 
 ## Packets
 
@@ -58,7 +58,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | EXPO-LATEST-FULL-STAGING-PIN-1 | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #573 | a0bb252a | a0bb252a | — | 65b8b798 | — | W4 | comment:5970558946 | pull_request:573 | — | Pin the latest accepted expo candidate and activate the fixed closed-goal hosted journey through the existing full staging path | 1×ops-source then director | — |
 | EXPO-MOVEMENT-VIDEO-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #575 | 526cea95 | 526cea95 | — | 0745c732 | — | W4 | comment:5971282758 | pull_request:575 | — | Loop approved demo media in the existing shared player with truthful fallback and no contribution side effects | 1×journey-qa then director | — |
 | EXPO-STATION-LOST-ANSWER-COPY-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #564 | 1d290f74 | 1d290f74 | — | 5be74f3f | — | W4 | comment:5963613447 | pull_request:564 | — | Replace station vendor error text with existing product-safe callable wording without changing retry truth | 1×journey-qa then director | — |
-| KIOSK-EXPECTED-TURN-1 | W9 | work | INTEGRATED (source-only) | ledger | CHANGES_REQUESTED | #587 | a3f38e22 | 4bc9a0b8 | — | — | — | W4 | comment:6042840991 | comment:6044506214 | — | Bind kiosk mutations to the intended turn and preserve exactly-once phone and station completion | 1×journey-qa then director | — |
+| KIOSK-EXPECTED-TURN-1 | W9 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #587 | 4bc9a0b8 | 4bc9a0b8 | — | — | — | W4 | comment:6042840991 | comment:6045666335 | — | Bind kiosk mutations to the intended turn and preserve exactly-once phone and station completion | 1×journey-qa then director | — |
 | KIOSK-EXPECTED-TURN-NATIVE-CALLER-1 | W7 | work | INTEGRATED (source-only) | ledger | RELEASED | — | — | — | — | — | — | — | comment:6044062885 | comment:6044062885 | — | Wire native station commands to the exact turn and preserve safe retry across later visitors | 1×journey-qa then director | — |
 | KIOSK-PAIRING-CLARITY-PROOF-1 | W9 | work | STAGED (hosted) | ledger | STAGED | #553 | 4537c26c | 4537c26c | — | ab77fbfc | hosted run 37025084843: PASS | W4 | comment:5945136749 | comment:5955903159 | — | Clarify venue-station pairing from the Champion's own phone and prove the existing flow end-to-end | 1×journey-qa then director | — |
 | KIOSK-UNVERIFIED-PARTICIPANT-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #586 | a17ee3e2 | a17ee3e2 | — | 819c26f0 | — | W4 | comment:6041849013 | pull_request:586 | — | Allow real authenticated unverified attendees to complete the ordinary WSF event participation backend journey | 1×journey-qa then director | — |
@@ -188,4 +188,5 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | ffb8060ed493 | W9 | KIOSK-EXPECTED-TURN-1 | handback | acked | 6044557669 | comment:6044566138 |
 | 5031a01de83a | W5 | EVENT-LIFECYCLE-BACKEND-1 | release | timed-out (wake-undelivered) | 6044759515, 6045098010 | — |
 | cb513479a2e2 | W3 | LOVABLE-KIOSK-HOSTED-PROOF-1 | release | acked | 6044987161 | comment:6044994583 |
+| 827c4cd558a0 | W4 | KIOSK-EXPECTED-TURN-1 | review | requested | — | — |
 

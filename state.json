@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "3ab567093ee6676d672135b9636676496dd6e0722f68d876790209f516b9bcb8",
-  "eventCount": 680,
+  "ledgerHead": "5c52b7e83474f7200bdf87aed9376ae2402c5807aaadaa16ca1890c42189bc2f",
+  "eventCount": 683,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1365,7 +1365,7 @@
       },
       "label": "Bind kiosk mutations to the intended turn and preserve exactly-once phone and station completion",
       "origin": "ledger",
-      "phase": "CHANGES_REQUESTED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -1374,7 +1374,7 @@
         "W4"
       ],
       "artifact": {
-        "subjectSha": "a3f38e228bbd55214656a500e5d30a9300425f7f",
+        "subjectSha": "4bc9a0b83168fdd5a990fe6db1fd3763a01a8c53",
         "prHeadSha": "4bc9a0b83168fdd5a990fe6db1fd3763a01a8c53",
         "evidenceSha": null,
         "mergeSha": null
@@ -1405,7 +1405,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6044506214
+          "id": 6045666335
         }
       },
       "review": {
@@ -1418,7 +1418,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 1,
+      "deliveries": 2,
       "pendingFinding": null
     },
     "KIOSK-EXPECTED-TURN-NATIVE-CALLER-1": {
@@ -4264,7 +4264,8 @@
       "ack": {
         "kind": "comment",
         "id": 6044566138
-      }
+      },
+      "superseded": true
     },
     "5031a01de83a07d4fc7c0ec68006ab2d0312d494a80f3da02654b5c56a6ba2b1": {
       "packet": "EVENT-LIFECYCLE-BACKEND-1",
@@ -4290,6 +4291,14 @@
         "id": 6044994583
       },
       "superseded": true
+    },
+    "827c4cd558a0c8614d08ae2c97c6a79309ddeddfa5417839c9c5ee31b824bf2f": {
+      "packet": "KIOSK-EXPECTED-TURN-1",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
