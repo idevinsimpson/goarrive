@@ -1130,6 +1130,113 @@ export const wsfJoinViaMarker = onCall<JoinViaMarkerRequest>(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+// wsfPublicPreviewLabel (MEMBER-TRUTH-BACKEND-1 B) — the two labels an
+// internet link preview may show, or nothing.
+//
+// A shared link's unfurl (iMessage, Slack, WhatsApp, a server-rendered head)
+// is a stranger reading a goal. The ONLY permission that covers it is the one
+// a Champion already gives per goal for exactly this audience:
+// `aggregateDisplayAuthorized === true`, through the same evaluator and the
+// same sample suppression `wsfGoalPulse` uses — which already publishes these
+// same two labels to anyone holding the goal id. Nothing here widens that.
+//
+// What does NOT publish a label: a community's join policy or link
+// admission, possession of a link or marker, discoverability, membership, or
+// a marker pointing at the goal. A marker is resolved only to find its goal;
+// the goal's own authorization still decides.
+//
+// ONE DENIAL SHAPE. Missing, false or malformed authorization, an unknown
+// goal, a bad, inactive or repointed marker, a sample community, a community
+// id on its own, two ids at once, anything malformed — all return the same
+// `{visibility:'none'}`, so the answer is never an existence oracle. It never
+// throws not-found. Only the per-IP rate limit answers differently, and it
+// fires before any lookup, so it says nothing about any goal.
+//
+// The labels are trimmed and capped at 60 characters. `maxAgeSeconds` is the
+// longest a consumer may cache EITHER answer, so a revocation or a repoint is
+// honoured within a minute; a goal's own id never changes meaning.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const PREVIEW_LABEL_MAX = 60;
+const PREVIEW_LABEL_MAX_AGE_SECONDS = 60;
+
+type PublicPreviewLabelRequest = { goalId?: unknown; markerSlug?: unknown };
+type PublicPreviewLabelResponse =
+  | { visibility: 'public'; communityName: string; goalTitle: string; maxAgeSeconds: number }
+  | { visibility: 'none'; maxAgeSeconds: number };
+
+function previewLabel(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (trimmed === '') return null;
+  return trimmed.slice(0, PREVIEW_LABEL_MAX).trim();
+}
+
+async function resolvePublicPreviewLabel(
+  data: PublicPreviewLabelRequest
+): Promise<PublicPreviewLabelResponse> {
+  const none: PublicPreviewLabelResponse = { visibility: 'none', maxAgeSeconds: PREVIEW_LABEL_MAX_AGE_SECONDS };
+  const db = getFirestore();
+  const hasGoal = data.goalId !== undefined;
+  const hasMarker = data.markerSlug !== undefined;
+  // Exactly one target. There is no community-only lookup.
+  if (hasGoal === hasMarker) return none;
+
+  let goalId: string | null = null;
+  let markerCommunityId: string | null = null;
+  if (hasMarker) {
+    const slug = normalizeMarkerSlug(data.markerSlug);
+    if (!slug) return none;
+    const markerSnap = await db.doc(`wsfMarkers/${slug}`).get();
+    const marker = markerSnap.exists ? readMarkerDoc(markerSnap.data()) : null;
+    if (!marker) return none;
+    goalId = marker.goalId;
+    markerCommunityId = marker.communityGroupId;
+  } else {
+    goalId = normalizeStringId(data.goalId);
+  }
+  if (!goalId) return none;
+
+  const goalSnap = await db.doc(`wsfGoals/${goalId}`).get();
+  if (!goalSnap.exists) return none;
+  const goal = goalSnap.data() as GoalDoc;
+  // A marker must point at a goal of the community it names.
+  if (markerCommunityId !== null && goal.communityGroupId !== markerCommunityId) return none;
+  if (!isAggregateDisplayAuthorized(goal)) return none;
+
+  // The display route, with no caller: sample suppression and the
+  // community's display name come from the same evaluator wsfGoalPulse uses.
+  const access = await evaluateGoalAggregateAccess(goal, null);
+  if (!access.allowed || !access.asDisplay) return none;
+  const communityName = previewLabel(access.communityDisplayName);
+  const goalTitle = previewLabel(goal.title);
+  if (!communityName || !goalTitle) return none;
+  return { visibility: 'public', communityName, goalTitle, maxAgeSeconds: PREVIEW_LABEL_MAX_AGE_SECONDS };
+}
+
+export const wsfPublicPreviewLabel = onCall<PublicPreviewLabelRequest>(
+  // Public: a link unfurler and a server-rendered head have no account.
+  // No-op in the emulator; enforced by Cloud Run IAM at deploy.
+  { region: 'us-central1', invoker: 'public' },
+  async (request): Promise<PublicPreviewLabelResponse> => {
+    const ip = extractIp(request.rawRequest as any);
+    // Rate limit FIRST, before any lookup, on the shared preview bucket.
+    await enforcePreviewRateLimit(ip, Date.now());
+    const data =
+      request.data && typeof request.data === 'object' && !Array.isArray(request.data)
+        ? (request.data as PublicPreviewLabelRequest)
+        : {};
+    try {
+      return await resolvePublicPreviewLabel(data);
+    } catch {
+      // A read that fails is a denial, never an `internal` that differs from
+      // the denial shape.
+      return { visibility: 'none', maxAgeSeconds: PREVIEW_LABEL_MAX_AGE_SECONDS };
+    }
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // D — ADMISSION CONTROLS
 //
 // Everything below changes who may enter or remain in a community. None of it
