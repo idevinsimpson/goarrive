@@ -51,19 +51,22 @@ export const ROWS = Object.freeze([
   ['expected-turn-start', 'the station starts the expected turn'],
   ['round-60s', 'the 60-second round runs and writes nothing at timer end'],
   ['review', 'the station shows the round for review'],
-  ['contribution-7', 'visitor A records exactly 7 from the phone'],
-  ['operation-receipt', 'the decoded wsfContribute receipt names this goal, an attempt, 7 added and a shared total the screen shows'],
-  ['own-history-shared', 'a fresh read shows A\'s own total up by exactly 7 and the receipt\'s shared total'],
-  ['reopen-static', 'reopening shows no replayed receipt and sends no second contribution'],
-  ['account-isolation', 'A -> B -> A in one browser: B sees none of A, A returns with the same identity and own total'],
+  ['contribution-7', 'visitor A sends exactly one wsfContribute for this goal with count 7 and a fresh attempt id'],
+  ['operation-receipt', 'that request\'s own response: 7 added, alreadyRecorded false, an integer own credit and shared total in the goal\'s unit, and the screen shows exactly that total'],
+  ['own-history-shared', 'fresh reads for the selected test goal: own credit up by exactly 7 and equal to the receipt, the shared total equal to the receipt, and the exact entry in A\'s own history'],
+  ['reopen-static', 'reopening MOVE on the same goal shows the recorded state and sends no second contribution'],
+  ['account-isolation', 'A -> B -> A: B\'s context, own history and pending MOVE carry nothing of A; A returns in fresh storage with the same identity and the same record'],
   ['station-finish', 'station Finish leaves no previous visitor for the next one'],
+  ['organizer-ui-approval', 'the Champion approves the kiosk code through the Manage community UI'],
   ['unverified-account', 'a genuinely unverified account joins and contributes'],
+  ['cleanup-tracking', 'every product-written document (membership, contribution) is in the cleanup manifest before cleanup'],
 ].map(([id, expected]) => Object.freeze({ id, expected })));
 const STATION_BLOCK = 'the safe station backend (#587) is not accepted or served; an older station path is never driven';
 export const FIXED_BLOCKED = Object.freeze({
   'queue-place': STATION_BLOCK, call: STATION_BLOCK, 'phone-ready': STATION_BLOCK, 'expected-turn-start': STATION_BLOCK,
   'round-60s': STATION_BLOCK, review: STATION_BLOCK, 'station-finish': STATION_BLOCK,
   'unverified-account': 'the existing fixture kit creates verified accounts only (#396 6043231980); verification is never faked',
+  'organizer-ui-approval': 'the station is approved through the kit\'s Champion callable as fixture preparation (tracked for cleanup); a UI approval would create a station record the kit cannot track',
 });
 
 const short = (e) => String(e?.message || e).split('\n')[0].replace(/[?&][A-Za-z]+=[^&\s"']+/g, '?…').replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, '<email>').slice(0, 200);
@@ -138,14 +141,60 @@ export function results(rows, extra = {}) {
 }
 export const allPassed = (doc) => Array.isArray(doc?.rows) && doc.rows.length === ROWS.length && doc.rows.every((r) => r.status === 'PASS');
 
-/** The receipt row from a decoded wsfContribute result. */
-export function receiptVerdict(result, { goalId, amount, screenText }) {
-  const rec = result && typeof result === 'object' ? (result.receipt ?? result) : {};
-  const shared = rec.sharedTotal;
-  const ok = rec.addedCount === amount && Number.isInteger(shared) && typeof (rec.attemptId ?? result?.attemptId) === 'string'
-    && (rec.goalId === undefined || rec.goalId === goalId) && String(screenText ?? '').replace(/,/g, '').includes(String(shared));
-  return { ok, shared: Number.isInteger(shared) ? shared : null, attemptId: rec.attemptId ?? result?.attemptId ?? null,
-    seen: `addedCount=${rec.addedCount} sharedTotal=${shared} attempt=${(rec.attemptId ?? result?.attemptId) ? 'yes' : 'no'} goal=${rec.goalId === undefined ? 'unstated' : rec.goalId === goalId ? 'this' : 'other'}` };
+/** Does `text` show the whole number `n` (en-US grouping or none), not merely contain its digits? */
+export function showsNumber(text, n) {
+  if (!Number.isInteger(n)) return false;
+  const t = String(text ?? '');
+  return [n.toLocaleString('en-US'), String(n)].some((f) => new RegExp(`(^|[^\\d,.])${f.replace(/[,.]/g, '\\$&')}(?![\\d,]*\\d)`).test(t));
+}
+
+/**
+ * The receipt row from ONE paired callable exchange: the wsfContribute REQUEST this page sent (goalId, attemptId,
+ * count) and that request's own RESPONSE (addedCount, ownCredit, alreadyRecorded, sharedTotal, target, unit, status,
+ * crossedTarget). The attempt and goal come from the request; nothing is read from a field the response never has.
+ */
+export function receiptVerdict(exchange, { goalId, amount, unit, screenText }) {
+  const q = exchange?.data ?? {};
+  const r = exchange?.result;
+  const okReq = q.goalId === goalId && q.count === amount && typeof q.attemptId === 'string' && q.attemptId !== '';
+  const okRes = !!r && typeof r === 'object' && r.addedCount === amount && r.alreadyRecorded === false
+    && Number.isInteger(r.ownCredit) && Number.isInteger(r.sharedTotal) && r.unit === unit;
+  const okScreen = okRes && showsNumber(screenText, r.sharedTotal) && String(screenText ?? '').includes(unit);
+  return {
+    ok: okReq && okRes && okScreen, attemptId: okReq ? q.attemptId : null,
+    shared: okRes ? r.sharedTotal : null, ownCredit: okRes ? r.ownCredit : null,
+    seen: `request ${okReq ? 'this goal, count ' + amount + ', an attempt' : 'not this goal/count/attempt'}; response addedCount=${r?.addedCount} alreadyRecorded=${r?.alreadyRecorded} unit=${r?.unit === unit ? 'the goal unit' : 'other'} shared=${r?.sharedTotal}; screen ${okScreen ? 'shows exactly that total' : 'does not show exactly that total'}`,
+  };
+}
+
+/** The selected-goal own credit from a paired wsfMyContribution exchange, or null (never 0 by default). */
+export const ownCreditOf = (exchange, goalId) => (exchange?.data?.goalId === goalId && Number.isInteger(exchange?.result?.ownCredit) ? exchange.result.ownCredit : null);
+/** The selected-goal shared total from a paired wsfGoalPulse exchange, or null. */
+export const sharedOf = (exchange, goalId) => (exchange?.data?.goalId === goalId && Number.isInteger(exchange?.result?.sharedTotal) ? exchange.result.sharedTotal : null);
+
+/**
+ * Every wsf* callable this page sends, each REQUEST paired with its own RESPONSE by Playwright's request identity.
+ * `onResult(exchange)` runs as each response is decoded, so cleanup tracking never depends on a later assertion.
+ * Bodies stay in memory; nothing here is written or logged.
+ */
+export function callableLog(page, onResult = () => {}) {
+  const all = [];
+  page.on('request', (req) => {
+    let name;
+    try { name = /\/(wsf[A-Za-z]+)$/.exec(new URL(req.url()).pathname)?.[1]; } catch { name = null; }
+    if (!name || req.method() !== 'POST') return;
+    let data = null;
+    try { data = JSON.parse(req.postData() || '{}')?.data ?? null; } catch { data = null; }
+    all.push({ name, req, data, result: undefined, error: null });
+  });
+  page.on('response', async (res) => {
+    const e = all.find((x) => x.req === res.request());
+    if (!e) return;
+    try { const b = await res.json(); e.result = b?.result ?? null; e.error = b?.error?.status ?? null; } catch { e.result = null; e.error = 'unreadable'; }
+    try { onResult(e); } catch { /* tracking failures surface through the cleanup-tracking row */ }
+  });
+  const of = (name, goalId) => all.filter((x) => x.name === name && (goalId === undefined || x.data?.goalId === goalId));
+  return { of, last: (name, goalId) => of(name, goalId).filter((x) => x.result !== undefined).at(-1) ?? null, sent: (name, goalId) => of(name, goalId).length };
 }
 
 /** The product-written documents this run must clean up, added to the kit's manifest after its last write. Run-tagged paths only. */
