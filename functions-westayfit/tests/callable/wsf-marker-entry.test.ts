@@ -284,16 +284,33 @@ describe('wsfResolveMarker — a scan writes nothing', () => {
 });
 
 describe('wsfJoinViaMarker — the same admission rules as the join link', () => {
-  it('refuses signed out, unverified, and no profile, in that order, writing nothing', async () => {
+  it('refuses signed out, then no profile (verified or not), writing nothing', async () => {
     const uid = `${RUN}_gated`;
     const signedOut = await join(null, slug('flag'));
     expect(signedOut.ok === false && signedOut.error.code).toBe('unauthenticated');
-    const unverified = await join(uid, slug('flag'), false);
-    expect(unverified.ok === false && unverified.error.code).toBe('failed-precondition');
-    expect(unverified.ok === false && unverified.error.message).toBe('Verify your email before joining a community.');
-    const noProfile = await join(uid, slug('flag'));
-    expect(noProfile.ok === false && noProfile.error.message).toBe('Complete your profile before joining a community.');
+    for (const verified of [false, true]) {
+      const noProfile = await join(uid, slug('flag'), verified);
+      expect(noProfile.ok === false && noProfile.error.code).toBe('failed-precondition');
+      expect(noProfile.ok === false && noProfile.error.message).toBe('Complete your profile before joining a community.');
+    }
     expect(await membership(expoA, uid)).toBeUndefined();
+  });
+
+  it('KIOSK-UNVERIFIED-PARTICIPANT-1: an unverified account with a profile joins through an approved marker', async () => {
+    const uid = `${RUN}_unverified_joiner`;
+    await seedProfile(uid);
+    const first = await join(uid, slug('flag'), false);
+    expect(first.ok && first.value).toEqual({ groupId: expoA, goalId: goalA, alreadyMember: false });
+    const again = await join(uid, slug('flag'), false);
+    expect(again.ok && again.value.alreadyMember).toBe(true);
+    // Verifying later keeps the same membership.
+    const verified = await join(uid, slug('flag'), true);
+    expect(verified.ok && verified.value.alreadyMember).toBe(true);
+    expect((await db().collection('wsfMemberships').where('userId', '==', uid).get()).size).toBe(1);
+    // Every marker refusal still applies to an unverified caller.
+    for (const s of [slug('nope'), slug('bad-inactive'), slug('grp-private'), slug('goal-foreign')]) {
+      expectNotFound(await join(uid, s, false));
+    }
   });
 
   it('joins the named community with the standard membership shape, and a second tap is idempotent', async () => {

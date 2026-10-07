@@ -584,3 +584,53 @@ describe('a Champion can still revoke display after the goal closes', () => {
     expect(pulse.status).toBe('closed');
   });
 });
+
+describe('KIOSK-UNVERIFIED-PARTICIPANT-1 — member reads for an unverified account', () => {
+  function asUnverified(fn: unknown, uid: string, data: unknown) {
+    return (fn as { run: (r: never) => Promise<never> }).run({
+      data,
+      auth: { uid, token: { email_verified: false } },
+      rawRequest: { ip: '127.0.0.1', headers: {} },
+    } as never);
+  }
+
+  test('an active unverified member reads exactly what a verified member reads', async () => {
+    const champion = uniq('peChamp');
+    const groupId = await seedGroup(champion);
+    const goalId = await seedGoal(groupId, champion);
+    const uid = uniq('peUnverified');
+    await seedMember(groupId, uid);
+
+    await asUnverified(wsfContribute, uid, { goalId, attemptId: 'pe-unverified-attempt', count: 7 });
+    const listed = (await asUnverified(wsfListGoals, uid, { groupId })) as { goals: Array<{ goalId: string }> };
+    expect(listed.goals.map((g) => g.goalId)).toContain(goalId);
+    const mine = (await asUnverified(wsfMyContribution, uid, { goalId })) as { ownCredit: number };
+    expect(mine.ownCredit).toBe(7);
+    const pulse = (await asUnverified(wsfGoalPulse, uid, { goalId })) as { sharedTotal: number };
+    expect(pulse.sharedTotal).toBe(7);
+    // The verified view of the same account is identical.
+    expect(await call(wsfMyContribution, uid, { goalId })).toEqual(mine);
+  });
+
+  test('an unverified non-member or removed member is refused exactly as a verified one is', async () => {
+    const champion = uniq('peChamp');
+    const groupId = await seedGroup(champion);
+    const goalId = await seedGoal(groupId, champion);
+    const stranger = uniq('peUnverifiedStranger');
+    const removed = uniq('peUnverifiedRemoved');
+    await seedMember(groupId, removed, 'removed');
+    const codeOf = (p: Promise<unknown>) => p.then(() => 'accepted', (e: HttpsError) => e.code);
+    for (const uid of [stranger, removed]) {
+      for (const [fn, data] of [
+        [wsfListGoals, { groupId }],
+        [wsfMyContribution, { goalId }],
+        [wsfGoalPulse, { goalId }],
+      ] as const) {
+        const asVerified = await codeOf(call(fn, uid, data));
+        const asUnverifiedCode = await codeOf(asUnverified(fn, uid, data));
+        expect(asVerified).not.toBe('accepted');
+        expect(asUnverifiedCode).toBe(asVerified);
+      }
+    }
+  });
+});
