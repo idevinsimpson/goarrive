@@ -2,15 +2,16 @@
  * CONTENTION under the one-time target-crossing event.
  *
  * MEMBER-TRUTH-BACKEND-1. Before a goal crosses its target, every
- * wsfContribute transaction reads and writes the goal's crossing gate
- * (wsfGoalCrossingGates) so it can decide, from an authoritative before and
- * after, whether THIS attempt crossed. That serialises pre-crossing
- * contributions on one document, so this file measures what it costs: N
- * simultaneous, unique, valid attempts on one below-target goal (N = 20 and
- * N = 50), for a goal whose gate was opened with it (every goal wsfCreateGoal
- * creates) and for a goal whose gate is built lazily from the shards (a goal
- * from before the gate), and the same N on a goal that has already crossed
- * (the single-shard path, which never touches the gate) as the baseline.
+ * wsfContribute transaction draws on ONE of ten headroom budget slots
+ * (wsfGoalCrossingGates/{goal}/slots) and escalates to all ten only when its
+ * count does not fit, so it can decide, from the authoritative headroom,
+ * whether THIS attempt crossed — without one common written document. This
+ * file measures what that costs: N simultaneous, unique, valid attempts on
+ * one below-target goal (N = 20 and N = 50), for a goal whose gate was opened
+ * with it (every goal wsfCreateGoal creates) and for a goal whose gate is
+ * built lazily from the shards (a goal from before the gate), and the same N
+ * on a goal that has already crossed (the single-shard path, which never
+ * touches the gate) as the baseline.
  *
  * What is pinned, per batch:
  *   • every attempt is accepted after Firestore's normal transaction retries —
@@ -87,7 +88,14 @@ async function seedGoal(target: number, gateAtCreation: boolean): Promise<{ goal
     createdAt: new Date(),
   });
   if (gateAtCreation) {
-    await getFirestore().doc(`wsfGoalCrossingGates/${ref.id}`).set({ total: 0, crossed: false, crossedAttemptId: null });
+    // The exact shape wsfCreateGoal writes: an open header and the whole
+    // target split across the ten slots.
+    const db = getFirestore();
+    await db.doc(`wsfGoalCrossingGates/${ref.id}`).set({ crossed: false, crossedAttemptId: null });
+    const base = Math.floor(target / 10);
+    for (let i = 0; i < 10; i++) {
+      await db.doc(`wsfGoalCrossingGates/${ref.id}/slots/${i}`).set({ budget: base + (i < target - base * 10 ? 1 : 0) });
+    }
   }
   return { goalId: ref.id, communityGroupId };
 }
@@ -200,7 +208,7 @@ describe('wsfContribute — contention around the target crossing', () => {
       expect(await shardSum(goalId)).toBe(2 * n * count);
       // The gate was not touched after the crossing.
       const gateAfter = (await getFirestore().doc(`wsfGoalCrossingGates/${goalId}`).get()).data() as Record<string, unknown>;
-      expect(gateAfter.total).toBe(gate.total);
+      expect(gateAfter).toEqual(gate);
     }, 180_000);
   }
 });

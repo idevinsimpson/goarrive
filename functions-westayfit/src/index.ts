@@ -2875,50 +2875,84 @@ async function sumGoalShards(goalId: string): Promise<number> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// THE CROSSING GATE (MEMBER-TRUTH-BACKEND-1).
+// THE CROSSING GATE (MEMBER-TRUTH-BACKEND-1) — a DISTRIBUTED HEADROOM BUDGET.
 //
-// `wsfGoalCrossingGates/{goalId}` holds the goal's exact shared total for as
-// long as the goal has NOT crossed its target, so the contribution that takes
-// it from below the target to at or beyond it is known INSIDE the transaction
-// that records it — from an authoritative before and after, never from a
-// racing post-commit read of the ten shards.
+// The fresh Together crossing must be decided inside the transaction that
+// records it, from an authoritative before and after — and an expo burst
+// must not queue every pre-crossing contribution on one document. So the
+// goal's remaining HEADROOM (target − shared total) is held in ten budget
+// slots, `wsfGoalCrossingGates/{goalId}/slots/{0..9}`, beside one header,
+// `wsfGoalCrossingGates/{goalId}` = { crossed, crossedAttemptId }.
 //
-//   • It is read and written only while `goal.reachedAt` is unset. The moment
-//     a contribution crosses, the same commit sets `reachedAt`, and every
-//     later contribution skips the gate entirely: the post-target hot path is
-//     the single-shard path it always was.
-//   • It is created lazily, by the first pre-crossing contribution, from ONE
-//     in-transaction read of the ten shards (the pre-contribution total), so
-//     it starts exactly equal to them; this contribution is then added once.
-//   • Only two code paths move a goal's shards — performContribution and
-//     wsfAdjustGoal — and both move an OPEN gate in the same transaction as
-//     the shard write, so the gate cannot drift from the shards.
-//   • `crossed` is permanent. A downward correction and a later re-crossing
-//     never open it again: one goal, one first crossing.
+// THE INVARIANT, while the gate is open: the ten budgets are non-negative
+// integers and sum EXACTLY to target − shardTotal (> 0).
+//
+//   • A contribution reads the header (shared, never written on this path)
+//     and ITS OWN slot, chosen deterministically from (uid, attemptId). If
+//     its count is STRICTLY below that slot's budget it cannot reach the
+//     target (count < slot ≤ headroom), so it decrements only that slot, in
+//     the same commit as its shard write. Ten slots, ten writers' worth of
+//     parallelism, and no common written document.
+//   • Otherwise it ESCALATES in the same transaction: it reads all ten slots
+//     (the complete headroom H). count ≥ H → it is the crossing: it closes
+//     the header naming itself, zeroes the slots and writes the goal's one
+//     event. count < H → it consumes exactly its count and re-splits the
+//     remaining H − count evenly, so no slot goes negative and later
+//     contributions find room again.
+//   • The gate is created with the goal (wsfCreateGoal), or — for a goal from
+//     before the gate — once, by the first pre-crossing contribution, from
+//     the ten shards read in that transaction. Concurrent initialisers
+//     contend on the header and only one commits.
+//   • Corrections (wsfAdjustGoal, the only other path that moves the shards)
+//     re-split the slots from the authoritative projected total in their own
+//     transaction. A correction never earns the crossing: reaching the
+//     target that way closes the gate with no attempt and no `reachedAt`.
+//   • `crossed` is permanent, and once `reachedAt` is set nothing reads the
+//     gate again: the post-target path is the single-shard path it was.
 //
 // Admin-SDK only: the client rules' WSF catch-all denies the collection.
 // ─────────────────────────────────────────────────────────────────────────────
 
-type CrossingGateDoc = {
-  total: number;
-  crossed: boolean;
-  crossedAttemptId: string | null;
-};
+const CROSSING_SLOT_COUNT = 10;
+
+type CrossingGateHeader = { crossed: boolean; crossedAttemptId: string | null };
 
 function crossingGateRef(goalId: string) {
   return getFirestore().doc(`wsfGoalCrossingGates/${goalId}`);
 }
 
-/** A stored gate is used only when its shape is exact; anything else is rebuilt from the shards. */
-function readCrossingGate(snap: FirebaseFirestore.DocumentSnapshot): CrossingGateDoc | null {
-  if (!snap.exists) return null;
-  const d = snap.data() as Partial<CrossingGateDoc>;
-  if (typeof d.total !== 'number' || !Number.isFinite(d.total) || typeof d.crossed !== 'boolean') return null;
-  return {
-    total: d.total,
-    crossed: d.crossed,
-    crossedAttemptId: typeof d.crossedAttemptId === 'string' ? d.crossedAttemptId : null,
-  };
+function crossingSlotRef(goalId: string, slot: number) {
+  return getFirestore().doc(`wsfGoalCrossingGates/${goalId}/slots/${slot}`);
+}
+
+/** The slot an attempt draws on: deterministic, so a retry draws on the same one. */
+function crossingSlotFor(uid: string, attemptId: string): number {
+  return createHash('sha256').update(`${uid}:${attemptId}`).digest().readUInt32BE(0) % CROSSING_SLOT_COUNT;
+}
+
+function readGateHeader(snap: FirebaseFirestore.DocumentSnapshot | null): CrossingGateHeader | null {
+  if (!snap || !snap.exists) return null;
+  const d = snap.data() as Partial<CrossingGateHeader>;
+  if (typeof d.crossed !== 'boolean') return null;
+  return { crossed: d.crossed, crossedAttemptId: typeof d.crossedAttemptId === 'string' ? d.crossedAttemptId : null };
+}
+
+/** A slot budget is trusted only as a non-negative integer. */
+function readSlotBudget(snap: FirebaseFirestore.DocumentSnapshot | null): number | null {
+  if (!snap || !snap.exists) return null;
+  const b = (snap.data() as { budget?: unknown }).budget;
+  return typeof b === 'number' && Number.isInteger(b) && b >= 0 ? b : null;
+}
+
+/** Split a headroom into ten non-negative integer budgets that sum to it exactly. */
+function splitHeadroom(headroom: number): number[] {
+  const base = Math.floor(headroom / CROSSING_SLOT_COUNT);
+  const rest = headroom - base * CROSSING_SLOT_COUNT;
+  return Array.from({ length: CROSSING_SLOT_COUNT }, (_, i) => base + (i < rest ? 1 : 0));
+}
+
+function headroomOf(target: number, total: number): number {
+  return target > 0 ? Math.max(target - total, 0) : 0;
 }
 
 function shardTotalOf(snaps: FirebaseFirestore.DocumentSnapshot[]): number {
@@ -3267,15 +3301,17 @@ export const wsfCreateGoal = onCall<CreateGoalRequest>(
         repeatPolicy,
         createdAt: FieldValue.serverTimestamp(),
       });
-      // THE CROSSING GATE, opened with the goal at an exact zero: a new goal
-      // has no shards yet, so its first contributions never pay the one-time
-      // shard sum that builds a gate lazily.
+      // THE CROSSING GATE, opened with the goal: a new goal has no shards,
+      // so its whole target is the headroom, split across the ten slots, and
+      // its first contributions never pay the one-time shard sum.
       tx.set(crossingGateRef(goalRef.id), {
-        total: 0,
         crossed: false,
         crossedAttemptId: null,
         updatedAt: FieldValue.serverTimestamp(),
       });
+      splitHeadroom(headroomOf(target, 0)).forEach((budget, i) =>
+        tx.set(crossingSlotRef(goalRef.id, i), { budget })
+      );
     });
 
     return { goalId: goalRef.id };
@@ -3921,13 +3957,15 @@ async function performContribution(args: {
       // not crossed: once `reachedAt` is set nothing here reads it again.
       const gateRef = crossingGateRef(goalId);
       const gateOpenCandidate = goal.reachedAt == null;
-      const [contribSnap, memberTotalSnap, membershipSnap, claimSnap, gateSnap] =
+      const ownSlot = crossingSlotFor(uid, attemptId);
+      const [contribSnap, memberTotalSnap, membershipSnap, claimSnap, gateSnap, ownSlotSnap] =
         await Promise.all([
           tx.get(contribRef),
           tx.get(memberTotalRef),
           tx.get(membershipRef),
           tx.get(claimRef),
           gateOpenCandidate ? tx.get(gateRef) : Promise.resolve(null),
+          gateOpenCandidate ? tx.get(crossingSlotRef(goalId, ownSlot)) : Promise.resolve(null),
         ]);
 
       // Idempotency wins over closure, window end, AND membership drift.
@@ -4061,44 +4099,67 @@ async function performContribution(args: {
         );
       }
 
-      // ── THE CROSSING DECISION, from an authoritative before and after ──
+      // ── THE CROSSING DECISION, from the authoritative headroom ──────────
       //
       // Still before any write (the transaction's read-before-write rule).
-      // A gate that does not exist yet is built from ONE read of the ten
-      // shards: that sum IS the shared total before this contribution, and
-      // this contribution is added to it exactly once below. A goal already
-      // standing at or beyond its target when its gate is first built (a
-      // goal from before the gate) is marked crossed with no attempt and no
-      // `reachedAt`: it never receives a dated event it cannot honestly
-      // carry, and it never celebrates.
-      let gateWrite: CrossingGateDoc | null = null;
+      // See THE CROSSING GATE for the invariant this keeps.
+      let headerWrite: CrossingGateHeader | null = null;
+      // All ten budgets when this transaction knows them all (initialised or
+      // escalated) — then all ten are written; otherwise only `ownSlotWrite`.
+      let allBudgets: number[] | null = null;
+      let ownSlotWrite: number | null = null;
       let crossedNow = false;
+      let reachedSharedTotal = 0;
       if (gateOpenCandidate) {
-        let gate = gateSnap ? readCrossingGate(gateSnap) : null;
-        if (!gate) {
+        let header = readGateHeader(gateSnap);
+        const readShardHeadroom = async (): Promise<number> => {
           const shardSnaps = await Promise.all(
             Array.from({ length: GOAL_SHARD_COUNT }, (_, i) => tx.get(goalShardRef(goalId, i)))
           );
-          const before = shardTotalOf(shardSnaps);
-          gate = {
-            total: before,
-            crossed: goal.target > 0 && before >= goal.target,
-            crossedAttemptId: null,
-          };
+          return headroomOf(goal.target, shardTotalOf(shardSnaps));
+        };
+        if (!header) {
+          // A goal from before the gate: built ONCE, from the shards, here.
+          const headroom = await readShardHeadroom();
+          header = { crossed: headroom === 0, crossedAttemptId: null };
+          headerWrite = header;
+          // Already at or beyond the target: closed with no attempt and no
+          // `reachedAt` — it never receives a dated event it cannot carry.
+          allBudgets = headroom === 0 ? splitHeadroom(0) : splitHeadroom(headroom);
         }
-        if (!gate.crossed) {
-          const before = gate.total;
-          const after = before + count;
-          crossedNow = goal.target > 0 && before < goal.target && after >= goal.target;
-          gateWrite = {
-            total: after,
-            crossed: crossedNow,
-            crossedAttemptId: crossedNow ? attemptId : null,
-          };
-        } else if (!gateSnap?.exists || !readCrossingGate(gateSnap)) {
-          // Freshly built, already beyond the target: record that once so
-          // the shards are not summed again on every contribution.
-          gateWrite = gate;
+        if (!header.crossed) {
+          const own = allBudgets ? allBudgets[ownSlot]! : readSlotBudget(ownSlotSnap);
+          if (own !== null && count < own) {
+            // FITS: cannot reach the target. Only this slot moves.
+            if (allBudgets) allBudgets[ownSlot] = own - count;
+            else ownSlotWrite = own - count;
+          } else {
+            // ESCALATE: the complete headroom, in this transaction.
+            if (!allBudgets) {
+              const others = await Promise.all(
+                Array.from({ length: CROSSING_SLOT_COUNT }, (_, i) =>
+                  i === ownSlot ? Promise.resolve(ownSlotSnap) : tx.get(crossingSlotRef(goalId, i))
+                )
+              );
+              const budgets = others.map((snap) => readSlotBudget(snap));
+              allBudgets = budgets.every((b) => b !== null)
+                ? (budgets as number[])
+                : splitHeadroom(await readShardHeadroom());
+            }
+            const headroom = allBudgets.reduce((sum, b) => sum + b, 0);
+            if (headroom > 0 && count >= headroom) {
+              // THIS attempt takes the total from below the target to at or
+              // beyond it. It alone is the crossing.
+              crossedNow = true;
+              reachedSharedTotal = goal.target - headroom + count;
+              allBudgets = splitHeadroom(0);
+              headerWrite = { crossed: true, crossedAttemptId: attemptId };
+            } else if (headroom === 0) {
+              headerWrite = { crossed: true, crossedAttemptId: null };
+            } else {
+              allBudgets = splitHeadroom(headroom - count);
+            }
+          }
         }
       }
 
@@ -4125,16 +4186,21 @@ async function performContribution(args: {
         { merge: true }
       );
 
-      // The gate moves in the SAME commit as the shard, so the two cannot
+      // The budget moves in the SAME commit as the shard, so the two cannot
       // disagree; and the crossing attempt writes the goal's one event here,
       // naming itself, instead of a post-commit observer guessing.
-      if (gateWrite) {
-        tx.set(gateRef, { ...gateWrite, updatedAt: FieldValue.serverTimestamp() });
+      if (headerWrite) {
+        tx.set(gateRef, { ...headerWrite, updatedAt: FieldValue.serverTimestamp() });
       }
-      if (crossedNow && gateWrite) {
+      if (allBudgets) {
+        allBudgets.forEach((budget, i) => tx.set(crossingSlotRef(goalId, i), { budget }));
+      } else if (ownSlotWrite !== null) {
+        tx.set(crossingSlotRef(goalId, ownSlot), { budget: ownSlotWrite });
+      }
+      if (crossedNow) {
         tx.update(goalRef, {
           reachedAt: FieldValue.serverTimestamp(),
-          reachedSharedTotal: gateWrite.total,
+          reachedSharedTotal,
           reachedAttemptId: attemptId,
         });
       }
@@ -5546,8 +5612,8 @@ export const wsfAdjustGoal = onCall<AdjustGoalRequest>(
       }
 
       // THE OPEN CROSSING GATE follows the shards exactly. This transaction
-      // has just read all ten, so the gate is set to the AUTHORITATIVE
-      // projected total rather than nudged by the delta: it cannot drift.
+      // has just read all ten shards, so the slots are re-split from the
+      // AUTHORITATIVE projected headroom rather than nudged by the delta.
       // A correction never credits an attempt, never celebrates and never
       // dates an event: a correction is not a moment anyone moved through.
       // If it is what takes the total to or past the target, the gate simply
@@ -5555,15 +5621,21 @@ export const wsfAdjustGoal = onCall<AdjustGoalRequest>(
       // contribution, downward correction or re-crossing can produce a
       // "first" crossing afterwards. No gate yet: nothing to do, the first
       // contribution builds it from these same shards.
-      const openGate = adjustGateSnap ? readCrossingGate(adjustGateSnap) : null;
+      const openGate = readGateHeader(adjustGateSnap);
       if (delta !== 0 && openGate && !openGate.crossed) {
-        const correctionCrossed = goal.target > 0 && projectedSharedTotal >= goal.target;
-        tx.set(adjustGateRef, {
-          total: projectedSharedTotal,
-          crossed: correctionCrossed,
-          crossedAttemptId: null,
-          updatedAt: FieldValue.serverTimestamp(),
-        });
+        const headroom = headroomOf(goal.target, projectedSharedTotal);
+        if (headroom === 0) {
+          tx.set(adjustGateRef, {
+            crossed: true,
+            crossedAttemptId: null,
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+        }
+        // Blind writes of all ten: a contribution that read its slot before
+        // this commit conflicts with it and retries against the new split.
+        splitHeadroom(headroom).forEach((budget, i) =>
+          tx.set(crossingSlotRef(goalId, i), { budget })
+        );
       }
 
       // Immutable audit doc. Written once; never updated.
