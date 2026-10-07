@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "44db51d6f82056934c58825ec122ce5523e4689e0344404c7d5d69c257a1ac12",
-  "eventCount": 567,
+  "ledgerHead": "26ba44ecd1baf2e09c9ea83aca7db1dfcfae826f9ba7a4e330ef15a0c1732f25",
+  "eventCount": 569,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1252,7 +1252,7 @@
       },
       "label": "Unblock real member Together crossing and privacy-safe public preview labels for the shared Firebase backend and Lovable Web Twin",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -1266,7 +1266,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         "*"
@@ -1285,7 +1285,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6029989725
+          "id": 6030044447
         }
       },
       "review": {
@@ -3256,11 +3256,14 @@
       "packet": "MEMBER-TRUTH-BACKEND-1",
       "worker": "W9",
       "reason": "release",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6030038232
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6030044447
+      }
     }
   },
   "fastpath": {
