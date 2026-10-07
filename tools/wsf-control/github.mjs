@@ -58,6 +58,10 @@ export function gitHubClient({ token, repo, fetchImpl = globalThis.fetch }) {
     }
   }
   const r = `/repos/${repo}`;
+  async function readComment(id) {
+    const c = await call('GET', `${r}/issues/comments/${id}`, null, `comment ${id}`);
+    return c && { id: c.id, body: c.body ?? '', author: c.user?.login ?? null, association: c.author_association ?? null, createdAt: c.created_at ?? null, updatedAt: c.updated_at ?? null };
+  }
   return {
     async pull(n) {
       const pr = await call('GET', `${r}/pulls/${n}`, null, `pull ${n}`);
@@ -112,10 +116,7 @@ export function gitHubClient({ token, repo, fetchImpl = globalThis.fetch }) {
       const x = await call('GET', `${r}/actions/workflows/${file}/runs?per_page=${n}`, null, 'workflow runs');
       return (x?.workflow_runs ?? []).map((w) => ({ id: w.id, status: w.status, conclusion: w.conclusion, createdAt: w.created_at, headSha: w.head_sha, title: w.display_title ?? null }));
     },
-    async comment(id) {
-      const c = await call('GET', `${r}/issues/comments/${id}`, null, `comment ${id}`);
-      return c && { id: c.id, body: c.body ?? '', author: c.user?.login ?? null, association: c.author_association ?? null, createdAt: c.created_at ?? null, updatedAt: c.updated_at ?? null };
-    },
+    comment: readComment,
     /**
      * The newest `count` comments of an issue or PR conversation, oldest first (the endpoint pages oldest-first).
      *
@@ -167,7 +168,37 @@ export function gitHubClient({ token, repo, fetchImpl = globalThis.fetch }) {
       const c = await call('POST', `${r}/issues/${issue}/comments`, { body }, `create comment on #${issue}`);
       return { id: c.id };
     },
-    async editComment(id, body) { await call('PATCH', `${r}/issues/comments/${id}`, { body }, `edit comment ${id}`); },
+    /**
+     * Edit one comment (the shadow CURRENT), sending the PATCH exactly ONCE (CONTROL-CURRENT-PATCH-ACK-1).
+     *
+     * A 2xx is the acknowledgment: the returned comment is never read or parsed (run 37661819992 lost the socket in
+     * this call), its unread body is cancelled and any cancel error swallowed. 404 and every other non-success status
+     * refuse, as an HTTP answer, never as a transport failure.
+     *
+     * When the PATCH fails in TRANSPORT (isTransportError) no acknowledgment exists: the server may or may not have
+     * applied it. The edit is never sent again. Instead the comment is read back once through the ordinary GET path,
+     * and the edit counts as made only when that read returns this comment id with exactly this body. A missing,
+     * different, newer or unreadable comment leaves it unconfirmed: an error is thrown and nothing claims success.
+     * Any other exception (a programmer error) is thrown as it is. Returns 'acknowledged' or 'confirmed-by-readback'.
+     */
+    async editComment(id, body) {
+      const what = `edit comment ${id}`;
+      let res;
+      try {
+        res = await fetchImpl(`${API}${r}/issues/comments/${id}`, { method: 'PATCH', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ body }) });
+      } catch (e) {
+        if (!isTransportError(e)) throw e;
+        let back = null;
+        try { back = await readComment(id); } catch { back = null; }
+        if (back && back.id === id && back.body === body) return 'confirmed-by-readback';
+        const err = new GitHubError('unconfirmed', what);
+        err.message = `GitHub ${what}: the PATCH acknowledgment was lost and the read-back ${back ? 'shows other content' : 'could not read the comment'}; the edit is unconfirmed`;
+        throw err;
+      }
+      try { await res.body?.cancel?.(); } catch { /* the acknowledgment is the status; the unread body is discarded */ }
+      if (!res.ok) throw new GitHubError(res.status, what);
+      return 'acknowledged';
+    },
     /** The numeric user id of an App's bot account, for its commit email. */
     async botUserId(slug) {
       const u = await call('GET', `/users/${encodeURIComponent(`${slug}[bot]`)}`, null, 'bot user');
