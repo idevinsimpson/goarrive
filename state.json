@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "751506eb1234f7e75e846ca31abadcfbd472acb317223ed6bb1c8ce0887cf01f",
-  "eventCount": 599,
+  "ledgerHead": "6c2e946865bd0668e5f38016fd014cc842ac49256107497715eeca2d5a52e326",
+  "eventCount": 600,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1458,8 +1458,8 @@
       },
       "label": "Complete the existing automatic Lovable delta receiver so Devin never has to relay native handoffs",
       "origin": "ledger",
-      "phase": "ACKED",
-      "phaseBeforeBlock": null,
+      "phase": "BLOCKED",
+      "phaseBeforeBlock": "ACKED",
       "queueIndexBeforeBlock": null,
       "inbox": 396,
       "pr": null,
@@ -1485,7 +1485,14 @@
         "tools/wsf-control/app-token.mjs",
         ".github/workflows/wsf-control-reconcile.yml"
       ],
-      "blockedBy": [],
+      "blockedBy": [
+        {
+          "external": "W3-SOURCE-EDIT-CONSENT",
+          "condition": "W3 session denies edits to the two remaining reserved receiver files",
+          "owner": "Devin",
+          "unblockWhen": "Approve those two file edits in the existing W3 Claude session"
+        }
+      ],
       "importRefs": [],
       "authority": {
         "queued": {
@@ -1499,7 +1506,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6035668980
+          "id": 6040736205
         }
       },
       "review": {
@@ -3431,7 +3438,8 @@
       "ack": {
         "kind": "comment",
         "id": 6035668980
-      }
+      },
+      "superseded": true
     },
     "664c6548f98211b4e27d633e2f4b591e8fbbbe66a97113ff9dff54aa1deddc73": {
       "packet": "MEMBER-PREVIEW-LABEL-1",
