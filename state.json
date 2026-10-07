@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "4c6b666e16513cb7744665621cb0d26a4b7b90fe2e261d7193c6ee9129bcabdc",
-  "eventCount": 563,
+  "ledgerHead": "28c0c732cecb031055021af9f34c67bea247bb3fd862a71f4abbad338d082016",
+  "eventCount": 564,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -557,7 +557,7 @@
       },
       "label": "Evergreen physical marker entry: permanent QR resolves to configured community and goal, then phone or optional kiosk participation",
       "origin": "ledger",
-      "phase": "ACCEPTED",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -569,7 +569,7 @@
         "subjectSha": "1545f36deb726da340e136a54ed6b353bde682a0",
         "prHeadSha": "1545f36deb726da340e136a54ed6b353bde682a0",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "09cc4cb1a2c4732dac5bae0372fa6c54b54935be"
       },
       "proof": null,
       "served": null,
@@ -596,8 +596,8 @@
           "id": 6029380297
         },
         "lastTransition": {
-          "kind": "comment",
-          "id": 6029380297
+          "kind": "pull_request",
+          "id": 583
         }
       },
       "review": {
