@@ -493,6 +493,26 @@ describe('one place per account, per EVENT', () => {
     // FIFO: Ann joined first, on the OTHER activity, and is called first.
     expect(called.assigned?.calledName).toBe('Ann');
   }, 30_000);
+
+  test('KIOSK-EXPECTED-TURN-1: a combined event’s Record receipt is scoped to the ACTIVITY recorded, in its own unit — never the parent’s total', async () => {
+    const { groupId, squats, pushups, station } = await combinedScene();
+    const a = await member(groupId, 'ann');
+    const ann = (await callAs(wsfJoinTurnLine, a, { goalId: pushups, calledName: 'Ann' })) as { entryId: string };
+    await callNext(station);
+    await callAs(wsfTurnReady, a, { entryId: ann.entryId });
+    await anon(wsfStartTurn, await bound(station));
+    const done = (await anon(wsfCompleteTurn, await bound(station, { count: 9 }))) as {
+      entryId: string;
+      receipt: { goalId: string; unit: string; addedCount: number; sharedTotal: number | null };
+    };
+    expect(done.entryId).toBe(ann.entryId);
+    expect(done.receipt.goalId).toBe(pushups);
+    expect(done.receipt.goalId).not.toBe(squats);
+    expect(done.receipt.unit).toBe('push-ups');
+    expect(done.receipt.addedCount).toBe(9);
+    // This activity had no other contribution: its own total is exactly 9.
+    expect(done.receipt.sharedTotal).toBe(9);
+  }, 40_000);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -858,10 +878,11 @@ describe('the result, and what is left afterwards', () => {
     // nobody else.
     const mine = (await callAs(wsfMyTurn, a, { goalId })) as {
       turn: unknown;
-      receipt: { amount: number; unit: string; goalId: string } | null;
+      receipt: { amount: number; unit: string; goalId: string; entryId: string | null } | null;
     };
     expect(mine.turn).toBeNull();
-    expect(mine.receipt).toEqual({ amount: 12, unit: 'squats', goalId });
+    // KIOSK-EXPECTED-TURN-1: the receipt names the turn it was recorded for.
+    expect(mine.receipt).toEqual({ amount: 12, unit: 'squats', goalId, entryId: entry.entryId });
 
     // Their place came back: they may get in line again, at the back.
     const rejoined = (await callAs(wsfJoinTurnLine, a, {

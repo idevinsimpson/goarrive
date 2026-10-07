@@ -1,6 +1,6 @@
 # KIOSK-EXPECTED-TURN-1 — a station command names the turn it is for
 
-Status: **delivered for review**. This is not accepted, not integrated and not staged. Source only, stacked on #586 (`a17ee3e2`, accepted but not merged).
+Status: **successor delivered for review** (handback: W4 finding 6044506214 and the owner receipt delta in #365 6044494616). This is not accepted, not integrated and not staged. Source only. It started stacked on #586 (`a17ee3e2`), and #586 has since merged into `claude/wsf-app-shell`.
 Emulator only (`demo-wsf-local`). No deploy, rules, index, IAM, secret, provider or UI change was made.
 
 ## The defect
@@ -45,6 +45,53 @@ A scratch probe proves this on the base (it was never committed). Setup: A finis
 - The shape is unchanged except for `assigned.turnRef`. `wsfTurnState` still has its five top-level keys and no array at any depth.
 - `assigned` now has these keys: `activityTitle, activityUnit, calledName, code, readySecondsLeft, state, turnRef`.
 
+#### `wsfCompleteTurn`: the completion's own receipt (additive)
+
+The response is the hall state plus `recorded` and `anyoneWaiting`, exactly as before, and **adds** these fields:
+
+```ts
+entryId: string;            // the entry THIS Record completed
+receipt: {
+  entryId: string;          // same as above
+  goalId: string;           // the ACTIVITY goal recorded (a combined event's child, never the parent)
+  addedCount: number;       // the attempt's recorded amount (on a replay: the ORIGINAL amount)
+  unit: string;             // goalId's own unit
+  alreadyRecorded: boolean;
+  sharedTotal: number | null;  // canonical post-commit observation of goalId's own total, in `unit`
+  target: number | null;
+  status: 'active' | 'closed' | ... | null;
+  crossedTarget: boolean | null; // canonical per-attempt value, forwarded as is (never true today)
+};
+```
+
+Example fixture, from an isolated goal with no other contribution and +7 recorded:
+
+```json
+{ "entryId": "<entry>", "receipt": { "entryId": "<entry>", "goalId": "<goal>", "addedCount": 7, "unit": "squats",
+  "alreadyRecorded": false, "sharedTotal": 7, "target": 5000, "status": "active", "crossedTarget": false } }
+```
+
+**Attribution.** `entryId` is the entry the server found by the `expectedTurn` the Record carried. It is never whoever the hall now serves, and never anything the caller names. A delayed or retried Record for A returns **A's** `entryId` and A's original `addedCount` with `alreadyRecorded: true`, while the hall fields in the same answer show B.
+
+**What is in the receipt:**
+- It is a whitelist. There is no uid, no `ownCredit`, no profile and no email. The member's contribution response is not forwarded whole to the shared screen.
+- It appears **only** in this credential-authorized answer. It is never in `wsfTurnState`, the pulse, the public QR, logs or rendered hall attributes, and nothing personal is stored on the station.
+
+**Honest absence:**
+- `sharedTotal`, `target`, `status` and `crossedTarget` are given only when the goal's aggregate may be shown on a public display. That is decided by `evaluateGoalAggregateAccess(goal, null)`, the same display route the pulse uses, and also requires that the canonical contribution returned them.
+- Otherwise they are `null`, **never 0**.
+- No before/after pair is derived: `before = sharedTotal − addedCount` is not computed and must not be computed by a caller.
+- On a replay, `sharedTotal` is today's observation and `addedCount`/`crossedTarget` are the attempt's stored values.
+- `crossedTarget` is not a goal-achievement claim. No new crossing algorithm is added (MEMBER-TRUTH-BACKEND-1 / TOGETHER-CROSSING-DESIGN-DECISION hold).
+
+#### `wsfMyTurn`: the phone's own receipt
+
+`receipt` gains `entryId: string | null` (`{ amount, unit, goalId, entryId }`), read from the receipt already stored under the caller's own uid.
+- A phone that lost an answer matches it to **that** entry, not to any entry on the goal.
+- A receipt stored before the field existed reports `entryId: null`.
+- The legacy `amount`/`unit`/`goalId` handling is unchanged.
+- The receipt is only ever the caller's own.
+
 ### Errors (new)
 
 | Code | Message | When |
@@ -72,13 +119,15 @@ Existing errors are unchanged: closed (`This goal is closed.`), not ready, nobod
 
 The server rejects old clients. Until this update ships, an old station screen gets `This screen needs an update before it can run a turn.` on Start, Record and Cancel.
 
-- `apps/westayfit/app/station/[goalId].tsx` → `runTurnAction`:
-  - Keep the last non-null `assigned.turnRef` seen from any response, **and retain it after `assigned` clears** so that a lost Record can be retried.
-  - Send it as `expectedTurn` with `wsfStartTurn`, `wsfCompleteTurn` and `wsfCancelTurn`.
-  - Clear it only when a new `turnRef` arrives or the station unpairs.
+- `apps/westayfit/app/station/[goalId].tsx` → `runTurnAction`: **bind each operation, not the screen** (W4 finding 6044506214).
+  - When Start, Record or Cancel is pressed, capture the **current** `assigned.turnRef`, and for Record the count, into an **immutable pending operation**. Send it as `expectedTurn` (plus `count`).
+  - A retry of that operation, such as a lost answer or a timeout, resends **exactly the captured `expectedTurn` and count**. It never substitutes a newer `turnRef` that a later poll or Call next brought in.
+  - Keep the visible current turn (from `wsfTurnState`/responses) and any pending operation **separate**. The visible turn may advance to B while A's Record is still pending, and A's retry still sends A's ref.
+  - Discard a pending operation only once its own answer arrives: success, `alreadyRecorded`, or a definite refusal such as stale or not-running. Read `entryId`/`receipt` from **that** answer to show the result of the operation it belongs to.
+  - **The hazard this avoids:** a "newest-ref" client that retries A's lost Record with B's ref sends B's binding with A's count. The server cannot tell whose count it is, so it records A's count **to B**, and the goal counts it twice. Never retry with a ref the operation did not capture.
 - `apps/westayfit/app/queue/[goalId].tsx` and `src/followAlongSession.ts` reference the turn callables in comments only. They need a verification read but no request change. The phone uses `wsfCompleteMyTurn`, which is unchanged.
 - `tests-e2e/expo-attendee-journey.spec.ts` (station record and lost answer) drives the station UI. It will fail against this server until the station client sends `expectedTurn`, and it should be re-run with that client.
-- **Lovable:** any Lovable station surface that calls these three callables must send `expectedTurn` from `assigned.turnRef` in the same way. No Lovable call site was found in this repository.
+- **Lovable:** any Lovable station surface that calls these three callables must use the same per-operation binding. It must read a Record's result from that answer's `entryId`/`receipt`, never from the hall's `result`/`code`. No Lovable call site was found in this repository.
 
 **Deploy order** (when separately authorized — not part of this packet):
 
@@ -92,6 +141,8 @@ The server rejects old clients. Until this update ships, an old station screen g
   - `wsfTurnEntries.stationTurnRef` (new, server-written)
   - `wsfKioskStations.serving.turnRef` (new, server-written)
   - `assigned.turnRef` in station responses
+  - `wsfCompleteTurn` → `entryId`, `receipt` (additive; see the contract above)
+  - `wsfMyTurn` → `receipt.entryId` (additive)
 - **Unchanged:** no rules, index, provider, IAM or secret change. No new ledger, no automatic credit, no raffle, and no frontend authority.
 
 ## Proof
@@ -137,6 +188,29 @@ The new suite covers:
 - **The wrong member:** `not-found`, nothing recorded.
 - **A closed goal:** the right binding gets the closed sentence and nothing is recorded; a stale binding is still stale.
 - **W4's `wsfCreateGoal` gate:** an unverified caller gets `failed-precondition` "Verify your email before starting a goal." and no goal is written.
+
+### Successor proof (receipt delta + W4 finding)
+
+Added rows:
+- `wsf-kiosk-expected-turn.test.ts`:
+  - A's late result after B is called returns A's `entryId`/receipt alongside B's hall.
+  - An isolated goal returns exactly +7, with `sharedTotal` 7, target, status and `crossedTarget:false`, and exactly the whitelisted keys. No uid, `ownCredit` or email appear.
+  - A goal that is not display-authorized gives shared fields `null`, not 0.
+  - The receipt is absent from the hall, from the other station and from the pulse.
+  - **W4's row:** a lost Record retried with its own captured `(refA, 20)` while B is mid-turn gives A's receipt with `alreadyRecorded`, and B's total stays 0.
+  - The phone's receipt carries `entryId`, another member sees nothing, and a legacy stored receipt gives `entryId: null`.
+  - When the phone and the station race, the station's receipt names A and reports A's one amount.
+- `wsf-turn.test.ts`:
+  - A combined event's receipt is scoped to the activity goal and unit (push-ups 9), never the parent's.
+  - The phone receipt assertion now includes `entryId`.
+
+| Run | Result |
+|---|---|
+| The two turn suites on the previous head `a3f38e22` (fail-before) | **8 failed / 64 passed** (the 8 are the new receipt rows; the privacy-only row passes before and after, as a regression guard) |
+| The two turn suites after | **72 / 72** |
+| Full callable suite after | **32 suites, 581 / 581** |
+| Deploy-config | **17 / 17** |
+| `tsc --noEmit` | clean |
 
 ## Next
 

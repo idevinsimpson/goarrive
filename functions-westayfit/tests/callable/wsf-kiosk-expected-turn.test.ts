@@ -104,7 +104,33 @@ type TurnState = {
   result: { code: string; amount: number; unit: string } | null;
   waitingCount: number;
 };
-type Recorded = TurnState & { recorded: { amount: number; unit: string; alreadyRecorded: boolean } };
+type StationReceipt = {
+  entryId: string;
+  goalId: string;
+  addedCount: number;
+  unit: string;
+  alreadyRecorded: boolean;
+  sharedTotal: number | null;
+  target: number | null;
+  status: string | null;
+  crossedTarget: boolean | null;
+};
+type Recorded = TurnState & {
+  entryId: string;
+  receipt: StationReceipt;
+  recorded: { amount: number; unit: string; alreadyRecorded: boolean };
+};
+const RECEIPT_KEYS = [
+  'addedCount',
+  'alreadyRecorded',
+  'crossedTarget',
+  'entryId',
+  'goalId',
+  'sharedTotal',
+  'status',
+  'target',
+  'unit',
+];
 
 // ── synthetic fixtures ──────────────────────────────────────────────────────
 
@@ -129,7 +155,7 @@ async function seedCommunity(championUid: string): Promise<string> {
   return groupId;
 }
 
-async function seedGoal(groupId: string): Promise<string> {
+async function seedGoal(groupId: string, aggregateDisplayAuthorized = true): Promise<string> {
   const now = Date.now();
   const ref = getFirestore().collection('wsfGoals').doc();
   await ref.set({
@@ -143,7 +169,7 @@ async function seedGoal(groupId: string): Promise<string> {
     endsAt: Timestamp.fromDate(new Date(now + 6 * 86_400_000)),
     timezone: 'America/New_York',
     repeatPolicy: 'multiple',
-    aggregateDisplayAuthorized: true,
+    aggregateDisplayAuthorized,
   });
   return ref.id;
 }
@@ -157,10 +183,10 @@ async function enrol(goalId: string, championUid: string, slot: 1 | 2 = 1): Prom
   return (await anon(wsfStationClaimPairing, { pairingId: requested.pairingId })) as Station;
 }
 
-async function scene() {
+async function scene(aggregateDisplayAuthorized = true) {
   const championUid = uniq('champ');
   const groupId = await seedCommunity(championUid);
-  const goalId = await seedGoal(groupId);
+  const goalId = await seedGoal(groupId, aggregateDisplayAuthorized);
   const station = await enrol(goalId, championUid);
   return { groupId, goalId, championUid, station };
 }
@@ -295,6 +321,11 @@ describe('a late command for visitor A never reaches visitor B', () => {
 
     const late = await complete(t.station, t.aRef, 999);
     expect(late.recorded).toEqual({ amount: 20, unit: 'squats', alreadyRecorded: true });
+    // The completion's OWN receipt is A's — the entry it was for, A's original
+    // amount — while the hall in the same answer is B's.
+    expect(late.entryId).toBe(t.aEntry.entryId);
+    expect(late.receipt.entryId).toBe(t.aEntry.entryId);
+    expect(late.receipt).toMatchObject({ goalId: t.goalId, addedCount: 20, unit: 'squats', alreadyRecorded: true });
 
     expect(await contributions(t.goalId, t.a)).toHaveLength(1);
     expect(await memberTotal(t.goalId, t.a)).toBe(20);
@@ -618,7 +649,150 @@ describe('recovery and refusal', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 6. W4's verification-gate regression, unchanged
+// 6. THE COMPLETION'S OWN RECEIPT — whitelisted, honest, and only in the answer
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('the completion receipt', () => {
+  test('an isolated goal: +7 is exactly +7, the shared total is the canonical observation, and only whitelisted fields are present', async () => {
+    const { groupId, goalId, station } = await scene();
+    const a = await member(groupId, 'ann');
+    const aEntry = await join(goalId, a, 'Ann');
+    const ref = await callAndReady(station, a, aEntry.entryId);
+    await start(station, ref);
+
+    const done = await complete(station, ref, 7);
+    expect(done.entryId).toBe(aEntry.entryId);
+    expect(Object.keys(done.receipt).sort()).toEqual(RECEIPT_KEYS);
+    expect(done.receipt).toEqual({
+      entryId: aEntry.entryId,
+      goalId,
+      addedCount: 7,
+      unit: 'squats',
+      alreadyRecorded: false,
+      sharedTotal: 7,
+      target: 5000,
+      status: 'active',
+      crossedTarget: false,
+    });
+    // The own contribution record agrees.
+    const own = await contributions(goalId, a);
+    expect(own).toHaveLength(1);
+    expect(own[0]!.count).toBe(7);
+    // Nothing personal on a shared screen: no uid, no own credit, no profile.
+    const serialized = JSON.stringify(done);
+    expect(serialized).not.toContain(a);
+    expect(serialized).not.toContain('ownCredit');
+    expect(serialized).not.toContain('email');
+  }, 60_000);
+
+  test('a goal whose aggregate may not be shown on a display: the shared fields are null — never 0 — and the own count is still exact', async () => {
+    const { groupId, goalId, station } = await scene(false);
+    const a = await member(groupId, 'ann');
+    const aEntry = await join(goalId, a, 'Ann');
+    const ref = await callAndReady(station, a, aEntry.entryId);
+    await start(station, ref);
+
+    const done = await complete(station, ref, 4);
+    expect(done.receipt).toEqual({
+      entryId: aEntry.entryId,
+      goalId,
+      addedCount: 4,
+      unit: 'squats',
+      alreadyRecorded: false,
+      sharedTotal: null,
+      target: null,
+      status: null,
+      crossedTarget: null,
+    });
+  }, 60_000);
+
+  test('the receipt lives only in the Record answer: the hall, the phone’s turn view and the pulse carry no entry id or receipt', async () => {
+    const { groupId, goalId, station, championUid } = await scene();
+    const a = await member(groupId, 'ann');
+    const aEntry = await join(goalId, a, 'Ann');
+    const ref = await callAndReady(station, a, aEntry.entryId);
+    await start(station, ref);
+    await complete(station, ref, 5);
+
+    const hall = await state(station);
+    expect(Object.keys(hall).sort()).toEqual(['assigned', 'result', 'stationId', 'stationLabel', 'waitingCount']);
+    expect(JSON.stringify(hall)).not.toContain(aEntry.entryId);
+    expect(JSON.stringify(hall)).not.toContain('receipt');
+    const two = await enrol(goalId, championUid, 2);
+    expect(JSON.stringify(await state(two))).not.toContain(aEntry.entryId);
+    const pulse = await callAs(wsfGoalPulse, championUid, { goalId });
+    expect(JSON.stringify(pulse)).not.toContain(aEntry.entryId);
+  }, 60_000);
+
+  test('W4 6044506214: retrying a lost Record with ITS OWN captured binding while B is mid-turn returns A’s receipt and leaves B at zero', async () => {
+    const { groupId, goalId, station } = await scene();
+    const a = await member(groupId, 'ann');
+    const b = await member(groupId, 'ben');
+    const aEntry = await join(goalId, a, 'Ann');
+    const bEntry = await join(goalId, b, 'Ben');
+    const aRef = await callAndReady(station, a, aEntry.entryId);
+    await start(station, aRef);
+    // The pending operation, captured when Record was pressed: (aRef, 20).
+    const pending = { expectedTurn: aRef, count: 20 };
+    await complete(station, pending.expectedTurn, pending.count); // the answer is lost
+    const bRef = await callAndReady(station, b, bEntry.entryId);
+    await start(station, bRef);
+
+    const retry = await complete(station, pending.expectedTurn, pending.count);
+    expect(retry.entryId).toBe(aEntry.entryId);
+    expect(retry.receipt).toMatchObject({ entryId: aEntry.entryId, addedCount: 20, alreadyRecorded: true });
+    expect(retry.assigned?.calledName).toBe('Ben');
+    expect(await memberTotal(goalId, a)).toBe(20);
+    expect(await memberTotal(goalId, b)).toBe(0);
+    expect(await contributions(goalId, b)).toHaveLength(0);
+    expect((await entryOf(bEntry.entryId)).status).toBe('active');
+  }, 60_000);
+
+  test('the phone’s own receipt names the entry it was recorded for; a receipt stored before the field existed reports null, not a guess', async () => {
+    const { groupId, goalId, station } = await scene();
+    const a = await member(groupId, 'ann');
+    const aEntry = await join(goalId, a, 'Ann');
+    const ref = await callAndReady(station, a, aEntry.entryId);
+    await start(station, ref);
+    await complete(station, ref, 6);
+
+    const mine = (await callAs(wsfMyTurn, a, { goalId })) as {
+      receipt: { amount: number; unit: string; goalId: string; entryId: string | null } | null;
+    };
+    expect(mine.receipt).toEqual({ amount: 6, unit: 'squats', goalId, entryId: aEntry.entryId });
+
+    // Another member sees none of it.
+    const b = await member(groupId, 'ben');
+    const theirs = (await callAs(wsfMyTurn, b, { goalId })) as { receipt: unknown };
+    expect(theirs.receipt).toBeNull();
+
+    // Legacy: the stored receipt without entryId.
+    const { FieldValue } = await import('firebase-admin/firestore');
+    await getFirestore()
+      .doc(`wsfTurnReceipts/goal__${goalId}__${a}`)
+      .update({ entryId: FieldValue.delete() });
+    const legacy = (await callAs(wsfMyTurn, a, { goalId })) as { receipt: { entryId: string | null } | null };
+    expect(legacy.receipt).toEqual({ amount: 6, unit: 'squats', goalId, entryId: null });
+  }, 60_000);
+
+  test('the phone and the station racing: whichever lands second, the station’s receipt names A’s entry and reports A’s one amount', async () => {
+    const { groupId, goalId, station } = await scene();
+    const a = await member(groupId, 'ann');
+    const aEntry = await join(goalId, a, 'Ann');
+    const ref = await callAndReady(station, a, aEntry.entryId);
+    await start(station, ref);
+    const [phone, screen] = await Promise.all([
+      callAs(wsfCompleteMyTurn, a, { entryId: aEntry.entryId, count: 3 }) as Promise<{ receipt: { addedCount: number } }>,
+      complete(station, ref, 8),
+    ]);
+    expect(screen.receipt.entryId).toBe(aEntry.entryId);
+    expect(screen.receipt.addedCount).toBe(phone.receipt.addedCount);
+    expect(await contributions(goalId, a)).toHaveLength(1);
+  }, 60_000);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 7. W4's verification-gate regression, unchanged
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('wsfCreateGoal verification gate', () => {

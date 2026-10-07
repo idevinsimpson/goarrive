@@ -8792,8 +8792,11 @@ type MyTurnResponse = {
     /** True once a station has started this turn and bound its attempt. */
     attemptOpen: boolean;
   } | null;
-  /** Their own last recorded turn at this event, if any. */
-  receipt: { amount: number; unit: string; goalId: string } | null;
+  /** Their own last recorded turn at this event, if any. `entryId` names the
+   * turn it was recorded for (KIOSK-EXPECTED-TURN-1), so a phone that lost an
+   * answer matches it to THAT entry rather than to any entry on the goal; it is
+   * null on a receipt stored before the field existed. */
+  receipt: { amount: number; unit: string; goalId: string; entryId: string | null } | null;
 };
 
 export const wsfMyTurn = onCall<MyTurnRequest>(
@@ -8821,6 +8824,7 @@ export const wsfMyTurn = onCall<MyTurnRequest>(
           amount: typeof stored.amount === 'number' ? stored.amount : 0,
           unit: typeof stored.unit === 'string' ? stored.unit : '',
           goalId: typeof stored.goalId === 'string' ? stored.goalId : '',
+          entryId: normalizeStringId(stored.entryId),
         }
       : null;
 
@@ -9588,7 +9592,45 @@ type CompleteTurnRequest = {
   /** KIOSK-EXPECTED-TURN-1: the turn this result is for. Required. */
   expectedTurn?: unknown;
 };
+/**
+ * THE COMPLETION'S OWN RECEIPT (KIOSK-EXPECTED-TURN-1), for the turn this
+ * Record was FOR — the entry the server found by the captured `expectedTurn`,
+ * never whoever the hall now serves and never anything the caller names.
+ *
+ * A WHITELIST, because the answer lands on a shared screen: no uid, no own
+ * credit, no profile, no email, and not the member's contribution response
+ * forwarded whole. It lives only in this credential-authorized response —
+ * never in wsfTurnState, the pulse, the QR or the hall.
+ *
+ * HONEST ABSENCE. A value the server does not know, or this screen may not be
+ * told, is null — never 0:
+ *   • sharedTotal/target/status are given only when the goal's aggregate may
+ *     be shown on a public display (evaluateGoalAggregateAccess with no
+ *     caller, the same route wsfGoalPulse's display path uses) AND the
+ *     canonical contribution returned them. sharedTotal is the canonical
+ *     post-commit observation of `goalId`'s own total, in `unit` — for a
+ *     combined event that is the ACTIVITY's total, never the parent's. No
+ *     before/after pair is derived from it.
+ *   • crossedTarget is the canonical per-attempt value, forwarded as is (it is
+ *     never true today; see ContributeResponse), and null where the shared
+ *     state is withheld.
+ */
+type StationTurnReceipt = {
+  entryId: string;
+  goalId: string;
+  addedCount: number;
+  unit: string;
+  alreadyRecorded: boolean;
+  sharedTotal: number | null;
+  target: number | null;
+  status: GoalStatus | null;
+  crossedTarget: boolean | null;
+};
+
 type CompleteTurnResponse = TurnStateResponse & {
+  /** The entry this Record completed (see StationTurnReceipt). */
+  entryId: string;
+  receipt: StationTurnReceipt;
   recorded: { amount: number; unit: string; alreadyRecorded: boolean };
   /** Whether anybody is waiting. ONE ROUND PER TURN WHILE ANYONE WAITS: when
    * this is true the screen offers nothing but "Call next", and a person who
@@ -9633,9 +9675,32 @@ export const wsfCompleteTurn = onCall<CompleteTurnRequest>(
       count: request.data?.count,
       by: { kind: 'station', stationId: authorized.stationId, turnRef: expectedTurn },
     });
+    const goalSnap = await db.doc(`wsfGoals/${entry.goalId}`).get();
+    const goal = goalSnap.exists ? (goalSnap.data() as GoalDoc) : null;
+    const displayAllowed = goal ? (await evaluateGoalAggregateAccess(goal, null)).allowed : false;
+    const shared = displayAllowed && typeof receipt.sharedTotal === 'number';
+    const unit =
+      typeof receipt.unit === 'string'
+        ? receipt.unit
+        : goal && typeof goal.unit === 'string'
+          ? goal.unit
+          : '';
+    const stationReceipt: StationTurnReceipt = {
+      entryId: entryRef.id,
+      goalId: entry.goalId,
+      addedCount: receipt.addedCount,
+      unit,
+      alreadyRecorded: receipt.alreadyRecorded === true,
+      sharedTotal: shared ? (receipt.sharedTotal as number) : null,
+      target: shared && typeof receipt.target === 'number' ? receipt.target : null,
+      status: shared && receipt.status ? receipt.status : null,
+      crossedTarget: shared && typeof receipt.crossedTarget === 'boolean' ? receipt.crossedTarget : null,
+    };
     const state = await readTurnState(authorized, lineId, Date.now());
     return {
       ...state,
+      entryId: entryRef.id,
+      receipt: stationReceipt,
       recorded: {
         amount: typeof receipt.addedCount === 'number' ? receipt.addedCount : 0,
         unit: typeof receipt.unit === 'string' ? receipt.unit : '',
