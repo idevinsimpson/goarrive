@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=3d0851f868b587bcfb03ad827c78a7116e0cad2cd4731e5e4acf69d9f0462bed events=610 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=7aa866bd3ea1c8e4393bb0aa11d39e1b64b0c656817565a58d3250bc672ae96b events=611 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `3d0851f868b587bcfb03ad827c78a7116e0cad2cd4731e5e4acf69d9f0462bed` (610 events)
+- Ledger head: `7aa866bd3ea1c8e4393bb0aa11d39e1b64b0c656817565a58d3250bc672ae96b` (611 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -168,5 +168,5 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | f4ea622a1226 | W9 | MEMBER-PREVIEW-LABEL-1 | handback | acked | 6035992343 | comment:6036001486 |
 | a3a1ba72e3e3 | W4 | MEMBER-PREVIEW-LABEL-1 | review | acked | 6036066074 | comment:6036085110 |
 | f60e1371d95c | W9 | KIOSK-UNVERIFIED-PARTICIPANT-1 | release | acked | 6042042985 | comment:6042073922 |
-| f46e958912c6 | W4 | KIOSK-UNVERIFIED-PARTICIPANT-1 | review | delivered | 6042281043 | — |
+| f46e958912c6 | W4 | KIOSK-UNVERIFIED-PARTICIPANT-1 | review | acked | 6042281043 | comment:6042323747 |
 
