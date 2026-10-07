@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "60d0e956540ec3bf85ddb8760fb783c04d134e4babcf7724cba9e6212d9a36ac",
-  "eventCount": 587,
+  "ledgerHead": "81dfe014a969e09f809b459ef4bb3a116ea850d26ad5fae04e7f402860077277",
+  "eventCount": 589,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1252,7 +1252,7 @@
       },
       "label": "Deliver the isolated privacy-safe public preview label without waiting for crossing attribution",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "CHANGES_REQUESTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -1289,7 +1289,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6035689620
+          "id": 6035952721
         }
       },
       "review": {
@@ -3439,7 +3439,16 @@
       "ack": {
         "kind": "comment",
         "id": 6035757428
-      }
+      },
+      "superseded": true
+    },
+    "f4ea622a1226d920493ec9ff483bb1519d338f3c80870ecb8f6e72675d782dfb": {
+      "packet": "MEMBER-PREVIEW-LABEL-1",
+      "worker": "W9",
+      "reason": "handback",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
