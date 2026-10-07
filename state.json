@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "ee24822dcdd351aa6969d0b78a93d8b3a00e38c63f1ae02ca95301c9f3ffe434",
-  "eventCount": 620,
+  "ledgerHead": "52584e9a0af7331385e3337b7c20a15b1f2b09c5108d546d2a92ce68a37aac15",
+  "eventCount": 621,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -61,7 +61,9 @@
     }
   },
   "queue": {
-    "W3": [],
+    "W3": [
+      "KIOSK-UNVERIFIED-PARTICIPANT-1-STAGING-PIN"
+    ],
     "W4": [],
     "W5": [],
     "W7": [],
@@ -1376,6 +1378,66 @@
         "after": "director"
       },
       "deliveries": 1,
+      "pendingFinding": null
+    },
+    "KIOSK-UNVERIFIED-PARTICIPANT-1-STAGING-PIN": {
+      "owner": "W3",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Pin and prove the integrated unverified-attendee backend through the reviewed full staging path",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        ".github/wsf-staging/approved-candidate.json",
+        ".github/wsf-staging/journeys/manifest.json",
+        ".github/wsf-staging/journeys/expo-attendee.mjs",
+        ".github/wsf-staging/tests/changed-journey-drivers.test.mjs",
+        ".github/wsf-staging/tests/pin-candidate.test.mjs",
+        "docs/westayfit/qa/kiosk-unverified-participant-staging-pin-1.md"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6043040592
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6043040592
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
       "pendingFinding": null
     },
     "MEMBER-PREVIEW-LABEL-1": {
