@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "fa2920b3c73e8b0df6291de3d7fd6165e40f23e2fd9ac4f2175b7eb1aa67e220",
-  "eventCount": 552,
+  "ledgerHead": "b9328741c591da44118c7d5c1e769cc5da245b95dcc021e512346bb19aeae285",
+  "eventCount": 553,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -3163,8 +3163,10 @@
       "packet": "EVERGREEN-MARKER-ENTRY-1",
       "worker": "W9",
       "reason": "release",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        6027915479
+      ],
       "ack": null
     }
   },
