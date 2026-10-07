@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "26ba44ecd1baf2e09c9ea83aca7db1dfcfae826f9ba7a4e330ef15a0c1732f25",
-  "eventCount": 569,
+  "ledgerHead": "c1f3a0c2a006420ec8bf3a810ceceb2668b5f4b02efad9e9f4aceeb8f38d3f5a",
+  "eventCount": 573,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1243,6 +1243,66 @@
       "deliveries": 3,
       "pendingFinding": null
     },
+    "MEMBER-PREVIEW-LABEL-1": {
+      "owner": "W9",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Deliver the isolated privacy-safe public preview label without waiting for crossing attribution",
+      "origin": "ledger",
+      "phase": "RELEASED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": 497,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": 0,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "functions-westayfit/src/index.ts",
+        "functions-westayfit/tests/callable/wsf-public-preview-label.test.ts",
+        "docs/westayfit/qa/member-truth-backend-1.md"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6035515078
+        },
+        "released": {
+          "kind": "comment",
+          "id": 6035517752
+        },
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6035517752
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "journey-qa",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
+      "pendingFinding": null
+    },
     "MEMBER-TRUTH-BACKEND-1": {
       "owner": "W9",
       "kind": "work",
@@ -1252,8 +1312,8 @@
       },
       "label": "Unblock real member Together crossing and privacy-safe public preview labels for the shared Firebase backend and Lovable Web Twin",
       "origin": "ledger",
-      "phase": "ACKED",
-      "phaseBeforeBlock": null,
+      "phase": "BLOCKED",
+      "phaseBeforeBlock": "ACKED",
       "queueIndexBeforeBlock": null,
       "inbox": 497,
       "pr": null,
@@ -1271,7 +1331,14 @@
       "subjectPaths": [
         "*"
       ],
-      "blockedBy": [],
+      "blockedBy": [
+        {
+          "external": "TOGETHER-CROSSING-DESIGN-DECISION",
+          "condition": "Both attribution experiments failed the accepted contention gate",
+          "owner": "Director and Owner",
+          "unblockWhen": "Record a scoped product or architecture decision for crossing A"
+        }
+      ],
       "importRefs": [],
       "authority": {
         "queued": {
@@ -1285,7 +1352,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6030044447
+          "id": 6035507739
         }
       },
       "review": {
@@ -3263,7 +3330,16 @@
       "ack": {
         "kind": "comment",
         "id": 6030044447
-      }
+      },
+      "superseded": true
+    },
+    "ab137da797c1917604cca24c1f68cb03c5b64626d848f4b23ecc4db486e979b5": {
+      "packet": "MEMBER-PREVIEW-LABEL-1",
+      "worker": "W9",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
