@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "52aa331e3f56390641638f709b2f5e13f40d5d65b37bb7440c89e5c6992acc7e",
-  "eventCount": 550,
+  "ledgerHead": "fa2920b3c73e8b0df6291de3d7fd6165e40f23e2fd9ac4f2175b7eb1aa67e220",
+  "eventCount": 552,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -65,9 +65,7 @@
     "W4": [],
     "W5": [],
     "W7": [],
-    "W9": [
-      "EVERGREEN-MARKER-ENTRY-1"
-    ]
+    "W9": []
   },
   "packets": {
     "AUTONOMY-ROUTER-1C": {
@@ -557,10 +555,10 @@
       },
       "label": "Evergreen physical marker entry: permanent QR resolves to configured community and goal, then phone or optional kiosk participation",
       "origin": "ledger",
-      "phase": "QUEUED",
+      "phase": "RELEASED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
-      "inbox": null,
+      "inbox": 497,
       "pr": null,
       "reviewers": [],
       "artifact": {
@@ -571,7 +569,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": null,
+      "releasedQueueIndex": 0,
       "reviewedBy": [],
       "subjectPaths": [
         "*"
@@ -583,11 +581,14 @@
           "kind": "comment",
           "id": 5999340795
         },
-        "released": null,
+        "released": {
+          "kind": "comment",
+          "id": 6027873710
+        },
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 5999340795
+          "id": 6027873710
         }
       },
       "review": {
@@ -3157,6 +3158,14 @@
         "id": 6024595043
       },
       "superseded": true
+    },
+    "a0fff7452f7ad133eba3aaddb4dc56854b81f2e7a3e012df16dcbeea1ff57945": {
+      "packet": "EVERGREEN-MARKER-ENTRY-1",
+      "worker": "W9",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
