@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "a2ef51caacf7cc3a51c49bc28ff41c015f583b9d5c8916820ca3057a611216e8",
-  "eventCount": 590,
+  "ledgerHead": "c12012859fb26866cdfe032bf35a3674963cc279458a58cdbb6eb8647d90e4f5",
+  "eventCount": 594,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1252,7 +1252,7 @@
       },
       "label": "Deliver the isolated privacy-safe public preview label without waiting for crossing attribution",
       "origin": "ledger",
-      "phase": "CHANGES_REQUESTED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -1261,8 +1261,8 @@
         "W4"
       ],
       "artifact": {
-        "subjectSha": "d5907d1e4c04c3260d2f0a66af879b70c6ffcb0e",
-        "prHeadSha": "d5907d1e4c04c3260d2f0a66af879b70c6ffcb0e",
+        "subjectSha": "37529ea37a1afd615ca2cce21fce45534f24d964",
+        "prHeadSha": "37529ea37a1afd615ca2cce21fce45534f24d964",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -1289,7 +1289,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6035952721
+          "id": 6036027511
         }
       },
       "review": {
@@ -1302,7 +1302,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 1,
+      "deliveries": 2,
       "pendingFinding": null
     },
     "MEMBER-TRUTH-BACKEND-1": {
@@ -3446,10 +3446,22 @@
       "packet": "MEMBER-PREVIEW-LABEL-1",
       "worker": "W9",
       "reason": "handback",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6035992343
       ],
+      "ack": {
+        "kind": "comment",
+        "id": 6036001486
+      },
+      "superseded": true
+    },
+    "a3a1ba72e3e30f8a4ba5b3b52f4f9bf3d8ca11f57338e5f8b026260ca0f79424": {
+      "packet": "MEMBER-PREVIEW-LABEL-1",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
