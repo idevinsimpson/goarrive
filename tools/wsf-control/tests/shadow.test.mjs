@@ -481,11 +481,13 @@ atest('GET-ONLY RETRY: one transport failure on a GET is retried once; a second 
   await assert.rejects(gh(twice).comment(7), /fetch failed/);
   assert.deepEqual(twice.seen, ['GET', 'GET'], 'a second transport failure surfaces; there is no third attempt');
 
-  for (const [name, run, method] of [['POST', (g) => g.createComment(396, 'x'), 'POST'], ['PATCH', (g) => g.editComment(5, 'x'), 'PATCH']]) {
-    const m = scripted('lost', ok({ id: 1 }));
-    await assert.rejects(run(gh(m)), /fetch failed/, name);
-    assert.deepEqual(m.seen, [method], `${name} is attempted exactly once`);
-  }
+  const post = scripted('lost', ok({ id: 1 }));
+  await assert.rejects(gh(post).createComment(396, 'x'), /fetch failed/, 'POST');
+  assert.deepEqual(post.seen, ['POST'], 'POST is attempted exactly once');
+  // CONTROL-CURRENT-PATCH-ACK-1: a lost PATCH answer is read back once, never re-sent (the read-back here shows other content).
+  const patch = scripted('lost', ok({ ...raw, id: 5 }));
+  await assert.rejects(gh(patch).editComment(5, 'x'), /unconfirmed/, 'PATCH');
+  assert.deepEqual(patch.seen, ['PATCH', 'GET'], 'PATCH is attempted exactly once; its lost answer is read back, never re-sent');
 
   for (const status of [400, 403, 422, 500, 502, 503]) {
     const h = scripted({ ok: false, status, json: async () => ({}) }, ok(raw));
@@ -522,6 +524,154 @@ atest('isTransportError: undici transport forms only', () => {
     Object.assign(new Error('x'), { code: 'ECONNRESET_LIKE' }), new GitHubError(500, 'x'), Object.assign(new GitHubError(502, 'x'), { cause: sock }), null, 'fetch failed', { message: 'fetch failed' }]) {
     assert.equal(isTransportError(e), false, String(e?.message ?? e));
   }
+});
+
+// ---- CONTROL-CURRENT-PATCH-ACK-1 (#365 6044027142): the CURRENT comment edit, acknowledged by status, never re-sent ----
+// Run 37661819992 failed with `TypeError: fetch failed` at the PATCH (github.mjs await fetchImpl, via editComment and
+// shadow-run's surface edit). The edit now never reads its 2xx body, and a lost answer is settled by one exact read-back.
+const TOKEN = 'tok-NEVER-PRINTED-0001';
+const SECRET_BODY = 'SECRET-RENDERED-BODY <!-- wsf-control ledgerHead=abc -->';
+const lostPatch = () => Object.assign(new TypeError('fetch failed'), { cause: { code: 'UND_ERR_SOCKET' } });
+const okNoRead = (onCancel = async () => {}) => ({ ok: true, status: 200, json: async () => { throw new SyntaxError('the PATCH answer must never be parsed'); }, body: { cancel: onCancel } });
+/** A comment server: one comment (id 5), PATCH and GET routed to `patch` / `get`; every attempt's method recorded. */
+function commentServer({ patch, get = null, start = 'old body' } = {}) {
+  const store = new Map([[5, start]]);
+  const seen = [];
+  const raw = (id) => ({ id, body: store.get(id), user: { login: BOT }, author_association: 'NONE', created_at: 't', updated_at: 't' });
+  const fetchImpl = async (url, init) => {
+    seen.push(init.method);
+    assert.equal(init.headers.Authorization, `Bearer ${TOKEN}`);
+    const id = Number(new URL(url).pathname.split('/').pop());
+    if (init.method === 'PATCH') return patch(store, id, JSON.parse(init.body).body);
+    if (get) return get(store, id, raw);
+    return store.has(id) ? { ok: true, status: 200, json: async () => raw(id) } : { ok: false, status: 404, json: async () => ({}) };
+  };
+  return { store, seen, client: gitHubClient({ token: TOKEN, repo: REPO, fetchImpl }) };
+}
+const patches = (seen) => seen.filter((m) => m === 'PATCH').length;
+const noLeak = (e) => { const m = `${e?.message ?? ''}${e?.stack ?? ''}`; return !m.includes(TOKEN) && !m.includes(SECRET_BODY) && !m.includes('old body'); };
+
+atest('PATCH-ACK: a 2xx edit is acknowledged by its status; the large or unreadable answer is never parsed, and a failing cancel is swallowed', async () => {
+  const unhandled = [];
+  const onUnhandled = (e) => unhandled.push(e);
+  process.on('unhandledRejection', onUnhandled);
+  try {
+    let cancelled = 0;
+    const big = commentServer({ patch: (st, id, b) => { st.set(id, b); return okNoRead(async () => { cancelled += 1; }); } });
+    assert.equal(await big.client.editComment(5, SECRET_BODY), 'acknowledged');
+    assert.deepEqual(big.seen, ['PATCH'], 'one PATCH, no read');
+    assert.equal(cancelled, 1, 'the unread answer is cancelled once');
+    const badCancel = commentServer({ patch: (st, id, b) => { st.set(id, b); return okNoRead(() => Promise.reject(new Error('cancel failed'))); } });
+    assert.equal(await badCancel.client.editComment(5, SECRET_BODY), 'acknowledged');
+    const throwsCancel = commentServer({ patch: (st, id, b) => { st.set(id, b); return okNoRead(() => { throw new Error('sync cancel failure'); }); } });
+    assert.equal(await throwsCancel.client.editComment(5, SECRET_BODY), 'acknowledged');
+    const noBody = commentServer({ patch: (st, id, b) => { st.set(id, b); return { ok: true, status: 204, json: async () => { throw new Error('never'); } }; } });
+    assert.equal(await noBody.client.editComment(5, SECRET_BODY), 'acknowledged', 'an answer with no stream is acknowledged too');
+    await new Promise((r) => setTimeout(r, 20));
+    assert.deepEqual(unhandled, [], 'no unhandled rejection');
+  } finally { process.off('unhandledRejection', onUnhandled); }
+});
+
+atest('PATCH-ACK: a lost answer after the server APPLIED the exact edit is confirmed by one read-back; one PATCH', async () => {
+  const s = commentServer({ patch: (st, id, b) => { st.set(id, b); throw lostPatch(); } });
+  assert.equal(await s.client.editComment(5, SECRET_BODY), 'confirmed-by-readback');
+  assert.deepEqual(s.seen, ['PATCH', 'GET']);
+  assert.equal(s.store.get(5), SECRET_BODY);
+});
+
+atest('PATCH-ACK: every unconfirmed read-back fails closed with one PATCH and never overwrites: not applied, missing, other or newer, marker-only, failed', async () => {
+  const marker = SECRET_BODY.slice(SECRET_BODY.indexOf('<!--'));
+  const cases = [
+    ['not applied (the old body is still there)', { patch: () => { throw lostPatch(); } }, ['PATCH', 'GET']],
+    ['the comment is gone (404)', { patch: (st) => { st.delete(5); throw lostPatch(); } }, ['PATCH', 'GET']],
+    ['a newer concurrent body', { patch: (st, id) => { st.set(id, `${SECRET_BODY}\nnewer`); throw lostPatch(); } }, ['PATCH', 'GET']],
+    ['a matching marker but a different body', { patch: (st, id) => { st.set(id, marker); throw lostPatch(); } }, ['PATCH', 'GET']],
+    ['the read-back answers HTTP 500', { patch: () => { throw lostPatch(); }, get: () => ({ ok: false, status: 500, json: async () => ({}) }) }, ['PATCH', 'GET']],
+    ['the read-back loses its socket twice', { patch: () => { throw lostPatch(); }, get: () => { throw lostPatch(); } }, ['PATCH', 'GET', 'GET']],
+    ['the read-back is malformed JSON', { patch: () => { throw lostPatch(); }, get: () => ({ ok: true, status: 200, json: async () => { throw new SyntaxError('x'); } }) }, ['PATCH', 'GET']],
+    ['the read-back names another comment', { patch: (st, id, b) => { st.set(id, b); throw lostPatch(); }, get: (st, id, raw) => ({ ok: true, status: 200, json: async () => ({ ...raw(id), id: 6 }) }) }, ['PATCH', 'GET']],
+  ];
+  for (const [name, opts, seen] of cases) {
+    const s = commentServer(opts);
+    const before = s.store.get(5);
+    await assert.rejects(s.client.editComment(5, SECRET_BODY), (e) => e instanceof GitHubError && !isTransportError(e) && /the edit is unconfirmed/.test(e.message) && noLeak(e), name);
+    assert.deepEqual(s.seen, seen, name);
+    assert.equal(patches(s.seen), 1, `${name}: exactly one PATCH`);
+    if (name.startsWith('not applied')) assert.equal(s.store.get(5), before, 'nothing was overwritten');
+  }
+});
+
+atest('PATCH-ACK: HTTP answers fail closed on their first attempt with no read-back (401, 403, 404, 422, 429, 5xx); a programmer error is thrown as it is', async () => {
+  for (const status of [401, 403, 404, 422, 429, 500, 502, 503]) {
+    let cancelled = 0;
+    const s = commentServer({ patch: () => ({ ok: false, status, json: async () => { throw new Error('never read'); }, body: { cancel: async () => { cancelled += 1; } } }) });
+    await assert.rejects(s.client.editComment(5, SECRET_BODY), (e) => e instanceof GitHubError && e.status === status && new RegExp(`HTTP ${status}`).test(e.message) && noLeak(e), String(status));
+    assert.deepEqual(s.seen, ['PATCH'], `HTTP ${status}: one PATCH, no read-back, no retry`);
+    assert.equal(cancelled, 1);
+  }
+  const bug = commentServer({ patch: () => { throw new TypeError("Cannot read properties of undefined (reading 'x')"); } });
+  await assert.rejects(bug.client.editComment(5, SECRET_BODY), (e) => e instanceof TypeError && !(e instanceof GitHubError));
+  assert.deepEqual(bug.seen, ['PATCH'], 'a programmer error is not a transport failure: no read-back');
+});
+
+atest('PATCH-ACK: POST creation still reads and returns its new id; GET reads are unchanged', async () => {
+  const seen = [];
+  const g = gitHubClient({ token: TOKEN, repo: REPO, fetchImpl: async (url, init) => { seen.push(init.method); return init.method === 'POST' ? { ok: true, status: 201, json: async () => ({ id: 4242 }) } : { ok: true, status: 200, json: async () => ({ id: 7, body: 'b', user: { login: 'x' } }) }; } });
+  assert.deepEqual(await g.createComment(396, 'x'), { id: 4242 });
+  assert.equal((await g.comment(7)).body, 'b');
+  assert.deepEqual(seen, ['POST', 'GET']);
+});
+
+/** The writer end to end, its surface edit going through the REAL client over a fake transport. */
+function patchWriterGh(mode) {
+  const base = fakeGh();
+  const state = { mode, patches: 0 };
+  const fetchImpl = async (url, init) => {
+    const id = Number(new URL(url).pathname.split('/').pop());
+    if (init.method === 'PATCH') {
+      state.patches += 1;
+      const want = JSON.parse(init.body).body;
+      if (state.mode === 'lost-unapplied') throw lostPatch();
+      base.comments.get(id).body = want;
+      if (state.mode === 'lost-applied') throw lostPatch();
+      return okNoRead();
+    }
+    const c = base.comments.get(id);
+    return c ? { ok: true, status: 200, json: async () => ({ id, body: c.body, user: { login: BOT }, created_at: 't', updated_at: 't' }) } : { ok: false, status: 404, json: async () => ({}) };
+  };
+  const real = gitHubClient({ token: TOKEN, repo: REPO, fetchImpl });
+  return { gh: { ...base, editComment: (id, body) => real.editComment(id, body) }, base, state };
+}
+
+atest('PATCH-ACK end to end: the ledger is pushed, the CURRENT edit\'s answer is lost and unapplied: the run fails, claims no surface, and the next run repairs it with no duplicate line or comment', async () => {
+  const remote = bareRemote();
+  const w = patchWriterGh('lost-unapplied');
+  await assert.rejects(run({ remote, gh: w.gh }), (e) => /the edit is unconfirmed/.test(e.message) && noLeak(e));
+  assert.equal(w.state.patches, 1, 'one PATCH, never re-sent');
+  const pushed = `${remoteEvents(remote)}\n`;
+  assert.equal(reduce(pushed).eventCount, 2, 'the protected state advanced before the edit (bootstrap + surface)');
+  assert.ok(w.base.comments.get(801).body.startsWith(SHADOW_PLACEHOLDER.split('\n')[0]), 'the comment still shows the placeholder: nothing claims it was rendered');
+  w.state.mode = 'ok';
+  const r = await run({ remote, gh: w.gh });
+  assert.equal(r.outcome, 'unchanged', 'no ledger line is written twice');
+  assert.equal(r.surface, 'edited');
+  assert.equal(`${remoteEvents(remote)}\n`, pushed, 'the ledger is byte-identical');
+  assert.equal(w.base.calls.created, 1, 'no second comment');
+  assert.equal(w.state.patches, 2, 'the repair is the next run\'s single PATCH');
+  assert.match(w.base.comments.get(801).body, /^<!-- wsf-control ledgerHead=/);
+});
+
+atest('PATCH-ACK end to end: a lost answer to an APPLIED edit is confirmed by read-back; the run reports the edit and a re-run finds it ok', async () => {
+  const remote = bareRemote();
+  const w = patchWriterGh('lost-applied');
+  const r = await run({ remote, gh: w.gh });
+  assert.equal(r.surface, 'edited');
+  assert.equal(w.state.patches, 1);
+  w.state.mode = 'ok';
+  const again = await run({ remote, gh: w.gh });
+  assert.equal(again.outcome, 'unchanged');
+  assert.equal(again.surface, 'ok', 'the confirmed edit is the rendering');
+  assert.equal(w.state.patches, 1, 'nothing re-sent');
 });
 
 // ---- stale-bootstrap recovery (run 50: the first bootstrap imported a 28-hour-old input) ----------------------
