@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "69161bb3a65bfed929d7dc7e2dc6cfc5951b733c27151ff89b5df953bbecdf45",
-  "eventCount": 560,
+  "ledgerHead": "6e048f6ad948a2ac48498f248bde62c016dd8ebe1cf4be2e53c5516658208aa7",
+  "eventCount": 561,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -65,7 +65,9 @@
     "W4": [],
     "W5": [],
     "W7": [],
-    "W9": []
+    "W9": [
+      "MEMBER-TRUTH-BACKEND-1"
+    ]
   },
   "packets": {
     "AUTONOMY-ROUTER-1C": {
@@ -1236,6 +1238,61 @@
         "after": "director"
       },
       "deliveries": 3,
+      "pendingFinding": null
+    },
+    "MEMBER-TRUTH-BACKEND-1": {
+      "owner": "W9",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Unblock real member Together crossing and privacy-safe public preview labels for the shared Firebase backend and Lovable Web Twin",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "*"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6029017448
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6029017448
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "journey-qa",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
       "pendingFinding": null
     },
     "MOVE-CAMERA-NATIVE-PORT-1": {
