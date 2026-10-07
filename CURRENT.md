@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=6e048f6ad948a2ac48498f248bde62c016dd8ebe1cf4be2e53c5516658208aa7 events=561 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=c46b0ed5e8f033d3fe9baf6f8563764da341ba707fdbdf8642be353fdfe12028 events=562 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `6e048f6ad948a2ac48498f248bde62c016dd8ebe1cf4be2e53c5516658208aa7` (561 events)
+- Ledger head: `c46b0ed5e8f033d3fe9baf6f8563764da341ba707fdbdf8642be353fdfe12028` (562 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -30,7 +30,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | Worker | Inbox | Active now | Reviewing | Waiting on review | Blocked | Next | Queue | WATCH |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | W3 | #396 | — | — | WORKER-EXECUTION-PROFILES-1 | — | — | — | off |
-| W4 | #394 | — | EVERGREEN-MARKER-ENTRY-1 | — | — | — | — | on |
+| W4 | #394 | — | — | — | — | — | — | off |
 | W5 | #395 | — | — | — | — | — | — | off |
 | W7 | #434 | — | — | — | — | — | — | off |
 | W9 | #497 | — | — | EVERGREEN-MARKER-ENTRY-1 | — | MEMBER-TRUTH-BACKEND-1 | MEMBER-TRUTH-BACKEND-1 | off |
@@ -46,7 +46,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | CONTROL-RECENT-COMMENTS-SAFE-READ-1 | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #579 | 758d686f | 758d686f | — | e5416da1 | — | W4 | comment:6020607329 | pull_request:579 | — | Bound recent-comment reads so the control App can consume current decisions without socket failure | 1×ops-source then director | — |
 | EMAIL-STAGING-REPAIR | W3 | work | STAGED (hosted) | ledger | INTEGRATED | #559 | 39484f78 | 39484f78 | — | f84346d3 | — | W4, W9 | comment:5959200686 | pull_request:559 | — | Diagnose and repair staging verification and password-reset delivery without weakening mail security | 1×ops-source+1×security then director | — |
 | EMAIL-STAGING-REPAIR-STAGING-PIN | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #570 | 5be8f661 | 5be8f661 | — | 01a07ef3 | — | W4 | comment:5965875967 | pull_request:570 | — | Pin the exact integrated email repair and coalesced accepted expo lineage through the reviewed full staging path | 1×ops-source then director | — |
-| EVERGREEN-MARKER-ENTRY-1 | W9 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #583 | 1545f36d | 1545f36d | — | — | — | W4 | comment:6027873710 | comment:6028901349 | — | Evergreen physical marker entry: permanent QR resolves to configured community and goal, then phone or optional kiosk participation | 1×journey-qa then director | — |
+| EVERGREEN-MARKER-ENTRY-1 | W9 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #583 | 1545f36d | 1545f36d | — | — | — | W4 | comment:6027873710 | comment:6029187467 | — | Evergreen physical marker entry: permanent QR resolves to configured community and goal, then phone or optional kiosk participation | 1×journey-qa then director | — |
 | EXPO-ACCOUNT-ENTRY-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #561 | e603a39c | e603a39c | — | 5705dc3b | — | W4 | comment:5961789672 | pull_request:561 | — | Expo account-entry seam: preserve event context and make the existing phone/kiosk choice fast and truthful without bypassing verified identity | 1×journey-qa then director | — |
 | EXPO-ACCOUNT-ENTRY-1-STAGING-PIN | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #566 | 04ca5d05 | 04ca5d05 | 04ca5d05 | 08a2f08d | — | W4 | comment:5963494417 | pull_request:566 | — | Pin exact integrated expo account-entry milestone through the existing reviewed full staging path | 1×ops-source then director | — |
 | EXPO-ATTENDEE-HOSTED-DRIVERS-1 | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #569 | f2c0e4e9 | f2c0e4e9 | — | dcf86674 | — | W4 | comment:5965372716 | pull_request:569 | — | Add the missing hosted attendee drivers and generated owner-card inputs using the existing staging journey framework | 1×ops-source then director | — |
