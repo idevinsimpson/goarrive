@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "2ea281de991e65c19c05a8793c1d172b43fe960fe8640e0095b617e76cb9ef59",
-  "eventCount": 612,
+  "ledgerHead": "22d3c87e47ecdde1e349e95c0c8c0556fd0bfd29a20d5205f09fda3de940c5d3",
+  "eventCount": 616,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1165,6 +1165,69 @@
       "deliveries": 1,
       "pendingFinding": null
     },
+    "KIOSK-EXPECTED-TURN-1": {
+      "owner": "W9",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Bind kiosk mutations to the intended turn and preserve exactly-once phone and station completion",
+      "origin": "ledger",
+      "phase": "RELEASED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": 497,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": 0,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "functions-westayfit/src/index.ts",
+        "functions-westayfit/tests/callable/wsf-turn.test.ts",
+        "functions-westayfit/tests/callable/wsf-station-enrollment.test.ts",
+        "functions-westayfit/tests/callable/wsf-combined-correction-and-recovery.test.ts",
+        "functions-westayfit/tests/callable/wsf-kiosk-expected-turn.test.ts",
+        "docs/westayfit/qa/kiosk-expected-turn-1.md"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6042838449
+        },
+        "released": {
+          "kind": "comment",
+          "id": 6042840991
+        },
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6042840991
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "journey-qa",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
+      "pendingFinding": null
+    },
     "KIOSK-PAIRING-CLARITY-PROOF-1": {
       "owner": "W9",
       "kind": "work",
@@ -1252,7 +1315,7 @@
       },
       "label": "Allow real authenticated unverified attendees to complete the ordinary WSF event participation backend journey",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "ACCEPTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -1293,10 +1356,13 @@
           "kind": "comment",
           "id": 6041849013
         },
-        "accepted": null,
+        "accepted": {
+          "kind": "comment",
+          "id": 6042807742
+        },
         "lastTransition": {
           "kind": "comment",
-          "id": 6042614011
+          "id": 6042807742
         }
       },
       "review": {
@@ -3579,6 +3645,14 @@
         "id": 6042323747
       },
       "superseded": true
+    },
+    "dd7bb9d5cae1a3f2abb8b167bf492d57e236089c83ba39b23770180deebbf7ea": {
+      "packet": "KIOSK-EXPECTED-TURN-1",
+      "worker": "W9",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
