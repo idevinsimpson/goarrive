@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "4ef2ebdc459851fbef94ecbab1458f2b6db6b5d34a1576f9f06d8e7a201b19e9",
-  "eventCount": 597,
+  "ledgerHead": "0320b5f04dcafff9fd9797f063264dc75f0f739f40d3cb5e4c68ef04849eba0e",
+  "eventCount": 598,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1252,7 +1252,7 @@
       },
       "label": "Deliver the isolated privacy-safe public preview label without waiting for crossing attribution",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "ACCEPTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -1288,10 +1288,13 @@
           "kind": "comment",
           "id": 6035517752
         },
-        "accepted": null,
+        "accepted": {
+          "kind": "comment",
+          "id": 6036573359
+        },
         "lastTransition": {
           "kind": "comment",
-          "id": 6036130276
+          "id": 6036573359
         }
       },
       "review": {
