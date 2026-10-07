@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "340d813b21273c1b82ae78ab9acfe42e070f21161e9f72a90ed42cd95508d2ed",
-  "eventCount": 668,
+  "ledgerHead": "55f490fd0e0d2edd6dd71762abf912e6ffe5eaebfd4bc93f7aa257e89f1a2286",
+  "eventCount": 672,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -61,9 +61,7 @@
     }
   },
   "queue": {
-    "W3": [
-      "LOVABLE-KIOSK-HOSTED-PROOF-1"
-    ],
+    "W3": [],
     "W4": [],
     "W5": [],
     "W7": [],
@@ -284,7 +282,7 @@
       },
       "label": "Repair CURRENT comment acknowledgment and verify uncertain PATCH by exact readback without mutation retries",
       "origin": "ledger",
-      "phase": "ACCEPTED",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -296,7 +294,7 @@
         "subjectSha": "85e1d35f65acd159456abc3712881d827825d1c6",
         "prHeadSha": "85e1d35f65acd159456abc3712881d827825d1c6",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "cc33f4e70eb5351023c97bff550a0b13bc943376"
       },
       "proof": null,
       "served": null,
@@ -324,8 +322,8 @@
           "id": 6044596793
         },
         "lastTransition": {
-          "kind": "comment",
-          "id": 6044596793
+          "kind": "pull_request",
+          "id": 588
         }
       },
       "review": {
@@ -1721,10 +1719,10 @@
       },
       "label": "Run the pinned Lovable kiosk journey with bounded real staging fixtures and cleanup inside the existing trusted runner",
       "origin": "ledger",
-      "phase": "QUEUED",
+      "phase": "RELEASED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
-      "inbox": null,
+      "inbox": 396,
       "pr": null,
       "reviewers": [],
       "artifact": {
@@ -1735,7 +1733,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": null,
+      "releasedQueueIndex": 0,
       "reviewedBy": [],
       "subjectPaths": [
         ".github/workflows/wsf-staging-deploy.yml",
@@ -1751,11 +1749,14 @@
           "kind": "comment",
           "id": 6044515892
         },
-        "released": null,
+        "released": {
+          "kind": "comment",
+          "id": 6044894488
+        },
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6044515892
+          "id": 6044894488
         }
       },
       "review": {
@@ -4173,7 +4174,7 @@
       "packet": "KIOSK-EXPECTED-TURN-NATIVE-CALLER-1",
       "worker": "W7",
       "reason": "release",
-      "status": "redelivered",
+      "status": "timed-out",
       "comments": [
         6044193835,
         6044557410
@@ -4215,6 +4216,14 @@
       "comments": [
         6044759515
       ],
+      "ack": null
+    },
+    "cb513479a2e2253b3ef60857cb402e2431615027e1bf14194eb3e6c013bd0036": {
+      "packet": "LOVABLE-KIOSK-HOSTED-PROOF-1",
+      "worker": "W3",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
