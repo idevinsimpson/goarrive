@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "87f152ae2b3c4a29834adb0fe98792e178a35fed1bf38a8fa33b67e392211646",
-  "eventCount": 580,
+  "ledgerHead": "be87525064d2573b0486c40d48d80509c689a5efa44690d13edc03f1ca0bb3b4",
+  "eventCount": 585,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1252,15 +1252,17 @@
       },
       "label": "Deliver the isolated privacy-safe public preview label without waiting for crossing attribution",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
-      "pr": null,
-      "reviewers": [],
+      "pr": 584,
+      "reviewers": [
+        "W4"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "d5907d1e4c04c3260d2f0a66af879b70c6ffcb0e",
+        "prHeadSha": "d5907d1e4c04c3260d2f0a66af879b70c6ffcb0e",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -1287,7 +1289,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6035601782
+          "id": 6035689620
         }
       },
       "review": {
@@ -1300,7 +1302,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "MEMBER-TRUTH-BACKEND-1": {
@@ -1451,7 +1453,7 @@
       },
       "label": "Complete the existing automatic Lovable delta receiver so Devin never has to relay native handoffs",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -1465,7 +1467,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         "tools/wsf-control/northstar.mjs",
@@ -1492,7 +1494,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6035534615
+          "id": 6035668980
         }
       },
       "review": {
@@ -3410,16 +3412,28 @@
       "ack": {
         "kind": "comment",
         "id": 6035601782
-      }
+      },
+      "superseded": true
     },
     "80177860322ca41fea5707569c4a0b7ab72a9f495df47a960a4bddd59667792f": {
       "packet": "NORTHSTAR-MIRROR-INTAKE-1",
       "worker": "W3",
       "reason": "release",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6035648701
       ],
+      "ack": {
+        "kind": "comment",
+        "id": 6035668980
+      }
+    },
+    "664c6548f98211b4e27d633e2f4b591e8fbbbe66a97113ff9dff54aa1deddc73": {
+      "packet": "MEMBER-PREVIEW-LABEL-1",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
