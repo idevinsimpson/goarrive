@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "ec2135ca407e27228e9825f70692f060f24693fe32eeffccea3f899450fe0a1d",
-  "eventCount": 632,
+  "ledgerHead": "a6bc48261e42376a53eaa94e5dde645cd4bd44f8235086e2c6baa6780fca16e2",
+  "eventCount": 642,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -258,6 +258,65 @@
         "lastTransition": {
           "kind": "comment",
           "id": 5857966052
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
+      "pendingFinding": null
+    },
+    "CONTROL-CURRENT-PATCH-ACK-1": {
+      "owner": "W3",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Repair CURRENT comment acknowledgment and verify uncertain PATCH by exact readback without mutation retries",
+      "origin": "ledger",
+      "phase": "RELEASED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": 396,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": 0,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "tools/wsf-control/github.mjs",
+        "tools/wsf-control/tests/shadow.test.mjs"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6044027142
+        },
+        "released": {
+          "kind": "comment",
+          "id": 6044037834
+        },
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6044037834
         }
       },
       "review": {
@@ -1176,15 +1235,17 @@
       },
       "label": "Bind kiosk mutations to the intended turn and preserve exactly-once phone and station completion",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
-      "pr": null,
-      "reviewers": [],
+      "pr": 587,
+      "reviewers": [
+        "W4"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "a3f38e228bbd55214656a500e5d30a9300425f7f",
+        "prHeadSha": "a3f38e228bbd55214656a500e5d30a9300425f7f",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -1214,7 +1275,71 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6042925619
+          "id": 6044003954
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "journey-qa",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 1,
+      "pendingFinding": null
+    },
+    "KIOSK-EXPECTED-TURN-NATIVE-CALLER-1": {
+      "owner": "W7",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Wire native station commands to the exact turn and preserve safe retry across later visitors",
+      "origin": "ledger",
+      "phase": "RELEASED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": 434,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": 0,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "apps/westayfit/app/station/[goalId].tsx",
+        "apps/westayfit/src/turnContract.ts",
+        "apps/westayfit/src/stationTurnOperation.ts",
+        "apps/westayfit/src/__tests__/stationTurnOperation.test.ts",
+        "tests-e2e/station-expected-turn.spec.ts",
+        "tests-e2e/expo-attendee-journey.spec.ts",
+        "docs/westayfit/qa/kiosk-expected-turn-native-caller-1.md"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6044059165
+        },
+        "released": {
+          "kind": "comment",
+          "id": 6044062885
+        },
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6044062885
         }
       },
       "review": {
@@ -1452,8 +1577,8 @@
       },
       "label": "Finish the blocked staging pin with verified approval ancestry and tracked unverified synthetic fixtures",
       "origin": "ledger",
-      "phase": "RELEASED",
-      "phaseBeforeBlock": null,
+      "phase": "BLOCKED",
+      "phaseBeforeBlock": "RELEASED",
       "queueIndexBeforeBlock": null,
       "inbox": 396,
       "pr": null,
@@ -1478,7 +1603,12 @@
         ".github/wsf-staging/pin-candidate.mjs",
         ".github/wsf-staging/journeys/fixture-kit.mjs"
       ],
-      "blockedBy": [],
+      "blockedBy": [
+        {
+          "packet": "CONTROL-CURRENT-PATCH-ACK-1",
+          "until": "INTEGRATED"
+        }
+      ],
       "importRefs": [],
       "authority": {
         "queued": {
@@ -1492,7 +1622,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6043993150
+          "id": 6044034555
         }
       },
       "review": {
@@ -3846,7 +3976,8 @@
       "ack": {
         "kind": "comment",
         "id": 6042925619
-      }
+      },
+      "superseded": true
     },
     "1bb58afbb79ec37c9861667a7b40b0d8b4d7360f9534883dd805b84e9d34cdd1": {
       "packet": "KIOSK-UNVERIFIED-PARTICIPANT-1-STAGING-PIN",
@@ -3870,6 +4001,31 @@
       "comments": [
         6044057222
       ],
+      "ack": null,
+      "superseded": true
+    },
+    "849b8aa43eb238b78556aa8971a9e3d6d94a7f306798a5d4d1c45c5b3db810a3": {
+      "packet": "CONTROL-CURRENT-PATCH-ACK-1",
+      "worker": "W3",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
+    },
+    "8ad8a042b172503b21175f13f1dbf99420dfe40fc486a4167c47d089de068833": {
+      "packet": "KIOSK-EXPECTED-TURN-1",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
+    },
+    "4f2f3ee721adac1871c9798563ce13f4e9620406a2d1f78af63937665121349a": {
+      "packet": "KIOSK-EXPECTED-TURN-NATIVE-CALLER-1",
+      "worker": "W7",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
