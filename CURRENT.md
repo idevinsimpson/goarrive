@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=09695a3c55ed95fb8041b49d73b15c5b7e0fc9f3741a6e97e42f1d9b26fa2db5 events=657 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=b98d32b989758540fedf8d95fc6735885ffd8d4ec66e0a57ed4491340657c94e events=659 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `09695a3c55ed95fb8041b49d73b15c5b7e0fc9f3741a6e97e42f1d9b26fa2db5` (657 events)
+- Ledger head: `b98d32b989758540fedf8d95fc6735885ffd8d4ec66e0a57ed4491340657c94e` (659 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -180,7 +180,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | 8f6be434c744 | W3 | KIOSK-UNVERIFIED-STAGING-RECOVERY-1 | release | delivered | 6044057222 | — |
 | 849b8aa43eb2 | W3 | CONTROL-CURRENT-PATCH-ACK-1 | release | acked | 6044193318 | comment:6044199224 |
 | 8ad8a042b172 | W4 | KIOSK-EXPECTED-TURN-1 | review | acked | 6044193561 | comment:6044222667 |
-| 4f2f3ee721ad | W7 | KIOSK-EXPECTED-TURN-NATIVE-CALLER-1 | release | retried | 6044193835 | — |
+| 4f2f3ee721ad | W7 | KIOSK-EXPECTED-TURN-NATIVE-CALLER-1 | release | redelivered | 6044193835, 6044557410 | — |
 | 574ab7e48385 | W9 | CONTROL-CURRENT-PATCH-ACK-1 | review | acked | 6044366439 | comment:6044453646 |
-| ffb8060ed493 | W9 | KIOSK-EXPECTED-TURN-1 | handback | requested | — | — |
+| ffb8060ed493 | W9 | KIOSK-EXPECTED-TURN-1 | handback | delivered | 6044557669 | — |
 
