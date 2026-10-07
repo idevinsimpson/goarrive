@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "0320b5f04dcafff9fd9797f063264dc75f0f739f40d3cb5e4c68ef04849eba0e",
-  "eventCount": 598,
+  "ledgerHead": "751506eb1234f7e75e846ca31abadcfbd472acb317223ed6bb1c8ce0887cf01f",
+  "eventCount": 599,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1252,7 +1252,7 @@
       },
       "label": "Deliver the isolated privacy-safe public preview label without waiting for crossing attribution",
       "origin": "ledger",
-      "phase": "ACCEPTED",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -1264,7 +1264,7 @@
         "subjectSha": "37529ea37a1afd615ca2cce21fce45534f24d964",
         "prHeadSha": "37529ea37a1afd615ca2cce21fce45534f24d964",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "245c771722d00fb6b5d0c03b867ae423d426e308"
       },
       "proof": null,
       "served": null,
@@ -1293,8 +1293,8 @@
           "id": 6036573359
         },
         "lastTransition": {
-          "kind": "comment",
-          "id": 6036573359
+          "kind": "pull_request",
+          "id": 584
         }
       },
       "review": {
