@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "ffc53624ad1ff803c48627003d48e68f6002c70d1eaa4271bd31eefee4b2b1bd",
-  "eventCount": 601,
+  "ledgerHead": "21f9d9fd5afe1e34537861a7e8d9a0f65efd66ca9fd933832d5f302e85cd5c1d",
+  "eventCount": 603,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -65,9 +65,7 @@
     "W4": [],
     "W5": [],
     "W7": [],
-    "W9": [
-      "KIOSK-UNVERIFIED-PARTICIPANT-1"
-    ]
+    "W9": []
   },
   "packets": {
     "AUTONOMY-ROUTER-1C": {
@@ -1254,10 +1252,10 @@
       },
       "label": "Allow real authenticated unverified attendees to complete the ordinary WSF event participation backend journey",
       "origin": "ledger",
-      "phase": "QUEUED",
+      "phase": "RELEASED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
-      "inbox": null,
+      "inbox": 497,
       "pr": null,
       "reviewers": [],
       "artifact": {
@@ -1268,7 +1266,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": null,
+      "releasedQueueIndex": 0,
       "reviewedBy": [],
       "subjectPaths": [
         "functions-westayfit/src/index.ts",
@@ -1287,11 +1285,14 @@
           "kind": "comment",
           "id": 6041743819
         },
-        "released": null,
+        "released": {
+          "kind": "comment",
+          "id": 6041849013
+        },
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6041743819
+          "id": 6041849013
         }
       },
       "review": {
@@ -3546,6 +3547,14 @@
         "id": 6036085110
       },
       "superseded": true
+    },
+    "f60e1371d95ca186ea48ff44e65ca70c4d4a6dba1d04a9b7ca06da99427ef9c4": {
+      "packet": "KIOSK-UNVERIFIED-PARTICIPANT-1",
+      "worker": "W9",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
