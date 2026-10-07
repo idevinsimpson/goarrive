@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "515fa1f8b7d9c464f07954647d9d12d3362650c4b3f3ccd1a7da07856179ade6",
-  "eventCount": 693,
+  "ledgerHead": "e29bfd70219f8c7cf9cac7921c20f4286ad1b2abde02381e8908172aadc84673",
+  "eventCount": 696,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1777,15 +1777,15 @@
       },
       "label": "Run the pinned Lovable kiosk journey with bounded real staging fixtures and cleanup inside the existing trusted runner",
       "origin": "ledger",
-      "phase": "CHANGES_REQUESTED",
+      "phase": "DELIVERED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
       "pr": 589,
       "reviewers": [],
       "artifact": {
-        "subjectSha": "404c3ba34c21779f923fde4ef8974d4ead51417e",
-        "prHeadSha": "01f649b11b9ff2c70369100f4e28019291be7d0e",
+        "subjectSha": "aae04a41fd6aa72d90106e87d4f036ed3d302ff3",
+        "prHeadSha": "aae04a41fd6aa72d90106e87d4f036ed3d302ff3",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -1814,7 +1814,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6045688233
+          "id": 6045953261
         }
       },
       "review": {
@@ -1831,7 +1831,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 1,
+      "deliveries": 2,
       "pendingFinding": null
     },
     "MEMBER-PREVIEW-LABEL-1": {
@@ -4320,11 +4320,15 @@
       "packet": "LOVABLE-KIOSK-HOSTED-PROOF-1",
       "worker": "W3",
       "reason": "handback",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6045860843
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6045941455
+      },
+      "superseded": true
     }
   },
   "fastpath": {
