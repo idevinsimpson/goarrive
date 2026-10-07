@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "706b98ccd82bb191ca9d7752a234b8a0def1a8021eeeaac70b39df2d99df3d53",
-  "eventCount": 652,
+  "ledgerHead": "09695a3c55ed95fb8041b49d73b15c5b7e0fc9f3741a6e97e42f1d9b26fa2db5",
+  "eventCount": 657,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -299,7 +299,9 @@
       "proof": null,
       "served": null,
       "releasedQueueIndex": null,
-      "reviewedBy": [],
+      "reviewedBy": [
+        "W9"
+      ],
       "subjectPaths": [
         "tools/wsf-control/github.mjs",
         "tools/wsf-control/tests/shadow.test.mjs"
@@ -318,7 +320,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6044200033
+          "id": 6044453646
         }
       },
       "review": {
@@ -1237,7 +1239,7 @@
       },
       "label": "Bind kiosk mutations to the intended turn and preserve exactly-once phone and station completion",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "CHANGES_REQUESTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -1277,7 +1279,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6044003954
+          "id": 6044506214
         }
       },
       "review": {
@@ -4031,13 +4033,14 @@
       "ack": {
         "kind": "comment",
         "id": 6044222667
-      }
+      },
+      "superseded": true
     },
     "4f2f3ee721adac1871c9798563ce13f4e9620406a2d1f78af63937665121349a": {
       "packet": "KIOSK-EXPECTED-TURN-NATIVE-CALLER-1",
       "worker": "W7",
       "reason": "release",
-      "status": "delivered",
+      "status": "retried",
       "comments": [
         6044193835
       ],
@@ -4047,10 +4050,22 @@
       "packet": "CONTROL-CURRENT-PATCH-ACK-1",
       "worker": "W9",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6044366439
       ],
+      "ack": {
+        "kind": "comment",
+        "id": 6044453646
+      },
+      "superseded": true
+    },
+    "ffb8060ed493ced8a9e6452cdffc581a25a023f74c4555e0a0dd4a11b8d3dd73": {
+      "packet": "KIOSK-EXPECTED-TURN-1",
+      "worker": "W9",
+      "reason": "handback",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
