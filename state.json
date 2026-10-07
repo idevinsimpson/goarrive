@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "9c6706c8db31181a01021c957fe3dee374c004e88635db799404de0fc399f154",
-  "eventCount": 684,
+  "ledgerHead": "ea4650f3de12ca8c1ed619be8190e73a861c56cbfac3742059b187be5916d8c1",
+  "eventCount": 690,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1365,7 +1365,7 @@
       },
       "label": "Bind kiosk mutations to the intended turn and preserve exactly-once phone and station completion",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "CHANGES_REQUESTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -1405,7 +1405,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6045666335
+          "id": 6044494616
         }
       },
       "review": {
@@ -1777,7 +1777,7 @@
       },
       "label": "Run the pinned Lovable kiosk journey with bounded real staging fixtures and cleanup inside the existing trusted runner",
       "origin": "ledger",
-      "phase": "DELIVERED",
+      "phase": "CHANGES_REQUESTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -1785,7 +1785,7 @@
       "reviewers": [],
       "artifact": {
         "subjectSha": "404c3ba34c21779f923fde4ef8974d4ead51417e",
-        "prHeadSha": "404c3ba34c21779f923fde4ef8974d4ead51417e",
+        "prHeadSha": "01f649b11b9ff2c70369100f4e28019291be7d0e",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -1814,7 +1814,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6045147996
+          "id": 6045688233
         }
       },
       "review": {
@@ -4300,6 +4300,23 @@
       "comments": [
         6045746368
       ],
+      "ack": null,
+      "superseded": true
+    },
+    "9ccddb32af25c16303f12f0962033b1813bb5991ff67b65a5b88693291e5b3d2": {
+      "packet": "KIOSK-EXPECTED-TURN-1",
+      "worker": "W9",
+      "reason": "handback",
+      "status": "requested",
+      "comments": [],
+      "ack": null
+    },
+    "e60f0b948571e31179164ce0ae4ebccff760aa9cf926d94d7f20b560571959a8": {
+      "packet": "LOVABLE-KIOSK-HOSTED-PROOF-1",
+      "worker": "W3",
+      "reason": "handback",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
