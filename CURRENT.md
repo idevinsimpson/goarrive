@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=a6bc48261e42376a53eaa94e5dde645cd4bd44f8235086e2c6baa6780fca16e2 events=642 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=75982681dbc4e9bd93a13223cdc49a2c8ded2a1cdee6a3af84958f697215735e events=645 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `a6bc48261e42376a53eaa94e5dde645cd4bd44f8235086e2c6baa6780fca16e2` (642 events)
+- Ledger head: `75982681dbc4e9bd93a13223cdc49a2c8ded2a1cdee6a3af84958f697215735e` (645 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -178,7 +178,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | dd7bb9d5cae1 | W9 | KIOSK-EXPECTED-TURN-1 | release | acked | 6042910254 | comment:6042925619 |
 | 1bb58afbb79e | W3 | KIOSK-UNVERIFIED-PARTICIPANT-1-STAGING-PIN | release | acked | 6043175500 | comment:6043195547 |
 | 8f6be434c744 | W3 | KIOSK-UNVERIFIED-STAGING-RECOVERY-1 | release | delivered | 6044057222 | — |
-| 849b8aa43eb2 | W3 | CONTROL-CURRENT-PATCH-ACK-1 | release | requested | — | — |
-| 8ad8a042b172 | W4 | KIOSK-EXPECTED-TURN-1 | review | requested | — | — |
-| 4f2f3ee721ad | W7 | KIOSK-EXPECTED-TURN-NATIVE-CALLER-1 | release | requested | — | — |
+| 849b8aa43eb2 | W3 | CONTROL-CURRENT-PATCH-ACK-1 | release | delivered | 6044193318 | — |
+| 8ad8a042b172 | W4 | KIOSK-EXPECTED-TURN-1 | review | delivered | 6044193561 | — |
+| 4f2f3ee721ad | W7 | KIOSK-EXPECTED-TURN-NATIVE-CALLER-1 | release | delivered | 6044193835 | — |
 
