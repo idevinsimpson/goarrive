@@ -22,7 +22,8 @@
       { "source": "/event/**", "destination": "/event/__dynamic.html" },
       { "source": "/queue/**", "destination": "/queue/__dynamic.html" },
       { "source": "/move/**", "destination": "/move/__dynamic.html" },
-      { "source": "/combined/**", "destination": "/combined/__dynamic.html" }
+      { "source": "/combined/**", "destination": "/combined/__dynamic.html" },
+      { "source": "/go/**", "destination": "/go/__dynamic.html" }
     ],
     "headers": [
       {

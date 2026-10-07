@@ -37,6 +37,7 @@ const FIXTURES = {
   contribute: 'contribute/[goalId].html',
   kiosk: 'kiosk/[goalId].html',
   combined: 'combined/[setupId].html',
+  go: 'go/[markerSlug].html',
   signin: 'signin.html',
   goalsNew: 'goals/new.html',
   challenge: 'community/[groupId]/challenge.html',
@@ -186,6 +187,10 @@ const ROUTE_COPY: Record<RouteName, { title: string; description: string }> = {
     title: 'Combined goal | WE STAY FIT',
     description: 'Shared challenges. More movement. Stronger communities.',
   },
+  // EVERGREEN-MARKER-ENTRY-1: a printed marker's page takes the global
+  // fallback on purpose — the head never names the community or goal a
+  // marker currently points at, because what it points at can change.
+  go: { title: 'WE STAY FIT', description: 'Shared challenges. More movement. Stronger communities.' },
   signin: { title: 'WE STAY FIT', description: 'Shared challenges. More movement. Stronger communities.' },
   goalsNew: { title: 'WE STAY FIT', description: 'Shared challenges. More movement. Stronger communities.' },
   challenge: { title: 'WE STAY FIT', description: 'Shared challenges. More movement. Stronger communities.' },
@@ -274,6 +279,7 @@ describe('exported head — every page', () => {
       'contribute',
       'kiosk',
       'combined',
+      'go',
       'challenge',
     ] as RouteName[]) {
       expect(link(production.pages[route], 'canonical')).toBe(`${PROD_ORIGIN}/`);
@@ -312,6 +318,37 @@ describe('exported head — the combined movement goal route', () => {
       source: '/combined/**',
       destination: '/combined/__dynamic.html',
     });
+  });
+});
+
+describe('exported head — the evergreen marker route', () => {
+  // EVERGREEN-MARKER-ENTRY-1. A printed QR is the coldest load there is: a
+  // phone that has never seen the app opens `/go/<slug>` directly. That only
+  // resolves because the build writes `go/__dynamic.html` AND both Hosting
+  // configs rewrite `/go/**` to it — the same pairing as every other dynamic
+  // route, and the two configs must not drift.
+  type Rewrite = { source: string; destination: string };
+  const rewritesOf = (file: string) =>
+    (JSON.parse(readFileSync(path.resolve(__dirname, '../../../', file), 'utf8')) as {
+      hosting: { rewrites: Rewrite[] };
+    }).hosting.rewrites;
+
+  it('emits the __dynamic alias the Hosting rewrite points at', () => {
+    expect(existsSync(path.join(production.dist, 'go/__dynamic.html'))).toBe(true);
+  });
+
+  it('is a declared rewrite in the Hosting source, prefix-disjoint from every other route', () => {
+    const rewrites = rewritesOf('firebase.westayfit.json');
+    expect(rewrites.filter((r) => r.source === '/go/**')).toEqual([
+      { source: '/go/**', destination: '/go/__dynamic.html' },
+    ]);
+    for (const r of rewrites) {
+      if (r.source !== '/go/**') expect(r.source.startsWith('/go/')).toBe(false);
+    }
+  });
+
+  it('the emulator harness declares byte-for-byte the same rewrites', () => {
+    expect(rewritesOf('firebase.westayfit.emulators.json')).toEqual(rewritesOf('firebase.westayfit.json'));
   });
 });
 

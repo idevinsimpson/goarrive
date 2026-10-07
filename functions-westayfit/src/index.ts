@@ -797,6 +797,97 @@ export const wsfPreviewCommunity = onCall<PreviewRequest>(
 type JoinRequest = { joinCode?: unknown };
 type JoinResponse = { groupId: string; alreadyMember: boolean };
 
+/**
+ * THE SHARED JOIN CORE: what a valid public link does once it has named a
+ * community. Extracted unchanged from wsfJoinCommunity (EVERGREEN-MARKER-ENTRY-1)
+ * so the evergreen marker join applies exactly the same admission rules —
+ * active member returns, removed stays refused, departed is reactivated only
+ * through a link-joinable active community, and a new membership has the same
+ * shape. The caller has already read the profile and the community inside `tx`.
+ */
+async function admitByLinkTx(
+  tx: FirebaseFirestore.Transaction,
+  groupId: string,
+  group: { joinPolicy: JoinPolicy; lifecycleStatus: string },
+  uid: string
+): Promise<JoinResponse> {
+  const membershipRef = getFirestore().doc(`wsfMemberships/${groupId}_${uid}`);
+  const membershipSnap = await tx.get(membershipRef);
+
+  // D3. This branch used to return before any policy check and WITHOUT
+  // consulting membershipStatus. Once a non-active value can be written,
+  // that would have routed a removed person straight back in on an old
+  // link. Each state now has a stated answer.
+  //
+  // Note the ordering that is deliberately preserved: the caller's code
+  // lookup already returned notFound() for an unknown — including a RESET —
+  // code before membership is read. So a reset code is unknown to
+  // everyone, members included (D1 wins over this grandfathering), and the
+  // code space stays unguessable.
+  if (membershipSnap.exists) {
+    const existing = membershipSnap.data() as { membershipStatus?: string };
+    const status = existing.membershipStatus;
+
+    // ACTIVE MEMBER — the legitimate purpose of this branch. A returning
+    // tap on the CURRENT link resolves, and the membership is neither
+    // re-created nor duplicated, even if the Champion has since flipped
+    // the policy or the lifecycle.
+    if (status === MEMBERSHIP_ACTIVE) {
+      return { groupId, alreadyMember: true };
+    }
+
+    // REMOVED — a general link never reactivates a removed membership.
+    // The response is the same notFound() an unknown code gets, so it
+    // discloses nothing about the community's current state, its name, or
+    // even that this person was once a member. Reinstatement is an
+    // explicit Champion action (wsfReinstateMember).
+    if (status === MEMBERSHIP_REMOVED) {
+      notFound();
+    }
+
+    // VOLUNTARILY DEPARTED — not banned. They come back the ordinary way,
+    // so the normal admission rules below must pass: a valid link to a
+    // link-joinable community on an active lifecycle. If those pass, the
+    // existing record is reactivated rather than duplicated.
+    if (status === MEMBERSHIP_DEPARTED) {
+      if (!LINK_JOINABLE.has(group.joinPolicy) || group.lifecycleStatus !== 'active') {
+        notFound();
+      }
+      tx.set(
+        membershipRef,
+        {
+          membershipStatus: MEMBERSHIP_ACTIVE,
+          rejoinedAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+      return { groupId, alreadyMember: false };
+    }
+
+    // Any other stored value is not a state this code understands, and
+    // guessing would be the wrong instinct for an admission decision.
+    notFound();
+  }
+
+  if (!LINK_JOINABLE.has(group.joinPolicy) || group.lifecycleStatus !== 'active') {
+    notFound();
+  }
+
+  // Membership shape matches wsfCreateCommunity's exactly (see §2). Role
+  // is 'member' rather than 'foundingChampion' — a joiner is not the
+  // creator.
+  tx.set(membershipRef, {
+    groupId,
+    userId: uid,
+    role: 'member',
+    membershipStatus: 'active',
+    createdAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+  return { groupId, alreadyMember: false };
+}
+
 export const wsfJoinCommunity = onCall<JoinRequest>(
   { region: 'us-central1' },
   async (request): Promise<JoinResponse> => {
@@ -836,81 +927,204 @@ export const wsfJoinCommunity = onCall<JoinRequest>(
       const groupDoc = groupsSnap.docs[0]!;
       const group = groupDoc.data() as { joinPolicy: JoinPolicy; lifecycleStatus: string };
 
-      const membershipRef = db.doc(`wsfMemberships/${groupDoc.id}_${uid}`);
-      const membershipSnap = await tx.get(membershipRef);
+      return await admitByLinkTx(tx, groupDoc.id, group, uid);
+    });
+  }
+);
 
-      // D3. This branch used to return before any policy check and WITHOUT
-      // consulting membershipStatus. Once a non-active value can be written,
-      // that would have routed a removed person straight back in on an old
-      // link. Each state now has a stated answer.
-      //
-      // Note the ordering that is deliberately preserved: the code lookup
-      // above already returned notFound() for an unknown — including a RESET —
-      // code before membership is read. So a reset code is unknown to
-      // everyone, members included (D1 wins over this grandfathering), and the
-      // code space stays unguessable.
-      if (membershipSnap.exists) {
-        const existing = membershipSnap.data() as { membershipStatus?: string };
-        const status = existing.membershipStatus;
+// ─────────────────────────────────────────────────────────────────────────────
+// EVERGREEN-MARKER-ENTRY-1 (phase A) — the physical-marker alias.
+//
+// A reusable printed QR carries only `https://westay.fit/go/{markerSlug}`. The
+// slug names a `wsfMarkers/{markerSlug}` document that points at ONE community
+// and ONE goal; repointing the marker changes that document and never a goal,
+// so an old goal link keeps exactly what it meant.
+//
+// THIS PHASE NEVER WRITES A MARKER. No callable here creates or edits
+// `wsfMarkers`; the documents are read-only to it (emulator fixtures in the
+// suite). Who may repoint a marker is an open owner/security decision and is
+// deliberately not invented here.
+//
+// The collection is Admin-SDK only: the client rules catch-all denies it, so
+// the app reaches it solely through these two callables.
+//
+// A marker is a PUBLIC LINK, so it is exactly as strong as the community's own
+// public join link and no stronger: a community that is not link-joinable or
+// not active resolves as not-found, the same as an unknown slug. Nothing in a
+// response names a join code, a member, a count or a scan.
+// ─────────────────────────────────────────────────────────────────────────────
 
-        // ACTIVE MEMBER — the legitimate purpose of this branch. A returning
-        // tap on the CURRENT link resolves, and the membership is neither
-        // re-created nor duplicated, even if the Champion has since flipped
-        // the policy or the lifecycle.
-        if (status === MEMBERSHIP_ACTIVE) {
-          return { groupId: groupDoc.id, alreadyMember: true };
-        }
+const MARKER_KIOSK_MODES = ['off', 'available', 'queue'] as const;
+type MarkerKioskMode = (typeof MARKER_KIOSK_MODES)[number];
 
-        // REMOVED — a general link never reactivates a removed membership.
-        // The response is the same notFound() an unknown code gets, so it
-        // discloses nothing about the community's current state, its name, or
-        // even that this person was once a member. Reinstatement is an
-        // explicit Champion action (wsfReinstateMember).
-        if (status === MEMBERSHIP_REMOVED) {
-          notFound();
-        }
+/** The phase-A marker document: only what resolving the journey needs. */
+type MarkerDoc = {
+  label: string;
+  active: boolean;
+  communityGroupId: string;
+  goalId: string;
+  kioskMode: MarkerKioskMode;
+};
 
-        // VOLUNTARILY DEPARTED — not banned. They come back the ordinary way,
-        // so the normal admission rules below must pass: a valid link to a
-        // link-joinable community on an active lifecycle. If those pass, the
-        // existing record is reactivated rather than duplicated.
-        if (status === MEMBERSHIP_DEPARTED) {
-          if (!LINK_JOINABLE.has(group.joinPolicy) || group.lifecycleStatus !== 'active') {
-            notFound();
-          }
-          tx.set(
-            membershipRef,
-            {
-              membershipStatus: MEMBERSHIP_ACTIVE,
-              rejoinedAt: FieldValue.serverTimestamp(),
-              updatedAt: FieldValue.serverTimestamp(),
-            },
-            { merge: true }
-          );
-          return { groupId: groupDoc.id, alreadyMember: false };
-        }
+/**
+ * Lowercase letters, digits and inner hyphens, at most 48 characters — the
+ * shape of `flag-01`. Printed URLs are typed back in by hand, so case is
+ * folded; anything else cannot be a slug and never reaches a document read.
+ */
+function normalizeMarkerSlug(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  const slug = v.trim().toLowerCase();
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?$/.test(slug)) return null;
+  return slug;
+}
 
-        // Any other stored value is not a state this code understands, and
-        // guessing would be the wrong instinct for an admission decision.
-        notFound();
+/** A stored marker is trusted only when every field has its exact shape. */
+function readMarkerDoc(data: unknown): MarkerDoc | null {
+  if (!data || typeof data !== 'object') return null;
+  const d = data as Record<string, unknown>;
+  if (d.active !== true) return null;
+  if (typeof d.label !== 'string' || d.label.trim().length === 0 || d.label.length > 80) return null;
+  const communityGroupId = normalizeStringId(d.communityGroupId);
+  const goalId = normalizeStringId(d.goalId);
+  if (!communityGroupId || !goalId) return null;
+  if (!MARKER_KIOSK_MODES.includes(d.kioskMode as MarkerKioskMode)) return null;
+  return {
+    label: d.label.trim(),
+    active: true,
+    communityGroupId,
+    goalId,
+    kioskMode: d.kioskMode as MarkerKioskMode,
+  };
+}
+
+type MarkerGoalState = 'open' | 'upcoming' | 'ended' | 'closed';
+
+/**
+ * The goal's TRUTHFUL state for a visitor, using the same server-time window
+ * wsfContribute enforces (startsAt inclusive, endsAt exclusive). A goal that is
+ * still `active` but whose window has passed is 'ended', never 'open'.
+ */
+function markerGoalState(goal: GoalDoc, nowMs: number): MarkerGoalState {
+  if (goal.status !== 'active') return 'closed';
+  if (nowMs < goal.startsAt.toMillis()) return 'upcoming';
+  if (nowMs >= goal.endsAt.toMillis()) return 'ended';
+  return 'open';
+}
+
+type ResolvedMarker = {
+  marker: MarkerDoc;
+  group: { displayName: string; joinPolicy: JoinPolicy; lifecycleStatus: string };
+  goal: GoalDoc;
+};
+
+/**
+ * Resolve a slug to its marker, community and goal, or fail closed with the
+ * generic not-found. Every refusal is the same: unknown slug, inactive or
+ * malformed marker, a community that is missing, not link-joinable or not
+ * active, and a goal that is missing or belongs to another community.
+ */
+async function resolveMarkerTx(
+  tx: FirebaseFirestore.Transaction,
+  slug: string
+): Promise<ResolvedMarker> {
+  const db = getFirestore();
+  const markerSnap = await tx.get(db.doc(`wsfMarkers/${slug}`));
+  if (!markerSnap.exists) notFound();
+  const marker = readMarkerDoc(markerSnap.data());
+  if (!marker) notFound();
+  const [groupSnap, goalSnap] = await Promise.all([
+    tx.get(db.doc(`wsfCommunityGroups/${marker.communityGroupId}`)),
+    tx.get(db.doc(`wsfGoals/${marker.goalId}`)),
+  ]);
+  if (!groupSnap.exists || !goalSnap.exists) notFound();
+  const group = groupSnap.data() as ResolvedMarker['group'];
+  if (!LINK_JOINABLE.has(group.joinPolicy) || group.lifecycleStatus !== 'active') notFound();
+  const goal = goalSnap.data() as GoalDoc;
+  if (goal.communityGroupId !== marker.communityGroupId) notFound();
+  return { marker, group, goal };
+}
+
+type ResolveMarkerRequest = { markerSlug?: unknown };
+type ResolveMarkerResponse = {
+  markerSlug: string;
+  label: string;
+  communityName: string;
+  goalId: string;
+  goalTitle: string;
+  goalState: MarkerGoalState;
+  kioskMode: MarkerKioskMode;
+  viewer: 'signedOut' | 'nonMember' | 'member';
+  /** Only for an active member, who can already read their community. */
+  communityGroupId: string | null;
+};
+
+export const wsfResolveMarker = onCall<ResolveMarkerRequest>(
+  // Public so a signed-out visitor standing at the flag can see what the code
+  // opens before any account step — the same posture, and the same per-IP
+  // bucket, as wsfPreviewCommunity. No-op in the emulator.
+  { region: 'us-central1', invoker: 'public' },
+  async (request): Promise<ResolveMarkerResponse> => {
+    const ip = extractIp(request.rawRequest as any);
+    // Rate limit FIRST, before any slug lookup.
+    await enforcePreviewRateLimit(ip, Date.now());
+
+    const slug = normalizeMarkerSlug(request.data?.markerSlug);
+    if (!slug) notFound();
+
+    const db = getFirestore();
+    const uid = request.auth?.uid ?? null;
+    return await db.runTransaction(async (tx) => {
+      const { marker, group, goal } = await resolveMarkerTx(tx, slug);
+      const membership = uid ? await readActiveMembership(tx, marker.communityGroupId, uid) : null;
+      const viewer: ResolveMarkerResponse['viewer'] =
+        uid === null ? 'signedOut' : membership ? 'member' : 'nonMember';
+      return {
+        markerSlug: slug,
+        label: marker.label,
+        communityName: group.displayName,
+        goalId: marker.goalId,
+        goalTitle: goal.title,
+        goalState: markerGoalState(goal, Date.now()),
+        kioskMode: marker.kioskMode,
+        viewer,
+        communityGroupId: viewer === 'member' ? marker.communityGroupId : null,
+      };
+    });
+  }
+);
+
+type JoinViaMarkerRequest = { markerSlug?: unknown };
+type JoinViaMarkerResponse = { groupId: string; goalId: string; alreadyMember: boolean };
+
+export const wsfJoinViaMarker = onCall<JoinViaMarkerRequest>(
+  { region: 'us-central1' },
+  async (request): Promise<JoinViaMarkerResponse> => {
+    // The same gates, in the same order, as wsfJoinCommunity.
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Sign in first.');
+    }
+    assertJoinEmailVerified(request.auth.token as { email_verified?: boolean });
+
+    const uid = request.auth.uid;
+    const slug = normalizeMarkerSlug(request.data?.markerSlug);
+    if (!slug) notFound();
+
+    const db = getFirestore();
+    const profileRef = db.doc(`wsfMemberProfiles/${uid}`);
+    return await db.runTransaction(async (tx) => {
+      const profileSnap = await tx.get(profileRef);
+      if (!profileSnap.exists) {
+        throw new HttpsError(
+          'failed-precondition',
+          'Complete your profile before joining a community.'
+        );
       }
-
-      if (!LINK_JOINABLE.has(group.joinPolicy) || group.lifecycleStatus !== 'active') {
-        notFound();
-      }
-
-      // Membership shape matches wsfCreateCommunity's exactly (see §2). Role
-      // is 'member' rather than 'foundingChampion' — a joiner is not the
-      // creator.
-      tx.set(membershipRef, {
-        groupId: groupDoc.id,
-        userId: uid,
-        role: 'member',
-        membershipStatus: 'active',
-        createdAt: FieldValue.serverTimestamp(),
-        updatedAt: FieldValue.serverTimestamp(),
-      });
-      return { groupId: groupDoc.id, alreadyMember: false };
+      // The marker is re-resolved inside THIS transaction, so a marker
+      // repointed or disabled between the visitor's scan and their tap admits
+      // them to nothing it no longer names.
+      const { marker, group } = await resolveMarkerTx(tx, slug);
+      const joined = await admitByLinkTx(tx, marker.communityGroupId, group, uid);
+      return { ...joined, goalId: marker.goalId };
     });
   }
 );

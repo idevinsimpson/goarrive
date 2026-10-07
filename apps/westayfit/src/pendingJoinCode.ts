@@ -17,6 +17,7 @@
 
 import { eventRoute, readEventReturn } from './eventReturn';
 import { kioskContributeRoute, readKioskReturnGoal } from './kioskSession';
+import { markerRoute, readMarkerReturn } from './markerEntry';
 
 const KEY = 'wsf.pendingJoinCode';
 
@@ -75,7 +76,7 @@ export function clearPendingJoinCode(): void {
  * and the visitor dead-ends. The pending code survives sessionStorage across
  * the gate hops and is consumed here on the last step.
  *
- * THREE DESTINATIONS CAN CLAIM THIS HOP, in this order:
+ * FOUR DESTINATIONS CAN CLAIM THIS HOP, in this order:
  *
  *   1. A PENDING JOIN CODE. A visitor mid-way through joining a community has
  *      to finish that before anything else.
@@ -87,6 +88,11 @@ export function clearPendingJoinCode(): void {
  *      there is no return target for anything to tamper with.
  *   3. A KIOSK RETURN, which sends the visitor back to the contribution screen
  *      on the device they walked up to (src/kioskSession.ts).
+ *   4. A MARKER RETURN (EVERGREEN-MARKER-ENTRY-1): somebody scanned a printed
+ *      `/go/<slug>` code and went to sign in. The route is rebuilt from a
+ *      validated slug (src/markerEntry.ts). It is last so it never changes
+ *      where the three older destinations land; the marker screen clears the
+ *      older returns when it arms its own, so in practice it stands alone.
  *
  * An event return and a kiosk return should not coexist: the event screen asks
  * whose screen this is FIRST, and a device that answers "shared" is handed to
@@ -100,5 +106,7 @@ export function nextRouteAfterAuth(fallback: string): string {
   if (eventGoalId) return eventRoute(eventGoalId);
   const kioskGoalId = readKioskReturnGoal();
   if (kioskGoalId) return kioskContributeRoute(kioskGoalId);
+  const markerSlug = readMarkerReturn();
+  if (markerSlug) return markerRoute(markerSlug);
   return fallback;
 }
