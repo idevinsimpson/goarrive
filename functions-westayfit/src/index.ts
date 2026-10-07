@@ -117,13 +117,13 @@ export const wsfSaveProfile = onCall<SaveProfileRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'wsfSaveProfile requires an authenticated caller.');
     }
-    const token = request.auth.token as { email_verified?: boolean };
-    if (token.email_verified !== true) {
-      throw new HttpsError(
-        'failed-precondition',
-        'Verify your email before saving your profile.'
-      );
-    }
+    // KIOSK-UNVERIFIED-PARTICIPANT-1 (owner policy #365 6041359966): an
+    // ordinary participant does NOT need a verified email to save their own
+    // profile. The caller is still a real authenticated Firebase account and
+    // can only ever write its own `wsfMemberProfiles/{uid}`; verifying the
+    // address later keeps the same uid, profile, memberships and credits.
+    // Organizer callables (communities, goals, combined goals) keep their own
+    // verification gates.
     const uid = request.auth.uid;
 
     const rawDisplayName = request.data?.displayName;
@@ -622,14 +622,19 @@ export const wsfSendVerificationEmail = onCall(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * §5 open decision: does joining require a verified email?
+ * §5 decision: does joining require a verified email?
  *
- * Default TRUE (safe, consistent with wsfCreateCommunity, protects the aggregate
- * counter from throwaway signups). Flipping to false trades the booth funnel
- * for that safety — the decision is Devin's. The guard is exactly one line so
- * that answer is one line, per §5.
+ * DECIDED: NO, for ordinary participants (KIOSK-UNVERIFIED-PARTICIPANT-1, owner
+ * policy #365 6041359966). An authenticated account with an unverified address
+ * may join through a valid public or invite link, or an approved marker, and
+ * then take part like any member. Every other admission control is untouched:
+ * a real Firebase account and a saved profile are still required, the link or
+ * marker must still be valid for a link-joinable active community, removed
+ * stays refused, and an unknown code is the same generic not-found. Verifying
+ * later keeps the same uid, membership and credit. Organizer callables keep
+ * their own verification gates. This is still the one line the policy turns on.
  */
-const JOIN_REQUIRES_EMAIL_VERIFIED = true;
+const JOIN_REQUIRES_EMAIL_VERIFIED = false;
 
 function assertJoinEmailVerified(token: { email_verified?: boolean }): void {
   if (JOIN_REQUIRES_EMAIL_VERIFIED && token.email_verified !== true) {

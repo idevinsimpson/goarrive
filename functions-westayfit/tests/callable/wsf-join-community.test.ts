@@ -173,16 +173,55 @@ describe('wsfJoinCommunity', () => {
     expect(result.error.code).toBe('unauthenticated');
   });
 
-  test('unverified email: failed-precondition (default JOIN_REQUIRES_EMAIL_VERIFIED=true)', async () => {
+  test('KIOSK-UNVERIFIED-PARTICIPANT-1: an unverified account with a profile joins through a valid link', async () => {
     await seedProfile('wsfJoin_carol');
     const code = mintJoinCode();
-    await seedGroup({ joinCode: code, joinPolicy: 'public' });
+    const groupId = await seedGroup({ joinCode: code, joinPolicy: 'public' });
 
-    const result = await tryRun('wsfJoin_carol', false, { joinCode: code });
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error.code).toBe('failed-precondition');
-    expect(result.error.message).toMatch(/Verify your email/i);
+    const first = await tryRun('wsfJoin_carol', false, { joinCode: code });
+    expect(first.ok && first.value).toEqual({ groupId, alreadyMember: false });
+    const row = (await getFirestore().doc(`wsfMemberships/${groupId}_wsfJoin_carol`).get()).data();
+    expect(row).toMatchObject({ groupId, userId: 'wsfJoin_carol', role: 'member', membershipStatus: 'active' });
+
+    // A retry is idempotent, and verifying later keeps the SAME membership.
+    const retry = await tryRun('wsfJoin_carol', false, { joinCode: code });
+    expect(retry.ok && retry.value).toEqual({ groupId, alreadyMember: true });
+    const verified = await tryRun('wsfJoin_carol', true, { joinCode: code });
+    expect(verified.ok && verified.value).toEqual({ groupId, alreadyMember: true });
+    const rows = await getFirestore()
+      .collection('wsfMemberships')
+      .where('userId', '==', 'wsfJoin_carol')
+      .where('groupId', '==', groupId)
+      .get();
+    expect(rows.size).toBe(1);
+  });
+
+  test('an unverified account keeps every other admission refusal', async () => {
+    await seedProfile('wsfJoin_erin');
+    // Private community, paused lifecycle, unknown code: the one generic not-found.
+    const privateCode = mintJoinCode();
+    await seedGroup({ joinCode: privateCode, joinPolicy: 'private' });
+    const pausedCode = mintJoinCode();
+    await seedGroup({ joinCode: pausedCode, joinPolicy: 'public', lifecycleStatus: 'archived' });
+    for (const joinCode of [privateCode, pausedCode, mintJoinCode()]) {
+      const r = await tryRun('wsfJoin_erin', false, { joinCode });
+      expect(r.ok).toBe(false);
+      if (!r.ok) {
+        expect(r.error.code).toBe('not-found');
+        expect(r.error.message).toBe('This link is not valid.');
+      }
+    }
+    // Removed stays removed.
+    const code = mintJoinCode();
+    const groupId = await seedGroup({ joinCode: code, joinPolicy: 'public' });
+    await getFirestore().doc(`wsfMemberships/${groupId}_wsfJoin_erin`).set({
+      groupId, userId: 'wsfJoin_erin', role: 'member', membershipStatus: 'removed',
+    });
+    const removed = await tryRun('wsfJoin_erin', false, { joinCode: code });
+    expect(removed.ok === false && removed.error.code).toBe('not-found');
+    // No profile is still a precondition, unverified or not.
+    const noProfile = await tryRun(`wsfJoin_noprofile_${Date.now()}`, false, { joinCode: code });
+    expect(noProfile.ok === false && noProfile.error.message).toMatch(/Complete your profile/i);
   });
 
   test('no profile: failed-precondition', async () => {

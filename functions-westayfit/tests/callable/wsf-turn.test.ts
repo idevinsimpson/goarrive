@@ -1562,3 +1562,44 @@ describe('a closed goal admits nobody — the decision is inside each transactio
     expect(entries.size).toBe(joins.filter((r) => r.ok).length);
   }, 60_000);
 });
+
+describe('KIOSK-UNVERIFIED-PARTICIPANT-1 — an unverified member takes a place in the line', () => {
+  function asUnverified(fn: unknown, uid: string, data: Data) {
+    return (fn as { run: (r: never) => Promise<unknown> }).run({
+      data,
+      auth: { uid, token: { email_verified: false } },
+      rawRequest: { ip: '127.0.0.1', headers: {} },
+      acceptsStreaming: false,
+    } as never);
+  }
+
+  test('joins the line, sees its own place, and a retry is the same place', async () => {
+    const { groupId, goalId } = await scene();
+    const m = await member(groupId, 'unverified');
+    const joined = (await asUnverified(wsfJoinTurnLine, m, { goalId, calledName: 'Uma' })) as {
+      entryId: string;
+      alreadyInLine: boolean;
+    };
+    expect(joined.alreadyInLine).toBe(false);
+    const again = (await asUnverified(wsfJoinTurnLine, m, { goalId, calledName: 'Uma' })) as {
+      entryId: string;
+      alreadyInLine: boolean;
+    };
+    expect(again).toEqual({ ...again, entryId: joined.entryId, alreadyInLine: true });
+    const mine = (await asUnverified(wsfMyTurn, m, { goalId })) as { turn: { status: string } | null };
+    expect(mine.turn).not.toBeNull();
+    // The same account, verified later, holds the same place.
+    const verifiedView = (await callAs(wsfMyTurn, m, { goalId })) as { turn: { status: string } | null };
+    expect(verifiedView).toEqual(mine);
+  }, 30_000);
+
+  test('an unverified account that is not a member is refused as a verified one is', async () => {
+    const { goalId } = await scene();
+    const stranger = uniq('unverified-stranger');
+    const codeOf = (p: Promise<unknown>) => p.then(() => 'accepted', (e: HttpsError) => e.code);
+    const unverifiedCode = await codeOf(asUnverified(wsfJoinTurnLine, stranger, { goalId, calledName: 'Uma' }));
+    const verifiedCode = await codeOf(callAs(wsfJoinTurnLine, stranger, { goalId, calledName: 'Uma' }));
+    expect(verifiedCode).not.toBe('accepted');
+    expect(unverifiedCode).toBe(verifiedCode);
+  }, 30_000);
+});
