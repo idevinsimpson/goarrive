@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "3df5069f0f3f0281b85d23dc6ae6a1f6b6ae82ed5dcdd8dfa92500565ad2a471",
-  "eventCount": 579,
+  "ledgerHead": "87f152ae2b3c4a29834adb0fe98792e178a35fed1bf38a8fa33b67e392211646",
+  "eventCount": 580,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -3416,8 +3416,10 @@
       "packet": "NORTHSTAR-MIRROR-INTAKE-1",
       "worker": "W3",
       "reason": "release",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        6035648701
+      ],
       "ack": null
     }
   },
