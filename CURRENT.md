@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=75982681dbc4e9bd93a13223cdc49a2c8ded2a1cdee6a3af84958f697215735e events=645 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=52ee0af960d165e841cbe5547d97256f849549eca4d9d224ff7ca60de43dfd5a events=651 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `75982681dbc4e9bd93a13223cdc49a2c8ded2a1cdee6a3af84958f697215735e` (645 events)
+- Ledger head: `52ee0af960d165e841cbe5547d97256f849549eca4d9d224ff7ca60de43dfd5a` (651 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -29,11 +29,11 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 
 | Worker | Inbox | Active now | Reviewing | Waiting on review | Blocked | Next | Queue | WATCH |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| W3 | #396 | CONTROL-CURRENT-PATCH-ACK-1 | — | WORKER-EXECUTION-PROFILES-1 | KIOSK-UNVERIFIED-STAGING-RECOVERY-1, NORTHSTAR-MIRROR-INTAKE-1 | — | — | on |
+| W3 | #396 | — | — | CONTROL-CURRENT-PATCH-ACK-1, WORKER-EXECUTION-PROFILES-1 | KIOSK-UNVERIFIED-STAGING-RECOVERY-1, NORTHSTAR-MIRROR-INTAKE-1 | — | — | off |
 | W4 | #394 | — | KIOSK-EXPECTED-TURN-1 | — | — | — | — | on |
 | W5 | #395 | — | — | — | — | — | — | off |
 | W7 | #434 | KIOSK-EXPECTED-TURN-NATIVE-CALLER-1 | — | — | — | — | — | on |
-| W9 | #497 | — | — | KIOSK-EXPECTED-TURN-1 | MEMBER-TRUTH-BACKEND-1 | PROFILE-PHOTOS-FIREBASE-1 | PROFILE-PHOTOS-FIREBASE-1 | off |
+| W9 | #497 | — | CONTROL-CURRENT-PATCH-ACK-1 | KIOSK-EXPECTED-TURN-1 | MEMBER-TRUTH-BACKEND-1 | PROFILE-PHOTOS-FIREBASE-1 | PROFILE-PHOTOS-FIREBASE-1 | on |
 
 ## Packets
 
@@ -42,7 +42,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | AUTONOMY-ROUTER-1C | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #544 | 37c49bbd | 37c49bbd | — | 5f7b63c9 | — | W4 | comment:5882824399 | pull_request:544 | — | Serial step 6: state-derived routing, wakes, and real-event proof | 1×ops-source then director | — |
 | AUTONOMY-ROUTER-1C-INTEGRATE | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #545 | fd697e0f | fd697e0f | — | 8ba39e19 | — | W4 | comment:5929164484 | pull_request:545 | — | Step 6 correction: derive integrate from ACCEPTED plus merged PR with same-cycle or successor reconcile and idempotency proof | 1×ops-source then director | — |
 | AUTONOMY-STATE-1B | W3 | work | INTEGRATED (source-only) | bootstrap | INTEGRATED | #538 | 073b7946 | 073b7946 | — | d42a3307 | — | — | comment:5857966052 | comment:5857966052 | — | Serial step 5: authoritative control state, App writer, bootstrap and shadow reconcile | 1×ops-source then director | — |
-| CONTROL-CURRENT-PATCH-ACK-1 | W3 | work | INTEGRATED (source-only) | ledger | RELEASED | — | — | — | — | — | — | — | comment:6044037834 | comment:6044037834 | — | Repair CURRENT comment acknowledgment and verify uncertain PATCH by exact readback without mutation retries | 1×ops-source then director | — |
+| CONTROL-CURRENT-PATCH-ACK-1 | W3 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #588 | 85e1d35f | 85e1d35f | — | — | — | W9 | comment:6044037834 | comment:6044200033 | — | Repair CURRENT comment acknowledgment and verify uncertain PATCH by exact readback without mutation retries | 1×ops-source then director | — |
 | CONTROL-EXPO-ROUTE-PATH-GRAMMAR | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #552 | 3cc44d30 | 3cc44d30 | — | 6687440d | — | W4 | comment:5944968693 | pull_request:552 | — | Allow exact Expo Router filenames in control packet path reservations without widening other path syntax | 1×ops-source then director | — |
 | CONTROL-RECENT-COMMENTS-SAFE-READ-1 | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #579 | 758d686f | 758d686f | — | e5416da1 | — | W4 | comment:6020607329 | pull_request:579 | — | Bound recent-comment reads so the control App can consume current decisions without socket failure | 1×ops-source then director | — |
 | EMAIL-STAGING-REPAIR | W3 | work | STAGED (hosted) | ledger | INTEGRATED | #559 | 39484f78 | 39484f78 | — | f84346d3 | — | W4, W9 | comment:5959200686 | pull_request:559 | — | Diagnose and repair staging verification and password-reset delivery without weakening mail security | 1×ops-source+1×security then director | — |
@@ -178,7 +178,8 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | dd7bb9d5cae1 | W9 | KIOSK-EXPECTED-TURN-1 | release | acked | 6042910254 | comment:6042925619 |
 | 1bb58afbb79e | W3 | KIOSK-UNVERIFIED-PARTICIPANT-1-STAGING-PIN | release | acked | 6043175500 | comment:6043195547 |
 | 8f6be434c744 | W3 | KIOSK-UNVERIFIED-STAGING-RECOVERY-1 | release | delivered | 6044057222 | — |
-| 849b8aa43eb2 | W3 | CONTROL-CURRENT-PATCH-ACK-1 | release | delivered | 6044193318 | — |
-| 8ad8a042b172 | W4 | KIOSK-EXPECTED-TURN-1 | review | delivered | 6044193561 | — |
+| 849b8aa43eb2 | W3 | CONTROL-CURRENT-PATCH-ACK-1 | release | acked | 6044193318 | comment:6044199224 |
+| 8ad8a042b172 | W4 | KIOSK-EXPECTED-TURN-1 | review | acked | 6044193561 | comment:6044222667 |
 | 4f2f3ee721ad | W7 | KIOSK-EXPECTED-TURN-NATIVE-CALLER-1 | release | delivered | 6044193835 | — |
+| 574ab7e48385 | W9 | CONTROL-CURRENT-PATCH-ACK-1 | review | requested | — | — |
 

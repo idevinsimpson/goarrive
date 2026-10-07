@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "75982681dbc4e9bd93a13223cdc49a2c8ded2a1cdee6a3af84958f697215735e",
-  "eventCount": 645,
+  "ledgerHead": "52ee0af960d165e841cbe5547d97256f849549eca4d9d224ff7ca60de43dfd5a",
+  "eventCount": 651,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -282,21 +282,23 @@
       },
       "label": "Repair CURRENT comment acknowledgment and verify uncertain PATCH by exact readback without mutation retries",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
-      "pr": null,
-      "reviewers": [],
+      "pr": 588,
+      "reviewers": [
+        "W9"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "85e1d35f65acd159456abc3712881d827825d1c6",
+        "prHeadSha": "85e1d35f65acd159456abc3712881d827825d1c6",
         "evidenceSha": null,
         "mergeSha": null
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         "tools/wsf-control/github.mjs",
@@ -316,7 +318,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6044037834
+          "id": 6044200033
         }
       },
       "review": {
@@ -329,7 +331,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "CONTROL-EXPO-ROUTE-PATH-GRAMMAR": {
@@ -4008,21 +4010,28 @@
       "packet": "CONTROL-CURRENT-PATCH-ACK-1",
       "worker": "W3",
       "reason": "release",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6044193318
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6044199224
+      },
+      "superseded": true
     },
     "8ad8a042b172503b21175f13f1dbf99420dfe40fc486a4167c47d089de068833": {
       "packet": "KIOSK-EXPECTED-TURN-1",
       "worker": "W4",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6044193561
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6044222667
+      }
     },
     "4f2f3ee721adac1871c9798563ce13f4e9620406a2d1f78af63937665121349a": {
       "packet": "KIOSK-EXPECTED-TURN-NATIVE-CALLER-1",
@@ -4032,6 +4041,14 @@
       "comments": [
         6044193835
       ],
+      "ack": null
+    },
+    "574ab7e48385f7fa1e941cc2d10786005a3b1d5800d733b74c8e62468df06c36": {
+      "packet": "CONTROL-CURRENT-PATCH-ACK-1",
+      "worker": "W9",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
