@@ -34,10 +34,11 @@ import { pathToFileURL } from 'node:url';
 export const LOVABLE_URL = 'https://we-stay-fit-foundation-trial.lovable.app';
 export const PROJECT_ID = 'westayfit-staging';
 /**
- * The reviewed served build: asset name -> sha256 of its bytes. EMPTY until a reviewed commit pins the manifest a
- * `--bind` run printed; while empty, every run stops in the credential-free gate.
+ * The reviewed served build: the sha256 of the entry page itself (its inline scripts and the asset list it loads) and
+ * asset name -> sha256 of its bytes. EMPTY until a reviewed commit pins the manifest a `--bind` run printed; while
+ * empty, every run stops in the credential-free gate. An observed digest is evidence for review, never self-approval.
  */
-export const REVIEWED_BUILD = Object.freeze({ assets: Object.freeze({}) });
+export const REVIEWED_BUILD = Object.freeze({ indexSha256: null, assets: Object.freeze({}) });
 /** At most this many assets are read when walking the served build. */
 export const MAX_ASSETS = 150;
 
@@ -115,7 +116,8 @@ export async function servedManifest(fetchImpl, base = LOVABLE_URL) {
 /** The observed build against the reviewed one: PASS only on the same names with the same digests. */
 export function bindBuild(observed, reviewed = REVIEWED_BUILD) {
   const want = reviewed?.assets ?? {};
-  if (!Object.keys(want).length) return { status: 'BLOCKED', reason: 'no reviewed digest manifest is pinned yet (REVIEWED_BUILD is empty)' };
+  if (!Object.keys(want).length || !/^[0-9a-f]{64}$/.test(String(reviewed?.indexSha256))) return { status: 'BLOCKED', reason: 'no reviewed digest manifest is pinned yet (REVIEWED_BUILD needs the entry page and every asset)' };
+  if (observed?.indexSha256 !== reviewed.indexSha256) return { status: 'FAIL', reason: 'the served entry page differs from the reviewed one (inline or loaded executable content changed)' };
   const got = observed?.assets ?? {};
   const missing = Object.keys(want).filter((n) => !Object.hasOwn(got, n));
   const extra = Object.keys(got).filter((n) => !Object.hasOwn(want, n));
@@ -128,7 +130,7 @@ export function bindBuild(observed, reviewed = REVIEWED_BUILD) {
 
 /** The lines a bind prints: the verdict, then the observed manifest (names and digests only). */
 export function bindLines(observed, verdict) {
-  return [`LOVABLE_BUILD=${verdict.status} (${verdict.reason})`, ...(observed ? Object.entries(observed.assets).map(([n, d]) => `LOVABLE_OBSERVED_ASSET ${n} ${d}`) : [])];
+  return [`LOVABLE_BUILD=${verdict.status} (${verdict.reason})`, ...(observed ? [`LOVABLE_OBSERVED_INDEX ${observed.indexSha256}`] : []), ...(observed ? Object.entries(observed.assets).map(([n, d]) => `LOVABLE_OBSERVED_ASSET ${n} ${d}`) : [])];
 }
 
 /** The results document: every row, in order, with its status and what was seen. */
