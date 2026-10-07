@@ -1,11 +1,12 @@
 import { readEventReturn } from './eventReturn';
 import { readKioskReturnGoal } from './kioskSession';
+import { readMarkerReturn } from './markerEntry';
 import { readPendingJoinCode } from './pendingJoinCode';
 
 /**
  * THE DESTINATION A GATE IS CARRYING, AS A KIND — NEVER AS A NAME.
  *
- * `nextRouteAfterAuth` resolves three destinations, and the identity screens
+ * `nextRouteAfterAuth` resolves four destinations, and the identity screens
  * want to SAY which one is waiting so a member knows the round trip has not
  * been lost. But a pending join code is opaque and a pending event is a goal
  * id: naming the community or the goal needs a read a signed-out visitor may
@@ -20,12 +21,13 @@ import { readPendingJoinCode } from './pendingJoinCode';
  * This READS only. Resolution and consumption stay in `nextRouteAfterAuth`,
  * on the terminal hop.
  */
-export type AuthDestinationKind = 'join' | 'event' | 'kiosk';
+export type AuthDestinationKind = 'join' | 'event' | 'kiosk' | 'marker';
 
 export function readAuthDestinationKind(): AuthDestinationKind | null {
   if (readPendingJoinCode()) return 'join';
   if (readEventReturn()) return 'event';
   if (readKioskReturnGoal()) return 'kiosk';
+  if (readMarkerReturn()) return 'marker';
   return null;
 }
 
@@ -72,6 +74,15 @@ export function authDestinationCard(
               // finishing here does not leave them signed in on it.
               'You will land back on it to enter your count. Finishing signs you out of this device.',
       };
+    case 'marker':
+      return {
+        label,
+        line: 'The code you scanned',
+        note:
+          stage === 'still'
+            ? 'This is the last step before it opens.'
+            : 'You scanned a code before signing in. You will land back on it, not on home.',
+      };
   }
 }
 
@@ -84,6 +95,12 @@ export function authReturnHeading(kind: AuthDestinationKind): {
     return {
       heading: 'Welcome back.',
       intro: 'Sign in and we will take you straight back to the invitation.',
+    };
+  }
+  if (kind === 'marker') {
+    return {
+      heading: 'Nearly there.',
+      intro: 'Sign in and we will take you straight back to the code you scanned.',
     };
   }
   if (kind === 'event') {
