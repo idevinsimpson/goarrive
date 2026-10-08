@@ -158,6 +158,22 @@ describe('who may manage an Event', () => {
     refused('update naming an account', u, 'invalid-argument', 'Only title, startsAt, endsAt and timezone can be edited.');
   }, 40_000);
 
+  test('a creator who is no longer a Champion gets nothing back by retrying their own create, removed or demoted', async () => {
+    const db = getFirestore();
+    for (const [label, change] of [['removed', { membershipStatus: 'removed' }], ['demoted', { role: 'member' }]] as const) {
+      const c = await community(label === 'removed' ? 'Gone' : 'Down');
+      const request = input(c.groupId, c.goalId);
+      const made = (await callAs(wsfCreateEvent, c.champ, request)) as { event: EventView; replayed: boolean };
+      expect([label, made.replayed]).toEqual([label, false]);
+      const before = await eventDoc(made.event.eventId);
+      await db.doc(`wsfMemberships/${c.groupId}_${c.champ}`).update(change);
+      const retry = await attempt(callAs(wsfCreateEvent, c.champ, request));
+      refused(`${label} creator replay`, retry, 'permission-denied', NOT_CHAMPION);
+      expect([label, strings(retry.ok ? retry.value : {}).includes(made.event.eventId)]).toEqual([label, false]);
+      expect(await eventDoc(made.event.eventId)).toEqual(before);
+    }
+  }, 40_000);
+
   test('a membership row counts only when its own fields name the caller and this community, not just its document id', async () => {
     const s = await scene();
     const db = getFirestore();

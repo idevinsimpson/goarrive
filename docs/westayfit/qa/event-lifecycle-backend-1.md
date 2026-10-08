@@ -197,12 +197,13 @@ A refusal writes nothing. The tests compare documents and their `updateTime` bef
 
 | Run | Result |
 |---|---|
-| `wsf-event-lifecycle.test.ts` + `wsf-event-lifecycle-privacy.test.ts` | **27 / 27** |
-| Full callable suite | **36 suites, 631 / 631** |
+| `wsf-event-lifecycle.test.ts` + `wsf-event-lifecycle-privacy.test.ts` | **30 / 30** |
+| Full callable suite | **36 suites, 634 / 634** |
 | Rules suite (unchanged rules) | **28 / 28** |
 | Deploy-config | **17 / 17** |
 | `tsc` (`npm run build`) | clean |
 | Mutant battery, 32 mutants, both suites per mutant | **32 / 32 killed** |
+| W4's survivors J10, J10b, J10 with J10b, J7, J18 (both suites) | **5 / 5 killed**, each by the test written for it |
 
 ### What each test pins
 
@@ -213,6 +214,7 @@ A refusal writes nothing. The tests compare documents and their `updateTime` bef
   - A duplicate or concurrent create is one Event.
   - The setup scope is snapshotted and equals `wsfEventContext`.
   - All four hand-edited divergences resolve to scope `goal`, exactly as the turn line does.
+  - A list filtered by `goalId` over a community with Events on two goals returns exactly that goal's Events, an unknown goal returns none, and a malformed `goalId` is refused (W4 F3).
 - **Field rules:**
   - 16 invalid inputs are refused with exact messages and nothing is written, including a raw offset as a zone.
   - A closed goal takes no Event, and a closed goal or an ended window cannot be published.
@@ -224,6 +226,8 @@ A refusal writes nothing. The tests compare documents and their `updateTime` bef
   - A retried or racing duplicate is one step.
 - **Edits:**
   - Version, replay and stale checks.
+  - A draft edit that moves the window before the goal's start, after its end, or across its end is refused, and nothing is written (W4 F1).
+  - A goal whose window is narrowed after the Event was made refuses publish, whether its new end falls before the Event's end or its new start after the Event's start, and the Event stays a version-1 draft (W4 F1).
   - Times locked on a published Event while title-only edits still work.
   - Closed Events are frozen.
   - An edit can never name the goal, community, target, unit, rules or status.
@@ -246,6 +250,7 @@ A refusal writes nothing. The tests compare documents and their `updateTime` bef
 - **Request fields grant nothing:**
   - Stray role and account fields grant nothing.
   - A membership row whose **own fields** name another account or another community grants nothing, even when its document id matches the caller. This is the E18 finding below.
+- **A creator who is no longer a Champion gets nothing back.** A Champion creates an Event and is then removed or, separately, demoted to member. Retrying the **same** create request is refused with `permission-denied`, the answer carries no Event, and the Event document is unchanged (W4 F2).
 - **Signed out and unverified:**
   - Signed out, all 8 operations are refused.
   - An unverified Champion can read but not write.
@@ -292,6 +297,18 @@ Each mutant was applied to `src/eventLifecycle.ts` alone and run against both su
 | E30 | Closed and cancelled Events can be edited | killed |
 
 **E18, found during this work:** the first battery had one survivor, E18, which drops the check that a membership row's own `userId` and `groupId` fields match. Every test row's fields happened to match its document id, so nothing could tell the difference. The privacy suite now seeds rows whose document id names the caller but whose fields name C1's Champion, or another community. With E18a, E18b and E18c applied, a borrowed or moved row would make a non-Champion a Champion; all three are now killed.
+
+### W4 journey-QA finding (#394 comment 6061337130), remedied in the tests
+
+W4 found the source correct, but five of W4's own mutants survived because three guards were unpinned. All three remedies are test-only; `src/eventLifecycle.ts` is byte-identical to the reviewed `9d0af6c5`.
+
+| Finding | Mutant that survived | Pinned now by | Result |
+|---|---|---|---|
+| **F1.** The goal-window rule was tested on create only. | J10 (the draft-edit check removed), J10b (the publish check removed), and both together | `wsf-event-lifecycle.test.ts` › a draft edit that moves the window outside the goal is refused; a goal narrowed after creation refuses publish | all three killed |
+| **F2.** A create replay was not tested against a creator who is no longer a Champion. | J7 (the replay answered before the Champion check) | `wsf-event-lifecycle-privacy.test.ts` › a creator who is no longer a Champion gets nothing back by retrying their own create, removed or demoted | killed |
+| **F3.** The documented `goalId` filter on `wsfListEvents` was untested. | J18 (the filter ignored) | `wsf-event-lifecycle.test.ts` › a list filtered by goalId returns exactly that goal's Events | killed |
+
+W4's J22, a request id replayed across different operations, was not counted by W4 and is not pinned here: clients mint a fresh id per operation, and the contract makes no promise about one id reused across operations.
 
 ## Integration handoff (`index.ts`, NOT edited here)
 
@@ -359,6 +376,9 @@ These apply to functions only:
 4. **History grows with every edit and is never truncated,** because recorded history is preserved. At about 150 bytes an entry, an Event reaches Firestore's 1 MiB document limit after roughly 7,000 edits. The request-id memory is bounded at 50.
 5. **`goalActivity` counts are for the whole goal, not the Event's window.** They are labelled `goalActivity` for that reason. A window-scoped count would need a range query, and so a composite index, which is out of scope.
 6. **`inFlight` is read after the transition commits.** It is a report, not a lock. A place can join or finish between the commit and the count.
+7. **Times without an offset are read as UTC, not in the Event's zone.** W4 noted this. `normalizeIso` accepts anything `new Date()` parses, so `2026-10-08T10:00` is read in the server's zone (UTC on Cloud Functions), not in `timezone`. This is the same parsing `wsfCreateGoal` already uses. The adapter should send `toISOString()` values.
+8. **The snapshotted scope can drift.** W4 noted this. `eventScope` and `setupId` are taken at creation and go stale if a combined setup later claims or releases the goal. `inFlight` already counts both lines. The admission integration should resolve the live line, not the snapshot.
+9. **An update replay returns the current Event,** not that request's own result. W4 noted this. It is settled-state idempotency, the same as the transitions.
 
 ## Boundaries kept
 

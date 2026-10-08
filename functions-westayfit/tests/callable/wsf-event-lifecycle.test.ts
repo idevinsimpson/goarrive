@@ -191,6 +191,22 @@ describe('create, read and list', () => {
     expect(listed.events.map((e) => e.eventId)).toEqual([made.event.eventId]);
   }, 30_000);
 
+  test('a list filtered by goalId returns exactly that goal\'s Events; an invalid goalId is refused', async () => {
+    const s = await scene();
+    const other = await seedGoal(s.groupId, { title: 'Push-ups', unit: 'push-ups' });
+    const a1 = (await createEvent(s.champ, draftInput(s.groupId, s.goalId))).event.eventId;
+    const a2 = (await createEvent(s.champ, draftInput(s.groupId, s.goalId))).event.eventId;
+    const b1 = (await createEvent(s.champ, draftInput(s.groupId, other))).event.eventId;
+    const list = async (extra: Data) => ((await callAs(wsfListEvents, s.champ, { groupId: s.groupId, ...extra })) as { events: EventView[] }).events;
+    const forGoal = await list({ goalId: s.goalId });
+    expect(forGoal.map((e) => e.eventId).sort()).toEqual([a1, a2].sort());
+    expect(forGoal.every((e) => e.goalId === s.goalId)).toBe(true);
+    expect((await list({ goalId: other })).map((e) => e.eventId)).toEqual([b1]);
+    expect((await list({})).map((e) => e.eventId).sort()).toEqual([a1, a2, b1].sort());
+    expect(await list({ goalId: 'noSuchGoalHere' })).toEqual([]);
+    refused(await attempt(list({ goalId: 'not a valid id' })), 'invalid-argument', 'goalId is not valid.');
+  }, 30_000);
+
   test('a duplicate submit or a lost answer retried — even concurrently — is ONE Event with the same id', async () => {
     const s = await scene();
     const input = draftInput(s.groupId, s.goalId);
@@ -412,6 +428,29 @@ describe('edits', () => {
     refused(await attempt(update(s.champ, { eventId: event.eventId, expectedVersion: 2, requestId: rid(), endsAt: iso(now + DAY) })), 'invalid-argument', 'endsAt must be strictly after startsAt.');
     refused(await attempt(update(s.champ, { eventId: event.eventId, expectedVersion: 2, requestId: rid() })), 'invalid-argument', 'Nothing to change.');
     refused(await attempt(update(s.champ, { eventId: event.eventId, requestId: rid(), title: 'No version' })), 'invalid-argument', 'expectedVersion is required.');
+  }, 30_000);
+
+  test('a draft edit that moves the window outside the goal is refused; a goal narrowed after creation refuses publish; nothing changes', async () => {
+    const s = await scene(); // goal window: now - 1 day .. now + 20 days
+    const now = Date.now();
+    const { event } = await createEvent(s.champ, draftInput(s.groupId, s.goalId));
+    const before = await getFirestore().doc(`wsfEvents/${event.eventId}`).get();
+    const outside = "The event must fall within the goal's own start and end.";
+    refused(await attempt(update(s.champ, { eventId: event.eventId, expectedVersion: 1, requestId: rid(), startsAt: iso(now - 2 * DAY) })), 'invalid-argument', outside);
+    refused(await attempt(update(s.champ, { eventId: event.eventId, expectedVersion: 1, requestId: rid(), endsAt: iso(now + 21 * DAY) })), 'invalid-argument', outside);
+    refused(await attempt(update(s.champ, { eventId: event.eventId, expectedVersion: 1, requestId: rid(), startsAt: iso(now + 19 * DAY), endsAt: iso(now + 22 * DAY) })), 'invalid-argument', outside);
+    const afterEdits = await getFirestore().doc(`wsfEvents/${event.eventId}`).get();
+    expect([afterEdits.data(), afterEdits.updateTime?.toMillis()]).toEqual([before.data(), before.updateTime?.toMillis()]);
+
+    // The goal's window is narrowed after the Event was made: its end now falls before the Event's end, then its start after the Event's start.
+    const goalRef = getFirestore().doc(`wsfGoals/${s.goalId}`);
+    await goalRef.update({ endsAt: Timestamp.fromMillis(now + DAY + 3_600_000) });
+    refused(await attempt(transition(wsfPublishEvent, s.champ, event.eventId)), 'failed-precondition', outside);
+    await goalRef.update({ startsAt: Timestamp.fromMillis(now + DAY + 60_000), endsAt: Timestamp.fromMillis(now + 20 * DAY) });
+    refused(await attempt(transition(wsfPublishEvent, s.champ, event.eventId)), 'failed-precondition', outside);
+    const afterPublish = await getFirestore().doc(`wsfEvents/${event.eventId}`).get();
+    expect([afterPublish.data(), afterPublish.updateTime?.toMillis()]).toEqual([before.data(), before.updateTime?.toMillis()]);
+    expect((await getEvent(s.champ, event.eventId)).event).toMatchObject({ status: 'draft', version: 1 });
   }, 30_000);
 
   test('once published, the times and zone are locked (only the title may change); closed and later events are frozen', async () => {
