@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "1de9d7ef243324b316734983e6f39eac46c47c6c098bf89f642eab84e60eb6fe",
-  "eventCount": 766,
+  "ledgerHead": "3e8fecebc942805035db5ac6b9f18f35d653eb50ada2422c95b7bc60d4ff8c99",
+  "eventCount": 772,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1806,7 +1806,10 @@
       "proof": null,
       "served": null,
       "releasedQueueIndex": null,
-      "reviewedBy": [],
+      "reviewedBy": [
+        "W9",
+        "W4"
+      ],
       "subjectPaths": [
         ".github/workflows/wsf-staging-deploy.yml",
         ".github/wsf-staging/hosted-lovable-kiosk.mjs",
@@ -1828,7 +1831,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6052515840
+          "id": 6052883856
         }
       },
       "review": {
@@ -2136,12 +2139,14 @@
       },
       "label": "Canonical private profile photos and permitted community roster for native and Lovable staging",
       "origin": "ledger",
-      "phase": "DELIVERED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
       "pr": 593,
-      "reviewers": [],
+      "reviewers": [
+        "W4"
+      ],
       "artifact": {
         "subjectSha": "5faac5dee055d5b576192077d14a85a8d0e57f3f",
         "prHeadSha": "5faac5dee055d5b576192077d14a85a8d0e57f3f",
@@ -4520,20 +4525,36 @@
       "packet": "LOVABLE-KIOSK-HOSTED-PROOF-1",
       "worker": "W4",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6052814327
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6052827762
+      },
+      "superseded": true
     },
     "c71bc50dd0c38fcccf6ae40893125f2b87ec3578ac6e5c2eeefc6c40e351199a": {
       "packet": "LOVABLE-KIOSK-HOSTED-PROOF-1",
       "worker": "W9",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6052814610
       ],
+      "ack": {
+        "kind": "comment",
+        "id": 6052849697
+      },
+      "superseded": true
+    },
+    "b743b66ebea2791b6d16b0abba325eff6696123ac8d2c2f9518316f6facf66fd": {
+      "packet": "PROFILE-PHOTOS-FIREBASE-1",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
