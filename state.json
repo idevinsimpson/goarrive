@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "52224482ee7324fbddd1ed3b186bdfdcf3ce1c9e502876dc761412108f7f4a60",
-  "eventCount": 717,
+  "ledgerHead": "a5af63cf8c89e7fd82408039a3148c6b9a455d39cb82c07d638aa977a57d42f3",
+  "eventCount": 718,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -348,7 +348,7 @@
       },
       "label": "Make the single CURRENT PATCH complete through a bounded transport while preserving exact readback and no resend",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "ACCEPTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -383,10 +383,13 @@
           "kind": "comment",
           "id": 6050347861
         },
-        "accepted": null,
+        "accepted": {
+          "kind": "comment",
+          "id": 6051021891
+        },
         "lastTransition": {
           "kind": "comment",
-          "id": 6050999616
+          "id": 6051021891
         }
       },
       "review": {
