@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "369f17d53baaaf31bbca3666ff72c4332ea4a64947a4cdb5508d0b0efa6477ec",
-  "eventCount": 840,
+  "ledgerHead": "b75939afd9178a0307c6fceb93f203c4e30b15b498f988586a2285b32488956c",
+  "eventCount": 841,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1639,7 +1639,7 @@
       },
       "label": "Correct native expected-turn caller reservation to executable Vitest and Playwright paths",
       "origin": "ledger",
-      "phase": "ACCEPTED",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -1651,7 +1651,7 @@
         "subjectSha": "1cdbeff52555a1585595e23a87f6905aa0b694ae",
         "prHeadSha": "1cdbeff52555a1585595e23a87f6905aa0b694ae",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "ec162d17a0540e936741027f9b8f90dd372cfaf4"
       },
       "proof": null,
       "served": null,
@@ -1684,8 +1684,8 @@
           "id": 6063435709
         },
         "lastTransition": {
-          "kind": "comment",
-          "id": 6063435709
+          "kind": "pull_request",
+          "id": 596
         }
       },
       "review": {
