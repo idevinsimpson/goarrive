@@ -21,7 +21,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { RUN_TAG, backend, expoHarness, harness, kitFor, runCleanup, serve, tmp } from './helpers/journey-model.mjs';
 import { drivers } from '../journeys/index.mjs';
-import { EXPO_ROWS, expoDrivers } from '../journeys/expo-attendee.mjs';
+import { EXPO_ROWS, UNVERIFIED_PARTICIPANT_ROWS, expoDrivers, unverifiedParticipantDriver } from '../journeys/expo-attendee.mjs';
 import { validateManifest } from '../milestone-manifest.mjs';
 import { checkManifestObject } from '../check-milestone-manifest.mjs';
 import { runHook } from '../hosted-changed-journeys.mjs';
@@ -489,6 +489,500 @@ await test('EXPO: a seeded defect through the runner is a FAILED journey and a F
   const card = spawnSync(process.execPath, [CARD, '--manifest', mf, '--results', path.join(changed, 'changed-journeys.json'),
     '--cleanup-manifest', h.kit.manifestPath, '--cleanup-receipt', receipt, '--staging-url', 'https://staging.example.test', '--out', path.join(changed, 'card.md')], { encoding: 'utf8' });
   assert.match(card.stdout, /OWNER_CARD_SUMMARY=FAILED/);
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// KIOSK-UNVERIFIED-STAGING-RECOVERY-1: the unverified participant's fixtures.
+// ═════════════════════════════════════════════════════════════════════════════
+const okBody = (body) => ({ ok: true, status: 200, text: async () => JSON.stringify(body) });
+/**
+ * The model backend, taught the two admin reads the unverified kit makes (an
+ * account lookup by uid or email, and the membership query by uid) and what
+ * each account was STORED as. `storeVerified` overrides what sign-up asked for;
+ * `loseSignUpAnswer` makes the account and then loses the answer; `failSignUp`
+ * fails before anything is made.
+ */
+function unverifiedBackend({ storeVerified = null, loseSignUpAnswer = false, failSignUp = false } = {}) {
+  const be = backend();
+  const inner = be.fetchImpl;
+  be.verified = new Map();
+  be.fetchImpl = async (url, opts = {}) => {
+    const body = opts.body ? JSON.parse(opts.body) : undefined;
+    const admin = opts.headers?.authorization === 'Bearer admin-token';
+    if (url.includes('accounts:signUp')) {
+      if (failSignUp) { be.requests.push({ url, method: opts.method, admin, body }); throw new TypeError('fetch failed'); }
+      const answer = await inner(url, opts);
+      const uid = [...be.accounts].find(([, e]) => e === body.email)?.[0];
+      be.verified.set(uid, storeVerified ?? body.emailVerified === true);
+      if (loseSignUpAnswer) throw new TypeError('fetch failed');
+      return answer;
+    }
+    if (url.includes('/accounts:lookup')) {
+      be.requests.push({ url, method: opts.method, admin, body });
+      const ids = body.localId || [...be.accounts].filter(([, e]) => (body.email || []).includes(e)).map(([u]) => u);
+      const users = ids.filter((u) => be.accounts.has(u)).map((u) => ({ localId: u, email: be.accounts.get(u), emailVerified: be.verified.get(u) === true }));
+      return okBody(users.length ? { users } : {});
+    }
+    if (url.endsWith('/documents:runQuery')) {
+      be.requests.push({ url, method: opts.method, admin, body });
+      const uid = body.structuredQuery.where.fieldFilter.value.stringValue;
+      const rows = [...be.docs].filter(([p, f]) => /^wsfMemberships\/[^/]+$/.test(p) && f.userId?.stringValue === uid)
+        .map(([p, f]) => ({ document: { name: `projects/westayfit-staging/databases/(default)/documents/${p}`, fields: f } }));
+      return okBody(rows.length ? rows : [{ readTime: '2026-10-08T12:00:00Z' }]);
+    }
+    return inner(url, opts);
+  };
+  return be;
+}
+const manifestOf = (kit) => JSON.parse(fs.readFileSync(kit.manifestPath, 'utf8'));
+const signUps = (be) => be.requests.filter((q) => q.url.includes('accounts:signUp')).map((q) => q.body);
+/** What the product's own callables write for a visitor who saves a profile and joins (wsfSaveProfile, admitByLinkTx). */
+function productAdmits(be, groupId, uid) {
+  be.docs.set(`wsfMemberProfiles/${uid}`, { displayName: { stringValue: 'Fixture Visitor' } });
+  be.docs.set(`wsfMemberships/${groupId}_${uid}`, { groupId: { stringValue: groupId }, userId: { stringValue: uid }, role: { stringValue: 'member' }, membershipStatus: { stringValue: 'active' } });
+}
+
+await test('UNVERIFIED KIT: the account is created through the same admin path with emailVerified:false, tracked at once, and read back as unverified', async () => {
+  const dir = tmp();
+  const be = unverifiedBackend();
+  const kit = kitFor(dir, be);
+  const who = await kit.createUnverifiedUser('visitor', 'Fixture Visitor');
+  const [body] = signUps(be);
+  assert.equal(body.emailVerified, false);
+  assert.deepEqual(Object.keys(body), ['targetProjectId', 'email', 'password', 'displayName', 'emailVerified', 'disabled', 'returnSecureToken']);
+  assert.match(who.email, new RegExp(`^wsf-${RUN_TAG}-visitor-[0-9a-f]{4}@example\\.com$`));
+  assert.deepEqual(manifestOf(kit).users, [who.uid]);
+  assert.equal(be.verified.get(who.uid), false, 'stored unverified');
+  assert.ok(be.requests.every((q) => q.admin), 'every kit request is admin-scoped');
+  const text = fs.readFileSync(kit.manifestPath, 'utf8');
+  assert.equal(text.includes(who.email) || text.includes(who.password), false, 'no email or password in the manifest');
+});
+
+await test('UNVERIFIED KIT: an account stored as verified is refused, and is still tracked so cleanup removes it', async () => {
+  const dir = tmp();
+  const be = unverifiedBackend({ storeVerified: true });
+  const kit = kitFor(dir, be);
+  await assert.rejects(() => kit.createUnverifiedUser('visitor'), /was not stored as unverified/);
+  assert.equal(manifestOf(kit).users.length, 1);
+  const { server, base } = await serve(be);
+  const c = await runCleanup(base, kit.manifestPath, path.join(dir, 'receipt.json'));
+  server.close();
+  assert.equal(c.receipt.status, 'COMPLETE', c.out);
+  assert.equal(be.accounts.size, 0);
+});
+
+await test('UNVERIFIED KIT: a sign-up whose answer is lost is found by its synthetic email and tracked; one that made nothing tracks nothing', async () => {
+  const dir = tmp();
+  const be = unverifiedBackend({ loseSignUpAnswer: true });
+  const kit = kitFor(dir, be);
+  await assert.rejects(() => kit.createUnverifiedUser('visitor'), /created anyway and is tracked for cleanup/);
+  assert.equal(be.accounts.size, 1);
+  assert.deepEqual(manifestOf(kit).users, [...be.accounts.keys()], 'the account the lost answer made is in the manifest');
+  const { server, base } = await serve(be);
+  const c = await runCleanup(base, kit.manifestPath, path.join(dir, 'receipt.json'));
+  server.close();
+  assert.equal(c.receipt.status, 'COMPLETE', c.out);
+  assert.equal(be.accounts.size, 0, 'the unknown-outcome account does not leak');
+
+  const dir2 = tmp();
+  const be2 = unverifiedBackend({ failSignUp: true });
+  const kit2 = kitFor(dir2, be2);
+  await assert.rejects(() => kit2.createUnverifiedUser('visitor'), /no account was created/);
+  assert.deepEqual(manifestOf(kit2).users, []);
+});
+
+await test('UNVERIFIED KIT: createVerifiedUser and signIn are unchanged (the verified request body is exactly as before)', async () => {
+  const dir = tmp();
+  const be = unverifiedBackend();
+  const kit = kitFor(dir, be);
+  const v = await kit.createVerifiedUser('control', 'Fixture Control');
+  const [body] = signUps(be);
+  assert.deepEqual(body, { targetProjectId: 'westayfit-staging', email: v.email, password: v.password, displayName: 'Fixture Control', emailVerified: true, disabled: false, returnSecureToken: false });
+  assert.equal(be.requests.some((q) => q.url.includes('accounts:lookup')), false, 'the verified maker makes no read-back');
+  const src = fs.readFileSync(path.resolve('.github/wsf-staging/journeys/fixture-kit.mjs'), 'utf8');
+  assert.match(src, /await page\.waitForURL\(\(u\) => !\/\^\\\/\(signin\|verify-email\|profile-setup\)\\b\/\.test\(new URL\(u\)\.pathname\), \{ timeout: 60_000 \}\);/, 'signIn still refuses /verify-email and /profile-setup');
+});
+
+await test('UNVERIFIED KIT: the joinable event is public with a join link and an approved marker, its goal allows more rounds, and no visitor is made a member', async () => {
+  const dir = tmp();
+  const be = unverifiedBackend();
+  const kit = kitFor(dir, be);
+  const ev = await kit.joinableEvent('open', { target: 1000, seeded: 100 });
+  const f = (p) => be.docs.get(p);
+  const group = f(`wsfCommunityGroups/${ev.groupId}`);
+  assert.equal(group.joinPolicy.stringValue, 'public');
+  assert.equal(group.lifecycleStatus.stringValue, 'active');
+  assert.match(group.joinCode.stringValue, /^[A-Za-z0-9_-]{16,128}$/);
+  assert.equal(group.joinCode.stringValue, ev.joinCode);
+  const marker = f(`wsfMarkers/${ev.markerSlug}`);
+  assert.match(ev.markerSlug, /^[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?$/);
+  assert.ok(ev.markerSlug.includes(RUN_TAG));
+  assert.deepEqual(Object.fromEntries(Object.entries(marker).map(([k, v]) => [k, Object.values(v)[0]])),
+    { label: 'Fixture Flag', active: true, communityGroupId: ev.groupId, goalId: ev.goalId, kioskMode: 'off' });
+  const goal = f(`wsfGoals/${ev.goalId}`);
+  assert.equal(goal.repeatPolicy.stringValue, 'multiple');
+  assert.equal(goal.communityGroupId.stringValue, ev.groupId);
+  const members = [...be.docs.keys()].filter((p) => p.startsWith('wsfMemberships/'));
+  assert.deepEqual(members, [`wsfMemberships/${ev.groupId}_e5cchamp-${RUN_TAG}-open`], 'only the placeholder Champion');
+  assert.equal(be.accounts.size, 0, 'the event itself makes no account');
+  const m = manifestOf(kit);
+  assert.deepEqual([...m.docs].sort(), [...be.docs.keys()].sort(), 'every document is tracked');
+  assert.ok(m.docs.every((p) => p.includes(RUN_TAG)));
+  const text = fs.readFileSync(kit.manifestPath, 'utf8');
+  assert.equal(text.includes(ev.joinCode), false, 'the join code is not written to the manifest');
+  assert.equal(ev.setupId.includes(ev.joinCode), false);
+});
+
+await test('UNVERIFIED KIT: what the product writes for the visitor, and a join that landed in ANOTHER community, are claimed; the REAL cleaner removes exactly those', async () => {
+  const dir = tmp();
+  const be = unverifiedBackend();
+  const kit = kitFor(dir, be);
+  const ev = await kit.joinableEvent('open', { target: 1000, seeded: 0 });
+  const who = await kit.createUnverifiedUser('visitor');
+  kit.expectVisitor(ev, who);
+  productAdmits(be, ev.groupId, who.uid);
+  // A wrong community: a real one this run never made, where the product also admitted the visitor.
+  be.docs.set('wsfCommunityGroups/someone-elses', { displayName: { stringValue: 'Not ours' } });
+  be.docs.set('wsfMemberships/someone-elses_realperson', { groupId: { stringValue: 'someone-elses' }, userId: { stringValue: 'realperson' } });
+  be.docs.set(`wsfMemberships/someone-elses_${who.uid}`, { groupId: { stringValue: 'someone-elses' }, userId: { stringValue: who.uid } });
+  assert.equal(await kit.claimMemberships(who), 2);
+  const m = manifestOf(kit);
+  assert.ok(m.docs.includes(`wsfMemberships/${ev.groupId}_${who.uid}`) && m.docs.includes(`wsfMemberProfiles/${who.uid}`));
+  assert.deepEqual(m.linkedDocs, [{ path: `wsfMemberships/someone-elses_${who.uid}`, via: who.uid }]);
+  const { server, base } = await serve(be);
+  const c = await runCleanup(base, kit.manifestPath, path.join(dir, 'receipt.json'));
+  server.close();
+  assert.equal(c.receipt.status, 'COMPLETE', c.out);
+  assert.equal(be.accounts.size, 0);
+  assert.deepEqual([...be.docs.keys()].sort(), ['wsfCommunityGroups/someone-elses', 'wsfMemberships/someone-elses_realperson'], 'only what is not this run\'s is left');
+});
+
+await test('UNVERIFIED KIT: a journey that fails after the product wrote leaves nothing behind; one that never reached the join leaves nothing either', async () => {
+  for (const reached of [true, false]) {
+    const dir = tmp();
+    const be = unverifiedBackend();
+    const kit = kitFor(dir, be);
+    const ev = await kit.joinableEvent('open', { target: 1000, seeded: 0 });
+    const who = await kit.createUnverifiedUser('visitor');
+    kit.expectVisitor(ev, who);
+    if (reached) {
+      productAdmits(be, ev.groupId, who.uid);
+      kit.trackContribution(ev, who, 'att-1');
+      be.docs.set(`wsfContributions/${ev.goalId}_${who.uid}_att-1`, { count: { integerValue: '15' } });
+      be.docs.set(`wsfGoalMemberTotals/${ev.goalId}_${who.uid}`, { total: { integerValue: '15' } });
+    }
+    // ...and the driver dies here, before anything else; the workflow's cleanup still runs.
+    const { server, base } = await serve(be);
+    const c = await runCleanup(base, kit.manifestPath, path.join(dir, 'receipt.json'));
+    server.close();
+    assert.equal(c.receipt.status, 'COMPLETE', `${reached}: ${c.out}`);
+    assert.equal(be.accounts.size + be.docs.size, 0, `${reached}: left ${[...be.docs.keys()].join(', ')}`);
+  }
+});
+
+// ---- the unverified participant's screens, modelled ------------------------------------
+/**
+ * A scripted model of the native app's hosted web build along the unverified
+ * journey, at 819c26f0 as served (sign-in, profile and marker hold an
+ * unverified account, as signin.tsx:121, profile-setup.tsx:113 and
+ * MarkerEntryScreen.tsx:269 do) or with those screens REPAIRED (an unverified
+ * account routed like a verified one). `holdAtSignin` repairs only the profile
+ * and marker screens. The service writes what the product's callables write
+ * (wsfSaveProfile; admitByLinkTx through wsfJoinViaMarker and wsfJoinCommunity;
+ * wsfContribute), so the REAL cleaner shows whether the driver claimed it all.
+ */
+function unverifiedHarness({ repaired = false, holdAtSignin = false, bugs = {} } = {}) {
+  const dir = tmp();
+  const be = unverifiedBackend();
+  const kit = kitFor(dir, be);
+  const str = (f) => (f ? Object.values(f)[0] : undefined);
+  const doc = (p) => be.docs.get(p);
+  const S = { contributions: [], mailSent: 0, verifyChecked: 0, ctxSeq: 0, firstCtx: new Map() };
+  const refuse = (message) => Object.assign(new Error(message), { status: 'FAILED_PRECONDITION' });
+  const svc = {
+    verified: (uid) => be.verified.get(uid) === true,
+    hasProfile: (uid) => be.docs.has(`wsfMemberProfiles/${uid}`),
+    member: (g, uid) => str(doc(`wsfMemberships/${g}_${uid}`)?.membershipStatus) === 'active',
+    groupName: (g) => str(doc(`wsfCommunityGroups/${g}`)?.displayName),
+    marker: (slug) => { const m = doc(`wsfMarkers/${slug}`); return m ? { groupId: str(m.communityGroupId), goalId: str(m.goalId) } : null; },
+    goalGroup: (goalId) => str(doc(`wsfGoals/${goalId}`)?.communityGroupId),
+    saveProfile(uid, name) { if (!bugs.profileNotSaved) be.docs.set(`wsfMemberProfiles/${uid}`, { displayName: { stringValue: name } }); },
+    admit(g, uid) {
+      if (!svc.hasProfile(uid)) throw refuse('Complete your profile before joining a community.');
+      if (svc.member(g, uid)) return { groupId: g, alreadyMember: true };
+      be.docs.set(`wsfMemberships/${g}_${uid}`, { groupId: { stringValue: g }, userId: { stringValue: uid }, role: { stringValue: 'member' }, membershipStatus: { stringValue: 'active' } });
+      return { groupId: g, alreadyMember: false };
+    },
+    joinViaMarker(slug, uid) {
+      const m = svc.marker(slug);
+      if (bugs.markerJoinsNothing) { if (!svc.hasProfile(uid)) throw refuse('Complete your profile before joining a community.'); return { groupId: m.groupId, alreadyMember: false }; }
+      return svc.admit(m.groupId, uid);
+    },
+    joinByCode(code, uid) {
+      const hit = [...be.docs].find(([p, f]) => /^wsfCommunityGroups\/[^/]+$/.test(p) && str(f.joinCode) === code);
+      if (!hit) throw refuse('This link is not valid.');
+      // Defect: the link admits the account to some other, real community.
+      if (bugs.linkAdmitsElsewhere) { be.docs.set(`wsfMemberships/realgroup-elsewhere_${uid}`, { groupId: { stringValue: 'realgroup-elsewhere' }, userId: { stringValue: uid }, membershipStatus: { stringValue: 'active' } }); return { groupId: 'realgroup-elsewhere', alreadyMember: false }; }
+      return svc.admit(hit[0].split('/')[1], uid);
+    },
+    seeded: (goalId) => [...be.docs].filter(([p]) => p.startsWith(`wsfGoalCounters/${goalId}/shards/`)).reduce((a, [, f]) => a + Number(f.count.integerValue), 0),
+    shared: (goalId) => svc.seeded(goalId) + (bugs.sharedMissesOwn ? 0 : S.contributions.filter((c) => c.goalId === goalId).reduce((a, c) => a + c.count, 0)),
+    own: (goalId, uid, ctx) => S.contributions.filter((c) => c.goalId === goalId && c.uid === uid
+      && (!bugs.creditLostOnFresh || S.firstCtx.get(uid) === ctx.id || c.ctx === ctx.id)).reduce((a, c) => a + c.count, 0),
+    contribute(goalId, uid, attemptId, count, ctx) {
+      if (!svc.member(svc.goalGroup(goalId), uid)) throw refuse('This goal doesn’t exist or isn’t available to this account.');
+      if (bugs.roundRefused && S.contributions.some((c) => c.goalId === goalId && c.uid === uid)) throw refuse('You’ve already recorded your part for this goal.');
+      for (let i = 0; i < (bugs.doubleCount ? 2 : 1); i += 1) S.contributions.push({ goalId, uid, count, ctx: ctx.id });
+      be.docs.set(`wsfContributions/${goalId}_${uid}_${attemptId}`, { goalId: { stringValue: goalId }, userId: { stringValue: uid }, count: { integerValue: String(count) } });
+      be.docs.set(`wsfGoalMemberTotals/${goalId}_${uid}`, { total: { integerValue: String(svc.own(goalId, uid, ctx)) } });
+      be.docs.set(`wsfGoals/${goalId}/recentAdditions/${attemptId}`, { count: { integerValue: String(count) } });
+    },
+  };
+  // The three native screens that hold an unverified account at 819c26f0.
+  const holds = (uid, where) => !svc.verified(uid) && (!repaired || (holdAtSignin && where === 'signin'));
+  const fmtN = (n) => n.toLocaleString('en-US');
+
+  function device(browser) {
+    const ctx = { id: (S.ctxSeq += 1), uid: null, closed: false, pages: [] };
+    const context = {
+      __ctx: ctx, browser: () => browser,
+      newPage: async () => { const p = pageFor(ctx, context); ctx.pages.push(p); return p; },
+      close: async () => { ctx.closed = true; },
+    };
+    return context;
+  }
+  function pageFor(ctx, context) {
+    const st = { path: '/', typed: {}, terms: false, step: 'entry', error: null, joinError: null, markerError: null, listeners: [], seq: 0 };
+    const go = (p) => { st.path = p; st.step = 'entry'; st.error = null; st.joinError = null; st.markerError = null; st.typed = {}; };
+    const landAfterAuth = () => go(holds(ctx.uid, 'signin') ? '/verify-email' : (svc.hasProfile(ctx.uid) ? '/' : '/profile-setup'));
+    function render() {
+      const N = new Map();
+      const add = (id, n = {}) => N.set(id, n);
+      const p = st.path;
+      if (p === '/signin') {
+        add('wsf-signin-email', { fill: (v) => { st.typed.email = v; } });
+        add('wsf-signin-password', { fill: (v) => { st.typed.password = v; } });
+        add('wsf-signin-submit', { click: () => {
+          const uid = [...be.accounts].find(([, e]) => e === st.typed.email)?.[0];
+          if (!uid || be.passwords.get(st.typed.email) !== st.typed.password) return;
+          ctx.uid = uid;
+          if (!S.firstCtx.has(uid)) S.firstCtx.set(uid, ctx.id);
+          landAfterAuth();
+        } });
+        return N;
+      }
+      if (!ctx.uid) return N;
+      const email = be.accounts.get(ctx.uid);
+      if (p === '/verify-email') {
+        add('wsf-verify', { text: `Step 2 of 3\nCheck your email.\nConfirm your email address at ${email}, then tap I have verified.\nSigned in as ${email}` });
+        add('wsf-verify-check', { click: () => { S.verifyChecked += 1; } });
+        add('wsf-verify-resend', { click: () => { S.mailSent += 1; } });
+        add('wsf-verify-signout', { click: () => { ctx.uid = null; go('/'); } });
+      } else if (p === '/profile-setup') {
+        if (holds(ctx.uid, 'profile')) {
+          add('wsf-profile-unverified', { text: 'Complete your profile\nVerify your email before completing your profile.\nVerify email' });
+        } else {
+          add('wsf-profile');
+          add('wsf-profile-displayName', { fill: (v) => { st.typed.name = v; } });
+          add('wsf-profile-termsCheckbox', { click: () => { st.terms = !st.terms; } });
+          add('wsf-profile-submit', { click: () => { if (st.terms && (st.typed.name || '').length >= 2) { svc.saveProfile(ctx.uid, st.typed.name); go('/'); } } });
+        }
+      } else if (p === '/') {
+        add('wsf-home-signed-in');
+      } else if (p.startsWith('/go/')) {
+        const m = svc.marker(p.slice(4));
+        if (m && svc.member(m.groupId, ctx.uid)) {
+          add('wsf-marker-choose', { text: 'How will you take part?' });
+          add('wsf-marker-phone', { text: 'Move on my phone', click: () => go(`/contribute/${m.goalId}`) });
+        } else if (m) {
+          add('wsf-marker-join');
+          add('wsf-marker-join-card', { text: `Join ${svc.groupName(m.groupId)}` });
+          if (holds(ctx.uid, 'marker')) add('wsf-marker-verify', { text: 'Confirm your email to join' });
+          else add('wsf-marker-join-button', { text: `Join ${svc.groupName(m.groupId)}`, click: () => { try { svc.joinViaMarker(p.slice(4), ctx.uid); } catch (e) { st.markerError = e.message; } } });
+          if (st.markerError) add('wsf-marker-join-error', { text: st.markerError });
+        }
+      } else if (p.startsWith('/join/')) {
+        const code = p.slice(6);
+        add('wsf-join-signed-in');
+        add('wsf-join-submit', { text: 'Join', click: () => {
+          try { const j = svc.joinByCode(code, ctx.uid); go(`/community/${bugs.linkWrongCommunity ? 'e5cgrp-somewhere-else' : j.groupId}`); } catch (e) { st.joinError = e.message; }
+        } });
+        if (st.joinError) {
+          add('wsf-join-submit-error', { text: `We couldn’t join this community.\n${st.joinError}` });
+          add('wsf-join-submit-error-title', { text: 'We couldn’t join this community.' });
+        }
+      } else if (p.startsWith('/community/')) {
+        const g = p.slice(11);
+        if (svc.member(g, ctx.uid)) add('wsf-community-name', { text: svc.groupName(g) });
+      } else if (p.startsWith('/contribute/')) {
+        const g = p.slice(12);
+        if (!svc.member(svc.goalGroup(g), ctx.uid)) {
+          add('wsf-contribute-not-found', { text: 'Goal not found\nThis goal doesn’t exist or isn’t available to this account.' });
+          return N;
+        }
+        add('wsf-contribute-screen');
+        add('wsf-contribute-shared-total', { text: `${fmtN(svc.shared(g))} of 1,000 squats` });
+        add('wsf-contribute-own-credit', { text: `Your total on this goal: ${svc.own(g, ctx.uid, ctx)} squats` });
+        if (st.step === 'receipt') add('wsf-contribute-receipt');
+        else if (st.step === 'review') {
+          add('wsf-contribute-review-screen');
+          add('wsf-contribute-submit', { click: () => {
+            const attemptId = `att-${ctx.id}-${(st.seq += 1)}`;
+            const count = Number(st.typed.count);
+            const req = { url: () => 'https://us-central1-westayfit-staging.cloudfunctions.net/wsfContribute', postData: () => JSON.stringify({ data: { goalId: g, attemptId, count } }) };
+            for (const l of st.listeners) l(req);
+            try { svc.contribute(g, ctx.uid, attemptId, count, ctx); st.step = 'receipt'; } catch (e) { st.error = e.message; }
+          } });
+          if (st.error) add('wsf-contribute-error', { text: st.error });
+        } else {
+          add('wsf-contribute-entry-screen');
+          add('wsf-contribute-entry', { fill: (v) => { st.typed.count = v; } });
+          add('wsf-contribute-review', { click: () => { st.step = 'review'; } });
+        }
+      } else if (p === '/activity') {
+        add('wsf-activity');
+        if (!bugs.historyMissing) {
+          for (const g of new Set(S.contributions.map((c) => c.goalId))) {
+            const own = svc.own(g, ctx.uid, ctx);
+            if (own > 0) add(`wsf-activity-goal-${g}-yours`, { text: `YOURS\n${own} squats` });
+          }
+        }
+      }
+      return N;
+    }
+    function locator(selector) {
+      const id = /data-testid="([^"]+)"/.exec(selector)?.[1];
+      const find = () => (ctx.closed ? null : render().get(id) || null);
+      const must = () => { const n = find(); if (!n) throw new Error(`locator: no ${selector}`); return n; };
+      const loc = {
+        first: () => loc,
+        count: async () => (find() ? 1 : 0),
+        innerText: async () => must().text || '',
+        isDisabled: async () => false,
+        click: async () => { const n = must(); if (!n.click) throw new Error(`${selector} is not clickable`); n.click(); },
+        fill: async (v) => must().fill(v),
+        waitFor: async () => { must(); },
+      };
+      return loc;
+    }
+    const page = {
+      goto: async (url) => go(new URL(url).pathname),
+      url: () => `https://staging.example.test${st.path}`,
+      waitForTimeout: async () => {},
+      waitForURL: async (pred) => { if (!pred(new URL(page.url()))) throw new Error('page.waitForURL: Timeout exceeded'); },
+      locator,
+      getByTestId: (id) => locator(`[data-testid="${id}"]`),
+      on: (ev, fn) => { if (ev === 'request') st.listeners.push(fn); },
+      off: (ev, fn) => { st.listeners = st.listeners.filter((l) => l !== fn); },
+      context: () => context,
+      screenshot: async ({ path: out }) => { fs.writeFileSync(out, 'png'); },
+    };
+    return page;
+  }
+  const opened = [];
+  const browser = { newContext: async () => { const c = device(browser); opened.push(c); return c; } };
+  const root = device(browser);
+  const rootPage = pageFor(root.__ctx, root);
+  return { dir, be, kit, S, svc, fixtures: kit, page: rootPage, opened };
+}
+
+const UNVERIFIED_ROWS = ['signin', 'profile', 'marker', 'link', 'contribute', 'history', 'fresh', 'round', 'control'];
+async function driveUnverified(opts = {}) {
+  const h = unverifiedHarness(opts);
+  const used = new Set();
+  const fixtures = new Proxy(h.fixtures, { get: (k, name) => { used.add(name); return k[name]; } });
+  const r = await unverifiedParticipantDriver({ page: h.page, baseUrl: 'https://staging.example.test', journey: { id: 'unverified-participant' }, fixtures });
+  const byRow = Object.fromEntries(r.assertions.map((a) => [tagOf(a.expected), a]));
+  return { ...h, r, used, byRow, failed: r.assertions.filter((a) => !a.ok).map((a) => tagOf(a.expected)) };
+}
+const cleanAll = async (h) => {
+  const { server, base } = await serve(h.be);
+  const c = await runCleanup(base, h.kit.manifestPath, path.join(h.dir, 'cleanup-receipt.json'));
+  server.close();
+  return c;
+};
+
+await test('UNVERIFIED: the driver is written but NOT registered (the frozen registry and the live manifest are unchanged until the pin), and it asserts nine rows', () => {
+  assert.equal(drivers['unverified-participant'], undefined);
+  assert.equal(Object.values(drivers).includes(unverifiedParticipantDriver), false);
+  assert.equal(expoDrivers['unverified-participant'], undefined);
+  assert.equal(EXPO_ROWS['unverified-participant'], undefined);
+  assert.equal(live().journeys.some((j) => j.id === 'unverified-participant'), false);
+  assert.deepEqual(Object.keys(UNVERIFIED_PARTICIPANT_ROWS), UNVERIFIED_ROWS);
+  assert.ok(Object.isFrozen(UNVERIFIED_PARTICIPANT_ROWS));
+});
+
+await test('UNVERIFIED at 819c26f0 as served: every visitor row fails on the screen that holds the account, the verified control passes, nothing is verified or mailed', async () => {
+  const d = await driveUnverified();
+  assert.deepEqual(d.failed, ['signin', 'profile', 'marker', 'link', 'contribute', 'history', 'fresh', 'round']);
+  assert.equal(d.byRow.control.ok, true, d.byRow.control.expected);
+  assert.match(d.byRow.signin.expected, /\/verify-email: held at the verification page \(Check your email\.\)/);
+  assert.match(d.byRow.profile.expected, /\/profile-setup: the profile page shows only Verify your email before completing your profile\./);
+  assert.match(d.byRow.marker.expected, /the marker shows Confirm your email to join in place of its Join button/);
+  assert.match(d.byRow.link.expected, /\/join\/\[link\]: We couldn’t join this community\. Complete your profile before joining a community\./);
+  assert.match(d.byRow.round.expected, /Goal not found/);
+  assert.match(d.byRow.fresh.expected, /\/verify-email: held at the verification page/);
+  const everything = JSON.stringify(d.r);
+  for (const [, email] of d.be.accounts) assert.equal(everything.includes(email), false, 'no synthetic address reaches the results');
+  const ev = d.be.docs.get([...d.be.docs.keys()].find((p) => /^wsfCommunityGroups\/e5cgrp-/.test(p)));
+  assert.equal(everything.includes(ev.joinCode.stringValue), false, 'no join code reaches the results');
+  assert.equal(d.S.mailSent + d.S.verifyChecked, 0, 'Resend and I have verified are never pressed');
+  const [visitor] = [...d.be.verified].find(([, v]) => v === false);
+  assert.equal([...d.be.docs.keys()].some((p) => p.endsWith(visitor) || p.includes(`_${visitor}`)), false, 'the held visitor was admitted to nothing');
+  assert.ok(d.opened.every((c) => c.__ctx.closed), 'every device closed');
+  const c = await cleanAll(d);
+  assert.equal(c.receipt.status, 'COMPLETE', c.out);
+  assert.equal(d.be.docs.size + d.be.accounts.size, 0);
+});
+
+await test('UNVERIFIED with the screens repaired: every row holds; the visitor is admitted by the product and credited 15 then 25; the REAL cleaner empties the store', async () => {
+  const d = await driveUnverified({ repaired: true });
+  assert.deepEqual(d.failed, [], d.r.assertions.filter((a) => !a.ok).map((a) => a.expected).join(' | '));
+  assert.deepEqual(d.r.assertions.map((a) => tagOf(a.expected)), UNVERIFIED_ROWS);
+  const [visitor] = [...d.be.verified].find(([, v]) => v === false);
+  const group = [...d.be.docs.keys()].find((p) => /^wsfCommunityGroups\/e5cgrp-/.test(p)).split('/')[1];
+  assert.ok(d.be.docs.has(`wsfMemberships/${group}_${visitor}`) && d.be.docs.has(`wsfMemberProfiles/${visitor}`));
+  assert.equal(d.S.contributions.filter((x) => x.uid === visitor).map((x) => x.count).join('+'), '15+10');
+  assert.equal(d.S.mailSent + d.S.verifyChecked, 0);
+  assert.ok(d.opened.every((c) => c.__ctx.closed));
+  const c = await cleanAll(d);
+  assert.equal(c.receipt.status, 'COMPLETE', c.out);
+  assert.equal(d.be.docs.size + d.be.accounts.size, 0, `left ${[...d.be.docs.keys()].join(', ')}`);
+});
+
+const UNVERIFIED_DEFECTS = [
+  [{ holdAtSignin: true }, ['signin', 'fresh']],
+  // The control joins only by the marker, so a marker join that writes nothing fails it too.
+  [{ bugs: { markerJoinsNothing: true } }, ['marker', 'control']],
+  [{ bugs: { linkWrongCommunity: true } }, ['link']],
+  // ...and its membership there is claimed by the sweep after the link, so cleanup still leaves nothing.
+  [{ bugs: { linkAdmitsElsewhere: true } }, ['link']],
+  [{ bugs: { profileNotSaved: true } }, ['marker', 'link', 'contribute', 'history', 'fresh', 'round', 'control']],
+  [{ bugs: { doubleCount: true } }, ['contribute', 'history', 'fresh', 'round', 'control']],
+  [{ bugs: { creditLostOnFresh: true } }, ['fresh', 'round']],
+  [{ bugs: { roundRefused: true } }, ['round']],
+  [{ bugs: { historyMissing: true } }, ['history', 'fresh']],
+  [{ bugs: { sharedMissesOwn: true } }, ['contribute', 'round']],
+];
+for (const [defect, rows] of UNVERIFIED_DEFECTS) {
+  await test(`UNVERIFIED (repaired) fails on a seeded defect ${JSON.stringify(defect)} exactly on ${rows.join(', ')}, and still leaves nothing behind`, async () => {
+    const d = await driveUnverified({ repaired: true, ...defect });
+    assert.deepEqual(d.failed, rows);
+    const c = await cleanAll(d);
+    assert.equal(c.receipt.status, 'COMPLETE', c.out);
+    assert.equal(d.be.docs.size + d.be.accounts.size, 0);
+  });
+}
+
+await test('UNVERIFIED: the driver reaches the store only through these kit calls, never presses the verification controls, and the kit never verifies an address', async () => {
+  const d = await driveUnverified();
+  const allowed = new Set(['joinableEvent', 'createUnverifiedUser', 'createVerifiedUser', 'expectVisitor', 'claimMemberships', 'signInLanding', 'trackContribution']);
+  for (const name of d.used) if (typeof name === 'string') assert.ok(allowed.has(name), `used fixtures.${name}`);
+  const driver = fs.readFileSync(path.resolve('.github/wsf-staging/journeys/expo-attendee.mjs'), 'utf8');
+  assert.doesNotMatch(driver, /wsf-verify-(resend|check|signout)/);
+  const kitSrc = fs.readFileSync(path.resolve('.github/wsf-staging/journeys/fixture-kit.mjs'), 'utf8');
+  assert.equal(kitSrc.match(/emailVerified: true/g).length, 1, 'only createVerifiedUser makes a verified account');
+  assert.doesNotMatch(kitSrc, /accounts:update|setAccountInfo|oobCode|sendOobCode/, 'nothing in the kit changes or verifies an account');
 });
 
 console.log(`\nchanged-journey-drivers: ${passed} passed`);
