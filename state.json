@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "e3373c38245a2bb11195a0815827d2862b868a84a85fa0574f2f0a4b0c127c19",
-  "eventCount": 814,
+  "ledgerHead": "09a9e8a82ccfc132940af8677ce617f6581856ad8354aedd36de321dd3390d77",
+  "eventCount": 815,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -4852,8 +4852,10 @@
       "packet": "KIOSK-EXPECTED-TURN-NATIVE-CALLER-RECOVERY-2",
       "worker": "W3",
       "reason": "release",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        6061336367
+      ],
       "ack": null
     }
   },
