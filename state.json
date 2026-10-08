@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "4b18a02c2e08b796364e955bc09606bad66e24cbab8f30d103e639b340b7f157",
-  "eventCount": 788,
+  "ledgerHead": "4b1b1faa2b48fe0d931dcbfa191ad411001fbcfa1d7f3dd2987941c10d94d86f",
+  "eventCount": 789,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2142,7 +2142,7 @@
       },
       "label": "Canonical private profile photos and permitted community roster for native and Lovable staging",
       "origin": "ledger",
-      "phase": "ACCEPTED",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -2154,7 +2154,7 @@
         "subjectSha": "57fd86b87ee19dfb3f238899829c5dbd2a2fe0f3",
         "prHeadSha": "57fd86b87ee19dfb3f238899829c5dbd2a2fe0f3",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "b83811950732d97dc5dde324cd7195cb61edaacf"
       },
       "proof": null,
       "served": null,
@@ -2185,8 +2185,8 @@
           "id": 6053420316
         },
         "lastTransition": {
-          "kind": "comment",
-          "id": 6053420316
+          "kind": "pull_request",
+          "id": 593
         }
       },
       "review": {
