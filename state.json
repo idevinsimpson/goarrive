@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "be86801ea3b1b36576b94ea66f8f916887a36332bc01775417522374530ffd0b",
-  "eventCount": 843,
+  "ledgerHead": "b8bd29cb7cbe2eaa6a1c408e44cd75b40a8346e889e9996afcd519a4c2f63919",
+  "eventCount": 844,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -4925,8 +4925,10 @@
       "packet": "KIOSK-UNVERIFIED-STAGING-RECOVERY-1",
       "worker": "W3",
       "reason": "release",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        6064256466
+      ],
       "ack": null
     }
   },
