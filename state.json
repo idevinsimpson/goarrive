@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "e29bfd70219f8c7cf9cac7921c20f4286ad1b2abde02381e8908172aadc84673",
-  "eventCount": 696,
+  "ledgerHead": "87eed25e6d4e8dcd68a62e6331ea18ac72573cb9076149465fc673d166188797",
+  "eventCount": 698,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -61,9 +61,7 @@
     }
   },
   "queue": {
-    "W3": [
-      "CONTROL-CURRENT-PATCH-TRANSPORT-2"
-    ],
+    "W3": [],
     "W4": [],
     "W5": [],
     "W7": [],
@@ -350,10 +348,10 @@
       },
       "label": "Make the single CURRENT PATCH complete through a bounded transport while preserving exact readback and no resend",
       "origin": "ledger",
-      "phase": "QUEUED",
+      "phase": "RELEASED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
-      "inbox": null,
+      "inbox": 396,
       "pr": null,
       "reviewers": [],
       "artifact": {
@@ -364,7 +362,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": null,
+      "releasedQueueIndex": 0,
       "reviewedBy": [],
       "subjectPaths": [
         "tools/wsf-control/github.mjs",
@@ -377,11 +375,14 @@
           "kind": "comment",
           "id": 6045160033
         },
-        "released": null,
+        "released": {
+          "kind": "comment",
+          "id": 6050347861
+        },
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6045160033
+          "id": 6050347861
         }
       },
       "review": {
@@ -4329,6 +4330,14 @@
         "id": 6045941455
       },
       "superseded": true
+    },
+    "1d9f6e64f3df030e08b7f33bdadb8ebf434107f091892850f8d5c446e2c042ce": {
+      "packet": "CONTROL-CURRENT-PATCH-TRANSPORT-2",
+      "worker": "W3",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
