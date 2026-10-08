@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "09a9e8a82ccfc132940af8677ce617f6581856ad8354aedd36de321dd3390d77",
-  "eventCount": 815,
+  "ledgerHead": "fd7319866a662c4d72adda5364c32676bc40f7bd0321fba8430ea64319b92eb9",
+  "eventCount": 819,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -752,7 +752,7 @@
       },
       "label": "Recover isolated Event lifecycle backend after withdrawn unacknowledged W5 assignment",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "CHANGES_REQUESTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -791,7 +791,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6060899993
+          "id": 6061337130
         }
       },
       "review": {
@@ -1637,7 +1637,7 @@
       },
       "label": "Correct native expected-turn caller reservation to executable Vitest and Playwright paths",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -1651,7 +1651,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         "apps/westayfit/app/station/[goalId].tsx",
@@ -1676,7 +1676,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6061210091
+          "id": 6061382606
         }
       },
       "review": {
@@ -4836,7 +4836,8 @@
       "ack": {
         "kind": "comment",
         "id": 6061025916
-      }
+      },
+      "superseded": true
     },
     "0db03e79b2f3131e4316ea74d1169e17a405708ed196b4ee725f5679b1c7b394": {
       "packet": "EVENT-LIFECYCLE-BACKEND-RECOVERY-1",
@@ -4846,16 +4847,28 @@
       "comments": [
         6060991924
       ],
-      "ack": null
+      "ack": null,
+      "superseded": true
     },
     "85ec59b9dd76845d16dc50a6a95f3544d6d3d67d23dfb4e6f4168acb04b6e9c5": {
       "packet": "KIOSK-EXPECTED-TURN-NATIVE-CALLER-RECOVERY-2",
       "worker": "W3",
       "reason": "release",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6061336367
       ],
+      "ack": {
+        "kind": "comment",
+        "id": 6061382606
+      }
+    },
+    "638e6595dee2776e36a24ecd5290cbf49be2d70f6f6f03c11660eb5680190262": {
+      "packet": "EVENT-LIFECYCLE-BACKEND-RECOVERY-1",
+      "worker": "W9",
+      "reason": "handback",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
