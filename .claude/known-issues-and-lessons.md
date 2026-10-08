@@ -1,6 +1,6 @@
 # GoArrive Known Issues & Lessons Learned
 
-_Last refreshed: 2026-10-07._
+_Last refreshed: 2026-10-08._
 
 ## Resolved Issues (Reference for Future Work)
 The following issues were encountered and resolved during development. They are documented here as institutional knowledge to prevent regression and inform future decisions.
@@ -298,3 +298,12 @@ The v3 handoff has two music elements — a graph-wired `audible` one for the fo
 This bit us concretely: `ended` (which advances the playlist) lived only on the audible element. While backgrounded that element is paused, and **a paused media element never fires `ended`** — so the shadow played the current track to its end and then simply stopped, with nothing to advance it. Returning to the app resumed the audible at the shadow's position, which immediately hit the end, fired `ended`, and advanced — which is why the symptom presented as "music stops when the track switches" and recovered on re-entry. The track was never switching at all. Fixed in PR #287 by giving the shadow its own `ended`/`error` handlers, guarded by element identity and `inBackgroundRef`.
 
 Two design rules fall out. **When you add a second element that can own playback, audit every listener on the first one** and decide explicitly whether it needs a twin — the failure is silent and only appears at a boundary the tests never reach. And **a handler that can trigger a retry cascade needs a circuit breaker**: `error → advance → error` would have burned an entire playlist in seconds with the real first cause buried at the top of the log, so #287 caps consecutive failures and stops.
+
+### WSF Control Writer: A Pooled HTTP Connection Can Stall a State-Mutating PATCH for the Full Client Timeout (PR #591)
+`editComment` was issued through undici's pooled HTTP connection. Runs 37671900853 and 37672822242 each spent ~315 s waiting for a status line that never arrived — exactly undici's 300 s header timeout — before the ACK-1 read-back correctly refused success. The cost was a near-full-run delay on every affected invocation.
+
+The failure mode: a pooled connection can carry the request to the server but fail to return a status line if the underlying socket went half-closed after the pool acquired it. Undici waits until its own default timeout; there is no shorter per-request deadline by default.
+
+The fix (`sendOnce`, PR #591) sends the PATCH on its own fresh connection: `node:https` with `agent: false` (no pool), `Connection: close`, and a byte-exact `Content-Length`, settling on the first status line within `PATCH_TIMEOUT_MS` (30 s). The body is never read — only the status code matters. A transport failure, deadline expiry, or connection close before any status line rejects with a `TransportError` code; the ACK-1 read-back path then determines whether the edit landed. HTTP redirect answers (3xx) now fail closed rather than passing silently through the 2xx check. GET and POST paths are unchanged and continue to use the existing `fetchImpl`.
+
+Lesson: a state-mutating HTTP call that must not be retried also must not be allowed to hang indefinitely. A pooled client's connection-reuse behavior can produce a stall that produces no error and no response — the caller cannot distinguish a hung connection from a slow server without its own deadline. For one-shot PATCH calls, use a fresh connection and a short explicit deadline so the transport layer forces a decision within a bounded window. This is distinct from the retry question (PR #588): that entry covers *not retransmitting* on transport failure; this entry covers *bounding the wait* before a transport failure is even declared.
