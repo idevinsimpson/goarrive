@@ -3781,11 +3781,28 @@ export const wsfContribute = onCall<ContributeRequest>(
  * door: whatever asks for a contribution passes the same three checks, in the
  * same order, with the same three messages.
  */
+/**
+ * KIOSK-EXPECTED-TURN-1. A turn completion rides INSIDE the contribution
+ * transaction, so "is this turn still the one being finished?" and "record the
+ * attempt" are one atomic decision: a cancel, a reassignment or a second
+ * completion that commits first is seen here, and never after the fact.
+ *
+ * `read` runs after the contribution's own reads and before any write; it may
+ * throw an HttpsError to refuse, which writes nothing. `write` runs in the same
+ * transaction after the contribution's writes (or on a replay, instead of
+ * them) and receives what was recorded.
+ */
+type TurnCompletionHook = {
+  read(tx: FirebaseFirestore.Transaction, contributionExists: boolean): Promise<void>;
+  write(tx: FirebaseFirestore.Transaction, outcome: { amount: number; unit: string }): void;
+};
+
 async function performContribution(args: {
   uid: string;
   goalId: unknown;
   attemptId: unknown;
   count: unknown;
+  turn?: TurnCompletionHook;
 }): Promise<ContributeResponse> {
   const uid = args.uid;
 
@@ -3864,6 +3881,10 @@ async function performContribution(args: {
           tx.get(claimRef),
         ]);
 
+      // The turn this contribution finishes, if any, is checked here — after
+      // the contribution's own reads, before any write.
+      if (args.turn) await args.turn.read(tx, contribSnap.exists);
+
       // Idempotency wins over closure, window end, AND membership drift.
       // A member who already succeeded must never see "you did the reps,
       // we say you didn't" — even if the goal has since closed, the window
@@ -3890,6 +3911,12 @@ async function performContribution(args: {
         const replayMembership = membershipSnap.exists
           ? (membershipSnap.data() as { membershipStatus?: string })
           : null;
+        if (args.turn) {
+          args.turn.write(tx, {
+            amount: typeof prev.count === 'number' ? prev.count : 0,
+            unit: typeof goal.unit === 'string' ? goal.unit : '',
+          });
+        }
         return {
           addedCount: typeof prev.count === 'number' ? prev.count : 0,
           alreadyRecorded: true as const,
@@ -4137,6 +4164,10 @@ async function performContribution(args: {
             createdAt: FieldValue.serverTimestamp(),
           }
         );
+      }
+
+      if (args.turn) {
+        args.turn.write(tx, { amount: count, unit: typeof goal.unit === 'string' ? goal.unit : '' });
       }
 
       // Reached only after the active-membership gate above, so this caller
@@ -5826,6 +5857,9 @@ type StationServing = {
   calledName: string;
   position: number;
   calledAt: FirebaseFirestore.Timestamp;
+  /** KIOSK-EXPECTED-TURN-1: the turn reference of the call this pointer
+   * names. Absent on a pointer written before the reference existed. */
+  turnRef?: string;
 };
 
 /**
@@ -7942,6 +7976,15 @@ type TurnEntryDoc = {
   /** When the 45 seconds run out. Null except while `assigned`. */
   readyLeaseExpiresAt: FirebaseFirestore.Timestamp | null;
   readyAt: FirebaseFirestore.Timestamp | null;
+  /**
+   * KIOSK-EXPECTED-TURN-1. THE EXPECTED-TURN REFERENCE: random, minted once by
+   * the call that assigned this entry to a station, and never changed. It is
+   * what a station names when it starts, cancels or completes THIS turn, so a
+   * delayed command for one visitor can never land on the next. It is not a
+   * uid, not a credential (every station command still needs the station
+   * secret) and not derived from anything about the person.
+   */
+  stationTurnRef?: string | null;
   /** THE CANONICAL ATTEMPT, minted once at start and bound here. */
   attemptId: string | null;
   attemptStationId: string | null;
@@ -8039,6 +8082,23 @@ function mintTurnAttemptId(): string {
   return `turn_${randomBytes(18).toString('base64url')}`;
 }
 
+/** KIOSK-EXPECTED-TURN-1: one opaque reference per station assignment. */
+function mintStationTurnRef(): string {
+  return `tr_${randomBytes(18).toString('base64url')}`;
+}
+
+function normalizeStationTurnRef(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  return /^tr_[A-Za-z0-9_-]{16,64}$/.test(v) ? v : null;
+}
+
+/** The station's command must name a turn: missing is an old client. */
+function requireStationTurnRef(v: unknown): string {
+  const ref = normalizeStationTurnRef(v);
+  if (!ref) throw new HttpsError('invalid-argument', TURN_REF_MISSING_MESSAGE);
+  return ref;
+}
+
 /**
  * The label a screen may show, normalized here and refused here.
  *
@@ -8071,6 +8131,12 @@ const TURN_IN_PROGRESS_MESSAGE =
   'Finish or cancel the turn on this screen before calling the next person.';
 const TURN_NOT_READY_MESSAGE = 'Ask them to tap “I’m ready” on their phone first.';
 const TURN_NOBODY_MESSAGE = 'Nobody is up at this screen.';
+/** KIOSK-EXPECTED-TURN-1: a station command that names no turn. An old
+ * screen build fails here safely instead of acting on whoever is up now. */
+const TURN_REF_MISSING_MESSAGE = 'This screen needs an update before it can run a turn.';
+/** KIOSK-EXPECTED-TURN-1: a command for a turn this screen is no longer on. */
+const TURN_STALE_MESSAGE = 'That turn has moved on. This screen now shows the current one.';
+const TURN_NOT_RUNNING_MESSAGE = 'That turn is not running.';
 const TURN_OTHER_ACTIVITY_MESSAGE =
   'You’re already in the line at this event. Finish or leave that turn first.';
 const TURN_LEASE_LAPSED_MESSAGE =
@@ -8281,6 +8347,10 @@ type TurnHallAssignment = {
   /** And what it is CALLED, so the room can read which of the event's
    * activities this turn is. */
   activityTitle: string;
+  /** KIOSK-EXPECTED-TURN-1: the opaque reference this station must send back
+   * with Start, Cancel and Complete for THIS turn. Given only to the station
+   * that holds the secret (this projection is station-authorized). */
+  turnRef: string | null;
 };
 
 /** The ten-second result. A CODE and a number — never a name. */
@@ -8340,6 +8410,7 @@ function hallAssignment(entry: TurnEntryDoc, now: number): TurnHallAssignment | 
     readySecondsLeft,
     activityUnit: typeof entry.activityUnit === 'string' ? entry.activityUnit : '',
     activityTitle: typeof entry.activityTitle === 'string' ? entry.activityTitle : '',
+    turnRef: normalizeStationTurnRef(entry.stationTurnRef),
   };
 }
 
@@ -8721,8 +8792,11 @@ type MyTurnResponse = {
     /** True once a station has started this turn and bound its attempt. */
     attemptOpen: boolean;
   } | null;
-  /** Their own last recorded turn at this event, if any. */
-  receipt: { amount: number; unit: string; goalId: string } | null;
+  /** Their own last recorded turn at this event, if any. `entryId` names the
+   * turn it was recorded for (KIOSK-EXPECTED-TURN-1), so a phone that lost an
+   * answer matches it to THAT entry rather than to any entry on the goal; it is
+   * null on a receipt stored before the field existed. */
+  receipt: { amount: number; unit: string; goalId: string; entryId: string | null } | null;
 };
 
 export const wsfMyTurn = onCall<MyTurnRequest>(
@@ -8750,6 +8824,7 @@ export const wsfMyTurn = onCall<MyTurnRequest>(
           amount: typeof stored.amount === 'number' ? stored.amount : 0,
           unit: typeof stored.unit === 'string' ? stored.unit : '',
           goalId: typeof stored.goalId === 'string' ? stored.goalId : '',
+          entryId: normalizeStringId(stored.entryId),
         }
       : null;
 
@@ -9051,6 +9126,8 @@ export const wsfCallNext = onCall<CallNextRequest>(
     const { stationId, stationRef } = authorized;
     const lineId = event.lineId;
     const lineRef = db.doc(`wsfTurnLines/${lineId}`);
+    // Minted outside the transaction so a Firestore retry re-uses it.
+    const turnRef = mintStationTurnRef();
 
     const outcome = await db.runTransaction(
       async (tx): Promise<'called' | 'empty' | 'blocked' | 'closed'> => {
@@ -9174,6 +9251,7 @@ export const wsfCallNext = onCall<CallNextRequest>(
           // when it ends without agreeing on a clock.
           readyLeaseExpiresAt: Timestamp.fromMillis(now + TURN_READY_LEASE_MS),
           readyAt: null,
+          stationTurnRef: turnRef,
         });
         // The cached pointer the screen reads. It carries the fields the hall
         // may see and no others — a uid must not reach a station document
@@ -9184,6 +9262,7 @@ export const wsfCallNext = onCall<CallNextRequest>(
             calledName: chosenEntry.calledName,
             position: chosenEntry.position,
             calledAt: Timestamp.fromMillis(now),
+            turnRef,
           },
         });
         return 'called';
@@ -9226,7 +9305,7 @@ export const wsfCallNext = onCall<CallNextRequest>(
 // again once it is terminal.
 // ─────────────────────────────────────────────────────────────────────────────
 
-type StartTurnRequest = { stationId?: unknown; secret?: unknown };
+type StartTurnRequest = { stationId?: unknown; secret?: unknown; expectedTurn?: unknown };
 type StartTurnResponse = TurnStateResponse & {
   started: boolean;
   /** The activity THEY chose, so the screen runs the right one. Public goal
@@ -9239,6 +9318,8 @@ export const wsfStartTurn = onCall<StartTurnRequest>(
   async (request): Promise<StartTurnResponse> => {
     const now = Date.now();
     const authorized = await authorizeStationForTurn(request.data, request.rawRequest, now);
+    // KIOSK-EXPECTED-TURN-1: the start names the turn it is for.
+    const expectedTurn = requireStationTurnRef(request.data?.expectedTurn);
     const event = await resolveTurnEvent(authorized.goalId);
     const db = getFirestore();
     const { stationId, stationRef } = authorized;
@@ -9270,14 +9351,19 @@ export const wsfStartTurn = onCall<StartTurnRequest>(
           message: STATION_REJECTED_MESSAGE,
         };
       }
-      const servingId = normalizeStringId(
-        (station.serving as { entryId?: unknown } | null | undefined)?.entryId
-      );
+      const stale = { kind: 'refused', code: 'failed-precondition', message: TURN_STALE_MESSAGE } as const;
+      // KIOSK-EXPECTED-TURN-1: the screen must still be on THE turn the
+      // command names. A delayed start for A after B was called is refused
+      // here and touches nothing.
+      const serving = station.serving as { entryId?: unknown; turnRef?: unknown } | null | undefined;
+      if (normalizeStationTurnRef(serving?.turnRef) !== expectedTurn) return stale;
+      const servingId = normalizeStringId(serving?.entryId);
       if (!servingId) return nobody;
       const entryRef = db.doc(`wsfTurnEntries/${servingId}`);
       const entrySnap = await tx.get(entryRef);
       if (!entrySnap.exists) return nobody;
       const entry = entrySnap.data() as TurnEntryDoc;
+      if (normalizeStationTurnRef(entry.stationTurnRef) !== expectedTurn) return stale;
 
       // THE NARROW AUTHORITY, stated as two equalities: this line, and a turn
       // THIS station called. A station cannot reach into another's.
@@ -9345,104 +9431,141 @@ export const wsfStartTurn = onCall<StartTurnRequest>(
  * response, or finishing on the phone after starting at the station all land
  * on the same (goal, uid, attemptId) key and record exactly once.
  *
- * ORDER MATTERS, and it is deliberate: the CONTRIBUTION commits first, then
- * the turn is marked done. The contribution is the durable truth; the entry is
- * bookkeeping. If the bookkeeping write is lost, a retry re-runs the
- * contribution (which reports `alreadyRecorded` and writes nothing) and
- * finishes the bookkeeping, so the two converge without a reconciler.
+ * KIOSK-EXPECTED-TURN-1: ONE TRANSACTION, NOT TWO. The turn's own checks and
+ * its bookkeeping now run INSIDE the contribution's transaction (the
+ * TurnCompletionHook), so there is no gap between "this turn is still running"
+ * and "record it":
+ *   • a cancel or a lapse that commits first is seen, and nothing is recorded
+ *     for a turn that is no longer running;
+ *   • a contribution that commits first marks the turn done in the same
+ *     commit, so a cancel after it finds nothing live to end;
+ *   • a replay of an attempt already recorded (a lost answer, a retry, the
+ *     phone and the screen racing) returns the same receipt and writes NOTHING
+ *     to the line, the station or the hall — so an old turn never clears,
+ *     counts for or changes the turn that is up now.
  */
 async function completeTurnEntry(args: {
   entryRef: FirebaseFirestore.DocumentReference;
   entry: TurnEntryDoc;
   count: unknown;
+  /** Who is finishing it, re-checked inside the transaction. */
+  by: { kind: 'station'; stationId: string; turnRef: string } | { kind: 'member'; uid: string };
 }): Promise<ContributeResponse> {
-  const { entryRef, entry } = args;
+  const { entryRef, entry, by } = args;
   const attemptId = normalizeStringId(entry.attemptId);
   if (!attemptId) {
     throw new HttpsError('failed-precondition', 'That turn has not been started yet.');
   }
-  const receipt = await performContribution({
-    uid: entry.uid,
-    goalId: entry.goalId,
-    attemptId,
-    count: args.count,
-  });
-
   const db = getFirestore();
   const lineId = entry.lineId;
-  const stationId = normalizeStringId(entry.attemptStationId);
+  const attemptStationId = normalizeStringId(entry.attemptStationId);
+  const stationRef = attemptStationId ? db.doc(`wsfKioskStations/${attemptStationId}`) : null;
   const at = Date.now();
-  const amount = typeof receipt.addedCount === 'number' ? receipt.addedCount : 0;
-  const unit = typeof receipt.unit === 'string' ? receipt.unit : '';
 
-  await db.runTransaction(async (tx) => {
-    const snap = await tx.get(entryRef);
-    if (!snap.exists) return;
-    const current = snap.data() as TurnEntryDoc;
-    const stationRef = stationId ? db.doc(`wsfKioskStations/${stationId}`) : null;
-    const stationSnap = stationRef ? await tx.get(stationRef) : null;
+  // What the transaction read, carried from `read` to `write`.
+  let current: TurnEntryDoc | null = null;
+  let stationSnap: FirebaseFirestore.DocumentSnapshot | null = null;
 
-    if (current.status !== 'done') {
+  const hook: TurnCompletionHook = {
+    async read(tx, contributionExists) {
+      const [snap, sSnap] = await Promise.all([
+        tx.get(entryRef),
+        stationRef ? tx.get(stationRef) : Promise.resolve(null),
+      ]);
+      if (!snap.exists) throw new HttpsError('failed-precondition', TURN_NOBODY_MESSAGE);
+      current = snap.data() as TurnEntryDoc;
+      stationSnap = sSnap;
+      // The binding, re-checked where it cannot change underneath us.
+      if (normalizeStringId(current.attemptId) !== attemptId) {
+        throw new HttpsError('failed-precondition', TURN_STALE_MESSAGE);
+      }
+      if (by.kind === 'station') {
+        if (
+          normalizeStringId(current.attemptStationId) !== by.stationId ||
+          normalizeStationTurnRef(current.stationTurnRef) !== by.turnRef
+        ) {
+          throw new HttpsError('failed-precondition', TURN_STALE_MESSAGE);
+        }
+        // A screen revoked since its credential was checked records nothing.
+        const station = sSnap && sSnap.exists ? (sSnap.data() as StationDoc) : null;
+        if (!station || station.status !== 'active') {
+          throw new HttpsError('permission-denied', STATION_REJECTED_MESSAGE);
+        }
+      } else if (current.uid !== by.uid) {
+        notFound();
+      }
+      // A turn that is no longer running records nothing new. An attempt
+      // that is ALREADY recorded may always replay its own receipt.
+      if (!contributionExists && current.status !== 'active') {
+        throw new HttpsError('failed-precondition', TURN_NOT_RUNNING_MESSAGE);
+      }
+    },
+    write(tx, outcome) {
+      const live = current;
+      // Bookkeeping happens once: on the commit that records the attempt, or
+      // on the replay that finds it recorded but the turn still open (a
+      // completion from before this transaction existed). A turn already done,
+      // cancelled or lapsed is never touched by a replay.
+      if (!live || live.status !== 'active') return;
       tx.update(entryRef, {
         status: 'done' satisfies TurnStatus,
         lineStatusKey: turnStatusKey(lineId, 'done'),
         doneAt: FieldValue.serverTimestamp(),
         endedBy: 'result',
         readyLeaseExpiresAt: null,
-        resultAmount: amount,
-        resultUnit: unit,
+        resultAmount: outcome.amount,
+        resultUnit: outcome.unit,
       });
-    }
-    // THE PLACE COMES BACK. A finished turn frees the account's one place at
-    // the event, so they may get back in line — at the BACK of it.
-    const uid = normalizeStringId(current.uid);
-    if (uid) {
-      tx.delete(db.doc(`wsfTurnMembers/${turnMemberDocId(lineId, uid)}`));
-      // THE RECOVERABLE RECEIPT. Written under the person's own uid, so a
-      // phone that lost the response to its own completion can still be shown
-      // exactly what happened — after every name has left every screen.
-      tx.set(db.doc(`wsfTurnReceipts/${turnMemberDocId(lineId, uid)}`), {
-        entryId: entryRef.id,
-        goalId: current.goalId,
-        attemptId,
-        amount,
-        unit,
-        recordedAtMillis: at,
-      } satisfies TurnReceiptDoc);
-    }
-    // ALL PRIOR NAME AND SESSION UI IS CLEARED, in the same transaction that
-    // records the result.
-    //
-    // THE NAME GOES; THE POINTER STAYS. Two things had to be true at once and
-    // they pulled in opposite directions. The hall must show no name the
-    // instant a turn is recorded — which it does anyway, because hallAssignment
-    // projects nothing from a `done` entry — and a station whose completion
-    // response was LOST must be able to press the button again and land on the
-    // same attempt rather than on "nobody is up". Clearing the pointer would
-    // have taken that retry away. So the name is blanked where it was cached
-    // and the entry id is kept, which is the smallest thing that keeps both:
-    // nothing a screen can read carries a name, and the retry still knows
-    // whose turn it was finishing. The pointer is replaced outright by the
-    // next call, and cleared by a cancel.
-    if (stationRef && stationSnap?.exists) {
-      const station = stationSnap.data() as StationDoc;
-      const servingId = normalizeStringId(
-        (station.serving as { entryId?: unknown } | null | undefined)?.entryId
-      );
-      if (servingId === entryRef.id) tx.update(stationRef, { 'serving.calledName': '' });
-    }
-    if (stationId) {
-      tx.set(
-        db.doc(`wsfTurnLines/${lineId}`),
-        {
-          lastResult: { stationId, code: current.code, amount, unit, atMillis: at },
-        },
-        { merge: true }
-      );
-    }
-  });
+      // THE PLACE COMES BACK. A finished turn frees the account's one place at
+      // the event, so they may get back in line — at the BACK of it.
+      const uid = normalizeStringId(live.uid);
+      if (uid) {
+        tx.delete(db.doc(`wsfTurnMembers/${turnMemberDocId(lineId, uid)}`));
+        // THE RECOVERABLE RECEIPT, under the person's own uid.
+        tx.set(db.doc(`wsfTurnReceipts/${turnMemberDocId(lineId, uid)}`), {
+          entryId: entryRef.id,
+          goalId: live.goalId,
+          attemptId,
+          amount: outcome.amount,
+          unit: outcome.unit,
+          recordedAtMillis: at,
+        } satisfies TurnReceiptDoc);
+      }
+      // THE NAME GOES; THE POINTER STAYS — and only if the screen is still on
+      // THIS turn. A screen already on the next person is not touched.
+      const sSnap = stationSnap as FirebaseFirestore.DocumentSnapshot | null;
+      if (stationRef && sSnap?.exists) {
+        const station = sSnap.data() as StationDoc;
+        const servingId = normalizeStringId(
+          (station.serving as { entryId?: unknown } | null | undefined)?.entryId
+        );
+        if (servingId === entryRef.id) tx.update(stationRef, { 'serving.calledName': '' });
+      }
+      if (attemptStationId) {
+        tx.set(
+          db.doc(`wsfTurnLines/${lineId}`),
+          {
+            lastResult: {
+              stationId: attemptStationId,
+              code: live.code,
+              amount: outcome.amount,
+              unit: outcome.unit,
+              atMillis: at,
+            },
+          },
+          { merge: true }
+        );
+      }
+    },
+  };
 
-  return receipt;
+  return performContribution({
+    uid: entry.uid,
+    goalId: entry.goalId,
+    attemptId,
+    count: args.count,
+    turn: hook,
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -9462,8 +9585,52 @@ async function completeTurnEntry(args: {
 // goal takes one contribution from each member…"), which names nobody.
 // ─────────────────────────────────────────────────────────────────────────────
 
-type CompleteTurnRequest = { stationId?: unknown; secret?: unknown; count?: unknown };
+type CompleteTurnRequest = {
+  stationId?: unknown;
+  secret?: unknown;
+  count?: unknown;
+  /** KIOSK-EXPECTED-TURN-1: the turn this result is for. Required. */
+  expectedTurn?: unknown;
+};
+/**
+ * THE COMPLETION'S OWN RECEIPT (KIOSK-EXPECTED-TURN-1), for the turn this
+ * Record was FOR — the entry the server found by the captured `expectedTurn`,
+ * never whoever the hall now serves and never anything the caller names.
+ *
+ * A WHITELIST, because the answer lands on a shared screen: no uid, no own
+ * credit, no profile, no email, and not the member's contribution response
+ * forwarded whole. It lives only in this credential-authorized response —
+ * never in wsfTurnState, the pulse, the QR or the hall.
+ *
+ * HONEST ABSENCE. A value the server does not know, or this screen may not be
+ * told, is null — never 0:
+ *   • sharedTotal/target/status are given only when the goal's aggregate may
+ *     be shown on a public display (evaluateGoalAggregateAccess with no
+ *     caller, the same route wsfGoalPulse's display path uses) AND the
+ *     canonical contribution returned them. sharedTotal is the canonical
+ *     post-commit observation of `goalId`'s own total, in `unit` — for a
+ *     combined event that is the ACTIVITY's total, never the parent's. No
+ *     before/after pair is derived from it.
+ *   • crossedTarget is the canonical per-attempt value, forwarded as is (it is
+ *     never true today; see ContributeResponse), and null where the shared
+ *     state is withheld.
+ */
+type StationTurnReceipt = {
+  entryId: string;
+  goalId: string;
+  addedCount: number;
+  unit: string;
+  alreadyRecorded: boolean;
+  sharedTotal: number | null;
+  target: number | null;
+  status: GoalStatus | null;
+  crossedTarget: boolean | null;
+};
+
 type CompleteTurnResponse = TurnStateResponse & {
+  /** The entry this Record completed (see StationTurnReceipt). */
+  entryId: string;
+  receipt: StationTurnReceipt;
   recorded: { amount: number; unit: string; alreadyRecorded: boolean };
   /** Whether anybody is waiting. ONE ROUND PER TURN WHILE ANYONE WAITS: when
    * this is true the screen offers nothing but "Call next", and a person who
@@ -9476,36 +9643,64 @@ export const wsfCompleteTurn = onCall<CompleteTurnRequest>(
   async (request): Promise<CompleteTurnResponse> => {
     const now = Date.now();
     const authorized = await authorizeStationForTurn(request.data, request.rawRequest, now);
+    const expectedTurn = requireStationTurnRef(request.data?.expectedTurn);
     const event = await resolveTurnEvent(authorized.goalId);
     const db = getFirestore();
     const lineId = event.lineId;
 
-    const stationSnap = await authorized.stationRef.get();
-    const station = stationSnap.exists
-      ? (stationSnap.data() as StationDoc)
-      : authorized.station;
-    const servingId = normalizeStringId(
-      (station.serving as { entryId?: unknown } | null | undefined)?.entryId
-    );
-    if (!servingId) throw new HttpsError('failed-precondition', TURN_NOBODY_MESSAGE);
-    const entryRef = db.doc(`wsfTurnEntries/${servingId}`);
-    const entrySnap = await entryRef.get();
-    if (!entrySnap.exists) throw new HttpsError('failed-precondition', TURN_NOBODY_MESSAGE);
-    const entry = entrySnap.data() as TurnEntryDoc;
+    // KIOSK-EXPECTED-TURN-1: THE TURN IS FOUND BY ITS OWN REFERENCE, not by
+    // whoever this screen is on when the request lands. A delayed result for A
+    // after B was called is A's result — recorded or replayed for A — and the
+    // screen's pointer to B is never consulted, cleared or changed.
+    const found = await db
+      .collection('wsfTurnEntries')
+      .where('stationTurnRef', '==', expectedTurn)
+      .limit(1)
+      .get();
+    if (found.empty) throw new HttpsError('failed-precondition', TURN_STALE_MESSAGE);
+    const entryRef = found.docs[0]!.ref;
+    const entry = found.docs[0]!.data() as TurnEntryDoc;
 
     // THE NARROW AUTHORITY. This station, this line, this station's attempt.
-    if (entry.lineId !== lineId) throw new HttpsError('failed-precondition', TURN_NOBODY_MESSAGE);
-    if (entry.attemptStationId !== authorized.stationId) {
-      throw new HttpsError('failed-precondition', TURN_NOBODY_MESSAGE);
+    if (entry.lineId !== lineId || entry.attemptStationId !== authorized.stationId) {
+      throw new HttpsError('failed-precondition', TURN_STALE_MESSAGE);
     }
-    if (entry.status !== 'active' && entry.status !== 'done') {
+    if (!normalizeStringId(entry.attemptId)) {
       throw new HttpsError('failed-precondition', TURN_NOT_READY_MESSAGE);
     }
 
-    const receipt = await completeTurnEntry({ entryRef, entry, count: request.data?.count });
+    const receipt = await completeTurnEntry({
+      entryRef,
+      entry,
+      count: request.data?.count,
+      by: { kind: 'station', stationId: authorized.stationId, turnRef: expectedTurn },
+    });
+    const goalSnap = await db.doc(`wsfGoals/${entry.goalId}`).get();
+    const goal = goalSnap.exists ? (goalSnap.data() as GoalDoc) : null;
+    const displayAllowed = goal ? (await evaluateGoalAggregateAccess(goal, null)).allowed : false;
+    const shared = displayAllowed && typeof receipt.sharedTotal === 'number';
+    const unit =
+      typeof receipt.unit === 'string'
+        ? receipt.unit
+        : goal && typeof goal.unit === 'string'
+          ? goal.unit
+          : '';
+    const stationReceipt: StationTurnReceipt = {
+      entryId: entryRef.id,
+      goalId: entry.goalId,
+      addedCount: receipt.addedCount,
+      unit,
+      alreadyRecorded: receipt.alreadyRecorded === true,
+      sharedTotal: shared ? (receipt.sharedTotal as number) : null,
+      target: shared && typeof receipt.target === 'number' ? receipt.target : null,
+      status: shared && receipt.status ? receipt.status : null,
+      crossedTarget: shared && typeof receipt.crossedTarget === 'boolean' ? receipt.crossedTarget : null,
+    };
     const state = await readTurnState(authorized, lineId, Date.now());
     return {
       ...state,
+      entryId: entryRef.id,
+      receipt: stationReceipt,
       recorded: {
         amount: typeof receipt.addedCount === 'number' ? receipt.addedCount : 0,
         unit: typeof receipt.unit === 'string' ? receipt.unit : '',
@@ -9550,10 +9745,15 @@ export const wsfCompleteMyTurn = onCall<CompleteMyTurnRequest>(
     const entry = entrySnap.data() as TurnEntryDoc;
     if (entry.uid !== uid) notFound();
     if (entry.status !== 'active' && entry.status !== 'done') {
-      throw new HttpsError('failed-precondition', 'That turn is not running.');
+      throw new HttpsError('failed-precondition', TURN_NOT_RUNNING_MESSAGE);
     }
 
-    const receipt = await completeTurnEntry({ entryRef, entry, count: request.data?.count });
+    const receipt = await completeTurnEntry({
+      entryRef,
+      entry,
+      count: request.data?.count,
+      by: { kind: 'member', uid },
+    });
     return { receipt, status: 'done' };
   }
 );
@@ -9569,25 +9769,29 @@ export const wsfCompleteMyTurn = onCall<CompleteMyTurnRequest>(
 // records no result, because there was none.
 // ─────────────────────────────────────────────────────────────────────────────
 
-type CancelTurnRequest = { stationId?: unknown; secret?: unknown };
+type CancelTurnRequest = { stationId?: unknown; secret?: unknown; expectedTurn?: unknown };
 
 export const wsfCancelTurn = onCall<CancelTurnRequest>(
   { region: 'us-central1', invoker: 'public' },
   async (request): Promise<TurnStateResponse> => {
     const now = Date.now();
     const authorized = await authorizeStationForTurn(request.data, request.rawRequest, now);
+    // KIOSK-EXPECTED-TURN-1: the cancel names the turn it is for.
+    const expectedTurn = requireStationTurnRef(request.data?.expectedTurn);
     const event = await resolveTurnEvent(authorized.goalId);
     const db = getFirestore();
     const lineId = event.lineId;
     const { stationId, stationRef } = authorized;
 
-    await db.runTransaction(async (tx) => {
+    const cancelled = await db.runTransaction(async (tx): Promise<'done' | 'stale'> => {
       const stationSnap = await tx.get(stationRef);
-      if (!stationSnap.exists) return;
+      if (!stationSnap.exists) return 'stale';
       const station = stationSnap.data() as StationDoc;
-      const servingId = normalizeStringId(
-        (station.serving as { entryId?: unknown } | null | undefined)?.entryId
-      );
+      const serving = station.serving as { entryId?: unknown; turnRef?: unknown } | null | undefined;
+      // A delayed cancel for A, arriving after B was called, ends nobody and
+      // clears nothing: B keeps the screen.
+      if (normalizeStationTurnRef(serving?.turnRef) !== expectedTurn) return 'stale';
+      const servingId = normalizeStringId(serving?.entryId);
       const entryRef = servingId ? db.doc(`wsfTurnEntries/${servingId}`) : null;
       const entrySnap = entryRef ? await tx.get(entryRef) : null;
 
@@ -9596,6 +9800,7 @@ export const wsfCancelTurn = onCall<CancelTurnRequest>(
         if (
           entry.lineId === lineId &&
           entry.assignedStationId === stationId &&
+          normalizeStationTurnRef(entry.stationTurnRef) === expectedTurn &&
           isTurnLive(entry.status)
         ) {
           tx.update(entryRef, {
@@ -9610,7 +9815,9 @@ export const wsfCancelTurn = onCall<CancelTurnRequest>(
         }
       }
       tx.update(stationRef, { serving: null });
+      return 'done';
     });
+    if (cancelled === 'stale') throw new HttpsError('failed-precondition', TURN_STALE_MESSAGE);
 
     return readTurnState(authorized, lineId, Date.now());
   }

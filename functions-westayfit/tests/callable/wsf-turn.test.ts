@@ -97,6 +97,7 @@ type HallAssignment = {
   calledName: string;
   state: 'assigned' | 'ready' | 'active';
   readySecondsLeft: number | null;
+  turnRef: string | null;
 };
 type HallResult = { code: string; amount: number; unit: string; secondsLeft: number };
 type TurnState = {
@@ -249,6 +250,15 @@ async function member(groupId: string, label: string): Promise<string> {
 
 const state = (s: Station) =>
   anon(wsfTurnState, { stationId: s.stationId, secret: s.secret }) as Promise<TurnState>;
+/** The turn a screen believes it is running, as the client holds it: the
+ * `turnRef` from its own latest view of the hall, kept after the hall clears
+ * so a screen that lost an answer can retry the SAME turn. */
+const heldTurn = new Map<string, string>();
+async function bound(s: Station, extra: Data = {}): Promise<Data> {
+  const seen = (await state(s)).assigned?.turnRef;
+  if (seen) heldTurn.set(s.stationId, seen);
+  return { stationId: s.stationId, secret: s.secret, expectedTurn: heldTurn.get(s.stationId), ...extra };
+}
 const callNext = (s: Station) =>
   anon(wsfCallNext, { stationId: s.stationId, secret: s.secret }) as Promise<
     TurnState & { called: boolean; blocked: string | null; blockedMessage: string | null }
@@ -348,6 +358,7 @@ describe('what a screen in a room is allowed to know', () => {
       'code',
       'readySecondsLeft',
       'state',
+      'turnRef',
     ]);
     // Exactly ONE of the three names is anywhere in the payload: the one
     // person this screen is serving.
@@ -482,6 +493,26 @@ describe('one place per account, per EVENT', () => {
     // FIFO: Ann joined first, on the OTHER activity, and is called first.
     expect(called.assigned?.calledName).toBe('Ann');
   }, 30_000);
+
+  test('KIOSK-EXPECTED-TURN-1: a combined event’s Record receipt is scoped to the ACTIVITY recorded, in its own unit — never the parent’s total', async () => {
+    const { groupId, squats, pushups, station } = await combinedScene();
+    const a = await member(groupId, 'ann');
+    const ann = (await callAs(wsfJoinTurnLine, a, { goalId: pushups, calledName: 'Ann' })) as { entryId: string };
+    await callNext(station);
+    await callAs(wsfTurnReady, a, { entryId: ann.entryId });
+    await anon(wsfStartTurn, await bound(station));
+    const done = (await anon(wsfCompleteTurn, await bound(station, { count: 9 }))) as {
+      entryId: string;
+      receipt: { goalId: string; unit: string; addedCount: number; sharedTotal: number | null };
+    };
+    expect(done.entryId).toBe(ann.entryId);
+    expect(done.receipt.goalId).toBe(pushups);
+    expect(done.receipt.goalId).not.toBe(squats);
+    expect(done.receipt.unit).toBe('push-ups');
+    expect(done.receipt.addedCount).toBe(9);
+    // This activity had no other contribution: its own total is exactly 9.
+    expect(done.receipt.sharedTotal).toBe(9);
+  }, 40_000);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -637,14 +668,12 @@ describe('two stations and independent phones', () => {
     await callNext(one);
     await callAs(wsfTurnReady, a, { entryId: entry.entryId });
 
+    // The other screen, even holding this turn's binding, is not this screen.
     const wrong = await attempt(
-      anon(wsfStartTurn, { stationId: two.stationId, secret: two.secret }) as Promise<unknown>
+      anon(wsfStartTurn, { ...(await bound(one)), stationId: two.stationId, secret: two.secret }) as Promise<unknown>
     );
     expect(wrong.ok).toBe(false);
-    const right = (await anon(wsfStartTurn, {
-      stationId: one.stationId,
-      secret: one.secret,
-    })) as { started: boolean };
+    const right = (await anon(wsfStartTurn, await bound(one))) as { started: boolean };
     expect(right.started).toBe(true);
   }, 40_000);
 
@@ -685,29 +714,20 @@ describe('the canonical attempt', () => {
 
     // Nobody is up yet.
     const early = await attempt(
-      anon(wsfStartTurn, {
-        stationId: station.stationId,
-        secret: station.secret,
-      }) as Promise<unknown>
+      anon(wsfStartTurn, await bound(station)) as Promise<unknown>
     );
     expect(early.ok).toBe(false);
 
     await callNext(station);
     // Called, but not ready: an offer nobody accepted is not a turn.
     const notReady = await attempt(
-      anon(wsfStartTurn, {
-        stationId: station.stationId,
-        secret: station.secret,
-      }) as Promise<unknown>
+      anon(wsfStartTurn, await bound(station)) as Promise<unknown>
     );
     expect(notReady.ok).toBe(false);
     if (!notReady.ok) expect(notReady.error.message).toMatch(/ready/i);
 
     await callAs(wsfTurnReady, a, { entryId: entry.entryId });
-    const started = (await anon(wsfStartTurn, {
-      stationId: station.stationId,
-      secret: station.secret,
-    })) as { started: boolean; activity: { goalId: string; unit: string } | null };
+    const started = (await anon(wsfStartTurn, await bound(station))) as { started: boolean; activity: { goalId: string; unit: string } | null };
     expect(started.started).toBe(true);
     expect(started.activity?.goalId).toBe(goalId);
 
@@ -719,7 +739,7 @@ describe('the canonical attempt', () => {
     expect(stored?.uid).toBe(a);
 
     // A second start is the SAME attempt.
-    await anon(wsfStartTurn, { stationId: station.stationId, secret: station.secret });
+    await anon(wsfStartTurn, await bound(station));
     expect((await entryOf(entry.entryId))?.attemptId).toBe(stored?.attemptId);
   }, 40_000);
 
@@ -732,22 +752,14 @@ describe('the canonical attempt', () => {
     })) as { entryId: string };
     await callNext(station);
     await callAs(wsfTurnReady, a, { entryId: entry.entryId });
-    await anon(wsfStartTurn, { stationId: station.stationId, secret: station.secret });
+    await anon(wsfStartTurn, await bound(station));
 
-    const first = (await anon(wsfCompleteTurn, {
-      stationId: station.stationId,
-      secret: station.secret,
-      count: 30,
-    })) as TurnState & { recorded: { amount: number; alreadyRecorded: boolean } };
+    const first = (await anon(wsfCompleteTurn, await bound(station, { count: 30 }))) as TurnState & { recorded: { amount: number; alreadyRecorded: boolean } };
     expect(first.recorded).toEqual({ amount: 30, unit: 'squats', alreadyRecorded: false });
 
     // THE RETRY. The same call, as a screen that never saw the answer would
     // make it — and with a different count, which must change nothing.
-    const retry = (await anon(wsfCompleteTurn, {
-      stationId: station.stationId,
-      secret: station.secret,
-      count: 999,
-    })) as TurnState & { recorded: { amount: number; alreadyRecorded: boolean } };
+    const retry = (await anon(wsfCompleteTurn, await bound(station, { count: 999 }))) as TurnState & { recorded: { amount: number; alreadyRecorded: boolean } };
     expect(retry.recorded.amount).toBe(30);
     expect(retry.recorded.alreadyRecorded).toBe(true);
 
@@ -765,7 +777,7 @@ describe('the canonical attempt', () => {
     })) as { entryId: string };
     await callNext(station);
     await callAs(wsfTurnReady, a, { entryId: entry.entryId });
-    await anon(wsfStartTurn, { stationId: station.stationId, secret: station.secret });
+    await anon(wsfStartTurn, await bound(station));
     const attemptId = (await entryOf(entry.entryId))?.attemptId;
 
     const phone = (await callAs(wsfCompleteMyTurn, a, { entryId: entry.entryId, count: 25 })) as {
@@ -774,11 +786,7 @@ describe('the canonical attempt', () => {
     expect(phone.receipt).toMatchObject({ addedCount: 25, alreadyRecorded: false });
 
     // The station, which believes it is still mid-turn, retries. One write.
-    const again = (await anon(wsfCompleteTurn, {
-      stationId: station.stationId,
-      secret: station.secret,
-      count: 25,
-    })) as { recorded: { amount: number; alreadyRecorded: boolean } };
+    const again = (await anon(wsfCompleteTurn, await bound(station, { count: 25 }))) as { recorded: { amount: number; alreadyRecorded: boolean } };
     expect(again.recorded.alreadyRecorded).toBe(true);
     expect(await contributionCount(goalId, a)).toBe(1);
 
@@ -811,7 +819,7 @@ describe('the canonical attempt', () => {
     expect((await entryOf(entry.entryId))?.status).toBe('assigned');
 
     // Cancelling is a decision somebody takes, and then the line moves.
-    await anon(wsfCancelTurn, { stationId: station.stationId, secret: station.secret });
+    await anon(wsfCancelTurn, await bound(station));
     expect((await entryOf(entry.entryId))?.status).toBe('left');
     expect((await entryOf(entry.entryId))?.endedBy).toBe('station');
     const next = await callNext(station);
@@ -833,12 +841,8 @@ describe('the result, and what is left afterwards', () => {
     })) as { entryId: string; code: string };
     await callNext(station);
     await callAs(wsfTurnReady, a, { entryId: entry.entryId });
-    await anon(wsfStartTurn, { stationId: station.stationId, secret: station.secret });
-    await anon(wsfCompleteTurn, {
-      stationId: station.stationId,
-      secret: station.secret,
-      count: 12,
-    });
+    await anon(wsfStartTurn, await bound(station));
+    await anon(wsfCompleteTurn, await bound(station, { count: 12 }));
 
     const after = await state(station);
     // EVERY NAME IS GONE, in the same transaction that recorded the result.
@@ -874,10 +878,11 @@ describe('the result, and what is left afterwards', () => {
     // nobody else.
     const mine = (await callAs(wsfMyTurn, a, { goalId })) as {
       turn: unknown;
-      receipt: { amount: number; unit: string; goalId: string } | null;
+      receipt: { amount: number; unit: string; goalId: string; entryId: string | null } | null;
     };
     expect(mine.turn).toBeNull();
-    expect(mine.receipt).toEqual({ amount: 12, unit: 'squats', goalId });
+    // KIOSK-EXPECTED-TURN-1: the receipt names the turn it was recorded for.
+    expect(mine.receipt).toEqual({ amount: 12, unit: 'squats', goalId, entryId: entry.entryId });
 
     // Their place came back: they may get in line again, at the back.
     const rejoined = (await callAs(wsfJoinTurnLine, a, {
@@ -896,7 +901,7 @@ describe('the result, and what is left afterwards', () => {
     })) as { entryId: string };
     await callNext(station);
     await callAs(wsfTurnReady, a, { entryId: entry.entryId });
-    await anon(wsfStartTurn, { stationId: station.stationId, secret: station.secret });
+    await anon(wsfStartTurn, await bound(station));
 
     await callAs(wsfLeaveTurnLine, a, { entryId: entry.entryId, switchingToPhone: true });
     expect((await entryOf(entry.entryId))?.status).toBe('left');
@@ -950,12 +955,8 @@ describe('a goal in no combined setup', () => {
     })) as { entryId: string };
     await callNext(station);
     await callAs(wsfTurnReady, a, { entryId: entry.entryId });
-    await anon(wsfStartTurn, { stationId: station.stationId, secret: station.secret });
-    await anon(wsfCompleteTurn, {
-      stationId: station.stationId,
-      secret: station.secret,
-      count: 7,
-    });
+    await anon(wsfStartTurn, await bound(station));
+    await anon(wsfCompleteTurn, await bound(station, { count: 7 }));
 
     const after = (await callAs(wsfGoalPulse, championUid, { goalId })) as Record<string, unknown>;
     expect(Object.keys(after).sort()).toEqual(nine);
@@ -1267,7 +1268,7 @@ describe('a closed goal admits nobody (GAP-2)', () => {
     const before = await lineSnapshot({ lineId, stationId: station.stationId, memberIds: [m] });
 
     expectClosed(
-      await attempt(anon(wsfStartTurn, { stationId: station.stationId, secret: station.secret }) as Promise<unknown>)
+      await attempt(anon(wsfStartTurn, await bound(station)) as Promise<unknown>)
     );
 
     expect(await lineSnapshot({ lineId, stationId: station.stationId, memberIds: [m] })).toBe(before);
@@ -1303,13 +1304,15 @@ describe('a closed goal admits nobody (GAP-2)', () => {
     const m = await member(groupId, 'mem');
     const joined = (await callAs(wsfJoinTurnLine, m, { goalId, calledName: 'Sam' })) as { entryId: string };
     await callNext(station);
+    // The screen took the binding when it called them; a lapsed hall shows none.
+    const args = await bound(station);
     await lapseLease(joined.entryId);
     await closeGoal(goalId);
     const lineId = `goal__${goalId}`;
     const before = await lineSnapshot({ lineId, stationId: station.stationId, memberIds: [m] });
 
     expectClosed(
-      await attempt(anon(wsfStartTurn, { stationId: station.stationId, secret: station.secret }) as Promise<unknown>)
+      await attempt(anon(wsfStartTurn, args) as Promise<unknown>)
     );
 
     expect(await lineSnapshot({ lineId, stationId: station.stationId, memberIds: [m] })).toBe(before);
@@ -1328,7 +1331,7 @@ describe('a closed goal admits nobody (GAP-2)', () => {
     const before = await lineSnapshot({ lineId, stationId: station.stationId, memberIds: [m] });
 
     expectClosed(
-      await attempt(anon(wsfStartTurn, { stationId: station.stationId, secret: station.secret }) as Promise<unknown>)
+      await attempt(anon(wsfStartTurn, await bound(station)) as Promise<unknown>)
     );
 
     expect(await lineSnapshot({ lineId, stationId: station.stationId, memberIds: [m] })).toBe(before);
@@ -1341,13 +1344,13 @@ describe('a closed goal admits nobody (GAP-2)', () => {
     const joined = (await callAs(wsfJoinTurnLine, m, { goalId, calledName: 'Sam' })) as { entryId: string };
     await callNext(station);
     await callAs(wsfTurnReady, m, { entryId: joined.entryId });
-    await anon(wsfStartTurn, { stationId: station.stationId, secret: station.secret });
+    await anon(wsfStartTurn, await bound(station));
     const startedAttempt = (await entryOf(joined.entryId))?.attemptId;
     await closeGoal(goalId);
 
     // A repeat start is the idempotent replay of the SAME attempt — it writes
     // nothing and advances nothing, so it is not refused.
-    const again = (await anon(wsfStartTurn, { stationId: station.stationId, secret: station.secret })) as {
+    const again = (await anon(wsfStartTurn, await bound(station))) as {
       started: boolean;
     };
     expect(again.started).toBe(true);
@@ -1355,7 +1358,7 @@ describe('a closed goal admits nobody (GAP-2)', () => {
     expect((await entryOf(joined.entryId))?.status).toBe('active');
 
     const recorded = await attempt(
-      anon(wsfCompleteTurn, { stationId: station.stationId, secret: station.secret, count: 10 }) as Promise<unknown>
+      anon(wsfCompleteTurn, await bound(station, { count: 10 })) as Promise<unknown>
     );
     expectClosed(recorded);
     expect(await contributionCount(goalId, m)).toBe(0);
@@ -1450,9 +1453,11 @@ describe('a closed goal admits nobody — the decision is inside each transactio
     const joined = (await callAs(wsfJoinTurnLine, m, { goalId, calledName: 'Sam' })) as { entryId: string };
     await callNext(station);
     await callAs(wsfTurnReady, m, { entryId: joined.entryId });
+    // The binding is read BEFORE the race is armed, as a screen already holds it.
+    const args = await bound(station);
     closeJustBeforeTheTransaction(goalId);
     expectClosed(
-      await attempt(anon(wsfStartTurn, { stationId: station.stationId, secret: station.secret }) as Promise<unknown>)
+      await attempt(anon(wsfStartTurn, args) as Promise<unknown>)
     );
     expect((await entryOf(joined.entryId))?.status).toBe('ready');
     expect((await entryOf(joined.entryId))?.attemptId).toBeNull();
@@ -1518,8 +1523,9 @@ describe('a closed goal admits nobody — the decision is inside each transactio
     const joined = (await callAs(wsfJoinTurnLine, m, { goalId, calledName: 'Sam' })) as { entryId: string };
     await callNext(station);
     await callAs(wsfTurnReady, m, { entryId: joined.entryId });
+    const args = await bound(station);
     const race = closeRightAfterTheGoalIsRead(goalId);
-    const r = await attempt(anon(wsfStartTurn, { stationId: station.stationId, secret: station.secret }) as Promise<unknown>);
+    const r = await attempt(anon(wsfStartTurn, args) as Promise<unknown>);
     await race.settled();
     jest.restoreAllMocks();
     const closure = await closedAt(goalId);
