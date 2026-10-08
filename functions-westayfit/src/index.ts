@@ -6,6 +6,25 @@ import { FieldValue, Timestamp, getFirestore, type DocumentReference } from 'fir
 import { defineSecret, projectID } from 'firebase-functions/params';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 
+import {
+  MAX_TOKENS_PER_FETCH,
+  MSG as PHOTO_MSG,
+  PHOTO_SOURCES,
+  PHOTO_VIS_FIELD,
+  canonicalJpeg,
+  decodeBase64Strict,
+  mintPhotoToken,
+  normalizeOperationId,
+  normalizePhotoToken,
+  normalizeRevision,
+  type FacePhotosResponse,
+  type FacesResponse,
+  type FaceEntry,
+  type OwnPhotoState,
+  type PhotoSource,
+  type PortraitDecision,
+} from './profilePhotos';
+
 initializeApp();
 
 const GROUP_TYPES = ['familyFriends', 'custom'] as const;
@@ -9895,7 +9914,7 @@ function resolveVisibility(stored: unknown): Vis {
   return VIS_PRIVATE;
 }
 
-type OwnMembership = { role: string; name: Vis; activity: Vis };
+type OwnMembership = { role: string; name: Vis; activity: Vis; photo: Vis };
 
 /**
  * The caller's own membership row, proven to be theirs.
@@ -9933,6 +9952,8 @@ async function requireOwnActiveMembership(
     role: typeof data.role === 'string' ? data.role : 'member',
     name: resolveVisibility(data[FIELD_NAME_VIS]),
     activity: resolveVisibility(data[FIELD_ACTIVITY_VIS]),
+    // PROFILE-PHOTOS-FIREBASE-1: Show my photo, per community, same three-way default.
+    photo: resolveVisibility(data[PHOTO_VIS_FIELD]),
   };
 }
 
@@ -10161,6 +10182,412 @@ export const wsfCommunityMembers = onCall<CommunityMembersRequest>(
     return {
       members: page,
       nextCursor: next < all.length ? encodeOffsetCursor(next) : null,
+    };
+  }
+);
+
+// ═════════════════════════════════════════════════════════════════════════════
+// PROFILE-PHOTOS-FIREBASE-1 — a member's own photo, and the faces a community
+// may see.
+//
+// Scope: #578 6043515827 (frozen) and #365 6043554729. Pure helpers, the JPEG
+// rebuild and the response whitelists live in profilePhotos.ts.
+//
+// THE AUDIENCE IS ENFORCED HERE, NOT IN CSS. The bytes live in the server-only
+// collection wsfProfilePhotos/{uid}, which firestore.rules' catch-all denies to
+// every client, so a photo leaves the server only through these callables:
+//   • the OWNER, through wsfMyProfilePhoto, everywhere and always;
+//   • an ACTIVE MEMBER of a community, through wsfCommunityFacePhotos, for
+//     another active member of THAT community whose name AND Show my photo are
+//     both visible there (a hidden name hides the face too).
+// Nothing else: no signed-out caller, no kiosk or station (they have no
+// account), no public preview, display or pulse. Every handler here requires
+// request.auth and none is `invoker: 'public'`.
+//
+// NO URL EXISTS. A photo is returned as base64 bytes inside an authenticated
+// callable answer, keyed by an opaque token that is re-minted on every upload
+// and cleared on removal. A token is not a credential: every fetch re-checks
+// the audience at read time, so hiding, removing, leaving or being removed
+// takes effect on the next request.
+//
+// GENERATIONS. Every write names the `expectedRevision` it was made against and
+// an idempotent `operationId`, inside one transaction on the owner's document:
+// a retried request returns its own settled result; a write made against an
+// older revision (a stale upload finishing after a removal or a newer upload
+// on another device) is refused and changes nothing. The account is always
+// request.auth.uid; no request names another account.
+// ═════════════════════════════════════════════════════════════════════════════
+
+type ProfilePhotoDoc = {
+  userId?: unknown;
+  revision?: unknown;
+  photoToken?: unknown;
+  jpeg?: unknown;
+  side?: unknown;
+  portraitDecision?: unknown;
+  lastOperationId?: unknown;
+};
+
+const PORTRAIT_DECISIONS: readonly PortraitDecision[] = ['used', 'skipped', 'removed'];
+
+function photoRef(db: FirebaseFirestore.Firestore, uid: string) {
+  return db.doc(`wsfProfilePhotos/${uid}`);
+}
+
+/** The stored document, only if it is this account's (the userId field is the authority, as on memberships). */
+function ownPhotoDoc(snap: FirebaseFirestore.DocumentSnapshot, uid: string): ProfilePhotoDoc | null {
+  if (!snap.exists) return null;
+  const d = snap.data() as ProfilePhotoDoc;
+  return d.userId === uid ? d : null;
+}
+
+function storedBytes(v: unknown): Buffer | null {
+  if (Buffer.isBuffer(v)) return v;
+  if (v instanceof Uint8Array) return Buffer.from(v);
+  return null;
+}
+
+function ownPhotoState(d: ProfilePhotoDoc | null): OwnPhotoState {
+  const revision = normalizeRevision(d?.revision) ?? 0;
+  const token = normalizePhotoToken(d?.photoToken);
+  const jpeg = storedBytes(d?.jpeg);
+  const side = typeof d?.side === 'number' && Number.isInteger(d.side) ? d.side : null;
+  const photo = token && jpeg && side !== null ? { token, revision, side, jpegBase64: jpeg.toString('base64') } : null;
+  const decision = PORTRAIT_DECISIONS.includes(d?.portraitDecision as PortraitDecision)
+    ? (d!.portraitDecision as PortraitDecision)
+    : null;
+  return { revision, photo, portrait: { decision, eligible: decision === null && photo === null } };
+}
+
+function requirePhotoWriteIds(data: { expectedRevision?: unknown; operationId?: unknown } | undefined) {
+  const expectedRevision = normalizeRevision(data?.expectedRevision);
+  if (expectedRevision === null) throw new HttpsError('invalid-argument', 'expectedRevision is required.');
+  const operationId = normalizeOperationId(data?.operationId);
+  if (operationId === null) throw new HttpsError('invalid-argument', 'operationId is required.');
+  return { expectedRevision, operationId };
+}
+
+/** The caller's own photo state: the photo (bytes included), its revision, and the portrait decision. */
+type MyProfilePhotoRequest = Record<string, never>;
+
+export const wsfMyProfilePhoto = onCall<MyProfilePhotoRequest>(
+  { region: 'us-central1' },
+  async (request): Promise<OwnPhotoState> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    const uid = request.auth.uid;
+    const db = getFirestore();
+    return ownPhotoState(ownPhotoDoc(await photoRef(db, uid).get(), uid));
+  }
+);
+
+type SetProfilePhotoRequest = {
+  jpegBase64?: unknown;
+  expectedRevision?: unknown;
+  operationId?: unknown;
+  source?: unknown;
+};
+
+/**
+ * Upload or replace the caller's photo. The bytes must be the small square JPEG
+ * crop; they are rebuilt without metadata (canonicalJpeg) before anything is
+ * stored. `source: 'portrait'` is the one-time movement-camera portrait: it is
+ * refused when a photo already exists or a portrait decision was already made,
+ * and it records the decision 'used'.
+ */
+export const wsfSetProfilePhoto = onCall<SetProfilePhotoRequest>(
+  { region: 'us-central1' },
+  async (request): Promise<OwnPhotoState & { replayed: boolean }> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    const uid = request.auth.uid;
+    const { expectedRevision, operationId } = requirePhotoWriteIds(request.data);
+    const rawSource = request.data?.source ?? 'library';
+    if (!PHOTO_SOURCES.includes(rawSource as PhotoSource)) {
+      throw new HttpsError('invalid-argument', "source must be 'library', 'camera' or 'portrait'.");
+    }
+    const source = rawSource as PhotoSource;
+    const raw = decodeBase64Strict(request.data?.jpegBase64);
+    if (!raw) {
+      const tooLong = typeof request.data?.jpegBase64 === 'string' && request.data.jpegBase64.length > 220_000;
+      throw new HttpsError('invalid-argument', tooLong ? PHOTO_MSG.tooLarge : PHOTO_MSG.notJpeg);
+    }
+    const canon = canonicalJpeg(raw);
+    if (!canon.ok) throw new HttpsError('invalid-argument', PHOTO_MSG[canon.reason]);
+
+    const db = getFirestore();
+    const ref = photoRef(db, uid);
+    // Minted OUTSIDE the transaction so a Firestore retry writes the same token.
+    const token = mintPhotoToken();
+    return db.runTransaction(async (tx) => {
+      const d = ownPhotoDoc(await tx.get(ref), uid);
+      if (d && d.lastOperationId === operationId) return { ...ownPhotoState(d), replayed: true };
+      const current = ownPhotoState(d);
+      if (current.revision !== expectedRevision) throw new HttpsError('failed-precondition', PHOTO_MSG.stale);
+      if (source === 'portrait') {
+        if (current.photo) throw new HttpsError('failed-precondition', PHOTO_MSG.portraitHasPhoto);
+        if (current.portrait.decision !== null) throw new HttpsError('failed-precondition', PHOTO_MSG.portraitDecided);
+      }
+      const next = {
+        userId: uid,
+        revision: current.revision + 1,
+        photoToken: token,
+        jpeg: canon.jpeg,
+        side: canon.side,
+        portraitDecision: source === 'portrait' ? 'used' : current.portrait.decision,
+        lastOperationId: operationId,
+        updatedAt: FieldValue.serverTimestamp(),
+      };
+      tx.set(ref, next);
+      return { ...ownPhotoState(next), replayed: false };
+    });
+  }
+);
+
+/**
+ * Remove the caller's photo everywhere: the bytes and the token are cleared,
+ * the revision moves on (so a stale upload cannot bring it back), and a member
+ * who never made a portrait decision is not prompted again ('removed').
+ * Removing when there is no photo changes nothing.
+ */
+export const wsfRemoveProfilePhoto = onCall<{ expectedRevision?: unknown; operationId?: unknown }>(
+  { region: 'us-central1' },
+  async (request): Promise<OwnPhotoState & { replayed: boolean }> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    const uid = request.auth.uid;
+    const { expectedRevision, operationId } = requirePhotoWriteIds(request.data);
+    const db = getFirestore();
+    const ref = photoRef(db, uid);
+    return db.runTransaction(async (tx) => {
+      const d = ownPhotoDoc(await tx.get(ref), uid);
+      if (d && d.lastOperationId === operationId) return { ...ownPhotoState(d), replayed: true };
+      const current = ownPhotoState(d);
+      if (current.revision !== expectedRevision) throw new HttpsError('failed-precondition', PHOTO_MSG.stale);
+      if (!current.photo) return { ...current, replayed: false };
+      const next = {
+        userId: uid,
+        revision: current.revision + 1,
+        photoToken: null,
+        jpeg: null,
+        side: null,
+        portraitDecision: current.portrait.decision ?? 'removed',
+        lastOperationId: operationId,
+        updatedAt: FieldValue.serverTimestamp(),
+      };
+      tx.set(ref, next);
+      return { ...ownPhotoState(next), replayed: false };
+    });
+  }
+);
+
+/**
+ * Record "Skip" for the one-time portrait offer, so no device asks again. The
+ * first decision wins and is never cleared ('used' comes from a portrait
+ * upload, 'removed' from a removal); a later call returns the settled state.
+ */
+export const wsfSetPortraitDecision = onCall<{ decision?: unknown }>(
+  { region: 'us-central1' },
+  async (request): Promise<OwnPhotoState> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    const uid = request.auth.uid;
+    if (request.data?.decision !== 'skipped') {
+      throw new HttpsError('invalid-argument', "decision must be 'skipped'.");
+    }
+    const db = getFirestore();
+    const ref = photoRef(db, uid);
+    return db.runTransaction(async (tx) => {
+      const d = ownPhotoDoc(await tx.get(ref), uid);
+      const current = ownPhotoState(d);
+      if (current.portrait.decision !== null) return current;
+      tx.set(
+        ref,
+        { userId: uid, revision: current.revision, portraitDecision: 'skipped', updatedAt: FieldValue.serverTimestamp() },
+        { merge: true }
+      );
+      return { ...current, portrait: { decision: 'skipped' as const, eligible: false } };
+    });
+  }
+);
+
+/**
+ * Show my photo, per community (default ON, the W8 three-way rule). 'private'
+ * HIDES the photo from this community only: it is kept, still shown to its
+ * owner, and still shown in other communities. Removal is wsfRemoveProfilePhoto.
+ * Self-only, exactly like wsfSetCommunityVisibility: no targetUid exists.
+ */
+export const wsfSetCommunityPhotoVisibility = onCall<{ groupId?: unknown; photo?: unknown }>(
+  { region: 'us-central1' },
+  async (request): Promise<{ groupId: string; photo: Vis }> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    const uid = request.auth.uid;
+    const groupId = normalizeStringId(request.data?.groupId);
+    if (!groupId) throw new HttpsError('invalid-argument', 'groupId is required.');
+    const v = request.data?.photo;
+    if (v !== VIS_PRIVATE && v !== VIS_VISIBLE) {
+      throw new HttpsError('invalid-argument', "photo must be 'private' or 'visible'.");
+    }
+    const db = getFirestore();
+    await requireOwnActiveMembership(db, groupId, uid);
+    await db
+      .doc(`wsfMemberships/${groupId}_${uid}`)
+      .set({ [PHOTO_VIS_FIELD]: v, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    const settled = await requireOwnActiveMembership(db, groupId, uid);
+    return { groupId, photo: settled.photo };
+  }
+);
+
+/**
+ * The faces of one community, to an active member of it: the caller ("you",
+ * shown first by the client) and one bounded, name-sorted page of the OTHER
+ * members whose names are visible there (the same rows wsfCommunityMembers
+ * lists). Each entry is the whitelist FaceEntry: a name, a role, and a photo
+ * token only when that member's Show my photo is on here and a photo exists.
+ * No uid, email, profile field, count of hidden members or timestamp.
+ */
+export const wsfCommunityFaces = onCall<CommunityMembersRequest>(
+  { region: 'us-central1' },
+  async (request): Promise<FacesResponse> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    const uid = request.auth.uid;
+    const groupId = normalizeStringId(request.data?.groupId);
+    if (!groupId) throw new HttpsError('invalid-argument', 'groupId is required.');
+    const offset = decodeOffsetCursor(request.data?.cursor);
+    if (offset === null) throw new HttpsError('invalid-argument', 'cursor is not valid.');
+
+    const db = getFirestore();
+    const own = await requireOwnActiveMembership(db, groupId, uid);
+
+    const snap = await db
+      .collection('wsfMemberships')
+      .where('groupId', '==', groupId)
+      .where('membershipStatus', '==', MEMBERSHIP_ACTIVE)
+      .limit(MEMBERS_MAX + 1)
+      .get();
+    if (snap.size > MEMBERS_MAX) {
+      console.error('[wsfCommunityFaces] active set exceeds the safety valve');
+      throw new HttpsError('failed-precondition', 'This community is too large to list right now.');
+    }
+
+    const rows: { userId: string; role: string; photo: Vis }[] = [];
+    const seen = new Set<string>([uid]);
+    for (const doc of snap.docs) {
+      const d = doc.data() as Record<string, unknown>;
+      if (typeof d.userId !== 'string' || d.userId === '') continue;
+      if (doc.id !== `${groupId}_${d.userId}`) continue;
+      if (seen.has(d.userId)) continue;
+      if (resolveVisibility(d[FIELD_NAME_VIS]) !== VIS_VISIBLE) continue;
+      seen.add(d.userId);
+      rows.push({
+        userId: d.userId,
+        role: typeof d.role === 'string' ? d.role : 'member',
+        photo: resolveVisibility(d[PHOTO_VIS_FIELD]),
+      });
+    }
+
+    const names = new Map<string, string>();
+    const want = [uid, ...rows.map((r) => r.userId)];
+    for (let start = 0; start < want.length; start += 300) {
+      const chunk = want.slice(start, start + 300);
+      const snaps = await db.getAll(...chunk.map((u) => db.doc(`wsfMemberProfiles/${u}`)));
+      for (const sn of snaps) {
+        if (!sn.exists) continue;
+        const dn = (sn.data() as { displayName?: unknown }).displayName;
+        if (typeof dn === 'string' && dn.trim() !== '') names.set(sn.id, dn.trim());
+      }
+    }
+
+    const listed = rows
+      .filter((r) => names.has(r.userId))
+      .map((r) => ({ ...r, displayName: names.get(r.userId)! }))
+      .sort((a, b) => a.displayName.localeCompare(b.displayName));
+    const page = listed.slice(offset, offset + MEMBERS_PAGE);
+
+    // Tokens for this page only (and the caller), never the bytes: a field mask
+    // keeps the JPEG out of this read entirely.
+    const tokenOf = new Map<string, string>();
+    const photoUids = [uid, ...page.filter((r) => r.photo === VIS_VISIBLE).map((r) => r.userId)];
+    const photoSnaps = await db.getAll(...photoUids.map((u) => photoRef(db, u)), {
+      fieldMask: ['userId', 'photoToken'],
+    });
+    for (const sn of photoSnaps) {
+      if (!sn.exists) continue;
+      const d = sn.data() as ProfilePhotoDoc;
+      const t = normalizePhotoToken(d.photoToken);
+      if (d.userId === sn.id && t) tokenOf.set(sn.id, t);
+    }
+
+    const members: FaceEntry[] = page.map((r) => {
+      const t = r.photo === VIS_VISIBLE ? tokenOf.get(r.userId) : undefined;
+      return { displayName: r.displayName, role: r.role, photo: t ? { token: t } : null };
+    });
+    const next = offset + MEMBERS_PAGE;
+    const youToken = tokenOf.get(uid);
+    return {
+      you: {
+        displayName: names.get(uid) ?? null,
+        photo: youToken ? { token: youToken } : null,
+        photoVisibility: own.photo,
+      },
+      members,
+      nextCursor: next < listed.length ? encodeOffsetCursor(next) : null,
+    };
+  }
+);
+
+/**
+ * The bytes for photo tokens the caller saw in wsfCommunityFaces for the SAME
+ * community. Each token is re-checked now: its owner must still be an active
+ * member here with a visible name and Show my photo on (or be the caller).
+ * A token that fails, or no longer names a stored photo, is simply left out —
+ * the client falls back to initials. The answer never says why.
+ */
+export const wsfCommunityFacePhotos = onCall<{ groupId?: unknown; tokens?: unknown }>(
+  { region: 'us-central1' },
+  async (request): Promise<FacePhotosResponse> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    const uid = request.auth.uid;
+    const groupId = normalizeStringId(request.data?.groupId);
+    if (!groupId) throw new HttpsError('invalid-argument', 'groupId is required.');
+    const rawTokens = request.data?.tokens;
+    if (!Array.isArray(rawTokens) || rawTokens.length === 0 || rawTokens.length > MAX_TOKENS_PER_FETCH) {
+      throw new HttpsError('invalid-argument', `tokens must list 1 to ${MAX_TOKENS_PER_FETCH} photo tokens.`);
+    }
+    const tokens: string[] = [];
+    for (const t of rawTokens) {
+      const n = normalizePhotoToken(t);
+      if (!n) throw new HttpsError('invalid-argument', 'tokens must list photo tokens.');
+      if (!tokens.includes(n)) tokens.push(n);
+    }
+
+    const db = getFirestore();
+    await requireOwnActiveMembership(db, groupId, uid);
+
+    const found = await db.collection('wsfProfilePhotos').where('photoToken', 'in', tokens).get();
+    const candidates: { owner: string; token: string; jpeg: Buffer }[] = [];
+    for (const doc of found.docs) {
+      const d = doc.data() as ProfilePhotoDoc;
+      const t = normalizePhotoToken(d.photoToken);
+      const jpeg = storedBytes(d.jpeg);
+      if (d.userId !== doc.id || !t || !jpeg || !tokens.includes(t)) continue;
+      candidates.push({ owner: doc.id, token: t, jpeg });
+    }
+
+    const others = [...new Set(candidates.map((c) => c.owner).filter((o) => o !== uid))];
+    const permitted = new Set<string>([uid]);
+    if (others.length) {
+      const snaps = await db.getAll(...others.map((o) => db.doc(`wsfMemberships/${groupId}_${o}`)));
+      for (const sn of snaps) {
+        if (!sn.exists) continue;
+        const m = sn.data() as Record<string, unknown>;
+        const owner = sn.id.slice(groupId.length + 1);
+        if (m.userId !== owner || m.groupId !== groupId || m.membershipStatus !== MEMBERSHIP_ACTIVE) continue;
+        if (resolveVisibility(m[FIELD_NAME_VIS]) !== VIS_VISIBLE) continue;
+        if (resolveVisibility(m[PHOTO_VIS_FIELD]) !== VIS_VISIBLE) continue;
+        permitted.add(owner);
+      }
+    }
+
+    const byToken = new Map(candidates.filter((c) => permitted.has(c.owner)).map((c) => [c.token, c.jpeg]));
+    return {
+      photos: tokens.filter((t) => byToken.has(t)).map((t) => ({ token: t, jpegBase64: byToken.get(t)!.toString('base64') })),
     };
   }
 );
