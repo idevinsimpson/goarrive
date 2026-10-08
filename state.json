@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "b75939afd9178a0307c6fceb93f203c4e30b15b498f988586a2285b32488956c",
-  "eventCount": 841,
+  "ledgerHead": "be86801ea3b1b36576b94ea66f8f916887a36332bc01775417522374530ffd0b",
+  "eventCount": 843,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1923,8 +1923,8 @@
       },
       "label": "Finish the blocked staging pin with verified approval ancestry and tracked unverified synthetic fixtures",
       "origin": "ledger",
-      "phase": "BLOCKED",
-      "phaseBeforeBlock": "RELEASED",
+      "phase": "RELEASED",
+      "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
       "pr": null,
@@ -1949,12 +1949,7 @@
         ".github/wsf-staging/pin-candidate.mjs",
         ".github/wsf-staging/journeys/fixture-kit.mjs"
       ],
-      "blockedBy": [
-        {
-          "packet": "CONTROL-CURRENT-PATCH-ACK-1",
-          "until": "INTEGRATED"
-        }
-      ],
+      "blockedBy": [],
       "importRefs": [],
       "authority": {
         "queued": {
@@ -1968,7 +1963,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6044034555
+          "id": 6064064740
         }
       },
       "review": {
@@ -4925,6 +4920,14 @@
         "id": 6061808578
       },
       "superseded": true
+    },
+    "a712d41461fb06a386569ac216888c73c6f2715bb0923ccf4607492218f88743": {
+      "packet": "KIOSK-UNVERIFIED-STAGING-RECOVERY-1",
+      "worker": "W3",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
