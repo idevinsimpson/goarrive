@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=4f4832f5d3f65e9d393aee4051408e6f6e1814c6dd0829bb7e0bd5d075c42f3a events=837 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=31ad512c104eaada00ab318a04933d5f6ec7b55fcd0fc88842256bcf0537853c events=838 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `4f4832f5d3f65e9d393aee4051408e6f6e1814c6dd0829bb7e0bd5d075c42f3a` (837 events)
+- Ledger head: `31ad512c104eaada00ab318a04933d5f6ec7b55fcd0fc88842256bcf0537853c` (838 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -218,6 +218,6 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | 85ec59b9dd76 | W3 | KIOSK-EXPECTED-TURN-NATIVE-CALLER-RECOVERY-2 | release | acked | 6061336367 | comment:6061382606 |
 | 638e6595dee2 | W9 | EVENT-LIFECYCLE-BACKEND-RECOVERY-1 | handback | acked | 6061511145 | comment:6061520149 |
 | 58d44641b3d7 | W4 | EVENT-LIFECYCLE-BACKEND-RECOVERY-1 | review | acked | 6061767398 | comment:6061786075 |
-| f0ed473f37e9 | W5 | EVENT-LIFECYCLE-BACKEND-RECOVERY-1 | review | retried | 6061767731 | — |
+| f0ed473f37e9 | W5 | EVENT-LIFECYCLE-BACKEND-RECOVERY-1 | review | redelivered | 6061767731, 6062576316 | — |
 | 4c1753e8d987 | W7 | KIOSK-EXPECTED-TURN-NATIVE-CALLER-RECOVERY-2 | review | acked | 6061767966 | comment:6061808578 |
 
