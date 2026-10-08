@@ -19,6 +19,7 @@ import {
   announceHallTurn,
   describeHallResult,
   describeWaitingCount,
+  RESULT_VISIBLE_SECONDS,
   formatTurnCode,
   isStationTurnRef,
   isUsableTurnCount,
@@ -251,6 +252,12 @@ export default function StationScreen() {
   const [pendingOp, setPendingOp] = useState<PendingOperation | null>(null);
   /** The last Record's result, read from ITS OWN receipt: a code and a number, never a name. */
   const [opReceipt, setOpReceipt] = useState<string | null>(null);
+  // It is up for the same ten seconds as the hall's own result line, and then gone.
+  useEffect(() => {
+    if (!opReceipt) return;
+    const t = setTimeout(() => setOpReceipt(null), RESULT_VISIBLE_SECONDS * 1000);
+    return () => clearTimeout(t);
+  }, [opReceipt]);
 
   /**
    * THE FOLLOW-ALONG THIS SCREEN RUNS, and it is the same one the phone runs:
@@ -1050,14 +1057,18 @@ export default function StationScreen() {
                   {callSentence}
                 </Text>
               </>
-            ) : resultSentence ? (
+            ) : resultSentence || opReceipt ? (
               /*
                 THE TEN SECONDS. A code and a number — and NO NAME: the moment a
                 turn is recorded every name on this screen is gone, and ten
                 seconds later so is this.
+
+                This screen's own Record is read from ITS OWN receipt (#587):
+                the hall's shared result names only the station that recorded
+                last, so two stations recording together must not depend on it.
               */
               <Text style={styles.servingSentence} testID="wsf-station-queue-result">
-                {resultSentence}
+                {opReceipt ?? resultSentence}
               </Text>
             ) : (
               <Text style={styles.queueEmpty} testID="wsf-station-queue-serving-empty">
@@ -1237,7 +1248,9 @@ export default function StationScreen() {
               {describePendingOperation(pendingOp)}
             </Text>
           ) : null}
-          {opReceipt && opReceipt !== resultSentence ? (
+          {/* While somebody else is up, an earlier Record's receipt is its own
+              line — never painted into the turn now being served. */}
+          {opReceipt && assigned ? (
             <Text style={styles.queueCount} testID="wsf-station-op-receipt" aria-live="polite">
               {opReceipt}
             </Text>
