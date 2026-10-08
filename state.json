@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "f5885b8f0e7af6d3d65757979a433117af5bad54cca4e81c84f21150880806ef",
-  "eventCount": 752,
+  "ledgerHead": "dadb9c51f27cf53d3774fd70af881448430de2dd8a1baafc6527876e4ac185f8",
+  "eventCount": 754,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -65,9 +65,7 @@
     "W4": [],
     "W5": [],
     "W7": [],
-    "W9": [
-      "PROFILE-PHOTOS-FIREBASE-1"
-    ]
+    "W9": []
   },
   "packets": {
     "AUTONOMY-ROUTER-1C": {
@@ -2138,10 +2136,10 @@
       },
       "label": "Canonical private profile photos and permitted community roster for native and Lovable staging",
       "origin": "ledger",
-      "phase": "QUEUED",
+      "phase": "RELEASED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
-      "inbox": null,
+      "inbox": 497,
       "pr": null,
       "reviewers": [],
       "artifact": {
@@ -2152,7 +2150,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": null,
+      "releasedQueueIndex": 0,
       "reviewedBy": [],
       "subjectPaths": [
         "functions-westayfit/src/index.ts",
@@ -2168,11 +2166,14 @@
           "kind": "comment",
           "id": 6043554729
         },
-        "released": null,
+        "released": {
+          "kind": "comment",
+          "id": 6052427068
+        },
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6043554729
+          "id": 6052427068
         }
       },
       "review": {
@@ -4495,6 +4496,14 @@
       "comments": [
         6052399946
       ],
+      "ack": null
+    },
+    "5de76c7c05dc50a79a399e071e6a69385ec94f3afb2cd6b92ba324fc8f666d2e": {
+      "packet": "PROFILE-PHOTOS-FIREBASE-1",
+      "worker": "W9",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
