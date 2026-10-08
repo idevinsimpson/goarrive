@@ -6,6 +6,8 @@
  * only in the Authorization header and never logged. Every method returns plain
  * data; errors carry the HTTP status and path, never a header or a body echo.
  */
+import https from 'node:https';
+
 const API = 'https://api.github.com';
 /**
  * Comments per page: a fixed 25, not the endpoint's 100. Runs 37493661423 and 37494992451 still lost the socket after
@@ -21,19 +23,68 @@ export class GitHubError extends Error {
 }
 
 /**
+ * The CURRENT edit's whole budget, connect to status line (CONTROL-CURRENT-PATCH-TRANSPORT-2). Runs 37671900853 and
+ * 37672822242 each waited ~315 s in the PATCH (undici's 300 s header timeout) for an answer that never came, and the
+ * edit was not applied. A healthy edit answers in seconds; past this bound the outcome is uncertain and is settled by
+ * the one exact read-back, never by waiting longer or by sending again.
+ */
+export const PATCH_TIMEOUT_MS = 30_000;
+
+/** A request that got no HTTP answer: the deadline passed, or the connection failed or closed first. Carries a code only. */
+export class TransportError extends Error {
+  constructor(code) { super(`GitHub request got no answer (${code})`); this.name = 'TransportError'; this.code = code; }
+}
+
+/**
+ * Send ONE request on its own fresh connection (no pooled socket, `Connection: close`) and settle on its status line.
+ *
+ * The first status line is the acknowledgment: the answer body is never read or parsed, and the connection is closed
+ * at once. No answer within `timeoutMs` (from the moment it is sent), a connection error, or a close before any status
+ * line rejects with a TransportError and destroys the connection; nothing is ever sent twice. An error the request
+ * function throws as it is called (a bad URL or header: a programmer error) is rethrown as it is.
+ * Resolves `{ ok, status }`.
+ */
+export function sendOnce(url, { method, headers, body }, { request = https.request, timeoutMs = PATCH_TIMEOUT_MS } = {}) {
+  const payload = Buffer.from(body ?? '', 'utf8');
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let req = null;
+    let timer = null;
+    const settle = (fn, value) => { if (settled) return false; settled = true; clearTimeout(timer); fn(value); return true; };
+    const fail = (code) => { if (settle(reject, new TransportError(code))) req?.destroy(); };
+    try {
+      req = request(url, { method, agent: false, headers: { ...headers, 'Content-Length': payload.length, Connection: 'close' } }, (res) => {
+        res.on('error', () => {});
+        const status = res.statusCode;
+        res.destroy();
+        settle(resolve, { ok: status >= 200 && status < 300, status });
+      });
+    } catch (e) {
+      settle(reject, e);
+      return;
+    }
+    timer = setTimeout(() => fail('WSF_PATCH_TIMEOUT'), timeoutMs);
+    req.on('error', (e) => fail(typeof e?.code === 'string' && /^[A-Z0-9_]{1,40}$/.test(e.code) ? e.code : 'WSF_PATCH_ERROR'));
+    req.on('close', () => fail('WSF_PATCH_CLOSED'));
+    req.end(payload);
+  });
+}
+
+/**
  * A TRANSPORT failure, and nothing else: an undici error code (`UND_ERR_*`, on the error or as its cause), or one of
  * undici's own TypeError forms for it, `fetch failed` (the request never got an answer) and `terminated` (the body was
  * cut off mid-read). A programmer error (ReferenceError, RangeError, any other TypeError), a plain application Error,
  * a SyntaxError from a non-JSON body, and every HTTP answer are not transport.
  */
 export function isTransportError(e) {
+  if (e instanceof TransportError) return true;
   if (!(e instanceof Error) || e instanceof GitHubError) return false;
   const code = e.code ?? e.cause?.code;
   if (typeof code === 'string' && code.startsWith('UND_ERR_')) return true;
   return e instanceof TypeError && (e.message === 'fetch failed' || e.message === 'terminated');
 }
 
-export function gitHubClient({ token, repo, fetchImpl = globalThis.fetch }) {
+export function gitHubClient({ token, repo, fetchImpl = globalThis.fetch, patchImpl = (url, init) => sendOnce(url, init) }) {
   if (!token) throw new Error('an installation token is required');
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) throw new Error('repo must be owner/name');
   const headers = { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'wsf-control-writer' };
@@ -171,13 +222,17 @@ export function gitHubClient({ token, repo, fetchImpl = globalThis.fetch }) {
     /**
      * Edit one comment (the shadow CURRENT), sending the PATCH exactly ONCE (CONTROL-CURRENT-PATCH-ACK-1).
      *
+     * The PATCH goes through `patchImpl`, by default sendOnce: its own fresh connection, settled by its status line
+     * within PATCH_TIMEOUT_MS (CONTROL-CURRENT-PATCH-TRANSPORT-2). GET and POST keep `fetchImpl`.
+     *
      * A 2xx is the acknowledgment: the returned comment is never read or parsed (run 37661819992 lost the socket in
-     * this call), its unread body is cancelled and any cancel error swallowed. 404 and every other non-success status
+     * this call); any unread body is cancelled and any cancel error swallowed. 404 and every other non-success status
      * refuse, as an HTTP answer, never as a transport failure.
      *
-     * When the PATCH fails in TRANSPORT (isTransportError) no acknowledgment exists: the server may or may not have
-     * applied it. The edit is never sent again. Instead the comment is read back once through the ordinary GET path,
-     * and the edit counts as made only when that read returns this comment id with exactly this body. A missing,
+     * When the PATCH fails in TRANSPORT (isTransportError, including the deadline passing) no acknowledgment exists:
+     * the server may or may not have applied it. The edit is never sent again. Instead the comment is read back once
+     * through the ordinary GET path, and the edit counts as made only when that read returns this comment id with
+     * exactly this body. A missing,
      * different, newer or unreadable comment leaves it unconfirmed: an error is thrown and nothing claims success.
      * Any other exception (a programmer error) is thrown as it is. Returns 'acknowledged' or 'confirmed-by-readback'.
      */
@@ -185,14 +240,15 @@ export function gitHubClient({ token, repo, fetchImpl = globalThis.fetch }) {
       const what = `edit comment ${id}`;
       let res;
       try {
-        res = await fetchImpl(`${API}${r}/issues/comments/${id}`, { method: 'PATCH', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ body }) });
+        res = await patchImpl(`${API}${r}/issues/comments/${id}`, { method: 'PATCH', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ body }) });
       } catch (e) {
         if (!isTransportError(e)) throw e;
         let back = null;
         try { back = await readComment(id); } catch { back = null; }
         if (back && back.id === id && back.body === body) return 'confirmed-by-readback';
+        const code = [e.code, e.cause?.code].find((c) => typeof c === 'string' && /^[A-Z0-9_]{1,40}$/.test(c));
         const err = new GitHubError('unconfirmed', what);
-        err.message = `GitHub ${what}: the PATCH acknowledgment was lost and the read-back ${back ? 'shows other content' : 'could not read the comment'}; the edit is unconfirmed`;
+        err.message = `GitHub ${what}: the PATCH acknowledgment was lost${code ? ` (${code})` : ''} and the read-back ${back ? 'shows other content' : 'could not read the comment'}; the edit is unconfirmed`;
         throw err;
       }
       try { await res.body?.cancel?.(); } catch { /* the acknowledgment is the status; the unread body is discarded */ }
