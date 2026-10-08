@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=e5bea97f7784dad7c0ad4a2b3fad5ea0dc40c535197d38f5e2a0c96ceff37eb2 events=834 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=fbe17afc0e915f14ed6a813fd8ad603635062a8237d1283de113703b49d54c30 events=835 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `e5bea97f7784dad7c0ad4a2b3fad5ea0dc40c535197d38f5e2a0c96ceff37eb2` (834 events)
+- Ledger head: `fbe17afc0e915f14ed6a813fd8ad603635062a8237d1283de113703b49d54c30` (835 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -30,7 +30,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | Worker | Inbox | Active now | Reviewing | Waiting on review | Blocked | Next | Queue | WATCH |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | W3 | #396 | — | — | KIOSK-EXPECTED-TURN-NATIVE-CALLER-RECOVERY-2, WORKER-EXECUTION-PROFILES-1 | KIOSK-UNVERIFIED-STAGING-RECOVERY-1, NORTHSTAR-MIRROR-INTAKE-1 | — | — | off |
-| W4 | #394 | — | EVENT-LIFECYCLE-BACKEND-RECOVERY-1 | — | — | — | — | on |
+| W4 | #394 | — | — | — | — | — | — | off |
 | W5 | #395 | — | EVENT-LIFECYCLE-BACKEND-RECOVERY-1 | — | — | — | — | on |
 | W7 | #434 | — | KIOSK-EXPECTED-TURN-NATIVE-CALLER-RECOVERY-2 | — | — | — | — | on |
 | W9 | #497 | — | — | EVENT-LIFECYCLE-BACKEND-RECOVERY-1 | MEMBER-TRUTH-BACKEND-1 | — | — | off |
@@ -49,7 +49,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | EMAIL-STAGING-REPAIR | W3 | work | STAGED (hosted) | ledger | INTEGRATED | #559 | 39484f78 | 39484f78 | — | f84346d3 | — | W4, W9 | comment:5959200686 | pull_request:559 | — | Diagnose and repair staging verification and password-reset delivery without weakening mail security | 1×ops-source+1×security then director | — |
 | EMAIL-STAGING-REPAIR-STAGING-PIN | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #570 | 5be8f661 | 5be8f661 | — | 01a07ef3 | — | W4 | comment:5965875967 | pull_request:570 | — | Pin the exact integrated email repair and coalesced accepted expo lineage through the reviewed full staging path | 1×ops-source then director | — |
 | EVENT-LIFECYCLE-BACKEND-1 | W5 | work | INTEGRATED (source-only) | ledger | WITHDRAWN | — | — | — | — | — | — | — | comment:6044610796 | comment:6059491796 | — | Implement canonical event lifecycle transactions and authorization in an isolated module without competing with kiosk receipt ownership | 1×journey-qa+1×security then director | — |
-| EVENT-LIFECYCLE-BACKEND-RECOVERY-1 | W9 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #595 | e56485a1 | e56485a1 | — | — | — | W4, W5 | comment:6060049268 | comment:6061658443 | — | Recover isolated Event lifecycle backend after withdrawn unacknowledged W5 assignment | 1×journey-qa+1×security then director | — |
+| EVENT-LIFECYCLE-BACKEND-RECOVERY-1 | W9 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #595 | e56485a1 | e56485a1 | — | — | — | W4, W5 | comment:6060049268 | comment:6062030511 | — | Recover isolated Event lifecycle backend after withdrawn unacknowledged W5 assignment | 1×journey-qa+1×security then director | — |
 | EVERGREEN-MARKER-ENTRY-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #583 | 1545f36d | 1545f36d | — | 09cc4cb1 | — | W4 | comment:6027873710 | pull_request:583 | — | Evergreen physical marker entry: permanent QR resolves to configured community and goal, then phone or optional kiosk participation | 1×journey-qa then director | — |
 | EXPO-ACCOUNT-ENTRY-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #561 | e603a39c | e603a39c | — | 5705dc3b | — | W4 | comment:5961789672 | pull_request:561 | — | Expo account-entry seam: preserve event context and make the existing phone/kiosk choice fast and truthful without bypassing verified identity | 1×journey-qa then director | — |
 | EXPO-ACCOUNT-ENTRY-1-STAGING-PIN | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #566 | 04ca5d05 | 04ca5d05 | 04ca5d05 | 08a2f08d | — | W4 | comment:5963494417 | pull_request:566 | — | Pin exact integrated expo account-entry milestone through the existing reviewed full staging path | 1×ops-source then director | — |

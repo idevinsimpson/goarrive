@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "e5bea97f7784dad7c0ad4a2b3fad5ea0dc40c535197d38f5e2a0c96ceff37eb2",
-  "eventCount": 834,
+  "ledgerHead": "fbe17afc0e915f14ed6a813fd8ad603635062a8237d1283de113703b49d54c30",
+  "eventCount": 835,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -770,7 +770,9 @@
       "proof": null,
       "served": null,
       "releasedQueueIndex": null,
-      "reviewedBy": [],
+      "reviewedBy": [
+        "W4"
+      ],
       "subjectPaths": [
         "functions-westayfit/src/eventLifecycle.ts",
         "functions-westayfit/tests/callable/wsf-event-lifecycle.test.ts",
@@ -791,7 +793,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6061658443
+          "id": 6062030511
         }
       },
       "review": {
@@ -4891,7 +4893,8 @@
       "ack": {
         "kind": "comment",
         "id": 6061786075
-      }
+      },
+      "superseded": true
     },
     "f0ed473f37e96c43db2387389744e5fc18b3ad00c0a196057419114b257f8c9d": {
       "packet": "EVENT-LIFECYCLE-BACKEND-RECOVERY-1",
