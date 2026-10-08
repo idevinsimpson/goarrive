@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "2557d392969fa251a9dc674e8a81363d2631ea84578f6475e88df573b751ee1f",
-  "eventCount": 709,
+  "ledgerHead": "0ffc7834347a559e8151fd7eb7c21c3f942064199f9a4d10003d877bf1db38b5",
+  "eventCount": 710,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -4365,11 +4365,14 @@
       "packet": "CONTROL-CURRENT-PATCH-TRANSPORT-2",
       "worker": "W3",
       "reason": "handback",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6050787763
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6050793033
+      }
     }
   },
   "fastpath": {
