@@ -198,11 +198,11 @@ A refusal writes nothing. The tests compare documents and their `updateTime` bef
 | Run | Result |
 |---|---|
 | `wsf-event-lifecycle.test.ts` + `wsf-event-lifecycle-privacy.test.ts` | **27 / 27** |
-| Full callable suite | _pending: rerun after the mutant battery restores the module_ |
+| Full callable suite | **36 suites, 631 / 631** |
 | Rules suite (unchanged rules) | **28 / 28** |
 | Deploy-config | **17 / 17** |
 | `tsc` (`npm run build`) | clean |
-| Mutant battery, 32 mutants, both suites per mutant | _pending: running at this checkpoint_ |
+| Mutant battery, 32 mutants, both suites per mutant | **32 / 32 killed** |
 
 ### What each test pins
 
@@ -256,7 +256,40 @@ A refusal writes nothing. The tests compare documents and their `updateTime` bef
 
 Each mutant was applied to `src/eventLifecycle.ts` alone and run against both suites. The original was restored afterwards and confirmed with `cmp`.
 
-_Pending: the full table is added when the battery completes._
+| # | Mutant | Result |
+|---|---|---|
+| E1 | `isChampion` ignores the role | killed |
+| E2 | `isChampion` ignores the membership status | killed |
+| E3 | `eventForChampion` skips the Champion check | killed |
+| E4 | Writes skip the verified-email check | killed |
+| E5 | Transitions skip the from-status check | killed |
+| E6 | The published time lock is removed | killed |
+| E7 | Edits skip the version check | killed |
+| E8 | Transition replay is disabled | killed |
+| E9 | Create replay is disabled | killed |
+| E10 | Edits accept unknown keys | killed |
+| E11 | Create skips the goal-window check | killed |
+| E12 | `createdByUid` leaks into the view | killed |
+| E13 | Publish skips the goal-active check | killed |
+| E14 | The list does not filter archived Events | killed |
+| E15 | `inFlight` is stubbed to zero | killed |
+| E16 | Create skips the goal-community check | killed |
+| E17 | The IANA name-shape check is removed, so offsets pass | killed |
+| E18a | The membership row's `userId` and `groupId` fields are ignored | killed |
+| E18b | The membership row's `userId` field is ignored | killed |
+| E18c | The membership row's `groupId` field is ignored | killed |
+| E19 | `eventAllowsEnrollment` ignores the status | killed |
+| E20 | `eventAllowsEnrollment` ignores the end | killed |
+| E21 | Scope ignores the setup's status | killed |
+| E22 | Scope ignores the setup's community | killed |
+| E23 | `inFlight` counts only the snapshotted line | killed |
+| E24 | `inFlight` counts only the current line | killed |
+| E25 | `inFlight` double-counts one line | killed |
+| E26 | Scope ignores the claim's status | killed |
+| E27 | Scope ignores a setup with no frozen children | killed |
+| E28 | Publish skips the ended check | killed |
+| E29 | The list is served to non-Champions | killed |
+| E30 | Closed and cancelled Events can be edited | killed |
 
 **E18, found during this work:** the first battery had one survivor, E18, which drops the check that a membership row's own `userId` and `groupId` fields match. Every test row's fields happened to match its document id, so nothing could tell the difference. The privacy suite now seeds rows whose document id names the caller but whose fields name C1's Champion, or another community. With E18a, E18b and E18c applied, a borrowed or moved row would make a non-Champion a Champion; all three are now killed.
 
