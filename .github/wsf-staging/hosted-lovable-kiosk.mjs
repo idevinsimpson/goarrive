@@ -20,7 +20,8 @@
  *
  * WHAT IS NOT CLAIMED (rows stay BLOCKED, named):
  *  - the station turn rows (queue place, call, phone-ready, expected-turn start, 60-second round, review, station
- *    Finish): the safe station backend (#587) is not accepted or served, and an older station path is never driven;
+ *    Finish): the safe station backend (#587, integrated in source) is not served on staging and this proof has no
+ *    station driver yet, and an older station path is never driven;
  *  - the genuinely unverified account: the existing kit creates verified accounts only (#396 6043231980), and no
  *    verification is faked;
  *  - the Champion's approval is the kit's Champion callable (tracked for cleanup), not the Champion UI.
@@ -76,7 +77,7 @@ export const ROWS = Object.freeze([
   ['unverified-account', 'a genuinely unverified account joins and contributes'],
   ['cleanup-tracking', 'every product-written document (membership, contribution) is in the cleanup manifest before cleanup'],
 ].map(([id, expected]) => Object.freeze({ id, expected })));
-const STATION_BLOCK = 'the safe station backend (#587) is not accepted or served; an older station path is never driven';
+const STATION_BLOCK = 'the safe station backend (#587, integrated in source) is not served on staging and this proof has no station driver yet; an older station path is never driven';
 export const FIXED_BLOCKED = Object.freeze({
   'queue-place': STATION_BLOCK, call: STATION_BLOCK, 'phone-ready': STATION_BLOCK, 'expected-turn-start': STATION_BLOCK,
   'round-60s': STATION_BLOCK, review: STATION_BLOCK, 'station-finish': STATION_BLOCK,

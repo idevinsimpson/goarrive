@@ -66,7 +66,7 @@ The goal and the attempt come from the **request**, because the response carries
 | reopen-static | MOVE reopened: no replayed receipt, no pending-contribution key, still exactly one contribution request | measured |
 | account-isolation | A signs out and B signs in in the same storage. B has no pending join keys, no test-goal reads and no Progress row. A then signs in, in a fresh context, with the community chosen explicitly: same identity, same own total, same row | measured |
 | cleanup-tracking | the membership and the contribution are tracked **from their requests** (so they are tracked even when a later assertion fails) and merged into the manifest before cleanup | measured; FAIL if the merge fails |
-| queue-place, call, phone-ready, expected-turn-start, round-60s, review, station-finish | — | **BLOCKED**: the safe station backend (#587) is not accepted or served, and an older station path is never driven |
+| queue-place, call, phone-ready, expected-turn-start, round-60s, review, station-finish | — | **BLOCKED**: the safe station backend (#587, integrated in source) is not served on staging and this proof has no station driver yet, and an older station path is never driven |
 | organizer-ui-approval | — | **BLOCKED**: the station is approved through the kit's Champion callable as fixture preparation, tracked for cleanup. A UI approval would create a station record the kit cannot track. |
 | unverified-account | — | **BLOCKED**: the kit makes verified accounts only (#396 `6043231980`); verification is never faked |
 
