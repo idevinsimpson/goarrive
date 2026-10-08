@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "345a39632f90d8fa20bf3590c4aa732ff803f0418d7896e6bb43eaa4336315bf",
-  "eventCount": 810,
+  "ledgerHead": "373ef7acb2e6023e3c27cc3a1cb7092136c21d781a3f156b6a00d28a9756908b",
+  "eventCount": 812,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -61,7 +61,9 @@
     }
   },
   "queue": {
-    "W3": [],
+    "W3": [
+      "KIOSK-EXPECTED-TURN-NATIVE-CALLER-RECOVERY-2"
+    ],
     "W4": [],
     "W5": [],
     "W7": [],
@@ -1613,6 +1615,67 @@
         "lastTransition": {
           "kind": "comment",
           "id": 6060908197
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "journey-qa",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
+      "pendingFinding": null
+    },
+    "KIOSK-EXPECTED-TURN-NATIVE-CALLER-RECOVERY-2": {
+      "owner": "W3",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Correct native expected-turn caller reservation to executable Vitest and Playwright paths",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "apps/westayfit/app/station/[goalId].tsx",
+        "apps/westayfit/src/turnContract.ts",
+        "apps/westayfit/src/stationTurnOperation.ts",
+        "apps/westayfit/tests/stationTurnOperation.test.ts",
+        "apps/westayfit/tests-e2e/station-expected-turn.spec.ts",
+        "apps/westayfit/tests-e2e/expo-attendee-journey.spec.ts",
+        "docs/westayfit/qa/kiosk-expected-turn-native-caller-1.md"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6061036018
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6061036018
         }
       },
       "review": {
@@ -4765,11 +4828,14 @@
       "packet": "EVENT-LIFECYCLE-BACKEND-RECOVERY-1",
       "worker": "W4",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6060991497
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6061025916
+      }
     },
     "0db03e79b2f3131e4316ea74d1169e17a405708ed196b4ee725f5679b1c7b394": {
       "packet": "EVENT-LIFECYCLE-BACKEND-RECOVERY-1",
