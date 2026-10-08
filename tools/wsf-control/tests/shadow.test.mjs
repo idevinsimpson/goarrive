@@ -794,14 +794,22 @@ atest('PATCH-TRANSPORT: a timeout or an early close is settled by ONE exact read
   });
 });
 
-atest('PATCH-TRANSPORT: HTTP answers over the socket fail closed at once (401, 403, 404, 422, 429, 5xx): one PATCH, no read-back, no retry', async () => {
+atest('PATCH-TRANSPORT: every non-2xx answer over the socket fails closed at once (3xx never followed, 401, 403, 404, 422, 429, 5xx): one PATCH, no read-back, no retry', async () => {
   await noUnhandled(async () => {
-    for (const status of [401, 403, 404, 422, 429, 500, 502, 503]) {
-      const h = await patchHost(({ res }) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(`{"message":"${TOKEN}"}`); });
+    // W4 F2 (#394 6050738781): the 2xx boundary is new code here, not Response.ok. A 3xx (a moved repository answers
+    // 301/307) is not an acknowledgment, and its Location, on this same host, is never followed (a follow would show
+    // as a second socket PATCH).
+    for (const status of [300, 301, 302, 304, 307, 308, 401, 403, 404, 422, 429, 500, 502, 503]) {
+      const h = await patchHost(({ req, res }) => {
+        const redirect = status >= 300 && status < 400 ? { Location: `http://${req.headers.host}/repos/${REPO}/issues/comments/6` } : {};
+        res.writeHead(status, { 'Content-Type': 'application/json', ...redirect });
+        res.end(status === 304 ? undefined : `{"message":"${TOKEN}"}`);
+      });
       try {
         await assert.rejects(within(h.client(2000).editComment(5, SECRET_BODY), 1500, String(status)), (e) => e instanceof GitHubError && e.status === status && noLeak(e), String(status));
         await pause(100);
         assert.deepEqual(h.order(), ['socket:PATCH'], `HTTP ${status}`);
+        assert.equal(h.store.get(5), 'old body', `HTTP ${status}: nothing claims the edit`);
       } finally { await h.close(); }
     }
   });
@@ -825,6 +833,33 @@ atest('PATCH-TRANSPORT: a late answer after the deadline changes nothing; progra
       assert.deepEqual(h.order(), [], 'no PATCH on the wire and no read-back');
     } finally { await h.close(); }
   });
+});
+
+atest('PATCH-TRANSPORT production default (W4 F1, #394 6050738781): the default client PATCH arms exactly PATCH_TIMEOUT_MS, nothing longer, and a missing status line ends in WSF_PATCH_TIMEOUT', async () => {
+  // No patchImpl and no timeoutMs: the path shadow-run uses. https.request is pointed at a host that never answers; the
+  // global setTimeout records each delay armed during the call and shortens the long ones, so the test needs no 30 s.
+  const h = await patchHost(() => { /* never answers */ });
+  const realRequest = https.request;
+  const realSetTimeout = globalThis.setTimeout;
+  const armed = [];
+  https.request = (url, o, cb) => h.request(url, o, cb);
+  globalThis.setTimeout = (fn, ms, ...rest) => { armed.push(ms); return realSetTimeout(fn, ms >= 1000 ? 20 : ms, ...rest); };
+  let outcome;
+  try {
+    const g = gitHubClient({ token: TOKEN, repo: REPO, fetchImpl: h.fetchImpl });
+    outcome = await Promise.race([
+      g.editComment(5, SECRET_BODY).then(() => 'resolved', (e) => e),
+      new Promise((r) => realSetTimeout(() => r('still waiting'), 5000)),
+    ]);
+  } finally {
+    globalThis.setTimeout = realSetTimeout;
+    https.request = realRequest;
+    await h.close();
+  }
+  assert.ok(outcome instanceof GitHubError && /\(WSF_PATCH_TIMEOUT\).*the edit is unconfirmed/.test(outcome.message) && noLeak(outcome), `the default PATCH ends in its own deadline (${outcome?.message ?? outcome})`);
+  assert.ok(armed.includes(PATCH_TIMEOUT_MS), `the production PATCH arms PATCH_TIMEOUT_MS (armed ${armed.join(', ')})`);
+  assert.ok(armed.every((ms) => ms <= PATCH_TIMEOUT_MS), `nothing longer than PATCH_TIMEOUT_MS is armed (armed ${armed.join(', ')})`);
+  assert.deepEqual(h.order(), ['socket:PATCH', 'fetch:GET'], 'one PATCH on its own connection, then one read-back');
 });
 
 atest('PATCH-TRANSPORT sendOnce: the bound holds, failures are TransportErrors carrying a code only, and the default client PATCH never uses fetchImpl', async () => {
