@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "fe2460619baf71133ddb4a89f62aac870beb2e4a87a94c68b15005a33d4c4fff",
-  "eventCount": 847,
+  "ledgerHead": "9980faa9a512d9644ee99971163945434018dd962aac0cc6c29ff78e4fe4fbb1",
+  "eventCount": 848,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1930,8 +1930,8 @@
       },
       "label": "Finish the blocked staging pin with verified approval ancestry and tracked unverified synthetic fixtures",
       "origin": "ledger",
-      "phase": "ACKED",
-      "phaseBeforeBlock": null,
+      "phase": "BLOCKED",
+      "phaseBeforeBlock": "ACKED",
       "queueIndexBeforeBlock": null,
       "inbox": 396,
       "pr": null,
@@ -1956,7 +1956,20 @@
         ".github/wsf-staging/pin-candidate.mjs",
         ".github/wsf-staging/journeys/fixture-kit.mjs"
       ],
-      "blockedBy": [],
+      "blockedBy": [
+        {
+          "external": "W3-SOURCE-EDIT-CONSENT",
+          "condition": "Originating W3 session refuses the reserved pin-candidate.mjs edit required to generate and review the safe pin",
+          "owner": "Devin",
+          "unblockWhen": "Devin authorizes that exact reserved edit in the existing W3 session"
+        },
+        {
+          "external": "DRIVER-REGISTRATION-RESERVATION",
+          "condition": "The reviewed driver registry path is outside the current reservation",
+          "owner": "Director",
+          "unblockWhen": "A normal linked reservation correction includes hosted-changed-journeys.test.mjs with one writer"
+        }
+      ],
       "importRefs": [],
       "authority": {
         "queued": {
@@ -1970,7 +1983,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6064282086
+          "id": 6065521680
         }
       },
       "review": {
@@ -4940,7 +4953,8 @@
       "ack": {
         "kind": "comment",
         "id": 6064282086
-      }
+      },
+      "superseded": true
     }
   },
   "fastpath": {

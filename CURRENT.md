@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=fe2460619baf71133ddb4a89f62aac870beb2e4a87a94c68b15005a33d4c4fff events=847 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=9980faa9a512d9644ee99971163945434018dd962aac0cc6c29ff78e4fe4fbb1 events=848 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `fe2460619baf71133ddb4a89f62aac870beb2e4a87a94c68b15005a33d4c4fff` (847 events)
+- Ledger head: `9980faa9a512d9644ee99971163945434018dd962aac0cc6c29ff78e4fe4fbb1` (848 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -29,7 +29,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 
 | Worker | Inbox | Active now | Reviewing | Waiting on review | Blocked | Next | Queue | WATCH |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| W3 | #396 | KIOSK-UNVERIFIED-STAGING-RECOVERY-1 | — | WORKER-EXECUTION-PROFILES-1 | NORTHSTAR-MIRROR-INTAKE-1 | — | — | on |
+| W3 | #396 | — | — | WORKER-EXECUTION-PROFILES-1 | KIOSK-UNVERIFIED-STAGING-RECOVERY-1, NORTHSTAR-MIRROR-INTAKE-1 | — | — | off |
 | W4 | #394 | — | — | — | — | — | — | off |
 | W5 | #395 | — | — | — | — | — | — | off |
 | W7 | #434 | — | — | — | — | — | — | off |
@@ -66,7 +66,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | KIOSK-PAIRING-CLARITY-PROOF-1 | W9 | work | STAGED (hosted) | ledger | STAGED | #553 | 4537c26c | 4537c26c | — | ab77fbfc | hosted run 37025084843: PASS | W4 | comment:5945136749 | comment:5955903159 | — | Clarify venue-station pairing from the Champion's own phone and prove the existing flow end-to-end | 1×journey-qa then director | — |
 | KIOSK-UNVERIFIED-PARTICIPANT-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #586 | a17ee3e2 | a17ee3e2 | — | 819c26f0 | — | W4 | comment:6041849013 | pull_request:586 | — | Allow real authenticated unverified attendees to complete the ordinary WSF event participation backend journey | 1×journey-qa then director | — |
 | KIOSK-UNVERIFIED-PARTICIPANT-1-STAGING-PIN | W3 | work | INTEGRATED (source-only) | ledger | WITHDRAWN | — | — | — | — | — | — | — | comment:6043102398 | comment:6043983205 | — | Pin and prove the integrated unverified-attendee backend through the reviewed full staging path | 1×ops-source then director | — |
-| KIOSK-UNVERIFIED-STAGING-RECOVERY-1 | W3 | work | INTEGRATED (source-only) | ledger | ACKED | — | — | — | — | — | — | — | comment:6043993150 | comment:6064282086 | — | Finish the blocked staging pin with verified approval ancestry and tracked unverified synthetic fixtures | 1×ops-source then director | — |
+| KIOSK-UNVERIFIED-STAGING-RECOVERY-1 | W3 | work | INTEGRATED (source-only) | ledger | BLOCKED (from ACKED) | — | — | — | — | — | — | — | comment:6043993150 | comment:6065521680 | W3-SOURCE-EDIT-CONSENT (Devin); DRIVER-REGISTRATION-RESERVATION (Director) | Finish the blocked staging pin with verified approval ancestry and tracked unverified synthetic fixtures | 1×ops-source then director | — |
 | LOVABLE-KIOSK-HOSTED-PROOF-1 | W3 | work | VERIFIED (hosted) | ledger | INTEGRATED | #589 | 8c9093c0 | 8c9093c0 | — | 41bff6c6 | — | W4, W9 | comment:6044894488 | pull_request:589 | — | Run the pinned Lovable kiosk journey with bounded real staging fixtures and cleanup inside the existing trusted runner | 1×ops-source+1×security then director | — |
 | MEMBER-PREVIEW-LABEL-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #584 | 37529ea3 | 37529ea3 | — | 245c7717 | — | W4 | comment:6035517752 | pull_request:584 | — | Deliver the isolated privacy-safe public preview label without waiting for crossing attribution | 1×journey-qa then director | — |
 | MEMBER-TRUTH-BACKEND-1 | W9 | work | INTEGRATED (source-only) | ledger | BLOCKED (from ACKED) | — | — | — | — | — | — | — | comment:6029989725 | comment:6035507739 | TOGETHER-CROSSING-DESIGN-DECISION (Director and Owner) | Unblock real member Together crossing and privacy-safe public preview labels for the shared Firebase backend and Lovable Web Twin | 1×journey-qa then director | — |
