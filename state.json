@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "ff3599024834d822602a2fd32fdb8f4e5a23f8e8c145fd82eb74fdf3220f580e",
-  "eventCount": 778,
+  "ledgerHead": "344d6a275113c3ff7e3df73539c5fd74ab47d859d12365852293aa3a7967319a",
+  "eventCount": 784,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1788,7 +1788,7 @@
       },
       "label": "Run the pinned Lovable kiosk journey with bounded real staging fixtures and cleanup inside the existing trusted runner",
       "origin": "ledger",
-      "phase": "ACCEPTED",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -1801,7 +1801,7 @@
         "subjectSha": "8c9093c0129c338f6cc2eb7d03bea04dac2aed62",
         "prHeadSha": "8c9093c0129c338f6cc2eb7d03bea04dac2aed62",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "41bff6c643ab4537d47a0732da48cfb86dc64b6b"
       },
       "proof": null,
       "served": null,
@@ -1833,8 +1833,8 @@
           "id": 6053091951
         },
         "lastTransition": {
-          "kind": "comment",
-          "id": 6053091951
+          "kind": "pull_request",
+          "id": 589
         }
       },
       "review": {
@@ -2142,7 +2142,7 @@
       },
       "label": "Canonical private profile photos and permitted community roster for native and Lovable staging",
       "origin": "ledger",
-      "phase": "CHANGES_REQUESTED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -2151,8 +2151,8 @@
         "W4"
       ],
       "artifact": {
-        "subjectSha": "5faac5dee055d5b576192077d14a85a8d0e57f3f",
-        "prHeadSha": "5faac5dee055d5b576192077d14a85a8d0e57f3f",
+        "subjectSha": "57fd86b87ee19dfb3f238899829c5dbd2a2fe0f3",
+        "prHeadSha": "57fd86b87ee19dfb3f238899829c5dbd2a2fe0f3",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -2181,7 +2181,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6053090140
+          "id": 6053214458
         }
       },
       "review": {
@@ -2194,7 +2194,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 1,
+      "deliveries": 2,
       "pendingFinding": null
     },
     "STAGING-FASTPATH-DOCS-LINEAGE-FIX": {
@@ -4570,10 +4570,22 @@
       "packet": "PROFILE-PHOTOS-FIREBASE-1",
       "worker": "W9",
       "reason": "handback",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6053169686
       ],
+      "ack": {
+        "kind": "comment",
+        "id": 6053176393
+      },
+      "superseded": true
+    },
+    "0944310db4babf003c7d8611111abf0b6ed5881eb4ddf7df017f7c9454b427e4": {
+      "packet": "PROFILE-PHOTOS-FIREBASE-1",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
