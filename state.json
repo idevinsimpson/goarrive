@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "dcb012d70a368173550458927ea59852c590ba1d9a2d7841266639fa0dd789eb",
-  "eventCount": 803,
+  "ledgerHead": "9a662981151db6ba7c5852a567b24f050eb1cd3674a6ff2f14f03f56f35fb080",
+  "eventCount": 808,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -752,15 +752,18 @@
       },
       "label": "Recover isolated Event lifecycle backend after withdrawn unacknowledged W5 assignment",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
-      "pr": null,
-      "reviewers": [],
+      "pr": 595,
+      "reviewers": [
+        "W4",
+        "W5"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "9d0af6c590645e3625b5a480dff52c811f1c88e7",
+        "prHeadSha": "9d0af6c590645e3625b5a480dff52c811f1c88e7",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -788,7 +791,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6060201845
+          "id": 6060899993
         }
       },
       "review": {
@@ -805,7 +808,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "EVERGREEN-MARKER-ENTRY-1": {
@@ -1570,7 +1573,7 @@
       },
       "label": "Recover native expected-turn caller after withdrawn unacknowledged W7 assignment",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "WITHDRAWN",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -1609,7 +1612,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6060186878
+          "id": 6060908197
         }
       },
       "review": {
@@ -4741,7 +4744,8 @@
       "ack": {
         "kind": "comment",
         "id": 6060201845
-      }
+      },
+      "superseded": true
     },
     "2288365b4788a6fed18c01d197931d5ec0f7df2fe2caa611f1a00b22a79df906": {
       "packet": "KIOSK-EXPECTED-TURN-NATIVE-CALLER-RECOVERY-1",
@@ -4754,7 +4758,24 @@
       "ack": {
         "kind": "comment",
         "id": 6060186878
-      }
+      },
+      "superseded": true
+    },
+    "4c47cc57fe3d70ebcafa9f8e67127565558f085f50e2365c9087b9c349e8a578": {
+      "packet": "EVENT-LIFECYCLE-BACKEND-RECOVERY-1",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
+    },
+    "0db03e79b2f3131e4316ea74d1169e17a405708ed196b4ee725f5679b1c7b394": {
+      "packet": "EVENT-LIFECYCLE-BACKEND-RECOVERY-1",
+      "worker": "W5",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
