@@ -2,7 +2,7 @@
 
 Director queue #365 `6044515892`, release `6044894488`; W3, inbox #396. **Source only.** No run has happened, and nothing here is a hosted pass.
 
-Rework after Director finding #365 `6045688233` and security detail #589 `6045713631`; both are covered below.
+Rework after Director finding #365 `6045688233` and security detail #589 `6045713631`, then after W9's independent finding #497 `6051520120`; all three are covered below.
 
 ## What it adds
 
@@ -14,7 +14,7 @@ It runs against exactly `https://we-stay-fit-foundation-trial.lovable.app` and t
 |---|---|---|
 | 1. bind | `gate` (no credential) | `hosted-lovable-kiosk.mjs --bind` reads the served entry page and every same-origin asset it loads (bounded, no redirects, no other origin). It hashes the entry page **and** each asset, then compares them to `REVIEWED_BUILD`. It exits 0 only on an exact match. |
 | 2. bind again | `lovable-kiosk`, before authentication | The same check. Any drift since the gate stops the job, and no credential is minted: the re-authentication step requires `steps.bind.outcome == 'success'`. |
-| 3. proof | `lovable-kiosk` | `--run` seeds run-tagged fixtures with the existing kit (`journeys/fixture-kit.mjs`), with no new account maker. It then drives the real Lovable UI in Playwright, using the candidate's pinned CLI. |
+| 3. proof | `lovable-kiosk` | `--run` seeds run-tagged fixtures with the existing kit (`journeys/fixture-kit.mjs`), with no new account maker. It then drives the real Lovable UI in Playwright, using the candidate's pinned CLI. Every browser context runs through the **served-code guard** (below), and the browser gets no cloud or workflow credential in its environment. |
 | 4. cleanup | always, blocking | `cleanup-synthetic.mjs` runs over the run's manifest. The product-written membership is merged in only if it is run-tagged. |
 | 5. scan, upload | always | `scan-evidence.mjs` runs; the upload happens only if the scan passes. |
 | 6. verdict | always | `--require` gives PASS only when every row passed **and** cleanup succeeded **and** the scan succeeded. |
@@ -22,6 +22,23 @@ It runs against exactly `https://we-stay-fit-foundation-trial.lovable.app` and t
 **`REVIEWED_BUILD` is empty in this change** (`indexSha256: null`, no assets). The first dispatch therefore stops in the credential-free gate with `LOVABLE_BUILD=BLOCKED`. It prints `LOVABLE_OBSERVED_INDEX <sha256>` and `LOVABLE_OBSERVED_ASSET <name> <sha256>` lines. A separately reviewed commit has to pin both the entry page digest and the asset digests before any authenticated run. Neither part alone binds: assets without the entry page digest are BLOCKED, so an inline script change in `index.html` cannot pass.
 
 The digests could not be computed from W3's session, because its proxy refuses the Lovable host (CONNECT 403). That refusal was not worked around.
+
+## The served-code guard (W9 finding #497 `6051520120`)
+
+The bind alone checks a separate, earlier fetch. The Lovable host is mutable, so the build the browser executes could differ: a publish could land between the bind and the browser's loads, or the entry page could load a script from another origin. The guard binds **what the browser loads**.
+
+- **Every request is routed.** Each browser context routes every request through `codeGuard`, with service workers blocked so none can answer around it.
+- **Documents** from the Lovable host (every navigation, SPA deep links like `/kiosk/…` and `/?join=…` included) are fetched once with no redirect followed. They must hash to the reviewed `indexSha256`, and they are fulfilled with exactly the hashed bytes.
+- **Scripts and stylesheets** from the Lovable host must be a reviewed `/assets/<name>`, carry that asset's reviewed digest, and are fulfilled with exactly the hashed bytes.
+- **Passive same-origin types** (images, fonts, the manifest) and **data requests** (`fetch`, `xhr`, `eventsource`) to the four API origins pass: Identity Toolkit, Secure Token, Firestore, and the staging callables host.
+- **Everything else is refused:** a redirect, an error status, other bytes, an unreviewed or foreign script, any document or script from an API origin, and any other origin. The refusal is recorded with no query string.
+- **A refusal stops the journey.** The journey checks after each navigation, so a refusal stops it before the next step:
+  - the kiosk is never approved, so the station secret never reaches an unreviewed kiosk;
+  - no password is typed into an unreviewed join page.
+- **host-build** is PASS only when the bind matched **and** the browser loaded at least one verified document **and** nothing was refused. A late refusal (for example a lazily loaded foreign script) still fails it.
+- **The browser's environment** drops `WSF_GOOGLE_*`, `GOOGLE_*`, `CLOUDSDK_*`, `ACTIONS_ID_TOKEN_REQUEST_*`, `ACTIONS_RUNTIME_*`, `GITHUB_TOKEN` and `GH_TOKEN`. That is W9's note N2; page script cannot read the environment, so this is defence in depth.
+
+**Limit.** The API-origin list is the expected Firebase set. If the real app reaches another origin for a data request, the first authenticated run fails host-build and names that request. A reviewed change must then add it; it is never allowed silently.
 
 ## The connected app's shapes (what the proof reads)
 
@@ -40,7 +57,7 @@ The goal and the attempt come from the **request**, because the response carries
 
 | Row | How it is measured | Status in this source |
 |---|---|---|
-| host-build | the reviewed entry page digest and every reviewed asset digest, exactly | BLOCKED until a digest manifest is pinned |
+| host-build | the reviewed entry page digest and every reviewed asset digest, exactly, at bind **and** for every document, script and stylesheet the browser loads; nothing else executable is loaded | BLOCKED until a digest manifest is pinned |
 | fixture-provenance | kit `expoEvent` (Champion, community, goal) plus two `memberInTwoCommunities` accounts that are **not** members of the event community | measured |
 | qr-join | the kiosk's `data-join-url` must be on the same host, carry a join code, and name this goal; A signs in through the product UI (identity checked) and presses **Join**; `wsfJoinCommunity` must answer this community with `alreadyMember === false`; then the phone choice appears | measured; **BLOCKED** if the kiosk shows "This goal has no join code to show." |
 | contribution-7 | exactly one `wsfContribute` request, and the receipt's `data-attempt` equals that request's `attemptId` | measured |
@@ -63,18 +80,40 @@ Every browser context is closed in `finally`, including on an early stop.
 
 ## Proof (offline)
 
-- **`tests/hosted-lovable-kiosk.test.mjs`: 13 passed.**
+- **`tests/hosted-lovable-kiosk.test.mjs`: 18 passed.**
   - It covers the exact host and the same-origin bounded walk; a cross-origin `/assets/` path is ignored.
   - **Binding** is BLOCKED while empty, and BLOCKED with assets but no entry digest or with an entry digest but no assets. It is PASS only on an exact match. It FAILs on a changed entry page with identical assets, on a missing observed entry digest, and on a changed, extra or missing asset.
   - **Receipt reproducer (#365 `6045688233`):** the canonical response `{addedCount:7, ownCredit:7, alreadyRecorded:false, sharedTotal:107, target:5000, unit:'squats', status:'active', crossedTarget:false}` with its request is accepted. A replay (`alreadyRecorded:true`) and each wrong screen total (100, 1,107, 1070, 10.7) are rejected. A further table rejects each field defect.
-  - **The journey** runs against a fake of the connected app that has one server, per-context storage, and request/response objects paired as Playwright pairs them. **21 single-defect negatives each fail their row.**
-- **Mutants: 28 of 29 killed.** The survivor is equivalent: making the receipt accept a fractional `sharedTotal` cannot pass, because the screen check accepts only whole numbers.
+  - **The journey** runs against a fake of the connected app that has one server, per-context storage, and request/response objects paired as Playwright pairs them. **21 single-defect negatives each fail their row.** The fake routes every document and asset load through the context's route handler, as Playwright does.
+  - **The served-code guard (W9).** Each of these defects is refused, and the run reaches no Champion approval when the kiosk is affected and no password entry: drift after the bind, a deep link with other bytes, a redirected document, a foreign script, a foreign script on the join page only, an unreviewed same-origin chunk, and a changed chunk. host-build FAILs, naming the request without its query.
+    - A foreign script loaded lazily mid-run is refused and fails host-build.
+    - The production default (an empty `REVIEWED_BUILD`) refuses the very first document.
+    - Unit tables cover `classifyRequest`, `codeGuard` (it fulfils exactly the hashed bytes and never follows a redirect), `hostBuildRow`, `runResults` and `browserEnv`.
+- **Mutants: 50 of 51 killed.**
+  - **Journey: 28 of 29.** The survivor is equivalent: making the receipt accept a fractional `sharedTotal` cannot pass, because the screen check accepts only whole numbers.
+  - **Guard: 22 of 22.** Killed:
+    - the guard not installed, or service workers not blocked;
+    - no check after the kiosk load, or before the sign-in;
+    - navigations continued; non-`/assets/` paths or unreviewed scripts passed;
+    - API origins serving scripts, any origin serving data, or foreign requests continued;
+    - the digest or status not checked, or redirects followed;
+    - an empty pin verified, or other bytes fulfilled;
+    - refusals not recorded or ignored by host-build, or nothing verified still passing;
+    - the journey's own host-build kept;
+    - credentials left in the browser environment.
+- **Real-Chromium smoke test (W3's scratch, not in the repo).** It used Playwright 1.59.1 and Chromium 1194, with a copy of the module pointed at local stand-ins for the Lovable host, one API origin and a foreign script host.
+  - The reviewed document, script and stylesheet were verified, fulfilled and executed, and the stylesheet applied.
+  - The foreign script was refused and never ran.
+  - The page's data request to the API origin went through.
+  - A reload after the entry page changed was refused (`net::ERR_BLOCKED_BY_CLIENT`). The reason named the path without the join query.
+  - A 302 entry page was refused.
+  - **Loopback-only artefact.** Chromium's Local Network Access check held the loopback API request until it was disabled for that test. The real API origins are public, so this does not apply to the run.
 - **Two real defects found while writing it, both fixed:**
   - `showsNumber` accepted `1107.5` as showing 1107. It now rejects a decimal tail.
   - In the first rework, the fresh-context identity negative was masked by a missing read.
 - **`tests/workflow-contract.test.mjs`: 103 passed.** The mode list is pinned at seven, and `lovable-kiosk` is reached only by its own mode. The bind comes before authentication. The job builds and deploys nothing and holds no stored secret. Cleanup is blocking, and the scan comes before the upload and the verdict.
-- **`run-all.mjs`: all suites passed.**
-- **Not yet in `run-all`.** The new suite is not registered there, because `run-all.mjs` is outside this packet's reserved paths. It runs directly: `node .github/wsf-staging/tests/hosted-lovable-kiosk.test.mjs`.
+- **`run-all.mjs`: all suites passed.** That run does not include this suite (see the next item).
+- **Not yet in `run-all`** (W9 note N1). The new suite is not registered there, because `run-all.mjs` is outside this packet's reserved paths; adding it needs a one-line scope delta. Until then it runs directly: `node .github/wsf-staging/tests/hosted-lovable-kiosk.test.mjs`.
 
 ## Before an authenticated run
 

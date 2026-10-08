@@ -10,8 +10,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  FIXED_BLOCKED, LOVABLE_URL, REVIEWED_BUILD, ROWS, allPassed, bindBuild, bindLines, checkBase, idHash, mergeIntoManifest,
-  ownCreditOf, receiptVerdict, requireVerdict, results, runJourney, servedManifest, sharedOf, showsNumber,
+  API_ORIGINS, FIXED_BLOCKED, LOVABLE_URL, REVIEWED_BUILD, ROWS, allPassed, bindBuild, bindLines, browserEnv, checkBase, classifyRequest,
+  codeGuard, hostBuildRow, idHash, mergeIntoManifest, ownCreditOf, receiptVerdict, requireVerdict, results, runJourney, runResults, servedManifest,
+  sharedOf, showsNumber,
 } from '../hosted-lovable-kiosk.mjs';
 
 let passed = 0;
@@ -164,22 +165,75 @@ test('cleanup merge: run-tagged product documents are added once; anything untag
  * together, progress, menu). One server; each context has its own storage. Every callable is a request object with
  * its OWN response, delivered to the page's listeners in that order. `bug` switches on one defect at a time.
  */
+/** The served build the fake host serves, and its reviewed manifest (what a pinned REVIEWED_BUILD would hold). */
+const FAKE_INDEX = '<!doctype html><script type="module" src="/assets/shell-AAA.js"></script><link rel="stylesheet" href="/assets/index-CCC.css">';
+const FAKE_ASSETS = { '/assets/shell-AAA.js': 'export const shell=1;', '/assets/kiosk-BBB.js': 'export const kiosk=1;', '/assets/index-CCC.css': 'body{}' };
+const FAKE_REVIEWED = Object.freeze({ indexSha256: sha(FAKE_INDEX), assets: Object.freeze(Object.fromEntries(Object.entries(FAKE_ASSETS).map(([p, b]) => [p.slice(8), sha(b)]))) });
+
 function lovable(bug = {}) {
   const goalId = 'e5cgoal-e5c-t-1-lk';
   const groupId = 'e5cgrp-e5c-t-1-lk';
-  const server = { shared: 100, own: {}, members: new Set(), contributions: 0, approved: false, requests: [] };
+  const server = { shared: 100, own: {}, members: new Set(), contributions: 0, approved: false, requests: [], contextOpts: [], routed: 0, docs: 0, loads: [], passwordFills: 0 };
   const accounts = {};
   let ctxCount = 0;
+  /** What the host answers for one URL. Drift, a different deep link, a redirect and a changed chunk are switchable. */
+  const serve = (url) => {
+    const u = new URL(url);
+    if (u.origin !== LOVABLE_URL) return { status: 200, body: 'globalThis.foreign = 1;' };
+    if (u.pathname.startsWith('/assets/')) {
+      if (!Object.hasOwn(FAKE_ASSETS, u.pathname)) return { status: bug.extraChunk && u.pathname === '/assets/extra-ZZZ.js' ? 200 : 404, body: 'export const extra=1;' };
+      return { status: 200, body: bug.changedChunk && u.pathname === '/assets/kiosk-BBB.js' ? 'export const kiosk=2;' : FAKE_ASSETS[u.pathname] };
+    }
+    server.docs += 1;
+    if (bug.redirectDoc) return { status: 302, body: '' };
+    if (bug.deepLinkDiffers && u.pathname.startsWith('/kiosk/')) return { status: 200, body: `${FAKE_INDEX}<script>inline()</script>` };
+    if (bug.driftAfter && server.docs > bug.driftAfter) return { status: 200, body: `${FAKE_INDEX}<!-- republished -->` };
+    return { status: 200, body: FAKE_INDEX };
+  };
+  /** One browser request through the context's route handler, as Playwright delivers it; resolves to what the handler did. */
+  async function load(context, url, type, navigation) {
+    let outcome = 'unhandled';
+    const route = {
+      request: () => ({ url: () => url, resourceType: () => type, isNavigationRequest: () => navigation }),
+      async fetch(o) { assert.equal(o?.maxRedirects, 0, 'a verified response never follows a redirect'); const r = serve(url); return { status: () => r.status, body: async () => Buffer.from(r.body) }; },
+      async fulfill({ body }) { outcome = 'fulfilled'; server.loads.push({ url, type, body: String(body) }); },
+      async continue() { outcome = 'continued'; },
+      async abort() { outcome = 'aborted'; },
+    };
+    assert.equal(context.handlers.length, 1, 'every context routes every request through the guard');
+    server.routed += 1;
+    await context.handlers[0](route);
+    return outcome;
+  }
+  /** A page load: the document, then what it loads (the kiosk chunk on the kiosk route), plus any injected defect. */
+  async function pageLoad(context, url) {
+    if ((await load(context, url, 'document', true)) !== 'fulfilled') throw new Error(`page.goto: net::ERR_BLOCKED_BY_CLIENT at ${new URL(url).origin}${new URL(url).pathname}`);
+    const subs = [[`${LOVABLE_URL}/assets/shell-AAA.js`, 'script'], [`${LOVABLE_URL}/assets/index-CCC.css`, 'stylesheet'], [`${LOVABLE_URL}/favicon.ico`, 'image']];
+    if (new URL(url).pathname.startsWith('/kiosk/')) subs.push([`${LOVABLE_URL}/assets/kiosk-BBB.js`, 'script']);
+    if (bug.foreignScript) subs.push(['https://cdn.example.test/x.js', 'script']);
+    if (bug.foreignOnJoin && new URL(url).searchParams.has('join')) subs.push(['https://cdn.example.test/join.js', 'script']);
+    if (bug.extraChunk) subs.push([`${LOVABLE_URL}/assets/extra-ZZZ.js`, 'script']);
+    for (const [s, t] of subs) await load(context, s, t, false);
+  }
   const browser = {
-    async newContext() {
+    async newContext(opts) {
       ctxCount += 1;
+      server.contextOpts.push(opts);
       const store = { local: {}, session: {}, idbUid: null };
       let closed = false;
-      return { async newPage() { return page(store); }, async close() { closed = true; browser.closed += 1; }, get closed() { return closed; } };
+      const context = {
+        handlers: [],
+        async route(pattern, handler) { assert.equal(pattern, '**/*'); context.handlers.push(handler); },
+        async newPage() { return page(store, context); },
+        async close() { closed = true; browser.closed += 1; },
+        get closed() { return closed; },
+      };
+      return context;
     },
     closed: 0,
   };
-  function page(store) {
+  function page(store, context) {
+    let current = null;
     let view = 'blank';
     let move = null; // null | 'camera' | 'count' | 'review' | 'receipt'
     let attempt = null;
@@ -245,7 +299,7 @@ function lovable(bug = {}) {
         },
         async fill(v) {
           if (key === 'label:Email') email = v;
-          else if (key === 'label:Password') { if (accounts[email]?.password !== v) throw new Error('wrong password'); }
+          else if (key === 'label:Password') { server.passwordFills += 1; if (accounts[email]?.password !== v) throw new Error('wrong password'); }
           else typed = Number(v);
         },
         async click() {
@@ -256,6 +310,7 @@ function lovable(bug = {}) {
             call('wsfJoinCommunity', { joinCode: store.session['wsf.pendingJoinCode'] }, { groupId: bug.otherGroup ? 'other-group' : groupId, alreadyMember: bug.alreadyMember ?? already });
             view = 'choose';
           } else if (key === 'testid:join-move-phone') {
+            if (bug.lateForeignScript) await load(context, 'https://cdn.example.test/late.js', 'script', false);
             store.local[`wsf.pinnedDestination.${uid()}`] = groupId; delete store.session['wsf.pendingJoinCode']; delete store.session['wsf.pendingJoinGoal'];
             view = 'home'; hydrate(); move = 'camera'; attempt = `attempt-${server.contributions + 1}abcdefgh`;
           } else if (key === 'role:Count by hand instead') move = 'count';
@@ -285,11 +340,13 @@ function lovable(bug = {}) {
       on(type, f) { listeners[type]?.push(f); },
       async goto(u) {
         const url = new URL(u, LOVABLE_URL);
+        await pageLoad(context, url.href);
+        current = url.href;
         if (url.pathname.startsWith('/kiosk/')) { view = 'kiosk'; return; }
         if (url.searchParams.get('join')) { store.session['wsf.pendingJoinCode'] = url.searchParams.get('join'); store.session['wsf.pendingJoinGoal'] = url.searchParams.get('goal'); }
         view = 'home'; move = null; hydrate();
       },
-      async reload() { move = null; hydrate(); },
+      async reload() { await pageLoad(context, current); move = null; hydrate(); },
       async waitForTimeout() {},
       async evaluate(fn, arg) {
         const src = String(fn);
@@ -320,7 +377,13 @@ const PASSING = ['fixture-provenance', 'qr-join', 'contribution-7', 'operation-r
 
 test('journey: A joins through the QR, records 7 once (bound to its request), re-reads, reopens static, and A -> B -> A stays isolated', async () => {
   const L = lovable();
-  const { rows, productDocs } = await runJourney({ browser: L.browser, fixtures: L.fixtures, base: LOVABLE_URL });
+  const { rows, productDocs, served } = await runJourney({ browser: L.browser, fixtures: L.fixtures, base: LOVABLE_URL, reviewed: FAKE_REVIEWED });
+  assert.deepEqual(served.violations, [], 'the browser loaded only the reviewed build');
+  assert.equal(hostBuildRow({ status: 'PASS', reason: 'bind' }, served).status, 'PASS');
+  assert.equal(served.verified, L.server.loads.length);
+  const reviewedDigests = new Set([FAKE_REVIEWED.indexSha256, ...Object.values(FAKE_REVIEWED.assets)]);
+  assert.ok(L.server.loads.length >= 10 && L.server.loads.every((x) => reviewedDigests.has(sha(x.body))), 'every executed document and asset is fulfilled with exactly the reviewed bytes');
+  assert.ok(L.server.contextOpts.length === L.opened() && L.server.contextOpts.every((o) => o.serviceWorkers === 'block'), 'no service worker can answer around the guard');
   for (const id of PASSING) assert.equal(statusOf(rows, id), 'PASS', `${id}: ${rows[id]?.seen}`);
   assert.equal(L.server.contributions, 1, 'exactly one contribution');
   assert.deepEqual(L.tracked.contributions, [['uid-lka', 'attempt-1abcdefgh']], 'the attempt is tracked from its request');
@@ -342,26 +405,146 @@ test('journey negatives: each defect fails exactly the row that measures it; not
   ];
   for (const [bug, row] of cases) {
     const L = lovable(bug);
-    const { rows } = await runJourney({ browser: L.browser, fixtures: L.fixtures, base: LOVABLE_URL });
+    const { rows } = await runJourney({ browser: L.browser, fixtures: L.fixtures, base: LOVABLE_URL, reviewed: FAKE_REVIEWED });
     assert.equal(statusOf(rows, row), 'FAIL', `${JSON.stringify(bug)} must fail ${row}: ${rows[row]?.seen}`);
+    if (bug.qrOrigin) assert.match(rows['qr-join'].seen, /the QR carries no same-host join link/, 'refused by the QR check itself, before any navigation');
     assert.equal(L.browser.closed, L.opened(), `${JSON.stringify(bug)}: every context is closed`);
   }
 });
 
 test('journey: a contribution whose assertions fail is still tracked for cleanup; an early stop closes the kiosk', async () => {
   let L = lovable({ addedCount: 6 });
-  let r = await runJourney({ browser: L.browser, fixtures: L.fixtures, base: LOVABLE_URL });
+  let r = await runJourney({ browser: L.browser, fixtures: L.fixtures, base: LOVABLE_URL, reviewed: FAKE_REVIEWED });
   assert.equal(statusOf(r.rows, 'operation-receipt'), 'FAIL');
   assert.equal(L.tracked.contributions.length, 1, 'tracked though the receipt failed');
   L = lovable({ approvalLost: true });
-  r = await runJourney({ browser: L.browser, fixtures: L.fixtures, base: LOVABLE_URL });
+  r = await runJourney({ browser: L.browser, fixtures: L.fixtures, base: LOVABLE_URL, reviewed: FAKE_REVIEWED });
   assert.equal(statusOf(r.rows, 'qr-join'), 'FAIL');
   assert.equal(L.server.contributions, 0);
   assert.deepEqual(r.productDocs, []);
   assert.equal(L.browser.closed, L.opened(), 'the kiosk context is closed on the early return');
   L = lovable({ noJoinCode: true });
-  r = await runJourney({ browser: L.browser, fixtures: L.fixtures, base: LOVABLE_URL });
+  r = await runJourney({ browser: L.browser, fixtures: L.fixtures, base: LOVABLE_URL, reviewed: FAKE_REVIEWED });
   assert.equal(statusOf(r.rows, 'qr-join'), 'BLOCKED', 'a community the kit cannot make link-joinable is BLOCKED, not passed');
+});
+
+// ---- the served-code guard (#589 W9 finding #497 6051520120): bind what the browser EXECUTES ----------------------
+test('guard negatives: drift after bind, a deep link with other bytes, a redirect, a foreign, unreviewed or changed script: refused, host-build FAIL, and the journey stops before any password is typed', async () => {
+  for (const [bug, named] of [
+    [{ driftAfter: 1 }, /document https:\/\/we-stay-fit-foundation-trial\.lovable\.app\/ differs from its reviewed digest/],
+    [{ deepLinkDiffers: true }, /document https:\/\/we-stay-fit-foundation-trial\.lovable\.app\/kiosk\/e5cgrp-e5c-t-1-lk\/e5cgoal-e5c-t-1-lk differs/],
+    [{ redirectDoc: true }, /answered HTTP 302, not the reviewed file/],
+    [{ foreignScript: true }, /script https:\/\/cdn\.example\.test\/x\.js is outside the reviewed build/],
+    [{ foreignOnJoin: true }, /script https:\/\/cdn\.example\.test\/join\.js is outside the reviewed build/],
+    [{ extraChunk: true }, /script https:\/\/we-stay-fit-foundation-trial\.lovable\.app\/assets\/extra-ZZZ\.js is not a reviewed asset/],
+    [{ changedChunk: true }, /assets\/kiosk-BBB\.js differs from its reviewed digest/],
+  ]) {
+    const L = lovable(bug);
+    const r = await runJourney({ browser: L.browser, fixtures: L.fixtures, base: LOVABLE_URL, reviewed: FAKE_REVIEWED });
+    const row = hostBuildRow({ status: 'PASS', reason: 'bind' }, r.served);
+    assert.equal(row.status, 'FAIL', JSON.stringify(bug));
+    assert.match(row.seen, named, JSON.stringify(bug));
+    assert.doesNotMatch(row.seen, /join=|JOINCODE|\?/, 'no query in what is named');
+    assert.equal(L.server.passwordFills, 0, `${JSON.stringify(bug)}: no password is typed into an unreviewed build`);
+    if (!bug.driftAfter && !bug.foreignOnJoin) assert.equal(L.tracked.approvals, 0, `${JSON.stringify(bug)}: an unreviewed kiosk is never approved (it would receive the station secret)`);
+    assert.equal(L.server.contributions, 0, `${JSON.stringify(bug)}: nothing is written`);
+    assert.deepEqual(r.productDocs, []);
+    assert.ok(!PASSING.some((id) => id !== 'fixture-provenance' && statusOf(r.rows, id) === 'PASS'), `${JSON.stringify(bug)}: no product row passes on an unreviewed build`);
+    assert.equal(L.browser.closed, L.opened(), `${JSON.stringify(bug)}: every context is closed`);
+  }
+  // A foreign script requested later in the run (a lazy load) is refused too, and fails host-build after the fact.
+  const late = lovable({ lateForeignScript: true });
+  const r = await runJourney({ browser: late.browser, fixtures: late.fixtures, base: LOVABLE_URL, reviewed: FAKE_REVIEWED });
+  assert.match(hostBuildRow({ status: 'PASS' }, r.served).seen, /script https:\/\/cdn\.example\.test\/late\.js is outside/);
+  assert.equal(hostBuildRow({ status: 'PASS' }, r.served).status, 'FAIL');
+  assert.ok(!late.server.loads.some((x) => x.url.includes('cdn.example.test')), 'the foreign script was never fulfilled');
+  // The production default is REVIEWED_BUILD (empty here): the browser is refused the very first document.
+  const empty = lovable();
+  const e = await runJourney({ browser: empty.browser, fixtures: empty.fixtures, base: LOVABLE_URL });
+  assert.match(hostBuildRow({ status: 'PASS' }, e.served).seen, /no reviewed digest is pinned/);
+  assert.equal(empty.server.passwordFills, 0);
+});
+
+test('classifyRequest: the reviewed host verifies documents and /assets/ code; API origins pass data only; everything else is refused', () => {
+  const R = FAKE_REVIEWED;
+  const L = LOVABLE_URL;
+  const c = (url, type, navigation = false) => classifyRequest({ url, type, navigation }, R);
+  assert.deepEqual(c(`${L}/kiosk/g/x?join=SECRETCODE`, 'document', true), { action: 'verify', want: R.indexSha256, what: `document ${L}/kiosk/g/x` });
+  assert.equal(c(`${L}/assets/shell-AAA.js`, 'script').want, R.assets['shell-AAA.js']);
+  assert.equal(c(`${L}/assets/index-CCC.css`, 'stylesheet').want, R.assets['index-CCC.css']);
+  for (const [url, type] of [[`${L}/favicon.ico`, 'image'], [`${L}/font.woff2`, 'font'], [`${L}/manifest.json`, 'manifest']]) assert.equal(c(url, type).action, 'continue', `${type}`);
+  for (const o of API_ORIGINS) for (const t of ['fetch', 'xhr', 'eventsource']) assert.equal(c(`${o}/v1/x?key=abc`, t).action, 'continue', `${o} ${t}`);
+  for (const [url, type, nav] of [
+    [`${L}/assets/other-ZZZ.js`, 'script'], [`${L}/sw.js`, 'script'], [`${L}/elsewhere/shell-AAA.js`, 'script'], [`${L}/assets/sub/shell-AAA.js`, 'script'], [`${L}/assets/shell-AAA.js/../x.js`, 'script'], [`${L}/x`, 'websocket'],
+    ['https://identitytoolkit.googleapis.com/x.js', 'script'], ['https://firestore.googleapis.com/', 'document', true], ['https://us-central1-westayfit-staging.cloudfunctions.net/x', 'image'],
+    ['https://cdn.example.test/x.js', 'script'], ['https://fonts.googleapis.com/css', 'stylesheet'], ['https://evil.example.test/api', 'fetch'],
+    ['https://we-stay-fit-foundation-trial.lovable.app.evil.test/', 'document', true], ['http://we-stay-fit-foundation-trial.lovable.app/', 'document', true], ['not a url', 'script'],
+  ]) {
+    const v = c(url, type, nav);
+    assert.equal(v.action, 'abort', `${type} ${url}`);
+    assert.doesNotMatch(v.reason, /key=|\?/, 'never a query');
+  }
+  assert.equal(classifyRequest({ url: `${L}/`, type: 'document', navigation: true }).want, null, 'the production default (empty) pins no document');
+});
+
+test('codeGuard: fulfils exactly the hashed bytes once verified; refuses a redirect, an error, other bytes or an unreadable answer; check() throws after any refusal', async () => {
+  const route = (url, type, navigation, answer) => {
+    const out = {};
+    return { out, r: {
+      request: () => ({ url: () => url, resourceType: () => type, isNavigationRequest: () => navigation }),
+      async fetch(o) { out.maxRedirects = o?.maxRedirects; if (answer instanceof Error) throw answer; return { status: () => answer.status, body: async () => Buffer.from(answer.body) }; },
+      async fulfill({ body }) { out.fulfilled = String(body); },
+      async continue() { out.continued = true; },
+      async abort(code) { out.aborted = code; },
+    } };
+  };
+  const g = codeGuard(FAKE_REVIEWED);
+  const ok = route(`${LOVABLE_URL}/kiosk/a/b`, 'document', true, { status: 200, body: FAKE_INDEX });
+  await g.handle(ok.r);
+  assert.deepEqual(ok.out, { maxRedirects: 0, fulfilled: FAKE_INDEX });
+  const api = route('https://firestore.googleapis.com/v1/x', 'xhr', false, null);
+  await g.handle(api.r);
+  assert.deepEqual(api.out, { continued: true });
+  g.check();
+  assert.deepEqual(g.summary(), { verified: 1, violations: [] });
+  for (const [answer, why] of [[{ status: 302, body: '' }, /HTTP 302/], [{ status: 500, body: FAKE_INDEX }, /HTTP 500/], [{ status: 200, body: `${FAKE_INDEX} ` }, /differs/], [new Error('net::ERR_FAILED https://x?token=abc'), /could not be read/]]) {
+    const one = codeGuard(FAKE_REVIEWED);
+    const x = route(`${LOVABLE_URL}/`, 'document', true, answer);
+    await one.handle(x.r);
+    assert.equal(x.out.aborted, 'blockedbyclient');
+    assert.equal(x.out.fulfilled, undefined, 'nothing unverified is fulfilled');
+    assert.match(one.summary().violations[0], why);
+    assert.doesNotMatch(one.summary().violations[0], /token=abc/);
+    assert.throws(() => one.check(), /served code outside the reviewed build/);
+  }
+  const foreign = codeGuard(FAKE_REVIEWED);
+  const f = route('https://cdn.example.test/x.js', 'script', false, { status: 200, body: 'x' });
+  await foreign.handle(f.r);
+  assert.equal(f.out.maxRedirects, undefined, 'a refused request is never fetched');
+  assert.equal(f.out.aborted, 'blockedbyclient');
+});
+
+test('runResults: host-build in the written results is the bind joined with what the browser was served, never the bind alone', () => {
+  const allRows = Object.fromEntries(ROWS.map((r) => [r.id, { status: 'PASS', seen: '' }]));
+  const clean = runResults({ status: 'PASS', reason: 'bind' }, { rows: allRows, served: { verified: 5, violations: [] } });
+  assert.equal(clean.rows.find((r) => r.id === 'host-build').status, 'PASS');
+  assert.equal(allPassed(clean), true);
+  for (const journey of [{ rows: allRows, served: { verified: 5, violations: ['script https://cdn.example.test/x.js is outside'] } }, { rows: allRows }, { rows: { ...allRows, 'host-build': { status: 'PASS', seen: 'claimed by the journey' } }, served: { verified: 0, violations: [] } }]) {
+    const doc = runResults({ status: 'PASS', reason: 'bind' }, journey, { 'cleanup-tracking': { status: 'PASS', seen: '' } });
+    assert.equal(doc.rows.find((r) => r.id === 'host-build').status, 'FAIL', JSON.stringify(journey.served));
+    assert.equal(allPassed(doc), false);
+  }
+  assert.equal(runResults({ status: 'BLOCKED', reason: 'nothing pinned' }, { rows: {} }).rows.find((r) => r.id === 'host-build').status, 'BLOCKED');
+});
+
+test('hostBuildRow and browserEnv: PASS needs the bind, a verified load and no refusal; the browser gets no cloud or workflow credential', () => {
+  assert.deepEqual(hostBuildRow({ status: 'BLOCKED', reason: 'nothing pinned' }, { verified: 3, violations: [] }), { status: 'BLOCKED', seen: 'nothing pinned' });
+  assert.equal(hostBuildRow({ status: 'PASS' }, undefined).status, 'FAIL', 'the browser never ran');
+  assert.equal(hostBuildRow({ status: 'PASS' }, { verified: 0, violations: [] }).status, 'FAIL');
+  assert.equal(hostBuildRow({ status: 'PASS' }, { verified: 4, violations: ['script x'] }).status, 'FAIL');
+  assert.equal(hostBuildRow({ status: 'PASS' }, { verified: 4, violations: [] }).status, 'PASS');
+  const env = browserEnv({ PATH: '/bin', HOME: '/h', WSF_RESULT_DIR: '/r', WSF_GOOGLE_ACCESS_TOKEN: 't', GOOGLE_APPLICATION_CREDENTIALS: '/k', GOOGLE_CLOUD_PROJECT: 'p', CLOUDSDK_AUTH_ACCESS_TOKEN_FILE: '/f', ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'o', ACTIONS_ID_TOKEN_REQUEST_URL: 'u', ACTIONS_RUNTIME_TOKEN: 'r', GITHUB_TOKEN: 'g', GH_TOKEN: 'h' });
+  assert.deepEqual(env, { PATH: '/bin', HOME: '/h', WSF_RESULT_DIR: '/r' });
 });
 
 test('canonical shapes: ownCredit is read for the selected goal only, and null is never a number', () => {

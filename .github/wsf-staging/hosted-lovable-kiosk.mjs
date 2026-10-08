@@ -9,8 +9,12 @@
  *              missing, extra or changed asset, or an unreadable host refuses BEFORE any credential exists, and prints
  *              the observed manifest (names and sha256 only) so a reviewed commit can pin it.
  *   --run      credentialed (the lovable-kiosk job): bind again (drift since the gate refuses), then seed run-tagged
- *              fixtures with the EXISTING kit (journeys/fixture-kit.mjs) and drive the real Lovable UI. Every row is
- *              PASS, FAIL or BLOCKED; results are written in `finally`; exit 0 only when every row passed.
+ *              fixtures with the EXISTING kit (journeys/fixture-kit.mjs) and drive the real Lovable UI. Every browser
+ *              context routes every request through codeGuard: each document and /assets/ script or stylesheet the
+ *              browser loads must carry its reviewed digest (fulfilled with exactly the hashed bytes), and nothing else
+ *              executable is loaded; a refusal fails host-build and stops the journey before the next step. The
+ *              browser runs with no cloud or workflow credential in its environment. Every row is PASS, FAIL or
+ *              BLOCKED; results are written in `finally`; exit 0 only when every row passed.
  *   --require  after blocking cleanup and the evidence scan: recompute the verdict from the written results and the
  *              cleanup and scan outcomes. Exit 0 only on every row PASS, cleanup success and scan success.
  *
@@ -41,9 +45,19 @@ export const PROJECT_ID = 'westayfit-staging';
 export const REVIEWED_BUILD = Object.freeze({ indexSha256: null, assets: Object.freeze({}) });
 /** At most this many assets are read when walking the served build. */
 export const MAX_ASSETS = 150;
+/**
+ * The only other origins the journey's pages may reach, and only for data (xhr, fetch, eventsource), never for a
+ * document or a script: Firebase Auth, Firestore and the staging callables.
+ */
+export const API_ORIGINS = Object.freeze([
+  'https://identitytoolkit.googleapis.com',
+  'https://securetoken.googleapis.com',
+  'https://firestore.googleapis.com',
+  `https://us-central1-${PROJECT_ID}.cloudfunctions.net`,
+]);
 
 export const ROWS = Object.freeze([
-  ['host-build', 'the exact Lovable host serves exactly the reviewed asset digests'],
+  ['host-build', 'the exact Lovable host serves exactly the reviewed entry page and asset digests, at bind AND for every document, script and stylesheet the browser loads; nothing else executable is loaded'],
   ['fixture-provenance', 'the event community, goal, Champion and visitors A and B are run-tagged kit fixtures in the cleanup manifest'],
   ['qr-join', 'visitor A, not a member, joins the event community through the kiosk QR link on the Lovable host'],
   ['queue-place', 'the visitor takes one place in the station line'],
@@ -131,6 +145,79 @@ export function bindBuild(observed, reviewed = REVIEWED_BUILD) {
 /** The lines a bind prints: the verdict, then the observed manifest (names and digests only). */
 export function bindLines(observed, verdict) {
   return [`LOVABLE_BUILD=${verdict.status} (${verdict.reason})`, ...(observed ? [`LOVABLE_OBSERVED_INDEX ${observed.indexSha256}`] : []), ...(observed ? Object.entries(observed.assets).map(([n, d]) => `LOVABLE_OBSERVED_ASSET ${n} ${d}`) : [])];
+}
+
+const PASSIVE_TYPES = new Set(['image', 'font', 'media', 'manifest', 'texttrack', 'xhr', 'fetch', 'eventsource']);
+const DATA_TYPES = new Set(['xhr', 'fetch', 'eventsource']);
+/**
+ * What the browser may load (#589 W9 finding #497 6051520120: the digest must bind what EXECUTES, not a neighbouring
+ * fetch). On the Lovable host: every document (each navigation, SPA deep links included) must be the reviewed entry
+ * page; every script or stylesheet must be a reviewed /assets/ file with its reviewed digest; passive types pass.
+ * Elsewhere: only data requests to API_ORIGINS pass. Everything else is refused. `what` never carries a query.
+ */
+export function classifyRequest({ url, type, navigation }, reviewed = REVIEWED_BUILD) {
+  let u;
+  try { u = new URL(url); } catch { return { action: 'abort', reason: `${type} with an unreadable URL` }; }
+  const what = `${type} ${u.origin}${u.pathname}`;
+  if (u.origin === LOVABLE_URL) {
+    if (navigation || type === 'document') return { action: 'verify', want: reviewed?.indexSha256 ?? null, what };
+    if (type === 'script' || type === 'stylesheet') {
+      const name = /^\/assets\/([A-Za-z0-9_.-]+)$/.exec(u.pathname)?.[1];
+      return name && Object.hasOwn(reviewed?.assets ?? {}, name) ? { action: 'verify', want: reviewed.assets[name], what } : { action: 'abort', reason: `${what} is not a reviewed asset` };
+    }
+    return PASSIVE_TYPES.has(type) ? { action: 'continue', what } : { action: 'abort', reason: `${what} is not a permitted resource type` };
+  }
+  if (API_ORIGINS.includes(u.origin) && !navigation && DATA_TYPES.has(type)) return { action: 'continue', what };
+  return { action: 'abort', reason: `${what} is outside the reviewed build and the permitted API origins` };
+}
+
+/**
+ * The served-code guard, routed on EVERY browser context of the journey (service workers blocked, so none can answer
+ * around it). A verified response is fetched once, hashed, and fulfilled with exactly the hashed bytes; a redirect, an
+ * error status, a different digest, an unreviewed or foreign script or document is aborted and recorded. `check()`
+ * throws once anything was refused, so the journey stops before the next step (a sign-in included).
+ */
+export function codeGuard(reviewed = REVIEWED_BUILD) {
+  const violations = [];
+  let verified = 0;
+  async function handle(route) {
+    const req = route.request();
+    const c = classifyRequest({ url: req.url(), type: req.resourceType(), navigation: req.isNavigationRequest() }, reviewed);
+    const refuse = async (reason) => { violations.push(reason); try { await route.abort('blockedbyclient'); } catch { /* the page may be gone */ } };
+    if (c.action === 'continue') { try { await route.continue(); } catch { /* the page may be gone */ } return; }
+    if (c.action === 'abort') { await refuse(c.reason); return; }
+    if (!/^[0-9a-f]{64}$/.test(String(c.want))) { await refuse(`${c.what}: no reviewed digest is pinned`); return; }
+    let res;
+    let body;
+    try { res = await route.fetch({ maxRedirects: 0 }); body = await res.body(); } catch (e) { await refuse(`${c.what} could not be read: ${short(e)}`); return; }
+    if (res.status() !== 200) { await refuse(`${c.what} answered HTTP ${res.status()}, not the reviewed file`); return; }
+    if (sha256(body) !== c.want) { await refuse(`${c.what} differs from its reviewed digest`); return; }
+    verified += 1;
+    try { await route.fulfill({ response: res, body }); } catch { /* the page may be gone */ }
+  }
+  return {
+    handle,
+    check() { if (violations.length) throw new Error(`the browser was served code outside the reviewed build: ${violations[0]}`); },
+    summary: () => ({ verified, violations: [...violations] }),
+  };
+}
+
+/** The host-build row: PASS only when the bind matched AND the browser executed only verified documents and assets. */
+export function hostBuildRow(bind, served) {
+  if (bind?.status !== 'PASS') return { status: bind?.status ?? 'FAIL', seen: bind?.reason ?? 'no bind verdict' };
+  if (served?.violations?.length) return { status: 'FAIL', seen: `bind matched, but the browser was served ${served.violations.length} unreviewed request(s): ${served.violations.slice(0, 3).join('; ')}` };
+  if (!(served?.verified > 0)) return { status: 'FAIL', seen: 'bind matched, but the browser loaded no verified document' };
+  return { status: 'PASS', seen: `bind matched; ${served.verified} document/asset response(s) the browser loaded matched their reviewed digests; nothing else executable was loaded` };
+}
+
+/** A --run's results: the journey's rows and the CLI's own, with host-build always from the bind AND what the browser was served. */
+export function runResults(bind, journey, rows = {}) {
+  return results({ ...journey?.rows, ...rows, 'host-build': hostBuildRow(bind, journey?.served) });
+}
+
+/** The browser's environment: the runner's, without any cloud or workflow credential (defence in depth; #589 W9 N2). */
+export function browserEnv(env) {
+  return Object.fromEntries(Object.entries(env).filter(([k]) => !/^(WSF_GOOGLE_|GOOGLE_|CLOUDSDK_|ACTIONS_ID_TOKEN_REQUEST_|ACTIONS_RUNTIME_|GITHUB_TOKEN$|GH_TOKEN$)/.test(k)));
 }
 
 /** The results document: every row, in order, with its status and what was seen. */
@@ -285,12 +372,18 @@ async function toCountStep(page) {
  * their REQUESTS as they are sent, so a later failed assertion never leaves an untracked document. Every browser
  * context it opens is closed in `finally`, on every return.
  */
-export async function runJourney({ browser, fixtures, base, amount = 7 }) {
+export async function runJourney({ browser, fixtures, base, amount = 7, reviewed = REVIEWED_BUILD }) {
   const rows = {};
   const set = (id, ok, seen, status) => { rows[id] = { status: status ?? (ok ? 'PASS' : 'FAIL'), seen }; };
   const productDocs = [];
   const contexts = [];
-  const ctx = async (viewport = PHONE) => { const c = await browser.newContext({ viewport, locale: 'en-US' }); contexts.push(c); return c; };
+  const guard = codeGuard(reviewed);
+  const ctx = async (viewport = PHONE) => {
+    const c = await browser.newContext({ viewport, locale: 'en-US', serviceWorkers: 'block' });
+    contexts.push(c);
+    await c.route('**/*', guard.handle);
+    return c;
+  };
   try {
     const ev = await fixtures.expoEvent('lk', { attendees: 0, target: 1000, seeded: 100 });
     const a = (await fixtures.memberInTwoCommunities('lka')).member;
@@ -309,12 +402,13 @@ export async function runJourney({ browser, fixtures, base, amount = 7 }) {
     // The kiosk shows its code; the Champion's approval is fixture preparation (the kit's tracked callable).
     const kiosk = await (await ctx({ width: 1280, height: 800 })).newPage();
     await kiosk.goto(`${base}/kiosk/${ev.groupId}/${ev.goalId}`);
+    guard.check();
     let joinUrl = null;
     try {
       const codeEl = kiosk.getByTestId('kiosk-pair-code');
       await codeEl.waitFor({ timeout: 30_000 });
       const code = (await codeEl.innerText()).replace(/\s+/g, '');
-      if (!/^[A-HJ-NP-Z2-9]{6}$/.test(code)) { set('qr-join', false, 'the kiosk code is not a pairing code'); return { rows, productDocs }; }
+      if (!/^[A-HJ-NP-Z2-9]{6}$/.test(code)) { set('qr-join', false, 'the kiosk code is not a pairing code'); return { rows, productDocs, served: guard.summary() }; }
       await fixtures.approveStation(ev, code, 1);
       const qr = kiosk.locator('svg[data-testid="kiosk-qr"]');
       await qr.waitFor({ timeout: 40_000 });
@@ -324,27 +418,28 @@ export async function runJourney({ browser, fixtures, base, amount = 7 }) {
     } catch (e) {
       const noCode = await visible(kiosk.getByText('This goal has no join code to show.'));
       set('qr-join', false, noCode ? 'the kiosk shows no join code for this community (the kit cannot make a link-joinable community)' : `the kiosk did not reach a QR join link: ${short(e)}`, noCode ? 'BLOCKED' : 'FAIL');
-      return { rows, productDocs };
+      return { rows, productDocs, served: guard.summary() };
     }
-    if (!joinUrl) { set('qr-join', false, 'the QR carries no same-host join link for this goal'); return { rows, productDocs }; }
+    if (!joinUrl) { set('qr-join', false, 'the QR carries no same-host join link for this goal'); return { rows, productDocs, served: guard.summary() }; }
 
     // Visitor A: the real QR link, the product sign-in, the deliberate Join, then MOVE on the phone.
     const pageA = await (await ctx()).newPage();
     trackA(pageA);
     const logA = callableLog(pageA);
     await pageA.goto(joinUrl);
+    guard.check(); // nothing is typed into a page that loaded anything unreviewed
     await signIn(pageA, a);
-    if ((await uidOf(pageA)) !== a.uid) { set('qr-join', false, 'the sign-in did not complete as visitor A'); return { rows, productDocs }; }
+    if ((await uidOf(pageA)) !== a.uid) { set('qr-join', false, 'the sign-in did not complete as visitor A'); return { rows, productDocs, served: guard.summary() }; }
     const banner = pageA.locator('[data-connected-join]');
     const join = banner.getByRole('button', { name: 'Join', exact: true });
-    if (!(await visible(join))) { set('qr-join', false, 'no Join for a visitor who is not a member'); return { rows, productDocs }; }
+    if (!(await visible(join))) { set('qr-join', false, 'no Join for a visitor who is not a member'); return { rows, productDocs, served: guard.summary() }; }
     await join.click();
     await pageA.waitForTimeout(5000);
     const joined = logA.last('wsfJoinCommunity');
     const phone = pageA.getByTestId('join-move-phone');
     set('qr-join', joined?.result?.groupId === ev.groupId && joined.result.alreadyMember === false && await visible(phone),
       `join ${joined?.result?.groupId === ev.groupId ? 'into this community' : 'not into this community'}, alreadyMember=${joined?.result?.alreadyMember}; phone choice ${await visible(phone) ? 'shown' : 'absent'}`);
-    if (rows['qr-join'].status !== 'PASS') return { rows, productDocs };
+    if (rows['qr-join'].status !== 'PASS') return { rows, productDocs, served: guard.summary() };
     const ownBefore = ownCreditOf(logA.last('wsfMyContribution', ev.goalId), ev.goalId);
     await phone.click();
     await pageA.waitForTimeout(3000);
@@ -368,6 +463,7 @@ export async function runJourney({ browser, fixtures, base, amount = 7 }) {
 
     // Fresh reads for the selected test goal, and the exact Progress row.
     await pageA.reload();
+    guard.check();
     await pageA.waitForTimeout(6000);
     await skipTour(pageA);
     const ownAfter = ownCreditOf(logA.last('wsfMyContribution', ev.goalId), ev.goalId);
@@ -393,6 +489,7 @@ export async function runJourney({ browser, fixtures, base, amount = 7 }) {
     await signOut(pageA);
     const logB = callableLog(pageA);
     await pageA.goto(`${base}/`);
+    guard.check();
     await signIn(pageA, b);
     await skipTour(pageA);
     const uidB = await uidOf(pageA);
@@ -403,6 +500,7 @@ export async function runJourney({ browser, fixtures, base, amount = 7 }) {
     const pageA2 = await (await ctx()).newPage();
     const logA2 = callableLog(pageA2);
     await pageA2.goto(`${base}/`);
+    guard.check();
     await signIn(pageA2, a);
     await chooseCommunity(pageA2);
     const back = await uidOf(pageA2);
@@ -415,7 +513,7 @@ export async function runJourney({ browser, fixtures, base, amount = 7 }) {
   } finally {
     await Promise.all(contexts.map((c) => c.close().catch(() => {})));
   }
-  return { rows, productDocs };
+  return { rows, productDocs, served: guard.summary() };
 }
 
 /** The verdict after cleanup and the scan: PASS only when every row passed and both outcomes are success. */
@@ -454,6 +552,7 @@ async function cli(mode, env) {
   const rows = { 'host-build': { status: verdict.status, seen: verdict.reason } };
   let journey = { rows: {}, productDocs: [] };
   let browser = null;
+  let doc = null;
   try {
     if (verdict.status !== 'PASS') return 1;
     const { createFixtureKit } = await import('./journeys/fixture-kit.mjs');
@@ -464,7 +563,7 @@ async function cli(mode, env) {
     const fixtures = createFixtureKit({ projectId: PROJECT_ID, apiKey: sdk.apiKey, token: env.WSF_GOOGLE_ACCESS_TOKEN, runTag, cleanupManifest: env.WSF_CLEANUP_MANIFEST });
     say(`LOVABLE_RUN_TAG=${runTag}`);
     const { chromium } = createRequire(path.resolve('apps/westayfit/package.json'))('@playwright/test');
-    browser = await chromium.launch();
+    browser = await chromium.launch({ env: browserEnv(process.env) });
     journey = await runJourney({ browser, fixtures, base: b.base });
   } catch (e) {
     rows['fixture-provenance'] ??= { status: 'FAIL', seen: `stopped before the journey: ${short(e)}` };
@@ -477,11 +576,11 @@ async function cli(mode, env) {
         rows['cleanup-tracking'] = { status: 'PASS', seen: `${journey.productDocs.length} product-written document(s) added; ${total} in the manifest` };
       } catch (e) { rows['cleanup-tracking'] = { status: 'FAIL', seen: `the product-written documents could not be added to the cleanup manifest: ${short(e)}` }; }
     } else if (journey.rows['fixture-provenance']) rows['cleanup-tracking'] = { status: 'PASS', seen: 'nothing product-written to add' };
-    const doc = results({ ...journey.rows, ...rows });
+    doc = runResults(verdict, journey, rows);
     fs.writeFileSync(path.join(dir, 'results.json'), `${JSON.stringify(doc, null, 2)}\n`);
     for (const r of doc.rows) say(`LOVABLE_ROW ${r.id}=${r.status}`);
   }
-  return allPassed(results({ ...journey.rows, ...rows })) ? 0 : 1;
+  return allPassed(doc) ? 0 : 1;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
