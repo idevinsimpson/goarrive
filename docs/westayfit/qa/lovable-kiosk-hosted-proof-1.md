@@ -2,7 +2,7 @@
 
 Director queue #365 `6044515892`, release `6044894488`; W3, inbox #396. **Source only.** No run has happened, and nothing here is a hosted pass.
 
-Rework after Director finding #365 `6045688233` and security detail #589 `6045713631`, then after W9's independent finding #497 `6051520120`; all three are covered below.
+Rework after Director finding #365 `6045688233` and security detail #589 `6045713631`, then W9's independent finding #497 `6051520120`, then W4's ops-source finding #394 `6051933442` as applied by the Director (#365 `6052330823`). All are covered below.
 
 ## What it adds
 
@@ -53,19 +53,29 @@ Every `wsf*` callable is read as one **exchange**: the request this page sent, p
 
 The goal and the attempt come from the **request**, because the response carries neither. A read counts only if its request named the selected test goal; otherwise it is `null`, never `0`.
 
+## What the existing kit can reach (W4 F1)
+
+The kit makes every community **private** (`joinPolicy: 'private'`). The served backend gives a private community no newcomer QR: `wsfStationState` returns `joinCode: null`, and `wsfJoinCommunity` does not admit a non-member by link. So with the kit as it is, the QR join **cannot** succeed, and it never gates anything else:
+
+- **`qr-join` is BLOCKED by name.** The reason given is the kit's private community. A link-joinable fixture needs a kit change, which is outside this packet.
+- **The phone rows use a control.** `contribution-7`, `operation-receipt`, `own-history-shared`, `reopen-static` and `account-isolation` are measured by the kit's **verified member** of the event community. The kit makes that member (`expoEvent(…, { attendees: 1 })`), like the Champion, as fixture preparation. The member signs in through the product UI. Each of these rows names the control in its `seen` text.
+- **Visitor B** stays a non-member and is the isolation check. **Visitor A** (a non-member) joins through the real QR only if a community is ever link-joinable.
+
+So the first authorized credentialed run can reach these rows: `host-build`, `fixture-provenance`, the five phone rows, and `cleanup-tracking`.
+
 ## Rows
 
 | Row | How it is measured | Status in this source |
 |---|---|---|
 | host-build | the reviewed entry page digest and every reviewed asset digest, exactly, at bind **and** for every document, script and stylesheet the browser loads; nothing else executable is loaded | BLOCKED until a digest manifest is pinned |
-| fixture-provenance | kit `expoEvent` (Champion, community, goal) plus two `memberInTwoCommunities` accounts that are **not** members of the event community | measured |
-| qr-join | the kiosk's `data-join-url` must be on the same host, carry a join code, and name this goal; A signs in through the product UI (identity checked) and presses **Join**; `wsfJoinCommunity` must answer this community with `alreadyMember === false`; then the phone choice appears | measured; **BLOCKED** if the kiosk shows "This goal has no join code to show." |
-| contribution-7 | exactly one `wsfContribute` request, and the receipt's `data-attempt` equals that request's `attemptId` | measured |
-| operation-receipt | request: this goal, `count === 7`, an attempt. Response: `addedCount === 7`, `alreadyRecorded === false`, whole-number `ownCredit` and `sharedTotal`, the goal's unit. Screen: exactly that shared total (en-US) and the unit | measured |
-| own-history-shared | after a reload: `wsfMyContribution` for this goal = before + 7 = the receipt's `ownCredit`; `wsfGoalPulse` = the receipt's `sharedTotal`; the Progress row shows both exactly | measured (BLOCKED if a selected-goal read is absent) |
-| reopen-static | MOVE reopened: no replayed receipt, no pending-contribution key, still exactly one contribution request | measured |
-| account-isolation | A signs out and B signs in in the same storage. B has no pending join keys, no test-goal reads and no Progress row. A then signs in, in a fresh context, with the community chosen explicitly: same identity, same own total, same row | measured |
-| cleanup-tracking | the membership and the contribution are tracked **from their requests** (so they are tracked even when a later assertion fails) and merged into the manifest before cleanup | measured; FAIL if the merge fails |
+| fixture-provenance | kit `expoEvent` (Champion, one verified member, community, goal) plus two `memberInTwoCommunities` accounts that are **not** members of the event community | measured |
+| qr-join | the kiosk's `data-join-url` must be on the same host, carry a join code, and name this goal; A signs in through the product UI (identity checked) and presses **Join**; `wsfJoinCommunity` must answer this community with `alreadyMember === false`; then the phone choice appears | **BLOCKED with the existing kit** (private community, no join code shown). It is measured only for a link-joinable community. |
+| contribution-7 | the **control** sends exactly one `wsfContribute` request, and the receipt's `data-attempt` equals that request's `attemptId` | measured (control) |
+| operation-receipt | request: this goal, `count === 7`, an attempt. Response: `addedCount === 7`, `alreadyRecorded === false`, whole-number `ownCredit` and `sharedTotal`, the goal's unit. Screen: exactly that shared total (en-US) and the unit | measured (control) |
+| own-history-shared | after a reload: `wsfMyContribution` for this goal = before + 7 = the receipt's `ownCredit`; `wsfGoalPulse` = the receipt's `sharedTotal`; the Progress row shows both exactly. Each read is paired with its own request, even when other goals' reads are answered around it. | measured (control; BLOCKED if a selected-goal read is absent) |
+| reopen-static | MOVE reopened: no replayed receipt, no pending-contribution key, still exactly one contribution request | measured (control) |
+| account-isolation | the control signs out and B (a non-member) signs in, in the same storage. B has no pending join keys, no test-goal reads and no Progress row. The control then signs in, in a fresh context, with the community chosen explicitly: same identity, same own total, same row | measured (control) |
+| cleanup-tracking | the control's contribution (and A's membership, if A joins) are tracked **from their requests**, so they are tracked even when a later assertion fails, and are merged into the manifest before cleanup | measured; FAIL if the merge fails |
 | queue-place, call, phone-ready, expected-turn-start, round-60s, review, station-finish | — | **BLOCKED**: the safe station backend (#587, integrated in source) is not served on staging and this proof has no station driver yet, and an older station path is never driven |
 | organizer-ui-approval | — | **BLOCKED**: the station is approved through the kit's Champion callable as fixture preparation, tracked for cleanup. A UI approval would create a station record the kit cannot track. |
 | unverified-account | — | **BLOCKED**: the kit makes verified accounts only (#396 `6043231980`); verification is never faked |
@@ -74,26 +84,41 @@ Every browser context is closed in `finally`, including on an early stop.
 
 ### Honest limits
 
-- **Champion approval.** It goes through the kit's callable, not through the Champion UI; see `organizer-ui-approval`. The visitors' sign-ins do go through the product UI.
+- **Champion approval.** It goes through the kit's callable, not through the Champion UI; see `organizer-ui-approval`. The control's and the visitors' sign-ins do go through the product UI.
+- **The control is a kit member, not a QR newcomer.** Its membership is fixture preparation, exactly like the Champion's; it is named as the control in every phone row, and nothing claims it joined by QR.
+- **Before spending a credentialed dispatch** (W4's residual): check against the donor source that the app does not load the Firebase `authDomain` `/__/auth/iframe` or a Google API script on page load. If it does, the guard refuses it by name and `host-build` FAILs, failing closed.
 - **Secrets.** Passwords stay in memory in the kit. Identities appear only as sha256 prefixes, and the results scrub emails and query values. No stored password, organizer storage or repository secret is used.
 - **Lovable project.** Nothing is written to the Lovable project.
 
 ## Proof (offline)
 
-- **`tests/hosted-lovable-kiosk.test.mjs`: 18 passed.**
+- **`tests/hosted-lovable-kiosk.test.mjs`: 21 passed.**
   - It covers the exact host and the same-origin bounded walk; a cross-origin `/assets/` path is ignored.
   - **Binding** is BLOCKED while empty, and BLOCKED with assets but no entry digest or with an entry digest but no assets. It is PASS only on an exact match. It FAILs on a changed entry page with identical assets, on a missing observed entry digest, and on a changed, extra or missing asset.
   - **Receipt reproducer (#365 `6045688233`):** the canonical response `{addedCount:7, ownCredit:7, alreadyRecorded:false, sharedTotal:107, target:5000, unit:'squats', status:'active', crossedTarget:false}` with its request is accepted. A replay (`alreadyRecorded:true`) and each wrong screen total (100, 1,107, 1070, 10.7) are rejected. A further table rejects each field defect.
-  - **The journey** runs against a fake of the connected app that has one server, per-context storage, and request/response objects paired as Playwright pairs them. **21 single-defect negatives each fail their row.** The fake routes every document and asset load through the context's route handler, as Playwright does.
-  - **The served-code guard (W9).** Each of these defects is refused, and the run reaches no Champion approval when the kiosk is affected and no password entry: drift after the bind, a deep link with other bytes, a redirected document, a foreign script, a foreign script on the join page only, an unreviewed same-origin chunk, and a changed chunk. host-build FAILs, naming the request without its query.
+  - **The journey** runs against a fake of the connected app that has one server, per-context storage, and request/response objects paired as Playwright pairs them. The fake routes every document and asset load through the context's route handler, as Playwright does.
+    - **The fake's default is the kit's real shape:** a private community with no join code. `qr-join` is BLOCKED with the kit reason, and the control passes the five phone rows. A link-joinable variant shows A's QR join passing, with the membership tracked, while the phone rows stay the control's.
+    - **22 single-defect negatives each fail their row**, including the control's sign-in silently failing (nothing is measured as an unknown identity). A failed QR join never erases the control's phone rows.
+    - **Pairing (W4 F3).** Home's reads for the member's other goal are in flight and answered **in reverse order** around the test goal's in every journey. A unit test interleaves `wsfContribute` and `wsfMyContribution` for two goals, answers them in reverse, and checks that each request gets only its own response.
+  - **The CLI (W4 F2).** `cli` is exported with injectable fetch, reviewed manifest, kit import and browser launch.
+    - `--bind` exits **0** only on an exact match.
+    - It exits **1** for the shipped empty manifest, a drifted entry page, a drifted asset, an unreadable asset, an unreachable host, a wrong host or a wrong project. The last two are refused before any read.
+    - `--run` with a non-PASS bind exits 1 **without importing the kit or launching a browser**, and writes results in which nothing passes. Only after an exact bind does it reach the kit.
+  - **The served-code guard (W9).** Each of these defects is refused, and the run reaches no Champion approval when the kiosk is affected and no password entry: drift after the bind, a deep link with other bytes, a redirected document, a foreign script, a foreign script on the join page only, a foreign script on the control's home page only, an unreviewed same-origin chunk, and a changed chunk. host-build FAILs, naming the request without its query.
     - A foreign script loaded lazily mid-run is refused and fails host-build.
     - The production default (an empty `REVIEWED_BUILD`) refuses the very first document.
     - Unit tables cover `classifyRequest`, `codeGuard` (it fulfils exactly the hashed bytes and never follows a redirect), `hostBuildRow`, `runResults` and `browserEnv`.
-- **Mutants: 50 of 51 killed.**
-  - **Journey: 28 of 29.** The survivor is equivalent: making the receipt accept a fractional `sharedTotal` cannot pass, because the screen check accepts only whole numbers.
-  - **Guard: 22 of 22.** Killed:
+- **Mutants: 61 of 62 killed.**
+  - **Journey, CLI and pairing: 38 of 39.** These include W4's four:
+    - Q: `--bind` always exits 0;
+    - B: `--run` proceeds on a non-PASS bind;
+    - P: the verdict is forced to PASS;
+    - I: a response pairs with the latest same-name request.
+
+    The control ones are also killed: the private QR stopping the journey, no kit member, the control's contribution or A's membership untracked, the control's sign-in unchecked, and the rows not labelled as the control. The survivor is equivalent: making the receipt accept a fractional `sharedTotal` cannot pass, because the screen check accepts only whole numbers.
+  - **Guard: 23 of 23.** Killed:
     - the guard not installed, or service workers not blocked;
-    - no check after the kiosk load, or before the sign-in;
+    - no check after the kiosk load, before A signs in, or before the control signs in;
     - navigations continued; non-`/assets/` paths or unreviewed scripts passed;
     - API origins serving scripts, any origin serving data, or foreign requests continued;
     - the digest or status not checked, or redirects followed;
@@ -120,4 +145,4 @@ Every browser context is closed in `finally`, including on an early stop.
 1. Ops-source review, security review, and Director acceptance of the exact head.
 2. One dispatch of `mode=lovable-kiosk`. It stops at the gate and prints the observed entry page digest and asset manifest.
 3. A reviewed commit that pins `REVIEWED_BUILD` (entry page digest and every asset) to that output.
-4. The authorized proof run. Rows that remain BLOCKED (the station turn, the organizer UI approval, the unverified account) fail it by name.
+4. The authorized proof run. It can reach `host-build`, `fixture-provenance`, the control's five phone rows and `cleanup-tracking`. The rows that remain BLOCKED fail it by name: `qr-join` (the kit's private community), the station turn, the organizer UI approval, and the unverified account.

@@ -25,7 +25,11 @@
  *  - the genuinely unverified account: the existing kit creates verified accounts only (#396 6043231980), and no
  *    verification is faked;
  *  - the Champion's approval is the kit's Champion callable (tracked for cleanup), not the Champion UI.
- * Visitors A and B are kit accounts that are NOT members of the event community: they join through the real QR link.
+ *  - the QR join with the existing kit: its communities are private, so the served kiosk shows no join code; qr-join is
+ *    BLOCKED by name and never gates the phone rows.
+ * The phone rows are measured by a CONTROL: the kit's verified member of the event community (made, like the Champion,
+ * as fixture preparation), signed in through the product UI. Visitor A (not a member) joins through the real QR link
+ * whenever the community is link-joinable; visitor B (not a member) is the isolation check.
  *
  * Secrets: account passwords exist only in memory (the kit's), never in a result, log line or file. Identities are
  * recorded as a short sha256 of the uid. Nothing here writes to the Lovable project.
@@ -67,11 +71,11 @@ export const ROWS = Object.freeze([
   ['expected-turn-start', 'the station starts the expected turn'],
   ['round-60s', 'the 60-second round runs and writes nothing at timer end'],
   ['review', 'the station shows the round for review'],
-  ['contribution-7', 'visitor A sends exactly one wsfContribute for this goal with count 7 and a fresh attempt id'],
+  ['contribution-7', 'the phone control (the kit\'s verified member) sends exactly one wsfContribute for this goal with count 7 and a fresh attempt id'],
   ['operation-receipt', 'that request\'s own response: 7 added, alreadyRecorded false, an integer own credit and shared total in the goal\'s unit, and the screen shows exactly that total'],
-  ['own-history-shared', 'fresh reads for the selected test goal: own credit up by exactly 7 and equal to the receipt, the shared total equal to the receipt, and the exact entry in A\'s own history'],
+  ['own-history-shared', 'fresh reads for the selected test goal: own credit up by exactly 7 and equal to the receipt, the shared total equal to the receipt, and the exact entry in the control\'s own history'],
   ['reopen-static', 'reopening MOVE on the same goal shows the recorded state and sends no second contribution'],
-  ['account-isolation', 'A -> B -> A: B\'s context, own history and pending MOVE carry nothing of A; A returns in fresh storage with the same identity and the same record'],
+  ['account-isolation', 'control -> B -> control: B (a non-member) carries nothing of the control in context, own history or pending MOVE; the control returns in fresh storage with the same identity and the same record'],
   ['station-finish', 'station Finish leaves no previous visitor for the next one'],
   ['organizer-ui-approval', 'the Champion approves the kiosk code through the Manage community UI'],
   ['unverified-account', 'a genuinely unverified account joins and contributes'],
@@ -304,6 +308,10 @@ const PHONE = { width: 390, height: 844 };
 const GOAL_TITLE = 'Fixture Expo Squats';
 const COMMUNITY = 'Fixture Expo Community';
 const UNIT = 'squats';
+/** How the phone rows name who measured them: the kit's verified member, made as fixture preparation. */
+const CONTROL = 'control (the kit\'s verified member)';
+/** qr-join with the existing kit: its communities are private, and the served backend gives a private community no join code. */
+const QR_KIT_BLOCK = 'the kiosk shows no join code: the existing kit makes only private communities (joinPolicy private), and the served backend gives a private community no newcomer QR; a link-joinable fixture needs a kit change outside this packet';
 
 /** The signed-in Firebase uid of this page: IndexedDB persistence first (the SDK default), then localStorage. */
 async function uidOf(page) {
@@ -386,21 +394,26 @@ export async function runJourney({ browser, fixtures, base, amount = 7, reviewed
     return c;
   };
   try {
-    const ev = await fixtures.expoEvent('lk', { attendees: 0, target: 1000, seeded: 100 });
+    // The kit's own event: a Champion and ONE verified member of its (private) community, made as fixture preparation.
+    const ev = await fixtures.expoEvent('lk', { attendees: 1, target: 1000, seeded: 100 });
+    const m = ev.attendees?.[0];
+    if (typeof m?.uid !== 'string' || !m.uid) throw new Error('the kit made no verified member for the phone control');
     const a = (await fixtures.memberInTwoCommunities('lka')).member;
     const b = (await fixtures.memberInTwoCommunities('lkb')).member;
-    set('fixture-provenance', true, `${ev.setupId}; visitors A and B are kit accounts outside this community`);
-    /** Track what A's page writes, from the request itself (the path is fixed by the request), before any reply. */
-    const trackA = (page) => {
+    set('fixture-provenance', true, `${ev.setupId}; the phone control is the kit's verified member of this community; visitors A and B are kit accounts outside it`);
+    /** Track what a page writes, from the request itself (the path is fixed by the request), before any reply. */
+    const track = (page, who, { join = false } = {}) => {
       page.on('request', (req) => {
         let name; let data;
         try { name = /\/(wsf[A-Za-z]+)$/.exec(new URL(req.url()).pathname)?.[1]; data = JSON.parse(req.postData() || '{}')?.data; } catch { return; }
-        if (name === 'wsfJoinCommunity' && !productDocs.includes(`wsfMemberships/${ev.groupId}_${a.uid}`)) productDocs.push(`wsfMemberships/${ev.groupId}_${a.uid}`);
-        if (name === 'wsfContribute' && data?.goalId === ev.goalId && typeof data.attemptId === 'string') fixtures.trackContribution(ev, a, data.attemptId);
+        if (join && name === 'wsfJoinCommunity' && !productDocs.includes(`wsfMemberships/${ev.groupId}_${who.uid}`)) productDocs.push(`wsfMemberships/${ev.groupId}_${who.uid}`);
+        if (name === 'wsfContribute' && data?.goalId === ev.goalId && typeof data.attemptId === 'string') fixtures.trackContribution(ev, who, data.attemptId);
       });
     };
 
-    // The kiosk shows its code; the Champion's approval is fixture preparation (the kit's tracked callable).
+    // 1. The kiosk shows its code; the Champion's approval is fixture preparation (the kit's tracked callable). Visitor A
+    //    joins through the QR only when the community is link-joinable; the kit's community is private, so the kiosk
+    //    shows no join code and qr-join is BLOCKED by name. The QR join never gates the phone control below.
     const kiosk = await (await ctx({ width: 1280, height: 800 })).newPage();
     await kiosk.goto(`${base}/kiosk/${ev.groupId}/${ev.goalId}`);
     guard.check();
@@ -409,106 +422,121 @@ export async function runJourney({ browser, fixtures, base, amount = 7, reviewed
       const codeEl = kiosk.getByTestId('kiosk-pair-code');
       await codeEl.waitFor({ timeout: 30_000 });
       const code = (await codeEl.innerText()).replace(/\s+/g, '');
-      if (!/^[A-HJ-NP-Z2-9]{6}$/.test(code)) { set('qr-join', false, 'the kiosk code is not a pairing code'); return { rows, productDocs, served: guard.summary() }; }
-      await fixtures.approveStation(ev, code, 1);
-      const qr = kiosk.locator('svg[data-testid="kiosk-qr"]');
-      await qr.waitFor({ timeout: 40_000 });
-      const raw = await qr.getAttribute('data-join-url');
-      const u = raw ? new URL(raw) : null;
-      joinUrl = u && u.origin === LOVABLE_URL && u.pathname === '/' && /^[A-Za-z0-9_-]{16,128}$/.test(u.searchParams.get('join') ?? '') && u.searchParams.get('goal') === ev.goalId ? u.href : null;
+      if (!/^[A-HJ-NP-Z2-9]{6}$/.test(code)) set('qr-join', false, 'the kiosk code is not a pairing code');
+      else {
+        await fixtures.approveStation(ev, code, 1);
+        const qr = kiosk.locator('svg[data-testid="kiosk-qr"]');
+        await qr.waitFor({ timeout: 40_000 });
+        const raw = await qr.getAttribute('data-join-url');
+        const u = raw ? new URL(raw) : null;
+        joinUrl = u && u.origin === LOVABLE_URL && u.pathname === '/' && /^[A-Za-z0-9_-]{16,128}$/.test(u.searchParams.get('join') ?? '') && u.searchParams.get('goal') === ev.goalId ? u.href : null;
+        if (!joinUrl) set('qr-join', false, 'the QR carries no same-host join link for this goal');
+      }
     } catch (e) {
+      guard.check();
       const noCode = await visible(kiosk.getByText('This goal has no join code to show.'));
-      set('qr-join', false, noCode ? 'the kiosk shows no join code for this community (the kit cannot make a link-joinable community)' : `the kiosk did not reach a QR join link: ${short(e)}`, noCode ? 'BLOCKED' : 'FAIL');
-      return { rows, productDocs, served: guard.summary() };
+      set('qr-join', false, noCode ? QR_KIT_BLOCK : `the kiosk did not reach a QR join link: ${short(e)}`, noCode ? 'BLOCKED' : 'FAIL');
     }
-    if (!joinUrl) { set('qr-join', false, 'the QR carries no same-host join link for this goal'); return { rows, productDocs, served: guard.summary() }; }
+    if (joinUrl) {
+      // Visitor A: the real QR link, the product sign-in, the deliberate Join; the phone choice must follow.
+      const pageA = await (await ctx()).newPage();
+      track(pageA, a, { join: true });
+      const logA = callableLog(pageA);
+      await pageA.goto(joinUrl);
+      guard.check(); // nothing is typed into a page that loaded anything unreviewed
+      await signIn(pageA, a);
+      const join = pageA.locator('[data-connected-join]').getByRole('button', { name: 'Join', exact: true });
+      if ((await uidOf(pageA)) !== a.uid) set('qr-join', false, 'the sign-in did not complete as visitor A');
+      else if (!(await visible(join))) set('qr-join', false, 'no Join for a visitor who is not a member');
+      else {
+        await join.click();
+        await pageA.waitForTimeout(5000);
+        const joined = logA.last('wsfJoinCommunity');
+        const phone = await visible(pageA.getByTestId('join-move-phone'));
+        set('qr-join', joined?.result?.groupId === ev.groupId && joined.result.alreadyMember === false && phone,
+          `join ${joined?.result?.groupId === ev.groupId ? 'into this community' : 'not into this community'}, alreadyMember=${joined?.result?.alreadyMember}; phone choice ${phone ? 'shown' : 'absent'}`);
+      }
+    }
 
-    // Visitor A: the real QR link, the product sign-in, the deliberate Join, then MOVE on the phone.
-    const pageA = await (await ctx()).newPage();
-    trackA(pageA);
-    const logA = callableLog(pageA);
-    await pageA.goto(joinUrl);
+    // 2. The phone CONTROL (#589 W4 F1, #365 6052330823): the kit's verified member, signed in through the product UI,
+    //    measures the phone rows independently of the QR join.
+    const pageM = await (await ctx()).newPage();
+    track(pageM, m);
+    const logM = callableLog(pageM);
+    await pageM.goto(`${base}/`);
     guard.check(); // nothing is typed into a page that loaded anything unreviewed
-    await signIn(pageA, a);
-    if ((await uidOf(pageA)) !== a.uid) { set('qr-join', false, 'the sign-in did not complete as visitor A'); return { rows, productDocs, served: guard.summary() }; }
-    const banner = pageA.locator('[data-connected-join]');
-    const join = banner.getByRole('button', { name: 'Join', exact: true });
-    if (!(await visible(join))) { set('qr-join', false, 'no Join for a visitor who is not a member'); return { rows, productDocs, served: guard.summary() }; }
-    await join.click();
-    await pageA.waitForTimeout(5000);
-    const joined = logA.last('wsfJoinCommunity');
-    const phone = pageA.getByTestId('join-move-phone');
-    set('qr-join', joined?.result?.groupId === ev.groupId && joined.result.alreadyMember === false && await visible(phone),
-      `join ${joined?.result?.groupId === ev.groupId ? 'into this community' : 'not into this community'}, alreadyMember=${joined?.result?.alreadyMember}; phone choice ${await visible(phone) ? 'shown' : 'absent'}`);
-    if (rows['qr-join'].status !== 'PASS') return { rows, productDocs, served: guard.summary() };
-    const ownBefore = ownCreditOf(logA.last('wsfMyContribution', ev.goalId), ev.goalId);
-    await phone.click();
-    await pageA.waitForTimeout(3000);
-    await toCountStep(pageA);
-    await pageA.locator('input[inputmode=numeric]').first().fill(String(amount));
-    await pageA.getByRole('button', { name: 'Review', exact: true }).first().click();
-    await pageA.getByTestId('confirm').click();
-    const receipt = pageA.locator('section.together-receipt');
+    await signIn(pageM, m);
+    if ((await uidOf(pageM)) !== m.uid) throw new Error('the control member\'s sign-in did not complete');
+    await skipTour(pageM);
+    await chooseCommunity(pageM);
+    const ownBefore = ownCreditOf(logM.last('wsfMyContribution', ev.goalId), ev.goalId);
+    await pageM.getByRole('button', { name: 'MOVE — add a contribution' }).first().click();
+    await pageM.waitForTimeout(3000);
+    await toCountStep(pageM);
+    await pageM.locator('input[inputmode=numeric]').first().fill(String(amount));
+    await pageM.getByRole('button', { name: 'Review', exact: true }).first().click();
+    await pageM.getByTestId('confirm').click();
+    const receipt = pageM.locator('section.together-receipt');
     await receipt.waitFor({ timeout: 20_000 });
-    await pageA.waitForTimeout(1500);
-    const sent = logA.of('wsfContribute');
+    await pageM.waitForTimeout(1500);
+    const sent = logM.of('wsfContribute');
     const ex = sent.at(-1) ?? null;
     const screen = (await receipt.innerText()).replace(/\s+/g, ' ');
     const r = receiptVerdict(ex, { goalId: ev.goalId, amount, unit: UNIT, screenText: screen });
     const sameAttempt = r.attemptId !== null && (await receipt.getAttribute('data-attempt')) === r.attemptId;
-    set('contribution-7', sent.length === 1 && r.attemptId !== null && sameAttempt, `${sent.length} contribution request(s); receipt ${sameAttempt ? 'bound to that request\'s attempt' : 'not bound to that request\'s attempt'}`);
-    set('operation-receipt', r.ok && sameAttempt && showsNumber(screen, amount), r.seen);
-    await pageA.getByTestId('together-done').click();
-    await pageA.waitForTimeout(1500);
-    await skipTour(pageA);
+    set('contribution-7', sent.length === 1 && r.attemptId !== null && sameAttempt, `${CONTROL}: ${sent.length} contribution request(s); receipt ${sameAttempt ? 'bound to that request\'s attempt' : 'not bound to that request\'s attempt'}`);
+    set('operation-receipt', r.ok && sameAttempt && showsNumber(screen, amount), `${CONTROL}: ${r.seen}`);
+    await pageM.getByTestId('together-done').click();
+    await pageM.waitForTimeout(1500);
+    await skipTour(pageM);
 
     // Fresh reads for the selected test goal, and the exact Progress row.
-    await pageA.reload();
+    await pageM.reload();
     guard.check();
-    await pageA.waitForTimeout(6000);
-    await skipTour(pageA);
-    const ownAfter = ownCreditOf(logA.last('wsfMyContribution', ev.goalId), ev.goalId);
-    const shared = sharedOf(logA.last('wsfGoalPulse', ev.goalId), ev.goalId);
+    await pageM.waitForTimeout(6000);
+    await skipTour(pageM);
+    const ownAfter = ownCreditOf(logM.last('wsfMyContribution', ev.goalId), ev.goalId);
+    const shared = sharedOf(logM.last('wsfGoalPulse', ev.goalId), ev.goalId);
     const before = ownBefore ?? 0; // a fresh account on a goal this run created: provably 0 when not read
-    const row = await progressRow(pageA);
+    const row = await progressRow(pageM);
     const rowOk = row !== null && row.includes(`${(ownAfter ?? NaN).toLocaleString('en-US')} ${UNIT}`) && showsNumber(row, shared);
-    if (ownAfter === null || shared === null) set('own-history-shared', false, `own ${ownAfter} shared ${shared}: a selected-goal read is missing`, 'BLOCKED');
+    if (ownAfter === null || shared === null) set('own-history-shared', false, `${CONTROL}: own ${ownAfter} shared ${shared}: a selected-goal read is missing`, 'BLOCKED');
     else set('own-history-shared', ownAfter === before + amount && ownAfter === r.ownCredit && shared === r.shared && rowOk,
-      `own ${before}${ownBefore === null ? ' (fresh, unread)' : ''} -> ${ownAfter} vs receipt ${r.ownCredit}; shared ${shared} vs receipt ${r.shared}; Progress row ${rowOk ? 'exact' : 'missing or different'}`);
+      `${CONTROL}: own ${before}${ownBefore === null ? ' (fresh, unread)' : ''} -> ${ownAfter} vs receipt ${r.ownCredit}; shared ${shared} vs receipt ${r.shared}; Progress row ${rowOk ? 'exact' : 'missing or different'}`);
 
     // Reopen MOVE on the same goal: a fresh draft, nothing replayed, no pending attempt, no second request.
-    await pageA.locator('[data-tab="home"]').first().click();
-    await pageA.getByRole('button', { name: 'MOVE — add a contribution' }).first().click();
-    await pageA.waitForTimeout(2000);
-    const pending = await pageA.evaluate((k) => localStorage.getItem(k), `wsf.pendingContribution.${ev.goalId}.${a.uid}`);
-    const replayed = await visible(pageA.locator('section.together-receipt'));
-    set('reopen-static', !replayed && pending === null && logA.sent('wsfContribute') === 1,
-      `receipt replayed ${replayed}; pending attempt ${pending === null ? 'none' : 'present'}; contribution requests ${logA.sent('wsfContribute')}`);
-    await pageA.keyboard.press('Escape');
+    await pageM.locator('[data-tab="home"]').first().click();
+    await pageM.getByRole('button', { name: 'MOVE — add a contribution' }).first().click();
+    await pageM.waitForTimeout(2000);
+    const pending = await pageM.evaluate((k) => localStorage.getItem(k), `wsf.pendingContribution.${ev.goalId}.${m.uid}`);
+    const replayed = await visible(pageM.locator('section.together-receipt'));
+    set('reopen-static', !replayed && pending === null && logM.sent('wsfContribute') === 1,
+      `${CONTROL}: receipt replayed ${replayed}; pending attempt ${pending === null ? 'none' : 'present'}; contribution requests ${logM.sent('wsfContribute')}`);
+    await pageM.keyboard.press('Escape');
 
-    // A -> B in the same browser storage, then A again in fresh storage with the test community chosen explicitly.
-    await signOut(pageA);
-    const logB = callableLog(pageA);
-    await pageA.goto(`${base}/`);
+    // The control -> B (a non-member) in the same browser storage, then the control again in fresh storage.
+    await signOut(pageM);
+    const logB = callableLog(pageM);
+    await pageM.goto(`${base}/`);
     guard.check();
-    await signIn(pageA, b);
-    await skipTour(pageA);
-    const uidB = await uidOf(pageA);
-    const pendingJoin = await pageA.evaluate(() => ['wsf.pendingJoinCode', 'wsf.pendingJoinGoal'].filter((k) => sessionStorage.getItem(k) !== null).length);
-    const bRow = await progressRow(pageA);
-    const bReadsA = logB.sent('wsfMyContribution', ev.goalId) + logB.sent('wsfGoalPulse', ev.goalId);
-    const bClean = uidB === b.uid && pendingJoin === 0 && bRow === null && bReadsA === 0 && !(await visible(pageA.locator('section.together-receipt')));
-    const pageA2 = await (await ctx()).newPage();
-    const logA2 = callableLog(pageA2);
-    await pageA2.goto(`${base}/`);
+    await signIn(pageM, b);
+    await skipTour(pageM);
+    const uidB = await uidOf(pageM);
+    const pendingJoin = await pageM.evaluate(() => ['wsf.pendingJoinCode', 'wsf.pendingJoinGoal'].filter((k) => sessionStorage.getItem(k) !== null).length);
+    const bRow = await progressRow(pageM);
+    const bReads = logB.sent('wsfMyContribution', ev.goalId) + logB.sent('wsfGoalPulse', ev.goalId);
+    const bClean = uidB === b.uid && pendingJoin === 0 && bRow === null && bReads === 0 && !(await visible(pageM.locator('section.together-receipt')));
+    const pageM2 = await (await ctx()).newPage();
+    const logM2 = callableLog(pageM2);
+    await pageM2.goto(`${base}/`);
     guard.check();
-    await signIn(pageA2, a);
-    await chooseCommunity(pageA2);
-    const back = await uidOf(pageA2);
-    const own2 = ownCreditOf(logA2.last('wsfMyContribution', ev.goalId), ev.goalId);
-    const row2 = await progressRow(pageA2);
-    set('account-isolation', bClean && back === a.uid && own2 === ownAfter && row2 === row,
-      `B ${uidB === b.uid ? 'signed in' : 'not signed in'}, pending join keys ${pendingJoin}, test-goal reads ${bReadsA}, Progress row ${bRow === null ? 'absent' : 'present'}; A back as ${idHash(back) === idHash(a.uid) ? 'the same identity' : 'another identity'}, own ${own2} vs ${ownAfter}, row ${row2 === row ? 'the same' : 'different'}`);
+    await signIn(pageM2, m);
+    await chooseCommunity(pageM2);
+    const back = await uidOf(pageM2);
+    const own2 = ownCreditOf(logM2.last('wsfMyContribution', ev.goalId), ev.goalId);
+    const row2 = await progressRow(pageM2);
+    set('account-isolation', bClean && back === m.uid && own2 === ownAfter && row2 === row,
+      `${CONTROL} -> B (non-member) -> ${CONTROL}: B ${uidB === b.uid ? 'signed in' : 'not signed in'}, pending join keys ${pendingJoin}, test-goal reads ${bReads}, Progress row ${bRow === null ? 'absent' : 'present'}; the control back as ${idHash(back) === idHash(m.uid) ? 'the same identity' : 'another identity'}, own ${own2} vs ${ownAfter}, row ${row2 === row ? 'the same' : 'different'}`);
   } catch (e) {
     for (const id of ['fixture-provenance', 'qr-join', 'contribution-7', 'operation-receipt', 'own-history-shared', 'reopen-static', 'account-isolation']) rows[id] ??= { status: 'FAIL', seen: `stopped: ${short(e)}` };
   } finally {
@@ -531,8 +559,18 @@ export function requireVerdict(doc, { cleanup, scan }) {
 }
 
 // ---- CLI ----------------------------------------------------------------------------------------
-async function cli(mode, env) {
-  const say = (l) => console.log(l);
+/** The real browser: the candidate's pinned Playwright, launched with no cloud or workflow credential in its environment. */
+async function launchChromium() {
+  const { chromium } = createRequire(path.resolve('apps/westayfit/package.json'))('@playwright/test');
+  return chromium.launch({ env: browserEnv(process.env) });
+}
+
+/**
+ * The CLI. Its exit code IS the gate: the workflow's bind steps stop the mode (before `config` mints anything, and
+ * before the job authenticates) only through a non-zero `--bind`, and `--run` must refuse a non-PASS bind before it
+ * imports the kit or launches a browser. Exported with injectable edges (#589 W4 F2) so both are tested.
+ */
+export async function cli(mode, env, { fetchImpl = fetch, reviewed = REVIEWED_BUILD, importKit = () => import('./journeys/fixture-kit.mjs'), launch = launchChromium, say = (l) => console.log(l) } = {}) {
   if (mode === '--require') {
     let doc = null;
     try { doc = JSON.parse(fs.readFileSync(path.join(env.WSF_RESULT_DIR, 'lovable-kiosk', 'results.json'), 'utf8')); } catch { /* no results */ }
@@ -544,7 +582,7 @@ async function cli(mode, env) {
   if (!b.ok || env.WSF_PROJECT !== PROJECT_ID) { say(`LOVABLE_BUILD=FAIL (${b.ok ? 'the project is not westayfit-staging' : b.reason})`); return 1; }
   let observed = null;
   let verdict;
-  try { observed = await servedManifest(fetch, b.base); verdict = bindBuild(observed); } catch (e) { verdict = { status: 'FAIL', reason: `the served build could not be read: ${short(e)}` }; }
+  try { observed = await servedManifest(fetchImpl, b.base); verdict = bindBuild(observed, reviewed); } catch (e) { verdict = { status: 'FAIL', reason: `the served build could not be read: ${short(e)}` }; }
   bindLines(observed, verdict).forEach(say);
   if (mode === '--bind') return verdict.status === 'PASS' ? 0 : 1;
   if (mode !== '--run') { say('usage: hosted-lovable-kiosk.mjs --bind | --run | --require'); return 2; }
@@ -556,16 +594,15 @@ async function cli(mode, env) {
   let doc = null;
   try {
     if (verdict.status !== 'PASS') return 1;
-    const { createFixtureKit } = await import('./journeys/fixture-kit.mjs');
+    const { createFixtureKit } = await importKit();
     let sdk;
     try { const raw = JSON.parse(fs.readFileSync(env.WSF_SDK_CONFIG_FILE, 'utf8')); sdk = raw?.result?.sdkConfig ?? raw?.sdkConfig ?? raw?.result ?? raw; } catch { sdk = null; }
     if (sdk?.projectId !== PROJECT_ID || typeof sdk?.apiKey !== 'string' || !env.WSF_GOOGLE_ACCESS_TOKEN || !env.WSF_CLEANUP_MANIFEST) throw new Error('the staging fixture inputs are missing');
     const runTag = `e5c-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`;
     const fixtures = createFixtureKit({ projectId: PROJECT_ID, apiKey: sdk.apiKey, token: env.WSF_GOOGLE_ACCESS_TOKEN, runTag, cleanupManifest: env.WSF_CLEANUP_MANIFEST });
     say(`LOVABLE_RUN_TAG=${runTag}`);
-    const { chromium } = createRequire(path.resolve('apps/westayfit/package.json'))('@playwright/test');
-    browser = await chromium.launch({ env: browserEnv(process.env) });
-    journey = await runJourney({ browser, fixtures, base: b.base });
+    browser = await launch();
+    journey = await runJourney({ browser, fixtures, base: b.base, reviewed });
   } catch (e) {
     rows['fixture-provenance'] ??= { status: 'FAIL', seen: `stopped before the journey: ${short(e)}` };
   } finally {
