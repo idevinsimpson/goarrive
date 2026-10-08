@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "07413796ed4d56c563adc895797f65b8333ca0ed9f2e5901b8b3d911cd6bede0",
-  "eventCount": 725,
+  "ledgerHead": "fb32961ad20ab34f5791bd7421de8dc71ddd16fc9e82b11cf429ed4d71e13fd4",
+  "eventCount": 729,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1390,7 +1390,9 @@
       "proof": null,
       "served": null,
       "releasedQueueIndex": null,
-      "reviewedBy": [],
+      "reviewedBy": [
+        "W4"
+      ],
       "subjectPaths": [
         "functions-westayfit/src/index.ts",
         "functions-westayfit/tests/callable/wsf-turn.test.ts",
@@ -1413,7 +1415,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6051232421
+          "id": 6051352224
         }
       },
       "review": {
@@ -1785,12 +1787,15 @@
       },
       "label": "Run the pinned Lovable kiosk journey with bounded real staging fixtures and cleanup inside the existing trusted runner",
       "origin": "ledger",
-      "phase": "DELIVERED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
       "pr": 589,
-      "reviewers": [],
+      "reviewers": [
+        "W4",
+        "W9"
+      ],
       "artifact": {
         "subjectSha": "aae04a41fd6aa72d90106e87d4f036ed3d302ff3",
         "prHeadSha": "aae04a41fd6aa72d90106e87d4f036ed3d302ff3",
@@ -4406,7 +4411,24 @@
       "ack": {
         "kind": "comment",
         "id": 6051302022
-      }
+      },
+      "superseded": true
+    },
+    "b019b87635918bbc2f574bb09d34f7a2f988f974043fcf765f74ecb28666ea09": {
+      "packet": "LOVABLE-KIOSK-HOSTED-PROOF-1",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
+    },
+    "ea24f1e616cf6cd9456450314028e2678613ae0c88b554fd6981c92a34d74627": {
+      "packet": "LOVABLE-KIOSK-HOSTED-PROOF-1",
+      "worker": "W9",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
