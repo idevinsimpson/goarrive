@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "d22bb661788838d052bfc73b31b1419f2bccd4e220a0729b6f4b471e647b8e60",
-  "eventCount": 704,
+  "ledgerHead": "0ecb89719136826d10e684859f5e1c683b4d0c588354dccc7f59c392c775e59c",
+  "eventCount": 705,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -4351,8 +4351,10 @@
       "packet": "CONTROL-CURRENT-PATCH-TRANSPORT-2",
       "worker": "W4",
       "reason": "review",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        6050537782
+      ],
       "ack": null
     }
   },
