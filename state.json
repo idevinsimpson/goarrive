@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "d06fda9dde73d646a40401d42235733daf20180e0da5e04923f75b115ecfb89e",
-  "eventCount": 799,
+  "ledgerHead": "dcb012d70a368173550458927ea59852c590ba1d9a2d7841266639fa0dd789eb",
+  "eventCount": 803,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -752,7 +752,7 @@
       },
       "label": "Recover isolated Event lifecycle backend after withdrawn unacknowledged W5 assignment",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -766,7 +766,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         "functions-westayfit/src/eventLifecycle.ts",
@@ -788,7 +788,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6060049268
+          "id": 6060201845
         }
       },
       "review": {
@@ -1570,7 +1570,7 @@
       },
       "label": "Recover native expected-turn caller after withdrawn unacknowledged W7 assignment",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -1584,7 +1584,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         "apps/westayfit/app/station/[goalId].tsx",
@@ -1609,7 +1609,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6060048984
+          "id": 6060186878
         }
       },
       "review": {
@@ -4734,21 +4734,27 @@
       "packet": "EVENT-LIFECYCLE-BACKEND-RECOVERY-1",
       "worker": "W9",
       "reason": "release",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6060164124
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6060201845
+      }
     },
     "2288365b4788a6fed18c01d197931d5ec0f7df2fe2caa611f1a00b22a79df906": {
       "packet": "KIOSK-EXPECTED-TURN-NATIVE-CALLER-RECOVERY-1",
       "worker": "W3",
       "reason": "release",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6060164400
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6060186878
+      }
     }
   },
   "fastpath": {
