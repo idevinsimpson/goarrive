@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "0ffc7834347a559e8151fd7eb7c21c3f942064199f9a4d10003d877bf1db38b5",
-  "eventCount": 710,
+  "ledgerHead": "f2e737dc0873359899b323a99d254df5ec9eb49c84fc426430ecfdc16d2819eb",
+  "eventCount": 714,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -348,7 +348,7 @@
       },
       "label": "Make the single CURRENT PATCH complete through a bounded transport while preserving exact readback and no resend",
       "origin": "ledger",
-      "phase": "CHANGES_REQUESTED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -357,8 +357,8 @@
         "W4"
       ],
       "artifact": {
-        "subjectSha": "468b3e792f591ecf8eb82c170b2fc0b80f70b76d",
-        "prHeadSha": "468b3e792f591ecf8eb82c170b2fc0b80f70b76d",
+        "subjectSha": "9070a3cf42884948ea97eb26e55f83f585d6bf86",
+        "prHeadSha": "9070a3cf42884948ea97eb26e55f83f585d6bf86",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -384,7 +384,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6050738781
+          "id": 6050852185
         }
       },
       "review": {
@@ -397,7 +397,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 1,
+      "deliveries": 2,
       "pendingFinding": null
     },
     "CONTROL-EXPO-ROUTE-PATH-GRAMMAR": {
@@ -4372,7 +4372,16 @@
       "ack": {
         "kind": "comment",
         "id": 6050793033
-      }
+      },
+      "superseded": true
+    },
+    "c457e466bc6c858b72218ecbad706c2b87ab6b9809ac5da03d5a91eace95c11e": {
+      "packet": "CONTROL-CURRENT-PATCH-TRANSPORT-2",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
