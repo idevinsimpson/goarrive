@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "f3ec6917f696fe5850d8473e17d451570526f46895a087147b5b61df01978b59",
-  "eventCount": 720,
+  "ledgerHead": "1e0056f369a99b921e16f15d752c1ff429737ce37c5c1b88b62635d95f93414c",
+  "eventCount": 723,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1373,7 +1373,7 @@
       },
       "label": "Bind kiosk mutations to the intended turn and preserve exactly-once phone and station completion",
       "origin": "ledger",
-      "phase": "CHANGES_REQUESTED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -1413,7 +1413,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6044494616
+          "id": 6051232421
         }
       },
       "review": {
@@ -1426,7 +1426,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 2,
+      "deliveries": 3,
       "pendingFinding": null
     },
     "KIOSK-EXPECTED-TURN-NATIVE-CALLER-1": {
@@ -4322,7 +4322,8 @@
       "ack": {
         "kind": "comment",
         "id": 6045874171
-      }
+      },
+      "superseded": true
     },
     "e60f0b948571e31179164ce0ae4ebccff760aa9cf926d94d7f20b560571959a8": {
       "packet": "LOVABLE-KIOSK-HOSTED-PROOF-1",
@@ -4393,6 +4394,14 @@
         "id": 6050914866
       },
       "superseded": true
+    },
+    "3ef4588cb52236b267616ced5d4d084674c659503e66718e335073733f88c479": {
+      "packet": "KIOSK-EXPECTED-TURN-1",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
