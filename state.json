@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "fbe17afc0e915f14ed6a813fd8ad603635062a8237d1283de113703b49d54c30",
-  "eventCount": 835,
+  "ledgerHead": "4f4832f5d3f65e9d393aee4051408e6f6e1814c6dd0829bb7e0bd5d075c42f3a",
+  "eventCount": 837,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1656,7 +1656,9 @@
       "proof": null,
       "served": null,
       "releasedQueueIndex": null,
-      "reviewedBy": [],
+      "reviewedBy": [
+        "W7"
+      ],
       "subjectPaths": [
         "apps/westayfit/app/station/[goalId].tsx",
         "apps/westayfit/src/turnContract.ts",
@@ -1680,7 +1682,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6061454040
+          "id": 6062409363
         }
       },
       "review": {
@@ -4900,7 +4902,7 @@
       "packet": "EVENT-LIFECYCLE-BACKEND-RECOVERY-1",
       "worker": "W5",
       "reason": "review",
-      "status": "delivered",
+      "status": "retried",
       "comments": [
         6061767731
       ],
@@ -4917,7 +4919,8 @@
       "ack": {
         "kind": "comment",
         "id": 6061808578
-      }
+      },
+      "superseded": true
     }
   },
   "fastpath": {
