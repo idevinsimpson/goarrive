@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "fcddb042ce35568df3896e81fd48babb1499211b69e27f2b1decf922a545f189",
-  "eventCount": 736,
+  "ledgerHead": "2d3433b772cbb8fc633ca1416dc541b5f8555565482464e9057dd9ef99f8e0d0",
+  "eventCount": 737,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -4449,8 +4449,10 @@
       "packet": "LOVABLE-KIOSK-HOSTED-PROOF-1",
       "worker": "W3",
       "reason": "handback",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        6051576301
+      ],
       "ack": null
     }
   },
