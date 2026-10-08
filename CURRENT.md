@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=c1ea8939472ec07e9e589f91bcb2187c82dde7ccb131113905b3ceaa2cffe7b9 events=829 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=b58b2405593bd05425b78c04fd2188d4a0d11ee8ed54d417c83c609dc2063b15 events=832 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `c1ea8939472ec07e9e589f91bcb2187c82dde7ccb131113905b3ceaa2cffe7b9` (829 events)
+- Ledger head: `b58b2405593bd05425b78c04fd2188d4a0d11ee8ed54d417c83c609dc2063b15` (832 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -217,7 +217,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | 0db03e79b2f3 | W5 | EVENT-LIFECYCLE-BACKEND-RECOVERY-1 | review | delivered | 6060991924 | — |
 | 85ec59b9dd76 | W3 | KIOSK-EXPECTED-TURN-NATIVE-CALLER-RECOVERY-2 | release | acked | 6061336367 | comment:6061382606 |
 | 638e6595dee2 | W9 | EVENT-LIFECYCLE-BACKEND-RECOVERY-1 | handback | acked | 6061511145 | comment:6061520149 |
-| 58d44641b3d7 | W4 | EVENT-LIFECYCLE-BACKEND-RECOVERY-1 | review | requested | — | — |
-| f0ed473f37e9 | W5 | EVENT-LIFECYCLE-BACKEND-RECOVERY-1 | review | requested | — | — |
-| 4c1753e8d987 | W7 | KIOSK-EXPECTED-TURN-NATIVE-CALLER-RECOVERY-2 | review | requested | — | — |
+| 58d44641b3d7 | W4 | EVENT-LIFECYCLE-BACKEND-RECOVERY-1 | review | delivered | 6061767398 | — |
+| f0ed473f37e9 | W5 | EVENT-LIFECYCLE-BACKEND-RECOVERY-1 | review | delivered | 6061767731 | — |
+| 4c1753e8d987 | W7 | KIOSK-EXPECTED-TURN-NATIVE-CALLER-RECOVERY-2 | review | delivered | 6061767966 | — |
 
