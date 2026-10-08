@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=97d27d48357633ff6e1f476c37f672b6a7cc2910ac2720b7cee1fc7d1702cf0b events=715 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=0e3286c3445634be776aec5ea5e904b1e844dfbc9b4b013809cd211723afe8cb events=716 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `97d27d48357633ff6e1f476c37f672b6a7cc2910ac2720b7cee1fc7d1702cf0b` (715 events)
+- Ledger head: `0e3286c3445634be776aec5ea5e904b1e844dfbc9b4b013809cd211723afe8cb` (716 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -194,5 +194,5 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | 1d9f6e64f3df | W3 | CONTROL-CURRENT-PATCH-TRANSPORT-2 | release | acked | 6050398019 | comment:6050437106 |
 | b756432786d4 | W4 | CONTROL-CURRENT-PATCH-TRANSPORT-2 | review | acked | 6050537782 | comment:6050571407 |
 | d0731cdb3af5 | W3 | CONTROL-CURRENT-PATCH-TRANSPORT-2 | handback | acked | 6050787763 | comment:6050793033 |
-| c457e466bc6c | W4 | CONTROL-CURRENT-PATCH-TRANSPORT-2 | review | delivered | 6050907527 | — |
+| c457e466bc6c | W4 | CONTROL-CURRENT-PATCH-TRANSPORT-2 | review | acked | 6050907527 | comment:6050914866 |
 
