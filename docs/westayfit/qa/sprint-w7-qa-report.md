@@ -6517,3 +6517,50 @@ After reassignment, 45 idle minutes produced no W7 post and no W7 timer line. W7
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0 (re-run before push).
 
 **Status:** **PASS at `d6d47879` with zero unresolved findings.** PN-1 to PN-4 are non-blocking. W7 made no product edit, merge, deploy, live-data change, credential or permission change, and did not touch any state ref or comment other than its own GitHub replies.
+
+## §81. Check 81: #596 KIOSK-EXPECTED-TURN-NATIVE-CALLER-RECOVERY-2 at `1cdbeff5`
+
+**Assignment:** router wake `4c1753e8d987a3294a41abdd15d4a2e41217883cf0f6582a9c19084466e0dedc` (#434 `6061767966`), under the owner's standing approval to ACK and perform valid W7 router reviews. I refreshed `wsf-control-state-2` first: `check` passed (835 events), `worker-view W7` showed `WATCH=on` and `REVIEWING=… phase=UNDER_REVIEW pr=#596 subject=1cdbeff5…`, W7 was the sole reviewer, and the wake was `acked`. I re-checked before posting: the PR head was still the subject, and nothing had been posted on #434 or #596 after my ACK. ACK: #434 `6061808578`.
+
+**Subject:** #596 (draft, owner W3) at exactly `1cdbeff52555a1585595e23a87f6905aa0b694ae`: 3 commits on `b8381195` (`claude/wsf-app-shell`), 5 files, +1139/−68, all inside the ledger's `subjectPaths`. I verified it in a detached worktree. Emulators only (`demo-wsf-local`), and nothing was pushed from it.
+
+### Reproduced
+
+| Check | Result |
+|---|---|
+| `tests/stationTurnOperation.test.ts` | **29 / 29** (the PR says 29) |
+| Full vitest | **1278 / 1278**, 65 files (the PR says 1,278 in 65) |
+| `tsc --noEmit` | exit **0** |
+| The PR's own mutant script (`mut-nc.mjs`, from its body, run from `apps/westayfit`) | **22 / 22 killed**; the tree is clean afterwards |
+| `expo-attendee-journey.spec.ts` on the head (unchanged by the PR) | **7 / 7** |
+| The same spec on the **base client** (`b8381195` versions of the two changed source files, same server, same build flags) | **5 failed, 2 passed**, as the PR says; the first failure is the record view never appearing after Start |
+| `station-enrollment` (3), `ui-kiosk` (3), `sprint-w1b-kiosk-confinement`, `sprint-w1b-kiosk-idle-finish`, `kiosk-setup-link`, `queue-call-by-name` on the head | **30 passed**, exit 0 |
+
+### Items
+
+1. **Contract copies equal the integrated #587 server, byte for byte.** The binding pattern `/^tr_[A-Za-z0-9_-]{16,64}$/` and the three sentences (`That turn has moved on. This screen now shows the current one.`, `That turn is not running.`, `This screen needs an update before it can run a turn.`) were compared with `functions-westayfit/src/index.ts` by program, not by eye. The last one is `TURN_REF_MISSING_MESSAGE` on the server, `TURN_NEEDS_UPDATE_MESSAGE` on the client; the text is identical. The client matches the stale, not-running and needs-update sentences **exactly**, never by code alone.
+2. **The #587 hazard, end to end, through the real station UI and the real integrated server (my instrument, `sprint-w7-expected-turn-instruments.md` #1).** A's Record **reaches the server** but its answer is cut. The screen offers "Try again", and the store already holds A once (25, goal 125). The hall moves on: Call next brings B. Pressing Start for B is **not sent**; the screen says "Finish checking <A's code> first". "Try again" then sends **A's own request byte for byte** (same `expectedTurn`, same count 25); the answer is A's receipt (`alreadyRecorded`, `addedCount` 25, A's own `entryId`); the screen shows A's line by A's code while still serving B. The store: A one contribution (25), **B none, B has no attempt, B's entry not done, goal 125**. B's own Start then carries a **different** ref and B's own Record (10) takes the goal to **135** with exactly two contributions. This is what the PR's own plan listed as `station-expected-turn.spec.ts` and left unwritten; it was not in the PR.
+3. **Non-vacuity of that instrument.**
+   - **On the newest-ref mutant** (the owner's mutant 1, rebuilt into the web bundle), it **fails**: the retry's answer carries no receipt.
+   - **On the base client** it **fails** at Start.
+4. **Controller logic, read in full (414 lines) and probed.** Single-flight (`inFlight`) is set before the send and outside React state. One immutable, frozen pending operation is captured at the press, with the turn's own ref, command, count and code. A press for another turn, or another command, while it is unanswered returns `otherPending` and sends nothing. Tickets are shared by polls and command answers, so only the newest-issued hall paints. A session change (secret, station or goal) drops everything, including answers in flight. A Record settles only from **its own receipt**, never from the hall, and a 2xx without a valid receipt stays unanswered rather than succeeding with the sent count. Definite refusals end the operation; lost answers keep it. Against a server that hands out no `turnRef`, the three commands are unavailable and **nothing is sent unbound**; Call next is unchanged.
+5. **Mutants beyond the owner's 22.** I wrote 16 more (session binding, hall-settling, ticket order, lost versus definite, pending lifecycle, the payload). The PR's suite kills **10 / 16**. The six survivors are **not product defects**: W7-1 is an equivalent mutant (the secret already identifies the station), and my 6 probes pass on the head and kill **W7-4** (Try again has no in-flight guard), **W7-8** (a late failure from an old session is not dropped), **W7-11** (the Record line states the sent count), **W7-12** (another command for the same turn resends the unanswered Record) and **W7-16** (a non-boolean `alreadyRecorded` is accepted). Together the suite and the probes kill 15 / 16.
+6. **Scope.** No server, rules, index, IAM, deploy, functions, fixture or Lovable change. `expo-attendee-journey.spec.ts` is unchanged, as the PR says, and it is the spec that proved the base fails. The QA record names the right limits.
+
+### Precision notes (non-blocking)
+
+- **PN-1 (tests).** Five behaviours that hold are not pinned by the PR's 29 tests: W7-4, W7-8 (an old session's **failure**, for example a permission-denied after a re-pair, is dropped and cannot clear the new session's credential), W7-11 (every test has `addedCount` equal to the sent count, so a line built from the sent count would pass), W7-12 and W7-16. The probes are in the instruments file; the owner may fold them in.
+- **PN-2 (carry-forward, already disclosed by the PR).** #587's note says to ship the station client first because an old server ignores the extra field. That no longer holds for this client: against a server that hands out no `turnRef`, Start, Record and "Let them go" are unavailable. Shipping the functions first breaks the old client. Either order leaves a window, so the two need to ship together or back to back. That is L0's decision. I read this in the PR's QA record and confirmed it in the code (`press` returns `unavailable`).
+- **PN-3 (code reading, not run).** After a stale refusal the screen shows the server's "This screen now shows the current one" but does not read the hall itself; the next 2 s poll (`STATE_POLL_MS`) repaints. For up to two seconds the old turn can still be on screen. Nothing is written in that window.
+- **PN-4 (names).** The QA record's file name, the commit subjects and two code comments still say RECOVERY-1; the packet is RECOVERY-2. The PR says so itself.
+
+### Limits, stated plainly (not findings)
+
+- This was the **web** build in Chromium against the emulators. The lost answer is a Playwright `route.abort` **after** the server processed the request, not a real network. I did **not** exercise iOS or Android, a hosted environment or a device, and the PR claims none.
+- Two stations recording together is covered by the existing journey test 1 (it passes); my instrument uses one station and two members.
+- Only the specs listed above were run; nothing else is claimed.
+- `/reg-d6d4.log` is still at the filesystem root (from Check 80); I could not delete it.
+
+- **Gates:** `ts:check` 0; `check-evidence-intact` 0 (re-run before push).
+
+**Status:** **PASS at `1cdbeff5` with zero unresolved findings.** PN-1 to PN-4 are non-blocking. W7 made no product edit, merge, deploy, live-data change, credential or permission change, and did not touch any state ref or comment other than its own GitHub replies.
