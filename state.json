@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "4b1b1faa2b48fe0d931dcbfa191ad411001fbcfa1d7f3dd2987941c10d94d86f",
-  "eventCount": 789,
+  "ledgerHead": "19ca7147e597092f3c3624c51be5e1d97c9e6251f47fb81b1a7a4d9eff6a338e",
+  "eventCount": 791,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -687,7 +687,7 @@
       },
       "label": "Implement canonical event lifecycle transactions and authorization in an isolated module without competing with kiosk receipt ownership",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "WITHDRAWN",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 395,
@@ -723,7 +723,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6044610796
+          "id": 6059491796
         }
       },
       "review": {
@@ -1441,7 +1441,7 @@
       },
       "label": "Wire native station commands to the exact turn and preserve safe retry across later visitors",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "WITHDRAWN",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 434,
@@ -1480,7 +1480,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6044062885
+          "id": 6059488593
         }
       },
       "review": {
@@ -4267,7 +4267,8 @@
         6044193835,
         6044557410
       ],
-      "ack": null
+      "ack": null,
+      "superseded": true
     },
     "574ab7e48385f7fa1e941cc2d10786005a3b1d5800d733b74c8e62468df06c36": {
       "packet": "CONTROL-CURRENT-PATCH-ACK-1",
@@ -4306,7 +4307,8 @@
         6044759515,
         6045098010
       ],
-      "ack": null
+      "ack": null,
+      "superseded": true
     },
     "cb513479a2e2253b3ef60857cb402e2431615027e1bf14194eb3e6c013bd0036": {
       "packet": "LOVABLE-KIOSK-HOSTED-PROOF-1",
