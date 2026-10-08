@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "c5c0cfe6b844fa08ee1ed33d779b584a47f8fbcaa37fd14c74faa61f6d342a79",
-  "eventCount": 755,
+  "ledgerHead": "3dc6288717b0bebe139951b39dd3d5f16a84aded9f1c2759892c5658f18217bd",
+  "eventCount": 764,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1788,7 +1788,7 @@
       },
       "label": "Run the pinned Lovable kiosk journey with bounded real staging fixtures and cleanup inside the existing trusted runner",
       "origin": "ledger",
-      "phase": "CHANGES_REQUESTED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -1798,8 +1798,8 @@
         "W9"
       ],
       "artifact": {
-        "subjectSha": "0df8f7bd7946b3db33321cc2cec618a50369291b",
-        "prHeadSha": "0df8f7bd7946b3db33321cc2cec618a50369291b",
+        "subjectSha": "8c9093c0129c338f6cc2eb7d03bea04dac2aed62",
+        "prHeadSha": "8c9093c0129c338f6cc2eb7d03bea04dac2aed62",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -1828,7 +1828,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6052330823
+          "id": 6052515840
         }
       },
       "review": {
@@ -1845,7 +1845,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 3,
+      "deliveries": 4,
       "pendingFinding": null
     },
     "MEMBER-PREVIEW-LABEL-1": {
@@ -2136,21 +2136,21 @@
       },
       "label": "Canonical private profile photos and permitted community roster for native and Lovable staging",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "DELIVERED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
-      "pr": null,
+      "pr": 593,
       "reviewers": [],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "5faac5dee055d5b576192077d14a85a8d0e57f3f",
+        "prHeadSha": "5faac5dee055d5b576192077d14a85a8d0e57f3f",
         "evidenceSha": null,
         "mergeSha": null
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         "functions-westayfit/src/index.ts",
@@ -2173,7 +2173,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6052427068
+          "id": 6052743788
         }
       },
       "review": {
@@ -2186,7 +2186,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "STAGING-FASTPATH-DOCS-LINEAGE-FIX": {
@@ -4492,20 +4492,44 @@
       "packet": "LOVABLE-KIOSK-HOSTED-PROOF-1",
       "worker": "W3",
       "reason": "handback",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6052399946
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6052507556
+      },
+      "superseded": true
     },
     "5de76c7c05dc50a79a399e071e6a69385ec94f3afb2cd6b92ba324fc8f666d2e": {
       "packet": "PROFILE-PHOTOS-FIREBASE-1",
       "worker": "W9",
       "reason": "release",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6052504001
       ],
+      "ack": {
+        "kind": "comment",
+        "id": 6052517710
+      },
+      "superseded": true
+    },
+    "2399e8f191fe75e5eb957c6a1cb03d5e9833331ee732bc21f706719cef319321": {
+      "packet": "LOVABLE-KIOSK-HOSTED-PROOF-1",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
+    },
+    "c71bc50dd0c38fcccf6ae40893125f2b87ec3578ac6e5c2eeefc6c40e351199a": {
+      "packet": "LOVABLE-KIOSK-HOSTED-PROOF-1",
+      "worker": "W9",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
