@@ -7,6 +7,8 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import http from 'node:http';
+import https from 'node:https';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -16,7 +18,7 @@ import { shadowSurfaceEvent, DECISION_OWNER, decisionBlock, decisionIntake, deri
 import { appendAll } from '../append-all.mjs';
 import { targetTitle } from '../fastpath.mjs';
 import { redact, tokenGitEnv, STATE_REF, predecessorRef } from '../gitstate.mjs';
-import { GitHubError, PAGE, gitHubClient, isTransportError } from '../github.mjs';
+import { GitHubError, PAGE, PATCH_TIMEOUT_MS, TransportError, gitHubClient, isTransportError, sendOnce } from '../github.mjs';
 import { STEP5_PERMISSIONS, appJwt, installationToken, AppTokenError } from '../app-token.mjs';
 import { health } from '../health-view.mjs';
 import { freshness } from '../freshness-view.mjs';
@@ -466,7 +468,7 @@ atest('GET-ONLY RETRY: one transport failure on a GET is retried once; a second 
   const raw = { id: 7, body: 'b', user: { login: 'idevinsimpson' }, author_association: 'OWNER', created_at: 't', updated_at: 't' };
   /** A fake that answers by a script, one entry per attempt, recording each attempt's method. */
   const scripted = (...steps) => { const seen = []; return { seen, fetchImpl: async (url, init) => { seen.push(init.method); const s = steps.shift(); if (s === 'lost') throw lost(); return s; } }; };
-  const gh = (f) => gitHubClient({ token: 't', repo: REPO, fetchImpl: f.fetchImpl });
+  const gh = (f) => gitHubClient({ token: 't', repo: REPO, fetchImpl: f.fetchImpl, patchImpl: f.fetchImpl });
 
   const once = scripted('lost', ok(raw));
   assert.deepEqual(await gh(once).comment(7), { id: 7, body: 'b', author: 'idevinsimpson', association: 'OWNER', createdAt: 't', updatedAt: 't' }, 'the exact response, once');
@@ -546,7 +548,7 @@ function commentServer({ patch, get = null, start = 'old body' } = {}) {
     if (get) return get(store, id, raw);
     return store.has(id) ? { ok: true, status: 200, json: async () => raw(id) } : { ok: false, status: 404, json: async () => ({}) };
   };
-  return { store, seen, client: gitHubClient({ token: TOKEN, repo: REPO, fetchImpl }) };
+  return { store, seen, client: gitHubClient({ token: TOKEN, repo: REPO, fetchImpl, patchImpl: fetchImpl }) };
 }
 const patches = (seen) => seen.filter((m) => m === 'PATCH').length;
 const noLeak = (e) => { const m = `${e?.message ?? ''}${e?.stack ?? ''}`; return !m.includes(TOKEN) && !m.includes(SECRET_BODY) && !m.includes('old body'); };
@@ -639,7 +641,7 @@ function patchWriterGh(mode) {
     const c = base.comments.get(id);
     return c ? { ok: true, status: 200, json: async () => ({ id, body: c.body, user: { login: BOT }, created_at: 't', updated_at: 't' }) } : { ok: false, status: 404, json: async () => ({}) };
   };
-  const real = gitHubClient({ token: TOKEN, repo: REPO, fetchImpl });
+  const real = gitHubClient({ token: TOKEN, repo: REPO, fetchImpl, patchImpl: fetchImpl });
   return { gh: { ...base, editComment: (id, body) => real.editComment(id, body) }, base, state };
 }
 
@@ -672,6 +674,221 @@ atest('PATCH-ACK end to end: a lost answer to an APPLIED edit is confirmed by re
   assert.equal(again.outcome, 'unchanged');
   assert.equal(again.surface, 'ok', 'the confirmed edit is the rendering');
   assert.equal(w.state.patches, 1, 'nothing re-sent');
+});
+
+// ---- CONTROL-CURRENT-PATCH-TRANSPORT-2 (#365 6045160033): the single PATCH over a bounded, fresh connection ----------
+// Runs 37671900853 and 37672822242 waited ~315 s in the CURRENT PATCH (undici's 300 s header timeout) for a status line
+// that never came; the exact read-back showed the old body. These tests drive the REAL sendOnce over a real local socket.
+/**
+ * A local HTTP host standing in for api.github.com's comment PATCH, over the same store the ordinary GET fake reads.
+ * `onPatch` decides what the host does with the PATCH it received. `log` records, in order, each request the host
+ * received (`via: 'socket'`) and each call the client made through fetchImpl (`via: 'fetch'`).
+ */
+async function patchHost(onPatch, { start = 'old body' } = {}) {
+  const store = new Map([[5, start]]);
+  const log = [];
+  const sockets = new Set();
+  const server = http.createServer((req, res) => {
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => {
+      const raw = Buffer.concat(chunks);
+      log.push({ via: 'socket', method: req.method, path: req.url, auth: req.headers.authorization, connection: req.headers.connection, length: Number(req.headers['content-length']), bytes: raw.length });
+      let body = null;
+      try { body = JSON.parse(raw.toString('utf8')).body; } catch { body = null; }
+      onPatch({ req, res, store, id: Number(req.url.split('/').pop()), body });
+    });
+  });
+  server.on('connection', (s) => { sockets.add(s); s.on('close', () => sockets.delete(s)); });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const local = (url) => { const u = new URL(url); return new URL(`${u.pathname}${u.search}`, `http://127.0.0.1:${server.address().port}`); };
+  const request = (url, opts, cb) => http.request(local(url), opts, cb);
+  const fetchImpl = async (url, init) => {
+    log.push({ via: 'fetch', method: init.method });
+    // main's editComment sent the PATCH through fetchImpl: route it to the same host, so the reproducer below is the
+    // observed case on either client. The bounded client never sends a PATCH here.
+    if (init.method === 'PATCH') return fetch(local(url), init);
+    const id = Number(new URL(url).pathname.split('/').pop());
+    return store.has(id) ? { ok: true, status: 200, json: async () => ({ id, body: store.get(id), user: { login: BOT }, created_at: 't', updated_at: 't' }) } : { ok: false, status: 404, json: async () => ({}) };
+  };
+  const client = (timeoutMs = 300) => gitHubClient({ token: TOKEN, repo: REPO, fetchImpl, patchImpl: (url, init) => sendOnce(url, init, { request, timeoutMs }) });
+  const close = async () => { for (const s of sockets) s.destroy(); await new Promise((r) => server.close(r)); };
+  const order = () => log.map((x) => `${x.via}:${x.method}`);
+  const sent = () => log.filter((x) => x.via === 'socket' && x.method === 'PATCH').length;
+  return { store, log, client, close, order, sent, request, local, fetchImpl };
+}
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+/** Fails when `p` has not settled within `ms`: an unbounded wait is a failure, not a hang of the suite. */
+const within = (p, ms, what) => Promise.race([p, pause(ms).then(() => { throw new Error(`${what}: still waiting after ${ms} ms (unbounded)`); })]);
+/** Run `fn` with unhandled rejections collected; none may occur, including after the settle (late socket events). */
+async function noUnhandled(fn) {
+  const seen = [];
+  const on = (e) => seen.push(e);
+  process.on('unhandledRejection', on);
+  try { await fn(); await pause(50); } finally { process.off('unhandledRejection', on); }
+  assert.deepEqual(seen.map(String), [], 'no unhandled rejection');
+}
+// A rendered body with multi-byte characters: Content-Length must count bytes, not characters.
+const WIDE_BODY = `${SECRET_BODY}\n→ — ✓ ${'x'.repeat(2000)}`;
+
+atest('PATCH-TRANSPORT reproducer (runs 37671900853, 37672822242): no status line ever arrives and the edit is not applied: settled within the bound, one PATCH, one read-back of the old body, unconfirmed', async () => {
+  await noUnhandled(async () => {
+    const h = await patchHost(() => { /* the request is received; no status line is ever sent */ });
+    try {
+      const t0 = Date.now();
+      await within(assert.rejects(h.client(300).editComment(5, SECRET_BODY), (e) => e instanceof GitHubError && /the edit is unconfirmed/.test(e.message) && /WSF_PATCH_TIMEOUT/.test(e.message) && /shows other content/.test(e.message) && noLeak(e)), 5000, 'the CURRENT edit');
+      const took = Date.now() - t0;
+      assert.ok(took >= 250 && took < 3000, `bounded by the deadline (${took} ms)`);
+      await pause(500);
+      assert.deepEqual(h.order(), ['socket:PATCH', 'fetch:GET'], 'one PATCH on the wire, then one read-back; never re-sent, never sent through fetchImpl');
+      assert.equal(h.store.get(5), 'old body', 'nothing was overwritten');
+    } finally { await h.close(); }
+  });
+});
+
+atest('PATCH-TRANSPORT: a 2xx is acknowledged at its status line on a fresh connection; the body (never-ending or cut off) is never read; the payload is exact', async () => {
+  await noUnhandled(async () => {
+    for (const [name, answer] of [
+      ['a body that never ends', (res) => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.write('{"id":5,"body":"'); }],
+      ['a body cut off mid-read', (res, req) => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.write('{"id":5,'); setTimeout(() => req.socket.destroy(), 10); }],
+      ['204 with no body', (res) => { res.writeHead(204); res.end(); }],
+    ]) {
+      const h = await patchHost(({ req, res, store, id, body }) => { store.set(id, body); answer(res, req); });
+      try {
+        assert.equal(await within(h.client(2000).editComment(5, WIDE_BODY), 1500, name), 'acknowledged', name);
+        assert.deepEqual(h.order(), ['socket:PATCH'], `${name}: one PATCH, no read-back`);
+        const got = h.log[0];
+        assert.equal(got.path, `/repos/${REPO}/issues/comments/5`);
+        assert.equal(got.auth, `Bearer ${TOKEN}`, 'the token travels only in the Authorization header');
+        assert.equal(got.connection, 'close', 'a fresh connection that is never pooled');
+        assert.equal(got.length, Buffer.byteLength(JSON.stringify({ body: WIDE_BODY }), 'utf8'), 'Content-Length counts bytes');
+        assert.equal(got.bytes, got.length, 'the whole payload arrived');
+        assert.equal(h.store.get(5), WIDE_BODY);
+      } finally { await h.close(); }
+    }
+  });
+});
+
+atest('PATCH-TRANSPORT: a timeout or an early close is settled by ONE exact read-back: applied exactly -> confirmed; old, other, newer or gone -> unconfirmed; one PATCH each', async () => {
+  await noUnhandled(async () => {
+    const hang = () => {};
+    const closeEarly = ({ req }) => req.socket.destroy();
+    const cases = [
+      ['timeout, applied exactly', ({ store, id, body }) => store.set(id, body), hang, 'confirmed-by-readback'],
+      ['timeout, not applied', () => {}, hang, /WSF_PATCH_TIMEOUT.*shows other content/],
+      ['timeout, a different body applied', ({ store, id, body }) => store.set(id, `${body}\nnewer`), hang, /shows other content/],
+      ['timeout, the comment is gone', ({ store, id }) => store.delete(id), hang, /could not read the comment/],
+      ['early close, applied exactly', ({ store, id, body }) => store.set(id, body), closeEarly, 'confirmed-by-readback'],
+      ['early close, not applied', () => {}, closeEarly, /\(ECONNRESET\).*shows other content/],
+    ];
+    for (const [name, apply, answer, want] of cases) {
+      const h = await patchHost((x) => { apply(x); answer(x); });
+      try {
+        const p = within(h.client(300).editComment(5, SECRET_BODY), 5000, name);
+        if (typeof want === 'string') assert.equal(await p, want, name);
+        else await assert.rejects(p, (e) => e instanceof GitHubError && !isTransportError(e) && want.test(e.message) && noLeak(e), name);
+        await pause(400);
+        assert.deepEqual(h.order(), ['socket:PATCH', 'fetch:GET'], `${name}: one PATCH, one read-back`);
+      } finally { await h.close(); }
+    }
+  });
+});
+
+atest('PATCH-TRANSPORT: every non-2xx answer over the socket fails closed at once (3xx never followed, 401, 403, 404, 422, 429, 5xx): one PATCH, no read-back, no retry', async () => {
+  await noUnhandled(async () => {
+    // W4 F2 (#394 6050738781): the 2xx boundary is new code here, not Response.ok. A 3xx (a moved repository answers
+    // 301/307) is not an acknowledgment, and its Location, on this same host, is never followed (a follow would show
+    // as a second socket PATCH).
+    for (const status of [300, 301, 302, 304, 307, 308, 401, 403, 404, 422, 429, 500, 502, 503]) {
+      const h = await patchHost(({ req, res }) => {
+        const redirect = status >= 300 && status < 400 ? { Location: `http://${req.headers.host}/repos/${REPO}/issues/comments/6` } : {};
+        res.writeHead(status, { 'Content-Type': 'application/json', ...redirect });
+        res.end(status === 304 ? undefined : `{"message":"${TOKEN}"}`);
+      });
+      try {
+        await assert.rejects(within(h.client(2000).editComment(5, SECRET_BODY), 1500, String(status)), (e) => e instanceof GitHubError && e.status === status && noLeak(e), String(status));
+        await pause(100);
+        assert.deepEqual(h.order(), ['socket:PATCH'], `HTTP ${status}`);
+        assert.equal(h.store.get(5), 'old body', `HTTP ${status}: nothing claims the edit`);
+      } finally { await h.close(); }
+    }
+  });
+});
+
+atest('PATCH-TRANSPORT: a late answer after the deadline changes nothing; programmer errors are thrown as they are, with no read-back', async () => {
+  await noUnhandled(async () => {
+    const late = await patchHost(({ res, store, id, body }) => setTimeout(() => { store.set(id, body); res.writeHead(200); res.end('{}'); }, 600));
+    try {
+      await assert.rejects(late.client(200).editComment(5, SECRET_BODY), /WSF_PATCH_TIMEOUT.*shows other content/);
+      await pause(800);
+      assert.deepEqual(late.order(), ['socket:PATCH', 'fetch:GET'], 'the late answer is ignored: no second settle, no resend');
+    } finally { await late.close(); }
+
+    const h = await patchHost(() => assert.fail('nothing is sent'));
+    try {
+      const bad = gitHubClient({ token: TOKEN, repo: REPO, fetchImpl: h.fetchImpl, patchImpl: (url, init) => sendOnce(url, { ...init, headers: { ...init.headers, 'X-Bad': 'a\nb' } }, { request: h.request, timeoutMs: 300 }) });
+      await assert.rejects(bad.editComment(5, SECRET_BODY), (e) => e instanceof TypeError && e.code === 'ERR_INVALID_CHAR' && !isTransportError(e), 'an invalid header is a programmer error');
+      const thrower = gitHubClient({ token: TOKEN, repo: REPO, fetchImpl: h.fetchImpl, patchImpl: (url, init) => sendOnce(url, init, { request: () => { throw new ReferenceError('request is not defined'); } }) });
+      await assert.rejects(thrower.editComment(5, SECRET_BODY), (e) => e instanceof ReferenceError);
+      assert.deepEqual(h.order(), [], 'no PATCH on the wire and no read-back');
+    } finally { await h.close(); }
+  });
+});
+
+atest('PATCH-TRANSPORT production default (W4 F1, #394 6050738781): the default client PATCH arms exactly PATCH_TIMEOUT_MS, nothing longer, and a missing status line ends in WSF_PATCH_TIMEOUT', async () => {
+  // No patchImpl and no timeoutMs: the path shadow-run uses. https.request is pointed at a host that never answers; the
+  // global setTimeout records each delay armed during the call and shortens the long ones, so the test needs no 30 s.
+  const h = await patchHost(() => { /* never answers */ });
+  const realRequest = https.request;
+  const realSetTimeout = globalThis.setTimeout;
+  const armed = [];
+  https.request = (url, o, cb) => h.request(url, o, cb);
+  globalThis.setTimeout = (fn, ms, ...rest) => { armed.push(ms); return realSetTimeout(fn, ms >= 1000 ? 20 : ms, ...rest); };
+  let outcome;
+  try {
+    const g = gitHubClient({ token: TOKEN, repo: REPO, fetchImpl: h.fetchImpl });
+    outcome = await Promise.race([
+      g.editComment(5, SECRET_BODY).then(() => 'resolved', (e) => e),
+      new Promise((r) => realSetTimeout(() => r('still waiting'), 5000)),
+    ]);
+  } finally {
+    globalThis.setTimeout = realSetTimeout;
+    https.request = realRequest;
+    await h.close();
+  }
+  assert.ok(outcome instanceof GitHubError && /\(WSF_PATCH_TIMEOUT\).*the edit is unconfirmed/.test(outcome.message) && noLeak(outcome), `the default PATCH ends in its own deadline (${outcome?.message ?? outcome})`);
+  assert.ok(armed.includes(PATCH_TIMEOUT_MS), `the production PATCH arms PATCH_TIMEOUT_MS (armed ${armed.join(', ')})`);
+  assert.ok(armed.every((ms) => ms <= PATCH_TIMEOUT_MS), `nothing longer than PATCH_TIMEOUT_MS is armed (armed ${armed.join(', ')})`);
+  assert.deepEqual(h.order(), ['socket:PATCH', 'fetch:GET'], 'one PATCH on its own connection, then one read-back');
+});
+
+atest('PATCH-TRANSPORT sendOnce: the bound holds, failures are TransportErrors carrying a code only, and the default client PATCH never uses fetchImpl', async () => {
+  assert.ok(PATCH_TIMEOUT_MS > 0 && PATCH_TIMEOUT_MS <= 60_000, 'well under the observed 300 s wait');
+  await noUnhandled(async () => {
+    const h = await patchHost(() => {});
+    try {
+      const t0 = Date.now();
+      await assert.rejects(sendOnce(`https://api.github.com/repos/${REPO}/issues/comments/5`, { method: 'PATCH', headers: { Authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ body: SECRET_BODY }) }, { request: h.request, timeoutMs: 250 }),
+        (e) => e instanceof TransportError && isTransportError(e) && e.code === 'WSF_PATCH_TIMEOUT' && noLeak(e));
+      assert.ok(Date.now() - t0 < 2000);
+    } finally { await h.close(); }
+    // A refused connection: a closed port.
+    const probe = http.createServer();
+    await new Promise((r) => probe.listen(0, '127.0.0.1', r));
+    const port = probe.address().port;
+    await new Promise((r) => probe.close(r));
+    await assert.rejects(sendOnce('https://api.github.com/x', { method: 'PATCH', headers: {}, body: '{}' }, { request: (url, o, cb) => http.request(`http://127.0.0.1:${port}/x`, o, cb), timeoutMs: 2000 }),
+      (e) => e instanceof TransportError && e.code === 'ECONNREFUSED');
+  });
+  // The client's default PATCH is sendOnce over node:https, never fetchImpl (https.request is pointed at a local host).
+  const h = await patchHost(({ res, store, id, body }) => { store.set(id, body); res.writeHead(200); res.end(); });
+  const real = https.request;
+  https.request = (url, o, cb) => h.request(url, o, cb);
+  try {
+    const g = gitHubClient({ token: TOKEN, repo: REPO, fetchImpl: h.fetchImpl });
+    assert.equal(await g.editComment(5, SECRET_BODY), 'acknowledged');
+    assert.deepEqual(h.order(), ['socket:PATCH'], 'the default PATCH went over its own connection; fetchImpl saw nothing');
+  } finally { https.request = real; await h.close(); }
 });
 
 // ---- stale-bootstrap recovery (run 50: the first bootstrap imported a 28-hour-old input) ----------------------
