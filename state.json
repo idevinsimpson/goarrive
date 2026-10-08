@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "3ba45a33a7b40ae6a1a2c9bdd99a9303af01c9f404ab84d1ffb58e9da0c554fe",
-  "eventCount": 746,
+  "ledgerHead": "12e2264c04438af3a3032be2a4bd9794ae89bc850061654464cc654a79288ab9",
+  "eventCount": 749,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1808,7 +1808,9 @@
       "proof": null,
       "served": null,
       "releasedQueueIndex": null,
-      "reviewedBy": [],
+      "reviewedBy": [
+        "W9"
+      ],
       "subjectPaths": [
         ".github/workflows/wsf-staging-deploy.yml",
         ".github/wsf-staging/hosted-lovable-kiosk.mjs",
@@ -1830,7 +1832,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6051761721
+          "id": 6051841574
         }
       },
       "review": {
@@ -4463,21 +4465,28 @@
       "packet": "LOVABLE-KIOSK-HOSTED-PROOF-1",
       "worker": "W4",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6051810195
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6051816252
+      }
     },
     "a41210dad68a379a0d836715b9b2e275438aefa57488ce24dfb36a6f8f71f45e": {
       "packet": "LOVABLE-KIOSK-HOSTED-PROOF-1",
       "worker": "W9",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6051810362
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6051841574
+      },
+      "superseded": true
     }
   },
   "fastpath": {
