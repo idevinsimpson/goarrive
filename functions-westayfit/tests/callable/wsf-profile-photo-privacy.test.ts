@@ -392,7 +392,18 @@ describe('Hide is not Remove', () => {
       expect(r.ok).toBe(false);
       if (!r.ok) expect(r.error.code).toBe('invalid-argument');
     }
+    // A refusal writes NOTHING (#394 6053090140): a nonmember's call creates no membership row — a stub row would
+    // block that person's later join by link — and a removed member's call leaves their row byte-identical.
     refusedMembers(await attempt(call(wsfSetCommunityPhotoVisibility, as(s.dee), { groupId: s.g1, photo: 'private' })));
+    expect((await getFirestore().doc(`wsfMemberships/${s.g1}_${s.dee}`).get()).exists).toBe(false);
+    const gone = await seedPerson('gone', 'Gone Synthetic');
+    await join(s.g1, gone, { membershipStatus: 'removed' });
+    const goneRef = getFirestore().doc(`wsfMemberships/${s.g1}_${gone}`);
+    const goneBefore = await goneRef.get();
+    refusedMembers(await attempt(call(wsfSetCommunityPhotoVisibility, as(gone), { groupId: s.g1, photo: 'private' })));
+    const goneAfter = await goneRef.get();
+    expect(goneAfter.data()).toEqual(goneBefore.data());
+    expect(goneAfter.updateTime?.isEqual(goneBefore.updateTime!)).toBe(true);
     // There is no way to name another member: a targetUid is ignored and only the caller's row changes.
     await call(wsfSetCommunityPhotoVisibility, as(s.ben), { groupId: s.g1, photo: 'private', targetUid: s.ann, userId: s.ann });
     const annRow = (await getFirestore().doc(`wsfMemberships/${s.g1}_${s.ann}`).get()).data()!;

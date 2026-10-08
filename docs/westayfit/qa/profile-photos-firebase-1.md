@@ -147,6 +147,7 @@ Both clients use this one contract. Firebase is the only authority: there are no
 | `wsf-profile-photos.test.ts` + `wsf-profile-photo-privacy.test.ts` | **23 / 23** |
 | Mutants (13: audience checks, generations, rebuild, portrait, self-exclusion, table lengths) | **12 killed**. The survivor, M4 (the faces list ignoring Show my photo), is equivalent: tokens are only loaded for rows whose photo is visible. |
 | Full callable suite | **34 suites, 604 / 604** |
+| W4 finding #394 6053090140 (F1, test-only) | Both cases are pinned: a refused Show-my-photo call by a nonmember creates **no** membership row, and a removed member's refused call leaves their row byte-identical. W4's **M17** (pre-write membership check removed) is now killed: **1 failed / 11** on the privacy suite. |
 | Deploy-config | **17 / 17** |
 | `tsc --noEmit` | clean |
 | Chromium round trip (scratch, not committed) | The rebuilt JPEG decodes to identical pixels. The injected GPS APP1, the COM segment and trailing junk are gone. |
