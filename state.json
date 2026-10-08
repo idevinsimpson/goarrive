@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "19ca7147e597092f3c3624c51be5e1d97c9e6251f47fb81b1a7a4d9eff6a338e",
-  "eventCount": 791,
+  "ledgerHead": "5468422e56232bb1e1e375cf0354ec183d01535567fe7c150304e4688145cf9e",
+  "eventCount": 793,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -61,11 +61,15 @@
     }
   },
   "queue": {
-    "W3": [],
+    "W3": [
+      "KIOSK-EXPECTED-TURN-NATIVE-CALLER-RECOVERY-1"
+    ],
     "W4": [],
     "W5": [],
     "W7": [],
-    "W9": []
+    "W9": [
+      "EVENT-LIFECYCLE-BACKEND-RECOVERY-1"
+    ]
   },
   "packets": {
     "AUTONOMY-ROUTER-1C": {
@@ -724,6 +728,68 @@
         "lastTransition": {
           "kind": "comment",
           "id": 6059491796
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "journey-qa",
+            "count": 1
+          },
+          {
+            "class": "security",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
+      "pendingFinding": null
+    },
+    "EVENT-LIFECYCLE-BACKEND-RECOVERY-1": {
+      "owner": "W9",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Recover isolated Event lifecycle backend after withdrawn unacknowledged W5 assignment",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "functions-westayfit/src/eventLifecycle.ts",
+        "functions-westayfit/tests/callable/wsf-event-lifecycle.test.ts",
+        "functions-westayfit/tests/callable/wsf-event-lifecycle-privacy.test.ts",
+        "docs/westayfit/qa/event-lifecycle-backend-1.md"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6059919181
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6059919181
         }
       },
       "review": {
@@ -1481,6 +1547,67 @@
         "lastTransition": {
           "kind": "comment",
           "id": 6059488593
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "journey-qa",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
+      "pendingFinding": null
+    },
+    "KIOSK-EXPECTED-TURN-NATIVE-CALLER-RECOVERY-1": {
+      "owner": "W3",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Recover native expected-turn caller after withdrawn unacknowledged W7 assignment",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "apps/westayfit/app/station/[goalId].tsx",
+        "apps/westayfit/src/turnContract.ts",
+        "apps/westayfit/src/stationTurnOperation.ts",
+        "apps/westayfit/src/__tests__/stationTurnOperation.test.ts",
+        "tests-e2e/station-expected-turn.spec.ts",
+        "tests-e2e/expo-attendee-journey.spec.ts",
+        "docs/westayfit/qa/kiosk-expected-turn-native-caller-1.md"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6059919550
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6059919550
         }
       },
       "review": {
