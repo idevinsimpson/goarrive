@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "3ef52d08e9f7ba3a3dada7c3af8b333432e7aaad26a7bb9f1aaa87b025fba64b",
-  "eventCount": 706,
+  "ledgerHead": "8d0fc41bc20740ddbf51173bcc4423f6bc9f0266e67edfc2c01af54ff036ca57",
+  "eventCount": 708,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -348,7 +348,7 @@
       },
       "label": "Make the single CURRENT PATCH complete through a bounded transport while preserving exact readback and no resend",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "CHANGES_REQUESTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -384,7 +384,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6050491610
+          "id": 6050738781
         }
       },
       "review": {
@@ -4358,7 +4358,16 @@
       "ack": {
         "kind": "comment",
         "id": 6050571407
-      }
+      },
+      "superseded": true
+    },
+    "d0731cdb3af587de41d0d3148074b6c09f919668b3432a788633f8bcd89f7cc4": {
+      "packet": "CONTROL-CURRENT-PATCH-TRANSPORT-2",
+      "worker": "W3",
+      "reason": "handback",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
