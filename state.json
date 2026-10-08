@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "a5af63cf8c89e7fd82408039a3148c6b9a455d39cb82c07d638aa977a57d42f3",
-  "eventCount": 718,
+  "ledgerHead": "699240a882686e8cd3808001b4cc959932df7c887410cee74290a732d6f7ecc7",
+  "eventCount": 719,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2852,7 +2852,7 @@
     {
       "id": "writer",
       "path": "tools/wsf-control",
-      "commit": "cc33f4e70eb5351023c97bff550a0b13bc943376"
+      "commit": "893517354762ad07782d79a57207e4e246bd16fd"
     },
     {
       "id": "writer-workflow",
