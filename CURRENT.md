@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=31ad512c104eaada00ab318a04933d5f6ec7b55fcd0fc88842256bcf0537853c events=838 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=369f17d53baaaf31bbca3666ff72c4332ea4a64947a4cdb5508d0b0efa6477ec events=840 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `31ad512c104eaada00ab318a04933d5f6ec7b55fcd0fc88842256bcf0537853c` (838 events)
+- Ledger head: `369f17d53baaaf31bbca3666ff72c4332ea4a64947a4cdb5508d0b0efa6477ec` (840 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -29,7 +29,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 
 | Worker | Inbox | Active now | Reviewing | Waiting on review | Blocked | Next | Queue | WATCH |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| W3 | #396 | — | — | KIOSK-EXPECTED-TURN-NATIVE-CALLER-RECOVERY-2, WORKER-EXECUTION-PROFILES-1 | KIOSK-UNVERIFIED-STAGING-RECOVERY-1, NORTHSTAR-MIRROR-INTAKE-1 | — | — | off |
+| W3 | #396 | — | — | WORKER-EXECUTION-PROFILES-1 | KIOSK-UNVERIFIED-STAGING-RECOVERY-1, NORTHSTAR-MIRROR-INTAKE-1 | — | — | off |
 | W4 | #394 | — | — | — | — | — | — | off |
 | W5 | #395 | — | EVENT-LIFECYCLE-BACKEND-RECOVERY-1 | — | — | — | — | on |
 | W7 | #434 | — | — | — | — | — | — | off |
@@ -62,7 +62,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | KIOSK-EXPECTED-TURN-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #587 | 4bc9a0b8 | 4bc9a0b8 | — | 934f24f0 | — | W4 | comment:6042840991 | pull_request:587 | — | Bind kiosk mutations to the intended turn and preserve exactly-once phone and station completion | 1×journey-qa then director | — |
 | KIOSK-EXPECTED-TURN-NATIVE-CALLER-1 | W7 | work | INTEGRATED (source-only) | ledger | WITHDRAWN | — | — | — | — | — | — | — | comment:6044062885 | comment:6059488593 | — | Wire native station commands to the exact turn and preserve safe retry across later visitors | 1×journey-qa then director | — |
 | KIOSK-EXPECTED-TURN-NATIVE-CALLER-RECOVERY-1 | W3 | work | INTEGRATED (source-only) | ledger | WITHDRAWN | — | — | — | — | — | — | — | comment:6060048984 | comment:6060908197 | — | Recover native expected-turn caller after withdrawn unacknowledged W7 assignment | 1×journey-qa then director | — |
-| KIOSK-EXPECTED-TURN-NATIVE-CALLER-RECOVERY-2 | W3 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #596 | 1cdbeff5 | 1cdbeff5 | — | — | — | W7 | comment:6061210091 | comment:6062409363 | — | Correct native expected-turn caller reservation to executable Vitest and Playwright paths | 1×journey-qa then director | — |
+| KIOSK-EXPECTED-TURN-NATIVE-CALLER-RECOVERY-2 | W3 | work | INTEGRATED (source-only) | ledger | ACCEPTED | #596 | 1cdbeff5 | 1cdbeff5 | — | — | — | W7 | comment:6061210091 | comment:6063435709 | — | Correct native expected-turn caller reservation to executable Vitest and Playwright paths | 1×journey-qa then director | — |
 | KIOSK-PAIRING-CLARITY-PROOF-1 | W9 | work | STAGED (hosted) | ledger | STAGED | #553 | 4537c26c | 4537c26c | — | ab77fbfc | hosted run 37025084843: PASS | W4 | comment:5945136749 | comment:5955903159 | — | Clarify venue-station pairing from the Champion's own phone and prove the existing flow end-to-end | 1×journey-qa then director | — |
 | KIOSK-UNVERIFIED-PARTICIPANT-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #586 | a17ee3e2 | a17ee3e2 | — | 819c26f0 | — | W4 | comment:6041849013 | pull_request:586 | — | Allow real authenticated unverified attendees to complete the ordinary WSF event participation backend journey | 1×journey-qa then director | — |
 | KIOSK-UNVERIFIED-PARTICIPANT-1-STAGING-PIN | W3 | work | INTEGRATED (source-only) | ledger | WITHDRAWN | — | — | — | — | — | — | — | comment:6043102398 | comment:6043983205 | — | Pin and prove the integrated unverified-attendee backend through the reviewed full staging path | 1×ops-source then director | — |
@@ -218,6 +218,6 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | 85ec59b9dd76 | W3 | KIOSK-EXPECTED-TURN-NATIVE-CALLER-RECOVERY-2 | release | acked | 6061336367 | comment:6061382606 |
 | 638e6595dee2 | W9 | EVENT-LIFECYCLE-BACKEND-RECOVERY-1 | handback | acked | 6061511145 | comment:6061520149 |
 | 58d44641b3d7 | W4 | EVENT-LIFECYCLE-BACKEND-RECOVERY-1 | review | acked | 6061767398 | comment:6061786075 |
-| f0ed473f37e9 | W5 | EVENT-LIFECYCLE-BACKEND-RECOVERY-1 | review | redelivered | 6061767731, 6062576316 | — |
+| f0ed473f37e9 | W5 | EVENT-LIFECYCLE-BACKEND-RECOVERY-1 | review | timed-out (wake-undelivered) | 6061767731, 6062576316 | — |
 | 4c1753e8d987 | W7 | KIOSK-EXPECTED-TURN-NATIVE-CALLER-RECOVERY-2 | review | acked | 6061767966 | comment:6061808578 |
 
