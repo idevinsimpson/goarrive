@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "5468422e56232bb1e1e375cf0354ec183d01535567fe7c150304e4688145cf9e",
-  "eventCount": 793,
+  "ledgerHead": "385a0ff8448b6412007e9f7b144e71154c20836d03a516595e18e1cb6d590a71",
+  "eventCount": 797,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -61,15 +61,11 @@
     }
   },
   "queue": {
-    "W3": [
-      "KIOSK-EXPECTED-TURN-NATIVE-CALLER-RECOVERY-1"
-    ],
+    "W3": [],
     "W4": [],
     "W5": [],
     "W7": [],
-    "W9": [
-      "EVENT-LIFECYCLE-BACKEND-RECOVERY-1"
-    ]
+    "W9": []
   },
   "packets": {
     "AUTONOMY-ROUTER-1C": {
@@ -756,10 +752,10 @@
       },
       "label": "Recover isolated Event lifecycle backend after withdrawn unacknowledged W5 assignment",
       "origin": "ledger",
-      "phase": "QUEUED",
+      "phase": "RELEASED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
-      "inbox": null,
+      "inbox": 497,
       "pr": null,
       "reviewers": [],
       "artifact": {
@@ -770,7 +766,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": null,
+      "releasedQueueIndex": 0,
       "reviewedBy": [],
       "subjectPaths": [
         "functions-westayfit/src/eventLifecycle.ts",
@@ -785,11 +781,14 @@
           "kind": "comment",
           "id": 6059919181
         },
-        "released": null,
+        "released": {
+          "kind": "comment",
+          "id": 6060049268
+        },
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6059919181
+          "id": 6060049268
         }
       },
       "review": {
@@ -1571,10 +1570,10 @@
       },
       "label": "Recover native expected-turn caller after withdrawn unacknowledged W7 assignment",
       "origin": "ledger",
-      "phase": "QUEUED",
+      "phase": "RELEASED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
-      "inbox": null,
+      "inbox": 396,
       "pr": null,
       "reviewers": [],
       "artifact": {
@@ -1585,7 +1584,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": null,
+      "releasedQueueIndex": 0,
       "reviewedBy": [],
       "subjectPaths": [
         "apps/westayfit/app/station/[goalId].tsx",
@@ -1603,11 +1602,14 @@
           "kind": "comment",
           "id": 6059919550
         },
-        "released": null,
+        "released": {
+          "kind": "comment",
+          "id": 6060048984
+        },
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6059919550
+          "id": 6060048984
         }
       },
       "review": {
@@ -4727,6 +4729,22 @@
         "id": 6053300849
       },
       "superseded": true
+    },
+    "ad83bafe5656ebd7df0c6c8115c34d30cf393f59668a6e77a1d140c31961236d": {
+      "packet": "EVENT-LIFECYCLE-BACKEND-RECOVERY-1",
+      "worker": "W9",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
+    },
+    "2288365b4788a6fed18c01d197931d5ec0f7df2fe2caa611f1a00b22a79df906": {
+      "packet": "KIOSK-EXPECTED-TURN-NATIVE-CALLER-RECOVERY-1",
+      "worker": "W3",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
