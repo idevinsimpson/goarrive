@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "cac978ee356a63a343de70564db513c34600cfe61951a8e905a4b877cf381ed0",
-  "eventCount": 820,
+  "ledgerHead": "c1ea8939472ec07e9e589f91bcb2187c82dde7ccb131113905b3ceaa2cffe7b9",
+  "eventCount": 829,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -752,7 +752,7 @@
       },
       "label": "Recover isolated Event lifecycle backend after withdrawn unacknowledged W5 assignment",
       "origin": "ledger",
-      "phase": "CHANGES_REQUESTED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -762,8 +762,8 @@
         "W5"
       ],
       "artifact": {
-        "subjectSha": "9d0af6c590645e3625b5a480dff52c811f1c88e7",
-        "prHeadSha": "9d0af6c590645e3625b5a480dff52c811f1c88e7",
+        "subjectSha": "e56485a1499f6390a233406719a53e5aeaecb50a",
+        "prHeadSha": "e56485a1499f6390a233406719a53e5aeaecb50a",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -791,7 +791,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6061337130
+          "id": 6061658443
         }
       },
       "review": {
@@ -808,7 +808,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 1,
+      "deliveries": 2,
       "pendingFinding": null
     },
     "EVERGREEN-MARKER-ENTRY-1": {
@@ -1637,15 +1637,17 @@
       },
       "label": "Correct native expected-turn caller reservation to executable Vitest and Playwright paths",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
-      "pr": null,
-      "reviewers": [],
+      "pr": 596,
+      "reviewers": [
+        "W7"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "1cdbeff52555a1585595e23a87f6905aa0b694ae",
+        "prHeadSha": "1cdbeff52555a1585595e23a87f6905aa0b694ae",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -1676,7 +1678,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6061382606
+          "id": 6061454040
         }
       },
       "review": {
@@ -1689,7 +1691,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "KIOSK-PAIRING-CLARITY-PROOF-1": {
@@ -4861,16 +4863,45 @@
       "ack": {
         "kind": "comment",
         "id": 6061382606
-      }
+      },
+      "superseded": true
     },
     "638e6595dee2776e36a24ecd5290cbf49be2d70f6f6f03c11660eb5680190262": {
       "packet": "EVENT-LIFECYCLE-BACKEND-RECOVERY-1",
       "worker": "W9",
       "reason": "handback",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6061511145
       ],
+      "ack": {
+        "kind": "comment",
+        "id": 6061520149
+      },
+      "superseded": true
+    },
+    "58d44641b3d79d0fa4b4e9ddb8013390e08679f3c664076053cd9f63a00ccf15": {
+      "packet": "EVENT-LIFECYCLE-BACKEND-RECOVERY-1",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
+    },
+    "f0ed473f37e96c43db2387389744e5fc18b3ad00c0a196057419114b257f8c9d": {
+      "packet": "EVENT-LIFECYCLE-BACKEND-RECOVERY-1",
+      "worker": "W5",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
+    },
+    "4c1753e8d987a3294a41abdd15d4a2e41217883cf0f6582a9c19084466e0dedc": {
+      "packet": "KIOSK-EXPECTED-TURN-NATIVE-CALLER-RECOVERY-2",
+      "worker": "W7",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
