@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "385a0ff8448b6412007e9f7b144e71154c20836d03a516595e18e1cb6d590a71",
-  "eventCount": 797,
+  "ledgerHead": "d06fda9dde73d646a40401d42235733daf20180e0da5e04923f75b115ecfb89e",
+  "eventCount": 799,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -4734,16 +4734,20 @@
       "packet": "EVENT-LIFECYCLE-BACKEND-RECOVERY-1",
       "worker": "W9",
       "reason": "release",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        6060164124
+      ],
       "ack": null
     },
     "2288365b4788a6fed18c01d197931d5ec0f7df2fe2caa611f1a00b22a79df906": {
       "packet": "KIOSK-EXPECTED-TURN-NATIVE-CALLER-RECOVERY-1",
       "worker": "W3",
       "reason": "release",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        6060164400
+      ],
       "ack": null
     }
   },
