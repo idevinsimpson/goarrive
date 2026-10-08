@@ -94,6 +94,14 @@ on:
           # activation manifest passed on the served build with cleanup
           # COMPLETE and the evidence scan passing.
           - journey-activation
+          # `lovable-kiosk` (LOVABLE-KIOSK-HOSTED-PROOF-1) is PROOF ONLY: it
+          # drives the Lovable Web Twin at exactly
+          # https://we-stay-fit-foundation-trial.lovable.app against
+          # westayfit-staging. No build, no deploy of any kind. The gate binds
+          # the host's served assets to the reviewed digests in
+          # hosted-lovable-kiosk.mjs before any credential exists; an unpinned
+          # or changed build stops there and prints what it observed.
+          - lovable-kiosk
 
       # WHY A RECOVERY MODE EXISTS.
       # Run 35495928362 created synthetic users and documents on staging and
@@ -156,7 +164,7 @@ jobs:
     # drag a gate (or the privileged config job behind it) along with it.
     # An explicit list, never a negation: a mode added later has to be named
     # here to get a credential.
-    if: ${{ inputs.mode == 'deploy' || inputs.mode == 'player-journey' || inputs.mode == 'social-privacy' || inputs.mode == 'journey-activation' }}
+    if: ${{ inputs.mode == 'deploy' || inputs.mode == 'player-journey' || inputs.mode == 'social-privacy' || inputs.mode == 'journey-activation' || inputs.mode == 'lovable-kiosk' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -242,6 +250,17 @@ jobs:
           WSF_RESULT_DIR: ${{ runner.temp }}/wsf-gate-marker
         run: node .github/wsf-staging/check-served-marker.mjs
 
+      # LOVABLE-KIOSK-HOSTED-PROOF-1: bind the Lovable host's served build to the
+      # reviewed digests HERE, in the credential-free gate. An unpinned, changed or
+      # unreadable build stops the mode before `config` can mint anything; the
+      # observed manifest (asset names and sha256 only) is printed for review.
+      - name: Bind the Lovable host's served build before any credentialed job
+        if: ${{ inputs.mode == 'lovable-kiosk' }}
+        env:
+          WSF_LOVABLE_URL: https://we-stay-fit-foundation-trial.lovable.app
+          WSF_PROJECT: westayfit-staging
+        run: node .github/wsf-staging/hosted-lovable-kiosk.mjs --bind
+
   # -------------------------------------------------------------- config ----
   # Privileged, and deliberately tiny: it reads the staging Web App's public
   # SDK config and nothing else. No application code is checked out here, so
@@ -251,7 +270,7 @@ jobs:
     # Same list as the gate. A skipped `needs` already skips this job, but
     # stating the condition means the reachability of every privileged job can
     # be read off its own `if:` rather than inferred through the graph.
-    if: ${{ inputs.mode == 'deploy' || inputs.mode == 'player-journey' || inputs.mode == 'social-privacy' || inputs.mode == 'journey-activation' }}
+    if: ${{ inputs.mode == 'deploy' || inputs.mode == 'player-journey' || inputs.mode == 'social-privacy' || inputs.mode == 'journey-activation' || inputs.mode == 'lovable-kiosk' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: wsf-staging
@@ -1377,6 +1396,160 @@ jobs:
           WSF_CLEANUP_OUTCOME: ${{ steps.cleanup.outcome }}
           WSF_SCAN_OUTCOME: ${{ steps.scan-activation-evidence.outcome }}
         run: node ops/.github/wsf-staging/require-activation.mjs
+
+  # ------------------------------------------------------- lovable-kiosk ----
+  # LOVABLE-KIOSK-HOSTED-PROOF-1 (Director #365 6044515892): the signed-in kiosk
+  # journey on the Lovable Web Twin at EXACTLY
+  # https://we-stay-fit-foundation-trial.lovable.app, against westayfit-staging.
+  # Proof only: no build, no deploy, no rules, index, IAM or provider change, and
+  # nothing is written to the Lovable project.
+  #
+  # ORDER IS THE SAFETY (as journey-activation):
+  #   1. the gate (credential-free) bound the served build to the reviewed
+  #      digests in hosted-lovable-kiosk.mjs, or stopped the mode;
+  #   2. this job binds again BEFORE authenticating (drift since the gate stops
+  #      it with no credential and no fixture);
+  #   3. only then does it authenticate; the harness seeds run-tagged fixtures
+  #      with the EXISTING kit and drives the real Lovable UI, holding the
+  #      synthetic passwords in memory only;
+  #   4. cleanup is blocking; 5. the evidence is scanned before upload;
+  #   6. --require passes only on every row PASS, cleanup and scan success.
+  # Rows the proof cannot honestly reach today (the station turn on #587, a
+  # genuinely unverified account) stay BLOCKED by name and fail the job.
+  lovable-kiosk:
+    needs: [gate, config]
+    if: ${{ inputs.mode == 'lovable-kiosk' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: wsf-staging
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out operational assets at the running workflow commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: ops
+          persist-credentials: false
+
+      - name: Check out the approved candidate (for its Playwright dependency only)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.gate.outputs.app_sha }}
+          path: app
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+
+      - name: Bind the served build again before any credential or fixture
+        id: bind
+        env:
+          WSF_LOVABLE_URL: https://we-stay-fit-foundation-trial.lovable.app
+          WSF_PROJECT: westayfit-staging
+        run: node ops/.github/wsf-staging/hosted-lovable-kiosk.mjs --bind
+
+      - name: Install candidate dependencies without lifecycle scripts
+        working-directory: app
+        run: npm --prefix apps/westayfit ci --ignore-scripts
+
+      - name: Install the pinned token library
+        run: npm install --no-save --ignore-scripts google-auth-library@9.15.1
+
+      - name: Install browsers using the candidate's pinned Playwright CLI
+        working-directory: app
+        run: |
+          set -euo pipefail
+          PW="apps/westayfit/node_modules/.bin/playwright"
+          [ -x "$PW" ] || { echo "::error::the candidate's Playwright CLI is not present at $PW"; exit 1; }
+          echo "PLAYWRIGHT_VERSION=$("$PW" --version)"
+          "$PW" install --with-deps chromium
+
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          name: wsf-staging-env
+          path: cfg
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SA }}
+
+      - name: Run the Lovable kiosk proof
+        id: proof
+        working-directory: app
+        env:
+          WSF_LOVABLE_URL: https://we-stay-fit-foundation-trial.lovable.app
+          WSF_PROJECT: westayfit-staging
+          WSF_RESULT_DIR: ${{ github.workspace }}/wsf-lovable-evidence
+          WSF_CLEANUP_MANIFEST: ${{ github.workspace }}/wsf-lovable-evidence/lovable-kiosk/cleanup-manifest.json
+        run: |
+          set -euo pipefail
+          set -a; . ../cfg/wsf-staging.env; set +a
+          export WSF_SDK_CONFIG_FILE="$RUNNER_TEMP/wsf-sdk-lovable/wsf-sdk-config.json"
+          node ../ops/.github/wsf-staging/write-sdk-config.mjs "$WSF_SDK_CONFIG_FILE" "$STAGING_PROJECT"
+          export WSF_GOOGLE_ACCESS_TOKEN="$(node -e '
+            const {GoogleAuth} = require("google-auth-library");
+            new GoogleAuth({scopes:["https://www.googleapis.com/auth/cloud-platform"]})
+              .getAccessToken().then((t)=>process.stdout.write(t||""));
+          ')"
+          node ../ops/.github/wsf-staging/hosted-lovable-kiosk.mjs --run
+
+      # Only if the bind passed: a run stopped on the wrong build ends with no
+      # credential minted at all.
+      - name: Re-authenticate before cleanup
+        if: ${{ always() && steps.bind.outcome == 'success' }}
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SA }}
+
+      # BLOCKING: with a fixture manifest, the cleaner's exit status is this step's.
+      - name: Remove the Lovable proof fixtures
+        id: cleanup
+        if: always()
+        env:
+          WSF_CLEANUP_MANIFEST: ${{ github.workspace }}/wsf-lovable-evidence/lovable-kiosk/cleanup-manifest.json
+          WSF_CLEANUP_RECEIPT: ${{ github.workspace }}/wsf-lovable-evidence/lovable-kiosk/cleanup-receipt.json
+        run: |
+          set -euo pipefail
+          if [ ! -f "$WSF_CLEANUP_MANIFEST" ]; then
+            echo "LOVABLE_CLEANUP=not needed (no fixtures were created)"
+            exit 0
+          fi
+          export WSF_GOOGLE_ACCESS_TOKEN="$(node -e '
+            const {GoogleAuth} = require("google-auth-library");
+            new GoogleAuth({scopes:["https://www.googleapis.com/auth/cloud-platform"]})
+              .getAccessToken().then((t)=>process.stdout.write(t||""));
+          ')"
+          node ops/.github/wsf-staging/cleanup-synthetic.mjs
+
+      - name: Scan evidence before upload
+        id: scan-lovable-evidence
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ github.workspace }}/wsf-lovable-evidence"
+          node ops/.github/wsf-staging/scan-evidence.mjs "${{ github.workspace }}/wsf-lovable-evidence"
+
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        if: ${{ always() && steps.scan-lovable-evidence.outcome == 'success' }}
+        with:
+          name: wsf-lovable-evidence
+          path: wsf-lovable-evidence
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Require the Lovable kiosk proof to have passed
+        if: always()
+        env:
+          WSF_RESULT_DIR: ${{ github.workspace }}/wsf-lovable-evidence
+          WSF_CLEANUP_OUTCOME: ${{ steps.cleanup.outcome }}
+          WSF_SCAN_OUTCOME: ${{ steps.scan-lovable-evidence.outcome }}
+        run: node ops/.github/wsf-staging/hosted-lovable-kiosk.mjs --require
 
   # ----------------------------------------------------- cleanup-recovery ----
   # Remove the synthetic fixtures an EARLIER run created and could not remove
