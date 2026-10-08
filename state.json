@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "89f148505b4652fa5b663fc152ae84996290ab04f4367d5fb3d5a441d9d394c5",
-  "eventCount": 785,
+  "ledgerHead": "a27d95b13a13e1f5003b020d2f58d91c4f16538e5011edf7c0f11fb991a78874",
+  "eventCount": 787,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2159,7 +2159,9 @@
       "proof": null,
       "served": null,
       "releasedQueueIndex": null,
-      "reviewedBy": [],
+      "reviewedBy": [
+        "W4"
+      ],
       "subjectPaths": [
         "functions-westayfit/src/index.ts",
         "functions-westayfit/src/profilePhotos.ts",
@@ -2181,7 +2183,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6053214458
+          "id": 6053397847
         }
       },
       "review": {
@@ -4584,11 +4586,15 @@
       "packet": "PROFILE-PHOTOS-FIREBASE-1",
       "worker": "W4",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6053292989
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6053300849
+      },
+      "superseded": true
     }
   },
   "fastpath": {
