@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "fd7319866a662c4d72adda5364c32676bc40f7bd0321fba8430ea64319b92eb9",
-  "eventCount": 819,
+  "ledgerHead": "cac978ee356a63a343de70564db513c34600cfe61951a8e905a4b877cf381ed0",
+  "eventCount": 820,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -4867,8 +4867,10 @@
       "packet": "EVENT-LIFECYCLE-BACKEND-RECOVERY-1",
       "worker": "W9",
       "reason": "handback",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        6061511145
+      ],
       "ack": null
     }
   },
