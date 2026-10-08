@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "373ef7acb2e6023e3c27cc3a1cb7092136c21d781a3f156b6a00d28a9756908b",
-  "eventCount": 812,
+  "ledgerHead": "e3373c38245a2bb11195a0815827d2862b868a84a85fa0574f2f0a4b0c127c19",
+  "eventCount": 814,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -61,9 +61,7 @@
     }
   },
   "queue": {
-    "W3": [
-      "KIOSK-EXPECTED-TURN-NATIVE-CALLER-RECOVERY-2"
-    ],
+    "W3": [],
     "W4": [],
     "W5": [],
     "W7": [],
@@ -1639,10 +1637,10 @@
       },
       "label": "Correct native expected-turn caller reservation to executable Vitest and Playwright paths",
       "origin": "ledger",
-      "phase": "QUEUED",
+      "phase": "RELEASED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
-      "inbox": null,
+      "inbox": 396,
       "pr": null,
       "reviewers": [],
       "artifact": {
@@ -1653,7 +1651,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": null,
+      "releasedQueueIndex": 0,
       "reviewedBy": [],
       "subjectPaths": [
         "apps/westayfit/app/station/[goalId].tsx",
@@ -1671,11 +1669,14 @@
           "kind": "comment",
           "id": 6061036018
         },
-        "released": null,
+        "released": {
+          "kind": "comment",
+          "id": 6061210091
+        },
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6061036018
+          "id": 6061210091
         }
       },
       "review": {
@@ -4845,6 +4846,14 @@
       "comments": [
         6060991924
       ],
+      "ack": null
+    },
+    "85ec59b9dd76845d16dc50a6a95f3544d6d3d67d23dfb4e6f4168acb04b6e9c5": {
+      "packet": "KIOSK-EXPECTED-TURN-NATIVE-CALLER-RECOVERY-2",
+      "worker": "W3",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
