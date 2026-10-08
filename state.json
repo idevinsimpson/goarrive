@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "416524e22b51eba4a8857a67d270a173bcce510d171ff96362d753ead4d48950",
-  "eventCount": 739,
+  "ledgerHead": "e169670733fd6495375f824029c2512127d5d61d588af75a1c8e9dfd3227500b",
+  "eventCount": 744,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1790,7 +1790,7 @@
       },
       "label": "Run the pinned Lovable kiosk journey with bounded real staging fixtures and cleanup inside the existing trusted runner",
       "origin": "ledger",
-      "phase": "CHANGES_REQUESTED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -1800,8 +1800,8 @@
         "W9"
       ],
       "artifact": {
-        "subjectSha": "aae04a41fd6aa72d90106e87d4f036ed3d302ff3",
-        "prHeadSha": "aae04a41fd6aa72d90106e87d4f036ed3d302ff3",
+        "subjectSha": "0df8f7bd7946b3db33321cc2cec618a50369291b",
+        "prHeadSha": "0df8f7bd7946b3db33321cc2cec618a50369291b",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -1830,7 +1830,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6051520120
+          "id": 6051761721
         }
       },
       "review": {
@@ -1847,7 +1847,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 2,
+      "deliveries": 3,
       "pendingFinding": null
     },
     "MEMBER-PREVIEW-LABEL-1": {
@@ -4456,7 +4456,24 @@
       "ack": {
         "kind": "comment",
         "id": 6051580738
-      }
+      },
+      "superseded": true
+    },
+    "1eb4f1a4aeb84f482db1fd3094301930b0ca3175fa881af795dc3ed5f9371f20": {
+      "packet": "LOVABLE-KIOSK-HOSTED-PROOF-1",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
+    },
+    "a41210dad68a379a0d836715b9b2e275438aefa57488ce24dfb36a6f8f71f45e": {
+      "packet": "LOVABLE-KIOSK-HOSTED-PROOF-1",
+      "worker": "W9",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
