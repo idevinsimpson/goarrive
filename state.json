@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "b58b2405593bd05425b78c04fd2188d4a0d11ee8ed54d417c83c609dc2063b15",
-  "eventCount": 832,
+  "ledgerHead": "e5bea97f7784dad7c0ad4a2b3fad5ea0dc40c535197d38f5e2a0c96ceff37eb2",
+  "eventCount": 834,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -4884,11 +4884,14 @@
       "packet": "EVENT-LIFECYCLE-BACKEND-RECOVERY-1",
       "worker": "W4",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6061767398
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6061786075
+      }
     },
     "f0ed473f37e96c43db2387389744e5fc18b3ad00c0a196057419114b257f8c9d": {
       "packet": "EVENT-LIFECYCLE-BACKEND-RECOVERY-1",
@@ -4904,11 +4907,14 @@
       "packet": "KIOSK-EXPECTED-TURN-NATIVE-CALLER-RECOVERY-2",
       "worker": "W7",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6061767966
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6061808578
+      }
     }
   },
   "fastpath": {
