@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "ad08ad30cc22a98853e1eb92bae5b2ec2a005c931f4099b30771e2754538ab73",
-  "eventCount": 777,
+  "ledgerHead": "ff3599024834d822602a2fd32fdb8f4e5a23f8e8c145fd82eb74fdf3220f580e",
+  "eventCount": 778,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -4570,8 +4570,10 @@
       "packet": "PROFILE-PHOTOS-FIREBASE-1",
       "worker": "W9",
       "reason": "handback",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        6053169686
+      ],
       "ack": null
     }
   },
