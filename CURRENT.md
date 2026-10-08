@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=b8bd29cb7cbe2eaa6a1c408e44cd75b40a8346e889e9996afcd519a4c2f63919 events=844 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=fe2460619baf71133ddb4a89f62aac870beb2e4a87a94c68b15005a33d4c4fff events=847 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `b8bd29cb7cbe2eaa6a1c408e44cd75b40a8346e889e9996afcd519a4c2f63919` (844 events)
+- Ledger head: `fe2460619baf71133ddb4a89f62aac870beb2e4a87a94c68b15005a33d4c4fff` (847 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -31,9 +31,9 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | W3 | #396 | KIOSK-UNVERIFIED-STAGING-RECOVERY-1 | — | WORKER-EXECUTION-PROFILES-1 | NORTHSTAR-MIRROR-INTAKE-1 | — | — | on |
 | W4 | #394 | — | — | — | — | — | — | off |
-| W5 | #395 | — | EVENT-LIFECYCLE-BACKEND-RECOVERY-1 | — | — | — | — | on |
+| W5 | #395 | — | — | — | — | — | — | off |
 | W7 | #434 | — | — | — | — | — | — | off |
-| W9 | #497 | — | — | EVENT-LIFECYCLE-BACKEND-RECOVERY-1 | MEMBER-TRUTH-BACKEND-1 | — | — | off |
+| W9 | #497 | — | — | — | EVENT-LIFECYCLE-BACKEND-RECOVERY-1, MEMBER-TRUTH-BACKEND-1 | — | — | off |
 
 ## Packets
 
@@ -49,7 +49,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | EMAIL-STAGING-REPAIR | W3 | work | STAGED (hosted) | ledger | INTEGRATED | #559 | 39484f78 | 39484f78 | — | f84346d3 | — | W4, W9 | comment:5959200686 | pull_request:559 | — | Diagnose and repair staging verification and password-reset delivery without weakening mail security | 1×ops-source+1×security then director | — |
 | EMAIL-STAGING-REPAIR-STAGING-PIN | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #570 | 5be8f661 | 5be8f661 | — | 01a07ef3 | — | W4 | comment:5965875967 | pull_request:570 | — | Pin the exact integrated email repair and coalesced accepted expo lineage through the reviewed full staging path | 1×ops-source then director | — |
 | EVENT-LIFECYCLE-BACKEND-1 | W5 | work | INTEGRATED (source-only) | ledger | WITHDRAWN | — | — | — | — | — | — | — | comment:6044610796 | comment:6059491796 | — | Implement canonical event lifecycle transactions and authorization in an isolated module without competing with kiosk receipt ownership | 1×journey-qa+1×security then director | — |
-| EVENT-LIFECYCLE-BACKEND-RECOVERY-1 | W9 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #595 | e56485a1 | e56485a1 | — | — | — | W4, W5 | comment:6060049268 | comment:6062030511 | — | Recover isolated Event lifecycle backend after withdrawn unacknowledged W5 assignment | 1×journey-qa+1×security then director | — |
+| EVENT-LIFECYCLE-BACKEND-RECOVERY-1 | W9 | work | INTEGRATED (source-only) | ledger | BLOCKED (from UNDER_REVIEW) | #595 | e56485a1 | e56485a1 | — | — | — | W4, W5 | comment:6060049268 | comment:6064313620 | SECURITY-REVIEWER-CAPACITY (Devin) | Recover isolated Event lifecycle backend after withdrawn unacknowledged W5 assignment | 1×journey-qa+1×security then director | — |
 | EVERGREEN-MARKER-ENTRY-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #583 | 1545f36d | 1545f36d | — | 09cc4cb1 | — | W4 | comment:6027873710 | pull_request:583 | — | Evergreen physical marker entry: permanent QR resolves to configured community and goal, then phone or optional kiosk participation | 1×journey-qa then director | — |
 | EXPO-ACCOUNT-ENTRY-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #561 | e603a39c | e603a39c | — | 5705dc3b | — | W4 | comment:5961789672 | pull_request:561 | — | Expo account-entry seam: preserve event context and make the existing phone/kiosk choice fast and truthful without bypassing verified identity | 1×journey-qa then director | — |
 | EXPO-ACCOUNT-ENTRY-1-STAGING-PIN | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #566 | 04ca5d05 | 04ca5d05 | 04ca5d05 | 08a2f08d | — | W4 | comment:5963494417 | pull_request:566 | — | Pin exact integrated expo account-entry milestone through the existing reviewed full staging path | 1×ops-source then director | — |
@@ -66,7 +66,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | KIOSK-PAIRING-CLARITY-PROOF-1 | W9 | work | STAGED (hosted) | ledger | STAGED | #553 | 4537c26c | 4537c26c | — | ab77fbfc | hosted run 37025084843: PASS | W4 | comment:5945136749 | comment:5955903159 | — | Clarify venue-station pairing from the Champion's own phone and prove the existing flow end-to-end | 1×journey-qa then director | — |
 | KIOSK-UNVERIFIED-PARTICIPANT-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #586 | a17ee3e2 | a17ee3e2 | — | 819c26f0 | — | W4 | comment:6041849013 | pull_request:586 | — | Allow real authenticated unverified attendees to complete the ordinary WSF event participation backend journey | 1×journey-qa then director | — |
 | KIOSK-UNVERIFIED-PARTICIPANT-1-STAGING-PIN | W3 | work | INTEGRATED (source-only) | ledger | WITHDRAWN | — | — | — | — | — | — | — | comment:6043102398 | comment:6043983205 | — | Pin and prove the integrated unverified-attendee backend through the reviewed full staging path | 1×ops-source then director | — |
-| KIOSK-UNVERIFIED-STAGING-RECOVERY-1 | W3 | work | INTEGRATED (source-only) | ledger | RELEASED | — | — | — | — | — | — | — | comment:6043993150 | comment:6064064740 | — | Finish the blocked staging pin with verified approval ancestry and tracked unverified synthetic fixtures | 1×ops-source then director | — |
+| KIOSK-UNVERIFIED-STAGING-RECOVERY-1 | W3 | work | INTEGRATED (source-only) | ledger | ACKED | — | — | — | — | — | — | — | comment:6043993150 | comment:6064282086 | — | Finish the blocked staging pin with verified approval ancestry and tracked unverified synthetic fixtures | 1×ops-source then director | — |
 | LOVABLE-KIOSK-HOSTED-PROOF-1 | W3 | work | VERIFIED (hosted) | ledger | INTEGRATED | #589 | 8c9093c0 | 8c9093c0 | — | 41bff6c6 | — | W4, W9 | comment:6044894488 | pull_request:589 | — | Run the pinned Lovable kiosk journey with bounded real staging fixtures and cleanup inside the existing trusted runner | 1×ops-source+1×security then director | — |
 | MEMBER-PREVIEW-LABEL-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #584 | 37529ea3 | 37529ea3 | — | 245c7717 | — | W4 | comment:6035517752 | pull_request:584 | — | Deliver the isolated privacy-safe public preview label without waiting for crossing attribution | 1×journey-qa then director | — |
 | MEMBER-TRUTH-BACKEND-1 | W9 | work | INTEGRATED (source-only) | ledger | BLOCKED (from ACKED) | — | — | — | — | — | — | — | comment:6029989725 | comment:6035507739 | TOGETHER-CROSSING-DESIGN-DECISION (Director and Owner) | Unblock real member Together crossing and privacy-safe public preview labels for the shared Firebase backend and Lovable Web Twin | 1×journey-qa then director | — |
@@ -220,5 +220,5 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | 58d44641b3d7 | W4 | EVENT-LIFECYCLE-BACKEND-RECOVERY-1 | review | acked | 6061767398 | comment:6061786075 |
 | f0ed473f37e9 | W5 | EVENT-LIFECYCLE-BACKEND-RECOVERY-1 | review | timed-out (wake-undelivered) | 6061767731, 6062576316 | — |
 | 4c1753e8d987 | W7 | KIOSK-EXPECTED-TURN-NATIVE-CALLER-RECOVERY-2 | review | acked | 6061767966 | comment:6061808578 |
-| a712d41461fb | W3 | KIOSK-UNVERIFIED-STAGING-RECOVERY-1 | release | delivered | 6064256466 | — |
+| a712d41461fb | W3 | KIOSK-UNVERIFIED-STAGING-RECOVERY-1 | release | acked | 6064256466 | comment:6064282086 |
 
