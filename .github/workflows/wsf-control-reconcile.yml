@@ -56,7 +56,7 @@ jobs:
           github.event.comment.user.login == 'idevinsimpson' &&
           github.event.comment.author_association == 'OWNER' &&
           (github.event.action != 'edited' || github.event.sender.login == 'idevinsimpson') &&
-          contains(fromJSON('[365, 394, 395, 396, 434, 497]'), github.event.issue.number)
+          contains(fromJSON('[365, 394, 395, 396, 434, 497, 578]'), github.event.issue.number)
         )
       )
     runs-on: ubuntu-latest

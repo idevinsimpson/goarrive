@@ -116,7 +116,12 @@ export const RE = Object.freeze({
   instant: /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/,
   rule: /^(?:[RA]-[A-Z0-9][A-Z0-9-]{1,40}|MANUAL)$/,
   contractId: /^[a-z0-9][a-z0-9.-]{1,60}$/,
+  // A North Star reference route (#578, NORTHSTAR-MIRROR-INTAKE-1): the review-lab root or a lowercase path below it.
+  // No trailing slash, `..`, `//`, query, fragment, scheme, host, case or whitespace.
+  route: /^\/review\/north-star(?:\/[a-z0-9-]+)*$/,
 });
+/** At most this many reference routes in one North Star target. */
+export const MAX_ROUTES = 20;
 const FREE_TEXT = new Set(['label', 'condition', 'unblockWhen']);
 const FREE_TEXT_MAX = 200;
 
@@ -209,6 +214,10 @@ const T = {
   /** A two-valued switch (set-fastpath): true or false, nothing else. */
   onOff: (v) => v === true || v === false,
   queueMap: (v) => isObj(v) && Object.entries(v).every(([w, q]) => RE.worker.test(w) && T.packets(q)),
+  /** Reference routes: 1..MAX_ROUTES distinct North Star lab routes. */
+  routes: (v) => Array.isArray(v) && v.length > 0 && v.length <= MAX_ROUTES && new Set(v).size === v.length && v.every((r) => typeof r === 'string' && r.length <= 120 && RE.route.test(r)),
+  /** A frozen North Star mirror target: the exact North Star SHA and its reference routes. */
+  northstar: (v) => exactKeys(v, ['sha', 'routes']) && T.sha(v.sha) && T.routes(v.routes),
 };
 
 /** A typed reference to the GitHub object that authorizes or proves an event. No URLs: kind, id and repository. */
@@ -259,7 +268,7 @@ export const EVENT_FIELDS = Object.freeze({
   'set-staging': [{ servedSha: T.sha, runId: T.int, runNumber: T.int, rollbackSha: T.sha }, { pinPr: T.int }],
   'set-surfaces': [{ surfaces: T.surfaces }, {}],
   'register-worker': [{ worker: T.worker, inbox: T.int }, { classes: T.classes }],
-  'queue': [{ packet: T.packet, owner: T.worker, completion: T.completion }, { kind: T.kind, subjectPaths: T.paths, label: T.text, review: T.review }],
+  'queue': [{ packet: T.packet, owner: T.worker, completion: T.completion }, { kind: T.kind, subjectPaths: T.paths, label: T.text, review: T.review, northstar: T.northstar }],
   'reorder-queue': [{ owner: T.worker, order: T.packets }, {}],
   'release': [{ packet: T.packet, inbox: T.int }, {}],
   'ack': [{ packet: T.packet, worker: T.worker }, {}],
@@ -301,6 +310,9 @@ export const EVENT_FIELDS = Object.freeze({
   'wake-ack': [{ wakeId: T.hash, packet: T.packet, worker: T.worker }, {}],
   'wake-retry': [{ wakeId: T.hash, packet: T.packet }, {}],
   'wake-timeout': [{ wakeId: T.hash, packet: T.packet }, {}],
+  // NORTHSTAR-MIRROR-INTAKE-1: the newest desired North Star revision from the #578 feed (data only, never a decision).
+  // It rests on the feed comment itself; the reducer (northstar.mjs) keeps only the newest one.
+  'northstar-desired': [{ sha: T.sha, routes: T.routes }, {}],
 });
 /**
  * Who holds a work packet's ball: its owner while the phase is worker-owned (RELEASED, ACKED, CHANGES_REQUESTED),
@@ -319,8 +331,8 @@ export const WAKE_REASONS = Object.freeze(['release', 'handback', 'review']);
 /** The wake event types; they record delivery truth and never move a packet's ball. */
 export const WAKE_EVENTS = Object.freeze(['wake', 'wake-delivered', 'wake-ack', 'wake-retry', 'wake-timeout']);
 /** Event types, and fields, that exist only in schema v2. A v1 line carrying one is malformed. */
-export const V2_ONLY = Object.freeze(['schema-upgrade', 'set-contracts', 'set-review-policy', 'apply-finding', 'set-shadow-surface', 'set-target', 'set-fastpath', 'authorize-retry', 'wake', 'wake-delivered', 'wake-ack', 'wake-retry', 'wake-timeout']);
-const V2_FIELDS = Object.freeze({ bootstrap: ['contracts', 'supersedes'], 'register-worker': ['classes'], queue: ['review'], finding: ['pending'] });
+export const V2_ONLY = Object.freeze(['schema-upgrade', 'set-contracts', 'set-review-policy', 'apply-finding', 'set-shadow-surface', 'set-target', 'set-fastpath', 'authorize-retry', 'wake', 'wake-delivered', 'wake-ack', 'wake-retry', 'wake-timeout', 'northstar-desired']);
+const V2_FIELDS = Object.freeze({ bootstrap: ['contracts', 'supersedes'], 'register-worker': ['classes'], queue: ['review', 'northstar'], finding: ['pending'] });
 
 /**
  * Which kinds of GitHub object may stand behind each event type.
@@ -341,6 +353,8 @@ export const SOURCE_RULES = Object.freeze({
   // A wake rests on whatever set the ball (a release or finding comment, a delivery); its receipts rest on comments.
   'wake': ['comment', 'pull_request', 'commit', 'workflow_run'],
   'wake-delivered': C, 'wake-ack': C, 'wake-retry': C, 'wake-timeout': C,
+  // The #578 feed comment that named the revision.
+  'northstar-desired': C,
   // A v2 proof-fail may rest on the failed run itself under the packet's pre-approved failure contract (R-PROOF-FAIL);
   // a v1 proof-fail still needs the focused finding comment (checked in validateEvent).
   'proof-fail': ['comment', 'workflow_run'],
