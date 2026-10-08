@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "12e2264c04438af3a3032be2a4bd9794ae89bc850061654464cc654a79288ab9",
-  "eventCount": 749,
+  "ledgerHead": "4ed6d22bc4dcac0de32b1cdee221ac6e79d580de3dd29767ef8b37c48f418f49",
+  "eventCount": 751,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1790,7 +1790,7 @@
       },
       "label": "Run the pinned Lovable kiosk journey with bounded real staging fixtures and cleanup inside the existing trusted runner",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "CHANGES_REQUESTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -1808,9 +1808,7 @@
       "proof": null,
       "served": null,
       "releasedQueueIndex": null,
-      "reviewedBy": [
-        "W9"
-      ],
+      "reviewedBy": [],
       "subjectPaths": [
         ".github/workflows/wsf-staging-deploy.yml",
         ".github/wsf-staging/hosted-lovable-kiosk.mjs",
@@ -1832,7 +1830,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6051841574
+          "id": 6052330823
         }
       },
       "review": {
@@ -4472,7 +4470,8 @@
       "ack": {
         "kind": "comment",
         "id": 6051816252
-      }
+      },
+      "superseded": true
     },
     "a41210dad68a379a0d836715b9b2e275438aefa57488ce24dfb36a6f8f71f45e": {
       "packet": "LOVABLE-KIOSK-HOSTED-PROOF-1",
@@ -4487,6 +4486,14 @@
         "id": 6051841574
       },
       "superseded": true
+    },
+    "54e56adf719be81b43b258e31c759b5686452d840e1e7c87cdaac271388193b9": {
+      "packet": "LOVABLE-KIOSK-HOSTED-PROOF-1",
+      "worker": "W3",
+      "reason": "handback",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
