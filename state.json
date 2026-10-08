@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "0e3286c3445634be776aec5ea5e904b1e844dfbc9b4b013809cd211723afe8cb",
-  "eventCount": 716,
+  "ledgerHead": "52224482ee7324fbddd1ed3b186bdfdcf3ce1c9e502876dc761412108f7f4a60",
+  "eventCount": 717,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -365,7 +365,9 @@
       "proof": null,
       "served": null,
       "releasedQueueIndex": null,
-      "reviewedBy": [],
+      "reviewedBy": [
+        "W4"
+      ],
       "subjectPaths": [
         "tools/wsf-control/github.mjs",
         "tools/wsf-control/tests/shadow.test.mjs"
@@ -384,7 +386,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6050852185
+          "id": 6050999616
         }
       },
       "review": {
@@ -4386,7 +4388,8 @@
       "ack": {
         "kind": "comment",
         "id": 6050914866
-      }
+      },
+      "superseded": true
     }
   },
   "fastpath": {
