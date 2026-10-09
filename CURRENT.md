@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=ac0c01deb744404e819fddb14c24ed334be4412572a78b98db9617b3b8907f7b events=856 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=7a90669d0c553d5871b0eebd38b6eb7ae0253ec9563d9483cdea9cbf0b7a02ea events=858 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `ac0c01deb744404e819fddb14c24ed334be4412572a78b98db9617b3b8907f7b` (856 events)
+- Ledger head: `7a90669d0c553d5871b0eebd38b6eb7ae0253ec9563d9483cdea9cbf0b7a02ea` (858 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -223,6 +223,6 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | f0ed473f37e9 | W5 | EVENT-LIFECYCLE-BACKEND-RECOVERY-1 | review | timed-out (wake-undelivered) | 6061767731, 6062576316 | — |
 | 4c1753e8d987 | W7 | KIOSK-EXPECTED-TURN-NATIVE-CALLER-RECOVERY-2 | review | acked | 6061767966 | comment:6061808578 |
 | a712d41461fb | W3 | KIOSK-UNVERIFIED-STAGING-RECOVERY-1 | release | acked | 6064256466 | comment:6064282086 |
-| 00c0938bdf85 | W3 | KIOSK-UNVERIFIED-STAGING-RECOVERY-2 | release | requested | — | — |
-| 877d34282cd7 | W9 | PRODUCTION-FIREBASE-INVENTORY-1 | release | requested | — | — |
+| 00c0938bdf85 | W3 | KIOSK-UNVERIFIED-STAGING-RECOVERY-2 | release | delivered | 6074915277 | — |
+| 877d34282cd7 | W9 | PRODUCTION-FIREBASE-INVENTORY-1 | release | delivered | 6074915391 | — |
 
