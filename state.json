@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "f41a77d6cfc269ea06e8e775cb07ae1c417438389f642286a6661d66a456efda",
-  "eventCount": 868,
+  "ledgerHead": "ae7fd08a5296fed24f8ea976a311fb5cee0aed49ca6796f598cf69c25824b071",
+  "eventCount": 869,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -5246,8 +5246,10 @@
       "packet": "EXPO-FULL-STAGING-RECOVERY-3",
       "worker": "W3",
       "reason": "release",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        6075146238
+      ],
       "ack": null
     }
   },
