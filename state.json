@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "a8a314776ab6f03995c228c131a2632b1871d05c75c1680fe16f0402083219e6",
-  "eventCount": 913,
+  "ledgerHead": "e55f2191b01de23d46718718eb26c813bda209d0a41699d9840cd80a2d0ad856",
+  "eventCount": 915,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2777,7 +2777,9 @@
       "proof": null,
       "served": null,
       "releasedQueueIndex": null,
-      "reviewedBy": [],
+      "reviewedBy": [
+        "W4"
+      ],
       "subjectPaths": [
         "docs/westayfit/ops/production/PRODUCTION_FIREBASE_INVENTORY_1.md",
         "docs/westayfit/ops/production/wsf-production-inventory.v1.json"
@@ -2796,7 +2798,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6076909251
+          "id": 6077136451
         }
       },
       "review": {
@@ -5531,11 +5533,14 @@
       "packet": "PRODUCTION-DEPLOY-PATH-1",
       "worker": "W9",
       "reason": "handback",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6077005855
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6077245630
+      }
     },
     "6c1797699e579a17c95fd06b3b127e1ca951a48d5e96d060c9141f2b5964834f": {
       "packet": "PRODUCTION-FIREBASE-INVENTORY-1",
@@ -5548,7 +5553,8 @@
       "ack": {
         "kind": "comment",
         "id": 6077068917
-      }
+      },
+      "superseded": true
     }
   },
   "fastpath": {
