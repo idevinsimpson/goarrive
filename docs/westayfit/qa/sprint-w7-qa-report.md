@@ -6564,3 +6564,44 @@ After reassignment, 45 idle minutes produced no W7 post and no W7 timer line. W7
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0 (re-run before push).
 
 **Status:** **PASS at `1cdbeff5` with zero unresolved findings.** PN-1 to PN-4 are non-blocking. W7 made no product edit, merge, deploy, live-data change, credential or permission change, and did not touch any state ref or comment other than its own GitHub replies.
+
+## §82. Check 82: #603 WRITER-CONCURRENCY-1 at `75f77d30`
+
+**Assignment:** router wake `e6f576320b1eb753c04006dc543d931ba80ec78da055a814950b21c7e9697726` (#434 `6079484002`), under the owner's standing approval to ACK and perform valid W7 router reviews. I refreshed `wsf-control-state-2` first: `check` passed (978 events), `worker-view W7` showed `WATCH=on` and `REVIEWING=WRITER-CONCURRENCY-1 phase=UNDER_REVIEW pr=#603 subject=75f77d30…`, W7 was the sole reviewer, and the wake was `delivered`. Before the ACK I re-checked that the PR head was still the subject and that nothing newer sat on #434. ACK: #434 `6079510595`.
+
+**Subject:** #603 (draft, owner W4) at exactly `75f77d30d2a137ecdb6a1dbc2a2e0241f93fd242`: one commit on `main` `df8d4d69`, 3 files, +164/−9, exactly the ledger's `subjectPaths` (the workflow, `shadow.test.mjs`, and the new note). I verified it in a detached worktree and pushed nothing from it. The workflow was never run; I dispatched nothing.
+
+### Reproduced
+
+| Check | Result |
+|---|---|
+| `node tools/wsf-control/run-all.mjs` | **all suites passed**; shadow **73** (the PR says 73); 357 `ok` lines. Local Node is 22.22.2 (the PR says 20) |
+| Fail-first: the PR's `shadow.test.mjs` against the **original** workflow | **fails** on the new group pin, as the PR says |
+| W7's property over GitHub's own expression engine (`@actions/expressions` 0.3.61), after a real YAML parse, 2928 event shapes | **head: 0 violations**; 88 writer runs hold `wsf-control-writer`, 2840 take `wsf-control-skip-<run_id>`. **Base: 2840 violations** (every non-writer run shares the writer group), so the instrument is not vacuous |
+| `actionlint` 1.7.12 on the head workflow | clean |
+| 11 W7 mutants of the workflow (the PR lists 8 of its own) | the PR's suite kills **11 / 11**; my property kills 9 and its two survivors are an inbox number outside its domain and a redundant App-bot clause |
+
+### Items
+
+1. **The diagnosis is real, and the cited cancellation is exact.** From the Actions API (read-only): writer run `37915019580` (an owner comment in the W4 inbox, 10:01:31Z) was last updated at 10:01:43Z, **one second after** `37915038477` (a comment on PR #601) was queued at 10:01:42Z. Neither had any job. Both concluded `cancelled`. `37913030558`, the queue's other cite, is also a cancelled inbox run.
+2. **The change does what it says.** The group is the writer group exactly when the reconcile job's `if` holds, and a run-id-keyed group of its own otherwise. After the real YAML parse, the `>-` folded text is a valid expression and agrees with the job `if` on all 2928 shapes, including `schedule`, `workflow_dispatch`, `workflow_run`, `pull_request` on `refs/pull/*`, a dispatch from a branch, an edit by a non-owner and the App's own comments. `cancel-in-progress` stays `false`. The `fastpath-dispatch` job shares its run's group, so nothing about it changes. No other workflow uses the writer group (`wsf-staging-deploy` has its own).
+3. **Coalescing among writer runs stays safe, and I checked why in the code.** A newer writer run still replaces an older pending one. The architecture note says that is safe because each run re-derives everything (§2.3 item 2, `docs/westayfit/ops/AUTONOMY_ARCHITECTURE_1B_1C.md:125`). In the writer, every run reads the control inbox's last 100 comments and each worker inbox fresh (`recentComments(inbox, 100)`, `readInbox`), not the event payload.
+4. **The test change keeps the pin.** The old pin (a literal group) is replaced by a shape pin (one workflow-level `${{ }}` group, one `cancel-in-progress: false`, no job-level group) plus the new test, which asserts group text equals the job `if` after whitespace normalisation and evaluates both over 19 event shapes (10 writer, 9 skipped; the PR's note says its engine check covered 20).
+5. **Scope.** `.github/` is touched by the owner W4 as the packet states; W7 touched nothing there. The note records the post-merge consequence honestly (below).
+
+### Precision notes (non-blocking)
+
+- **PN-1 (calibration, measured).** In the 09:40Z–10:20Z window on 2026-10-09, this workflow had 44 runs: **36 cancelled**, 4 success, 4 skipped. Of the 29 cancelled writer-eligible runs, **22 were displaced by other writer-eligible runs**, 1 by a dispatch, 5 by non-writer runs and 1 is unknown. This packet removes only the 5. Red "cancelled" runs will stay common after the merge; that is the designed coalescing, safe per item 3, and the packet's note says so.
+- **PN-2 (the note's wording).** The note says run `37915038477` "skips at the job `if`". It had no job and concluded `cancelled`; it was itself displaced one second before `37915135212` was queued. The causal claim (the PR comment cancelled the pending writer run) holds.
+- **PN-3 (carry-forward, documented by the PR).** The writer pins `tools/wsf-control` and the workflow, and this change touches both. At the merge commit `writerPinProblem` stops the writer recording anything (`writer-code-unpinned`) until an owner `set-contracts` decision re-pins both contracts at that commit. I confirmed the check and the re-pin path in `tools/wsf-control/shadow-run.mjs` (`writerPinProblem`, `repinLine`). That decision is L0's.
+- **PN-4 (test fidelity).** The in-repo test evaluates expressions with a small JavaScript transliteration (`==` becomes `===`, so string comparison is case-sensitive; GitHub's is case-insensitive). The shape and drift pins still catch every mutant I tried, and my run with GitHub's own engine covers the difference. Folding my property into the repo would need the engine as a dependency, so I leave that as a suggestion only.
+
+### Limits, stated plainly (not findings)
+
+- **There is no hosted proof, and I could not make one.** GitHub's real queue behaviour under the new group can only be observed after the merge and the re-pin. The evidence is GitHub's expression engine, the queue model and the run history above. A simple post-merge check: no new `cancelled` writer-eligible run should name a non-writer displacer.
+- I ran the suite on Node 22, not 20.
+- `/reg-d6d4.log` is still at the filesystem root (from Check 80); I could not delete it.
+
+- **Gates:** `ts:check` 0; `check-evidence-intact` 0 (re-run before push).
+
+**Status:** **PASS at `75f77d30` with zero unresolved findings.** PN-1 to PN-4 are non-blocking. W7 made no product edit, merge, dispatch, deploy, live-data change, credential or permission change, and did not touch any state ref or comment other than its own GitHub replies.
