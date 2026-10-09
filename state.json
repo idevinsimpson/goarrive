@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "5a903d244252476f1bee327030497237c2b3a1f94f8b81198368d88ce3157847",
-  "eventCount": 1040,
+  "ledgerHead": "a43d5e2b5dbf929a805719e338ed92b9d0b48fe1db471f7da9f881c8091e863f",
+  "eventCount": 1044,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2999,6 +2999,64 @@
         "lastTransition": {
           "kind": "comment",
           "id": 6040736205
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
+      "pendingFinding": null
+    },
+    "PROD-RUNTIME-SA-AUTH-ROLE-1": {
+      "owner": "W9",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Runbook B13: read back the production WSF functions' runtime service account roles (email action links need Identity Toolkit permission); owner by-name grant before step 6; step 8 line, receipt field",
+      "origin": "ledger",
+      "phase": "RELEASED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": 497,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": 0,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "docs/westayfit/ops/production/RUNBOOK_WSF_PRODUCTION_DEPLOY_1.md"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6083892206
+        },
+        "released": {
+          "kind": "comment",
+          "id": 6083892481
+        },
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6083892481
         }
       },
       "review": {
@@ -6244,10 +6302,21 @@
       "packet": "LOVABLE-DEVICE-QA-2",
       "worker": "W4",
       "reason": "handback",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6083581143
       ],
+      "ack": {
+        "kind": "comment",
+        "id": 6083736654
+      }
+    },
+    "f42c9d5d2f5c6c294909af0f99b822f451653f27c148924c8b51fc607c983a32": {
+      "packet": "PROD-RUNTIME-SA-AUTH-ROLE-1",
+      "worker": "W9",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
