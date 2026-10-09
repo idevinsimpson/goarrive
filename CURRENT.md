@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=b39655939fadb02d310a96207b43b0824546d88c61cd67d83cead7ac15914e4d events=925 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=fc70991faf15ed3fe05d11c973f497e8bb53c97ccbae1f9c08c064d7eaa07473 events=927 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `b39655939fadb02d310a96207b43b0824546d88c61cd67d83cead7ac15914e4d` (925 events)
+- Ledger head: `fc70991faf15ed3fe05d11c973f497e8bb53c97ccbae1f9c08c064d7eaa07473` (927 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -238,6 +238,6 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | 5da493455e28 | W3 | EXPO-FULL-STAGING-RECOVERY-4 | release | acked | 6076634226 | comment:6076764787 |
 | 6be4be116f01 | W9 | PRODUCTION-DEPLOY-PATH-1 | handback | acked | 6077005855 | comment:6077245630 |
 | 6c1797699e57 | W4 | PRODUCTION-FIREBASE-INVENTORY-1 | review | acked | 6077006063 | comment:6077068917 |
-| 1868e30865e5 | W4 | EXPO-FULL-STAGING-RECOVERY-4 | review | requested | — | — |
-| f9e0a83b767e | W3 | PRODUCTION-DEPLOY-PATH-1 | review | requested | — | — |
+| 1868e30865e5 | W4 | EXPO-FULL-STAGING-RECOVERY-4 | review | delivered | 6077681002 | — |
+| f9e0a83b767e | W3 | PRODUCTION-DEPLOY-PATH-1 | review | delivered | 6077681219 | — |
 
