@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=9adf3bb58464229421b419151bb6cda103098a51dcc21b0a0600199fa98827f7 events=984 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=a15704dd0e94b2789063e1e412a69d573d2c27c1ec9db95d4c2bad5c5780a880 events=986 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `9adf3bb58464229421b419151bb6cda103098a51dcc21b0a0600199fa98827f7` (984 events)
+- Ledger head: `a15704dd0e94b2789063e1e412a69d573d2c27c1ec9db95d4c2bad5c5780a880` (986 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -30,7 +30,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | Worker | Inbox | Active now | Reviewing | Waiting on review | Blocked | Next | Queue | WATCH |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | W3 | #396 | STAGING-TURN-DRIVERS-1 | — | WORKER-EXECUTION-PROFILES-1 | NORTHSTAR-MIRROR-INTAKE-1 | — | — | on |
-| W4 | #394 | LOVABLE-DEVICE-QA-1 | — | WRITER-CONCURRENCY-1 | — | — | — | on |
+| W4 | #394 | LOVABLE-DEVICE-QA-1 | — | — | — | — | — | on |
 | W5 | #395 | — | — | — | — | — | — | off |
 | W7 | #434 | — | — | — | — | — | — | off |
 | W9 | #497 | PRODUCTION-DEPLOY-PATH-1 | — | — | EVENT-LIFECYCLE-BACKEND-RECOVERY-1, MEMBER-TRUTH-BACKEND-1 | KIOSK-TURN-LIFECYCLE-1 | KIOSK-TURN-LIFECYCLE-1 | on |
@@ -94,7 +94,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | STAGING-TURN-DRIVERS-1 | W3 | work | INTEGRATED (source-only) | ledger | ACKED | — | — | — | — | — | — | — | comment:6079017108 | comment:6079125836 | — | Bring the staging hosted suite (Package E turn-contract row) and the changed-journey and player drivers to the #587 turn contract (expectedTurn on wsfStartTurn, the attempt a started turn carries) | 1×journey-qa then director | — |
 | TOGETHER-COMPLETION-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #567 | e4e32ed6 | e4e32ed6 | — | 22766935 | — | W4 | comment:5964984624 | pull_request:567 | — | Port the owner-selected Together completion from the frozen Lovable reference to the confirmed member receipt with truthful totals, one-time motion and reduced-motion parity | 1×journey-qa then director | — |
 | WORKER-EXECUTION-PROFILES-1 | W3 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #562 | 0790876b | 0790876b | — | — | — | W4, W9 | comment:5962925247 | comment:5963579258 | — | Finish existing PR 562 credential-mode safety and pilot readiness without activating or replacing live workers | 1×ops-source+1×security then director | — |
-| WRITER-CONCURRENCY-1 | W4 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #603 | 75f77d30 | 75f77d30 | — | — | — | W7 | comment:6078863846 | comment:6079667142 | — | Writer gap fix: keep non-qualifying issue_comment runs out of the wsf-control-writer concurrency group so they never cancel a queued qualifying run; update the workflow test pin and note | 1×ops-source then director | — |
+| WRITER-CONCURRENCY-1 | W4 | work | INTEGRATED (source-only) | ledger | ACCEPTED | #603 | 75f77d30 | 75f77d30 | — | — | — | W7 | comment:6078863846 | comment:6080896165 | — | Writer gap fix: keep non-qualifying issue_comment runs out of the wsf-control-writer concurrency group so they never cancel a queued qualifying run; update the workflow test pin and note | 1×ops-source then director | — |
 
 ## Wakes
 
@@ -252,5 +252,5 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | a5d4ea540bc1 | W4 | WRITER-CONCURRENCY-1 | release | acked | 6078962743 | comment:6079018663 |
 | 612a9cd1912a | W3 | STAGING-TURN-DRIVERS-1 | release | acked | 6079121090 | comment:6079125836 |
 | e6f576320b1e | W7 | WRITER-CONCURRENCY-1 | review | acked | 6079484002 | comment:6079510595 |
-| 9c107c6d3441 | W4 | LOVABLE-DEVICE-QA-1 | release | delivered | 6079628551 | — |
+| 9c107c6d3441 | W4 | LOVABLE-DEVICE-QA-1 | release | retried | 6079628551 | — |
 

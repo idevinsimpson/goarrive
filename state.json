@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "9adf3bb58464229421b419151bb6cda103098a51dcc21b0a0600199fa98827f7",
-  "eventCount": 984,
+  "ledgerHead": "a15704dd0e94b2789063e1e412a69d573d2c27c1ec9db95d4c2bad5c5780a880",
+  "eventCount": 986,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -3828,7 +3828,7 @@
       },
       "label": "Writer gap fix: keep non-qualifying issue_comment runs out of the wsf-control-writer concurrency group so they never cancel a queued qualifying run; update the workflow test pin and note",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "ACCEPTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 394,
@@ -3864,10 +3864,13 @@
           "kind": "comment",
           "id": 6078863846
         },
-        "accepted": null,
+        "accepted": {
+          "kind": "comment",
+          "id": 6080896165
+        },
         "lastTransition": {
           "kind": "comment",
-          "id": 6079667142
+          "id": 6080896165
         }
       },
       "review": {
@@ -6056,7 +6059,7 @@
       "packet": "LOVABLE-DEVICE-QA-1",
       "worker": "W4",
       "reason": "release",
-      "status": "delivered",
+      "status": "retried",
       "comments": [
         6079628551
       ],
