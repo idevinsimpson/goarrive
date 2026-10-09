@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "bfd5a6097d7d2ff6835bd5f7cb61faa7e1eedf2e0f2316063c325cef7de3b57b",
-  "eventCount": 1080,
+  "ledgerHead": "340605eb75d7b1707dd1a5f864bdbbf5b21bf35065fb383cc25270af84e211ae",
+  "eventCount": 1082,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2749,7 +2749,7 @@
       },
       "label": "Route-aware reviewed-build pin for Lovable expo build 9b9eade5: normalize only the two per-request values, bind documents per route template, keep asset digests exact, negative mutation tests",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 394,
@@ -2763,7 +2763,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         ".github/wsf-staging/hosted-lovable-kiosk.mjs",
@@ -2786,7 +2786,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6090734914
+          "id": 6090889862
         }
       },
       "review": {
@@ -6460,11 +6460,14 @@
       "packet": "LOVABLE-REVIEWED-BUILD-1",
       "worker": "W4",
       "reason": "release",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6090832846
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6090889862
+      }
     }
   },
   "fastpath": {
