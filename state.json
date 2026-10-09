@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "e2304bfb63575c7f27bc921363c85d26b9673e62c45aa5f9a8e6d182e7ce2e3b",
-  "eventCount": 1021,
+  "ledgerHead": "8d814d810445f9b682da6f5bc4d75439dff559b361ae9a4e51e46b05a12a46ea",
+  "eventCount": 1022,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -6202,8 +6202,10 @@
       "packet": "KIOSK-TURN-LIFECYCLE-1",
       "worker": "W9",
       "reason": "release",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        6082182898
+      ],
       "ack": null
     }
   },
