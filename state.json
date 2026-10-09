@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "ae7fd08a5296fed24f8ea976a311fb5cee0aed49ca6796f598cf69c25824b071",
-  "eventCount": 869,
+  "ledgerHead": "e23b667c70c37abee015adbdbefebe529382fa071003929676458128d43f0bf2",
+  "eventCount": 872,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2562,15 +2562,17 @@
       },
       "label": "Read-only production Firebase source-vs-deployed inventory, Web Twin activation prerequisites and WSF-only rollout and rollback plan",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
-      "pr": null,
-      "reviewers": [],
+      "pr": 599,
+      "reviewers": [
+        "W4"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "711ecca12f2a619fe5a85a2546f81443dccd47f8",
+        "prHeadSha": "711ecca12f2a619fe5a85a2546f81443dccd47f8",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -2596,7 +2598,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6074970106
+          "id": 6075126055
         }
       },
       "review": {
@@ -2609,7 +2611,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "PROFILE-PHOTOS-FIREBASE-1": {
@@ -5240,7 +5242,8 @@
       "ack": {
         "kind": "comment",
         "id": 6074970106
-      }
+      },
+      "superseded": true
     },
     "e1511ca4b4937cf9c3913d50ad7348f68d739679f3d302625a1b239fe5417c48": {
       "packet": "EXPO-FULL-STAGING-RECOVERY-3",
@@ -5250,6 +5253,14 @@
       "comments": [
         6075146238
       ],
+      "ack": null
+    },
+    "ca9d8c7ea8881393f209054d792973e4c5847e0346ab97a3e9d6b9cc9c3ac174": {
+      "packet": "PRODUCTION-FIREBASE-INVENTORY-1",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
