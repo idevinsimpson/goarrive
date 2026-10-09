@@ -2779,6 +2779,50 @@ function goalRepeatPolicy(goal: Pick<GoalDoc, 'repeatPolicy'>): GoalRepeatPolicy
 }
 
 /**
+ * The one sentence a member is given when a goal that takes one contribution
+ * from each member already holds theirs. The contribution says it, and so does
+ * the turn line's door (wsfJoinTurnLine, KIOSK-TURN-LIFECYCLE-1): one constant,
+ * so the two can never say it differently.
+ */
+const ONE_CONTRIBUTION_MESSAGE =
+  'This goal takes one contribution from each member, and yours is already recorded.';
+
+/**
+ * How many contributions this member already has recorded on this goal, read
+ * INSIDE the caller's transaction, or null when nothing says.
+ *
+ * The evidence is the member's own totals document, wsfGoalMemberTotals/
+ * {goalId}_{uid}, which the caller has already read: a document read, not a
+ * query, so two transactions racing two different attemptIds contend on it
+ * and exactly one commits. Rows written before contributionCount existed carry
+ * no count, and their total is not proof either way (wsfAdjustGoal can move a
+ * total with no contribution behind it), so the ledger itself is asked, and
+ * only for those rows: 1 if it holds one, else 0. A member with no totals
+ * document has nothing recorded, because every contribution write creates one.
+ *
+ * Shared by performContribution's repeat-policy gate and wsfJoinTurnLine, so
+ * "already recorded" is one rule wherever it is asked.
+ */
+async function priorContributionCount(
+  tx: FirebaseFirestore.Transaction,
+  goalId: string,
+  uid: string,
+  memberTotalSnap: FirebaseFirestore.DocumentSnapshot
+): Promise<number | null> {
+  const prior = memberTotalSnap.data() as { contributionCount?: number } | undefined;
+  if (typeof prior?.contributionCount === 'number') return prior.contributionCount;
+  if (!memberTotalSnap.exists) return null;
+  const ledger = await tx.get(
+    getFirestore()
+      .collection('wsfContributions')
+      .where('goalId', '==', goalId)
+      .where('userId', '==', uid)
+      .limit(1)
+  );
+  return ledger.empty ? 0 : 1;
+}
+
+/**
  * THE single policy for "may this caller be told this goal's CURRENT shared
  * state?". Every path that can disclose it calls this — the display read and
  * the contribution replay both — so a second path cannot quietly apply a
@@ -4031,31 +4075,18 @@ async function performContribution(args: {
         | undefined;
       const previousMemberTotal =
         typeof priorMemberTotal?.total === 'number' ? priorMemberTotal.total : 0;
-      // Rows written before contributionCount existed carry no count. Their
-      // total is not proof either way — wsfAdjustGoal can move a total
-      // without any contribution behind it — so the ledger itself is asked,
-      // and only for those rows. A member with no totals document at all has
-      // nothing recorded: the contribution write below always creates one.
-      let previousContributionCount: number | null =
-        typeof priorMemberTotal?.contributionCount === 'number'
-          ? priorMemberTotal.contributionCount
-          : null;
-      if (previousContributionCount === null && memberTotalSnap.exists) {
-        const priorContributions = await tx.get(
-          db
-            .collection('wsfContributions')
-            .where('goalId', '==', goalId)
-            .where('userId', '==', uid)
-            .limit(1)
-        );
-        previousContributionCount = priorContributions.empty ? 0 : 1;
-      }
+      // See priorContributionCount: the totals row's own count, or for a row
+      // written before that field existed, the ledger. The contribution write
+      // below always creates the row, so no row means nothing recorded.
+      const previousContributionCount = await priorContributionCount(
+        tx,
+        goalId,
+        uid,
+        memberTotalSnap
+      );
       const recordedBefore = (previousContributionCount ?? 0) > 0;
       if (goalRepeatPolicy(goal) === 'once' && recordedBefore) {
-        throw new HttpsError(
-          'failed-precondition',
-          'This goal takes one contribution from each member, and yours is already recorded.'
-        );
+        throw new HttpsError('failed-precondition', ONE_CONTRIBUTION_MESSAGE);
       }
 
       const shardIndex = randomGoalShardIndex();
@@ -6530,6 +6561,27 @@ export const wsfListStations = onCall<ListStationsRequest>(
 // gets the same 'permission-denied' an unknown screen gets, which is what makes
 // it clear its own storage and go back to a pairing code. The document itself
 // stays, with when it was revoked and by whom.
+//
+// THE TURN ON THE SCREEN GOES BACK TO THE LINE (KIOSK-TURN-LIFECYCLE-1). A
+// screen can be revoked while it holds somebody's turn. `ready` and `active`
+// never lapse, so before this the person's phone said "walk to Station 1" for
+// the rest of the event, and their one place was held by a turn nobody could
+// run. Now, in this same transaction:
+//   - an assigned, ready or active turn this screen holds is returned to the
+//     line at the position it already had (returnTurnToLine), so the next
+//     screen at the event calls that person first;
+//   - an assignment whose 45 seconds had already run out is closed as the
+//     no-show it already was (recoverLapsedTurn), as every other transaction
+//     closes it;
+//   - a finished turn, the waiting line, and every other screen's turn are not
+//     touched;
+//   - the screen's `serving` pointer is cleared, so no name stays on it.
+// `wsfMyTurn` and the other screens' `wsfTurnState` see it on their next read.
+//
+// The turn is found by the screen's own `serving` pointer and confirmed on the
+// entry (assigned to THIS station). Every path that gives a station a live
+// turn sets that pointer, and "Call next" refuses while the pointed-at turn is
+// live, so a station holds at most one live turn and it is that one.
 // ─────────────────────────────────────────────────────────────────────────────
 
 type RevokeStationRequest = { stationId?: unknown };
@@ -6578,12 +6630,37 @@ export const wsfRevokeStation = onCall<RevokeStationRequest>(
       const pairingRef = pairingId ? db.doc(`wsfKioskPairings/${pairingId}`) : null;
       const pairingSnap = pairingRef ? await tx.get(pairingRef) : null;
 
+      // The turn this screen holds, read with the other reads and before any
+      // write, as a transaction requires.
+      const servingId = normalizeStringId(
+        (station.serving as { entryId?: unknown } | null | undefined)?.entryId
+      );
+      const servingRef = servingId ? db.doc(`wsfTurnEntries/${servingId}`) : null;
+      const servingSnap = servingRef ? await tx.get(servingRef) : null;
+      const now = Date.now();
+
       tx.update(stationRef, {
         status: 'revoked' satisfies StationStatus,
         secretHash: FieldValue.delete(),
         revokedAt: FieldValue.serverTimestamp(),
         revokedBy: uid,
+        serving: null,
       });
+
+      if (servingRef && servingSnap?.exists) {
+        const entry = servingSnap.data() as TurnEntryDoc;
+        if (entry.assignedStationId === stationId) {
+          if (isTurnLeaseLapsed(entry, now)) {
+            recoverLapsedTurn(tx, servingRef, entry);
+          } else if (
+            entry.status === 'assigned' ||
+            entry.status === 'ready' ||
+            entry.status === 'active'
+          ) {
+            returnTurnToLine(tx, servingRef, entry);
+          }
+        }
+      }
 
       if (pairingRef && pairingSnap?.exists) {
         const pairing = pairingSnap.data() as PairingDoc;
@@ -7875,6 +7952,11 @@ export const wsfCombinedGoalPulse = onCall<CombinedGoalPulseRequest>(
 //      the real multi-activity choice on the phone, carried onto the entry. A
 //      goal in no combined setup is its own event and behaves exactly as it
 //      did.
+//   8. A REVOKED SCREEN GIVES ITS TURN BACK (KIOSK-TURN-LIFECYCLE-1). Revoking
+//      a station returns the turn it holds to `waiting`, at the position it
+//      already had, so the next screen calls that person first. It is not an
+//      ending: the person did nothing, and keeps their place. See
+//      returnTurnToLine.
 //
 // COLLECTIONS, all Admin-SDK-only, none in firestore.rules, all covered by the
 // catch-all deny at the bottom of the WSF section — the same position
@@ -8024,12 +8106,14 @@ type TurnEntryDoc = {
   readyLeaseExpiresAt: FirebaseFirestore.Timestamp | null;
   readyAt: FirebaseFirestore.Timestamp | null;
   /**
-   * KIOSK-EXPECTED-TURN-1. THE EXPECTED-TURN REFERENCE: random, minted once by
-   * the call that assigned this entry to a station, and never changed. It is
-   * what a station names when it starts, cancels or completes THIS turn, so a
-   * delayed command for one visitor can never land on the next. It is not a
-   * uid, not a credential (every station command still needs the station
-   * secret) and not derived from anything about the person.
+   * KIOSK-EXPECTED-TURN-1. THE EXPECTED-TURN REFERENCE: random, minted by the
+   * call that assigned this entry to a station, and never changed while that
+   * assignment lasts. It is what a station names when it starts, cancels or
+   * completes THIS turn, so a delayed command for one visitor can never land
+   * on the next. It is not a uid, not a credential (every station command
+   * still needs the station secret) and not derived from anything about the
+   * person. Cleared when a revocation returns the turn to the line, so the
+   * revoked screen's reference matches nothing; the next call mints a new one.
    */
   stationTurnRef?: string | null;
   /** THE CANONICAL ATTEMPT, minted once at start and bound here. */
@@ -8044,6 +8128,10 @@ type TurnEntryDoc = {
   leftAt?: FirebaseFirestore.Timestamp | null;
   /** 'member' | 'station' | 'lease'. Never a uid. */
   endedBy?: string | null;
+  /** KIOSK-TURN-LIFECYCLE-1: when a revocation returned this turn to the line,
+   * and why ('stationRevoked'). Not an ending: the entry is `waiting` again. */
+  requeuedAt?: FirebaseFirestore.Timestamp | null;
+  requeueReason?: string | null;
 };
 
 /** wsfTurnLines/{lineId} — the event's line. */
@@ -8213,8 +8301,19 @@ async function turnGoalOpenIn(
   tx: FirebaseFirestore.Transaction,
   goalId: string
 ): Promise<boolean> {
+  return (await openTurnGoalIn(tx, goalId)) !== null;
+}
+
+/** The same transactional read, returning the open goal itself (or null), for
+ * a caller that needs more of it than "is it open". */
+async function openTurnGoalIn(
+  tx: FirebaseFirestore.Transaction,
+  goalId: string
+): Promise<GoalDoc | null> {
   const snap = await tx.get(getFirestore().doc(`wsfGoals/${goalId}`));
-  return snap.exists && (snap.data() as GoalDoc).status === 'active';
+  if (!snap.exists) return null;
+  const goal = snap.data() as GoalDoc;
+  return goal.status === 'active' ? goal : null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -8565,6 +8664,51 @@ function recoverLapsedTurn(
   }
 }
 
+/**
+ * KIOSK-TURN-LIFECYCLE-1: give a turn back to the line, inside a transaction
+ * that has already done its reads. Used when the station holding the turn is
+ * revoked.
+ *
+ * IT IS NOT AN ENDING. The person did nothing wrong, so:
+ *   - the entry is `waiting` again, at the POSITION IT ALREADY HAD. Positions
+ *     are handed out once and never reused, so theirs is older than anyone who
+ *     joined after them, and the next "Call next" at the event reaches them
+ *     first;
+ *   - their one place at the event (wsfTurnMembers) is untouched, and so are
+ *     their name and code: the code is still theirs and still unique;
+ *   - every trace of the station goes: the assignment, its label, the lease,
+ *     the ready tap, and the expected-turn reference, so the revoked screen's
+ *     reference matches nothing;
+ *   - a started-but-unrecorded attempt is DROPPED. A minted attempt that was
+ *     never contributed is not a number anywhere (see wsfLeaveTurnLine), and
+ *     the next screen to start this turn mints its own. Dropping it inside the
+ *     same transaction is what keeps the count honest: a phone completion
+ *     that commits first finds the turn still active and marks it done, and
+ *     this function is then never called for it; one that commits after finds
+ *     the turn waiting with no attempt and records nothing.
+ */
+function returnTurnToLine(
+  tx: FirebaseFirestore.Transaction,
+  entryRef: FirebaseFirestore.DocumentReference,
+  entry: TurnEntryDoc
+): void {
+  tx.update(entryRef, {
+    status: 'waiting' satisfies TurnStatus,
+    lineStatusKey: turnStatusKey(entry.lineId, 'waiting'),
+    assignedAt: null,
+    assignedStationId: null,
+    assignedStationLabel: null,
+    readyLeaseExpiresAt: null,
+    readyAt: null,
+    stationTurnRef: null,
+    attemptId: null,
+    attemptStationId: null,
+    attemptStartedAt: null,
+    requeuedAt: FieldValue.serverTimestamp(),
+    requeueReason: 'stationRevoked',
+  });
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // wsfEventContext — what this QR resolves to.
 //
@@ -8638,6 +8782,19 @@ export const wsfEventContext = onCall<EventContextRequest>(
 // at its existing position and with its existing code, and writes nothing —
 // including no rewrite of calledName, because a second tap must not silently
 // relabel somebody who is already on a screen.
+//
+// ONE CONTRIBUTION MEANS ONE (KIOSK-TURN-LIFECYCLE-1). Under a goal that takes
+// one contribution from each member, a member whose contribution is already
+// recorded is refused at the door, with the contribution's own sentence
+// (ONE_CONTRIBUTION_MESSAGE), from the contribution's own evidence
+// (priorContributionCount), read in this transaction. Before this the line
+// took their place, called them, started them, and only refused at the very
+// end. The check is on the activity they chose, so at a combined event an
+// activity they have not recorded still admits them. It comes after the
+// membership and closed-goal checks, so it is said only to a member, and
+// before the existing-place return, so a member who recorded on their own
+// phone while in line is told too; that refusal writes nothing, and the place
+// they hold stays theirs until they leave it.
 // ─────────────────────────────────────────────────────────────────────────────
 
 type JoinTurnLineRequest = { goalId?: unknown; calledName?: unknown };
@@ -8691,8 +8848,20 @@ export const wsfJoinTurnLine = onCall<JoinTurnLineRequest>(
       // authorization, so it tells a stranger nothing the not-found did not.
       // Refused before any read that could lead to a write, so a refused join
       // creates no place, no entry and no line, and recovers nothing either.
-      if (!(await turnGoalOpenIn(tx, goalId))) {
+      const goal = await openTurnGoalIn(tx, goalId);
+      if (!goal) {
         throw new HttpsError('failed-precondition', TURN_GOAL_CLOSED_MESSAGE);
+      }
+
+      // ONE CONTRIBUTION MEANS ONE: the same gate, the same evidence and the
+      // same sentence as the contribution itself. Also refused before any
+      // write.
+      if (goalRepeatPolicy(goal) === 'once') {
+        const memberTotalSnap = await tx.get(db.doc(`wsfGoalMemberTotals/${goalId}_${uid}`));
+        const recorded = await priorContributionCount(tx, goalId, uid, memberTotalSnap);
+        if ((recorded ?? 0) > 0) {
+          throw new HttpsError('failed-precondition', ONE_CONTRIBUTION_MESSAGE);
+        }
       }
 
       const memberSnap = await tx.get(memberRef);
