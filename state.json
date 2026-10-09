@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "9fd2f61da93b8d26fe4bf7d6e17798c5bb5293bb586925e340b473f1761ecc66",
-  "eventCount": 996,
+  "ledgerHead": "ef86aee545da54617346be32a9b51a098c87f411c6978607403f23c316d3d221",
+  "eventCount": 998,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -20,7 +20,7 @@
   "canonical": {
     "developmentBranch": "claude/wsf-app-shell",
     "developmentSha": "e65bfee9eecb2370f602d09880da604709fba58a",
-    "operationalMain": "df8d4d69f41f70971c5918c36d776b9af07d1bcb"
+    "operationalMain": "7cd5aad36e9a1403ad63f070a4ffa87657ae8faa"
   },
   "staging": {
     "servedSha": "ec162d17a0540e936741027f9b8f90dd372cfaf4",
@@ -6074,11 +6074,14 @@
       "packet": "PRODUCTION-DEPLOY-PATH-1",
       "worker": "W7",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6081225033
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6081253164
+      }
     }
   },
   "fastpath": {
