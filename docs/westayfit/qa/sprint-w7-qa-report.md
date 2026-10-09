@@ -6679,3 +6679,65 @@ No new finding. The PASS stands.
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0 (re-run before push).
 
 **Status:** **PASS at `dfd48c87` with zero unresolved findings.** PN-1 to PN-4 are non-blocking. This is an independent review of the source and the procedure only: it is not acceptance, not a deployment, and not a hosted or production proof. W7 made no product edit, merge, dispatch, deploy, live-data change, credential or permission change, and did not touch any state ref or comment other than its own GitHub replies.
+
+## §84. Check 84: #604 STAGING-TURN-DRIVERS-1 at `7f42ba1c`
+
+**Assignment:** router wake `9c018cc05a759f41161b34f1650fa0d7c7dbeaa16fd2a236be3aff7e13256b5c` (#434 `6081767585`), under the owner's standing approval to ACK and perform valid W7 router reviews. This is the journey-QA wake L0 said might follow its relay for the first two. I refreshed `wsf-control-state-2` first: `check` passed (1010 events), `worker-view W7` showed `WATCH=on` and `REVIEWING=STAGING-TURN-DRIVERS-1 phase=UNDER_REVIEW pr=#604 subject=7f42ba1c…`, W7 was the sole reviewer (class `journey-qa`), and the wake was `delivered`. The PR head was still the subject, and nothing newer sat on #434 or the PR. ACK: #434 `6081779104`.
+
+**Subject:** #604 (draft, owner W3) at exactly `7f42ba1c5bbfaae17578a351c02864f2839f5659`: one commit on `main` `7cd5aad3`, 7 files, +555/−109, all inside the ledger's `subjectPaths`. I verified it in detached worktrees and pushed nothing from them. **I did not run anything against staging or any hosted system, and used no credential.** Every run below is against the **local emulators** (`demo-wsf-local`).
+
+### What I did differently from the PR's own proof
+
+The PR proves the drivers against a hermetic model it also wrote. The model is a claim about the product, so I checked it against the product two ways. First, I read each claimed behaviour in the served source. Second, I ran the PR's **real drivers and real fixture kit** against the **real product build at `ec162d17`** (the web app and the functions, on the emulators), by rewriting the kit's hosted URLs to the emulators. The fixture kit takes an injectable `fetch`, so none of its code was changed. I ran the same drivers from **main** on the same product as the fail-before control.
+
+### Reproduced
+
+| Check | Result |
+|---|---|
+| `changed-journey-drivers.test.mjs` | **118 passed** (the PR says 118) |
+| `hosted-smoke-contract.test.mjs` | **46 passed** (the PR says 46) |
+| `tests/run-all.mjs` (28 suites) | **all suites passed** (Node 22) |
+| `check-milestone-manifest.mjs` with `WSF_APPROVED_SHA=ec162d17…` | **`MILESTONE_MANIFEST=valid`**, 9 journeys, each with a registered driver; with main's SHA it is `refused`, as it should be |
+| Driver row text against the manifest's `expected` text | **equal for all 9 journeys** |
+| **The PR's drivers on the real product (emulator)** | **8 / 8 journeys, 33 / 33 rows**: `event-use-my-phone` 4, `event-join-line` 3, `two-station-turns` 5, `phone-and-stations-converge` 3, `station-lost-answer` 4, `line-place-ends` 4, `closed-goal-turn` 7, `shared-screen-finish` 3 |
+| The five timing-sensitive journeys, three more times each | **15 / 15** (converge, lost-answer, line-place-ends, closed-goal-turn, two-station-turns); each has now passed 4 of 4 |
+| **Main's drivers on the same real product** | `two-station-turns` passes; **the other five fail with run 61's own causes**: converge and lost-answer both *"the started turn carries no attempt yet"*; `line-place-ends` the `noShow` row; `closed-goal-turn` *"wsfApproveStation refused: INVALID_ARGUMENT"*; `shared-screen-finish` the `finish` and `next` rows (saw `YOUR TOTAL ON THIS GOAL: 5 squats`) |
+| **The smoke's `hosted turn-service contract` row against the real #587 server (emulator)** | **head: PASS. Main: FAIL `start the turn: application refusal (INVALID_ARGUMENT)`**, run 61's message. I ran only that row (24 rows exist); the rest are not claimed |
+| The PR's structural smoke test, against main's smoke and 3 mutants | **kills all four**: main's smoke, no `expectedTurn` on Start, none on the Record retry, a weakened `tr_` pattern |
+| Static fidelity: every `wsf-` test id the drivers use, against the product source at `ec162d17` | 106 ids; 98 literal, 7 built by documented builders (`DeviceChoice` `${testID}-personal`/`-shared`, `FollowAlongCard` `${prefix}-start`/`-pause`/`-stop`/`-timer`), 1 is a results-directory name, not an id. The matched strings (`to say you’re coming`, `Your turn timed out`, the 45-second sentence, `Nobody is waiting.`, `Go to Station`, `This goal is closed.`) are all in the product |
+
+### Items
+
+1. **Run 61's causes are the causes, and the fixes remove them.**
+   - Main's drivers fail on the real product exactly where run 61 failed and with its messages, so the diagnosis is right.
+   - The head passes all of them, repeatedly.
+   - The PR could not establish how hosted reached *no attempt yet* on `station-lost-answer` (its model stops earlier). **On the real product it is established:** main's driver reproduces that message there. The cause is consistent with the early I'm ready tap (main taps without waiting for the call to show and ignores the Start result), which I did not instrument separately.
+2. **The model's served-behaviour claims are true in the product at `ec162d17`.**
+   - `TURN_POLL_MS` is 3 s and `TURN_POLL_FAST_MS` 1 s while called; `STATE_POLL_MS` is 2 s.
+   - `normalizeStationSlot` admits slots 1 and 2 only (`index.ts:5745-5749`).
+   - `turnRunningWide` is `wide && action === 'complete'`, with `wide` at 900 px.
+   - `isTurnLeaseLapsed` applies only to `assigned`.
+   - The kiosk tile label is `textTransform: 'uppercase'` (`contribute/[goalId].tsx:3244-3250`).
+   - The no-show notice lasts one 3 s poll: the next tick finds `wasLiveRef` false and drops it.
+3. **The countdown watch is correct against the real product.** The driver reads `wsf-queue-lease` at 40 to 45 s, watches it to 3 s or less with the call still standing, then reads the heading and reason together. It passed four times, and it is strictly stronger than main's single read after a sleep.
+4. **The #587 contract is respected.** The smoke reads `assigned.turnRef`, checks it against the server's pattern, and sends it on Start and on the retried Record. The station UI drivers go through the station's own buttons, which (#596) send the binding. The unchanged `hosted-player-journey.mjs` waits for the ready panel and starts through the station's own Start, as the PR says.
+5. **Scope and hygiene.** Seven files, all in scope. The second event in `closed-goal-turn` is tracked and closed through the kit (`patchDoc` refuses a document this run did not create), results name no address, and synthetic addresses stay under `example.com`.
+
+### Precision notes (non-blocking)
+
+- **PN-1 (six test-pin gaps; the driver holds in each).** Of 23 mutants that weaken one driver check, the PR's 118 tests kill **17**. The six survivors: **(a to d)** `sayReady` and `readyThenStart` made soft, in four ways (no wait, no tap check, no Start-enabled check, no turn-began check). By reading, each following step still fails the journey, so only the message differs; the PR's own survivor is the same kind. **(e)** the `wsf-queue-lease` text matcher relaxed to any digits. **(f)** the second event's total is no longer read after the closure: **the one real assertion the tests do not pin** (the shipped driver reads it, and it held in all four real runs).
+- **PN-2 (time budget, unmeasured on hosted).** Each journey has a 240 s limit (`DRIVER_TIMEOUT_MS`). On the emulators the two longest took about 67 s (`line-place-ends`, of which about 47 s is the lease itself) and 55 s (`closed-goal-turn`, two events, four stations, five phones). Hosted round trips are slower and I could not measure them. The PR says as much.
+- **PN-3 (the PR's product observations are true, and are not for this packet).** The timed-out notice is gone after one poll, and a Let them go on a member whose phone last saw the call, not their ready, shows *Your turn timed out* for that poll. I confirmed both by reading `app/queue/[goalId].tsx`.
+- **PN-4 (not exercised).** `unverified-participant` is untouched and I did not run it. `hosted-player-journey.mjs` is unchanged and I checked it by reading only.
+- **PN-5 (evidence entry).** Run 61's header is true at job level (a `workflow_dispatch` on main `df8d4d69`; `hosted-verify` failed at *Run the Package E hosted authorization checks* and *Require the hosted checks to have passed*; the changed-journey step is report-only and succeeded; `player-journey` was skipped). The printed counts (`RESULTS=24`, `3 passed, 6 failed`, cleanup 242/242 and 28/28) and the per-journey messages are in logs and an artifact that this environment cannot download, as the PR says. The causes are instead reproduced above.
+
+### Limits, stated plainly (not findings)
+
+- **This is not a hosted proof.** The product, the functions and the fixtures are real, but the network, the hosted clock, Cloud Functions latency and the staging project are not. The PR says the same.
+- I used the build at `ec162d17`, the commit the manifest pins. I did not re-prove that `ec162d17` is what staging serves.
+- One smoke row of 24 was run.
+- `/reg-d6d4.log` is still at the filesystem root (from Check 80); I could not delete it.
+
+- **Gates:** `ts:check` 0; `check-evidence-intact` 0 (re-run before push).
+
+**Status:** **PASS at `7f42ba1c` with zero unresolved findings.** PN-1 to PN-5 are non-blocking. This is independent journey QA of the harness source: it is not acceptance, a deployment, or a hosted proof. W7 made no product edit, merge, dispatch, deploy, live-data change, credential or permission change, and did not touch any state ref or comment other than its own GitHub replies.
