@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "b5b9a0ff9ebd0fb5aac98e5739332a5f952bc3fbd17ecff6c2df37180ddfb442",
-  "eventCount": 988,
+  "ledgerHead": "b3857883b209d0d5bc0613b73cb68da5b5f80ef1895e0036aee6a9c8cfd9fdbe",
+  "eventCount": 995,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2536,7 +2536,7 @@
       },
       "label": "Proof-only lovable-device-matrix mode in the staging workflow: four viewports over the accepted Web Twin journeys on the trial host, PASS/FAIL/BLOCKED per row with screenshots; L0-dispatched",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 394,
@@ -2550,7 +2550,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         ".github/workflows/wsf-staging-deploy.yml",
@@ -2572,7 +2572,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6079513029
+          "id": 6081082241
         }
       },
       "review": {
@@ -2951,17 +2951,17 @@
       },
       "label": "Reviewed WSF-only production deploy path for goarrive: production-only Firebase config, network-free pre-flight guard, operator runbook with candidates A/B, receipts, rollback; nothing deployed",
       "origin": "ledger",
-      "phase": "CHANGES_REQUESTED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
       "pr": 600,
       "reviewers": [
-        "W3"
+        "W7"
       ],
       "artifact": {
-        "subjectSha": "03a8549725c67f5e38cb6c3a9de78c3378dcb2d4",
-        "prHeadSha": "87735995be009ec20844dbdf37e5007253b5f11f",
+        "subjectSha": "dfd48c87ee36710e47c19f0b6e70e3ab7a71e246",
+        "prHeadSha": "dfd48c87ee36710e47c19f0b6e70e3ab7a71e246",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -2989,7 +2989,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6078906904
+          "id": 6081107061
         }
       },
       "review": {
@@ -3002,7 +3002,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 2,
+      "deliveries": 3,
       "pendingFinding": null
     },
     "PRODUCTION-FIREBASE-INVENTORY-1": {
@@ -3828,7 +3828,7 @@
       },
       "label": "Writer gap fix: keep non-qualifying issue_comment runs out of the wsf-control-writer concurrency group so they never cancel a queued qualifying run; update the workflow test pin and note",
       "origin": "ledger",
-      "phase": "ACCEPTED",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 394,
@@ -3840,7 +3840,7 @@
         "subjectSha": "75f77d30d2a137ecdb6a1dbc2a2e0241f93fd242",
         "prHeadSha": "75f77d30d2a137ecdb6a1dbc2a2e0241f93fd242",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "7cd5aad36e9a1403ad63f070a4ffa87657ae8faa"
       },
       "proof": null,
       "served": null,
@@ -3869,8 +3869,8 @@
           "id": 6080896165
         },
         "lastTransition": {
-          "kind": "comment",
-          "id": 6080896165
+          "kind": "pull_request",
+          "id": 603
         }
       },
       "review": {
@@ -6012,7 +6012,8 @@
       "ack": {
         "kind": "comment",
         "id": 6079051195
-      }
+      },
+      "superseded": true
     },
     "a5d4ea540bc1579bea40c0295dd67b5ed80100b9fe4f7e954d8b95ef5c8cc677": {
       "packet": "WRITER-CONCURRENCY-1",
@@ -6059,11 +6060,22 @@
       "packet": "LOVABLE-DEVICE-QA-1",
       "worker": "W4",
       "reason": "release",
-      "status": "redelivered",
+      "status": "acked",
       "comments": [
         6079628551,
         6081043712
       ],
+      "ack": {
+        "kind": "comment",
+        "id": 6081082241
+      }
+    },
+    "4100c4f29c58d977f2739fa443fb33edd99264d95055749eafa95c1d07b112d9": {
+      "packet": "PRODUCTION-DEPLOY-PATH-1",
+      "worker": "W7",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },

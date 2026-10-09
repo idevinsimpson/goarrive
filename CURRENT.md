@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=b5b9a0ff9ebd0fb5aac98e5739332a5f952bc3fbd17ecff6c2df37180ddfb442 events=988 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=b3857883b209d0d5bc0613b73cb68da5b5f80ef1895e0036aee6a9c8cfd9fdbe events=995 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `b5b9a0ff9ebd0fb5aac98e5739332a5f952bc3fbd17ecff6c2df37180ddfb442` (988 events)
+- Ledger head: `b3857883b209d0d5bc0613b73cb68da5b5f80ef1895e0036aee6a9c8cfd9fdbe` (995 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -14,7 +14,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 - Unattended fast-path dispatch: ENABLED (set-fastpath)
 - Staging target (fast path): `ab77fbfce97e60c1c22492397b2ab6b491f9e0db` (KIOSK-PAIRING-CLARITY-PROOF-1), checked against the full-path pin `a31276516e786ac8f848269de4c839b3b9e13123`
 - Staging retry authorized once (authorize-retry, decision 5955316632): `ab77fbfce97e60c1c22492397b2ab6b491f9e0db` (KIOSK-PAIRING-CLARITY-PROOF-1) after failed run 37012494776, repaired by STAGING-FASTPATH-INVENTORY-BASELINE-FIX at `745b4f6270a90555757b9b01255ee77f0a74e8fb`; spent once any newer attempt at that target exists
-- Critical path: PRODUCTION-DEPLOY-PATH-1 (CHANGES_REQUESTED, W9)
+- Critical path: PRODUCTION-DEPLOY-PATH-1 (UNDER_REVIEW, W9)
 - Schema: v2. Every line is written by the `wsf-control-writer` App and names its authority class and rule.
 - Contracts pinned: autonomy-architecture@9ca268d2 (`docs/westayfit/ops/AUTONOMY_ARCHITECTURE_1B_1C.md`); autonomy-contract@9ca268d2 (`docs/westayfit/ops/AUTONOMY_ACCEPTANCE_CONTRACT.md`); capabilities@9ca268d2 (`docs/westayfit/ops/control/capabilities.v1.json`); control-state@9ca268d2 (`docs/westayfit/ops/CONTROL_STATE.md`); fable-operating-protocol@9ca268d2 (`docs/westayfit/ops/control/contracts/FABLE_OPERATING_PROTOCOL_v1.md`); north-star-journeys@9ca268d2 (`docs/westayfit/ops/journeys/NORTH_STAR_JOURNEY_MANIFEST.v1.json`); owner-test-card@9ca268d2 (`docs/westayfit/ops/control/contracts/OWNER_TEST_CARD_AND_SMOKE_CONTRACT.md`); program-director-skill@9ca268d2 (`.claude/skills/wsf-program-director/SKILL.md`); staging-control-plane@9ca268d2 (`skills/wsf-staging-deploy/SKILL.md`); worker-inboxes@9ca268d2 (`docs/westayfit/ops/control/contracts/WORKER_INBOXES.md`); writer@7cd5aad3 (`tools/wsf-control`); writer-workflow@7cd5aad3 (`.github/workflows/wsf-control-reconcile.yml`)
 - **SHADOW CURRENT.** This rendering is comment 5878724949 on #365. The human CURRENT (comment 5847443607) stays authoritative until Step 5 exits; nothing routes or wakes from this page.
@@ -32,8 +32,8 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | W3 | #396 | STAGING-TURN-DRIVERS-1 | — | WORKER-EXECUTION-PROFILES-1 | NORTHSTAR-MIRROR-INTAKE-1 | — | — | on |
 | W4 | #394 | LOVABLE-DEVICE-QA-1 | — | — | — | — | — | on |
 | W5 | #395 | — | — | — | — | — | — | off |
-| W7 | #434 | — | — | — | — | — | — | off |
-| W9 | #497 | PRODUCTION-DEPLOY-PATH-1 | — | — | EVENT-LIFECYCLE-BACKEND-RECOVERY-1, MEMBER-TRUTH-BACKEND-1 | KIOSK-TURN-LIFECYCLE-1 | KIOSK-TURN-LIFECYCLE-1 | on |
+| W7 | #434 | — | PRODUCTION-DEPLOY-PATH-1 | — | — | — | — | on |
+| W9 | #497 | — | — | PRODUCTION-DEPLOY-PATH-1 | EVENT-LIFECYCLE-BACKEND-RECOVERY-1, MEMBER-TRUTH-BACKEND-1 | KIOSK-TURN-LIFECYCLE-1 | KIOSK-TURN-LIFECYCLE-1 | off |
 
 ## Packets
 
@@ -75,13 +75,13 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | KIOSK-UNVERIFIED-PARTICIPANT-1-STAGING-PIN | W3 | work | INTEGRATED (source-only) | ledger | WITHDRAWN | — | — | — | — | — | — | — | comment:6043102398 | comment:6043983205 | — | Pin and prove the integrated unverified-attendee backend through the reviewed full staging path | 1×ops-source then director | — |
 | KIOSK-UNVERIFIED-STAGING-RECOVERY-1 | W3 | work | INTEGRATED (source-only) | ledger | WITHDRAWN (from ACKED) | — | — | — | — | — | — | — | comment:6043993150 | comment:6074820448 | W3-SOURCE-EDIT-CONSENT (Devin); DRIVER-REGISTRATION-RESERVATION (Director) | Finish the blocked staging pin with verified approval ancestry and tracked unverified synthetic fixtures | 1×ops-source then director | — |
 | KIOSK-UNVERIFIED-STAGING-RECOVERY-2 | W3 | work | INTEGRATED (source-only) | ledger | WITHDRAWN | — | — | — | — | — | — | — | comment:6074824513 | comment:6075036000 | — | Finish the consented staging pin with verified approval ancestry, the registered unverified hosted driver and tracked synthetic fixtures | 1×ops-source then director | — |
-| LOVABLE-DEVICE-QA-1 | W4 | work | INTEGRATED (source-only) | ledger | RELEASED | — | — | — | — | — | — | — | comment:6079513029 | comment:6079513029 | — | Proof-only lovable-device-matrix mode in the staging workflow: four viewports over the accepted Web Twin journeys on the trial host, PASS/FAIL/BLOCKED per row with screenshots; L0-dispatched | 1×ops-source then director | — |
+| LOVABLE-DEVICE-QA-1 | W4 | work | INTEGRATED (source-only) | ledger | ACKED | — | — | — | — | — | — | — | comment:6079513029 | comment:6081082241 | — | Proof-only lovable-device-matrix mode in the staging workflow: four viewports over the accepted Web Twin journeys on the trial host, PASS/FAIL/BLOCKED per row with screenshots; L0-dispatched | 1×ops-source then director | — |
 | LOVABLE-KIOSK-HOSTED-PROOF-1 | W3 | work | VERIFIED (hosted) | ledger | INTEGRATED | #589 | 8c9093c0 | 8c9093c0 | — | 41bff6c6 | — | W4, W9 | comment:6044894488 | pull_request:589 | — | Run the pinned Lovable kiosk journey with bounded real staging fixtures and cleanup inside the existing trusted runner | 1×ops-source+1×security then director | — |
 | MEMBER-PREVIEW-LABEL-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #584 | 37529ea3 | 37529ea3 | — | 245c7717 | — | W4 | comment:6035517752 | pull_request:584 | — | Deliver the isolated privacy-safe public preview label without waiting for crossing attribution | 1×journey-qa then director | — |
 | MEMBER-TRUTH-BACKEND-1 | W9 | work | INTEGRATED (source-only) | ledger | BLOCKED (from ACKED) | — | — | — | — | — | — | — | comment:6029989725 | comment:6035507739 | TOGETHER-CROSSING-DESIGN-DECISION (Director and Owner) | Unblock real member Together crossing and privacy-safe public preview labels for the shared Firebase backend and Lovable Web Twin | 1×journey-qa then director | — |
 | MOVE-CAMERA-NATIVE-PORT-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #577 | d6d47879 | d6d47879 | — | 856e20e0 | — | W7 | comment:5997538756 | pull_request:577 | — | Port the owner-accepted camera-assisted squat MOVE North Star into the current Expo app without automatic contribution credit | 1×journey-qa then director | — |
 | NORTHSTAR-MIRROR-INTAKE-1 | W3 | work | INTEGRATED (source-only) | ledger | BLOCKED (from ACKED) | — | — | — | — | — | — | — | comment:6035534615 | comment:6040736205 | W3-SOURCE-EDIT-CONSENT (Devin) | Complete the existing automatic Lovable delta receiver so Devin never has to relay native handoffs | 1×ops-source then director | — |
-| PRODUCTION-DEPLOY-PATH-1 | W9 | work | INTEGRATED (source-only) | ledger | CHANGES_REQUESTED | #600 | 03a85497 | 87735995 | — | — | — | W3 | comment:6075293540 | comment:6078906904 | — | Reviewed WSF-only production deploy path for goarrive: production-only Firebase config, network-free pre-flight guard, operator runbook with candidates A/B, receipts, rollback; nothing deployed | 1×ops-source then director | — |
+| PRODUCTION-DEPLOY-PATH-1 | W9 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #600 | dfd48c87 | dfd48c87 | — | — | — | W7 | comment:6075293540 | comment:6081107061 | — | Reviewed WSF-only production deploy path for goarrive: production-only Firebase config, network-free pre-flight guard, operator runbook with candidates A/B, receipts, rollback; nothing deployed | 1×ops-source then director | — |
 | PRODUCTION-FIREBASE-INVENTORY-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #599 | 80b603c7 | 80b603c7 | — | 0f1fd585 | — | W4 | comment:6074831300 | comment:6077389004 | — | Read-only production Firebase source-vs-deployed inventory, Web Twin activation prerequisites and WSF-only rollout and rollback plan | 1×ops-source then director | — |
 | PROFILE-PHOTOS-FIREBASE-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #593 | 57fd86b8 | 57fd86b8 | — | b8381195 | — | W4 | comment:6052427068 | pull_request:593 | — | Canonical private profile photos and permitted community roster for native and Lovable staging | 1×journey-qa then director | — |
 | STAGING-FASTPATH-DOCS-LINEAGE-FIX | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #551 | 963dd558 | 963dd558 | — | 9825aa36 | — | W4 | comment:5944563639 | pull_request:551 | — | Step 7 correction: allow provably non-runtime docs/instruction lineage while preserving fail-closed fast-path invariants | 1×ops-source then director | — |
@@ -94,7 +94,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | STAGING-TURN-DRIVERS-1 | W3 | work | INTEGRATED (source-only) | ledger | ACKED | — | — | — | — | — | — | — | comment:6079017108 | comment:6079125836 | — | Bring the staging hosted suite (Package E turn-contract row) and the changed-journey and player drivers to the #587 turn contract (expectedTurn on wsfStartTurn, the attempt a started turn carries) | 1×journey-qa then director | — |
 | TOGETHER-COMPLETION-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #567 | e4e32ed6 | e4e32ed6 | — | 22766935 | — | W4 | comment:5964984624 | pull_request:567 | — | Port the owner-selected Together completion from the frozen Lovable reference to the confirmed member receipt with truthful totals, one-time motion and reduced-motion parity | 1×journey-qa then director | — |
 | WORKER-EXECUTION-PROFILES-1 | W3 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #562 | 0790876b | 0790876b | — | — | — | W4, W9 | comment:5962925247 | comment:5963579258 | — | Finish existing PR 562 credential-mode safety and pilot readiness without activating or replacing live workers | 1×ops-source+1×security then director | — |
-| WRITER-CONCURRENCY-1 | W4 | work | INTEGRATED (source-only) | ledger | ACCEPTED | #603 | 75f77d30 | 75f77d30 | — | — | — | W7 | comment:6078863846 | comment:6080896165 | — | Writer gap fix: keep non-qualifying issue_comment runs out of the wsf-control-writer concurrency group so they never cancel a queued qualifying run; update the workflow test pin and note | 1×ops-source then director | — |
+| WRITER-CONCURRENCY-1 | W4 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #603 | 75f77d30 | 75f77d30 | — | 7cd5aad3 | — | W7 | comment:6078863846 | pull_request:603 | — | Writer gap fix: keep non-qualifying issue_comment runs out of the wsf-control-writer concurrency group so they never cancel a queued qualifying run; update the workflow test pin and note | 1×ops-source then director | — |
 
 ## Wakes
 
@@ -252,5 +252,6 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | a5d4ea540bc1 | W4 | WRITER-CONCURRENCY-1 | release | acked | 6078962743 | comment:6079018663 |
 | 612a9cd1912a | W3 | STAGING-TURN-DRIVERS-1 | release | acked | 6079121090 | comment:6079125836 |
 | e6f576320b1e | W7 | WRITER-CONCURRENCY-1 | review | acked | 6079484002 | comment:6079510595 |
-| 9c107c6d3441 | W4 | LOVABLE-DEVICE-QA-1 | release | redelivered | 6079628551, 6081043712 | — |
+| 9c107c6d3441 | W4 | LOVABLE-DEVICE-QA-1 | release | acked | 6079628551, 6081043712 | comment:6081082241 |
+| 4100c4f29c58 | W7 | PRODUCTION-DEPLOY-PATH-1 | review | requested | — | — |
 
