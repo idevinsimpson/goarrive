@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "bf38c4d78154087d1ad8be7633ad810c31115e80a2944fa5d9a187d3cabd83e8",
-  "eventCount": 902,
+  "ledgerHead": "29b7afe3f3ca706d821728122fd9ffca8c8bb019f967a5c528af49999367f5ad",
+  "eventCount": 904,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1308,7 +1308,7 @@
       },
       "label": "Pin ec162d17 through the reviewed full staging path: RECOVERY-3 scope plus the three reservation-gap paths (verify-deployment 49->59 cases, Home manifest and home-journey retarget)",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -1322,7 +1322,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         ".github/wsf-staging/approved-candidate.json",
@@ -1353,7 +1353,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6076523104
+          "id": 6076764787
         }
       },
       "review": {
@@ -5520,11 +5520,14 @@
       "packet": "EXPO-FULL-STAGING-RECOVERY-4",
       "worker": "W3",
       "reason": "release",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6076634226
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6076764787
+      }
     }
   },
   "fastpath": {
