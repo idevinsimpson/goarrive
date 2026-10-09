@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "d5135103a3645060f6452ee82193b3138dc1123c769c052825014dd54d09a174",
-  "eventCount": 895,
+  "ledgerHead": "54b4089d1a16376e8ba8d04c3fd985d197db4e2e67c769439b0a5f16d739c8a3",
+  "eventCount": 897,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2679,7 +2679,10 @@
         "after": "director"
       },
       "deliveries": 1,
-      "pendingFinding": null
+      "pendingFinding": {
+        "kind": "comment",
+        "id": 6076291750
+      }
     },
     "PRODUCTION-FIREBASE-INVENTORY-1": {
       "owner": "W9",
@@ -5418,12 +5421,16 @@
       "packet": "PRODUCTION-DEPLOY-PATH-1",
       "worker": "W4",
       "reason": "review",
-      "status": "redelivered",
+      "status": "acked",
       "comments": [
         6075741456,
         6076232299
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6076248686
+      },
+      "superseded": true
     },
     "2652666dd08383555f99350e394eecedcee3b727ead7150972a4353bbea7c12c": {
       "packet": "PRODUCTION-FIREBASE-INVENTORY-1",

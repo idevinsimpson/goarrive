@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=d5135103a3645060f6452ee82193b3138dc1123c769c052825014dd54d09a174 events=895 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=54b4089d1a16376e8ba8d04c3fd985d197db4e2e67c769439b0a5f16d739c8a3 events=897 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `d5135103a3645060f6452ee82193b3138dc1123c769c052825014dd54d09a174` (895 events)
+- Ledger head: `54b4089d1a16376e8ba8d04c3fd985d197db4e2e67c769439b0a5f16d739c8a3` (897 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -30,7 +30,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | Worker | Inbox | Active now | Reviewing | Waiting on review | Blocked | Next | Queue | WATCH |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | W3 | #396 | EXPO-FULL-STAGING-RECOVERY-3 | — | WORKER-EXECUTION-PROFILES-1 | NORTHSTAR-MIRROR-INTAKE-1 | — | — | on |
-| W4 | #394 | — | PRODUCTION-DEPLOY-PATH-1 | — | — | — | — | on |
+| W4 | #394 | — | — | — | — | — | — | off |
 | W5 | #395 | — | — | — | — | — | — | off |
 | W7 | #434 | — | — | — | — | — | — | off |
 | W9 | #497 | PRODUCTION-FIREBASE-INVENTORY-1 | — | PRODUCTION-DEPLOY-PATH-1 | EVENT-LIFECYCLE-BACKEND-RECOVERY-1, MEMBER-TRUTH-BACKEND-1 | EXPO-PRIZE-WIRING-2 | EXPO-PRIZE-WIRING-2 | on |
@@ -76,7 +76,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | MEMBER-TRUTH-BACKEND-1 | W9 | work | INTEGRATED (source-only) | ledger | BLOCKED (from ACKED) | — | — | — | — | — | — | — | comment:6029989725 | comment:6035507739 | TOGETHER-CROSSING-DESIGN-DECISION (Director and Owner) | Unblock real member Together crossing and privacy-safe public preview labels for the shared Firebase backend and Lovable Web Twin | 1×journey-qa then director | — |
 | MOVE-CAMERA-NATIVE-PORT-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #577 | d6d47879 | d6d47879 | — | 856e20e0 | — | W7 | comment:5997538756 | pull_request:577 | — | Port the owner-accepted camera-assisted squat MOVE North Star into the current Expo app without automatic contribution credit | 1×journey-qa then director | — |
 | NORTHSTAR-MIRROR-INTAKE-1 | W3 | work | INTEGRATED (source-only) | ledger | BLOCKED (from ACKED) | — | — | — | — | — | — | — | comment:6035534615 | comment:6040736205 | W3-SOURCE-EDIT-CONSENT (Devin) | Complete the existing automatic Lovable delta receiver so Devin never has to relay native handoffs | 1×ops-source then director | — |
-| PRODUCTION-DEPLOY-PATH-1 | W9 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #600 | dff97e4f | dff97e4f | — | — | — | W4 | comment:6075293540 | comment:6075658750 | — | Reviewed WSF-only production deploy path for goarrive: production-only Firebase config, network-free pre-flight guard, operator runbook with candidates A/B, receipts, rollback; nothing deployed | 1×ops-source then director | — |
+| PRODUCTION-DEPLOY-PATH-1 | W9 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #600 | dff97e4f | dff97e4f | — | — | — | W4 | comment:6075293540 | comment:6075658750 | — | Reviewed WSF-only production deploy path for goarrive: production-only Firebase config, network-free pre-flight guard, operator runbook with candidates A/B, receipts, rollback; nothing deployed | 1×ops-source then director | comment:6076291750 |
 | PRODUCTION-FIREBASE-INVENTORY-1 | W9 | work | INTEGRATED (source-only) | ledger | CHANGES_REQUESTED | #599 | 711ecca1 | 711ecca1 | — | — | — | W4 | comment:6074831300 | comment:6075479691 | — | Read-only production Firebase source-vs-deployed inventory, Web Twin activation prerequisites and WSF-only rollout and rollback plan | 1×ops-source then director | — |
 | PROFILE-PHOTOS-FIREBASE-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #593 | 57fd86b8 | 57fd86b8 | — | b8381195 | — | W4 | comment:6052427068 | pull_request:593 | — | Canonical private profile photos and permitted community roster for native and Lovable staging | 1×journey-qa then director | — |
 | STAGING-FASTPATH-DOCS-LINEAGE-FIX | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #551 | 963dd558 | 963dd558 | — | 9825aa36 | — | W4 | comment:5944563639 | pull_request:551 | — | Step 7 correction: allow provably non-runtime docs/instruction lineage while preserving fail-closed fast-path invariants | 1×ops-source then director | — |
@@ -232,6 +232,6 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | e1511ca4b493 | W3 | EXPO-FULL-STAGING-RECOVERY-3 | release | acked | 6075146238 | comment:6075387734 |
 | ca9d8c7ea888 | W4 | PRODUCTION-FIREBASE-INVENTORY-1 | review | acked | 6075255359 | comment:6075395067 |
 | b65fbb58ba73 | W9 | PRODUCTION-DEPLOY-PATH-1 | release | acked | 6075401735 | comment:6075521276 |
-| 6fe7e958cb2e | W4 | PRODUCTION-DEPLOY-PATH-1 | review | redelivered | 6075741456, 6076232299 | — |
+| 6fe7e958cb2e | W4 | PRODUCTION-DEPLOY-PATH-1 | review | acked | 6075741456, 6076232299 | comment:6076248686 |
 | 2652666dd083 | W9 | PRODUCTION-FIREBASE-INVENTORY-1 | handback | acked | 6075741656 | comment:6075814708 |
 
