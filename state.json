@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "3ab8626aa315ab92331dda07cf7d522e2632e822bd687ee8ea786e48c82051e0",
-  "eventCount": 1062,
+  "ledgerHead": "933abb7877d6fd3bb7a71b00bf304282a3b5af61f88c685e5323938cf68ecdf9",
+  "eventCount": 1066,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -20,7 +20,7 @@
   "canonical": {
     "developmentBranch": "claude/wsf-app-shell",
     "developmentSha": "8a067b29420563408e16cff5d91cc77b2ad0fbd8",
-    "operationalMain": "e2384102f42d5c4f47541893a9aea0cbb0b0754c"
+    "operationalMain": "3c2ef6b986ff334c14557ae8ac477700f4ee0f21"
   },
   "staging": {
     "servedSha": "ec162d17a0540e936741027f9b8f90dd372cfaf4",
@@ -2605,7 +2605,7 @@
       },
       "label": "Proof-only lovable-device-matrix mode in the staging workflow: four viewports over the accepted Web Twin journeys on the trial host, PASS/FAIL/BLOCKED rows with screenshots; L0-dispatched; + mode pins",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 394,
@@ -2617,7 +2617,7 @@
         "subjectSha": "4bf7f8b501c0a3238d972cd2c0266f132678fe17",
         "prHeadSha": "4bf7f8b501c0a3238d972cd2c0266f132678fe17",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "3c2ef6b986ff334c14557ae8ac477700f4ee0f21"
       },
       "proof": null,
       "served": null,
@@ -2643,10 +2643,13 @@
           "kind": "comment",
           "id": 6081291520
         },
-        "accepted": null,
-        "lastTransition": {
+        "accepted": {
           "kind": "comment",
-          "id": 6084592990
+          "id": 6084810090
+        },
+        "lastTransition": {
+          "kind": "pull_request",
+          "id": 605
         }
       },
       "review": {
@@ -6362,11 +6365,14 @@
       "packet": "PROD-RUNTIME-SA-AUTH-ROLE-1",
       "worker": "W9",
       "reason": "handback",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6084946355
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6085042337
+      }
     }
   },
   "fastpath": {

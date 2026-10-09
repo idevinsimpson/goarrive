@@ -1,15 +1,15 @@
-<!-- wsf-control ledgerHead=3ab8626aa315ab92331dda07cf7d522e2632e822bd687ee8ea786e48c82051e0 events=1062 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=933abb7877d6fd3bb7a71b00bf304282a3b5af61f88c685e5323938cf68ecdf9 events=1066 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `3ab8626aa315ab92331dda07cf7d522e2632e822bd687ee8ea786e48c82051e0` (1062 events)
+- Ledger head: `933abb7877d6fd3bb7a71b00bf304282a3b5af61f88c685e5323938cf68ecdf9` (1066 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
-- Canonical: development `claude/wsf-app-shell` at `8a067b29420563408e16cff5d91cc77b2ad0fbd8`; operational main `e2384102f42d5c4f47541893a9aea0cbb0b0754c`
+- Canonical: development `claude/wsf-app-shell` at `8a067b29420563408e16cff5d91cc77b2ad0fbd8`; operational main `3c2ef6b986ff334c14557ae8ac477700f4ee0f21`
 - Staging: serves `ec162d17a0540e936741027f9b8f90dd372cfaf4` (run 37912780869, #61); rollback `ab77fbfce97e60c1c22492397b2ab6b491f9e0db`; pin PR #597
 - Unattended fast-path dispatch: ENABLED (set-fastpath)
 - Staging target (fast path): `ab77fbfce97e60c1c22492397b2ab6b491f9e0db` (KIOSK-PAIRING-CLARITY-PROOF-1), checked against the full-path pin `a31276516e786ac8f848269de4c839b3b9e13123`
@@ -30,7 +30,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | Worker | Inbox | Active now | Reviewing | Waiting on review | Blocked | Next | Queue | WATCH |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | W3 | #396 | — | — | WORKER-EXECUTION-PROFILES-1 | NORTHSTAR-MIRROR-INTAKE-1 | — | — | off |
-| W4 | #394 | — | — | LOVABLE-DEVICE-QA-2 | — | — | — | off |
+| W4 | #394 | — | — | — | — | — | — | off |
 | W5 | #395 | — | — | — | — | — | — | off |
 | W7 | #434 | — | — | — | — | — | — | off |
 | W9 | #497 | PROD-RUNTIME-SA-AUTH-ROLE-1 | — | — | EVENT-LIFECYCLE-BACKEND-RECOVERY-1, MEMBER-TRUTH-BACKEND-1 | — | — | on |
@@ -76,7 +76,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | KIOSK-UNVERIFIED-STAGING-RECOVERY-1 | W3 | work | INTEGRATED (source-only) | ledger | WITHDRAWN (from ACKED) | — | — | — | — | — | — | — | comment:6043993150 | comment:6074820448 | W3-SOURCE-EDIT-CONSENT (Devin); DRIVER-REGISTRATION-RESERVATION (Director) | Finish the blocked staging pin with verified approval ancestry and tracked unverified synthetic fixtures | 1×ops-source then director | — |
 | KIOSK-UNVERIFIED-STAGING-RECOVERY-2 | W3 | work | INTEGRATED (source-only) | ledger | WITHDRAWN | — | — | — | — | — | — | — | comment:6074824513 | comment:6075036000 | — | Finish the consented staging pin with verified approval ancestry, the registered unverified hosted driver and tracked synthetic fixtures | 1×ops-source then director | — |
 | LOVABLE-DEVICE-QA-1 | W4 | work | INTEGRATED (source-only) | ledger | WITHDRAWN | — | — | — | — | — | — | — | comment:6079513029 | comment:6081289315 | — | Proof-only lovable-device-matrix mode in the staging workflow: four viewports over the accepted Web Twin journeys on the trial host, PASS/FAIL/BLOCKED per row with screenshots; L0-dispatched | 1×ops-source then director | — |
-| LOVABLE-DEVICE-QA-2 | W4 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #605 | 4bf7f8b5 | 4bf7f8b5 | — | — | — | W3 | comment:6081291520 | comment:6084592990 | — | Proof-only lovable-device-matrix mode in the staging workflow: four viewports over the accepted Web Twin journeys on the trial host, PASS/FAIL/BLOCKED rows with screenshots; L0-dispatched; + mode pins | 1×ops-source then director | — |
+| LOVABLE-DEVICE-QA-2 | W4 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #605 | 4bf7f8b5 | 4bf7f8b5 | — | 3c2ef6b9 | — | W3 | comment:6081291520 | pull_request:605 | — | Proof-only lovable-device-matrix mode in the staging workflow: four viewports over the accepted Web Twin journeys on the trial host, PASS/FAIL/BLOCKED rows with screenshots; L0-dispatched; + mode pins | 1×ops-source then director | — |
 | LOVABLE-KIOSK-HOSTED-PROOF-1 | W3 | work | VERIFIED (hosted) | ledger | INTEGRATED | #589 | 8c9093c0 | 8c9093c0 | — | 41bff6c6 | — | W4, W9 | comment:6044894488 | pull_request:589 | — | Run the pinned Lovable kiosk journey with bounded real staging fixtures and cleanup inside the existing trusted runner | 1×ops-source+1×security then director | — |
 | MEMBER-PREVIEW-LABEL-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #584 | 37529ea3 | 37529ea3 | — | 245c7717 | — | W4 | comment:6035517752 | pull_request:584 | — | Deliver the isolated privacy-safe public preview label without waiting for crossing attribution | 1×journey-qa then director | — |
 | MEMBER-TRUTH-BACKEND-1 | W9 | work | INTEGRATED (source-only) | ledger | BLOCKED (from ACKED) | — | — | — | — | — | — | — | comment:6029989725 | comment:6035507739 | TOGETHER-CROSSING-DESIGN-DECISION (Director and Owner) | Unblock real member Together crossing and privacy-safe public preview labels for the shared Firebase backend and Lovable Web Twin | 1×journey-qa then director | — |
@@ -265,5 +265,5 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | f42c9d5d2f5c | W9 | PROD-RUNTIME-SA-AUTH-ROLE-1 | release | acked | 6084066196 | comment:6084189796 |
 | a0840d851f6f | W3 | LOVABLE-DEVICE-QA-2 | review | acked | 6084262288 | comment:6084514655 |
 | c42d1a3446a6 | W4 | PROD-RUNTIME-SA-AUTH-ROLE-1 | review | acked | 6084460251 | comment:6084690889 |
-| 8c029aed1170 | W9 | PROD-RUNTIME-SA-AUTH-ROLE-1 | handback | delivered | 6084946355 | — |
+| 8c029aed1170 | W9 | PROD-RUNTIME-SA-AUTH-ROLE-1 | handback | acked | 6084946355 | comment:6085042337 |
 
