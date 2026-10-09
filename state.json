@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "6787443817a6dbba96f0979717245e4c9fda7ac419bc729108618ba849101f59",
-  "eventCount": 1025,
+  "ledgerHead": "66c507c02f4c21c4017d487af6e0d02f39113f442377b8b0f6de2460357e7df4",
+  "eventCount": 1029,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2197,15 +2197,17 @@
       },
       "label": "Revoke ends/requeues that station's assigned/ready/active line entry (seen via wsfMyTurn/wsfTurnState); wsfJoinTurnLine refuses an already-recorded member (one-contribution reason); tests; doc note",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
-      "pr": null,
-      "reviewers": [],
+      "pr": 606,
+      "reviewers": [
+        "W4"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "17a565dc88c058b136664355dd4fa0634f0a39d5",
+        "prHeadSha": "17a565dc88c058b136664355dd4fa0634f0a39d5",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -2233,7 +2235,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6082315169
+          "id": 6082731993
         }
       },
       "review": {
@@ -2246,7 +2248,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "KIOSK-UNVERIFIED-PARTICIPANT-1": {
@@ -3689,7 +3691,7 @@
       },
       "label": "Bring the staging hosted suite (Package E turn-contract row) and the changed-journey and player drivers to the #587 turn contract (expectedTurn on wsfStartTurn, the attempt a started turn carries)",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "ACCEPTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -3727,10 +3729,13 @@
           "kind": "comment",
           "id": 6079017108
         },
-        "accepted": null,
+        "accepted": {
+          "kind": "comment",
+          "id": 6082608679
+        },
         "lastTransition": {
           "kind": "comment",
-          "id": 6082390768
+          "id": 6082608679
         }
       },
       "review": {
@@ -6212,7 +6217,16 @@
       "ack": {
         "kind": "comment",
         "id": 6082315169
-      }
+      },
+      "superseded": true
+    },
+    "1eac669d580424e0ade2a9ae16b01c8eb6bf560a7c8f01bb4961a4c09bc2d1a6": {
+      "packet": "KIOSK-TURN-LIFECYCLE-1",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {

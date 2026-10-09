@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=6787443817a6dbba96f0979717245e4c9fda7ac419bc729108618ba849101f59 events=1025 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=66c507c02f4c21c4017d487af6e0d02f39113f442377b8b0f6de2460357e7df4 events=1029 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `6787443817a6dbba96f0979717245e4c9fda7ac419bc729108618ba849101f59` (1025 events)
+- Ledger head: `66c507c02f4c21c4017d487af6e0d02f39113f442377b8b0f6de2460357e7df4` (1029 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -29,11 +29,11 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 
 | Worker | Inbox | Active now | Reviewing | Waiting on review | Blocked | Next | Queue | WATCH |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| W3 | #396 | — | LOVABLE-DEVICE-QA-2 | STAGING-TURN-DRIVERS-1, WORKER-EXECUTION-PROFILES-1 | NORTHSTAR-MIRROR-INTAKE-1 | — | — | on |
-| W4 | #394 | — | — | LOVABLE-DEVICE-QA-2 | — | — | — | off |
+| W3 | #396 | — | LOVABLE-DEVICE-QA-2 | WORKER-EXECUTION-PROFILES-1 | NORTHSTAR-MIRROR-INTAKE-1 | — | — | on |
+| W4 | #394 | — | KIOSK-TURN-LIFECYCLE-1 | LOVABLE-DEVICE-QA-2 | — | — | — | on |
 | W5 | #395 | — | — | — | — | — | — | off |
 | W7 | #434 | — | — | — | — | — | — | off |
-| W9 | #497 | KIOSK-TURN-LIFECYCLE-1 | — | — | EVENT-LIFECYCLE-BACKEND-RECOVERY-1, MEMBER-TRUTH-BACKEND-1 | — | — | on |
+| W9 | #497 | — | — | KIOSK-TURN-LIFECYCLE-1 | EVENT-LIFECYCLE-BACKEND-RECOVERY-1, MEMBER-TRUTH-BACKEND-1 | — | — | off |
 
 ## Packets
 
@@ -70,7 +70,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | KIOSK-EXPECTED-TURN-NATIVE-CALLER-RECOVERY-2 | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #596 | 1cdbeff5 | 1cdbeff5 | — | ec162d17 | — | W7 | comment:6061210091 | pull_request:596 | — | Correct native expected-turn caller reservation to executable Vitest and Playwright paths | 1×journey-qa then director | — |
 | KIOSK-PAIRING-CLARITY-PROOF-1 | W9 | work | STAGED (hosted) | ledger | STAGED | #553 | 4537c26c | 4537c26c | — | ab77fbfc | hosted run 37025084843: PASS | W4 | comment:5945136749 | comment:5955903159 | — | Clarify venue-station pairing from the Champion's own phone and prove the existing flow end-to-end | 1×journey-qa then director | — |
 | KIOSK-REVOKE-ACTIVE-TURN-1 | W9 | work | INTEGRATED (source-only) | ledger | WITHDRAWN | — | — | — | — | — | — | — | — | comment:6079352515 | — | On wsfRevokeStation, end or requeue that station's assigned/ready/active line entry server-side and surface the new status via wsfMyTurn/wsfTurnState; callable tests; doc note | 1×ops-source then director | — |
-| KIOSK-TURN-LIFECYCLE-1 | W9 | work | INTEGRATED (source-only) | ledger | ACKED | — | — | — | — | — | — | — | comment:6082013157 | comment:6082315169 | — | Revoke ends/requeues that station's assigned/ready/active line entry (seen via wsfMyTurn/wsfTurnState); wsfJoinTurnLine refuses an already-recorded member (one-contribution reason); tests; doc note | 1×ops-source then director | — |
+| KIOSK-TURN-LIFECYCLE-1 | W9 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #606 | 17a565dc | 17a565dc | — | — | — | W4 | comment:6082013157 | comment:6082731993 | — | Revoke ends/requeues that station's assigned/ready/active line entry (seen via wsfMyTurn/wsfTurnState); wsfJoinTurnLine refuses an already-recorded member (one-contribution reason); tests; doc note | 1×ops-source then director | — |
 | KIOSK-UNVERIFIED-PARTICIPANT-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #586 | a17ee3e2 | a17ee3e2 | — | 819c26f0 | — | W4 | comment:6041849013 | pull_request:586 | — | Allow real authenticated unverified attendees to complete the ordinary WSF event participation backend journey | 1×journey-qa then director | — |
 | KIOSK-UNVERIFIED-PARTICIPANT-1-STAGING-PIN | W3 | work | INTEGRATED (source-only) | ledger | WITHDRAWN | — | — | — | — | — | — | — | comment:6043102398 | comment:6043983205 | — | Pin and prove the integrated unverified-attendee backend through the reviewed full staging path | 1×ops-source then director | — |
 | KIOSK-UNVERIFIED-STAGING-RECOVERY-1 | W3 | work | INTEGRATED (source-only) | ledger | WITHDRAWN (from ACKED) | — | — | — | — | — | — | — | comment:6043993150 | comment:6074820448 | W3-SOURCE-EDIT-CONSENT (Devin); DRIVER-REGISTRATION-RESERVATION (Director) | Finish the blocked staging pin with verified approval ancestry and tracked unverified synthetic fixtures | 1×ops-source then director | — |
@@ -92,7 +92,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | STAGING-FRESHNESS-FASTPATH | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #548 | c295d5c1 | c295d5c1 | — | 73d87d4e | — | W4 | comment:5938517396 | pull_request:548 | — | Step 7: automate preview-eligible accepted/integrated to deterministic candidate, pin, existing staging dispatch, and FRESH readback | 1×ops-source then director | — |
 | STAGING-PIN-FASTPATH-SERVED-BASELINE-1 | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #565 | a72a399e | a72a399e | — | e3598578 | — | W9 | comment:5963657922 | pull_request:565 | — | Teach the existing pin generator to represent a ledger-fast-path served baseline truthfully and fail closed otherwise | 1×ops-source then director | — |
 | STAGING-PROOF-RECONCILE-ROUTING-FIX | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #557 | cc180898 | cc180898 | — | 9ca268d2 | — | W4 | comment:5956038540 | pull_request:557 | — | Derive the exact successful staging run proof and pointer sequence when the workflow-run wake is missed | 1×ops-source then director | — |
-| STAGING-TURN-DRIVERS-1 | W3 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #604 | 7f42ba1c | 7f42ba1c | — | — | — | W7 | comment:6079017108 | comment:6082390768 | — | Bring the staging hosted suite (Package E turn-contract row) and the changed-journey and player drivers to the #587 turn contract (expectedTurn on wsfStartTurn, the attempt a started turn carries) | 1×journey-qa then director | — |
+| STAGING-TURN-DRIVERS-1 | W3 | work | INTEGRATED (source-only) | ledger | ACCEPTED | #604 | 7f42ba1c | 7f42ba1c | — | — | — | W7 | comment:6079017108 | comment:6082608679 | — | Bring the staging hosted suite (Package E turn-contract row) and the changed-journey and player drivers to the #587 turn contract (expectedTurn on wsfStartTurn, the attempt a started turn carries) | 1×journey-qa then director | — |
 | TOGETHER-COMPLETION-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #567 | e4e32ed6 | e4e32ed6 | — | 22766935 | — | W4 | comment:5964984624 | pull_request:567 | — | Port the owner-selected Together completion from the frozen Lovable reference to the confirmed member receipt with truthful totals, one-time motion and reduced-motion parity | 1×journey-qa then director | — |
 | WORKER-EXECUTION-PROFILES-1 | W3 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #562 | 0790876b | 0790876b | — | — | — | W4, W9 | comment:5962925247 | comment:5963579258 | — | Finish existing PR 562 credential-mode safety and pilot readiness without activating or replacing live workers | 1×ops-source+1×security then director | — |
 | WRITER-CONCURRENCY-1 | W4 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #603 | 75f77d30 | 75f77d30 | — | 7cd5aad3 | — | W7 | comment:6078863846 | pull_request:603 | — | Writer gap fix: keep non-qualifying issue_comment runs out of the wsf-control-writer concurrency group so they never cancel a queued qualifying run; update the workflow test pin and note | 1×ops-source then director | — |
@@ -259,4 +259,5 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | 9c018cc05a75 | W7 | STAGING-TURN-DRIVERS-1 | review | acked | 6081767585 | comment:6081779104 |
 | 58c46f112cac | W3 | LOVABLE-DEVICE-QA-2 | review | acked | 6081988232 | comment:6082110470 |
 | c0b43c67f852 | W9 | KIOSK-TURN-LIFECYCLE-1 | release | acked | 6082182898 | comment:6082315169 |
+| 1eac669d5804 | W4 | KIOSK-TURN-LIFECYCLE-1 | review | requested | — | — |
 
