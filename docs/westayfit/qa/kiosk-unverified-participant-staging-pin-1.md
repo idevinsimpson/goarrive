@@ -1,19 +1,23 @@
-# KIOSK-UNVERIFIED-STAGING-RECOVERY-2: the unverified participant's hosted proof, and the pin it waits on
+# EXPO-FULL-STAGING-RECOVERY-3: the unverified participant's hosted proof, the marker rewrite, and the pin it waits on
 
-**Status: partial, not delivered.** The fixture kit, the driver, its registration and their tests are done (below). The staging pin is **not generated**.
+**Status: partial, not delivered.** The fixture kit, the driver, its registration, the operational `/go/**` rewrite and their tests are done (below). The staging pin is **not generated**, and so neither are the manifest rows, which name the pinned build.
 
 It needs the bounded `pin-candidate.mjs` change that this W3 session's tool-permission classifier refused on 2026-10-07 ("Security Weaken"). The owner's consent is recorded on GitHub (#365 `6074607727`, pointer #396 `6074612378`), and as the queue says, it stays subject to this session's own permission check. The edit is not retried until the owner approves it inside the W3 session, where the approval has been requested.
 
 | | |
 |---|---|
-| **Packet** | KIOSK-UNVERIFIED-STAGING-RECOVERY-2: queue #365 `6074823456`, release `6074824513`. It succeeds RECOVERY-1, withdrawn in `6074820448`, whose contract is #365 `6043040592` with recovery delta `6043989729`. The reservation adds `tests/hosted-changed-journeys.test.mjs`. W3, inbox #396 (wake `00c0938b…`, ack `6074964040`). |
+| **Packet** | EXPO-FULL-STAGING-RECOVERY-3: queue #365 `6075042219`, release `6075043474`, L0 delta #396 `6075046683`; W3, inbox #396 (wake `e1511ca4…`, ack `6075387734`). It succeeds RECOVERY-2 (queue `6074823456`, withdrawn in `6075036000`), which succeeded RECOVERY-1 (withdrawn in `6074820448`). The contract is #365 `6043040592` with recovery delta `6043989729`. The reservation adds `tests/hosted-changed-journeys.test.mjs` and `firebase.westayfit.staging.json`. |
 | **Base** | operational `main` `41bff6c6`. |
-| **Candidate / rollback** | `819c26f0e18031fa575f430985ac024fd68f1588` / `ab77fbfce97e60c1c22492397b2ab6b491f9e0db` (unchanged; no newer served receipt). |
+| **Candidate / rollback** | **`ec162d17a0540e936741027f9b8f90dd372cfaf4`** (the latest accepted development head; RECOVERY-3 replaced `819c26f0`) / `ab77fbfce97e60c1c22492397b2ab6b491f9e0db` (served, run `37025084843`). |
 | **Proof type** | Source only. Hermetic tests against an in-memory backend and a scripted page model. Nothing deployed or dispatched, and no hosted run. |
 
-## What the native app does at 819c26f0 (read from source)
+## What the native app does at 819c26f0 and ec162d17 (read from source)
 
-#586 opened the **server** to an account whose address is not verified: `wsfSaveProfile`, `wsfJoinCommunity`, `wsfJoinViaMarker` and `wsfContribute`. Its own QA record says the app's UI was out of scope. That is still true at 819c26f0, and at `claude/wsf-app-shell` today none of these files has changed since then.
+#586 opened the **server** to an account whose address is not verified: `wsfSaveProfile`, `wsfJoinCommunity`, `wsfJoinViaMarker` and `wsfContribute`. Its own QA record says the app's UI was out of scope.
+
+That is still true at the new candidate **ec162d17**:
+- **The screens are unchanged.** None of the 14 screens this journey touches changed between 819c26f0 and ec162d17 (`git log 819c26f0..ec162d17`, 0 commits each): sign-in, sign-up, verification, profile, join, marker (`go/[markerSlug].tsx`, `MarkerEntryScreen.tsx`, `markerEntry.ts`), contribute, progress, community home and both layouts. The line numbers below hold for both.
+- **The server stays open.** At ec162d17, `JOIN_REQUIRES_EMAIL_VERIFIED = false` (`index.ts:656`), and `wsfSaveProfile` has no verification check. The only remaining checks guard organiser actions: `wsfCreateCommunity` (`:203`) and `wsfCreateGoal` (`:3114`).
 
 There is no global redirect: `app/_layout.tsx` and `app/(tabs)/_layout.tsx` only check for a signed-in user. The screens that stop an unverified account:
 
@@ -28,7 +32,7 @@ There is no global redirect: `app/_layout.tsx` and `app/(tabs)/_layout.tsx` only
 
 **The client prerequisites that remain.** Before this journey can pass hosted, the native app must route an unverified ordinary participant to its profile step and let it save its profile and join by the marker. That means the three checks at `signin.tsx:63/121` (with `signup.tsx:46`), `profile-setup.tsx:113` and `MarkerEntryScreen.tsx:269`. It is a separate UI slice; this packet changes no product code. The Lovable Web Twin is a different host and is not exercised here.
 
-## What changed (four reserved paths)
+## What changed (five reserved paths)
 
 ### `.github/wsf-staging/journeys/fixture-kit.mjs`
 
@@ -89,6 +93,20 @@ The model's service writes what `wsfSaveProfile`, `admitByLinkTx` and `wsfContri
 | Kit tests | `emailVerified:false`, tracked, read back; stored-as-verified refused yet cleaned; lost answer found and cleaned; nothing made means nothing tracked; verified maker unchanged; public link and active marker with no visitor membership, every document tracked and no join code in the manifest; a wrong-community membership claimed and removed while the real community and another person's membership stay; failure after the product wrote, or before the join, still cleans to empty |
 | Mutants (fixture-kit.mjs and expo-attendee.mjs) | **18 / 18 killed**: made verified, no read-back, lost answer not looked up, untracked before read-back, private community, one round only, inactive marker, profile not claimed, wrong community not claimed, verification landing counted as signed in, join code printed, verification text unscrubbed, fresh sign-in reusing the browser, marker join not checked, shared total not checked, control not checked, no sweep after the link, new round not checked |
 | Fail-before | The new test file against main's kit and driver: exits 1 (`expo-attendee.mjs` has no unverified journey, and the kit has no unverified account) |
+
+### `firebase.westayfit.staging.json` (operational, RECOVERY-3)
+
+One rewrite is added, `{ "source": "/go/**", "destination": "/go/__dynamic.html" }`. It goes last, in the same order and shape as the candidate's `firebase.westayfit.json`; nothing else changes.
+
+The candidate has declared `/go/**` since EVERGREEN-MARKER-ENTRY-1, and the operational config did not route it. The deploy job's `check-hosting-routes.mjs` refuses exactly that case. That was the dead end L0 found (#365 `6075036000`).
+
+| Real `check-hosting-routes.mjs`, with a dist holding the 13 destinations the candidate declares | Result |
+|---|---|
+| ec162d17 against main's operational config (before) | `ROUTES=failed (2)`: "/go/__dynamic.html … routes nothing to it" and "/go/** is declared by the candidate and matches no operational rewrite" |
+| ec162d17 against this config (after) | `ROUTES=pass`: 13 candidate rewrites, 13 operational, 13 built |
+| Rollback ab77fbfc (12 rewrites, no `/go` page) against this config | `ROUTES=pass`, with the note that `/go/**` points at a page this candidate does not build. Never a failure, so the rollback is not blocked |
+
+The existing `workflow-contract` suite (103) and `check-hosting-routes` suite (16) pass unchanged. The site, codebase, headers and every other rewrite are untouched.
 
 ### Untracked product writes, named
 
