@@ -1,6 +1,6 @@
 # LOVABLE-DEVICE-QA-1 / -2: the Web Twin device matrix, a proof-only staging mode
 
-**Status: delivered for review. Not accepted, not merged, not dispatched.** Nothing was run against the trial host or westayfit-staging. This container cannot reach either host (#394 `6078709181`), which is why the matrix runs as a mode of the trusted staging workflow (route (a)).
+**Status: redelivered for review after W3's finding (#605 `6082944945`). Not accepted, not merged, not dispatched.** Nothing was run against the trial host or westayfit-staging. This container cannot reach either host (#394 `6078709181`), which is why the matrix runs as a mode of the trusted staging workflow (route (a)).
 
 | | |
 |---|---|
@@ -19,7 +19,7 @@
    - seeds **two run-tagged joinable communities** with the existing kit (`joinableEvent`), and the kit writes nothing after that;
    - runs the matrix.
 
-   Every browser context routes every request through the **kiosk harness's reviewed `codeGuard`**. It is reused, not restated: a document or script outside the reviewed build is refused, and the whole matrix stops before anything more is typed.
+   Every browser context routes every request through the **kiosk harness's reviewed `codeGuard`**. It is reused, not restated. A document or script outside the reviewed build is refused at once (the request is blocked). The matrix then stops at the next navigation check, so no later cell or viewport runs. Steps between that refusal and the next navigation check can still type into the current page.
 3. **Cleanup is blocking** (`cleanup-synthetic.mjs` over this run's manifest). The evidence is scanned before upload, and `--require` passes only when every row is PASS and both cleanup and scan succeeded.
 
 ## The matrix: 4 viewports × 9 cells, plus 3 run rows
@@ -33,10 +33,10 @@ The viewports are small phone **360×640**, phone **390×844**, tablet **820×11
 | `invite-link` | Signed out, `/?join=<code>&goal=<goal>` opens the sign-in, the code is gone from the address bar, and the join is held in this tab's sessionStorage. |
 | `signup` | "Create account" through the product form reaches the name step ("Step 2 of 2"). The verification send state is honest: the "We couldn’t send your verification email yet…" notice shows exactly when `wsfSendVerificationEmail` did not answer `{sent:true}`. |
 | `unverified-participation` | Still unverified, "Your name" → "Continue": `wsfSaveProfile` answers without error and the member app opens. If the server refuses it with `FAILED_PRECONDITION`, the cell and the cells after it are **BLOCKED (backend)**. |
-| `invite-join` | The held invite previews "Join Fixture Open Community?". "Join" makes one `wsfJoinCommunity` into this community with `alreadyMember:false`, then the phone choice appears. |
+| `invite-join` | The held invite previews "Join Fixture Open Community?". **No join request before the tap, exactly one after it**, and that request's own answer is into this community with `alreadyMember:false`. Then the phone choice appears. |
 | `camera-fallback` | "Move on my phone" opens the squat camera screen with **"Camera estimate on this device · nothing is recorded or sent"**. With no camera, "Camera isn’t available" → "Enter reps manually" opens the manual sheet, and Escape closes MOVE. **Zero `wsfContribute`** requests. |
 | `progress-you` | Progress shows "Your first contribution will appear here". You shows the **verify reminder** ("Verify your email"), the fixture community as **Member**, and the initials avatar **DV** (from "Device Visitor"). |
-| `memberships` | A second invite link in the same tab joins the second fixture community, and You lists **both memberships**, one current. |
+| `memberships` | A second invite link in the same tab makes **exactly one join** (one request before the tap, two after it), and its answer is into the second fixture community. Home then shows that community's goal (40 of 300). The app's own membership read (`wsfMyCommunities`) holds **both** fixture group ids. You lists **exactly two** memberships, **exactly one** current. |
 
 The run rows are `host-build` (the bind and every document and asset the browser loaded), `fixture-provenance` and `cleanup-tracking`.
 
@@ -56,7 +56,13 @@ The uid exists only once the product's sign-up returns it. It is read from that 
 - `wsfMemberships/<fixture group>_<uid>` for both fixture communities;
 - `wsfMemberProfiles/<uid>`, which the cleaner admits through that run-tagged membership.
 
-A join answered for any other community is claimed as linked through the uid. If a sign-up response names no account, that viewport stops before any profile is saved, and `cleanup-tracking` fails by name.
+A join answered for any other community is claimed as linked through the uid.
+
+**When the sign-up answer is lost**, the account is looked up by its synthetic email. The lookup is an admin read through the kit's own endpoint, and it returns uids only. What it finds is tracked before the next step. If the lookup proves no account exists, the viewport stops with `signup` FAIL. If the lookup fails, or the manifest refuses a write, the miss is recorded and that viewport stops before any profile is saved.
+
+**`cleanup-tracking` FAILs whenever any account went untracked**, whatever else was tracked, because the cleaner deletes only the accounts its manifest names. Its PASS for an empty run reads "no visitor account was tracked and none went untracked".
+
+**What the You list can and cannot show.** The kit gives both fixture communities the same name, and You renders names only. A list showing the second community twice therefore looks exactly like the right list, unless both rows are marked current; that case FAILs. So the cell tells the two communities apart where they differ: the join's own answer, Home's goal numbers, and the membership read by group id.
 
 **Not cleaned, named:**
 - **`wsfVerificationSends/<uid>`**: three integer counters the product's send keeps per uid. The doc has no uid field, so the cleaner cannot prove it; it is left, keyed by a deleted account.
@@ -97,13 +103,28 @@ If the first dispatch prints **DIFFERENT**, the guard would refuse that document
 
 | Run | Result |
 |---|---|
-| `node .github/wsf-staging/hosted-lovable-device-matrix.test.mjs` | **14 passed**: the empty pin, the rows and matrix, the verdict rules, the cleanup merge against the cleaner's own provenance rules, the journey at all four viewports (one negative per defect), the guard stop, the CLI with the document probe, and the workflow structure |
+| `node .github/wsf-staging/hosted-lovable-device-matrix.test.mjs` | **20 passed**. They cover:<br>• the empty pin, the rows and matrix, and the verdict rules;<br>• the cleanup merge against the cleaner's own provenance rules;<br>• the journey at all four viewports, with one negative per defect: auto-join, double-join, already-member, a duplicate or both-current list, a stale Home, a short membership read, the send-state and backend classifications, and the two previously unused defects;<br>• a guard stop at three navigations;<br>• the lost-answer lookup and a refused manifest;<br>• the CLI's tracking verdicts and host-build composition, and the account lookup;<br>• the document probe;<br>• the workflow structure and its safety order |
 | `node .github/wsf-staging/tests/workflow-contract.test.mjs` | **103 passed**. The granted hunks only: the mode in the options pin, the job in `order` and in both job lists, and `'lovable-device-matrix': false` in the six `reachedJobs` tables |
 | `node .github/wsf-staging/tests/run-all.mjs` | all suites passed |
 | `node .github/wsf-staging/tests/hosted-lovable-kiosk.test.mjs` | 21 passed (the reused harness, unchanged) |
 | `node tools/wsf-control/run-all.mjs` | all suites passed |
 | `actionlint` 1.7.7 on the workflow | clean |
-| Driver mutants (14) | **all killed**. The defects: tracking dropped; the address-bar strip, held join, send-state honesty, sample-data, contribution and memberships checks dropped; backend refusal mislabelled; a foreign join not claimed; the guard stop removed; the tour never dismissed; no wait for a tracked account; a run behind a refused bind; untagged documents admitted |
-| Workflow mutants (8) | **all killed**. The defects: the bind after authentication, re-authentication after a refused bind, an upload without a passing scan, a non-blocking cleanup, the gate bind removed, a negation gate, an install with lifecycle scripts, an added secret |
+| Driver mutants (27) | **26 killed, 1 equivalent**. The first round's 14, with W3's N2 now in its direct form: the wait for the sign-up answer is deleted, and the fake answers only over simulated time. Plus 13 for this round:<br>• the notice allowed after a sent email;<br>• the notice wording unchecked;<br>• every save error BLOCKED;<br>• an untracked account ignored;<br>• a refused manifest write not recorded;<br>• a found account not tracked;<br>• a failed lookup not recorded;<br>• the join count ignored, at both invites;<br>• more than one current row accepted;<br>• Home not checked;<br>• the membership read not checked.<br>**Equivalent:** reading the latest join answer instead of the tap's own, because once exactly one join was sent they are the same exchange. |
+| Workflow mutants (18) | **all killed**. The first round's 8 (the bind after authentication, re-authentication after a refused bind, an upload without a passing scan, a non-blocking cleanup, the gate bind removed, a negation gate, an install with lifecycle scripts, an added secret), plus W3's 8 survivors in 10 forms:<br>• the run's manifest moved off the cleanup path;<br>• `\|\| exit 0` after the cleaner;<br>• cleanup gated on the proof, two forms;<br>• upload `path: .`;<br>• the result directory outside the scanned one;<br>• `continue-on-error` on each bind;<br>• `if: always()` on Authenticate;<br>• `id: bind` renamed |
 
 The new suite lives at its reserved path beside the harness, not under `tests/`. `tests/run-all.mjs` lists suites explicitly inside another packet's reservation, and it does not list the kiosk suite either. So the suite is run directly; adding it to that list belongs to a later change there.
+
+## Review round: W3's finding (#605 `6082944945`), fixed in place
+
+1. **`cleanup-tracking`** FAILs whenever any account went untracked, empty extras or not, and its empty PASS says what was measured. The optional fix is taken too: a lost sign-up answer is looked up by its synthetic email and tracked.
+   - `cli('--run')` with `noSignupResponse` and a failing lookup: **FAIL**, with 4 accounts created and 0 in the manifest.
+   - The same with the lookup answering: **PASS**, with all 4 in the manifest.
+2. **`invite-join`** counts the join requests before the tap (it must be 0) and reads the exchange the tap sent, which must be the only one. The count is in the seen text. Twin negatives: auto-join and double-join.
+3. **`memberships`** is narrowed to what is measured (above). Exactly one current row is required. Twin negatives: both rows current, the second community listed twice (which also marks two rows current), a stale Home and a short membership read.
+4. **The mode's safety order** is pinned in the suite. Every result, manifest and receipt path, the scan argument and the upload path are tied to the one evidence directory. The cleanup has an exact `if: always()`, with the cleaner last and nothing swallowed, as C4 pins for hosted-verify. Also pinned: `id: bind`, no `continue-on-error` anywhere in the job or on the gate bind, and no `if:` on Authenticate. All of W3's eight survivors are now killed.
+
+**Non-blocking notes:**
+- **N1:** the comments now say two fixture communities.
+- **N2:** the fake's sign-up answer now arrives only over simulated time, so deleting the wait fails the suite.
+- **N3:** the guard-stop wording is corrected.
+- **N4:** the classification gaps, the two unused defects, the CLI host-build composition, the guard checks after the display and second-invite navigations, a refused manifest write and one screenshot per cell are now pinned.

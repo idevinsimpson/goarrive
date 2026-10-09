@@ -10,7 +10,7 @@
  *              REVIEWED_BUILD below. Exit 0 only on an exact match. An empty REVIEWED_BUILD (nothing reviewed yet), a
  *              missing, extra or changed asset, or an unreadable host refuses BEFORE any credential exists, and prints
  *              the observed manifest (names and sha256 only) so a reviewed commit can pin it.
- *   --run      credentialed (the lovable-device-matrix job): bind again, seed ONE run-tagged joinable community with the
+ *   --run      credentialed (the lovable-device-matrix job): bind again, seed TWO run-tagged joinable communities with the
  *              EXISTING kit (journeys/fixture-kit.mjs), then at each viewport drive one synthetic visitor through the
  *              product: the signed-out landing and the display, the invite link, sign-up, the honest verification send
  *              state, the profile, the join, the camera screen and its manual fallback (cancelled), Progress and You.
@@ -71,7 +71,7 @@ export const CELLS = Object.freeze([
   ['invite-join', 'the held invite previews the fixture community and the visitor joins it: one join into this community, not already a member, then the phone choice'],
   ['camera-fallback', 'MOVE opens the squat camera screen with its privacy copy; with no camera the manual fallback is offered; cancelling sends no contribution'],
   ['progress-you', 'Progress shows the first-contribution empty state; You shows the verify reminder, the fixture community as Member, and the initials avatar'],
-  ['memberships', 'a second invite link joins a second fixture community, and You lists both memberships'],
+  ['memberships', 'a second invite link makes exactly one join, into the second fixture community; Home then shows that community\'s goal; the app\'s own membership read holds both fixture communities; You lists exactly two memberships, exactly one current'],
 ].map(([id, expected]) => Object.freeze({ id, expected })));
 
 /** Every row: the three run rows, then each cell at each viewport (`<cell>@<viewport>`). */
@@ -258,6 +258,16 @@ async function settled(page, log, name, ms = T.settle) {
   }
   return null;
 }
+/** The `index`-th exchange of a callable once it has its response (null within `ms`): the request a given tap sent,
+ *  never an earlier or later one. */
+async function nth(page, log, name, index, ms = T.settle) {
+  for (let waited = 0; waited <= ms; waited += 500) {
+    const e = log.of(name)[index];
+    if (e && e.result !== undefined) return e;
+    await page.waitForTimeout(500);
+  }
+  return null;
+}
 const SIGNUP_PATH = '/v1/accounts:signUp';
 
 /**
@@ -266,20 +276,25 @@ const SIGNUP_PATH = '/v1/accounts:signUp';
  * visitor's account and the documents the product may write for it are tracked from the sign-up RESPONSE, before the
  * next step. A refusal by the code guard stops the whole matrix; any other failure stops that viewport only.
  */
-export async function runMatrix({ browser, fixtures, runTag, base, reviewed = REVIEWED_BUILD, shotsDir, manifest }) {
+export async function runMatrix({ browser, fixtures, runTag, base, reviewed = REVIEWED_BUILD, shotsDir, manifest, lookup = null }) {
   const rows = {};
   const set = (id, status, seen, ...shots) => { rows[id] = { status, seen, shots: shots.filter(Boolean) }; };
   const extras = { users: [], docs: [], linked: [] };
   let trackingFailed = null;
   const guard = codeGuard(reviewed);
   const contexts = [];
-  const track = (part) => {
+  /** Track at once: the manifest names the account before the product writes anything for it. A refused write is
+   *  recorded as a tracking failure (cleanup-tracking then FAILs) and stops the viewport. */
+  const track = (part, where) => {
     for (const k of ['users', 'docs', 'linked']) for (const v of part[k] ?? []) if (!extras[k].some((x) => JSON.stringify(x) === JSON.stringify(v))) extras[k].push(v);
-    mergeExtras(manifest, part); // at once: the manifest names the account before the product writes anything for it
+    try { mergeExtras(manifest, part); } catch (e) { trackingFailed ??= `${where}: the cleanup manifest refused the entry (${short(e)})`; throw e; }
   };
+  const visitorDocs = (id) => [`wsfMemberships/${one.groupId}_${id}`, `wsfMemberships/${two.groupId}_${id}`, `wsfMemberProfiles/${id}`];
+  let one = null;
+  let two = null;
   try {
-    const one = await fixtures.joinableEvent('dm1', { target: 500, seeded: 120 });
-    const two = await fixtures.joinableEvent('dm2', { target: 300, seeded: 40 });
+    one = await fixtures.joinableEvent('dm1', { target: 500, seeded: 120 });
+    two = await fixtures.joinableEvent('dm2', { target: 300, seeded: 40 });
     set('fixture-provenance', 'PASS', `${one.setupId}; ${two.setupId}; each viewport's visitor signs up through the product with this run's synthetic email and is tracked from the sign-up response`);
     for (const vp of VIEWPORTS) {
       const cell = (c, status, seen, ...shots) => set(`${c}@${vp.id}`, status, seen, ...shots);
@@ -304,7 +319,7 @@ export async function runMatrix({ browser, fixtures, runTag, base, reviewed = RE
             const body = await res.json();
             if (typeof body?.localId !== 'string' || !body.localId || uid) return;
             const id = body.localId;
-            track({ users: [id], docs: [`wsfMemberships/${one.groupId}_${id}`, `wsfMemberships/${two.groupId}_${id}`, `wsfMemberProfiles/${id}`] });
+            track({ users: [id], docs: visitorDocs(id) }, vp.id);
             uid = id;
           } catch (e) { trackingFailed ??= `${vp.id}: ${short(e)}`; }
         });
@@ -353,8 +368,21 @@ export async function runMatrix({ browser, fixtures, runTag, base, reviewed = RE
         await page.getByLabel('Password', { exact: true }).first().fill(password);
         await button(page, COPY.createSubmit).click();
         for (let waited = 0; !uid && waited < T.step; waited += 500) await page.waitForTimeout(500);
+        // A lost sign-up answer: the account may exist all the same, under this run's synthetic email. Look it up and
+        // track what is found; only a failed lookup leaves an account the manifest cannot name.
+        let byLookup = false;
+        if (!uid && lookup) {
+          let found = null;
+          try { found = await lookup(email); } catch (e) { trackingFailed ??= `${vp.id}: the sign-up answer was not seen and the account lookup failed (${short(e)})`; }
+          if (found?.length) {
+            track({ users: found, docs: found.flatMap(visitorDocs) }, vp.id);
+            uid = found[0];
+            byLookup = true;
+          }
+          if (found && !found.length) throw new Error('the product\'s sign-up created no account (none under this run\'s synthetic email)');
+        }
         if (!uid) {
-          trackingFailed ??= `${vp.id}: the sign-up response named no account before the next step`;
+          trackingFailed ??= `${vp.id}: the sign-up answer was not seen and no lookup could name the account`;
           throw new Error('the product\'s sign-up returned no account');
         }
         await waitShown(page, SEL.profileSetup, T.step);
@@ -366,7 +394,7 @@ export async function runMatrix({ browser, fixtures, runTag, base, reviewed = RE
         const step = await textOf(page, SEL.profileSetup);
         const honest = send !== null && (sentOk ? !notice : notice && noticeText.startsWith(COPY.sendFailed));
         cell('signup', honest && step.includes(COPY.stepUnverified) ? 'PASS' : 'FAIL',
-          `account ${idHash(uid)} created and tracked; verification send ${send === null ? 'not seen' : sentOk ? 'sent' : `refused (${send.error ?? 'no result'})`}; notice ${notice ? 'shown' : 'absent'}; name step ${step.includes(COPY.stepUnverified) ? COPY.stepUnverified : 'without the unverified step count'}`, await shoot(page, 'signup'));
+          `account ${idHash(uid)} created and tracked${byLookup ? ' (by lookup: the sign-up answer was not seen)' : ''}; verification send ${send === null ? 'not seen' : sentOk ? 'sent' : `refused (${send.error ?? 'no result'})`}; notice ${notice ? 'shown' : 'absent'}; name step ${step.includes(COPY.stepUnverified) ? COPY.stepUnverified : 'without the unverified step count'}`, await shoot(page, 'signup'));
 
         // 5. Still unverified: the profile save, then the member app.
         reached = 'unverified-participation';
@@ -387,13 +415,17 @@ export async function runMatrix({ browser, fixtures, runTag, base, reviewed = RE
         const preview = await settled(page, log, 'wsfPreviewCommunity');
         const previewText = await textOf(page, SEL.joinCard);
         await dismissTour(page); // the tour can open over the join card
+        // "Nothing is joined until you tap Join": count the join requests before the tap, read the one THIS tap sent.
+        const joinsBefore = log.sent('wsfJoinCommunity');
         await page.locator(SEL.joinCard).getByRole('button', { name: 'Join', exact: true }).first().click();
-        const joined = await settled(page, log, 'wsfJoinCommunity', T.step);
+        const joined = await nth(page, log, 'wsfJoinCommunity', joinsBefore, T.step);
+        await page.waitForTimeout(1000); // a second send would surface here
+        const joinsAfter = log.sent('wsfJoinCommunity');
         const groupId = joined?.result?.groupId;
-        if (typeof groupId === 'string' && groupId && groupId !== one.groupId) track({ linked: [{ path: `wsfMemberships/${groupId}_${uid}`, via: uid }] });
+        if (typeof groupId === 'string' && groupId && groupId !== one.groupId) track({ linked: [{ path: `wsfMemberships/${groupId}_${uid}`, via: uid }] }, vp.id);
         const phone = await page.locator(SEL.movePhone).first().waitFor({ state: 'visible', timeout: T.step }).then(() => true, () => false);
-        cell('invite-join', previewText.includes(`Join ${one.communityName}?`) && !preview?.error && groupId === one.groupId && joined.result.alreadyMember === false && phone ? 'PASS' : 'FAIL',
-          `preview ${previewText.includes(`Join ${one.communityName}?`) ? 'names the fixture community' : 'does not name it'}; join ${groupId === one.groupId ? 'into this community' : joined?.error ? `refused (${joined.error})` : 'not into this community'}, alreadyMember=${joined?.result?.alreadyMember}; phone choice ${phone ? 'shown' : 'absent'}`, await shoot(page, 'invite-join'));
+        cell('invite-join', joinsBefore === 0 && joinsAfter === 1 && previewText.includes(`Join ${one.communityName}?`) && !preview?.error && groupId === one.groupId && joined.result.alreadyMember === false && phone ? 'PASS' : 'FAIL',
+          `join requests before the tap ${joinsBefore}, after ${joinsAfter}; preview ${previewText.includes(`Join ${one.communityName}?`) ? 'names the fixture community' : 'does not name it'}; the tap's join ${groupId === one.groupId ? 'into this community' : joined?.error ? `refused (${joined.error})` : 'not into this community'}, alreadyMember=${joined?.result?.alreadyMember}; phone choice ${phone ? 'shown' : 'absent'}`, await shoot(page, 'invite-join'));
 
         // 7. MOVE on the phone: the squat camera screen, its privacy copy, the no-camera fallback, then cancel.
         reached = 'camera-fallback';
@@ -438,13 +470,14 @@ export async function runMatrix({ browser, fixtures, runTag, base, reviewed = RE
         await page.goto(`${base}/?join=${encodeURIComponent(two.joinCode)}&goal=${encodeURIComponent(two.goalId)}`);
         guard.check();
         await page.locator(`${SEL.joinCard}[data-connected-join="preview"]`).first().waitFor({ state: 'visible', timeout: T.boot });
-        const joinsBefore = log.sent('wsfJoinCommunity');
         await dismissTour(page); // the tour can open over the join card
+        const secondBefore = log.sent('wsfJoinCommunity');
         await page.locator(SEL.joinCard).getByRole('button', { name: 'Join', exact: true }).first().click();
-        for (let waited = 0; log.of('wsfJoinCommunity').filter((x) => x.result !== undefined).length <= joinsBefore && waited < T.step; waited += 500) await page.waitForTimeout(500);
-        const second = log.last('wsfJoinCommunity');
+        const second = await nth(page, log, 'wsfJoinCommunity', secondBefore, T.step);
+        await page.waitForTimeout(1000);
+        const secondAfter = log.sent('wsfJoinCommunity');
         const g2 = second?.result?.groupId;
-        if (typeof g2 === 'string' && g2 && g2 !== two.groupId) track({ linked: [{ path: `wsfMemberships/${g2}_${uid}`, via: uid }] });
+        if (typeof g2 === 'string' && g2 && g2 !== two.groupId) track({ linked: [{ path: `wsfMemberships/${g2}_${uid}`, via: uid }] }, vp.id);
         // The phone choice opens MOVE; close the camera at once, sending nothing.
         if (await page.locator(SEL.movePhone).first().waitFor({ state: 'visible', timeout: T.step }).then(() => true, () => false)) {
           await dismissTour(page);
@@ -454,15 +487,26 @@ export async function runMatrix({ browser, fixtures, runTag, base, reviewed = RE
           await page.waitForTimeout(1500);
         }
         await dismissTour(page);
+        // The two fixture communities share the kit's name, and You renders names only, so they are told apart where
+        // they differ: the server's answer to the tap, Home's goal (the second is 40 of 300, the first 120 of 500), and
+        // the app's own membership read (wsfMyCommunities, by group id).
+        await page.locator(SEL.tab('home')).first().click();
+        await page.waitForTimeout(1000);
+        const homeText = await textOf(page, SEL.panel('Home'));
+        const homeIsSecond = showsNumber(homeText, two.seeded) && homeText.includes(`/ ${two.target.toLocaleString('en-US')} confirmed`);
+        const mine = log.last('wsfMyCommunities')?.result?.items;
+        const readIds = Array.isArray(mine) ? mine.map((x) => x?.groupId) : [];
+        const readBoth = readIds.length === 2 && readIds.includes(one.groupId) && readIds.includes(two.groupId);
         await page.locator(SEL.tab('you')).first().click();
         await waitShown(page, SEL.panel('You'), T.step);
         const list = page.locator(SEL.memberships);
         const n = await list.count().catch(() => 0);
         const names = [];
         for (let i = 0; i < n; i += 1) names.push(clean(await list.nth(i).innerText()));
-        const both = n === 2 && names.every((t) => t.includes(two.communityName)) && names.some((t) => /current/.test(t));
-        cell('memberships', g2 === two.groupId && second.result.alreadyMember === false && both && log.sent('wsfContribute') === 0 ? 'PASS' : 'FAIL',
-          `second join ${g2 === two.groupId ? 'into the second community' : second?.error ? `refused (${second.error})` : 'not into the second community'}; You lists ${n} membership(s)${both ? ', one current' : ''}; contribution requests ${log.sent('wsfContribute')}`, await shoot(page, 'memberships'));
+        const currentRows = names.filter((t) => /current/.test(t)).length;
+        const listOk = n === 2 && currentRows === 1 && names.every((t) => t.includes(two.communityName));
+        cell('memberships', secondBefore === 1 && secondAfter === 2 && g2 === two.groupId && second.result.alreadyMember === false && homeIsSecond && readBoth && listOk && log.sent('wsfContribute') === 0 ? 'PASS' : 'FAIL',
+          `join requests before the tap ${secondBefore}, after ${secondAfter}; the tap's join ${g2 === two.groupId ? 'into the second community' : second?.error ? `refused (${second.error})` : 'not into the second community'}; Home ${homeIsSecond ? 'shows the second community\'s goal' : 'does not show the second community\'s goal'}; membership read ${readBoth ? 'holds both fixture communities' : `holds ${readIds.length} group(s)`}; You lists ${n} membership(s), ${currentRows} current; contribution requests ${log.sent('wsfContribute')}`, await shoot(page, 'memberships'));
         reached = null;
       } catch (e) {
         if (guard.summary().violations.length) throw e; // unreviewed code: nothing more is typed anywhere
@@ -495,7 +539,20 @@ async function launchChromium() {
  * before the job authenticates) only through a non-zero `--bind`, and `--run` refuses a non-PASS bind before it
  * imports the kit or launches a browser. Exported with injectable edges so both are tested.
  */
-export async function cli(mode, env, { fetchImpl = fetch, reviewed = REVIEWED_BUILD, importKit = () => import('./journeys/fixture-kit.mjs'), launch = launchChromium, say = (l) => console.log(l), journey = runMatrix } = {}) {
+/** An admin read of accounts by email (the kit's own lookup): the uids found, [] for none; never echoes a body. */
+export function accountLookup(token, fetchImpl = fetch) {
+  return async (email) => {
+    const res = await fetchImpl(`https://identitytoolkit.googleapis.com/v1/projects/${PROJECT_ID}/accounts:lookup`, {
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ email: [email] }),
+    });
+    if (!res.ok) throw new Error(`the account lookup answered HTTP ${res.status}`);
+    const body = await res.json();
+    if (body?.users !== undefined && !Array.isArray(body.users)) throw new Error('the account lookup returned users of an unexpected type');
+    return (body?.users ?? []).map((u) => u?.localId).filter((x) => typeof x === 'string' && /^[A-Za-z0-9]{6,128}$/.test(x));
+  };
+}
+
+export async function cli(mode, env, { fetchImpl = fetch, lookupFetch = fetch, reviewed = REVIEWED_BUILD, importKit = () => import('./journeys/fixture-kit.mjs'), launch = launchChromium, say = (l) => console.log(l), journey = runMatrix } = {}) {
   if (mode === '--require') {
     let doc = null;
     try { doc = JSON.parse(fs.readFileSync(path.join(env.WSF_RESULT_DIR, 'lovable-device-matrix', 'results.json'), 'utf8')); } catch { /* no results */ }
@@ -528,21 +585,26 @@ export async function cli(mode, env, { fetchImpl = fetch, reviewed = REVIEWED_BU
     const fixtures = createFixtureKit({ projectId: PROJECT_ID, apiKey: sdk.apiKey, token: env.WSF_GOOGLE_ACCESS_TOKEN, runTag, cleanupManifest: env.WSF_CLEANUP_MANIFEST });
     say(`LOVABLE_RUN_TAG=${runTag}`);
     browser = await launch();
-    run = await journey({ browser, fixtures, runTag, base: b.base, reviewed, shotsDir: path.join(dir, 'shots'), manifest: env.WSF_CLEANUP_MANIFEST });
+    run = await journey({ browser, fixtures, runTag, base: b.base, reviewed, shotsDir: path.join(dir, 'shots'), manifest: env.WSF_CLEANUP_MANIFEST, lookup: accountLookup(env.WSF_GOOGLE_ACCESS_TOKEN, lookupFetch) });
   } catch (e) {
     rows['fixture-provenance'] ??= { status: 'FAIL', seen: `stopped before the journey: ${short(e)}` };
   } finally {
     if (browser) await browser.close().catch(() => {});
+    // Whatever was tracked is merged again (a union); an account the journey could not track FAILS the row whether or
+    // not anything else was tracked, because the cleaner deletes only the accounts its manifest names.
     const x = run.extras ?? { users: [], docs: [], linked: [] };
+    let merged = null;
+    let mergeError = null;
     if (x.users.length || x.docs.length || x.linked.length) {
       try {
         if (!env.WSF_CLEANUP_MANIFEST) throw new Error('no cleanup manifest');
-        const n = mergeExtras(env.WSF_CLEANUP_MANIFEST, x);
-        rows['cleanup-tracking'] = run.trackingFailed
-          ? { status: 'FAIL', seen: `a visitor was tracked late or not at all during the journey: ${run.trackingFailed}` }
-          : { status: 'PASS', seen: `${x.users.length} visitor account(s), ${x.docs.length} product document(s) and ${x.linked.length} linked document(s) tracked; manifest ${n.users} users, ${n.docs} documents, ${n.linked} linked` };
-      } catch (e) { rows['cleanup-tracking'] = { status: 'FAIL', seen: `the visitor accounts and their documents could not be added to the cleanup manifest: ${short(e)}` }; }
-    } else if (run.rows['fixture-provenance']) rows['cleanup-tracking'] = { status: 'PASS', seen: 'no visitor account was created, so nothing product-written to add' };
+        merged = mergeExtras(env.WSF_CLEANUP_MANIFEST, x);
+      } catch (e) { mergeError = e; }
+    }
+    if (mergeError) rows['cleanup-tracking'] = { status: 'FAIL', seen: `the visitor accounts and their documents could not be added to the cleanup manifest: ${short(mergeError)}` };
+    else if (run.trackingFailed) rows['cleanup-tracking'] = { status: 'FAIL', seen: `an account the product created may be missing from the cleanup manifest: ${run.trackingFailed}` };
+    else if (merged) rows['cleanup-tracking'] = { status: 'PASS', seen: `${x.users.length} visitor account(s), ${x.docs.length} product document(s) and ${x.linked.length} linked document(s) tracked; manifest ${merged.users} users, ${merged.docs} documents, ${merged.linked} linked` };
+    else if (run.rows['fixture-provenance']) rows['cleanup-tracking'] = { status: 'PASS', seen: 'no visitor account was tracked and none went untracked, so nothing product-written to add' };
     doc = results({ ...run.rows, ...rows, 'host-build': hostBuildRow(verdict, run.served) });
     fs.writeFileSync(path.join(dir, 'results.json'), `${JSON.stringify(doc, null, 2)}\n`);
     for (const l of matrixLines(doc)) say(l);

@@ -1581,8 +1581,8 @@ jobs:
   #   1. the gate (credential-free) bound the served build to the reviewed
   #      digests in hosted-lovable-device-matrix.mjs, or stopped the mode;
   #   2. this job binds again BEFORE authenticating;
-  #   3. only then does it authenticate; the harness seeds one run-tagged
-  #      joinable community with the EXISTING kit, and each viewport signs up
+  #   3. only then does it authenticate; the harness seeds two run-tagged
+  #      joinable communities with the EXISTING kit, and each viewport signs up
   #      one synthetic account through the product UI (run-tagged synthetic
   #      email, password in memory only), tracked for cleanup the moment the
   #      product returns its uid; every browser context routes every request

@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  CELLS, COPY, LOVABLE_URL, PROJECT_ID, REVIEWED_BUILD, ROWS, SEL, VIEWPORTS, VISITOR_INITIALS, VISITOR_NAME, allPassed, cli, matrixLines, mergeExtras,
+  CELLS, COPY, LOVABLE_URL, PROJECT_ID, REVIEWED_BUILD, ROWS, SEL, VIEWPORTS, VISITOR_INITIALS, VISITOR_NAME, accountLookup, allPassed, cli, matrixLines, mergeExtras,
   requireVerdict, results, runMatrix, visitorEmail,
 } from './hosted-lovable-device-matrix.mjs';
 import * as kiosk from './hosted-lovable-kiosk.mjs';
@@ -176,6 +176,8 @@ function twin(bug = {}) {
     if ((await load(context, url, 'document', true)) !== 'fulfilled') throw new Error(`page.goto: net::ERR_BLOCKED_BY_CLIENT at ${new URL(url).origin}${new URL(url).pathname}`);
     const subs = [[`${LOVABLE_URL}/assets/shell-AAA.js`, 'script'], [`${LOVABLE_URL}/assets/index-CCC.css`, 'stylesheet'], [`${LOVABLE_URL}/favicon.ico`, 'image']];
     if (bug.foreignOnJoin && new URL(url).searchParams.has('join')) subs.push(['https://cdn.example.test/join.js', 'script']);
+    if (bug.foreignOnDisplay && new URL(url).pathname.startsWith('/display/')) subs.push(['https://cdn.example.test/display.js', 'script']);
+    if (bug.foreignOnSecondInvite && new URL(url).searchParams.get('goal')?.endsWith('-dm2')) subs.push(['https://cdn.example.test/second.js', 'script']);
     for (const [s, t] of subs) await load(context, s, t, false);
   }
   const browser = {
@@ -207,6 +209,8 @@ function twin(bug = {}) {
     let name = '';
     const typed = {};
     let current = null;
+    /** What the network answers later: delivered one per waitForTimeout, so a driver that does not wait never sees it. */
+    const later = [];
     const emit = (name, data, result, error) => {
       const req = { url: () => `https://us-central1-westayfit-staging.cloudfunctions.net/${name}`, method: () => 'POST', postData: () => JSON.stringify({ data }) };
       server.requests.push({ name, data, uid: store.uid });
@@ -216,14 +220,25 @@ function twin(bug = {}) {
     };
     const groupByCode = (code) => Object.entries(server.groups).find(([, g]) => g.joinCode === code)?.[0];
     const memberships = () => server.members[store.uid] ?? [];
+    /** The app's own membership read (the canonical hydrate), by group id. */
+    const hydrate = () => {
+      const ids = bug.readShort ? memberships().slice(-1) : memberships();
+      emit('wsfMyCommunities', {}, { items: ids.map((groupId) => ({ groupId, displayName: server.groups[groupId]?.name ?? 'Other', role: 'member' })) });
+    };
     const enterShell = () => {
       view = 'shell';
       tab = 'home';
+      hydrate();
       const code = store.session['wsf.pendingJoinCode'];
       if (code) {
         const g = groupByCode(code);
         card = { stage: 'preview', groupId: g, goalId: store.session['wsf.pendingJoinGoal'] };
         emit('wsfPreviewCommunity', { joinCode: code }, g ? { displayName: server.groups[g].name, joinPolicy: 'public' } : null, g ? null : 'NOT_FOUND');
+        if (bug.autoJoin && g) {
+          // The "Nothing is joined until you tap Join" regression: the product joins on its own when the card opens.
+          server.members[store.uid] = [...new Set([...memberships(), g])];
+          emit('wsfJoinCommunity', { joinCode: code }, { groupId: g, alreadyMember: false });
+        }
       }
     };
     /** Every element the current view renders: the selectors it answers to, role/name/label, text, attributes, actions. */
@@ -250,20 +265,22 @@ function twin(bug = {}) {
           for (const f of listeners.request) f(req);
           if (!bug.noSignupResponse) {
             const res = { url: () => req.url(), request: () => req, json: async () => ({ localId: store.uid, idToken: 'not-a-token' }) };
-            for (const f of listeners.response) f(res);
+            later.push(() => { for (const f of listeners.response) f(res); });
           }
           view = 'profile';
           const ok = !!bug.sendOk;
           emit('wsfSendVerificationEmail', {}, ok ? { sent: true } : null, ok ? null : 'INTERNAL');
           notice = bug.dishonestNotice ? ok : !ok;
+          if (bug.sendOkNotice) notice = true;
         } });
       }
       if (view === 'profile') {
         add({ sels: [SEL.profileSetup], text: `${bug.wrongStep ? 'Step 3 of 3' : COPY.stepUnverified} What should your community call you?` });
-        if (notice) add({ sels: [SEL.verifySendNotice], text: `${COPY.sendFailed} (Could not send the verification email. Try again shortly.). Some communities need a verified email before you can continue.` });
+        if (notice) add({ sels: [SEL.verifySendNotice], text: `${bug.wrongNoticeText ? 'Email sent' : COPY.sendFailed} (Could not send the verification email. Try again shortly.). Some communities need a verified email before you can continue.` });
         add({ label: COPY.nameLabel, onFill: (v) => { name = v; } });
         add({ role: 'button', name: COPY.nameSubmit, onClick: () => {
           if (bug.saveRefused) { emit('wsfSaveProfile', { displayName: name }, null, 'FAILED_PRECONDITION'); return; }
+          if (bug.saveError) { emit('wsfSaveProfile', { displayName: name }, null, 'INTERNAL'); return; }
           server.profiles[store.uid] = name;
           emit('wsfSaveProfile', { displayName: name }, { created: true });
           enterShell();
@@ -292,7 +309,11 @@ function twin(bug = {}) {
             const gid = bug.joinOther ? `someOtherGroup${joins}` : card.groupId;
             server.members[store.uid] = [...memberships(), gid];
             current = gid;
+            if (bug.manifestLostOnJoin) fs.rmSync(manifest, { force: true });
             emit('wsfJoinCommunity', { joinCode: store.session['wsf.pendingJoinCode'] }, { groupId: gid, alreadyMember: already || !!bug.alreadyMember });
+            // A double-submitted Join: a second request the server answers as already a member.
+            if (bug.doubleJoin) emit('wsfJoinCommunity', { joinCode: store.session['wsf.pendingJoinCode'] }, { groupId: gid, alreadyMember: true });
+            hydrate();
             card.stage = 'choose';
           }) });
           if (card.stage === 'choose') add({ sels: [SEL.movePhone], role: 'button', name: 'Move on my phone', onClick: blocked(() => { card = null; delete store.session['wsf.pendingJoinCode']; delete store.session['wsf.pendingJoinGoal']; cam = true; }) });
@@ -305,6 +326,11 @@ function twin(bug = {}) {
         }
         if (sheet) add({ sels: [SEL.sheet], text: `Start moving ${COPY.manualSheet} Back Review` });
         for (const t of ['home', 'community', 'progress', 'you']) add({ sels: [SEL.tab(t)], onClick: blocked(() => { tab = t; }) });
+        if (tab === 'home') {
+          const homeGroup = bug.homeStale ? memberships()[0] : current;
+          const g = Object.values(server.goals).find((x) => x.groupId === homeGroup);
+          add({ sels: [SEL.panel('Home')], text: g ? `Your community ${server.groups[homeGroup].name} ${g.title} ${g.seeded} / ${g.target} confirmed Start moving` : 'Find your people' });
+        }
         if (tab === 'progress') add({ sels: [SEL.panel('Progress')] }, bug.noEmpty || add({ sels: [SEL.progressEmpty] }), bug.noEmpty || add({ sels: [`${SEL.progressEmpty} h2`], text: COPY.progressEmpty }));
         if (tab === 'you') {
           const mine = memberships();
@@ -315,7 +341,8 @@ function twin(bug = {}) {
           add({ sels: [SEL.belongingBand], text: `Your current community ${cur} Role Member Community 2 members` });
           const words = (server.profiles[store.uid] ?? '').split(/\s+/).filter(Boolean);
           add({ sels: [SEL.portraitInitials], text: words.length ? `${words[0][0]}${words.at(-1)[0]}`.toUpperCase() : '' });
-          if (mine.length > 1 && !bug.noList) for (const g of mine) add({ sels: [SEL.memberships], text: `${server.groups[g]?.name ?? 'Other'} Member${g === current ? ' · current' : ''}` });
+          const listed = bug.dupList ? mine.map(() => current) : mine;
+          if (mine.length > 1 && !bug.noList) for (const g of listed) add({ sels: [SEL.memberships], text: `${server.groups[g]?.name ?? 'Other'} Member${g === current || bug.bothCurrent ? ' · current' : ''}` });
         }
       }
       return els;
@@ -380,7 +407,7 @@ function twin(bug = {}) {
         try { return fn(arg); } finally { if (prev === undefined) delete globalThis.sessionStorage; else globalThis.sessionStorage = prev; }
       },
       async screenshot({ path: p }) { assert.ok(p.startsWith(shotsDir), 'screenshots stay in the evidence directory'); fs.writeFileSync(p, `PNG ${view} ${opts.viewport.width}x${opts.viewport.height}`); },
-      async waitForTimeout() {},
+      async waitForTimeout() { const f = later.shift(); if (f) f(); },
     };
   }
   return { server, browser, fixtures, manifest, shotsDir, dir };
@@ -410,6 +437,7 @@ test('journey: every cell PASSES at all four viewports; each visitor is tracked 
   assert.deepEqual(out.extras.users.sort(), m.users.sort());
   // Evidence: screenshots per cell inside the evidence directory; results carry no code, email or password.
   for (const v of VIEWPORTS) for (const c of CELLS) for (const s of out.rows[`${c.id}@${v.id}`].shots) assert.ok(fs.existsSync(path.join(t.dir, s)), s);
+  for (const v of VIEWPORTS) for (const c of CELLS) assert.ok(out.rows[`${c.id}@${v.id}`].shots.length >= 1, `${c.id}@${v.id} has its screenshot`);
   assert.equal(out.rows['progress-you@v390'].shots.length, 2, 'Progress and You each have a screenshot');
   const doc = JSON.stringify(results(out.rows));
   for (const code of Object.values(t.server.groups).map((g) => g.joinCode)) assert.equal(doc.includes(code), false, 'the join code never reaches a result');
@@ -426,13 +454,30 @@ test('journey negatives: each defect fails exactly the cell that measures it, at
   for (const [bug, cell] of [
     [{ sampleData: true }, 'landing'], [{ displayNotAuthorized: true }, 'display'], [{ noStrip: true }, 'invite-link'], [{ dropPending: true }, 'invite-link'],
     [{ dishonestNotice: true }, 'signup'], [{ wrongStep: true }, 'signup'], [{ noPrivacy: true }, 'camera-fallback'], [{ modelFail: true }, 'camera-fallback'],
-    [{ noReminder: true }, 'progress-you'], [{ noList: true }, 'memberships'],
+    [{ noReminder: true }, 'progress-you'], [{ noList: true }, 'memberships'], [{ noEmpty: true }, 'progress-you'],
+    [{ sendOk: true, sendOkNotice: true }, 'signup'], [{ wrongNoticeText: true }, 'signup'],
+    [{ bothCurrent: true }, 'memberships'], [{ dupList: true }, 'memberships'], [{ homeStale: true }, 'memberships'], [{ readShort: true }, 'memberships'],
   ]) {
     const { out } = await run(bug);
     assert.deepEqual(cellsAt(out.rows, cell), ['FAIL', 'FAIL', 'FAIL', 'FAIL'], `${JSON.stringify(bug)} fails ${cell}`);
     const others = CELLS.filter((c) => c.id !== cell && !(bug.dropPending && ['invite-join', 'camera-fallback', 'progress-you', 'memberships'].includes(c.id)));
     for (const c of others) assert.deepEqual(cellsAt(out.rows, c.id), ['PASS', 'PASS', 'PASS', 'PASS'], `${JSON.stringify(bug)} leaves ${c.id}`);
   }
+  // A join the product makes before the tap, a double-submitted tap, or an already-member answer fails the join, at both invites.
+  for (const bug of [{ autoJoin: true }, { doubleJoin: true }, { alreadyMember: true }]) {
+    const { out } = await run(bug);
+    for (const cell of ['invite-join', 'memberships']) assert.deepEqual(cellsAt(out.rows, cell), ['FAIL', 'FAIL', 'FAIL', 'FAIL'], `${JSON.stringify(bug)} fails ${cell}`);
+    for (const cell of ['landing', 'display', 'invite-link', 'signup', 'unverified-participation', 'camera-fallback', 'progress-you']) assert.deepEqual(cellsAt(out.rows, cell), ['PASS', 'PASS', 'PASS', 'PASS'], `${JSON.stringify(bug)} leaves ${cell}`);
+  }
+  assert.match((await run({ autoJoin: true })).out.rows['invite-join@v360'].seen, /join requests before the tap 1/);
+  assert.match((await run({ doubleJoin: true })).out.rows['invite-join@v360'].seen, /join requests before the tap 0, after 2/);
+  // A manifest that refuses the linked claim for a foreign join is a tracking failure, not a silent stop.
+  const lost = await run({ joinOther: true, manifestLostOnJoin: true });
+  assert.match(lost.out.trackingFailed, /^v360: the cleanup manifest refused the entry/);
+  assert.equal(statusOf(lost.out.rows, 'invite-join@v360'), 'FAIL');
+  // Any other profile-save error is a FAIL, never BLOCKED (backend).
+  const se = (await run({ saveError: true })).out;
+  for (const cell of ['unverified-participation', 'invite-join', 'camera-fallback', 'progress-you', 'memberships']) assert.deepEqual(cellsAt(se.rows, cell), ['FAIL', 'FAIL', 'FAIL', 'FAIL'], cell);
   // An honest notice when the send succeeds is no notice at all.
   assert.deepEqual(cellsAt((await run({ sendOk: true })).out.rows, 'signup'), ['PASS', 'PASS', 'PASS', 'PASS']);
   // A contribution sent on cancel fails the camera cell (and the later cells that count contributions).
@@ -461,8 +506,34 @@ test('journey: a sign-up whose response names no account stops that viewport bef
   const out = await runMatrix({ browser: t.browser, fixtures: t.fixtures, runTag: TAG, base: LOVABLE_URL, reviewed: FAKE_REVIEWED, shotsDir: t.shotsDir, manifest: t.manifest });
   assert.deepEqual(cellsAt(out.rows, 'signup'), ['FAIL', 'FAIL', 'FAIL', 'FAIL']);
   assert.deepEqual(cellsAt(out.rows, 'unverified-participation'), ['FAIL', 'FAIL', 'FAIL', 'FAIL']);
-  assert.match(out.trackingFailed, /named no account/);
+  assert.match(out.trackingFailed, /the sign-up answer was not seen and no lookup could name the account/);
   assert.equal(t.server.requests.filter((r) => r.name === 'wsfSaveProfile').length, 0, 'no profile is saved for an account the manifest does not name');
+});
+
+test('journey: a lost sign-up answer is recovered by looking the synthetic email up; a failed lookup is a tracking failure', async () => {
+  const t = twin({ noSignupResponse: true });
+  const asked = [];
+  const lookup = async (email) => { asked.push(email); return t.server.signups.filter((x) => x.email === email).map((x) => x.uid); };
+  const out = await runMatrix({ browser: t.browser, fixtures: t.fixtures, runTag: TAG, base: LOVABLE_URL, reviewed: FAKE_REVIEWED, shotsDir: t.shotsDir, manifest: t.manifest, lookup });
+  for (const c of CELLS) assert.deepEqual(cellsAt(out.rows, c.id), ['PASS', 'PASS', 'PASS', 'PASS'], c.id);
+  assert.match(out.rows['signup@v360'].seen, /by lookup: the sign-up answer was not seen/);
+  assert.equal(out.trackingFailed, null);
+  assert.deepEqual(asked, t.server.signups.map((x) => x.email), 'each viewport asks for its own synthetic email only');
+  const m = JSON.parse(fs.readFileSync(t.manifest, 'utf8'));
+  assert.deepEqual(m.users.sort(), t.server.signups.map((x) => x.uid).sort());
+  assert.equal(cleanerAdmits(m), true);
+  const f = twin({ noSignupResponse: true });
+  const failed = await runMatrix({ browser: f.browser, fixtures: f.fixtures, runTag: TAG, base: LOVABLE_URL, reviewed: FAKE_REVIEWED, shotsDir: f.shotsDir, manifest: f.manifest, lookup: async () => { throw new Error('HTTP 503'); } });
+  assert.deepEqual(cellsAt(failed.rows, 'signup'), ['FAIL', 'FAIL', 'FAIL', 'FAIL']);
+  assert.match(failed.trackingFailed, /account lookup failed/);
+});
+
+test('journey: a cleanup manifest that refuses the visitor stops that viewport before the profile step and is a tracking failure', async () => {
+  const t = twin();
+  const out = await runMatrix({ browser: t.browser, fixtures: t.fixtures, runTag: TAG, base: LOVABLE_URL, reviewed: FAKE_REVIEWED, shotsDir: t.shotsDir, manifest: path.join(t.dir, 'missing', 'cleanup-manifest.json') });
+  assert.deepEqual(cellsAt(out.rows, 'signup'), ['FAIL', 'FAIL', 'FAIL', 'FAIL']);
+  assert.match(out.trackingFailed, /^v360: /);
+  assert.equal(t.server.requests.filter((r) => r.name === 'wsfSaveProfile').length, 0);
 });
 
 test('guard: unreviewed code on the invite page fails host-build and stops the whole matrix before any account is created', async () => {
@@ -477,6 +548,17 @@ test('guard: unreviewed code on the invite page fails host-build and stops the w
   assert.equal(t.server.passwordFills, 0, 'nothing is typed after the guard refused');
   assert.equal(t.server.accounts, 0);
   assert.equal(t.browser.closed, 1);
+  // The check follows every navigation: the display, and the second invite in the same tab.
+  const d = twin({ foreignOnDisplay: true });
+  const od = await runMatrix({ browser: d.browser, fixtures: d.fixtures, runTag: TAG, base: LOVABLE_URL, reviewed: FAKE_REVIEWED, shotsDir: d.shotsDir, manifest: d.manifest });
+  assert.deepEqual([statusOf(od.rows, 'landing@v360'), statusOf(od.rows, 'display@v360'), statusOf(od.rows, 'landing@v390')], ['PASS', 'FAIL', 'FAIL']);
+  assert.equal(d.server.accounts, 0);
+  const s2 = twin({ foreignOnSecondInvite: true });
+  const o2 = await runMatrix({ browser: s2.browser, fixtures: s2.fixtures, runTag: TAG, base: LOVABLE_URL, reviewed: FAKE_REVIEWED, shotsDir: s2.shotsDir, manifest: s2.manifest });
+  assert.equal(statusOf(o2.rows, 'progress-you@v360'), 'PASS');
+  assert.equal(statusOf(o2.rows, 'memberships@v360'), 'FAIL');
+  assert.equal(statusOf(o2.rows, 'landing@v390'), 'FAIL', 'no later viewport runs');
+  assert.equal(s2.server.accounts, 1, 'only the first viewport\'s visitor was created');
 });
 
 // ---- the CLI ----------------------------------------------------------------------------------------
@@ -549,6 +631,71 @@ test('cli: a full --run with the fake kit and browser writes the matrix, tracks 
   assert.equal(await cli('--require', { WSF_RESULT_DIR: path.join(t.dir, 'nothing-here'), WSF_CLEANUP_OUTCOME: 'success', WSF_SCAN_OUTCOME: 'success' }, { say: () => {} }), 1);
 });
 
+/** A full --run of the CLI on the fake host, kit and browser. The account lookup is `lookupFetch`, or (lookupFromTwin)
+ *  answered from the twin's own sign-ups; `journey(o, t)` replaces the matrix. */
+async function cliRun(bug, { lookupFetch, lookupFromTwin = false, journey } = {}) {
+  const t = twin(bug);
+  if (lookupFromTwin) lookupFetch = lookupFrom(t);
+  const sdk = path.join(t.dir, 'sdk.json');
+  fs.writeFileSync(sdk, JSON.stringify({ result: { sdkConfig: { projectId: PROJECT_ID, apiKey: 'demo' } } }));
+  const env = { WSF_LOVABLE_URL: LOVABLE_URL, WSF_PROJECT: PROJECT_ID, WSF_RESULT_DIR: t.dir, WSF_SDK_CONFIG_FILE: sdk, WSF_GOOGLE_ACCESS_TOKEN: 'tok', WSF_CLEANUP_MANIFEST: t.manifest };
+  const code = await cli('--run', env, {
+    fetchImpl: host(), lookupFetch, reviewed: FAKE_REVIEWED, say: () => {}, launch: async () => ({ ...t.browser, close: async () => {} }),
+    importKit: async () => ({ createFixtureKit: () => t.fixtures }),
+    journey: journey ? (o) => journey(o, t) : (o) => runMatrix({ ...o, runTag: TAG, shotsDir: t.shotsDir }),
+  });
+  const doc = JSON.parse(fs.readFileSync(path.join(t.dir, 'lovable-device-matrix', 'results.json'), 'utf8'));
+  return { t, code, doc, row: (id) => doc.rows.find((r) => r.id === id) };
+}
+const lookupFrom = (t) => async (url, init) => {
+  const email = JSON.parse(init.body).email[0];
+  return { ok: true, status: 200, json: async () => ({ users: t.server.signups.filter((x) => x.email === email).map((x) => ({ localId: x.uid, email: x.email })) }) };
+};
+
+test('cli: an account the journey could not track FAILS cleanup-tracking, whatever else was tracked; a lookup that names it lets the cleaner have it', async () => {
+  const lost = await cliRun({ noSignupResponse: true }, { lookupFetch: async () => ({ ok: false, status: 503, json: async () => ({}) }) });
+  assert.equal(lost.code, 1);
+  assert.equal(lost.row('cleanup-tracking').status, 'FAIL', lost.row('cleanup-tracking').seen);
+  assert.match(lost.row('cleanup-tracking').seen, /may be missing from the cleanup manifest/);
+  assert.equal(lost.t.server.accounts, 4, 'the product created four accounts');
+  assert.equal(JSON.parse(fs.readFileSync(lost.t.manifest, 'utf8')).users.length, 0, 'none of them is in the manifest');
+  // The same lost answers, with the lookup available: every account is found by its synthetic email and tracked.
+  const rec = await cliRun({ noSignupResponse: true }, { lookupFromTwin: true });
+  assert.equal(rec.row('cleanup-tracking').status, 'PASS', rec.row('cleanup-tracking').seen);
+  assert.deepEqual(JSON.parse(fs.readFileSync(rec.t.manifest, 'utf8')).users.sort(), rec.t.server.signups.map((x) => x.uid).sort());
+  assert.equal(rec.code, 0);
+  // A refused manifest write during the journey also FAILS the row.
+  const refused = await cliRun({}, { journey: (o, t) => runMatrix({ ...o, runTag: TAG, shotsDir: t.shotsDir, manifest: path.join(t.dir, 'missing', 'm.json') }) });
+  assert.equal(refused.row('cleanup-tracking').status, 'FAIL');
+  // Nothing created and nothing lost: the PASS says exactly that.
+  const none = await cliRun({}, { journey: async () => ({ rows: { 'fixture-provenance': { status: 'PASS', seen: 'x' } }, extras: { users: [], docs: [], linked: [] }, trackingFailed: null, served: { verified: 1, violations: [] } }) });
+  assert.equal(none.row('cleanup-tracking').status, 'PASS');
+  assert.match(none.row('cleanup-tracking').seen, /no visitor account was tracked and none went untracked/);
+  const silent = await cliRun({}, { journey: async () => ({ rows: { 'fixture-provenance': { status: 'PASS', seen: 'x' } }, extras: { users: [], docs: [], linked: [] }, trackingFailed: 'v360: lost', served: { verified: 1, violations: [] } }) });
+  assert.equal(silent.row('cleanup-tracking').status, 'FAIL', 'an untracked account with nothing else tracked is still a FAIL');
+});
+
+test('cli: host-build in the written results joins the bind with what the browser was served', async () => {
+  const bad = await cliRun({}, { journey: async () => ({ rows: {}, extras: { users: [], docs: [], linked: [] }, trackingFailed: null, served: { verified: 3, violations: ['script https://cdn.example.test/x.js is outside the reviewed build'] } }) });
+  assert.equal(bad.row('host-build').status, 'FAIL');
+  assert.match(bad.row('host-build').seen, /unreviewed request/);
+  const none = await cliRun({}, { journey: async () => ({ rows: {}, extras: { users: [], docs: [], linked: [] }, trackingFailed: null, served: { verified: 0, violations: [] } }) });
+  assert.equal(none.row('host-build').status, 'FAIL', 'a bind with no verified load is not a PASS');
+});
+
+test('accountLookup: the kit\'s admin read by email, uids only, never a body echoed', async () => {
+  const calls = [];
+  const f = async (url, init) => { calls.push({ url, init }); return { ok: true, status: 200, json: async () => ({ users: [{ localId: 'UidVisitor9', email: 'x' }, { localId: 'bad uid!' }, {}] }) }; };
+  assert.deepEqual(await accountLookup('tok', f)('wsf-e5c-a-dmv360-ab12@example.com'), ['UidVisitor9']);
+  assert.equal(calls[0].url, 'https://identitytoolkit.googleapis.com/v1/projects/westayfit-staging/accounts:lookup');
+  assert.equal(calls[0].init.method, 'POST');
+  assert.equal(calls[0].init.headers.authorization, 'Bearer tok');
+  assert.deepEqual(JSON.parse(calls[0].init.body), { email: ['wsf-e5c-a-dmv360-ab12@example.com'] });
+  assert.deepEqual(await accountLookup('tok', async () => ({ ok: true, status: 200, json: async () => ({}) }))('e'), [], '{} is the documented none');
+  await assert.rejects(accountLookup('tok', async () => ({ ok: false, status: 403, json: async () => ({ error: { message: 'secret detail' } }) }))('e'), (e) => /HTTP 403/.test(e.message) && !/secret detail/.test(e.message));
+  await assert.rejects(accountLookup('tok', async () => ({ ok: true, status: 200, json: async () => ({ users: 'x' }) }))('e'), /unexpected type/);
+});
+
 // ---- the workflow mode -------------------------------------------------------------------------------
 test('workflow: the gate binds credential-free; the job binds again before it authenticates, cleans up blocking, scans before upload, and requires', () => {
   const y = fs.readFileSync(new URL('../workflows/wsf-staging-deploy.yml', import.meta.url), 'utf8');
@@ -604,6 +751,51 @@ test('workflow: the gate binds credential-free; the job binds again before it au
   for (const l of live.split('\n').filter((x) => /npm (install|--prefix .* ci)/.test(x))) assert.match(l, /--ignore-scripts/, l.trim());
   assert.match(live, /google-auth-library@9\.15\.1/);
   assert.deepEqual([...live.matchAll(/WSF_LOVABLE_URL: (\S+)/g)].map((m) => m[1]), [LOVABLE_URL, LOVABLE_URL]);
+});
+
+test('workflow: the safety order is pinned: one evidence directory end to end, a blocking cleanup that nothing swallows, the bind id and no silenced step', () => {
+  const y = fs.readFileSync(new URL('../workflows/wsf-staging-deploy.yml', import.meta.url), 'utf8');
+  const jobAt = y.indexOf('\n  lovable-device-matrix:\n');
+  const job = y.slice(jobAt, jobAt + 1 + y.slice(jobAt + 1).search(/\n {2}[a-z][a-z-]*:\n/));
+  const liveOf = (t) => t.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+  const steps = job.split(/\n {6}- /).slice(1).map((x) => `- ${x}`);
+  const step = (n) => liveOf(steps.find((x) => x.startsWith(`- name: ${n}\n`)) ?? '');
+  const live = liveOf(job);
+  const DIR = '${{ github.workspace }}/wsf-lovable-device-evidence';
+  const values = (k) => [...live.matchAll(new RegExp(`^\\s+${k}: (.+)$`, 'gm'))].map((m) => m[1].trim());
+  // Every path the job reads or writes evidence through is the ONE directory the scan reads and the upload sends.
+  assert.deepEqual(values('WSF_RESULT_DIR'), [DIR, DIR], 'the run and the verdict read the scanned directory');
+  assert.deepEqual(values('WSF_CLEANUP_MANIFEST'), [`${DIR}/lovable-device-matrix/cleanup-manifest.json`, `${DIR}/lovable-device-matrix/cleanup-manifest.json`], 'the run writes the manifest the cleanup reads');
+  assert.deepEqual(values('WSF_CLEANUP_RECEIPT'), [`${DIR}/lovable-device-matrix/cleanup-receipt.json`]);
+  const scan = step('Scan evidence before upload');
+  assert.match(scan, /^\s+if: always\(\)$/m);
+  assert.ok(scan.includes(`mkdir -p "${DIR}"`) && scan.includes(`node ops/.github/wsf-staging/scan-evidence.mjs "${DIR}"`), 'the scan reads exactly that directory');
+  const upload = liveOf(steps.find((x) => x.startsWith('- uses: actions/upload-artifact@')) ?? '');
+  assert.deepEqual([...upload.matchAll(/^\s+path: (.+)$/gm)].map((m) => m[1].trim()), ['wsf-lovable-device-evidence'], 'the upload sends that directory and nothing else');
+  // The cleanup is BLOCKING (as C4 pins for hosted-verify): exact always(), the only early success before the cleaner, nothing after it.
+  const cleanup = step('Remove the device matrix fixtures');
+  assert.match(cleanup, /^\s+if: always\(\)$/m, 'cleanup runs whatever the run did');
+  assert.match(cleanup, /^\s+id: cleanup$/m, 'the verdict reads this outcome');
+  assert.equal(/continue-on-error/.test(cleanup), false, 'a failed cleanup fails the job');
+  const noManifest = cleanup.indexOf('if [ ! -f "$WSF_CLEANUP_MANIFEST" ]; then');
+  const cleaner = cleanup.indexOf('node ops/.github/wsf-staging/cleanup-synthetic.mjs');
+  assert.ok(noManifest !== -1 && cleaner > noManifest);
+  assert.equal((cleanup.match(/exit 0/g) || []).length, 1, 'exactly one success exit: the no-manifest branch');
+  assert.ok(cleanup.indexOf('exit 0') < cleaner);
+  const after = cleanup.slice(cleaner);
+  assert.match(after, /^node ops\/\.github\/wsf-staging\/cleanup-synthetic\.mjs\s*$/m, 'the cleaner\'s exit status is the step\'s');
+  assert.equal(/\|\||set \+e|; *true|exit 0/.test(after), false, 'nothing may swallow a cleanup failure');
+  assert.match(cleanup, /^\s+set -euo pipefail$/m);
+  // The bind: its id is what re-authentication reads; neither bind may be silenced; Authenticate is success-gated only.
+  assert.match(step('Bind the served build again before any credential or fixture'), /^\s+id: bind$/m);
+  assert.equal(/continue-on-error/.test(live), false, 'no step of the job may be silenced');
+  const gate = y.slice(y.indexOf('\n  gate:\n'), y.indexOf('\n  config:\n'));
+  const gateBind = liveOf(gate.split(/\n {6}- /).find((x) => x.startsWith('name: Bind the Lovable host\'s served build for the device matrix')) ?? '');
+  assert.ok(gateBind.length > 0);
+  assert.equal(/continue-on-error/.test(gateBind), false, 'an unbound build must stop the gate');
+  assert.equal(/^\s+if:/m.test(step('Authenticate to Google Cloud')), false, 'success-gated: skipped after a failed bind');
+  assert.match(step('Re-authenticate before cleanup'), /^\s+if: \$\{\{ always\(\) && steps\.bind\.outcome == 'success' \}\}$/m);
+  assert.match(step('Require the Lovable device matrix to have passed'), /^\s+if: always\(\)$/m);
 });
 
 test('the harness reuses the kiosk proof\'s reviewed bind and code guard rather than restating them', () => {
