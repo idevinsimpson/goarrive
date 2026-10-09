@@ -1,10 +1,12 @@
-# KIOSK-UNVERIFIED-STAGING-RECOVERY-1: the unverified participant's hosted proof, and the pin it waits on
+# KIOSK-UNVERIFIED-STAGING-RECOVERY-2: the unverified participant's hosted proof, and the pin it waits on
 
-**Status: partial, not delivered.** The fixture kit, the driver and their tests are done (below). The staging pin is **not generated**. It needs the bounded `pin-candidate.mjs` change that this W3 session's tool-permission classifier refused on 2026-10-07 ("Security Weaken"). Only the owner can clear that refusal, by approving it inside the W3 session. A GitHub comment cannot.
+**Status: partial, not delivered.** The fixture kit, the driver, its registration and their tests are done (below). The staging pin is **not generated**.
+
+It needs the bounded `pin-candidate.mjs` change that this W3 session's tool-permission classifier refused on 2026-10-07 ("Security Weaken"). The owner's consent is recorded on GitHub (#365 `6074607727`, pointer #396 `6074612378`), and as the queue says, it stays subject to this session's own permission check. The edit is not retried until the owner approves it inside the W3 session, where the approval has been requested.
 
 | | |
 |---|---|
-| **Packet** | KIOSK-UNVERIFIED-STAGING-RECOVERY-1. Contract #365 `6043040592`, recovery delta `6043989729`, release `6043993150`, unblock `6064064740`. W3, inbox #396 (wake `a712d414…`, ack `6064282086`). |
+| **Packet** | KIOSK-UNVERIFIED-STAGING-RECOVERY-2: queue #365 `6074823456`, release `6074824513`. It succeeds RECOVERY-1, withdrawn in `6074820448`, whose contract is #365 `6043040592` with recovery delta `6043989729`. The reservation adds `tests/hosted-changed-journeys.test.mjs`. W3, inbox #396 (wake `00c0938b…`, ack `6074964040`). |
 | **Base** | operational `main` `41bff6c6`. |
 | **Candidate / rollback** | `819c26f0e18031fa575f430985ac024fd68f1588` / `ab77fbfce97e60c1c22492397b2ab6b491f9e0db` (unchanged; no newer served receipt). |
 | **Proof type** | Source only. Hermetic tests against an in-memory backend and a scripted page model. Nothing deployed or dispatched, and no hosted run. |
@@ -26,7 +28,7 @@ There is no global redirect: `app/_layout.tsx` and `app/(tabs)/_layout.tsx` only
 
 **The client prerequisites that remain.** Before this journey can pass hosted, the native app must route an unverified ordinary participant to its profile step and let it save its profile and join by the marker. That means the three checks at `signin.tsx:63/121` (with `signup.tsx:46`), `profile-setup.tsx:113` and `MarkerEntryScreen.tsx:269`. It is a separate UI slice; this packet changes no product code. The Lovable Web Twin is a different host and is not exercised here.
 
-## What changed (three reserved paths)
+## What changed (four reserved paths)
 
 ### `.github/wsf-staging/journeys/fixture-kit.mjs`
 
@@ -49,7 +51,7 @@ Nothing verifies an address. The kit contains one `emailVerified: true` (the unc
 
 ### `.github/wsf-staging/journeys/expo-attendee.mjs`
 
-The new `unverified-participant` driver (`unverifiedParticipantDriver`, rows `UNVERIFIED_PARTICIPANT_ROWS`). On its own phone, the unverified visitor:
+The new `unverified-participant` driver (rows `EXPO_ROWS['unverified-participant']`). On its own phone, the unverified visitor:
 1. signs in;
 2. saves its profile;
 3. joins by the approved marker;
@@ -63,7 +65,11 @@ A verified account with no profile walks the same path as the **control**.
 
 Every row reads the page. Where a screen stops the account, the row fails and names that screen; the seen text never carries an address (scrubbed) or a join code (`/join/[link]`). The driver never presses Resend or I have verified, so a hosted run sends no mail and verifies nothing.
 
-**It is written and tested but NOT registered.** Registering a driver changes the frozen registry: `journeys/index.mjs` and the reviewed list in `tests/hosted-changed-journeys.test.mjs`, which is **outside this reservation**. It also belongs with the pin and the manifest row that name it, which this packet cannot yet produce. The frozen registry, the live manifest and the eight attendee journeys are unchanged.
+**It is registered:**
+- `expoDrivers` carries it, and its rows are `EXPO_ROWS['unverified-participant']`.
+- The reviewed, frozen list in `tests/hosted-changed-journeys.test.mjs` (added to the reservation by RECOVERY-2) now names it.
+
+A registered driver runs only when the live manifest names its journey, and that row lands with the pin that names its build. The live manifest and the eight attendee journeys are unchanged.
 
 ### `.github/wsf-staging/tests/changed-journey-drivers.test.mjs`
 
@@ -104,9 +110,8 @@ That edit to `.github/wsf-staging/pin-candidate.mjs` was refused by this session
 - the bounded `pin-candidate.mjs` change and its tests (old cases byte-identical, the exact three-link chain, tampering with each link, a fourth link refused);
 - the generated `approved-candidate.json` for `819c26f0`;
 - the live `manifest.json` moved to `819c26f0` with the journey below;
-- the driver registered: `expoDrivers` plus the frozen list in `tests/hosted-changed-journeys.test.mjs`. That second file needs adding to the reservation.
 
-**The manifest row, ready to land with the pin** (`expected` is `UNVERIFIED_PARTICIPANT_ROWS`, word for word):
+**The manifest row, ready to land with the pin** (`expected` is `EXPO_ROWS['unverified-participant']`, word for word):
 
 ```json
 {

@@ -73,6 +73,17 @@ export const EXPO_ROWS = Object.freeze({
     next: 'the next person starts at the sign-in gate and their own credit reads zero, while the shared total keeps both people\'s contributions',
     countdown: 'left untouched, the countdown performs the same Finish and Stay puts it back',
   },
+  'unverified-participant': {
+    signin: 'signing in, the unverified account is taken to its profile step, not held at a verification page',
+    profile: 'the profile step offers the unverified account its name form, and Save profile moves on',
+    marker: 'the approved marker offers Join Fixture Open Community, and joining shows How will you take part?',
+    link: 'the community\'s join link then opens the same community for the member',
+    contribute: 'Move on my phone records 15: Your total on this goal: 15 squats, and the shared total of 115 counts it once',
+    history: 'Your progress lists the goal with YOURS 15 squats',
+    fresh: 'in a fresh browser with nothing stored, signing in again reaches the same member, whose progress still reads YOURS 15 squats',
+    round: 'a new round of 10 is accepted: Your total on this goal: 25 squats, and a shared total of 125',
+    control: 'a verified account with no profile, on the same path, lands on its profile step, saves it, joins by the marker and records its own 5',
+  },
 });
 
 const PHONE = { width: 390, height: 844 };
@@ -693,23 +704,6 @@ async function sharedScreenFinish({ page, baseUrl, fixtures }) {
  * verified are never pressed, so a run sends no mail. A verified account with
  * no profile walks the same path as the control.
  */
-/**
- * Written and tested, NOT registered. Registering a driver changes the frozen
- * registry (journeys/index.mjs and its reviewed list in
- * tests/hosted-changed-journeys.test.mjs); that lands with the staging pin and
- * the manifest row that name this journey, never ahead of them.
- */
-export const UNVERIFIED_PARTICIPANT_ROWS = Object.freeze({
-  signin: 'signing in, the unverified account is taken to its profile step, not held at a verification page',
-  profile: 'the profile step offers the unverified account its name form, and Save profile moves on',
-  marker: 'the approved marker offers Join Fixture Open Community, and joining shows How will you take part?',
-  link: 'the community\'s join link then opens the same community for the member',
-  contribute: 'Move on my phone records 15: Your total on this goal: 15 squats, and the shared total of 115 counts it once',
-  history: 'Your progress lists the goal with YOURS 15 squats',
-  fresh: 'in a fresh browser with nothing stored, signing in again reaches the same member, whose progress still reads YOURS 15 squats',
-  round: 'a new round of 10 is accepted: Your total on this goal: 25 squats, and a shared total of 125',
-  control: 'a verified account with no profile, on the same path, lands on its profile step, saves it, joins by the marker and records its own 5',
-});
 const UNVERIFIED_STOPS = Object.freeze({
   'wsf-verify': 'held at the verification page (Check your email.), whose only ways on are verifying or signing out',
   'wsf-profile-unverified': 'the profile page shows only Verify your email before completing your profile.',
@@ -769,7 +763,7 @@ const GATE_SCREEN = /^\/(signin|verify-email|profile-setup)$/;
 
 async function unverifiedParticipant({ page, baseUrl, fixtures }) {
   const r = recorder();
-  const row = tagged(r, UNVERIFIED_PARTICIPANT_ROWS);
+  const row = tagged(r, EXPO_ROWS['unverified-participant']);
   const ev = await fixtures.joinableEvent('unverified', { target: 1000, seeded: 100 });
   const visitor = await fixtures.createUnverifiedUser('unverified-v', 'Fixture Visitor');
   const control = await fixtures.createVerifiedUser('unverified-c', 'Fixture Control');
@@ -857,7 +851,5 @@ export const expoDrivers = Object.freeze({
   'line-place-ends': linePlaceEnds,
   'closed-goal-turn': closedGoalTurn,
   'shared-screen-finish': sharedScreenFinish,
+  'unverified-participant': unverifiedParticipant,
 });
-
-/** The unverified participant's driver, for the pin that registers it (see UNVERIFIED_PARTICIPANT_ROWS). */
-export const unverifiedParticipantDriver = unverifiedParticipant;

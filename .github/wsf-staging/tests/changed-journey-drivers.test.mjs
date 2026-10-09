@@ -21,7 +21,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { RUN_TAG, backend, expoHarness, harness, kitFor, runCleanup, serve, tmp } from './helpers/journey-model.mjs';
 import { drivers } from '../journeys/index.mjs';
-import { EXPO_ROWS, UNVERIFIED_PARTICIPANT_ROWS, expoDrivers, unverifiedParticipantDriver } from '../journeys/expo-attendee.mjs';
+import { EXPO_ROWS, expoDrivers } from '../journeys/expo-attendee.mjs';
 import { validateManifest } from '../milestone-manifest.mjs';
 import { checkManifestObject } from '../check-milestone-manifest.mjs';
 import { runHook } from '../hosted-changed-journeys.mjs';
@@ -891,7 +891,7 @@ async function driveUnverified(opts = {}) {
   const h = unverifiedHarness(opts);
   const used = new Set();
   const fixtures = new Proxy(h.fixtures, { get: (k, name) => { used.add(name); return k[name]; } });
-  const r = await unverifiedParticipantDriver({ page: h.page, baseUrl: 'https://staging.example.test', journey: { id: 'unverified-participant' }, fixtures });
+  const r = await drivers['unverified-participant']({ page: h.page, baseUrl: 'https://staging.example.test', journey: { id: 'unverified-participant' }, fixtures });
   const byRow = Object.fromEntries(r.assertions.map((a) => [tagOf(a.expected), a]));
   return { ...h, r, used, byRow, failed: r.assertions.filter((a) => !a.ok).map((a) => tagOf(a.expected)) };
 }
@@ -902,14 +902,11 @@ const cleanAll = async (h) => {
   return c;
 };
 
-await test('UNVERIFIED: the driver is written but NOT registered (the frozen registry and the live manifest are unchanged until the pin), and it asserts nine rows', () => {
-  assert.equal(drivers['unverified-participant'], undefined);
-  assert.equal(Object.values(drivers).includes(unverifiedParticipantDriver), false);
-  assert.equal(expoDrivers['unverified-participant'], undefined);
-  assert.equal(EXPO_ROWS['unverified-participant'], undefined);
-  assert.equal(live().journeys.some((j) => j.id === 'unverified-participant'), false);
-  assert.deepEqual(Object.keys(UNVERIFIED_PARTICIPANT_ROWS), UNVERIFIED_ROWS);
-  assert.ok(Object.isFrozen(UNVERIFIED_PARTICIPANT_ROWS));
+await test('UNVERIFIED: the driver is registered beside the expo drivers and asserts nine rows; the live manifest names it only with the pin', () => {
+  assert.equal(drivers['unverified-participant'], expoDrivers['unverified-participant']);
+  assert.equal(typeof drivers['unverified-participant'], 'function');
+  assert.deepEqual(Object.keys(EXPO_ROWS['unverified-participant']), UNVERIFIED_ROWS);
+  assert.equal(live().journeys.some((j) => j.id === 'unverified-participant'), false, 'the manifest row lands with the pin that names its build');
 });
 
 await test('UNVERIFIED at 819c26f0 as served: every visitor row fails on the screen that holds the account, the verified control passes, nothing is verified or mailed', async () => {
