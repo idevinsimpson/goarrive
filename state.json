@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "918868dd6e8a39f05f1821f577b73b580429c61291e983bff19f83e9897767b9",
-  "eventCount": 950,
+  "ledgerHead": "3260fc6d5657065146a07892b890a32be105c3c256b9c5d8e10d68a86accb512",
+  "eventCount": 958,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -62,7 +62,9 @@
   },
   "queue": {
     "W3": [],
-    "W4": [],
+    "W4": [
+      "LOVABLE-DEVICE-QA-1"
+    ],
     "W5": [],
     "W7": [],
     "W9": []
@@ -77,7 +79,7 @@
       },
       "label": "Refuse anonymous-provider Firebase tokens at every WSF callable auth site (requireRealIdentity + optionalRealUid), with refusal tests; the release gate named in the production forensics",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -89,7 +91,7 @@
         "subjectSha": "118c2af99ce8bffd62243fe00f64531f620c3afd",
         "prHeadSha": "118c2af99ce8bffd62243fe00f64531f620c3afd",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "e65bfee9eecb2370f602d09880da604709fba58a"
       },
       "proof": null,
       "served": null,
@@ -115,10 +117,13 @@
           "kind": "comment",
           "id": 6077733181
         },
-        "accepted": null,
-        "lastTransition": {
+        "accepted": {
           "kind": "comment",
-          "id": 6078693648
+          "id": 6078861278
+        },
+        "lastTransition": {
+          "kind": "pull_request",
+          "id": 601
         }
       },
       "review": {
@@ -2405,6 +2410,64 @@
       "deliveries": 0,
       "pendingFinding": null
     },
+    "LOVABLE-DEVICE-QA-1": {
+      "owner": "W4",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Proof-only lovable-device-matrix mode in the staging workflow: four viewports over the accepted Web Twin journeys on the trial host, PASS/FAIL/BLOCKED per row with screenshots; L0-dispatched",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        ".github/workflows/wsf-staging-deploy.yml",
+        ".github/wsf-staging/hosted-lovable-device-matrix.mjs",
+        ".github/wsf-staging/hosted-lovable-device-matrix.test.mjs",
+        "docs/westayfit/qa/lovable-device-qa-1.md"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6078892265
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6078892265
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
+      "pendingFinding": null
+    },
     "LOVABLE-KIOSK-HOSTED-PROOF-1": {
       "owner": "W3",
       "kind": "work",
@@ -2768,7 +2831,7 @@
       },
       "label": "Reviewed WSF-only production deploy path for goarrive: production-only Firebase config, network-free pre-flight guard, operator runbook with candidates A/B, receipts, rollback; nothing deployed",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "CHANGES_REQUESTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -2806,7 +2869,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6077519159
+          "id": 6078906904
         }
       },
       "review": {
@@ -3572,6 +3635,66 @@
         "after": "director"
       },
       "deliveries": 1,
+      "pendingFinding": null
+    },
+    "WRITER-CONCURRENCY-1": {
+      "owner": "W4",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Writer gap fix: keep non-qualifying issue_comment runs out of the wsf-control-writer concurrency group so they never cancel a queued qualifying run; update the workflow test pin and note",
+      "origin": "ledger",
+      "phase": "RELEASED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": 394,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": 0,
+      "reviewedBy": [],
+      "subjectPaths": [
+        ".github/workflows/wsf-control-reconcile.yml",
+        "tools/wsf-control/tests/shadow.test.mjs",
+        "docs/westayfit/ops/control/WRITER_CONCURRENCY_1.md"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6078735066
+        },
+        "released": {
+          "kind": "comment",
+          "id": 6078863846
+        },
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6078863846
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
       "pendingFinding": null
     }
   },
@@ -5658,7 +5781,8 @@
       "ack": {
         "kind": "comment",
         "id": 6078077972
-      }
+      },
+      "superseded": true
     },
     "65dfcb5bfddb5179533815ff9864a35f85cb0678c409f2d84f8c66a95331eded": {
       "packet": "ANON-GATE-1",
@@ -5687,6 +5811,22 @@
         "id": 6078504660
       },
       "superseded": true
+    },
+    "a5506c543e7ac900b40cad2486cb94233b7a579cb5a68d1d0cd8d7d1fe1fb2d5": {
+      "packet": "PRODUCTION-DEPLOY-PATH-1",
+      "worker": "W9",
+      "reason": "handback",
+      "status": "requested",
+      "comments": [],
+      "ack": null
+    },
+    "a5d4ea540bc1579bea40c0295dd67b5ed80100b9fe4f7e954d8b95ef5c8cc677": {
+      "packet": "WRITER-CONCURRENCY-1",
+      "worker": "W4",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
