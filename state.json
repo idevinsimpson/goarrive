@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "90d42c7d2bfafe0150be5779a14f568ef09aa76b2d843f7774c0b4c0681e6430",
-  "eventCount": 1073,
+  "ledgerHead": "bb059b78f3091226af8666280d15db8773f986f30879c827401b6f9f5fefdf30",
+  "eventCount": 1076,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -20,7 +20,7 @@
   "canonical": {
     "developmentBranch": "claude/wsf-app-shell",
     "developmentSha": "8a067b29420563408e16cff5d91cc77b2ad0fbd8",
-    "operationalMain": "3c2ef6b986ff334c14557ae8ac477700f4ee0f21"
+    "operationalMain": "e703614827bc1bfe28035c1105f827dbc98b3193"
   },
   "staging": {
     "servedSha": "ec162d17a0540e936741027f9b8f90dd372cfaf4",
@@ -3028,7 +3028,7 @@
       },
       "label": "Runbook B13: read back the production WSF functions' runtime service account roles (email action links need Identity Toolkit permission); owner by-name grant before step 6; step 8 line, receipt field",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -3040,7 +3040,7 @@
         "subjectSha": "def247c0e76dacbc1cc791b610d2a7f83f6b0c21",
         "prHeadSha": "def247c0e76dacbc1cc791b610d2a7f83f6b0c21",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "e703614827bc1bfe28035c1105f827dbc98b3193"
       },
       "proof": null,
       "served": null,
@@ -3062,10 +3062,13 @@
           "kind": "comment",
           "id": 6083892481
         },
-        "accepted": null,
-        "lastTransition": {
+        "accepted": {
           "kind": "comment",
-          "id": 6085475734
+          "id": 6085659599
+        },
+        "lastTransition": {
+          "kind": "pull_request",
+          "id": 607
         }
       },
       "review": {

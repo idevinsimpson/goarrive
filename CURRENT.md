@@ -1,15 +1,15 @@
-<!-- wsf-control ledgerHead=90d42c7d2bfafe0150be5779a14f568ef09aa76b2d843f7774c0b4c0681e6430 events=1073 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=bb059b78f3091226af8666280d15db8773f986f30879c827401b6f9f5fefdf30 events=1076 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `90d42c7d2bfafe0150be5779a14f568ef09aa76b2d843f7774c0b4c0681e6430` (1073 events)
+- Ledger head: `bb059b78f3091226af8666280d15db8773f986f30879c827401b6f9f5fefdf30` (1076 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
-- Canonical: development `claude/wsf-app-shell` at `8a067b29420563408e16cff5d91cc77b2ad0fbd8`; operational main `3c2ef6b986ff334c14557ae8ac477700f4ee0f21`
+- Canonical: development `claude/wsf-app-shell` at `8a067b29420563408e16cff5d91cc77b2ad0fbd8`; operational main `e703614827bc1bfe28035c1105f827dbc98b3193`
 - Staging: serves `ec162d17a0540e936741027f9b8f90dd372cfaf4` (run 37912780869, #61); rollback `ab77fbfce97e60c1c22492397b2ab6b491f9e0db`; pin PR #597
 - Unattended fast-path dispatch: ENABLED (set-fastpath)
 - Staging target (fast path): `ab77fbfce97e60c1c22492397b2ab6b491f9e0db` (KIOSK-PAIRING-CLARITY-PROOF-1), checked against the full-path pin `a31276516e786ac8f848269de4c839b3b9e13123`
@@ -33,7 +33,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | W4 | #394 | — | — | — | — | — | — | off |
 | W5 | #395 | — | — | — | — | — | — | off |
 | W7 | #434 | — | — | — | — | — | — | off |
-| W9 | #497 | — | — | PROD-RUNTIME-SA-AUTH-ROLE-1 | EVENT-LIFECYCLE-BACKEND-RECOVERY-1, MEMBER-TRUTH-BACKEND-1 | — | — | off |
+| W9 | #497 | — | — | — | EVENT-LIFECYCLE-BACKEND-RECOVERY-1, MEMBER-TRUTH-BACKEND-1 | — | — | off |
 
 ## Packets
 
@@ -82,7 +82,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | MEMBER-TRUTH-BACKEND-1 | W9 | work | INTEGRATED (source-only) | ledger | BLOCKED (from ACKED) | — | — | — | — | — | — | — | comment:6029989725 | comment:6035507739 | TOGETHER-CROSSING-DESIGN-DECISION (Director and Owner) | Unblock real member Together crossing and privacy-safe public preview labels for the shared Firebase backend and Lovable Web Twin | 1×journey-qa then director | — |
 | MOVE-CAMERA-NATIVE-PORT-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #577 | d6d47879 | d6d47879 | — | 856e20e0 | — | W7 | comment:5997538756 | pull_request:577 | — | Port the owner-accepted camera-assisted squat MOVE North Star into the current Expo app without automatic contribution credit | 1×journey-qa then director | — |
 | NORTHSTAR-MIRROR-INTAKE-1 | W3 | work | INTEGRATED (source-only) | ledger | BLOCKED (from ACKED) | — | — | — | — | — | — | — | comment:6035534615 | comment:6040736205 | W3-SOURCE-EDIT-CONSENT (Devin) | Complete the existing automatic Lovable delta receiver so Devin never has to relay native handoffs | 1×ops-source then director | — |
-| PROD-RUNTIME-SA-AUTH-ROLE-1 | W9 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #607 | def247c0 | def247c0 | — | — | — | W3 | comment:6083892481 | comment:6085475734 | — | Runbook B13: read back the production WSF functions' runtime service account roles (email action links need Identity Toolkit permission); owner by-name grant before step 6; step 8 line, receipt field | 1×ops-source then director | — |
+| PROD-RUNTIME-SA-AUTH-ROLE-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #607 | def247c0 | def247c0 | — | e7036148 | — | W3 | comment:6083892481 | pull_request:607 | — | Runbook B13: read back the production WSF functions' runtime service account roles (email action links need Identity Toolkit permission); owner by-name grant before step 6; step 8 line, receipt field | 1×ops-source then director | — |
 | PRODUCTION-DEPLOY-PATH-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #600 | dfd48c87 | dfd48c87 | — | 1d3f1c2c | — | W7 | comment:6075293540 | pull_request:600 | — | Reviewed WSF-only production deploy path for goarrive: production-only Firebase config, network-free pre-flight guard, operator runbook with candidates A/B, receipts, rollback; nothing deployed | 1×ops-source then director | — |
 | PRODUCTION-FIREBASE-INVENTORY-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #599 | 80b603c7 | 80b603c7 | — | 0f1fd585 | — | W4 | comment:6074831300 | comment:6077389004 | — | Read-only production Firebase source-vs-deployed inventory, Web Twin activation prerequisites and WSF-only rollout and rollback plan | 1×ops-source then director | — |
 | PROFILE-PHOTOS-FIREBASE-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #593 | 57fd86b8 | 57fd86b8 | — | b8381195 | — | W4 | comment:6052427068 | pull_request:593 | — | Canonical private profile photos and permitted community roster for native and Lovable staging | 1×journey-qa then director | — |
