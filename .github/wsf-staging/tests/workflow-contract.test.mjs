@@ -96,14 +96,14 @@ test('no npx invocation exists in any job', () => {
 });
 
 test('the browser jobs run the candidate-local Playwright binary', () => {
-  for (const j of ['hosted-verify', 'player-journey', 'journey-activation', 'lovable-kiosk']) {
+  for (const j of ['hosted-verify', 'player-journey', 'journey-activation', 'lovable-kiosk', 'lovable-device-matrix']) {
     assert.match(jobs[j], /apps\/westayfit\/node_modules\/\.bin\/playwright/, `${j}: not the candidate's CLI`);
     assert.match(jobs[j], /install --with-deps chromium/, `${j}: browsers not installed from that CLI`);
   }
 });
 
 test('privileged dependency installs keep --ignore-scripts', () => {
-  for (const j of ['config', 'deploy', 'hosted-verify', 'player-journey', 'social-privacy', 'journey-activation', 'lovable-kiosk', 'cleanup-recovery']) {
+  for (const j of ['config', 'deploy', 'hosted-verify', 'player-journey', 'social-privacy', 'journey-activation', 'lovable-kiosk', 'lovable-device-matrix', 'cleanup-recovery']) {
     const installs = jobs[j].split('\n').filter((l) => /npm (install|--prefix .* ci)/.test(l));
     for (const line of installs) {
       assert.match(line, /--ignore-scripts/, `${j}: privileged install without --ignore-scripts: ${line.trim()}`);
@@ -328,7 +328,7 @@ function reachedJobs(mode) {
     'needs.build.result': 'success',
     'needs.deploy.result': 'success',
   };
-  const order = ['gate', 'config', 'build', 'deploy', 'hosted-verify', 'player-journey', 'social-privacy', 'journey-activation', 'lovable-kiosk', 'cleanup-recovery'];
+  const order = ['gate', 'config', 'build', 'deploy', 'hosted-verify', 'player-journey', 'social-privacy', 'journey-activation', 'lovable-kiosk', 'lovable-device-matrix', 'cleanup-recovery'];
   const reached = {};
   for (const name of order) {
     const cond = jobCondition(name);
@@ -390,6 +390,7 @@ test('player mode reaches only gate, config and the player journey', () => {
     'social-privacy': false,
     'journey-activation': false,
     'lovable-kiosk': false,
+    'lovable-device-matrix': false,
     'cleanup-recovery': false,
   });
 });
@@ -431,6 +432,7 @@ test('deploy mode still reaches build, deploy and hosted verification', () => {
     'social-privacy': false,
     'journey-activation': false,
     'lovable-kiosk': false,
+    'lovable-device-matrix': false,
     'cleanup-recovery': false,
   });
 });
@@ -450,6 +452,7 @@ test('social-privacy mode reaches only gate, config and the privacy verification
     'social-privacy': true,
     'journey-activation': false,
     'lovable-kiosk': false,
+    'lovable-device-matrix': false,
     'cleanup-recovery': false,
   });
 });
@@ -523,6 +526,7 @@ test('mail-preflight mode reaches NOTHING that builds, deploys or verifies', () 
     'social-privacy': false,
     'journey-activation': false,
     'lovable-kiosk': false,
+    'lovable-device-matrix': false,
     'cleanup-recovery': false,
   });
 });
@@ -542,8 +546,8 @@ test('deploy is the default mode, so an unset input runs the normal path', () =>
   */
   assert.deepEqual(
     options,
-    ['deploy', 'player-journey', 'cleanup-recovery', 'mail-preflight', 'social-privacy', 'journey-activation', 'lovable-kiosk'],
-    'exactly these seven modes exist'
+    ['deploy', 'player-journey', 'cleanup-recovery', 'mail-preflight', 'social-privacy', 'journey-activation', 'lovable-kiosk', 'lovable-device-matrix'],
+    'exactly these eight modes exist'
   );
 });
 
@@ -661,6 +665,7 @@ test('recovery mode reaches the recovery job and nothing else — not even the g
     'social-privacy': false,
     'journey-activation': false,
     'lovable-kiosk': false,
+    'lovable-device-matrix': false,
     'cleanup-recovery': true,
   });
 });
@@ -1224,6 +1229,7 @@ await test('journey-activation mode reaches only gate, config and the activation
     'social-privacy': false,
     'journey-activation': true,
     'lovable-kiosk': false,
+    'lovable-device-matrix': false,
     'cleanup-recovery': false,
   });
   const needs = /^ {4}needs: (.*)$/m.exec(jobs['journey-activation'])[1];
