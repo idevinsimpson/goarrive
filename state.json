@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "442b6cca73780ca6a09bfb2b2bdb668a9ff678c8f288b4335b35dce3c476c1ac",
-  "eventCount": 972,
+  "ledgerHead": "151000dcb2d205e5d86c903a8e0159276618d36585673364528e70e3c02bedda",
+  "eventCount": 977,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -53,7 +53,8 @@
     "W7": {
       "inbox": 434,
       "classes": [
-        "journey-qa"
+        "journey-qa",
+        "ops-source"
       ]
     },
     "W9": {
@@ -68,7 +69,7 @@
     "W5": [],
     "W7": [],
     "W9": [
-      "KIOSK-REVOKE-ACTIVE-TURN-1"
+      "KIOSK-TURN-LIFECYCLE-1"
     ]
   },
   "packets": {
@@ -2142,7 +2143,7 @@
       },
       "label": "On wsfRevokeStation, end or requeue that station's assigned/ready/active line entry server-side and surface the new status via wsfMyTurn/wsfTurnState; callable tests; doc note",
       "origin": "ledger",
-      "phase": "QUEUED",
+      "phase": "WITHDRAWN",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": null,
@@ -2175,7 +2176,65 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6079095202
+          "id": 6079352515
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
+      "pendingFinding": null
+    },
+    "KIOSK-TURN-LIFECYCLE-1": {
+      "owner": "W9",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Revoke ends/requeues that station's assigned/ready/active line entry (seen via wsfMyTurn/wsfTurnState); wsfJoinTurnLine refuses an already-recorded member (one-contribution reason); tests; doc note",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "functions-westayfit/src/index.ts",
+        "functions-westayfit/tests/callable/wsf-station-turn-lifecycle.test.ts",
+        "functions-westayfit/tests/",
+        "docs/westayfit/ops/security/"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6079353576
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6079353576
         }
       },
       "review": {
@@ -3768,12 +3827,14 @@
       },
       "label": "Writer gap fix: keep non-qualifying issue_comment runs out of the wsf-control-writer concurrency group so they never cancel a queued qualifying run; update the workflow test pin and note",
       "origin": "ledger",
-      "phase": "DELIVERED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 394,
       "pr": 603,
-      "reviewers": [],
+      "reviewers": [
+        "W7"
+      ],
       "artifact": {
         "subjectSha": "75f77d30d2a137ecdb6a1dbc2a2e0241f93fd242",
         "prHeadSha": "75f77d30d2a137ecdb6a1dbc2a2e0241f93fd242",
@@ -5973,6 +6034,14 @@
         "kind": "comment",
         "id": 6079125836
       }
+    },
+    "e6f576320b1eb753c04006dc543d931ba80ec78da055a814950b21c7e9697726": {
+      "packet": "WRITER-CONCURRENCY-1",
+      "worker": "W7",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
