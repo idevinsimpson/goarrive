@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "1500e0a3a9086172d73ad76a16810e45d06c3243f9be112ce6632e201b9bcb26",
-  "eventCount": 1061,
+  "ledgerHead": "3ab8626aa315ab92331dda07cf7d522e2632e822bd687ee8ea786e48c82051e0",
+  "eventCount": 1062,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -6362,8 +6362,10 @@
       "packet": "PROD-RUNTIME-SA-AUTH-ROLE-1",
       "worker": "W9",
       "reason": "handback",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        6084946355
+      ],
       "ack": null
     }
   },
