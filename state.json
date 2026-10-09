@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "79ab2797a6ff82b6c1fe897605107e92062687b0052cc45401256c2bde3de1ba",
-  "eventCount": 978,
+  "ledgerHead": "5c69e792ec9ad6de303abe069c4a3c6db3562353b44f117add044a0377f52bc5",
+  "eventCount": 981,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -63,9 +63,7 @@
   },
   "queue": {
     "W3": [],
-    "W4": [
-      "LOVABLE-DEVICE-QA-1"
-    ],
+    "W4": [],
     "W5": [],
     "W7": [],
     "W9": [
@@ -2538,10 +2536,10 @@
       },
       "label": "Proof-only lovable-device-matrix mode in the staging workflow: four viewports over the accepted Web Twin journeys on the trial host, PASS/FAIL/BLOCKED per row with screenshots; L0-dispatched",
       "origin": "ledger",
-      "phase": "QUEUED",
+      "phase": "RELEASED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
-      "inbox": null,
+      "inbox": 394,
       "pr": null,
       "reviewers": [],
       "artifact": {
@@ -2552,7 +2550,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": null,
+      "releasedQueueIndex": 0,
       "reviewedBy": [],
       "subjectPaths": [
         ".github/workflows/wsf-staging-deploy.yml",
@@ -2567,11 +2565,14 @@
           "kind": "comment",
           "id": 6078892265
         },
-        "released": null,
+        "released": {
+          "kind": "comment",
+          "id": 6079513029
+        },
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6078892265
+          "id": 6079513029
         }
       },
       "review": {
@@ -6039,10 +6040,21 @@
       "packet": "WRITER-CONCURRENCY-1",
       "worker": "W7",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6079484002
       ],
+      "ack": {
+        "kind": "comment",
+        "id": 6079510595
+      }
+    },
+    "9c107c6d3441f25f33aaa7ef8c44c4afd0517377353c5a01723e3a2cf6050a37": {
+      "packet": "LOVABLE-DEVICE-QA-1",
+      "worker": "W4",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
