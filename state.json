@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "81e31773b0ada48386f3829f1e6f5c7722ab85c84861b64ef77758ba0892199e",
-  "eventCount": 1010,
+  "ledgerHead": "2405c723da60f011140098e25ebe5c5c7cfe98c98a9bcf27bcd59f53c9913b85",
+  "eventCount": 1015,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2597,15 +2597,17 @@
       },
       "label": "Proof-only lovable-device-matrix mode in the staging workflow: four viewports over the accepted Web Twin journeys on the trial host, PASS/FAIL/BLOCKED rows with screenshots; L0-dispatched; + mode pins",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 394,
-      "pr": null,
-      "reviewers": [],
+      "pr": 605,
+      "reviewers": [
+        "W3"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "6c4858f0f8174158f85cda58b926ff15213bf7d0",
+        "prHeadSha": "6c4858f0f8174158f85cda58b926ff15213bf7d0",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -2634,7 +2636,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6081630495
+          "id": 6081787714
         }
       },
       "review": {
@@ -2647,7 +2649,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "LOVABLE-KIOSK-HOSTED-PROOF-1": {
@@ -3013,7 +3015,7 @@
       },
       "label": "Reviewed WSF-only production deploy path for goarrive: production-only Firebase config, network-free pre-flight guard, operator runbook with candidates A/B, receipts, rollback; nothing deployed",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "ACCEPTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -3050,10 +3052,13 @@
           "kind": "comment",
           "id": 6075293540
         },
-        "accepted": null,
+        "accepted": {
+          "kind": "comment",
+          "id": 6081789402
+        },
         "lastTransition": {
           "kind": "comment",
-          "id": 6081541583
+          "id": 6081789402
         }
       },
       "review": {
@@ -6163,16 +6168,28 @@
       "ack": {
         "kind": "comment",
         "id": 6081630495
-      }
+      },
+      "superseded": true
     },
     "9c018cc05a759f41161b34f1650fa0d7c7dbeaa16fd2a236be3aff7e13256b5c": {
       "packet": "STAGING-TURN-DRIVERS-1",
       "worker": "W7",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6081767585
       ],
+      "ack": {
+        "kind": "comment",
+        "id": 6081779104
+      }
+    },
+    "58c46f112cacd338ecb41de7294f2ff1c58c1cefc9f0813320602615030067fe": {
+      "packet": "LOVABLE-DEVICE-QA-2",
+      "worker": "W3",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
