@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "e55f2191b01de23d46718718eb26c813bda209d0a41699d9840cd80a2d0ad856",
-  "eventCount": 915,
+  "ledgerHead": "6a02ce3d01977348e39f86dc37aaa1d494e8df88f9a77784c2b5d76f3c1bd1df",
+  "eventCount": 918,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -20,7 +20,7 @@
   "canonical": {
     "developmentBranch": "claude/wsf-app-shell",
     "developmentSha": "ec162d17a0540e936741027f9b8f90dd372cfaf4",
-    "operationalMain": "41bff6c643ab4537d47a0732da48cfb86dc64b6b"
+    "operationalMain": "0f1fd58551eb78ea0a88619d265611865986d75a"
   },
   "staging": {
     "servedSha": "ab77fbfce97e60c1c22492397b2ab6b491f9e0db",
@@ -29,7 +29,7 @@
     "rollbackSha": "a31276516e786ac8f848269de4c839b3b9e13123",
     "pinPr": 522
   },
-  "criticalPath": "PRODUCTION-FIREBASE-INVENTORY-1",
+  "criticalPath": null,
   "workers": {
     "W3": {
       "inbox": 396,
@@ -2760,7 +2760,7 @@
       },
       "label": "Read-only production Firebase source-vs-deployed inventory, Web Twin activation prerequisites and WSF-only rollout and rollback plan",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -2772,7 +2772,7 @@
         "subjectSha": "80b603c7a9b28bbe005621500544ebe7c60868e6",
         "prHeadSha": "80b603c7a9b28bbe005621500544ebe7c60868e6",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "0f1fd58551eb78ea0a88619d265611865986d75a"
       },
       "proof": null,
       "served": null,
@@ -2795,10 +2795,13 @@
           "kind": "comment",
           "id": 6074831300
         },
-        "accepted": null,
+        "accepted": {
+          "kind": "comment",
+          "id": 6077383523
+        },
         "lastTransition": {
           "kind": "comment",
-          "id": 6077136451
+          "id": 6077389004
         }
       },
       "review": {
