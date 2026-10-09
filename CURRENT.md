@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=3260fc6d5657065146a07892b890a32be105c3c256b9c5d8e10d68a86accb512 events=958 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=f6274edaec23bfc242aba449146a5d4f7a8e25dc2bd35eee1a6d75887950c5e1 events=960 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `3260fc6d5657065146a07892b890a32be105c3c256b9c5d8e10d68a86accb512` (958 events)
+- Ledger head: `f6274edaec23bfc242aba449146a5d4f7a8e25dc2bd35eee1a6d75887950c5e1` (960 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -245,6 +245,6 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | f9e0a83b767e | W3 | PRODUCTION-DEPLOY-PATH-1 | review | acked | 6077681219, 6078019028 | comment:6078077972 |
 | 65dfcb5bfddb | W9 | ANON-GATE-1 | release | acked | 6077850130 | comment:6077926364 |
 | f4339d1e8c33 | W4 | ANON-GATE-1 | review | acked | 6078366255 | comment:6078504660 |
-| a5506c543e7a | W9 | PRODUCTION-DEPLOY-PATH-1 | handback | requested | — | — |
-| a5d4ea540bc1 | W4 | WRITER-CONCURRENCY-1 | release | requested | — | — |
+| a5506c543e7a | W9 | PRODUCTION-DEPLOY-PATH-1 | handback | delivered | 6078962481 | — |
+| a5d4ea540bc1 | W4 | WRITER-CONCURRENCY-1 | release | delivered | 6078962743 | — |
 
