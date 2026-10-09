@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "356139dae4c2272f959fcb7de1ce02cd3dc449cd0dfb2c17f67014dc62a45a7c",
-  "eventCount": 1038,
+  "ledgerHead": "5a903d244252476f1bee327030497237c2b3a1f94f8b81198368d88ce3157847",
+  "eventCount": 1040,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -19,7 +19,7 @@
   },
   "canonical": {
     "developmentBranch": "claude/wsf-app-shell",
-    "developmentSha": "e65bfee9eecb2370f602d09880da604709fba58a",
+    "developmentSha": "8a067b29420563408e16cff5d91cc77b2ad0fbd8",
     "operationalMain": "e2384102f42d5c4f47541893a9aea0cbb0b0754c"
   },
   "staging": {
@@ -2197,7 +2197,7 @@
       },
       "label": "Revoke ends/requeues that station's assigned/ready/active line entry (seen via wsfMyTurn/wsfTurnState); wsfJoinTurnLine refuses an already-recorded member (one-contribution reason); tests; doc note",
       "origin": "ledger",
-      "phase": "ACCEPTED",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -2209,7 +2209,7 @@
         "subjectSha": "17a565dc88c058b136664355dd4fa0634f0a39d5",
         "prHeadSha": "17a565dc88c058b136664355dd4fa0634f0a39d5",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "8a067b29420563408e16cff5d91cc77b2ad0fbd8"
       },
       "proof": null,
       "served": null,
@@ -2239,8 +2239,8 @@
           "id": 6083346531
         },
         "lastTransition": {
-          "kind": "comment",
-          "id": 6083346531
+          "kind": "pull_request",
+          "id": 606
         }
       },
       "review": {
