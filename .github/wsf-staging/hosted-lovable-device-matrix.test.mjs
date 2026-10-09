@@ -22,11 +22,11 @@ const test = (name, fn) => pending.push([name, fn]);
 const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 
 // ---- the pin, the host and the rows --------------------------------------------------------------
-test('nothing is reviewed yet: REVIEWED_BUILD is empty, so every run stops in the credential-free gate', () => {
-  assert.equal(REVIEWED_BUILD.indexSha256, null);
-  assert.equal(Object.keys(REVIEWED_BUILD.assets).length, 0);
-  assert.ok(Object.isFrozen(REVIEWED_BUILD) && Object.isFrozen(REVIEWED_BUILD.assets));
-  assert.equal(kiosk.bindBuild({ indexSha256: sha('x'), assets: { 'a.js': sha('a') } }, REVIEWED_BUILD).status, 'BLOCKED');
+test('one pin for both proofs: REVIEWED_BUILD is the kiosk harness\'s, and nothing is reviewed yet, so every run stops in the credential-free gate', () => {
+  assert.equal(REVIEWED_BUILD, kiosk.REVIEWED_BUILD, 'the same object, not a copy');
+  assert.deepEqual(REVIEWED_BUILD, { documents: {}, assets: {} });
+  assert.equal(kiosk.bindBuild({ documents: FAKE_REVIEWED.documents, assets: { 'a.js': sha('a') }, refusals: [] }, REVIEWED_BUILD).status, 'BLOCKED');
+  for (const p of ['/', '/?join=x&goal=y', '/display/e5cgoal-e5c-t-1-dm1']) assert.ok(kiosk.matchTemplate(new URL(`${LOVABLE_URL}${p}`).pathname), `the matrix loads ${p}, a reviewed route template`);
   assert.equal(LOVABLE_URL, 'https://we-stay-fit-foundation-trial.lovable.app');
   assert.equal(PROJECT_ID, 'westayfit-staging');
 });
@@ -124,9 +124,27 @@ test('cleanup merge: a visitor uid, its tagged membership and its linked profile
  * Playwright delivers it; every callable is a request and its OWN response, delivered to the page's listeners; the
  * product's sign-up answers with the account's localId. `bug` switches on one defect at a time.
  */
-const FAKE_INDEX = '<!doctype html><script type="module" src="/assets/shell-AAA.js"></script><link rel="stylesheet" href="/assets/index-CCC.css">';
+/** A document as the TanStack Start host serves it (HTML-VARIANCE-1): a per-request context token and per-request u: timestamps, and the route's own params. */
+let served = 0;
+function servedDoc(pathname, extra = '') {
+  served += 1;
+  const ts = String(1760050000000 + served * 7919);
+  const segs = pathname.split('/').filter(Boolean);
+  const route = pathname === '/' ? '/' : segs[0] === 'display' ? '/display/$goalId' : '/kiosk/$communityId/$goalId';
+  const ids = segs.slice(1);
+  return `<!DOCTYPE html><html><head><link rel="stylesheet" href="/assets/index-CCC.css">`
+    + `<script src="/__l5e/events.Q1w2E3r4.js" data-context-token="ctx.${crypto.randomBytes(12).toString('base64url')}" defer></script></head>`
+    + `<body><main data-route="${route}"${ids.map((v, i) => ` data-p${i}="${v}"`).join('')}></main>${extra}`
+    + `<script data-tsr-stream-part="">$_TSR.router.matches=[{i:"__root__",u:${ts}},{i:"${route}${ids.length ? pathname : ''}",u:${ts}}]</script>`
+    + `<script type="module" src="/assets/shell-AAA.js"></script></body></html>`;
+}
 const FAKE_ASSETS = { '/assets/shell-AAA.js': 'export const shell=1;', '/assets/index-CCC.css': 'body{}' };
-const FAKE_REVIEWED = Object.freeze({ indexSha256: sha(FAKE_INDEX), assets: Object.freeze(Object.fromEntries(Object.entries(FAKE_ASSETS).map(([p, b]) => [p.slice(8), sha(b)]))) });
+const canonOf = (p) => { const d = kiosk.canonicalDocument(servedDoc(p), `${LOVABLE_URL}${p}`); return { sha256: d.sha256, streamU: d.streamU }; };
+const FAKE_REVIEWED = Object.freeze({
+  documents: Object.freeze({ '/': canonOf('/'), '/display/$goalId': canonOf('/display/ga1-wsf-bind-probe'), '/kiosk/$communityId/$goalId': canonOf('/kiosk/ca1-wsf-bind-probe/ga1-wsf-bind-probe') }),
+  assets: Object.freeze(Object.fromEntries(Object.entries(FAKE_ASSETS).map(([p, b]) => [p.slice(8), sha(b)]))),
+});
+const EVENTS_SCRIPT = `${LOVABLE_URL}/__l5e/events.Q1w2E3r4.js`;
 const TAG = 'e5c-mx1abc-0a1b2c';
 
 function twin(bug = {}) {
@@ -156,7 +174,7 @@ function twin(bug = {}) {
     const u = new URL(url);
     if (u.origin !== LOVABLE_URL) return { status: 200, body: 'globalThis.foreign = 1;' };
     if (u.pathname.startsWith('/assets/')) return Object.hasOwn(FAKE_ASSETS, u.pathname) ? { status: 200, body: FAKE_ASSETS[u.pathname] } : { status: 404, body: '' };
-    return { status: 200, body: FAKE_INDEX };
+    return { status: 200, body: servedDoc(u.pathname) };
   };
   async function load(context, url, type, navigation) {
     let outcome = 'unhandled';
@@ -174,7 +192,7 @@ function twin(bug = {}) {
   }
   async function pageLoad(context, url) {
     if ((await load(context, url, 'document', true)) !== 'fulfilled') throw new Error(`page.goto: net::ERR_BLOCKED_BY_CLIENT at ${new URL(url).origin}${new URL(url).pathname}`);
-    const subs = [[`${LOVABLE_URL}/assets/shell-AAA.js`, 'script'], [`${LOVABLE_URL}/assets/index-CCC.css`, 'stylesheet'], [`${LOVABLE_URL}/favicon.ico`, 'image']];
+    const subs = [[EVENTS_SCRIPT, 'script'], [`${LOVABLE_URL}/assets/shell-AAA.js`, 'script'], [`${LOVABLE_URL}/assets/index-CCC.css`, 'stylesheet'], [`${LOVABLE_URL}/favicon.ico`, 'image']];
     if (bug.foreignOnJoin && new URL(url).searchParams.has('join')) subs.push(['https://cdn.example.test/join.js', 'script']);
     if (bug.foreignOnDisplay && new URL(url).pathname.startsWith('/display/')) subs.push(['https://cdn.example.test/display.js', 'script']);
     if (bug.foreignOnSecondInvite && new URL(url).searchParams.get('goal')?.endsWith('-dm2')) subs.push(['https://cdn.example.test/second.js', 'script']);
@@ -444,6 +462,7 @@ test('journey: every cell PASSES at all four viewports; each visitor is tracked 
   assert.doesNotMatch(doc, /@example\.com|Wsf!/);
   assert.equal(out.served.violations.length, 0);
   assert.ok(out.served.verified > 0);
+  assert.ok(out.served.blocked.length >= VIEWPORTS.length * 4 && out.served.blocked.every((w) => w === `script ${EVENTS_SCRIPT}`), 'the host events script is blocked on every page load, never run');
 });
 
 test('journey negatives: each defect fails exactly the cell that measures it, at every viewport', async () => {
@@ -562,14 +581,14 @@ test('guard: unreviewed code on the invite page fails host-build and stops the w
 });
 
 // ---- the CLI ----------------------------------------------------------------------------------------
-/** The host as fetch sees it: one shell for every page path (a single-page app), unless `docs` says otherwise. */
-function host(files = { '/': FAKE_INDEX, ...FAKE_ASSETS }, docs = {}) {
+/** The host as fetch sees it: each document rendered for its own path, unless `doc` says otherwise. */
+function host(files = FAKE_ASSETS, doc = (p) => servedDoc(p)) {
   return async (url, init) => {
     assert.equal(init.redirect, 'error');
     const u = new URL(url);
     assert.equal(u.origin, LOVABLE_URL, 'never another origin');
     const p = u.pathname;
-    const body = p.startsWith('/assets/') ? files[p] : (docs[`${p}${u.search}`] ?? docs[p] ?? files['/']);
+    const body = p.startsWith('/assets/') ? files[p] : doc(p);
     if (body === undefined) return { ok: false, status: 404, arrayBuffer: async () => new ArrayBuffer(0) };
     return { ok: true, status: 200, arrayBuffer: async () => Buffer.from(body) };
   };
@@ -580,22 +599,16 @@ test('cli: --bind exits non-zero before any credential unless the served build i
   const lines = [];
   assert.equal(await cli('--bind', env, { fetchImpl: host(), say: (l) => lines.push(l) }), 1, 'the shipped REVIEWED_BUILD is empty, so the gate stops');
   assert.match(lines[0], /^LOVABLE_BUILD=BLOCKED/);
-  assert.ok(lines.includes(`LOVABLE_OBSERVED_INDEX ${sha(FAKE_INDEX)}`));
+  assert.deepEqual(lines.filter((l) => l.startsWith('LOVABLE_OBSERVED_DOCUMENT ')), Object.entries(FAKE_REVIEWED.documents).map(([t, d]) => `LOVABLE_OBSERVED_DOCUMENT ${t} ${d.sha256} u=2`), 'the kiosk harness\'s route-aware bind, one canonical document per template');
+  assert.equal(lines.filter((l) => l.startsWith('LOVABLE_DOCUMENT_PROBE ')).length, kiosk.BIND_PROBES.length);
+  assert.ok(lines.every((l) => !/join=|\?/.test(l)), 'probe lines name the page, never its query');
   assert.equal(await cli('--bind', env, { fetchImpl: host(), reviewed: FAKE_REVIEWED, say: () => {} }), 0);
-  // The document probe: names and verdicts only, and it never changes the bind's exit code.
-  const spa = [];
-  assert.equal(await cli('--bind', env, { fetchImpl: host(), reviewed: FAKE_REVIEWED, say: (l) => spa.push(l) }), 0);
-  assert.deepEqual(spa.filter((l) => l.startsWith('LOVABLE_DOCUMENT_PROBE')), [
-    'LOVABLE_DOCUMENT_PROBE the entry page, fetched again: the same bytes as the entry page',
-    'LOVABLE_DOCUMENT_PROBE a /display/ deep link: the same bytes as the entry page',
-    'LOVABLE_DOCUMENT_PROBE the entry page with an invite query: the same bytes as the entry page',
-  ]);
+  // A server-rendered deep link that carries more than its own params is no longer only reported: the bind fails.
   const ssr = [];
-  assert.equal(await cli('--bind', env, { fetchImpl: host(undefined, { '/display/wsfDocumentProbe': `${FAKE_INDEX}<main>display</main>` }), reviewed: FAKE_REVIEWED, say: (l) => ssr.push(l) }), 0, 'the probe reports; the bind verdict alone decides');
-  assert.ok(ssr.includes('LOVABLE_DOCUMENT_PROBE a /display/ deep link: DIFFERENT bytes from the entry page (the code guard would refuse this document)'));
-  assert.equal(ssr.filter((l) => /DIFFERENT/.test(l)).length, 1);
-  assert.ok(spa.concat(ssr).every((l) => !/join=|wsfDocumentProbe0000/.test(l)), 'probe lines name the page, never its query');
-  assert.equal(await cli('--bind', env, { fetchImpl: host({ '/': FAKE_INDEX, ...FAKE_ASSETS, '/assets/shell-AAA.js': 'changed' }), reviewed: FAKE_REVIEWED, say: () => {} }), 1);
+  assert.equal(await cli('--bind', env, { fetchImpl: host(undefined, (p) => servedDoc(p, p.startsWith('/display/') ? `<p>${p.length}</p>` : '')), reviewed: FAKE_REVIEWED, say: (l) => ssr.push(l) }), 1, 'route data beyond the params stops the gate');
+  assert.match(ssr[0], /^LOVABLE_BUILD=FAIL \(the served \/display\/\$goalId document differs/);
+  assert.ok(ssr.some((l) => /^LOVABLE_OBSERVED_DOCUMENT \/display\/\$goalId UNBOUND \(its 2 loads reduce to 2 different canonical documents/.test(l)));
+  assert.equal(await cli('--bind', env, { fetchImpl: host({ ...FAKE_ASSETS, '/assets/shell-AAA.js': 'changed' }), reviewed: FAKE_REVIEWED, say: () => {} }), 1);
   assert.equal(await cli('--bind', { ...env, WSF_PROJECT: 'goarrive' }, { fetchImpl: host(), reviewed: FAKE_REVIEWED, say: () => {} }), 1, 'never another project');
   assert.equal(await cli('--bind', { ...env, WSF_LOVABLE_URL: 'https://westayfit-staging.web.app' }, { fetchImpl: host(), reviewed: FAKE_REVIEWED, say: () => {} }), 1, 'never another host');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-dm-cli-'));
@@ -801,7 +814,7 @@ test('workflow: the safety order is pinned: one evidence directory end to end, a
 test('the harness reuses the kiosk proof\'s reviewed bind and code guard rather than restating them', () => {
   const src = fs.readFileSync(new URL('./hosted-lovable-device-matrix.mjs', import.meta.url), 'utf8');
   assert.match(src, /from '\.\/hosted-lovable-kiosk\.mjs';/);
-  for (const own of ['function classifyRequest', 'function codeGuard', 'function servedManifest', 'function bindBuild', 'function checkBase']) assert.equal(src.includes(own), false, own);
+  for (const own of ['function classifyRequest', 'function codeGuard', 'function servedManifest', 'function bindBuild', 'function checkBase', 'function canonicalDocument', 'function matchTemplate', 'BIND_PROBES = ', 'REVIEWED_BUILD = ', 'data-context-token', 'data-tsr-stream-part']) assert.equal(src.includes(own), false, own);
   assert.match(src, /await ctx\.route\('\*\*\/\*', guard\.handle\);/, 'every context routes every request through the guard');
   assert.match(src, /serviceWorkers: 'block'/);
   assert.equal(/userAgent|devices\[/.test(src), false, 'no mobile user agent: the viewport alone, so the Auth SDK loads nothing from another origin');

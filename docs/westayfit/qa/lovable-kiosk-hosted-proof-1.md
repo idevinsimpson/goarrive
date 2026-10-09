@@ -4,6 +4,8 @@ Director queue #365 `6044515892`, release `6044894488`; W3, inbox #396. **Source
 
 Rework after Director finding #365 `6045688233` and security detail #589 `6045713631`, then W9's independent finding #497 `6051520120`, then W4's ops-source finding #394 `6051933442` as applied by the Director (#365 `6052330823`). All are covered below.
 
+**Updated by LOVABLE-REVIEWED-BUILD-1** (queue #365 `6090733639`, release `6090734914`; W4, inbox #394). The bind and the guard are now route-aware, because the Web Twin is server-rendered and no single entry-page digest can bind it. That section is below: "The route-aware reviewed build". Sections that describe the single entry-page digest are corrected where they stood.
+
 ## What it adds
 
 There is one new mode in the existing trusted staging workflow, `mode=lovable-kiosk`. It is proof only: it builds nothing, deploys nothing, and changes no rules, indexes, IAM or providers.
@@ -12,23 +14,24 @@ It runs against exactly `https://we-stay-fit-foundation-trial.lovable.app` and t
 
 | Step | Where | What it does |
 |---|---|---|
-| 1. bind | `gate` (no credential) | `hosted-lovable-kiosk.mjs --bind` reads the served entry page and every same-origin asset it loads (bounded, no redirects, no other origin). It hashes the entry page **and** each asset, then compares them to `REVIEWED_BUILD`. It exits 0 only on an exact match. |
+| 1. bind | `gate` (no credential) | `hosted-lovable-kiosk.mjs --bind` loads the document of every route template the journeys use (`BIND_PROBES`) and every same-origin asset they load (bounded, no redirects, no other origin). It reduces each document to its template's canonical form, hashes each asset, checks every reference the documents make, then compares everything to `REVIEWED_BUILD`. It exits 0 only on an exact match. |
 | 2. bind again | `lovable-kiosk`, before authentication | The same check. Any drift since the gate stops the job, and no credential is minted: the re-authentication step requires `steps.bind.outcome == 'success'`. |
 | 3. proof | `lovable-kiosk` | `--run` seeds run-tagged fixtures with the existing kit (`journeys/fixture-kit.mjs`), with no new account maker. It then drives the real Lovable UI in Playwright, using the candidate's pinned CLI. Every browser context runs through the **served-code guard** (below), and the browser gets no cloud or workflow credential in its environment. |
 | 4. cleanup | always, blocking | `cleanup-synthetic.mjs` runs over the run's manifest. The product-written membership is merged in only if it is run-tagged. |
 | 5. scan, upload | always | `scan-evidence.mjs` runs; the upload happens only if the scan passes. |
 | 6. verdict | always | `--require` gives PASS only when every row passed **and** cleanup succeeded **and** the scan succeeded. |
 
-**`REVIEWED_BUILD` is empty in this change** (`indexSha256: null`, no assets). The first dispatch therefore stops in the credential-free gate with `LOVABLE_BUILD=BLOCKED`. It prints `LOVABLE_OBSERVED_INDEX <sha256>` and `LOVABLE_OBSERVED_ASSET <name> <sha256>` lines. A separately reviewed commit has to pin both the entry page digest and the asset digests before any authenticated run. Neither part alone binds: assets without the entry page digest are BLOCKED, so an inline script change in `index.html` cannot pass.
+**`REVIEWED_BUILD`** holds a canonical document per route template and every asset digest. Neither part alone binds: documents without assets, or assets without a document for every template, are BLOCKED. Its value and status are in "The route-aware reviewed build", below.
 
-The digests could not be computed from W3's session, because its proxy refuses the Lovable host (CONNECT 403). That refusal was not worked around.
+The digests could not be computed from W3's session, nor from W4's for LOVABLE-REVIEWED-BUILD-1: both sessions' proxies refuse the Lovable host (CONNECT 403). Neither refusal was worked around.
 
 ## The served-code guard (W9 finding #497 `6051520120`)
 
 The bind alone checks a separate, earlier fetch. The Lovable host is mutable, so the build the browser executes could differ: a publish could land between the bind and the browser's loads, or the entry page could load a script from another origin. The guard binds **what the browser loads**.
 
 - **Every request is routed.** Each browser context routes every request through `codeGuard`, with service workers blocked so none can answer around it.
-- **Documents** from the Lovable host (every navigation, SPA deep links like `/kiosk/…` and `/?join=…` included) are fetched once with no redirect followed. They must hash to the reviewed `indexSha256`, and they are fulfilled with exactly the hashed bytes.
+- **Documents** from the Lovable host (every navigation, deep links like `/kiosk/…` and `/?join=…` included) are fetched once with no redirect followed. Each must be a reviewed route template and valid UTF-8, and must reduce, for the URL requested, to that template's reviewed canonical document with its reviewed count of stream-part timestamps. A document is fulfilled with exactly the bytes read. Any other path is refused.
+- **The host's injected events script** (`/__l5e/events.<id>.js`, the tag that carries the context token) is **blocked**: it is never fetched, fulfilled or run, and it is counted apart from refusals. Only that exact path shape on the Lovable host is blocked, and only as a script.
 - **Scripts and stylesheets** from the Lovable host must be a reviewed `/assets/<name>`, carry that asset's reviewed digest, and are fulfilled with exactly the hashed bytes.
 - **Passive same-origin types** (images, fonts, the manifest) and **data requests** (`fetch`, `xhr`, `eventsource`) to the four API origins pass: Identity Toolkit, Secure Token, Firestore, and the staging callables host.
 - **Everything else is refused:** a redirect, an error status, other bytes, an unreviewed or foreign script, any document or script from an API origin, and any other origin. The refusal is recorded with no query string.
@@ -39,6 +42,64 @@ The bind alone checks a separate, earlier fetch. The Lovable host is mutable, so
 - **The browser's environment** drops `WSF_GOOGLE_*`, `GOOGLE_*`, `CLOUDSDK_*`, `ACTIONS_ID_TOKEN_REQUEST_*`, `ACTIONS_RUNTIME_*`, `GITHUB_TOKEN` and `GH_TOKEN`. That is W9's note N2; page script cannot read the environment, so this is defence in depth.
 
 **Limit.** The API-origin list is the expected Firebase set. If the real app reaches another origin for a data request, the first authenticated run fails host-build and names that request. A reviewed change must then add it; it is never allowed silently.
+
+## The route-aware reviewed build (LOVABLE-REVIEWED-BUILD-1)
+
+**Why a single digest cannot bind this build.** The Web Twin is TanStack Start and server-rendered (HTML-VARIANCE-1, #365 `6089082668`; the backend lane's measurements, #365 `6089534129`).
+- **Per request**, exactly two values change: the value of the host's `data-context-token` attribute on the `/__l5e/events.*.js` script tag, and each `u:<epoch ms>` inside the `data-tsr-stream-part` script.
+- **Per route**, a deep link's document also differs from `/`, and two ids give two documents. The route source at Lovable `9b9eade5` shows why. `/display/$goalId` and `/kiosk/$communityId/$goalId` have no loaders; they render from their params only, so the ids appear in the rendered markup and in the stream part.
+- **The query string** never reaches the document.
+
+**The canonical document** (`canonicalDocument(text, url)`) is what both the bind and the browser guard hash:
+1. **The URL must be a reviewed route template.** The templates are `ROUTE_TEMPLATES`: `/`, `/display/$goalId` and `/kiosk/$communityId/$goalId`. Those are every document the two proofs load (`/` also with an invite query). Each path param must be 12–128 characters of `A-Z a-z 0-9 _ -`, and no param may contain another. Fixture ids are `e5cgrp-…` and `e5cgoal-…`, about 30 characters.
+2. **The document must contain no NUL character.** The guard also requires valid UTF-8.
+3. **The context token.** There must be exactly one `data-context-token=` in the document. Its value must be one quoted token of 8–4096 characters of `A-Z a-z 0-9 . _ ~ : + / = -`, and the attribute must close right after it. That value, and nothing else, is replaced by a fixed slot. A refusal names the kind of character found (quote, angle bracket, whitespace and so on), never the value.
+4. **The stream part.** There must be exactly one `<script … data-tsr-stream-part …>`. Inside it, every `u:` key (never the tail of another name such as `menu:`) must carry exactly 13 digits. Each is replaced by a fixed slot and counted. A `u:` anywhere else stays exact.
+5. **The URL's own params** go back into their template slots, longest first, and their occurrences are counted.
+6. **The digest** is the sha256 of the result. Every other byte is kept, so any other change alters it: a script, an attribute, route data, or a per-request value anywhere else.
+
+**`REVIEWED_BUILD`** (shared: the device matrix re-exports the kiosk harness's, so both proofs use one pin, and a later publish needs one new value):
+- **`documents`:** template → `{ sha256, streamU }`, the canonical digest and the reviewed number of stream-part timestamps;
+- **`assets`:** name → sha256 of the exact bytes, with no normalization.
+
+**The bind** (`servedManifest`, credential-free):
+- **What it loads.** It loads `BIND_PROBES`: `/` twice, `/` with an invite query, and each param template under two fixed probe ids. The two ids differ in their first and last characters, their case and their length.
+- **Binding a template.** A template is bound only when all of its loads reduce to one canonical document. Route data beyond the URL's own params, or a per-request value outside the two normalized ones, leaves it **UNBOUND**, and the bind fails before any credential.
+- **Assets.** It walks the assets referenced by every probed document (including a route chunk that only a deep link preloads) and their imports.
+- **References.** It classifies every `<script src>` and stylesheet or modulepreload link the documents make exactly as the browser guard would. Any reference the guard would refuse fails the bind, even when every digest matches.
+- **What it prints.** It prints each template's canonical digest and timestamp count, and each probe load (path without query, template, digest, timestamp count and param counts). It also prints any refused reference, each asset, and, when every template is bound, one `LOVABLE_OBSERVED_BUILD {…}` JSON line: the exact manifest to pin. It never prints a document's bytes or the token's value.
+- **Its verdict.** It is BLOCKED while the pin lacks a document for any template, a timestamp count, or the assets. It is PASS only when every document, every asset and the reference check match.
+
+**The browser guard.**
+- **Documents.** A document must be a reviewed template, valid UTF-8, and must reduce for its own URL to the reviewed canonical document with the reviewed timestamp count. It is fulfilled with exactly the bytes read.
+- **The host's events script.** The injected `/__l5e/events.<id>.js` is **blocked**, never run, and is counted apart from refusals (host-build names the count). Only that exact path shape on the Lovable host is blocked, and only as a script. Any other `/__l5e/` script, the same path as a stylesheet or a document, or the same path on another origin is refused.
+- **Why it is blocked.** It is Lovable's injected script, not the app's. The document digest already binds its tag, and running it would execute host bytes outside the reviewed build, and could send events to an origin the guard refuses.
+
+**The negative mutations of the queue**, each refused by the guard with its reason, and each also giving a different canonical form at bind:
+- a changed script `src`;
+- an added inline script;
+- an inline-script change outside `u:`;
+- a changed attribute other than the token;
+- a token value carrying `"`;
+- a token value carrying `>`;
+- a token followed by a second attribute;
+- a non-digit `u:`;
+- a 14-digit `u:`;
+- an extra stream-part script;
+- an extra `u:` (the reviewed count differs);
+- a param that is not the URL's (display, and kiosk with another community);
+- an unknown template (`/c/…/g/…`).
+
+Further refusals tested: a second token, no token, a NUL, a param too short to bind, overlapping params, and a document that is not UTF-8.
+
+**The pin's status in this change:** see the PR for the current head. It is empty until a bind **of this code** prints the manifest, because the per-template canonical digests are computed by this code from the served documents. The gate runs `38002199884` and `38002201983` (build `9b9eade5`, 23:00Z) printed the asset digests and the old single-digest probe: all three documents DIFFERENT. They cannot supply canonical digests. W4's session cannot reach the Lovable host (CONNECT 403), so the bind has to run where the host is reachable: the gate job of a dispatch on this branch, which is credential-free and stops at the bind by design.
+
+**Superseded elsewhere.** `docs/westayfit/qa/lovable-device-qa-1.md` (outside this packet's paths) describes the device matrix's old raw-bytes document probe. That probe is removed: the device matrix now uses this route-aware bind.
+
+**Limits.**
+- The token's character set is an assumption, because the token value was never seen here. If the real token uses another character, the bind refuses every document, names the kind of character, and does so before any credential.
+- The same applies to the `u:` shape: an unquoted key preceded by a non-name character.
+- If the real app loads another document path during the journey (a reload after a client-side route change), the guard refuses it by name, and host-build fails closed.
 
 ## The connected app's shapes (what the proof reads)
 
@@ -67,7 +128,7 @@ So the first authorized credentialed run can reach these rows: `host-build`, `fi
 
 | Row | How it is measured | Status in this source |
 |---|---|---|
-| host-build | the reviewed entry page digest and every reviewed asset digest, exactly, at bind **and** for every document, script and stylesheet the browser loads; nothing else executable is loaded | BLOCKED until a digest manifest is pinned |
+| host-build | every route template's reviewed canonical document and every reviewed asset digest, exactly, at bind **and** for every document, script and stylesheet the browser loads; the host's events script blocked; nothing else executable is loaded | BLOCKED until the route-aware manifest is pinned |
 | fixture-provenance | kit `expoEvent` (Champion, one verified member, community, goal) plus two `memberInTwoCommunities` accounts that are **not** members of the event community | measured |
 | qr-join | the kiosk's `data-join-url` must be on the same host, carry a join code, and name this goal; A signs in through the product UI (identity checked) and presses **Join**; `wsfJoinCommunity` must answer this community with `alreadyMember === false`; then the phone choice appears | **BLOCKED with the existing kit** (private community, no join code shown). It is measured only for a link-joinable community. |
 | contribution-7 | the **control** sends exactly one `wsfContribute` request, and the receipt's `data-attempt` equals that request's `attemptId` | measured (control) |
@@ -92,6 +153,19 @@ Every browser context is closed in `finally`, including on an early stop.
 
 ## Proof (offline)
 
+**LOVABLE-REVIEWED-BUILD-1** (Node 20.20.2 and Node 22.22.2):
+- **`tests/hosted-lovable-kiosk.test.mjs`: 25 passed.**
+  - New: route templates; the canonical document (two requests and two ids reduce to one document; the query never reaches it; only a `u:` key counts; a `u:` outside the stream part stays exact; the token's value is never returned); the queue's negative mutations; the served manifest (all probes, a route chunk only a deep link loads, route data beyond the params, a per-request nonce, refused references); the binding table; the bind lines (the JSON line to pin, no document, no token, no query).
+  - Updated: the journey verifies both kiosk-proof templates and blocks the host's events script on every page; the guard negatives name the template; `classifyRequest` covers templates, the events script and its look-alikes.
+- **`hosted-lovable-device-matrix.test.mjs`: 20 passed.** The pin is the kiosk harness's object. Each document the matrix loads is a reviewed template. The CLI prints the route-aware bind, and a display deep link carrying route data now **fails** the gate instead of being reported. The harness restates no part of the bind.
+- **`tests/workflow-contract.test.mjs`: 103 passed** (unchanged; no workflow change). **`tests/run-all.mjs`** (staging) and **`tools/wsf-control/run-all.mjs`**: all suites passed.
+- **Mutants of the new code: 33 of 34 killed.**
+  - They include all the token, stream-part and param checks; the template match; the events-script block (its path shape, its type, and its counting); the UTF-8 check; the probe agreement; the reference check; the timestamp-count pin; and the probe-line query.
+  - Two survivors of the first pass were real test gaps, and both are now killed: assets walked only from `/`, and the stream part read to the end of the document.
+  - One defect was found in W4's own re-read and fixed: the stream part's end was looked up in a lower-cased copy of the document, whose length can differ (`İ`). Its mutant is killed.
+  - The survivor is equivalent: substituting params shortest first instead of longest first. The overlap check already refuses a param contained in another, and two ids cannot overlap in a document that separates them.
+
+**LOVABLE-KIOSK-HOSTED-PROOF-1** (the original packet; its single entry-page digest is superseded above):
 - **`tests/hosted-lovable-kiosk.test.mjs`: 21 passed.**
   - It covers the exact host and the same-origin bounded walk; a cross-origin `/assets/` path is ignored.
   - **Binding** is BLOCKED while empty, and BLOCKED with assets but no entry digest or with an entry digest but no assets. It is PASS only on an exact match. It FAILs on a changed entry page with identical assets, on a missing observed entry digest, and on a changed, extra or missing asset.
@@ -143,6 +217,6 @@ Every browser context is closed in `finally`, including on an early stop.
 ## Before an authenticated run
 
 1. Ops-source review, security review, and Director acceptance of the exact head.
-2. One dispatch of `mode=lovable-kiosk`. It stops at the gate and prints the observed entry page digest and asset manifest.
-3. A reviewed commit that pins `REVIEWED_BUILD` (entry page digest and every asset) to that output.
+2. One dispatch of the route-aware code. It stops at the gate and prints `LOVABLE_OBSERVED_BUILD`: every template's canonical document and every asset.
+3. A reviewed commit that pins `REVIEWED_BUILD` to exactly that line (LOVABLE-REVIEWED-BUILD-1). After L0 merges it, one kiosk `--run` and one device-matrix `--run`.
 4. The authorized proof run. It can reach `host-build`, `fixture-provenance`, the control's five phone rows and `cleanup-tracking`. The rows that remain BLOCKED fail it by name: `qr-join` (the kit's private community), the station turn, the organizer UI approval, and the unverified account.

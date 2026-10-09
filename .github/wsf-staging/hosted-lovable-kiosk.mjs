@@ -4,17 +4,20 @@
  * Lovable Web Twin, run ONLY by the `lovable-kiosk` mode of the trusted staging workflow. Proof only: it builds and
  * deploys nothing, and it never runs against any host but LOVABLE_URL or any project but westayfit-staging.
  *
- *   --bind     credential-free (the gate job): read the host's served assets, hash every one, and compare the set to
- *              REVIEWED_BUILD below. Exit 0 only on an exact match. An empty REVIEWED_BUILD (nothing reviewed yet), a
- *              missing, extra or changed asset, or an unreadable host refuses BEFORE any credential exists, and prints
- *              the observed manifest (names and sha256 only) so a reviewed commit can pin it.
+ *   --bind     credential-free (the gate job): load the documents of every route template the journeys use (BIND_PROBES),
+ *              reduce each to its canonical form (canonicalDocument), read the served assets, hash every one, and
+ *              compare all of it to REVIEWED_BUILD below. Exit 0 only on an exact match. An empty REVIEWED_BUILD
+ *              (nothing reviewed yet), a changed document, a missing, extra or changed asset, a document reference the
+ *              code guard would refuse, or an unreadable host refuses BEFORE any credential exists, and prints the
+ *              observed manifest (templates, names and sha256 only) so a reviewed commit can pin it.
  *   --run      credentialed (the lovable-kiosk job): bind again (drift since the gate refuses), then seed run-tagged
  *              fixtures with the EXISTING kit (journeys/fixture-kit.mjs) and drive the real Lovable UI. Every browser
- *              context routes every request through codeGuard: each document and /assets/ script or stylesheet the
- *              browser loads must carry its reviewed digest (fulfilled with exactly the hashed bytes), and nothing else
- *              executable is loaded; a refusal fails host-build and stops the journey before the next step. The
- *              browser runs with no cloud or workflow credential in its environment. Every row is PASS, FAIL or
- *              BLOCKED; results are written in `finally`; exit 0 only when every row passed.
+ *              context routes every request through codeGuard: each document the browser loads must reduce to its
+ *              template's reviewed canonical document, and each /assets/ script or stylesheet must carry its reviewed
+ *              digest (both fulfilled with exactly the bytes read); the host's injected events script is blocked, and
+ *              nothing else executable is loaded; a refusal fails host-build and stops the journey before the next
+ *              step. The browser runs with no cloud or workflow credential in its environment. Every row is PASS,
+ *              FAIL or BLOCKED; results are written in `finally`; exit 0 only when every row passed.
  *   --require  after blocking cleanup and the evidence scan: recompute the verdict from the written results and the
  *              cleanup and scan outcomes. Exit 0 only on every row PASS, cleanup success and scan success.
  *
@@ -43,11 +46,38 @@ import { pathToFileURL } from 'node:url';
 export const LOVABLE_URL = 'https://we-stay-fit-foundation-trial.lovable.app';
 export const PROJECT_ID = 'westayfit-staging';
 /**
- * The reviewed served build: the sha256 of the entry page itself (its inline scripts and the asset list it loads) and
- * asset name -> sha256 of its bytes. EMPTY until a reviewed commit pins the manifest a `--bind` run printed; while
- * empty, every run stops in the credential-free gate. An observed digest is evidence for review, never self-approval.
+ * The reviewed served build (LOVABLE-REVIEWED-BUILD-1, queue #365 6090733639), shared by the lovable-kiosk and
+ * lovable-device-matrix proofs:
+ *  - documents: for each route template the journeys load, the sha256 of its canonical document (canonicalDocument:
+ *    its inline scripts, the references it loads and every other byte, with only the two per-request values
+ *    normalized and the URL's own params in their slots) and the number of `u:` timestamps its stream part carries;
+ *  - assets: asset name -> sha256 of its bytes, exact.
+ * EMPTY until a reviewed commit pins the manifest a `--bind` run of this code printed; while empty, every run stops in
+ * the credential-free gate. An observed digest is evidence for review, never self-approval. A later Lovable publish
+ * needs only a new value here.
  */
-export const REVIEWED_BUILD = Object.freeze({ indexSha256: null, assets: Object.freeze({}) });
+export const REVIEWED_BUILD = Object.freeze({ documents: Object.freeze({}), assets: Object.freeze({}) });
+/**
+ * The route templates the journeys load as documents: the kiosk proof `/` (also with an invite query) and
+ * `/kiosk/<community>/<goal>`; the device matrix `/` (also with an invite query) and `/display/<goal>`. A document
+ * for any other path is refused.
+ */
+export const ROUTE_TEMPLATES = Object.freeze(['/', '/display/$goalId', '/kiosk/$communityId/$goalId']);
+/**
+ * The documents the credential-free bind loads: `/` twice, `/` with an invite query, and each param template under two
+ * different fixed probe ids (never a fixture's). The two ids differ in their first and last characters, their case and
+ * their length, so a document that carries anything derived from an id other than the id itself cannot reduce to one
+ * canonical form. Every load of one template must reduce to the same canonical document.
+ */
+export const BIND_PROBES = Object.freeze([
+  '/',
+  '/',
+  '/?join=jn1-wsf-bind-probe&goal=ga1-wsf-bind-probe',
+  '/display/ga1-wsf-bind-probe',
+  '/display/Zq9wsfBindProbeGoal2',
+  '/kiosk/ca1-wsf-bind-probe/ga1-wsf-bind-probe',
+  '/kiosk/Xk4wsfBindProbeComm2/Zq9wsfBindProbeGoal2',
+]);
 /** At most this many assets are read when walking the served build. */
 export const MAX_ASSETS = 150;
 /**
@@ -103,21 +133,137 @@ export function checkBase(raw) {
   return { ok: true, base: LOVABLE_URL };
 }
 
-/** Every same-origin asset the served build loads, by name, with the sha256 of its bytes. Bounded; never follows another origin. */
+/** The route template a document path is, with the path's own params, or null for any other path. */
+export function matchTemplate(pathname) {
+  const segs = String(pathname).split('/').slice(1);
+  for (const t of ROUTE_TEMPLATES) {
+    if (t === '/') { if (pathname === '/') return { template: t, params: {} }; continue; }
+    const ts = t.split('/').slice(1);
+    if (ts.length !== segs.length) continue;
+    const params = {};
+    if (ts.every((s, i) => (s.startsWith('$') ? segs[i] !== '' && ((params[s.slice(1)] = segs[i]), true) : s === segs[i]))) return { template: t, params };
+  }
+  return null;
+}
+
+/** A path param the guard can bind: a fixture-shaped id, long enough that it cannot stand for other text in a document. */
+const PARAM_RE = /^[A-Za-z0-9_-]{12,128}$/;
+/** A slot the canonical form puts where a normalized value or a param was. NUL never appears in a served document. */
+const SLOT = (name) => `\u0000wsf:${name}\u0000`;
+/** The host's context token: one quoted, token-shaped value, the attribute closed right after it. */
+const TOKEN_RE = /data-context-token="([A-Za-z0-9._~:+/=-]{8,4096})"(?=[\s/>])/g;
+const STREAM_OPEN_RE = /<script\b[^>]*?\sdata-tsr-stream-part(?=[\s=/>])[^>]*>/gi;
+/** A `u:` key in the stream part (never the tail of another name such as `menu:`), with its value if that is 13 digits. */
+const STREAM_U_RE = /(?<![A-Za-z0-9_$])u:(\d{13}(?!\d))?/g;
+const UTF8 = new TextDecoder('utf-8', { fatal: true });
+/** Which kinds of character a value carries outside a token's, for a refusal reason that never prints the value. */
+const outside = (v) => [[/"/, 'quote'], [/[<>]/, 'angle bracket'], [/\s/, 'whitespace'], [/&/, 'ampersand'], [/[^A-Za-z0-9._~:+/=\-"<>\s&]/, 'other']].filter(([re]) => re.test(v)).map(([, n]) => n);
+
+/**
+ * The canonical form of one served document for the URL it was served at, and its sha256, or why there is none
+ * (HTML-VARIANCE-1, #365 6089082668 and 6089534129). Exactly two per-request values are normalized, each with a strict
+ * count: the value of the host's one `data-context-token` attribute, and each `u:<13 digits>` inside the one
+ * `data-tsr-stream-part` script. Then each of the URL's own path params is put back into its template slot. Every
+ * other byte is kept, so any other difference (a script, an attribute, route data, a per-request value elsewhere)
+ * changes the digest. Nothing returned carries the token's value.
+ */
+export function canonicalDocument(text, url) {
+  let u;
+  try { u = new URL(url); } catch { return { reason: 'an unreadable URL' }; }
+  const m = matchTemplate(u.pathname);
+  if (!m) return { reason: `${u.pathname} is not a reviewed route template` };
+  const fail = (reason) => ({ template: m.template, reason });
+  const params = Object.entries(m.params);
+  if (params.some(([, v]) => !PARAM_RE.test(v))) return fail('a path param the guard cannot bind (it must be 12-128 of A-Z, a-z, 0-9, _ and -)');
+  if (params.some(([, v], i) => params.some(([, w], j) => i !== j && w.includes(v)))) return fail('two path params overlap');
+  let doc = String(text);
+  if (doc.includes('\u0000')) return fail('the document carries a NUL character');
+  // 1. The host's context token: exactly one attribute, with exactly one token-shaped value.
+  const attrs = doc.split('data-context-token=').length - 1;
+  if (attrs !== 1) return fail(`${attrs} data-context-token attributes, not exactly 1`);
+  if ([...doc.matchAll(TOKEN_RE)].length !== 1) {
+    const raw = /data-context-token=("?)([^]{0,4097}?)(?:"|$)/.exec(doc);
+    const bad = raw?.[1] === '"' ? outside(raw[2]) : ['no opening quote'];
+    return fail(`the data-context-token value is not one quoted token closed by the end of its attribute (${bad.length ? bad.join(', ') : 'the attribute is not closed after the value, or the value is not 8-4096 characters'})`);
+  }
+  doc = doc.replace(TOKEN_RE, `data-context-token="${SLOT('token')}"`);
+  // 2. TanStack's stream part: exactly one script, and every u: in it is 13 digits.
+  const opens = [...doc.matchAll(STREAM_OPEN_RE)];
+  if (opens.length !== 1) return fail(`${opens.length} data-tsr-stream-part scripts, not exactly 1`);
+  const start = opens[0].index + opens[0][0].length;
+  const close = /<\/script/gi; // searched in the document itself: lower-casing can change a string's length
+  close.lastIndex = start;
+  const end = close.exec(doc)?.index ?? -1;
+  if (end < 0) return fail('the data-tsr-stream-part script is not closed');
+  let streamU = 0;
+  let nonDigit = 0;
+  const part = doc.slice(start, end).replace(STREAM_U_RE, (all, ts) => { streamU += 1; if (!ts) nonDigit += 1; return `u:${SLOT('u')}`; });
+  if (nonDigit) return fail(`${nonDigit} of the ${streamU} u: values in the stream part are not 13 digits`);
+  if (!streamU) return fail('the stream part carries no u: value');
+  doc = `${doc.slice(0, start)}${part}${doc.slice(end)}`;
+  // 3. The URL's own params back into their slots, longest first.
+  const counts = {};
+  for (const [name, v] of [...params].sort((a, b) => b[1].length - a[1].length)) {
+    const pieces = doc.split(v);
+    counts[name] = pieces.length - 1;
+    doc = pieces.join(SLOT(`param:${name}`));
+  }
+  return { template: m.template, sha256: sha256(Buffer.from(doc, 'utf8')), streamU, params: counts };
+}
+
+/** The script and stylesheet references a document itself makes (src of a script; href of a stylesheet or modulepreload link). */
+function tagRefs(html) {
+  const out = [];
+  for (const [, a] of html.matchAll(/<script\b([^>]*)>/gi)) { const src = /\ssrc=["']([^"']*)["']/i.exec(a)?.[1]; if (src !== undefined) out.push([src, 'script']); }
+  for (const [, a] of html.matchAll(/<link\b([^>]*)>/gi)) {
+    const rel = (/\srel=["']([^"']*)["']/i.exec(a)?.[1] ?? '').toLowerCase().split(/\s+/);
+    const href = /\shref=["']([^"']*)["']/i.exec(a)?.[1];
+    if (href === undefined) continue;
+    if (rel.includes('stylesheet')) out.push([href, 'stylesheet']);
+    else if (rel.includes('modulepreload')) out.push([href, 'script']);
+    else if (rel.includes('preload') && /\sas=["']?(script|style)/i.test(a)) out.push([href, /\sas=["']?script/i.test(a) ? 'script' : 'stylesheet']);
+  }
+  return out;
+}
+
+/**
+ * The served build: each route template's canonical document, from every BIND_PROBES load of it, and every same-origin
+ * asset the documents load, by name, with the sha256 of its bytes. Bounded; never follows another origin. A template
+ * whose loads reduce to different canonical documents stays unbound (sha256 null) and the bind fails; the reference
+ * check names every document reference the code guard would refuse.
+ */
 export async function servedManifest(fetchImpl, base = LOVABLE_URL) {
   const get = async (p) => {
     const res = await fetchImpl(`${base}${p}`, { redirect: 'error', headers: { 'user-agent': 'wsf-lovable-kiosk-bind' } });
-    if (!res.ok) throw new Error(`${p} answered HTTP ${res.status}`);
+    if (!res.ok) throw new Error(`${p.split('?')[0]} answered HTTP ${res.status}`);
     return Buffer.from(await res.arrayBuffer());
   };
-  const html = (await get('/')).toString('utf8');
   // Same-origin references only: `assets/x.js` or `/assets/x.js` right after a quote, parenthesis or space (never the
   // path inside another origin's URL), and, inside a chunk, Vite's sibling imports `./x.js` (which live in /assets/).
   const refs = (text, inChunk = false) => [
     ...[...text.matchAll(/(?:^|["'(\s])\/?(assets\/[A-Za-z0-9_.-]+\.(?:js|css))/g)].map((m) => `/${m[1]}`),
     ...(inChunk ? [...text.matchAll(/["']\.\/([A-Za-z0-9_.-]+\.(?:js|css))["']/g)].map((m) => `/assets/${m[1]}`) : []),
   ];
-  const queue = [...new Set(refs(html))];
+  const probes = [];
+  const queue = [];
+  const tags = [];
+  for (const p of BIND_PROBES) {
+    const body = await get(p);
+    let text = null;
+    try { text = UTF8.decode(body); } catch { /* not UTF-8: refused below, never canonicalized */ }
+    probes.push({ path: p, ...(text === null ? { reason: 'the document is not valid UTF-8' } : canonicalDocument(text, `${base}${p}`)) });
+    if (text === null) continue;
+    for (const r of refs(text)) if (!queue.includes(r)) queue.push(r);
+    for (const [ref, type] of tagRefs(text)) tags.push({ url: new URL(ref, `${base}${p}`).href, type });
+  }
+  const documents = {};
+  for (const t of ROUTE_TEMPLATES) {
+    const of = probes.filter((x) => matchTemplate(new URL(`${base}${x.path}`).pathname)?.template === t);
+    const forms = new Set(of.map((x) => (x.sha256 ? `${x.sha256} ${x.streamU}` : null)));
+    documents[t] = of.length && of.every((x) => x.sha256) && forms.size === 1
+      ? { sha256: of[0].sha256, streamU: of[0].streamU }
+      : { sha256: null, streamU: null, reason: of.find((x) => !x.sha256)?.reason ?? `its ${of.length} loads reduce to ${forms.size} different canonical documents (route data beyond the URL's own params, or a per-request value outside the two normalized ones)` };
+  }
   const assets = {};
   while (queue.length) {
     const p = queue.shift();
@@ -128,15 +274,19 @@ export async function servedManifest(fetchImpl, base = LOVABLE_URL) {
     assets[name] = sha256(body);
     if (p.endsWith('.js')) for (const r of refs(body.toString('utf8'), true)) if (!Object.hasOwn(assets, r.slice(8)) && !queue.includes(r)) queue.push(r);
   }
-  if (!Object.keys(assets).length) throw new Error('the served page names no asset');
-  return { indexSha256: sha256(Buffer.from(html)), assets: Object.fromEntries(Object.entries(assets).sort(([a], [b]) => (a < b ? -1 : 1))) };
+  if (!Object.keys(assets).length) throw new Error('the served documents name no asset');
+  const refusals = [...new Set(tags.map((x) => classifyRequest({ ...x, navigation: false }, { documents: {}, assets })).filter((c) => c.action === 'abort').map((c) => c.reason))];
+  return { documents, assets: Object.fromEntries(Object.entries(assets).sort(([a], [b]) => (a < b ? -1 : 1))), probes, refusals };
 }
 
-/** The observed build against the reviewed one: PASS only on the same names with the same digests. */
+const pinnedDocument = (d) => /^[0-9a-f]{64}$/.test(String(d?.sha256)) && Number.isInteger(d?.streamU) && d.streamU > 0;
+/** The observed build against the reviewed one: PASS only on the same canonical documents, the same asset names with the same digests, and no document reference the guard would refuse. */
 export function bindBuild(observed, reviewed = REVIEWED_BUILD) {
   const want = reviewed?.assets ?? {};
-  if (!Object.keys(want).length || !/^[0-9a-f]{64}$/.test(String(reviewed?.indexSha256))) return { status: 'BLOCKED', reason: 'no reviewed digest manifest is pinned yet (REVIEWED_BUILD needs the entry page and every asset)' };
-  if (observed?.indexSha256 !== reviewed.indexSha256) return { status: 'FAIL', reason: 'the served entry page differs from the reviewed one (inline or loaded executable content changed)' };
+  const docs = reviewed?.documents ?? {};
+  if (!Object.keys(want).length || !ROUTE_TEMPLATES.every((t) => pinnedDocument(docs[t]))) return { status: 'BLOCKED', reason: 'no reviewed build is pinned yet (REVIEWED_BUILD needs a canonical document for every route template and every asset)' };
+  const changedDocs = ROUTE_TEMPLATES.filter((t) => observed?.documents?.[t]?.sha256 !== docs[t].sha256 || observed.documents[t].streamU !== docs[t].streamU);
+  if (changedDocs.length) return { status: 'FAIL', reason: `the served ${changedDocs.join(', ')} document${changedDocs.length > 1 ? 's differ' : ' differs'} from the reviewed one (inline or loaded executable content, route data or a per-request value changed)` };
   const got = observed?.assets ?? {};
   const missing = Object.keys(want).filter((n) => !Object.hasOwn(got, n));
   const extra = Object.keys(got).filter((n) => !Object.hasOwn(want, n));
@@ -144,31 +294,59 @@ export function bindBuild(observed, reviewed = REVIEWED_BUILD) {
   if (missing.length || extra.length || changed.length) {
     return { status: 'FAIL', reason: `the served build differs from the reviewed one: ${missing.length} missing, ${extra.length} unreviewed, ${changed.length} changed (${[...missing, ...extra, ...changed].slice(0, 5).join(', ')})` };
   }
-  return { status: 'PASS', reason: `${Object.keys(want).length} reviewed assets served exactly` };
+  if (!Array.isArray(observed?.refusals) || observed.refusals.length) return { status: 'FAIL', reason: `the documents load ${observed?.refusals?.length ?? 'unchecked'} reference(s) the code guard would refuse${observed?.refusals?.length ? ` (${observed.refusals.slice(0, 3).join('; ')})` : ''}` };
+  return { status: 'PASS', reason: `${ROUTE_TEMPLATES.length} reviewed route documents and ${Object.keys(want).length} reviewed assets served exactly` };
 }
 
-/** The lines a bind prints: the verdict, then the observed manifest (names and digests only). */
+/**
+ * The lines a bind prints: the verdict, each template's canonical document, each probe load, any reference the guard
+ * would refuse, each asset, and, when every template is bound, the whole manifest as one JSON line to pin. Templates,
+ * fixed probe paths, names, counts and digests only: never a document's bytes or the token's value.
+ */
 export function bindLines(observed, verdict) {
-  return [`LOVABLE_BUILD=${verdict.status} (${verdict.reason})`, ...(observed ? [`LOVABLE_OBSERVED_INDEX ${observed.indexSha256}`] : []), ...(observed ? Object.entries(observed.assets).map(([n, d]) => `LOVABLE_OBSERVED_ASSET ${n} ${d}`) : [])];
+  const lines = [`LOVABLE_BUILD=${verdict.status} (${verdict.reason})`];
+  if (!observed) return lines;
+  for (const t of ROUTE_TEMPLATES) {
+    const d = observed.documents?.[t];
+    lines.push(d?.sha256 ? `LOVABLE_OBSERVED_DOCUMENT ${t} ${d.sha256} u=${d.streamU}` : `LOVABLE_OBSERVED_DOCUMENT ${t} UNBOUND (${d?.reason ?? 'not loaded'})`);
+  }
+  for (const p of observed.probes ?? []) {
+    const where = `${String(p.path).split('?')[0]}${String(p.path).includes('?') ? ' (with an invite query)' : ''}`;
+    lines.push(`LOVABLE_DOCUMENT_PROBE ${where} ${p.sha256 ? `${p.template} ${p.sha256} u=${p.streamU} params=${JSON.stringify(p.params)}` : `refused (${p.reason})`}`);
+  }
+  for (const r of observed.refusals ?? []) lines.push(`LOVABLE_DOCUMENT_REFUSED_REFERENCE ${r}`);
+  for (const [n, d] of Object.entries(observed.assets ?? {})) lines.push(`LOVABLE_OBSERVED_ASSET ${n} ${d}`);
+  if (ROUTE_TEMPLATES.every((t) => pinnedDocument(observed.documents?.[t]))) {
+    lines.push(`LOVABLE_OBSERVED_BUILD ${JSON.stringify({ documents: Object.fromEntries(ROUTE_TEMPLATES.map((t) => [t, { sha256: observed.documents[t].sha256, streamU: observed.documents[t].streamU }])), assets: observed.assets })}`);
+  }
+  return lines;
 }
 
 const PASSIVE_TYPES = new Set(['image', 'font', 'media', 'manifest', 'texttrack', 'xhr', 'fetch', 'eventsource']);
 const DATA_TYPES = new Set(['xhr', 'fetch', 'eventsource']);
+/** The host's injected events script, the tag that carries the context token: blocked, never run, never a refusal. */
+const HOST_EVENTS_SCRIPT = /^\/__l5e\/events\.[A-Za-z0-9_-]+\.js$/;
 /**
  * What the browser may load (#589 W9 finding #497 6051520120: the digest must bind what EXECUTES, not a neighbouring
- * fetch). On the Lovable host: every document (each navigation, SPA deep links included) must be the reviewed entry
- * page; every script or stylesheet must be a reviewed /assets/ file with its reviewed digest; passive types pass.
- * Elsewhere: only data requests to API_ORIGINS pass. Everything else is refused. `what` never carries a query.
+ * fetch). On the Lovable host: every document (each navigation, deep links included) must be a reviewed route template
+ * and is verified against that template's reviewed canonical document; every script or stylesheet must be a reviewed
+ * /assets/ file with its reviewed digest, except the host's injected events script, which is blocked and never run;
+ * passive types pass. Elsewhere: only data requests to API_ORIGINS pass. Everything else is refused. `what` never
+ * carries a query.
  */
 export function classifyRequest({ url, type, navigation }, reviewed = REVIEWED_BUILD) {
   let u;
   try { u = new URL(url); } catch { return { action: 'abort', reason: `${type} with an unreadable URL` }; }
   const what = `${type} ${u.origin}${u.pathname}`;
   if (u.origin === LOVABLE_URL) {
-    if (navigation || type === 'document') return { action: 'verify', want: reviewed?.indexSha256 ?? null, what };
+    if (navigation || type === 'document') {
+      const m = matchTemplate(u.pathname);
+      return m ? { action: 'verify', kind: 'document', template: m.template, want: reviewed?.documents?.[m.template] ?? null, what } : { action: 'abort', reason: `${what} is not a reviewed route template` };
+    }
     if (type === 'script' || type === 'stylesheet') {
+      if (type === 'script' && HOST_EVENTS_SCRIPT.test(u.pathname)) return { action: 'block', what };
       const name = /^\/assets\/([A-Za-z0-9_.-]+)$/.exec(u.pathname)?.[1];
-      return name && Object.hasOwn(reviewed?.assets ?? {}, name) ? { action: 'verify', want: reviewed.assets[name], what } : { action: 'abort', reason: `${what} is not a reviewed asset` };
+      return name && Object.hasOwn(reviewed?.assets ?? {}, name) ? { action: 'verify', kind: 'asset', want: reviewed.assets[name], what } : { action: 'abort', reason: `${what} is not a reviewed asset` };
     }
     return PASSIVE_TYPES.has(type) ? { action: 'continue', what } : { action: 'abort', reason: `${what} is not a permitted resource type` };
   }
@@ -178,32 +356,44 @@ export function classifyRequest({ url, type, navigation }, reviewed = REVIEWED_B
 
 /**
  * The served-code guard, routed on EVERY browser context of the journey (service workers blocked, so none can answer
- * around it). A verified response is fetched once, hashed, and fulfilled with exactly the hashed bytes; a redirect, an
- * error status, a different digest, an unreviewed or foreign script or document is aborted and recorded. `check()`
- * throws once anything was refused, so the journey stops before the next step (a sign-in included).
+ * around it). A verified response is fetched once and fulfilled with exactly the bytes read: an asset only when those
+ * bytes carry its reviewed digest, a document only when they are valid UTF-8 and reduce, for the URL requested, to its
+ * template's reviewed canonical document with the reviewed number of stream-part timestamps. A redirect, an error
+ * status, other bytes, an unreviewed or foreign script or document is aborted and recorded; the host's events script is
+ * aborted and counted as blocked. `check()` throws once anything was refused, so the journey stops before the next step
+ * (a sign-in included).
  */
 export function codeGuard(reviewed = REVIEWED_BUILD) {
   const violations = [];
+  const blocked = [];
   let verified = 0;
   async function handle(route) {
     const req = route.request();
     const c = classifyRequest({ url: req.url(), type: req.resourceType(), navigation: req.isNavigationRequest() }, reviewed);
     const refuse = async (reason) => { violations.push(reason); try { await route.abort('blockedbyclient'); } catch { /* the page may be gone */ } };
     if (c.action === 'continue') { try { await route.continue(); } catch { /* the page may be gone */ } return; }
+    if (c.action === 'block') { blocked.push(c.what); try { await route.abort('blockedbyclient'); } catch { /* the page may be gone */ } return; }
     if (c.action === 'abort') { await refuse(c.reason); return; }
-    if (!/^[0-9a-f]{64}$/.test(String(c.want))) { await refuse(`${c.what}: no reviewed digest is pinned`); return; }
+    if (c.kind === 'document' ? !pinnedDocument(c.want) : !/^[0-9a-f]{64}$/.test(String(c.want))) { await refuse(`${c.what}: no reviewed ${c.kind === 'document' ? `${c.template} document` : 'digest'} is pinned`); return; }
     let res;
     let body;
     try { res = await route.fetch({ maxRedirects: 0 }); body = await res.body(); } catch (e) { await refuse(`${c.what} could not be read: ${short(e)}`); return; }
     if (res.status() !== 200) { await refuse(`${c.what} answered HTTP ${res.status()}, not the reviewed file`); return; }
-    if (sha256(body) !== c.want) { await refuse(`${c.what} differs from its reviewed digest`); return; }
+    if (c.kind === 'document') {
+      let text;
+      try { text = UTF8.decode(body); } catch { await refuse(`${c.what} is not valid UTF-8`); return; }
+      const d = canonicalDocument(text, req.url());
+      if (!d.sha256) { await refuse(`${c.what}: ${d.reason}`); return; }
+      if (d.template !== c.template || d.streamU !== c.want.streamU) { await refuse(`${c.what} carries ${d.streamU} stream-part u: value(s), not the reviewed ${c.want.streamU}`); return; }
+      if (d.sha256 !== c.want.sha256) { await refuse(`${c.what} differs from the reviewed ${c.template} document`); return; }
+    } else if (sha256(body) !== c.want) { await refuse(`${c.what} differs from its reviewed digest`); return; }
     verified += 1;
     try { await route.fulfill({ response: res, body }); } catch { /* the page may be gone */ }
   }
   return {
     handle,
     check() { if (violations.length) throw new Error(`the browser was served code outside the reviewed build: ${violations[0]}`); },
-    summary: () => ({ verified, violations: [...violations] }),
+    summary: () => ({ verified, violations: [...violations], blocked: [...blocked] }),
   };
 }
 
@@ -212,7 +402,7 @@ export function hostBuildRow(bind, served) {
   if (bind?.status !== 'PASS') return { status: bind?.status ?? 'FAIL', seen: bind?.reason ?? 'no bind verdict' };
   if (served?.violations?.length) return { status: 'FAIL', seen: `bind matched, but the browser was served ${served.violations.length} unreviewed request(s): ${served.violations.slice(0, 3).join('; ')}` };
   if (!(served?.verified > 0)) return { status: 'FAIL', seen: 'bind matched, but the browser loaded no verified document' };
-  return { status: 'PASS', seen: `bind matched; ${served.verified} document/asset response(s) the browser loaded matched their reviewed digests; nothing else executable was loaded` };
+  return { status: 'PASS', seen: `bind matched; ${served.verified} document/asset response(s) the browser loaded matched their reviewed digests; ${served.blocked?.length ?? 0} host events script request(s) blocked, not run; nothing else executable was loaded` };
 }
 
 /** A --run's results: the journey's rows and the CLI's own, with host-build always from the bind AND what the browser was served. */

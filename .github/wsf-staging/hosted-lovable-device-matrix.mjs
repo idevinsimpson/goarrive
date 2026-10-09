@@ -6,10 +6,12 @@
  * project but westayfit-staging. It is the lovable-kiosk proof's shape, and it reuses that harness's reviewed host
  * check, served-build binding, code guard, callable log and browser environment rather than restating them.
  *
- *   --bind     credential-free (the gate job): read the host's served assets, hash every one, and compare the set to
- *              REVIEWED_BUILD below. Exit 0 only on an exact match. An empty REVIEWED_BUILD (nothing reviewed yet), a
- *              missing, extra or changed asset, or an unreadable host refuses BEFORE any credential exists, and prints
- *              the observed manifest (names and sha256 only) so a reviewed commit can pin it.
+ *   --bind     credential-free (the gate job): the kiosk harness's route-aware bind (its BIND_PROBES documents, each
+ *              reduced to its template's canonical form, and every served asset hashed) compared to the shared
+ *              REVIEWED_BUILD. Exit 0 only on an exact match. An empty REVIEWED_BUILD (nothing reviewed yet), a changed
+ *              document, a missing, extra or changed asset, a document reference the code guard would refuse, or an
+ *              unreadable host refuses BEFORE any credential exists, and prints the observed manifest (templates, names
+ *              and sha256 only) so a reviewed commit can pin it.
  *   --run      credentialed (the lovable-device-matrix job): bind again, seed TWO run-tagged joinable communities with the
  *              EXISTING kit (journeys/fixture-kit.mjs), then at each viewport drive one synthetic visitor through the
  *              product: the signed-out landing and the display, the invite link, sign-up, the honest verification send
@@ -42,16 +44,15 @@ import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 
 import {
-  LOVABLE_URL, PROJECT_ID, bindBuild, bindLines, browserEnv, callableLog, checkBase, codeGuard, hostBuildRow, idHash, servedManifest, showsNumber,
+  LOVABLE_URL, PROJECT_ID, REVIEWED_BUILD, bindBuild, bindLines, browserEnv, callableLog, checkBase, codeGuard, hostBuildRow, idHash, servedManifest, showsNumber,
 } from './hosted-lovable-kiosk.mjs';
 
-export { LOVABLE_URL, PROJECT_ID };
 /**
- * The reviewed served build for this proof: the sha256 of the entry page and asset name -> sha256 of its bytes. EMPTY
- * until a reviewed commit pins the manifest a `--bind` run printed; while empty, every run stops in the credential-free
- * gate. An observed digest is evidence for review, never self-approval.
+ * The reviewed served build is the kiosk harness's (LOVABLE-REVIEWED-BUILD-1): one pin of the one Lovable build both
+ * proofs drive, so a later publish needs only one new value. Its route templates cover this matrix's documents (`/`,
+ * `/` with an invite query, `/display/<goal>`).
  */
-export const REVIEWED_BUILD = Object.freeze({ indexSha256: null, assets: Object.freeze({}) });
+export { LOVABLE_URL, PROJECT_ID, REVIEWED_BUILD };
 
 /** The four viewports of the queue, in order. */
 export const VIEWPORTS = Object.freeze([
@@ -81,32 +82,6 @@ export const ROWS = Object.freeze([
   ...VIEWPORTS.flatMap((v) => CELLS.map((c) => Object.freeze({ id: `${c.id}@${v.id}`, expected: `${v.label}: ${c.expected}` }))),
   Object.freeze({ id: 'cleanup-tracking', expected: 'every visitor account and every product-written document is in the cleanup manifest before cleanup' }),
 ]);
-
-/**
- * The documents the journey navigates to, probed in the credential-free bind. The code guard verifies EVERY document
- * the browser loads against the entry page's reviewed digest, which holds only if the host serves the same bytes for
- * every path and every request (a single-page shell). The Web Twin is a TanStack Start app, so whether `/` is stable
- * between requests and whether a deep link is the same shell is a fact of the served host that source cannot settle.
- * The probe prints it, names and verdicts only, and never changes the bind verdict. Fixed placeholder ids, never a
- * fixture's.
- */
-export const DOCUMENT_PROBES = Object.freeze([
-  ['the entry page, fetched again', '/'],
-  ['a /display/ deep link', '/display/wsfDocumentProbe'],
-  ['the entry page with an invite query', '/?join=wsfDocumentProbe0000&goal=wsfDocumentProbe'],
-]);
-export async function documentProbe(fetchImpl, base, indexSha256) {
-  const lines = [];
-  for (const [label, p] of DOCUMENT_PROBES) {
-    try {
-      const res = await fetchImpl(`${base}${p}`, { redirect: 'error', headers: { 'user-agent': 'wsf-lovable-device-bind' } });
-      if (!res.ok) { lines.push(`LOVABLE_DOCUMENT_PROBE ${label}: HTTP ${res.status}`); continue; }
-      const same = crypto.createHash('sha256').update(Buffer.from(await res.arrayBuffer())).digest('hex') === indexSha256;
-      lines.push(`LOVABLE_DOCUMENT_PROBE ${label}: ${same ? 'the same bytes as the entry page' : 'DIFFERENT bytes from the entry page (the code guard would refuse this document)'}`);
-    } catch (e) { lines.push(`LOVABLE_DOCUMENT_PROBE ${label}: unreadable (${short(e)})`); }
-  }
-  return lines;
-}
 
 const short = (e) => String(e?.message || e).split('\n')[0].replace(/[?&][A-Za-z]+=[^&\s"']+/g, '?…').replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, '<email>').slice(0, 200);
 
@@ -566,7 +541,6 @@ export async function cli(mode, env, { fetchImpl = fetch, lookupFetch = fetch, r
   let verdict;
   try { observed = await servedManifest(fetchImpl, b.base); verdict = bindBuild(observed, reviewed); } catch (e) { verdict = { status: 'FAIL', reason: `the served build could not be read: ${short(e)}` }; }
   bindLines(observed, verdict).forEach(say);
-  if (observed) (await documentProbe(fetchImpl, b.base, observed.indexSha256)).forEach(say);
   if (mode === '--bind') return verdict.status === 'PASS' ? 0 : 1;
   if (mode !== '--run') { say('usage: hosted-lovable-device-matrix.mjs --bind | --run | --require'); return 2; }
   const dir = path.join(env.WSF_RESULT_DIR, 'lovable-device-matrix');
