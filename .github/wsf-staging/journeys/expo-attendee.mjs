@@ -708,6 +708,8 @@ const UNVERIFIED_STOPS = Object.freeze({
   'wsf-verify': 'held at the verification page (Check your email.), whose only ways on are verifying or signing out',
   'wsf-profile-unverified': 'the profile page shows only Verify your email before completing your profile.',
   'wsf-marker-verify': 'the marker shows Confirm your email to join in place of its Join button',
+  // The marker's own error card: its service did not answer (as a new service is, until its transport is opened).
+  'wsf-marker-error': null,
   'wsf-join-submit-error': null, // the product's own refusal, read from the page
   'wsf-contribute-not-found': null,
   'wsf-contribute-signed-out': null,

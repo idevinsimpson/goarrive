@@ -226,6 +226,9 @@ export function expectedPriorNote({ previous, run, added, m, served = null, newF
     'HOSTED_MARKER_MATCHES=true and VERIFY=pass. read-inventory.mjs refuses a deploy whose live count differs from this number. ';
   if (sameFunctions(m)) {
     s += `THIS PIN'S DEPLOY IS EXPECTED TO CREATE NOTHING (${run.after} -> ${run.after}, CREATED_THIS_DEPLOY=none) and to lose nothing. `;
+  } else if (newFunctions) {
+    s += 'THIS PIN CHANGES THE FUNCTION SOURCE. Which functions its deploy creates and removes is derived below from the export ' +
+      'delta git measures; anything beyond their names (configuration, triggers, regions) is NOT derived here and needs explicit review. ';
   } else {
     s += 'THIS PIN CHANGES THE FUNCTION SOURCE, so what its deploy creates or removes is NOT derived here and needs explicit review. ';
   }
@@ -233,8 +236,9 @@ export function expectedPriorNote({ previous, run, added, m, served = null, newF
     const n = newFunctions.names.length;
     s += `THIS PIN ADDS ${word(n)} FUNCTION${n === 1 ? '' : 'S'} to candidateAddedFunctions, measured with git as exported by the candidate ` +
       `and not by ${s8(newFunctions.measuredAgainst)} (${newFunctions.exportsBefore} -> ${newFunctions.exportsAfter} exports, none removed): ` +
-      `${list(newFunctions.names)}. Its deploy is expected to create exactly these (${run.after} -> ${run.after + n}), and the verifier's ` +
-      `EXPECTED set then becomes the base plus all ${lower(added.length + n)} listed names. `;
+      `${list(newFunctions.names)}. Its deploy is expected to create exactly these (${run.after} -> ${run.after + n}). With this file in ` +
+      `the operational checkout the verifier's EXPECTED set is the base plus all ${lower(added.length + n)} listed names, so a verification ` +
+      'before that deploy has created them fails, by design. ';
   }
   const baseOk = m.verifier.base !== null && m.verifier.base.length === base;
   if (newFunctions) {
@@ -242,8 +246,7 @@ export function expectedPriorNote({ previous, run, added, m, served = null, newF
     const kept = `the ${lower(added.length)} name${added.length === 1 ? '' : 's'} this file already listed`;
     const all = lower(added.length + newFunctions.names.length);
     s += baseOk
-      ? `Before this deploy, the verifier's EXPECTED set is the ${base}-name base plus ${kept}, which equals this prior; ` +
-        'the verifier reads candidateAddedFunctions from this file in the operational checkout. '
+      ? `The measured prior is the verifier's ${base}-name base plus ${kept}. `
       : `The verifier's base (${m.verifier.base === null ? 'unreadable' : m.verifier.base.length} names at ${s8(m.verifier.ref)}) plus ` +
         `${kept} does NOT equal this prior; review the expected set before dispatch. `;
     return s + 'A function that is not listed fails verification as present but not expected; a listed service that disappears fails, named. ' +
@@ -435,6 +438,30 @@ export function supersededHistory(file, { run, previous }) {
     [`_previousPackageLabel${p8}`]: `HISTORICAL, the label of the ${p8} pin, which no deploy served: run ${run.number} (${run.id}), the last deploy-mode run, ` +
       `served ${s8(previous)}, and this pin supersedes it before any deploy: ${file.packageLabel}`,
   };
+}
+
+/** The history an approval holds: its `_previous*` keys, sorted. */
+const historyKeys = (o) => Object.keys(o).filter((k) => k.startsWith('_previous')).sort();
+
+/**
+ * The history entries `approval` holds that `from` (the approval it replaced) does not explain: an
+ * approval's history is exactly the one before it plus that one's three rotated entries. An entry
+ * nothing explains is a never-served approval the chain does not visit (a hand edit to the
+ * invariants could otherwise skip a link and slip past MAX_NEVER_SERVED).
+ */
+function unexplainedHistory(approval, from) {
+  const f8 = s8(from.approvedAppSha);
+  const known = new Set([...historyKeys(from), `_previousExpectedPriorFunctionsNote${f8}`, `_previousFullCandidateNote${f8}`, `_previousPackageLabel${f8}`]);
+  return historyKeys(approval).filter((k) => !known.has(k));
+}
+
+/** Why a never-served approval that replaced the deployed one directly does not stand on its history, or null. */
+function directHistoryProblem(approval, deployed) {
+  const changed = historyKeys(deployed).filter((k) => approval[k] !== deployed[k]);
+  if (changed.length) return `it does not carry ${changed.join(', ')} exactly as the deployed approval has it`;
+  const extra = unexplainedHistory(approval, deployed);
+  if (extra.length) return `it carries history the deployed approval and its rotation do not explain (${extra.join(', ')}): a never-served approval the chain does not visit`;
+  return null;
 }
 
 /** The pure part: previous approval + measured facts -> next approval object. */
@@ -665,6 +692,10 @@ function supersededApproval(repo, a, { deployed, deployedText, served, run, cand
   if (set(sup.candidateAddedFunctions) !== set(deployed.candidateAddedFunctions)) refuse('the superseded approval does not retain the deployed approval\'s candidateAddedFunctions exactly');
   const d8 = s8(deployed.approvedAppSha);
   if (!Object.hasOwn(sup, `_previousPackageLabel${d8}`)) refuse(`the superseded approval has not rotated the deployed pin ${d8} into history: its ancestry is not the deployed approval's`);
+  if (chain.length === 0) {
+    const why = directHistoryProblem(sup, deployed);
+    if (why) refuse(`the superseded approval replaced the deployed pin directly, but ${why}`);
+  }
   return { sha, approval: sup, deployedPin: deployed.approvedAppSha, opsHead, chainedFrom: chain[0] ?? null, chain };
 }
 
@@ -683,7 +714,10 @@ function supersededApproval(repo, a, { deployed, deployedText, served, run, cand
  *     the link, was generated by this script from the same run, marker,
  *     rollback, inventory and retained set, rotated the deployed pin out, and is
  *     what its holder's history quotes word for word; every history entry it
- *     kept, its holder still carries verbatim (history is append-only).
+ *     kept, its holder still carries verbatim (history is append-only), and
+ *     the holder carries nothing the link and its rotation do not explain (no
+ *     link the chain does not visit). The link that replaced the deployed pin
+ *     carries the deployed approval's history the same way.
  * A link whose own file replaced the deployed pin ends the chain and must say
  * nothing earlier; a link that chains must name exactly the prior its record
  * names. More than MAX_NEVER_SERVED never-served approvals in all refuses.
@@ -705,6 +739,8 @@ function innerChain(repo, { inv, sup, sha, deployed, served, servedSha, run, ops
     if (link.inv.previousApprovedAppSha === deployed.approvedAppSha) {
       if (Object.hasOwn(record, 'priorNeverServed')) bad(`its record names an earlier never-served ${record.priorNeverServed}, but ${s8(link.sha)}'s own approval replaced the deployed pin directly`);
       if (link.inv.supersededApproval !== undefined) bad(`${s8(link.sha)}'s own approval replaced the deployed pin directly yet records a superseded approval`);
+      const why = directHistoryProblem(link.approval, deployed);
+      if (why) bad(`${s8(link.sha)}'s own approval replaced the deployed pin directly, but ${why}`);
       return chain;
     }
     if (!Object.hasOwn(record, 'priorNeverServed')) bad(`its record names no earlier never-served approval, but ${s8(link.sha)}'s own approval replaced ${link.inv.previousApprovedAppSha}`);
@@ -776,6 +812,8 @@ function proveLink(repo, { record, holder, depth, deployed, served, servedSha, r
   for (const [k, v] of Object.entries(file)) {
     if (k.startsWith('_previous') && holder.approval[k] !== v) bad(`${s8(holder.sha)} does not carry ${k} exactly as ${s8(p)}'s own approval at ${s8(at)} has it`);
   }
+  const extra = unexplainedHistory(holder.approval, file);
+  if (extra.length) bad(`${s8(holder.sha)} carries history that neither ${s8(p)}'s own approval nor its rotation explains (${extra.join(', ')}): a never-served approval the chain does not visit`);
   return { sha: p, approval: file, inv: finv };
 }
 

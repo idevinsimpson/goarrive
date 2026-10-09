@@ -303,6 +303,8 @@ await test('EXPO: the store-only claims are named as exclusions and asserted by 
   assert.match(byId['event-use-my-phone'].knownExclusions.join(' '), /MOVE-CAMERA-NATIVE-PORT-1, #577.*EXPO-MOVEMENT-VIDEO-1, #575.*UNPROVEN here/);
   assert.match(byId['unverified-participant'].knownExclusions.join(' '), /MEMBER-PREVIEW-LABEL-1.*PROFILE-PHOTOS-FIREBASE-1, #593.*UNPROVEN here/);
   assert.match(byId['unverified-participant'].knownExclusions.join(' '), /expected to FAIL on its eight visitor rows/);
+  assert.match(byId['unverified-participant'].knownExclusions.join(' '), /\(wsfResolveMarker, wsfJoinViaMarker\) are expected to arrive SHUT \(invoker_iam_check_enabled\).*the verified control's included, fails on the marker's own error card, named/);
+  assert.match(byId['event-use-my-phone'].knownExclusions.join(' '), /its approved catalog is empty at this build, so no clip shows/);
   // GAP-2 is fixed at the approved build (#571): its exclusion is gone, and the store-only half of the gate stays named.
   assert.doesNotMatch(JSON.stringify(m), /GAP-2/);
   assert.match(byId['closed-goal-turn'].knownExclusions.join(' '), /creates or advances no entry, place, assignment, lease or attempt document: stored facts the hosted screens do not show; proved on emulators by EXPO-CLOSED-GOAL-QUEUE-GATE-1/);
@@ -698,7 +700,7 @@ await test('UNVERIFIED KIT: a journey that fails after the product wrote leaves 
  * (wsfSaveProfile; admitByLinkTx through wsfJoinViaMarker and wsfJoinCommunity;
  * wsfContribute), so the REAL cleaner shows whether the driver claimed it all.
  */
-function unverifiedHarness({ repaired = false, holdAtSignin = false, bugs = {} } = {}) {
+function unverifiedHarness({ repaired = false, holdAtSignin = false, markerShut = false, bugs = {} } = {}) {
   const dir = tmp();
   const be = unverifiedBackend();
   const kit = kitFor(dir, be);
@@ -798,7 +800,11 @@ function unverifiedHarness({ repaired = false, holdAtSignin = false, bugs = {} }
         add('wsf-home-signed-in');
       } else if (p.startsWith('/go/')) {
         const m = svc.marker(p.slice(4));
-        if (m && svc.member(m.groupId, ctx.uid)) {
+        if (markerShut) {
+          // wsfResolveMarker deployed but SHUT (invoker_iam_check_enabled): the screen's own error card.
+          add('wsf-marker-error', { text: 'We couldn’t open this code. Try again.\nTry again\nBack to home' });
+          add('wsf-marker-retry');
+        } else if (m && svc.member(m.groupId, ctx.uid)) {
           add('wsf-marker-choose', { text: 'How will you take part?' });
           add('wsf-marker-phone', { text: 'Move on my phone', click: () => go(`/contribute/${m.goalId}`) });
         } else if (m) {
@@ -940,6 +946,21 @@ await test('UNVERIFIED at 819c26f0 as served: every visitor row fails on the scr
   const c = await cleanAll(d);
   assert.equal(c.receipt.status, 'COMPLETE', c.out);
   assert.equal(d.be.docs.size + d.be.accounts.size, 0);
+});
+
+await test('UNVERIFIED with the marker services SHUT, as this pin\'s deploy is expected to leave them: the marker rows and the control fail on the marker\'s own error card, named; nothing is admitted by marker; the REAL cleaner empties the store', async () => {
+  const served = await driveUnverified({ markerShut: true });
+  assert.deepEqual(served.failed, ['signin', 'profile', 'marker', 'link', 'contribute', 'history', 'fresh', 'round', 'control']);
+  assert.match(served.byRow.marker.expected, /\/go\/[^:]+: We couldn’t open this code\. Try again\./);
+  assert.match(served.byRow.control.expected, /joined false; .*We couldn’t open this code\. Try again\./);
+  assert.equal((await cleanAll(served)).receipt.status, 'COMPLETE');
+  assert.equal(served.be.docs.size + served.be.accounts.size, 0);
+  // Even with the native screens repaired, every row that goes through the marker fails until its transport is opened.
+  const repaired = await driveUnverified({ markerShut: true, repaired: true });
+  assert.deepEqual(repaired.failed, ['marker', 'contribute', 'history', 'fresh', 'round', 'control']);
+  assert.equal(repaired.byRow.link.ok, true, 'the join link does not use the marker services');
+  assert.equal((await cleanAll(repaired)).receipt.status, 'COMPLETE');
+  assert.equal(repaired.be.docs.size + repaired.be.accounts.size, 0);
 });
 
 await test('UNVERIFIED with the screens repaired: every row holds; the visitor is admitted by the product and credited 15 then 25; the REAL cleaner empties the store', async () => {

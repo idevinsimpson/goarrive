@@ -637,9 +637,9 @@ await test('the LIVE pin on a 49-function staging: the gate admits BEFORE 49 and
   assert.deepEqual(r.receipt.preExistingTransportDrifted, [], 'a SHUT listed service is reported, not failed as drift');
   assert.equal(r.receipt.candidateServiceTransportRequiresSeparateApproval, true, 'SHUT is named for the separate transport approval, never declared usable');
   assert.deepEqual(
-    r.receipt.candidateServiceTransportNeedingApproval.filter((n) => ADDED_59.includes(n)).sort(),
-    [...ADDED_59].sort(),
-    'each of the ten is named for the separate transport approval'
+    r.receipt.candidateServiceTransportNeedingApproval.filter((n) => SOCIAL.includes(n) || ADDED_59.includes(n)).sort(),
+    [...SOCIAL, ...ADDED_59].sort(),
+    'the three social services still SHUT and each of the ten are named for the separate transport approval'
   );
 });
 
