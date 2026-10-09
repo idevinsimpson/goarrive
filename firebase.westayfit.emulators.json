@@ -40,6 +40,7 @@
     "trailingSlash": false,
     "rewrites": [
       { "source": "/community/*/challenge", "destination": "/community/__dynamic/challenge.html" },
+      { "source": "/community/*/members", "destination": "/community/__dynamic/members.html" },
       { "source": "/community/**", "destination": "/community/__dynamic.html" },
       { "source": "/join/**", "destination": "/join/__dynamic.html" },
       { "source": "/contribute/**", "destination": "/contribute/__dynamic.html" },
@@ -49,7 +50,8 @@
       { "source": "/event/**", "destination": "/event/__dynamic.html" },
       { "source": "/queue/**", "destination": "/queue/__dynamic.html" },
       { "source": "/move/**", "destination": "/move/__dynamic.html" },
-      { "source": "/combined/**", "destination": "/combined/__dynamic.html" }
+      { "source": "/combined/**", "destination": "/combined/__dynamic.html" },
+      { "source": "/go/**", "destination": "/go/__dynamic.html" }
     ],
     "headers": [
       {

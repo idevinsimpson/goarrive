@@ -79,6 +79,14 @@ export type HallAssignment = {
   /** And what it is CALLED, so a room full of people doing three different
    * things can read which one this turn is. */
   activityTitle: string;
+  /**
+   * KIOSK-EXPECTED-TURN-1: the opaque binding the SERVING STATION must send
+   * back with Start, Cancel and Record for THIS turn. Only a station's own
+   * credentialed answers carry it; it is absent everywhere else (the phone,
+   * the pulse, the public QR), and `null` from a server that predates it. It
+   * names nobody and is never printed, logged or put in a testID.
+   */
+  turnRef?: string | null;
 };
 
 /** The ten-second result. A code and a number — never a name. */
@@ -216,6 +224,24 @@ export function describeTurnPlace(opts: {
  */
 export const TURN_NO_SHOW_MESSAGE =
   'The screen called you and the 45 seconds ran out, so it moved on. Get back in line and it will call you again.';
+
+/**
+ * THE BINDING'S SHAPE, a copy of the server's `normalizeStationTurnRef`
+ * (deliberately a copy, like every rule here). A station command is only ever
+ * sent with a reference this accepts; anything else is an old server, and the
+ * command is unavailable rather than sent without one.
+ */
+export function isStationTurnRef(v: unknown): v is string {
+  return typeof v === 'string' && /^tr_[A-Za-z0-9_-]{16,64}$/.test(v);
+}
+
+/** The server's own sentences for a station command refused because of its
+ * binding — copies of TURN_REF_MISSING_MESSAGE, TURN_STALE_MESSAGE and
+ * TURN_NOT_RUNNING_MESSAGE, matched exactly so the screen can tell a definite
+ * refusal (the operation is over) from a lost answer (it is not). */
+export const TURN_NEEDS_UPDATE_MESSAGE = 'This screen needs an update before it can run a turn.';
+export const TURN_STALE_MESSAGE = 'That turn has moved on. This screen now shows the current one.';
+export const TURN_NOT_RUNNING_MESSAGE = 'That turn is not running.';
 
 /** The one sentence for a name a screen may not show. Mirrors the server's
  * TURN_NAME_REFUSED, deliberately as a copy. */

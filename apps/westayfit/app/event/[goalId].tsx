@@ -1,5 +1,6 @@
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { FirebaseError } from 'firebase/app';
+import { signOut } from 'firebase/auth';
 import { httpsCallable } from 'firebase/functions';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -31,13 +32,11 @@ import {
   EVENT_CHOICE_INTRO,
   EVENT_CHOICE_NOTE,
   EVENT_CHOICE_PHONE_DESCRIPTION,
-  EVENT_CHOICE_PHONE_LABEL,
   EVENT_CHOICE_QUEUE_DESCRIPTION,
-  EVENT_CHOICE_QUEUE_LABEL,
 } from '../../src/eventActivity';
 import { clearEventReturn, setEventReturn } from '../../src/eventReturn';
 import { wsfAuthEnabled } from '../../src/featureFlags';
-import { getFirebaseFunctions } from '../../src/firebase';
+import { getFirebaseAuth, getFirebaseFunctions } from '../../src/firebase';
 import { CALL_NAME_MAX, callNameSuggestions, isUsableCallName } from '../../src/queueName';
 import { TURN_NAME_REFUSED } from '../../src/turnContract';
 import { ButtonLink } from '../../src/ui/ButtonLink';
@@ -91,7 +90,7 @@ import { WsfWordmark } from '../../src/ui/WsfWordmark';
  *   activity opened WITHOUT a scan has nothing to choose and stands answered.
  *   The whole of that rule is `initialSelection` in src/eventActivity.ts.
  *
- *   THEN, WHERE. And only then: "Use my phone" or "Join the kiosk queue".
+ *   THEN, WHERE. And only then: "Move on my phone" or "Use a kiosk".
  *   Neither control exists on the page until an activity is selected, so
  *   nothing offers a queue to somebody who has not yet said what they are
  *   doing — and a scan on its own reaches neither.
@@ -134,6 +133,17 @@ type EventState =
     }
   | { kind: 'notMember' }
   | { kind: 'error'; message: string };
+
+/**
+ * EXPO-ACCOUNT-ENTRY-1 (Director scope delta #497 `5962179622`). The event
+ * landing's own words for its two ways on. LOCAL to this route on purpose:
+ * the shared `EVENT_CHOICE_*_LABEL` constants in `src/eventActivity.ts`, the
+ * queue screen and the design targets keep theirs. Only the label changes —
+ * the phone way is still the existing `/contribute/<goal>` link, the kiosk way
+ * still opens the name control whose one confirm is the single queue write.
+ */
+const EVENT_LANDING_PHONE_LABEL = 'Move on my phone';
+const EVENT_LANDING_KIOSK_LABEL = 'Use a kiosk';
 
 export default function EventScreen() {
   const params = useLocalSearchParams<{ goalId: string; activity?: string }>();
@@ -311,6 +321,28 @@ export default function EventScreen() {
     setCallName(null);
     setQueueError(null);
   }, []);
+
+  /**
+   * Wrong account at an event: keep the event, change the person. The return
+   * is written for this goal id before signing out (it was spent when this
+   * account arrived), so sign-in -> nextRouteAfterAuth brings the next account
+   * straight back here. Nothing else is stored and nothing is granted.
+   */
+  const [switchingAccount, setSwitchingAccount] = useState(false);
+  const onUseDifferentAccount = useCallback(async () => {
+    if (switchingAccount) return;
+    setSwitchingAccount(true);
+    setEventReturn(goalId);
+    try {
+      await signOut(getFirebaseAuth());
+    } catch {
+      // A failed sign-out leaves them signed in as before; the button says so
+      // by coming back.
+      setSwitchingAccount(false);
+      return;
+    }
+    router.replace('/signin' as never);
+  }, [goalId, switchingAccount]);
 
   const onJoinQueue = useCallback(async () => {
     if (joining) return;
@@ -531,6 +563,24 @@ export default function EventScreen() {
             You’ll need an account, so what you add is yours and stays yours.
           </Text>
         </View>
+        {/*
+          EXPO-ACCOUNT-ENTRY-1. The two ways in, said BEFORE the account is
+          asked for, in the same words the buttons below use once they exist
+          (the route's own EVENT_LANDING_* labels, so the two cannot drift). Plain
+          text and not controls: neither is a way on until the visitor is
+          signed in, a member, and has chosen an activity.
+        */}
+        <View style={[kit.card, styles.ways]} testID="wsf-event-ways">
+          <Text style={kit.cardMeta}>Two ways to take part, once you’re signed in</Text>
+          <Text style={kit.body}>
+            <Text style={styles.wayName}>{EVENT_LANDING_PHONE_LABEL}</Text>
+            {' — count it yourself, right now.'}
+          </Text>
+          <Text style={kit.body}>
+            <Text style={styles.wayName}>{EVENT_LANDING_KIOSK_LABEL}</Text>
+            {' — take your turn at the screen in the room.'}
+          </Text>
+        </View>
         <View style={styles.actions}>
           {/*
             REMEMBER THE EVENT ON THE WAY INTO THE AUTH FLOW, and only on the
@@ -556,6 +606,12 @@ export default function EventScreen() {
             label="Already have an account? Sign in"
             onPress={() => setEventReturn(goalId)}
           />
+          {/* The one wait an account involves, said plainly rather than
+              discovered at verify-email. Nothing here promises it away. */}
+          <Text style={kit.caption} testID="wsf-event-account-note">
+            A new account needs you to confirm your email first. Open the link we send, then come
+            back to this page and you’ll pick up right here.
+          </Text>
           {/* The cancel boundary: somebody who says "not now" must not be
               carried back here by an auth flow they start later. */}
           <SecondaryLink
@@ -595,6 +651,30 @@ export default function EventScreen() {
           You’re signed in, but you’re not in the community running this. Ask a Champion to send you
           their invite, then come back to this page.
         </Text>
+        {/*
+          EXPO-ACCOUNT-ENTRY-1. WHICH account this is, because the usual
+          reason for landing here at an event is having signed in with the
+          wrong one. And a way to fix that which keeps the event: the return
+          was spent on arriving here, so it is re-armed for this same goal
+          BEFORE signing out, and the next sign-in comes straight back.
+        */}
+        {user?.email ? (
+          <Text style={kit.caption} testID="wsf-event-not-member-account">
+            {`Signed in as ${user.email}`}
+          </Text>
+        ) : null}
+        <Pressable
+          onPress={() => void onUseDifferentAccount()}
+          disabled={switchingAccount}
+          style={kit.secondaryButton}
+          testID="wsf-event-switch-account"
+          accessibilityRole="button"
+          accessibilityState={{ disabled: switchingAccount }}
+        >
+          <Text style={kit.secondaryButtonText}>
+            {switchingAccount ? 'Signing out…' : 'Use a different account'}
+          </Text>
+        </Pressable>
         <SecondaryLink href="/" label="Back to home" />
       </View>
     );
@@ -666,9 +746,9 @@ export default function EventScreen() {
       {/*
         DECISION TWO: WHERE. Rendered ONLY once an activity is selected — not
         disabled, not greyed, not present. A scan reaches neither control, and
-        neither control is a queue write in any case: "Use my phone" is a link
-        to the contribution screen that already exists, and "Join the kiosk
-        queue" opens the name control below. The one call that creates a place
+        neither control is a queue write in any case: "Move on my phone" is a link
+        to the contribution screen that already exists, and "Use a kiosk"
+        opens the name control below. The one call that creates a place
         in the line is inside that control.
       */}
       {selectedActivity ? (
@@ -693,7 +773,7 @@ export default function EventScreen() {
               style={kit.primaryButton}
               textStyle={kit.primaryButtonText}
               testID="wsf-event-add"
-              label={EVENT_CHOICE_PHONE_LABEL}
+              label={EVENT_LANDING_PHONE_LABEL}
             />
             <Text style={kit.caption} testID="wsf-event-add-description">
               {EVENT_CHOICE_PHONE_DESCRIPTION}
@@ -705,9 +785,9 @@ export default function EventScreen() {
                   style={kit.secondaryButton}
                   testID="wsf-event-queue-start"
                   accessibilityRole="button"
-                  accessibilityLabel={`${EVENT_CHOICE_QUEUE_LABEL}. ${EVENT_CHOICE_QUEUE_DESCRIPTION}`}
+                  accessibilityLabel={`${EVENT_LANDING_KIOSK_LABEL}. ${EVENT_CHOICE_QUEUE_DESCRIPTION}`}
                 >
-                  <Text style={kit.secondaryButtonText}>{EVENT_CHOICE_QUEUE_LABEL}</Text>
+                  <Text style={kit.secondaryButtonText}>{EVENT_LANDING_KIOSK_LABEL}</Text>
                 </Pressable>
                 <Text style={kit.caption} testID="wsf-event-queue-start-description">
                   {EVENT_CHOICE_QUEUE_DESCRIPTION}
@@ -846,6 +926,8 @@ export default function EventScreen() {
 
 const styles = StyleSheet.create({
   actions: { gap: 10 },
+  wayName: { fontWeight: '800', color: wsfTheme.colors.text },
+  ways: { gap: 4 },
   // The second decision, as one block: its heading, its sentence, its two ways
   // on and the line that says neither of them is a queue yet.
   choice: { gap: 10, width: '100%' },

@@ -1,0 +1,14 @@
+
+Running 10 tests using 1 worker
+
+[1/10] [chromium] › tests-e2e/sprint-w9-community-settings-parity-1.spec.ts:170:7 › COMMUNITY-SETTINGS-PARITY-1 cp3 · hardening › H1 the switch is the reference toggle: geometry, role and state, keyboard ring, Space
+[2/10] [chromium] › tests-e2e/sprint-w9-community-settings-parity-1.spec.ts:229:7 › COMMUNITY-SETTINGS-PARITY-1 cp3 · hardening › H2 a re-read issued before a save lands does not put back what the save settled
+[3/10] [chromium] › tests-e2e/sprint-w9-community-settings-parity-1.spec.ts:274:7 › COMMUNITY-SETTINGS-PARITY-1 cp3 · hardening › H3 a community with an unresolved save takes no second action; after the reply the next one goes through
+[4/10] [chromium] › tests-e2e/sprint-w9-community-settings-parity-1.spec.ts:311:7 › COMMUNITY-SETTINGS-PARITY-1 cp3 · hardening › H4 membership lost before a save: its switches go at once and its block says so; nothing is stored
+[5/10] [chromium] › tests-e2e/sprint-w9-community-settings-parity-1.spec.ts:333:7 › COMMUNITY-SETTINGS-PARITY-1 cp3 · hardening › H5 the roster follows a settled privacy change made in Settings
+[6/10] [chromium] › tests-e2e/sprint-w9-community-settings-parity-1.spec.ts:364:7 › COMMUNITY-SETTINGS-PARITY-1 cp3 · hardening › H6 Close, Escape and the scrim during the exit are one dismissal, after repeated opens
+[7/10] [chromium] › tests-e2e/sprint-w9-community-settings-parity-1.spec.ts:402:7 › COMMUNITY-SETTINGS-PARITY-1 cp3 · hardening › H7 reduced motion: Close dismisses without the 180 ms wait
+[8/10] [chromium] › tests-e2e/sprint-w9-community-settings-parity-1.spec.ts:423:7 › COMMUNITY-SETTINGS-PARITY-1 cp3 · hardening › H8 closing mid-save is safe: the late reply does not overwrite or error the reopened panel
+[9/10] [chromium] › tests-e2e/sprint-w9-community-settings-parity-1.spec.ts:459:7 › COMMUNITY-SETTINGS-PARITY-1 cp3 · hardening › H9 switching: every frame after a chip press pairs the heading with its own community
+[10/10] [chromium] › tests-e2e/sprint-w9-community-settings-parity-1.spec.ts:493:7 › COMMUNITY-SETTINGS-PARITY-1 cp3 · hardening › H10 a failed goals read invents nothing: Goals is a dash and there is no "No active goal"
+  10 passed (31.3s)

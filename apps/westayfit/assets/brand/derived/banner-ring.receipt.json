@@ -1,0 +1,47 @@
+{
+  "source": "Lovable e15b9fa0-b2a0-4314-bc21-9c573b8eceb1 @ d4f606244ba3995080fb0bcd471cbebf4cbbc56a, src/styles.css .community-banner::after",
+  "decision": "Director #506 5845316335 (W4 option (a))",
+  "geometry": {
+    "circle": 260,
+    "border": 40,
+    "right": -90,
+    "top": -90,
+    "crop": 170,
+    "centre": [
+      130,
+      40
+    ],
+    "inner": 90,
+    "outer": 130
+  },
+  "token": {
+    "rgb": [
+      145,
+      203,
+      125
+    ],
+    "alpha": 0.14
+  },
+  "supersample": "16x16",
+  "placement": "right 0 / top 0 of the banner, 170×170, pointerEvents none, not accessible",
+  "files": [
+    {
+      "file": "apps/westayfit/assets/brand/derived/banner-ring.png",
+      "scale": 1,
+      "pixels": 170,
+      "sha256": "7ab71c248aa9899bfcb628a609c5051f15f4579ee0e9af7592dbd97db2619d91"
+    },
+    {
+      "file": "apps/westayfit/assets/brand/derived/banner-ring@2x.png",
+      "scale": 2,
+      "pixels": 340,
+      "sha256": "926ffaa6b201509c5857604de03e75342ce39bb8653f0d304c6c81f052692d68"
+    },
+    {
+      "file": "apps/westayfit/assets/brand/derived/banner-ring@3x.png",
+      "scale": 3,
+      "pixels": 510,
+      "sha256": "0a969f4f3fdff599884e0eb021df2f76804aff5beed88b83d69fe2fb49115beb"
+    }
+  ]
+}

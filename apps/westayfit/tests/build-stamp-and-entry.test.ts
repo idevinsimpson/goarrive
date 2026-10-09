@@ -37,7 +37,9 @@ describe('the home page is a usable front door', () => {
   // linked to, under copy that told visitors there was no signup. Every gate
   // passed: the routes worked, the rules worked, the deploy worked. The app
   // was simply unreachable unless you already knew the URL.
-  const home = read('app/index.tsx');
+  // Home lives in its tab group since the shell migration. Same file, same
+  // content -- only the path moved.
+  const home = read('app/(tabs)/(home)/index.tsx');
 
   it('offers signup and signin when auth is enabled', () => {
     expect(home).toContain('wsfAuthEnabled');

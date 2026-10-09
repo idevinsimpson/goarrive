@@ -1,5 +1,11 @@
 # FitLife Expo — Critical Path and Cut Line
 
+> **HISTORICAL (2026-09-05 planning record).** Not current authority. It was written under
+> the now-superseded `WE_STAY_FIT_MASTER.md`; Strategic Master v3.0 + the v3.1 addendum
+> govern (see `DOCUMENT_AUTHORITY_AND_SUPERSESSION.md`). Its adult-signup and adults-only
+> enforcement items are not current policy: the age gate was removed (DECISIONS 2026-09-06),
+> and adults-only must not be silently reinstated.
+
 **2026-09-05 · PM assessment · Claude Code**
 **Event: Sunday 2026-10-11, 12:00–5:00 PM, Alpharetta City Center — 36 days out.**
 

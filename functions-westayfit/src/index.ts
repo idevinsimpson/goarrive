@@ -2,9 +2,30 @@ import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 
 import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
-import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore';
+import { FieldValue, Timestamp, getFirestore, type DocumentReference } from 'firebase-admin/firestore';
 import { defineSecret, projectID } from 'firebase-functions/params';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
+
+import { optionalRealUid, requireRealIdentity } from './anon-gate';
+
+import {
+  MAX_TOKENS_PER_FETCH,
+  MSG as PHOTO_MSG,
+  PHOTO_SOURCES,
+  PHOTO_VIS_FIELD,
+  canonicalJpeg,
+  decodeBase64Strict,
+  mintPhotoToken,
+  normalizeOperationId,
+  normalizePhotoToken,
+  normalizeRevision,
+  type FacePhotosResponse,
+  type FacesResponse,
+  type FaceEntry,
+  type OwnPhotoState,
+  type PhotoSource,
+  type PortraitDecision,
+} from './profilePhotos';
 
 initializeApp();
 
@@ -117,13 +138,14 @@ export const wsfSaveProfile = onCall<SaveProfileRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'wsfSaveProfile requires an authenticated caller.');
     }
-    const token = request.auth.token as { email_verified?: boolean };
-    if (token.email_verified !== true) {
-      throw new HttpsError(
-        'failed-precondition',
-        'Verify your email before saving your profile.'
-      );
-    }
+    requireRealIdentity(request);
+    // KIOSK-UNVERIFIED-PARTICIPANT-1 (owner policy #365 6041359966): an
+    // ordinary participant does NOT need a verified email to save their own
+    // profile. The caller is still a real authenticated Firebase account and
+    // can only ever write its own `wsfMemberProfiles/{uid}`; verifying the
+    // address later keeps the same uid, profile, memberships and credits.
+    // Organizer callables (communities, goals, combined goals) keep their own
+    // verification gates.
     const uid = request.auth.uid;
 
     const rawDisplayName = request.data?.displayName;
@@ -181,6 +203,7 @@ export const wsfCreateCommunity = onCall<CreateCommunityRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'wsfCreateCommunity requires an authenticated caller.');
     }
+    requireRealIdentity(request);
     const token = request.auth.token as { email_verified?: boolean };
     if (token.email_verified !== true) {
       throw new HttpsError(
@@ -351,17 +374,46 @@ function readSendConfig(): SendConfig {
       `WSF email sending is not configured: missing ${missing.join(', ')}.`
     );
   }
+  // Defaults to Firebase's own handler, which is always live and is precisely
+  // what the project's custom action URL overrode. Override this once a real
+  // handler route exists.
+  const actionHandler = canonicalActionHandler(
+    process.env.WSF_AUTH_ACTION_HANDLER ??
+      `https://${process.env.GCLOUD_PROJECT ?? 'goarrive'}.firebaseapp.com/__/auth/action`
+  );
+  if (!actionHandler) {
+    // EMAIL-STAGING-REPAIR: validated here, before any quota is reserved, so a
+    // bad operator value fails closed without spending a cooldown. The value
+    // itself is never logged or returned.
+    console.error('[wsf mail] invalid config', 'WSF_AUTH_ACTION_HANDLER');
+    throw new HttpsError(
+      'failed-precondition',
+      'WSF email sending is not configured: invalid WSF_AUTH_ACTION_HANDLER.'
+    );
+  }
   return {
     apiKey: apiKey as string,
     from: from as string,
     appUrl: appUrl as string,
-    // Defaults to Firebase's own handler, which is always live and is precisely
-    // what the project's custom action URL overrode. Override this once a real
-    // handler route exists.
-    actionHandler:
-      process.env.WSF_AUTH_ACTION_HANDLER ??
-      `https://${process.env.GCLOUD_PROJECT ?? 'goarrive'}.firebaseapp.com/__/auth/action`,
+    actionHandler,
   };
+}
+
+/**
+ * The action handler as origin + path, or null when it cannot be one: not an
+ * absolute https URL, or carrying credentials, a query or a fragment (the
+ * minted query string replaces the query, and anything else would ride along
+ * on every link).
+ */
+export function canonicalActionHandler(raw: string): string | null {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (u.protocol !== 'https:' || u.username || u.password || u.search || u.hash) return null;
+  return `${u.origin}${u.pathname}`;
 }
 
 /**
@@ -375,32 +427,110 @@ export function retargetActionLink(link: string, handler: string): string {
   return target.toString();
 }
 
-/** Cooldown plus daily cap, per uid. Returns ms still to wait, or 0 when clear. */
-async function checkSendQuota(uid: string, now: number): Promise<number> {
-  const ref = getFirestore().doc(`wsfVerificationSends/${uid}`);
-  const snap = await ref.get();
-  const data = snap.data() as
-    | { lastSentAt?: number; dayStart?: number; countToday?: number }
-    | undefined;
+/**
+ * The send quota, shared by verification (keyed by uid) and reset (keyed by a
+ * hash of the address): a cooldown between sends and a daily cap.
+ *
+ * EMAIL-STAGING-REPAIR. The quota used to be spent with a plain read-then-set
+ * BEFORE anything was sent, and nothing gave it back:
+ *
+ *   * A failed attempt (Admin link minting, a provider rejection, a network
+ *     error) still started the 60 s cooldown, so the member's immediate,
+ *     legitimate retry got `resource-exhausted` although no message had left.
+ *     That is exactly the staging field test: "Didn't send", then a resend
+ *     refused as too soon.
+ *   * Read-then-set is not atomic: two concurrent requests could both read a
+ *     clear cooldown and both send.
+ *
+ * Now a transaction RESERVES the send (cooldown and cap checked and written
+ * atomically, so one in-flight attempt per key), and a failed attempt RELEASES
+ * the cooldown back to what it was before this attempt. The attempt still
+ * counts toward the daily cap, so failures cannot be used to hammer the
+ * provider: at most one attempt in flight per key, at most SEND_DAILY_CAP a day,
+ * successful or not. A successful send, and reset's unknown-address path, keep
+ * the reservation exactly as before. So does EVERY failed reset (see
+ * resetFailed): the reset callable is public, and releasing only for a known
+ * address would make the retry an account-existence signal. So does a provider request that failed in
+ * transport (status 0): the provider may have accepted it, so that is not an
+ * attempt that sent nothing, and releasing would allow a duplicate.
+ */
+type SendReservation = {
+  ref: DocumentReference;
+  reservedAt: number;
+  priorLastSentAt: number | null;
+};
 
-  const since = now - (data?.lastSentAt ?? 0);
-  if (data?.lastSentAt && since < SEND_COOLDOWN_MS) return SEND_COOLDOWN_MS - since;
+async function reserveSend(
+  path: string,
+  now: number,
+  capMessage: string
+): Promise<{ waitMs: number } | { reservation: SendReservation }> {
+  const ref = getFirestore().doc(path);
+  return getFirestore().runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const data = snap.data() as
+      | { lastSentAt?: number; dayStart?: number; countToday?: number }
+      | undefined;
 
-  const dayStart = data?.dayStart ?? 0;
-  const sameDay = now - dayStart < 24 * 60 * 60 * 1000;
-  const countToday = sameDay ? (data?.countToday ?? 0) : 0;
-  if (countToday >= SEND_DAILY_CAP) {
-    throw new HttpsError(
-      'resource-exhausted',
-      'Too many verification emails today. Try again tomorrow.'
+    const since = now - (data?.lastSentAt ?? 0);
+    if (data?.lastSentAt && since < SEND_COOLDOWN_MS) return { waitMs: SEND_COOLDOWN_MS - since };
+
+    const dayStart = data?.dayStart ?? 0;
+    const sameDay = now - dayStart < 24 * 60 * 60 * 1000;
+    const countToday = sameDay ? (data?.countToday ?? 0) : 0;
+    if (countToday >= SEND_DAILY_CAP) {
+      throw new HttpsError('resource-exhausted', capMessage);
+    }
+
+    tx.set(
+      ref,
+      { lastSentAt: now, dayStart: sameDay ? dayStart : now, countToday: countToday + 1 },
+      { merge: true }
     );
-  }
+    return { reservation: { ref, reservedAt: now, priorLastSentAt: data?.lastSentAt ?? null } };
+  });
+}
 
-  await ref.set(
-    { lastSentAt: now, dayStart: sameDay ? dayStart : now, countToday: countToday + 1 },
-    { merge: true }
-  );
-  return 0;
+/**
+ * Gives the cooldown back after an attempt that sent nothing, so the member's
+ * retry is not refused as too soon. Only if the reservation is still the
+ * latest one (nothing reserved after it); the daily count is kept. Best effort:
+ * a failed release leaves the ordinary cooldown, never a bypass.
+ */
+async function releaseSend(r: SendReservation): Promise<void> {
+  try {
+    await getFirestore().runTransaction(async (tx) => {
+      const snap = await tx.get(r.ref);
+      if ((snap.data() as { lastSentAt?: number } | undefined)?.lastSentAt !== r.reservedAt) return;
+      tx.update(r.ref, { lastSentAt: r.priorLastSentAt ?? FieldValue.delete() });
+    });
+  } catch {
+    // Nothing to log that is safe and useful; the cooldown simply stands.
+  }
+}
+
+/** The Firebase error code of an Admin SDK failure, or '' — never its message, which can name the address. */
+function adminErrorCode(e: unknown): string {
+  return typeof e === 'object' && e && 'code' in e ? String((e as { code?: unknown }).code ?? '') : '';
+}
+
+/**
+ * POST to the provider. Resolves to the HTTP status, or 0 when the request
+ * itself failed — an AMBIGUOUS outcome: the provider may have accepted the POST
+ * before the client saw the reset or timeout, so it is never proof that nothing
+ * was sent.
+ */
+async function postToProvider(config: SendConfig, body: Record<string, unknown>): Promise<number> {
+  try {
+    const res = await fetch(RESEND_ENDPOINT, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${config.apiKey}`, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return res.ok ? 200 : res.status || 0;
+  } catch {
+    return 0;
+  }
 }
 
 export const wsfSendVerificationEmail = onCall(
@@ -412,6 +542,7 @@ export const wsfSendVerificationEmail = onCall(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     // The address comes from the token. Never from the caller.
     const email = request.auth.token.email;
     if (typeof email !== 'string' || !email) {
@@ -424,40 +555,66 @@ export const wsfSendVerificationEmail = onCall(
 
     const config = readSendConfig();
 
-    const waitMs = await checkSendQuota(request.auth.uid, Date.now());
-    if (waitMs > 0) {
+    const quota = await reserveSend(
+      `wsfVerificationSends/${request.auth.uid}`,
+      Date.now(),
+      'Too many verification emails today. Try again tomorrow.'
+    );
+    if ('waitMs' in quota) {
       throw new HttpsError(
         'resource-exhausted',
-        `Please wait ${Math.ceil(waitMs / 1000)}s before requesting another email.`
+        `Please wait ${Math.ceil(quota.waitMs / 1000)}s before requesting another email.`
       );
     }
 
-    const minted = await getAuth().generateEmailVerificationLink(email, {
-      url: config.appUrl,
-      handleCodeInApp: false,
-    });
-    const link = retargetActionLink(minted, config.actionHandler);
+    let minted: string;
+    try {
+      minted = await getAuth().generateEmailVerificationLink(email, {
+        url: config.appUrl,
+        handleCodeInApp: false,
+      });
+    } catch (e) {
+      // Was uncaught: the code never reached the logs as a classified fault and
+      // the quota stayed spent. The code only — the message can name the address.
+      console.error('[wsfSendVerificationEmail] Admin SDK failed', adminErrorCode(e) || 'unknown');
+      await releaseSend(quota.reservation);
+      throw new HttpsError('internal', 'Could not send the verification email. Try again shortly.');
+    }
+    let link: string;
+    try {
+      link = retargetActionLink(minted, config.actionHandler);
+    } catch {
+      // A definite pre-provider failure (an unparseable minted link): nothing
+      // was sent, so the reservation is given back. Never log the link.
+      console.error('[wsfSendVerificationEmail] action link unusable');
+      await releaseSend(quota.reservation);
+      throw new HttpsError('internal', 'Could not send the verification email. Try again shortly.');
+    }
 
-    const res = await fetch(RESEND_ENDPOINT, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${config.apiKey}`, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        from: config.from,
-        to: [email],
-        subject: 'Confirm your email for We Stay Fit',
-        text: [
-          'Confirm your email address to finish setting up your We Stay Fit account.',
-          '',
-          link,
-          '',
-          'If you did not create this account, you can ignore this message.',
-        ].join('\n'),
-      }),
+    const status = await postToProvider(config, {
+      from: config.from,
+      to: [email],
+      subject: 'Confirm your email for We Stay Fit',
+      text: [
+        'Confirm your email address to finish setting up your We Stay Fit account.',
+        '',
+        link,
+        '',
+        'If you did not create this account, you can ignore this message.',
+      ].join('\n'),
     });
 
-    if (!res.ok) {
-      // The response body can echo the recipient; log the status only.
-      console.error('[wsfSendVerificationEmail] provider rejected send', res.status);
+    if (status === 0) {
+      // Ambiguous: the provider may have accepted it. Keep the cooldown, so an
+      // immediate retry cannot send a second copy.
+      console.error('[wsfSendVerificationEmail] provider outcome unknown');
+      throw new HttpsError('internal', 'Could not send the verification email. Try again shortly.');
+    }
+    if (status !== 200) {
+      // A definite rejection: nothing was sent. The response body can echo the
+      // recipient; log the status only.
+      console.error('[wsfSendVerificationEmail] provider rejected send', status);
+      await releaseSend(quota.reservation);
       throw new HttpsError('internal', 'Could not send the verification email. Try again shortly.');
     }
 
@@ -489,14 +646,19 @@ export const wsfSendVerificationEmail = onCall(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * §5 open decision: does joining require a verified email?
+ * §5 decision: does joining require a verified email?
  *
- * Default TRUE (safe, consistent with wsfCreateCommunity, protects the aggregate
- * counter from throwaway signups). Flipping to false trades the booth funnel
- * for that safety — the decision is Devin's. The guard is exactly one line so
- * that answer is one line, per §5.
+ * DECIDED: NO, for ordinary participants (KIOSK-UNVERIFIED-PARTICIPANT-1, owner
+ * policy #365 6041359966). An authenticated account with an unverified address
+ * may join through a valid public or invite link, or an approved marker, and
+ * then take part like any member. Every other admission control is untouched:
+ * a real Firebase account and a saved profile are still required, the link or
+ * marker must still be valid for a link-joinable active community, removed
+ * stays refused, and an unknown code is the same generic not-found. Verifying
+ * later keeps the same uid, membership and credit. Organizer callables keep
+ * their own verification gates. This is still the one line the policy turns on.
  */
-const JOIN_REQUIRES_EMAIL_VERIFIED = true;
+const JOIN_REQUIRES_EMAIL_VERIFIED = false;
 
 function assertJoinEmailVerified(token: { email_verified?: boolean }): void {
   if (JOIN_REQUIRES_EMAIL_VERIFIED && token.email_verified !== true) {
@@ -664,12 +826,104 @@ export const wsfPreviewCommunity = onCall<PreviewRequest>(
 type JoinRequest = { joinCode?: unknown };
 type JoinResponse = { groupId: string; alreadyMember: boolean };
 
+/**
+ * THE SHARED JOIN CORE: what a valid public link does once it has named a
+ * community. Extracted unchanged from wsfJoinCommunity (EVERGREEN-MARKER-ENTRY-1)
+ * so the evergreen marker join applies exactly the same admission rules —
+ * active member returns, removed stays refused, departed is reactivated only
+ * through a link-joinable active community, and a new membership has the same
+ * shape. The caller has already read the profile and the community inside `tx`.
+ */
+async function admitByLinkTx(
+  tx: FirebaseFirestore.Transaction,
+  groupId: string,
+  group: { joinPolicy: JoinPolicy; lifecycleStatus: string },
+  uid: string
+): Promise<JoinResponse> {
+  const membershipRef = getFirestore().doc(`wsfMemberships/${groupId}_${uid}`);
+  const membershipSnap = await tx.get(membershipRef);
+
+  // D3. This branch used to return before any policy check and WITHOUT
+  // consulting membershipStatus. Once a non-active value can be written,
+  // that would have routed a removed person straight back in on an old
+  // link. Each state now has a stated answer.
+  //
+  // Note the ordering that is deliberately preserved: the caller's code
+  // lookup already returned notFound() for an unknown — including a RESET —
+  // code before membership is read. So a reset code is unknown to
+  // everyone, members included (D1 wins over this grandfathering), and the
+  // code space stays unguessable.
+  if (membershipSnap.exists) {
+    const existing = membershipSnap.data() as { membershipStatus?: string };
+    const status = existing.membershipStatus;
+
+    // ACTIVE MEMBER — the legitimate purpose of this branch. A returning
+    // tap on the CURRENT link resolves, and the membership is neither
+    // re-created nor duplicated, even if the Champion has since flipped
+    // the policy or the lifecycle.
+    if (status === MEMBERSHIP_ACTIVE) {
+      return { groupId, alreadyMember: true };
+    }
+
+    // REMOVED — a general link never reactivates a removed membership.
+    // The response is the same notFound() an unknown code gets, so it
+    // discloses nothing about the community's current state, its name, or
+    // even that this person was once a member. Reinstatement is an
+    // explicit Champion action (wsfReinstateMember).
+    if (status === MEMBERSHIP_REMOVED) {
+      notFound();
+    }
+
+    // VOLUNTARILY DEPARTED — not banned. They come back the ordinary way,
+    // so the normal admission rules below must pass: a valid link to a
+    // link-joinable community on an active lifecycle. If those pass, the
+    // existing record is reactivated rather than duplicated.
+    if (status === MEMBERSHIP_DEPARTED) {
+      if (!LINK_JOINABLE.has(group.joinPolicy) || group.lifecycleStatus !== 'active') {
+        notFound();
+      }
+      tx.set(
+        membershipRef,
+        {
+          membershipStatus: MEMBERSHIP_ACTIVE,
+          rejoinedAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+      return { groupId, alreadyMember: false };
+    }
+
+    // Any other stored value is not a state this code understands, and
+    // guessing would be the wrong instinct for an admission decision.
+    notFound();
+  }
+
+  if (!LINK_JOINABLE.has(group.joinPolicy) || group.lifecycleStatus !== 'active') {
+    notFound();
+  }
+
+  // Membership shape matches wsfCreateCommunity's exactly (see §2). Role
+  // is 'member' rather than 'foundingChampion' — a joiner is not the
+  // creator.
+  tx.set(membershipRef, {
+    groupId,
+    userId: uid,
+    role: 'member',
+    membershipStatus: 'active',
+    createdAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+  return { groupId, alreadyMember: false };
+}
+
 export const wsfJoinCommunity = onCall<JoinRequest>(
   { region: 'us-central1' },
   async (request): Promise<JoinResponse> => {
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     assertJoinEmailVerified(request.auth.token as { email_verified?: boolean });
 
     const uid = request.auth.uid;
@@ -703,82 +957,313 @@ export const wsfJoinCommunity = onCall<JoinRequest>(
       const groupDoc = groupsSnap.docs[0]!;
       const group = groupDoc.data() as { joinPolicy: JoinPolicy; lifecycleStatus: string };
 
-      const membershipRef = db.doc(`wsfMemberships/${groupDoc.id}_${uid}`);
-      const membershipSnap = await tx.get(membershipRef);
-
-      // D3. This branch used to return before any policy check and WITHOUT
-      // consulting membershipStatus. Once a non-active value can be written,
-      // that would have routed a removed person straight back in on an old
-      // link. Each state now has a stated answer.
-      //
-      // Note the ordering that is deliberately preserved: the code lookup
-      // above already returned notFound() for an unknown — including a RESET —
-      // code before membership is read. So a reset code is unknown to
-      // everyone, members included (D1 wins over this grandfathering), and the
-      // code space stays unguessable.
-      if (membershipSnap.exists) {
-        const existing = membershipSnap.data() as { membershipStatus?: string };
-        const status = existing.membershipStatus;
-
-        // ACTIVE MEMBER — the legitimate purpose of this branch. A returning
-        // tap on the CURRENT link resolves, and the membership is neither
-        // re-created nor duplicated, even if the Champion has since flipped
-        // the policy or the lifecycle.
-        if (status === MEMBERSHIP_ACTIVE) {
-          return { groupId: groupDoc.id, alreadyMember: true };
-        }
-
-        // REMOVED — a general link never reactivates a removed membership.
-        // The response is the same notFound() an unknown code gets, so it
-        // discloses nothing about the community's current state, its name, or
-        // even that this person was once a member. Reinstatement is an
-        // explicit Champion action (wsfReinstateMember).
-        if (status === MEMBERSHIP_REMOVED) {
-          notFound();
-        }
-
-        // VOLUNTARILY DEPARTED — not banned. They come back the ordinary way,
-        // so the normal admission rules below must pass: a valid link to a
-        // link-joinable community on an active lifecycle. If those pass, the
-        // existing record is reactivated rather than duplicated.
-        if (status === MEMBERSHIP_DEPARTED) {
-          if (!LINK_JOINABLE.has(group.joinPolicy) || group.lifecycleStatus !== 'active') {
-            notFound();
-          }
-          tx.set(
-            membershipRef,
-            {
-              membershipStatus: MEMBERSHIP_ACTIVE,
-              rejoinedAt: FieldValue.serverTimestamp(),
-              updatedAt: FieldValue.serverTimestamp(),
-            },
-            { merge: true }
-          );
-          return { groupId: groupDoc.id, alreadyMember: false };
-        }
-
-        // Any other stored value is not a state this code understands, and
-        // guessing would be the wrong instinct for an admission decision.
-        notFound();
-      }
-
-      if (!LINK_JOINABLE.has(group.joinPolicy) || group.lifecycleStatus !== 'active') {
-        notFound();
-      }
-
-      // Membership shape matches wsfCreateCommunity's exactly (see §2). Role
-      // is 'member' rather than 'foundingChampion' — a joiner is not the
-      // creator.
-      tx.set(membershipRef, {
-        groupId: groupDoc.id,
-        userId: uid,
-        role: 'member',
-        membershipStatus: 'active',
-        createdAt: FieldValue.serverTimestamp(),
-        updatedAt: FieldValue.serverTimestamp(),
-      });
-      return { groupId: groupDoc.id, alreadyMember: false };
+      return await admitByLinkTx(tx, groupDoc.id, group, uid);
     });
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EVERGREEN-MARKER-ENTRY-1 (phase A) — the physical-marker alias.
+//
+// A reusable printed QR carries only `https://westay.fit/go/{markerSlug}`. The
+// slug names a `wsfMarkers/{markerSlug}` document that points at ONE community
+// and ONE goal; repointing the marker changes that document and never a goal,
+// so an old goal link keeps exactly what it meant.
+//
+// THIS PHASE NEVER WRITES A MARKER. No callable here creates or edits
+// `wsfMarkers`; the documents are read-only to it (emulator fixtures in the
+// suite). Who may repoint a marker is an open owner/security decision and is
+// deliberately not invented here.
+//
+// The collection is Admin-SDK only: the client rules catch-all denies it, so
+// the app reaches it solely through these two callables.
+//
+// A marker is a PUBLIC LINK, so it is exactly as strong as the community's own
+// public join link and no stronger: a community that is not link-joinable or
+// not active resolves as not-found, the same as an unknown slug. Nothing in a
+// response names a join code, a member, a count or a scan.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const MARKER_KIOSK_MODES = ['off', 'available', 'queue'] as const;
+type MarkerKioskMode = (typeof MARKER_KIOSK_MODES)[number];
+
+/** The phase-A marker document: only what resolving the journey needs. */
+type MarkerDoc = {
+  label: string;
+  active: boolean;
+  communityGroupId: string;
+  goalId: string;
+  kioskMode: MarkerKioskMode;
+};
+
+/**
+ * Lowercase letters, digits and inner hyphens, at most 48 characters — the
+ * shape of `flag-01`. Printed URLs are typed back in by hand, so case is
+ * folded; anything else cannot be a slug and never reaches a document read.
+ */
+function normalizeMarkerSlug(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  const slug = v.trim().toLowerCase();
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?$/.test(slug)) return null;
+  return slug;
+}
+
+/** A stored marker is trusted only when every field has its exact shape. */
+function readMarkerDoc(data: unknown): MarkerDoc | null {
+  if (!data || typeof data !== 'object') return null;
+  const d = data as Record<string, unknown>;
+  if (d.active !== true) return null;
+  if (typeof d.label !== 'string' || d.label.trim().length === 0 || d.label.length > 80) return null;
+  const communityGroupId = normalizeStringId(d.communityGroupId);
+  const goalId = normalizeStringId(d.goalId);
+  if (!communityGroupId || !goalId) return null;
+  if (!MARKER_KIOSK_MODES.includes(d.kioskMode as MarkerKioskMode)) return null;
+  return {
+    label: d.label.trim(),
+    active: true,
+    communityGroupId,
+    goalId,
+    kioskMode: d.kioskMode as MarkerKioskMode,
+  };
+}
+
+type MarkerGoalState = 'open' | 'upcoming' | 'ended' | 'closed';
+
+/**
+ * The goal's TRUTHFUL state for a visitor, using the same server-time window
+ * wsfContribute enforces (startsAt inclusive, endsAt exclusive). A goal that is
+ * still `active` but whose window has passed is 'ended', never 'open'.
+ */
+function markerGoalState(goal: GoalDoc, nowMs: number): MarkerGoalState {
+  if (goal.status !== 'active') return 'closed';
+  if (nowMs < goal.startsAt.toMillis()) return 'upcoming';
+  if (nowMs >= goal.endsAt.toMillis()) return 'ended';
+  return 'open';
+}
+
+type ResolvedMarker = {
+  marker: MarkerDoc;
+  group: { displayName: string; joinPolicy: JoinPolicy; lifecycleStatus: string };
+  goal: GoalDoc;
+};
+
+/**
+ * Resolve a slug to its marker, community and goal, or fail closed with the
+ * generic not-found. Every refusal is the same: unknown slug, inactive or
+ * malformed marker, a community that is missing, not link-joinable or not
+ * active, and a goal that is missing or belongs to another community.
+ */
+async function resolveMarkerTx(
+  tx: FirebaseFirestore.Transaction,
+  slug: string
+): Promise<ResolvedMarker> {
+  const db = getFirestore();
+  const markerSnap = await tx.get(db.doc(`wsfMarkers/${slug}`));
+  if (!markerSnap.exists) notFound();
+  const marker = readMarkerDoc(markerSnap.data());
+  if (!marker) notFound();
+  const [groupSnap, goalSnap] = await Promise.all([
+    tx.get(db.doc(`wsfCommunityGroups/${marker.communityGroupId}`)),
+    tx.get(db.doc(`wsfGoals/${marker.goalId}`)),
+  ]);
+  if (!groupSnap.exists || !goalSnap.exists) notFound();
+  const group = groupSnap.data() as ResolvedMarker['group'];
+  if (!LINK_JOINABLE.has(group.joinPolicy) || group.lifecycleStatus !== 'active') notFound();
+  const goal = goalSnap.data() as GoalDoc;
+  if (goal.communityGroupId !== marker.communityGroupId) notFound();
+  return { marker, group, goal };
+}
+
+type ResolveMarkerRequest = { markerSlug?: unknown };
+type ResolveMarkerResponse = {
+  markerSlug: string;
+  label: string;
+  communityName: string;
+  goalId: string;
+  goalTitle: string;
+  goalState: MarkerGoalState;
+  kioskMode: MarkerKioskMode;
+  viewer: 'signedOut' | 'nonMember' | 'member';
+  /** Only for an active member, who can already read their community. */
+  communityGroupId: string | null;
+};
+
+export const wsfResolveMarker = onCall<ResolveMarkerRequest>(
+  // Public so a signed-out visitor standing at the flag can see what the code
+  // opens before any account step — the same posture, and the same per-IP
+  // bucket, as wsfPreviewCommunity. No-op in the emulator.
+  { region: 'us-central1', invoker: 'public' },
+  async (request): Promise<ResolveMarkerResponse> => {
+    const ip = extractIp(request.rawRequest as any);
+    // Rate limit FIRST, before any slug lookup.
+    await enforcePreviewRateLimit(ip, Date.now());
+
+    const slug = normalizeMarkerSlug(request.data?.markerSlug);
+    if (!slug) notFound();
+
+    const db = getFirestore();
+    const uid = optionalRealUid(request);
+    return await db.runTransaction(async (tx) => {
+      const { marker, group, goal } = await resolveMarkerTx(tx, slug);
+      const membership = uid ? await readActiveMembership(tx, marker.communityGroupId, uid) : null;
+      const viewer: ResolveMarkerResponse['viewer'] =
+        uid === null ? 'signedOut' : membership ? 'member' : 'nonMember';
+      return {
+        markerSlug: slug,
+        label: marker.label,
+        communityName: group.displayName,
+        goalId: marker.goalId,
+        goalTitle: goal.title,
+        goalState: markerGoalState(goal, Date.now()),
+        kioskMode: marker.kioskMode,
+        viewer,
+        communityGroupId: viewer === 'member' ? marker.communityGroupId : null,
+      };
+    });
+  }
+);
+
+type JoinViaMarkerRequest = { markerSlug?: unknown };
+type JoinViaMarkerResponse = { groupId: string; goalId: string; alreadyMember: boolean };
+
+export const wsfJoinViaMarker = onCall<JoinViaMarkerRequest>(
+  { region: 'us-central1' },
+  async (request): Promise<JoinViaMarkerResponse> => {
+    // The same gates, in the same order, as wsfJoinCommunity.
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Sign in first.');
+    }
+    requireRealIdentity(request);
+    assertJoinEmailVerified(request.auth.token as { email_verified?: boolean });
+
+    const uid = request.auth.uid;
+    const slug = normalizeMarkerSlug(request.data?.markerSlug);
+    if (!slug) notFound();
+
+    const db = getFirestore();
+    const profileRef = db.doc(`wsfMemberProfiles/${uid}`);
+    return await db.runTransaction(async (tx) => {
+      const profileSnap = await tx.get(profileRef);
+      if (!profileSnap.exists) {
+        throw new HttpsError(
+          'failed-precondition',
+          'Complete your profile before joining a community.'
+        );
+      }
+      // The marker is re-resolved inside THIS transaction, so a marker
+      // repointed or disabled between the visitor's scan and their tap admits
+      // them to nothing it no longer names.
+      const { marker, group } = await resolveMarkerTx(tx, slug);
+      const joined = await admitByLinkTx(tx, marker.communityGroupId, group, uid);
+      return { ...joined, goalId: marker.goalId };
+    });
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// wsfPublicPreviewLabel (MEMBER-TRUTH-BACKEND-1 B) — the two labels an
+// internet link preview may show, or nothing.
+//
+// A shared link's unfurl (iMessage, Slack, WhatsApp, a server-rendered head)
+// is a stranger reading a goal. The ONLY permission that covers it is the one
+// a Champion already gives per goal for exactly this audience:
+// `aggregateDisplayAuthorized === true`, through the same evaluator and the
+// same sample suppression `wsfGoalPulse` uses — which already publishes these
+// same two labels to anyone holding the goal id. Nothing here widens that.
+//
+// What does NOT publish a label: a community's join policy or link
+// admission, possession of a link or marker, discoverability, membership, or
+// a marker pointing at the goal. A marker is resolved only to find its goal;
+// the goal's own authorization still decides.
+//
+// ONE DENIAL SHAPE. Missing, false or malformed authorization, an unknown
+// goal, a bad, inactive or repointed marker, a sample community, a community
+// id on its own, two ids at once, anything malformed — all return the same
+// `{visibility:'none'}`, so the answer is never an existence oracle. It never
+// throws not-found. Only the per-IP rate limit answers differently, and it
+// fires before any lookup, so it says nothing about any goal.
+//
+// The labels are trimmed and capped at 60 characters. `maxAgeSeconds` is the
+// longest a consumer may cache EITHER answer, so a revocation or a repoint is
+// honoured within a minute; a goal's own id never changes meaning.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const PREVIEW_LABEL_MAX = 60;
+const PREVIEW_LABEL_MAX_AGE_SECONDS = 60;
+
+type PublicPreviewLabelRequest = { goalId?: unknown; markerSlug?: unknown };
+type PublicPreviewLabelResponse =
+  | { visibility: 'public'; communityName: string; goalTitle: string; maxAgeSeconds: number }
+  | { visibility: 'none'; maxAgeSeconds: number };
+
+function previewLabel(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (trimmed === '') return null;
+  return trimmed.slice(0, PREVIEW_LABEL_MAX).trim();
+}
+
+async function resolvePublicPreviewLabel(
+  data: PublicPreviewLabelRequest
+): Promise<PublicPreviewLabelResponse> {
+  const none: PublicPreviewLabelResponse = { visibility: 'none', maxAgeSeconds: PREVIEW_LABEL_MAX_AGE_SECONDS };
+  const db = getFirestore();
+  const hasGoal = data.goalId !== undefined;
+  const hasMarker = data.markerSlug !== undefined;
+  // Exactly one target. There is no community-only lookup.
+  if (hasGoal === hasMarker) return none;
+
+  let goalId: string | null = null;
+  let markerCommunityId: string | null = null;
+  if (hasMarker) {
+    const slug = normalizeMarkerSlug(data.markerSlug);
+    if (!slug) return none;
+    const markerSnap = await db.doc(`wsfMarkers/${slug}`).get();
+    const marker = markerSnap.exists ? readMarkerDoc(markerSnap.data()) : null;
+    if (!marker) return none;
+    goalId = marker.goalId;
+    markerCommunityId = marker.communityGroupId;
+  } else {
+    goalId = normalizeStringId(data.goalId);
+  }
+  if (!goalId) return none;
+
+  const goalSnap = await db.doc(`wsfGoals/${goalId}`).get();
+  if (!goalSnap.exists) return none;
+  const goal = goalSnap.data() as GoalDoc;
+  // A marker must point at a goal of the community it names.
+  if (markerCommunityId !== null && goal.communityGroupId !== markerCommunityId) return none;
+  if (!isAggregateDisplayAuthorized(goal)) return none;
+
+  // The display route, with no caller: sample suppression and the
+  // community's display name come from the same evaluator wsfGoalPulse uses.
+  const access = await evaluateGoalAggregateAccess(goal, null);
+  if (!access.allowed || !access.asDisplay) return none;
+  const communityName = previewLabel(access.communityDisplayName);
+  const goalTitle = previewLabel(goal.title);
+  if (!communityName || !goalTitle) return none;
+  return { visibility: 'public', communityName, goalTitle, maxAgeSeconds: PREVIEW_LABEL_MAX_AGE_SECONDS };
+}
+
+export const wsfPublicPreviewLabel = onCall<PublicPreviewLabelRequest>(
+  // Public: a link unfurler and a server-rendered head have no account.
+  // No-op in the emulator; enforced by Cloud Run IAM at deploy.
+  { region: 'us-central1', invoker: 'public' },
+  async (request): Promise<PublicPreviewLabelResponse> => {
+    const ip = extractIp(request.rawRequest as any);
+    // Rate limit FIRST, before any lookup, on the shared preview bucket.
+    await enforcePreviewRateLimit(ip, Date.now());
+    const data =
+      request.data && typeof request.data === 'object' && !Array.isArray(request.data)
+        ? (request.data as PublicPreviewLabelRequest)
+        : {};
+    try {
+      return await resolvePublicPreviewLabel(data);
+    } catch {
+      // A read that fails is a denial, never an `internal` that differs from
+      // the denial shape.
+      return { visibility: 'none', maxAgeSeconds: PREVIEW_LABEL_MAX_AGE_SECONDS };
+    }
   }
 );
 
@@ -879,6 +1364,7 @@ export const wsfResetJoinCode = onCall<ResetJoinCodeRequest>(
   { region: 'us-central1' },
   async (request): Promise<ResetJoinCodeResponse> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const groupId = normalizeStringId(request.data?.groupId);
     if (!groupId) throw new HttpsError('invalid-argument', 'groupId is required.');
@@ -954,6 +1440,7 @@ export const wsfRemoveMember = onCall<MembershipActionRequest>(
   { region: 'us-central1' },
   async (request): Promise<MembershipActionResponse> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const groupId = normalizeStringId(request.data?.groupId);
     const targetUid = normalizeStringId(request.data?.targetUid);
@@ -1008,6 +1495,7 @@ export const wsfLeaveCommunity = onCall<LeaveRequest>(
   { region: 'us-central1' },
   async (request): Promise<MembershipActionResponse> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const groupId = normalizeStringId(request.data?.groupId);
     if (!groupId) throw new HttpsError('invalid-argument', 'groupId is required.');
@@ -1059,6 +1547,7 @@ export const wsfReinstateMember = onCall<MembershipActionRequest>(
   { region: 'us-central1' },
   async (request): Promise<MembershipActionResponse> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const groupId = normalizeStringId(request.data?.groupId);
     const targetUid = normalizeStringId(request.data?.targetUid);
@@ -1110,6 +1599,7 @@ export const wsfDesignateChampion = onCall<MembershipActionRequest>(
   { region: 'us-central1' },
   async (request): Promise<MembershipActionResponse & { role: string }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const groupId = normalizeStringId(request.data?.groupId);
     const targetUid = normalizeStringId(request.data?.targetUid);
@@ -1368,6 +1858,7 @@ export const wsfListChallenge = onCall<ListChallengeRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const groupId = normalizeStringId(request.data?.groupId);
     if (!groupId) {
@@ -1512,6 +2003,7 @@ export const wsfCheckIn = onCall<CheckInRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const moveId = normalizeStringId(request.data?.moveId);
     if (!moveId) {
@@ -1691,6 +2183,16 @@ type MyCommunityItem = {
   role: string;
   memberCount: number;
   isSample: boolean;
+  /**
+   * The CALLER'S OWN visibility in this community, so Settings can render what
+   * is stored rather than guess it.
+   *
+   * Safe on this callable precisely because its query is `userId == caller`:
+   * every row it touches is the caller's own. Publishing anybody else's answers
+   * would state more than appearing in the directory already does.
+   */
+  nameVisibility: Vis;
+  activityVisibility: Vis;
   activeChallenge: {
     id: string;
     title: string;
@@ -1708,6 +2210,7 @@ export const wsfMyCommunities = onCall(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const db = getFirestore();
 
@@ -1724,7 +2227,7 @@ export const wsfMyCommunities = onCall(
         const membership = membershipDoc.data() as {
           groupId: string;
           role: string;
-        };
+        } & Record<string, unknown>;
         const groupSnap = await db
           .doc(`wsfCommunityGroups/${membership.groupId}`)
           .get();
@@ -1776,6 +2279,10 @@ export const wsfMyCommunities = onCall(
           role: membership.role,
           memberCount: memberCountSnap.data().count,
           isSample: group.isSample === true,
+          // Resolved through the same three-way rule the social reads use, so
+          // Settings cannot disagree with the directory about what is stored.
+          nameVisibility: resolveVisibility(membership[FIELD_NAME_VIS]),
+          activityVisibility: resolveVisibility(membership[FIELD_ACTIVITY_VIS]),
           activeChallenge,
         };
         return item;
@@ -1827,6 +2334,7 @@ export const wsfChallengePulse = onCall<PulseRequest>(
     // an id can only ever be consulted once the caller is known to be entitled
     // to that id's data.
     if (!request.auth) notFound();
+    requireRealIdentity(request);
     const callerUid = request.auth.uid;
 
     const ip = extractIp(request.rawRequest as any);
@@ -1902,33 +2410,6 @@ export const wsfChallengePulse = onCall<PulseRequest>(
 //     "not set up yet on this build" copy.
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function checkResetQuota(emailKey: string, now: number): Promise<number> {
-  const ref = getFirestore().doc(`wsfPasswordResetSends/${emailKey}`);
-  const snap = await ref.get();
-  const data = snap.data() as
-    | { lastSentAt?: number; dayStart?: number; countToday?: number }
-    | undefined;
-
-  const since = now - (data?.lastSentAt ?? 0);
-  if (data?.lastSentAt && since < SEND_COOLDOWN_MS) return SEND_COOLDOWN_MS - since;
-
-  const dayStart = data?.dayStart ?? 0;
-  const sameDay = now - dayStart < 24 * 60 * 60 * 1000;
-  const countToday = sameDay ? (data?.countToday ?? 0) : 0;
-  if (countToday >= SEND_DAILY_CAP) {
-    throw new HttpsError(
-      'resource-exhausted',
-      'Too many password reset requests today. Try again tomorrow.'
-    );
-  }
-
-  await ref.set(
-    { lastSentAt: now, dayStart: sameDay ? dayStart : now, countToday: countToday + 1 },
-    { merge: true }
-  );
-  return 0;
-}
-
 function normalizeResetEmail(v: unknown): string | null {
   if (typeof v !== 'string') return null;
   const trimmed = v.trim().toLowerCase();
@@ -1963,11 +2444,15 @@ export const wsfSendPasswordResetEmail = onCall<SendPasswordResetRequest>(
     const config = readSendConfig();
 
     const emailKey = hashEmailForQuota(email);
-    const waitMs = await checkResetQuota(emailKey, Date.now());
-    if (waitMs > 0) {
+    const quota = await reserveSend(
+      `wsfPasswordResetSends/${emailKey}`,
+      Date.now(),
+      'Too many password reset requests today. Try again tomorrow.'
+    );
+    if ('waitMs' in quota) {
       throw new HttpsError(
         'resource-exhausted',
-        `Please wait ${Math.ceil(waitMs / 1000)}s before requesting another reset.`
+        `Please wait ${Math.ceil(quota.waitMs / 1000)}s before requesting another reset.`
       );
     }
 
@@ -1977,14 +2462,12 @@ export const wsfSendPasswordResetEmail = onCall<SendPasswordResetRequest>(
         url: config.appUrl,
       });
     } catch (e) {
-      const code =
-        typeof e === 'object' && e && 'code' in e
-          ? String((e as { code?: unknown }).code ?? '')
-          : '';
+      const code = adminErrorCode(e);
       // Unknown email is the whole enumeration case: return the SAME success
-      // shape the happy path returns. auth/invalid-email is folded in for the
-      // same reason — the client shouldn't be able to distinguish "you typed
-      // it wrong" from "not on file".
+      // shape the happy path returns, and KEEP the reservation exactly as a
+      // real send does — releasing it only here would make the quota write
+      // pattern an account-existence signal. auth/invalid-email is folded in
+      // for the same reason.
       if (
         code === 'auth/user-not-found' ||
         code === 'auth/email-not-found' ||
@@ -1992,44 +2475,72 @@ export const wsfSendPasswordResetEmail = onCall<SendPasswordResetRequest>(
       ) {
         return { accepted: true };
       }
-      // Anything else is a real fault. Log the code only, never the address.
+      // Anything else is a real fault. Log the code only, never the address,
+      // then answer exactly as for an unknown address (see resetFailed).
       console.error('[wsfSendPasswordResetEmail] Admin SDK failed', code || 'unknown');
-      throw new HttpsError('internal', 'Could not send the reset email. Try again shortly.');
+      return resetFailed();
     }
 
-    const link = retargetActionLink(minted, config.actionHandler);
+    let link: string;
+    try {
+      link = retargetActionLink(minted, config.actionHandler);
+    } catch {
+      // A definite pre-provider failure (an unparseable minted link). Never
+      // log the link.
+      console.error('[wsfSendPasswordResetEmail] action link unusable');
+      return resetFailed();
+    }
 
-    const res = await fetch(RESEND_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${config.apiKey}`,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        from: config.from,
-        to: [email],
-        subject: 'Reset your We Stay Fit password',
-        text: [
-          'Someone asked to reset the password for your We Stay Fit account.',
-          '',
-          'Open this link to choose a new password. The link expires in an hour.',
-          '',
-          link,
-          '',
-          'If you did not ask for a reset, you can ignore this message.',
-        ].join('\n'),
-      }),
+    const status = await postToProvider(config, {
+      from: config.from,
+      to: [email],
+      subject: 'Reset your We Stay Fit password',
+      text: [
+        'Someone asked to reset the password for your We Stay Fit account.',
+        '',
+        'Open this link to choose a new password. The link expires in an hour.',
+        '',
+        link,
+        '',
+        'If you did not ask for a reset, you can ignore this message.',
+      ].join('\n'),
     });
 
-    if (!res.ok) {
-      // The provider response body can echo the recipient; log the status only.
-      console.error('[wsfSendPasswordResetEmail] provider rejected send', res.status);
-      throw new HttpsError('internal', 'Could not send the reset email. Try again shortly.');
+    if (status === 0) {
+      // Ambiguous: the provider may have accepted it.
+      console.error('[wsfSendPasswordResetEmail] provider outcome unknown');
+      return resetFailed();
+    }
+    if (status !== 200) {
+      // A definite rejection. The provider response body can echo the
+      // recipient; log the status only.
+      console.error('[wsfSendPasswordResetEmail] provider rejected send', status);
+      return resetFailed();
     }
 
     return { accepted: true };
   }
 );
+
+/**
+ * EMAIL-STAGING-REPAIR, W9 R1 (Director #365 5964370581). The reset callable
+ * is public, so every answer after the reservation must be one an unknown
+ * address could also get. A known address whose send failed downstream (Admin
+ * link minting, an unusable link, a provider rejection or an ambiguous
+ * transport failure) used to answer `internal` while an unknown address
+ * answered `{accepted: true}`: while the provider is failing, that split names
+ * which addresses have accounts. So a failed send answers exactly as an
+ * unknown address does: the same `{accepted: true}`, and the reservation KEPT
+ * as the unknown path keeps it. Releasing it here would let the immediate
+ * retry succeed where an unknown address's retry is refused as too soon, which
+ * is the same oracle one request later. The failure is still classified in the
+ * server log (code or status only, never the address), and still counts
+ * toward the daily cap. Verification is token-bound (its caller is the
+ * account), so it keeps its truthful `internal` and its release.
+ */
+function resetFailed(): SendPasswordResetResponse {
+  return { accepted: true };
+}
 
 // ═════════════════════════════════════════════════════════════════════════════
 // E4-A1 — Goals + Contributions (quantitative shared totals).
@@ -2265,6 +2776,50 @@ function goalRepeatPolicy(goal: Pick<GoalDoc, 'repeatPolicy'>): GoalRepeatPolicy
   if (raw === undefined || raw === null) return 'multiple';
   if (raw === 'multiple') return 'multiple';
   return 'once';
+}
+
+/**
+ * The one sentence a member is given when a goal that takes one contribution
+ * from each member already holds theirs. The contribution says it, and so does
+ * the turn line's door (wsfJoinTurnLine, KIOSK-TURN-LIFECYCLE-1): one constant,
+ * so the two can never say it differently.
+ */
+const ONE_CONTRIBUTION_MESSAGE =
+  'This goal takes one contribution from each member, and yours is already recorded.';
+
+/**
+ * How many contributions this member already has recorded on this goal, read
+ * INSIDE the caller's transaction, or null when nothing says.
+ *
+ * The evidence is the member's own totals document, wsfGoalMemberTotals/
+ * {goalId}_{uid}, which the caller has already read: a document read, not a
+ * query, so two transactions racing two different attemptIds contend on it
+ * and exactly one commits. Rows written before contributionCount existed carry
+ * no count, and their total is not proof either way (wsfAdjustGoal can move a
+ * total with no contribution behind it), so the ledger itself is asked, and
+ * only for those rows: 1 if it holds one, else 0. A member with no totals
+ * document has nothing recorded, because every contribution write creates one.
+ *
+ * Shared by performContribution's repeat-policy gate and wsfJoinTurnLine, so
+ * "already recorded" is one rule wherever it is asked.
+ */
+async function priorContributionCount(
+  tx: FirebaseFirestore.Transaction,
+  goalId: string,
+  uid: string,
+  memberTotalSnap: FirebaseFirestore.DocumentSnapshot
+): Promise<number | null> {
+  const prior = memberTotalSnap.data() as { contributionCount?: number } | undefined;
+  if (typeof prior?.contributionCount === 'number') return prior.contributionCount;
+  if (!memberTotalSnap.exists) return null;
+  const ledger = await tx.get(
+    getFirestore()
+      .collection('wsfContributions')
+      .where('goalId', '==', goalId)
+      .where('userId', '==', uid)
+      .limit(1)
+  );
+  return ledger.empty ? 0 : 1;
 }
 
 /**
@@ -2616,6 +3171,7 @@ export const wsfCreateGoal = onCall<CreateGoalRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const token = request.auth.token as { email_verified?: boolean };
     if (token.email_verified !== true) {
       throw new HttpsError(
@@ -3262,6 +3818,7 @@ export const wsfContribute = onCall<ContributeRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     // THE ONE CANONICAL CONTRIBUTION. Everything that used to stand here
     // still stands, unchanged and in the same order, in performContribution
     // below: the same normalizations and the same messages, the same
@@ -3305,11 +3862,28 @@ export const wsfContribute = onCall<ContributeRequest>(
  * door: whatever asks for a contribution passes the same three checks, in the
  * same order, with the same three messages.
  */
+/**
+ * KIOSK-EXPECTED-TURN-1. A turn completion rides INSIDE the contribution
+ * transaction, so "is this turn still the one being finished?" and "record the
+ * attempt" are one atomic decision: a cancel, a reassignment or a second
+ * completion that commits first is seen here, and never after the fact.
+ *
+ * `read` runs after the contribution's own reads and before any write; it may
+ * throw an HttpsError to refuse, which writes nothing. `write` runs in the same
+ * transaction after the contribution's writes (or on a replay, instead of
+ * them) and receives what was recorded.
+ */
+type TurnCompletionHook = {
+  read(tx: FirebaseFirestore.Transaction, contributionExists: boolean): Promise<void>;
+  write(tx: FirebaseFirestore.Transaction, outcome: { amount: number; unit: string }): void;
+};
+
 async function performContribution(args: {
   uid: string;
   goalId: unknown;
   attemptId: unknown;
   count: unknown;
+  turn?: TurnCompletionHook;
 }): Promise<ContributeResponse> {
   const uid = args.uid;
 
@@ -3388,6 +3962,10 @@ async function performContribution(args: {
           tx.get(claimRef),
         ]);
 
+      // The turn this contribution finishes, if any, is checked here — after
+      // the contribution's own reads, before any write.
+      if (args.turn) await args.turn.read(tx, contribSnap.exists);
+
       // Idempotency wins over closure, window end, AND membership drift.
       // A member who already succeeded must never see "you did the reps,
       // we say you didn't" — even if the goal has since closed, the window
@@ -3414,6 +3992,12 @@ async function performContribution(args: {
         const replayMembership = membershipSnap.exists
           ? (membershipSnap.data() as { membershipStatus?: string })
           : null;
+        if (args.turn) {
+          args.turn.write(tx, {
+            amount: typeof prev.count === 'number' ? prev.count : 0,
+            unit: typeof goal.unit === 'string' ? goal.unit : '',
+          });
+        }
         return {
           addedCount: typeof prev.count === 'number' ? prev.count : 0,
           alreadyRecorded: true as const,
@@ -3491,31 +4075,18 @@ async function performContribution(args: {
         | undefined;
       const previousMemberTotal =
         typeof priorMemberTotal?.total === 'number' ? priorMemberTotal.total : 0;
-      // Rows written before contributionCount existed carry no count. Their
-      // total is not proof either way — wsfAdjustGoal can move a total
-      // without any contribution behind it — so the ledger itself is asked,
-      // and only for those rows. A member with no totals document at all has
-      // nothing recorded: the contribution write below always creates one.
-      let previousContributionCount: number | null =
-        typeof priorMemberTotal?.contributionCount === 'number'
-          ? priorMemberTotal.contributionCount
-          : null;
-      if (previousContributionCount === null && memberTotalSnap.exists) {
-        const priorContributions = await tx.get(
-          db
-            .collection('wsfContributions')
-            .where('goalId', '==', goalId)
-            .where('userId', '==', uid)
-            .limit(1)
-        );
-        previousContributionCount = priorContributions.empty ? 0 : 1;
-      }
+      // See priorContributionCount: the totals row's own count, or for a row
+      // written before that field existed, the ledger. The contribution write
+      // below always creates the row, so no row means nothing recorded.
+      const previousContributionCount = await priorContributionCount(
+        tx,
+        goalId,
+        uid,
+        memberTotalSnap
+      );
       const recordedBefore = (previousContributionCount ?? 0) > 0;
       if (goalRepeatPolicy(goal) === 'once' && recordedBefore) {
-        throw new HttpsError(
-          'failed-precondition',
-          'This goal takes one contribution from each member, and yours is already recorded.'
-        );
+        throw new HttpsError('failed-precondition', ONE_CONTRIBUTION_MESSAGE);
       }
 
       const shardIndex = randomGoalShardIndex();
@@ -3661,6 +4232,10 @@ async function performContribution(args: {
             createdAt: FieldValue.serverTimestamp(),
           }
         );
+      }
+
+      if (args.turn) {
+        args.turn.write(tx, { amount: count, unit: typeof goal.unit === 'string' ? goal.unit : '' });
       }
 
       // Reached only after the active-membership gate above, so this caller
@@ -3956,7 +4531,7 @@ export const wsfGoalPulse = onCall<GoalPulseRequest>(
     // The whole body is readGoalPulseTotals. Nothing is added to, removed
     // from or reordered in what it returns: this response is the settled
     // nine-field contract and this callable is now only its front door.
-    return readGoalPulseTotals(goalId, request.auth?.uid ?? null);
+    return readGoalPulseTotals(goalId, optionalRealUid(request));
   }
 );
 
@@ -4038,7 +4613,7 @@ export const wsfGoalRecentAdditions = onCall<GoalRecentAdditionsRequest>(
     if (!goalSnap.exists) notFound();
     const goal = goalSnap.data() as GoalDoc;
 
-    const access = await evaluateGoalAggregateAccess(goal, request.auth?.uid ?? null);
+    const access = await evaluateGoalAggregateAccess(goal, optionalRealUid(request));
     if (!access.allowed) notFound();
 
     // The read happens only after the gate. Newest first, bounded by the query
@@ -4110,6 +4685,7 @@ export const wsfMyContribution = onCall<MyContributionRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const goalId = normalizeStringId(request.data?.goalId);
     if (!goalId) {
@@ -4458,6 +5034,7 @@ export const wsfListGoals = onCall<ListGoalsRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const uid = request.auth.uid;
 
     const groupId = normalizeStringId(request.data?.groupId);
@@ -4631,6 +5208,7 @@ export const wsfSetGoalDisplayAuthorization = onCall<SetGoalDisplayAuthorization
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const uid = request.auth.uid;
 
     const goalId = normalizeStringId(request.data?.goalId);
@@ -4687,6 +5265,7 @@ export const wsfAdjustGoal = onCall<AdjustGoalRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const uid = request.auth.uid;
 
     const goalId = normalizeStringId(request.data?.goalId);
@@ -5163,18 +5742,33 @@ export const wsfAdjustGoal = onCall<AdjustGoalRequest>(
 // device in its own localStorage, presented on every call, compared in
 // constant time, and revocable by the Champion in one action.
 //
-// WHAT A STATION IS DELIBERATELY NOT ABLE TO DO. It cannot record a
-// contribution, it cannot name a person, it cannot list members, and it
-// cannot read anything a public display could not. It calls
+// WHAT A STATION IS DELIBERATELY NOT ABLE TO DO. It cannot name a person, it
+// cannot list members, and it cannot read anything a public display could not.
+//
+// IT CAN, HOWEVER, CAUSE A CONTRIBUTION TO BE RECORDED — and an earlier version
+// of this comment said the opposite, which is the more dangerous of the two
+// errors a comment can make. `wsfCompleteTurn` is station-authorized
+// (`authorizeStationForTurn`) and reaches `completeTurnEntry`, which calls
+// `performContribution` — the same function `wsfContribute` uses, writing
+// wsfContributions, the goal shard and wsfGoalMemberTotals. That is the one
+// station-authorized path that writes them: `wsfCancelTurn` is station-
+// authorized and writes none of them, and `wsfCompleteMyTurn` reaches the same
+// helper but is the MEMBER'S own authenticated path, not a station capability.
+//
+// What keeps it narrow is that the station supplies NO IDENTITY. The uid comes
+// from the turn entry of the member who joined the line and started the turn,
+// the station may only complete the attempt IT is serving, and both are checked
+// before the write. A station credits a person it cannot name. It calls
 // `readGoalPulseTotals(goalId, null)` — the display route, the Champion's own
 // published-display permission — so a station standing on a goal that is not
 // display-authorized is refused exactly as the kiosk and the display are.
 //
 // WHAT IS DELIBERATELY NOT STORED about a station: no user agent, no IP
 // address, no device fingerprint, no geolocation, and no attendee identity of
-// any kind. A station cannot prove who is standing at it, so it records
-// nothing about them, and nothing here writes wsfContributions,
-// wsfGoalCounters or wsfGoalMemberTotals.
+// any kind. A station cannot prove who is standing at it, so it records nothing
+// about them. The ENROLMENT callables in this section write none of
+// wsfContributions, wsfGoalCounters or wsfGoalMemberTotals; the turn family
+// does, through the member's own turn entry, as stated above.
 //
 // RULES. Neither wsfKioskStations nor wsfKioskPairings appears in
 // firestore.rules, so both fall to the catch-all `match /{document=**} { allow
@@ -5335,6 +5929,9 @@ type StationServing = {
   calledName: string;
   position: number;
   calledAt: FirebaseFirestore.Timestamp;
+  /** KIOSK-EXPECTED-TURN-1: the turn reference of the call this pointer
+   * names. Absent on a pointer written before the reference existed. */
+  turnRef?: string;
 };
 
 /**
@@ -5518,6 +6115,7 @@ export const wsfApproveStation = onCall<ApproveStationRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const uid = request.auth.uid;
 
     const goalId = normalizeStringId(request.data?.goalId);
@@ -5906,6 +6504,7 @@ export const wsfListStations = onCall<ListStationsRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const goalId = normalizeStringId(request.data?.goalId);
     if (!goalId) {
@@ -5962,6 +6561,27 @@ export const wsfListStations = onCall<ListStationsRequest>(
 // gets the same 'permission-denied' an unknown screen gets, which is what makes
 // it clear its own storage and go back to a pairing code. The document itself
 // stays, with when it was revoked and by whom.
+//
+// THE TURN ON THE SCREEN GOES BACK TO THE LINE (KIOSK-TURN-LIFECYCLE-1). A
+// screen can be revoked while it holds somebody's turn. `ready` and `active`
+// never lapse, so before this the person's phone said "walk to Station 1" for
+// the rest of the event, and their one place was held by a turn nobody could
+// run. Now, in this same transaction:
+//   - an assigned, ready or active turn this screen holds is returned to the
+//     line at the position it already had (returnTurnToLine), so the next
+//     screen at the event calls that person first;
+//   - an assignment whose 45 seconds had already run out is closed as the
+//     no-show it already was (recoverLapsedTurn), as every other transaction
+//     closes it;
+//   - a finished turn, the waiting line, and every other screen's turn are not
+//     touched;
+//   - the screen's `serving` pointer is cleared, so no name stays on it.
+// `wsfMyTurn` and the other screens' `wsfTurnState` see it on their next read.
+//
+// The turn is found by the screen's own `serving` pointer and confirmed on the
+// entry (assigned to THIS station). Every path that gives a station a live
+// turn sets that pointer, and "Call next" refuses while the pointed-at turn is
+// live, so a station holds at most one live turn and it is that one.
 // ─────────────────────────────────────────────────────────────────────────────
 
 type RevokeStationRequest = { stationId?: unknown };
@@ -5973,6 +6593,7 @@ export const wsfRevokeStation = onCall<RevokeStationRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const stationId = normalizeStringId(request.data?.stationId);
     if (!stationId) {
@@ -6009,12 +6630,37 @@ export const wsfRevokeStation = onCall<RevokeStationRequest>(
       const pairingRef = pairingId ? db.doc(`wsfKioskPairings/${pairingId}`) : null;
       const pairingSnap = pairingRef ? await tx.get(pairingRef) : null;
 
+      // The turn this screen holds, read with the other reads and before any
+      // write, as a transaction requires.
+      const servingId = normalizeStringId(
+        (station.serving as { entryId?: unknown } | null | undefined)?.entryId
+      );
+      const servingRef = servingId ? db.doc(`wsfTurnEntries/${servingId}`) : null;
+      const servingSnap = servingRef ? await tx.get(servingRef) : null;
+      const now = Date.now();
+
       tx.update(stationRef, {
         status: 'revoked' satisfies StationStatus,
         secretHash: FieldValue.delete(),
         revokedAt: FieldValue.serverTimestamp(),
         revokedBy: uid,
+        serving: null,
       });
+
+      if (servingRef && servingSnap?.exists) {
+        const entry = servingSnap.data() as TurnEntryDoc;
+        if (entry.assignedStationId === stationId) {
+          if (isTurnLeaseLapsed(entry, now)) {
+            recoverLapsedTurn(tx, servingRef, entry);
+          } else if (
+            entry.status === 'assigned' ||
+            entry.status === 'ready' ||
+            entry.status === 'active'
+          ) {
+            returnTurnToLine(tx, servingRef, entry);
+          }
+        }
+      }
 
       if (pairingRef && pairingSnap?.exists) {
         const pairing = pairingSnap.data() as PairingDoc;
@@ -6258,6 +6904,7 @@ export const wsfCreateCombinedGoal = onCall<CreateCombinedGoalRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const token = request.auth.token as { email_verified?: boolean };
     if (token.email_verified !== true) {
       throw new HttpsError(
@@ -6525,6 +7172,7 @@ export const wsfCloseCombinedGoal = onCall<CloseCombinedGoalRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const uid = request.auth.uid;
 
     const setupId = normalizeStringId(request.data?.setupId);
@@ -6720,6 +7368,7 @@ export const wsfRepairCombinedGoal = onCall<RepairCombinedGoalRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const uid = request.auth.uid;
 
     const setupId = normalizeStringId(request.data?.setupId);
@@ -7175,7 +7824,7 @@ export const wsfCombinedGoalPulse = onCall<CombinedGoalPulseRequest>(
       children.push(goal);
     }
 
-    const access = await evaluateCombinedAccess(communityGroupId, children, request.auth?.uid ?? null);
+    const access = await evaluateCombinedAccess(communityGroupId, children, optionalRealUid(request));
     // Byte-identical to the answer an unknown setupId gets, so the URL cannot
     // be used to learn whether a setup exists.
     if (!access.allowed) notFound();
@@ -7303,6 +7952,11 @@ export const wsfCombinedGoalPulse = onCall<CombinedGoalPulseRequest>(
 //      the real multi-activity choice on the phone, carried onto the entry. A
 //      goal in no combined setup is its own event and behaves exactly as it
 //      did.
+//   8. A REVOKED SCREEN GIVES ITS TURN BACK (KIOSK-TURN-LIFECYCLE-1). Revoking
+//      a station returns the turn it holds to `waiting`, at the position it
+//      already had, so the next screen calls that person first. It is not an
+//      ending: the person did nothing, and keeps their place. See
+//      returnTurnToLine.
 //
 // COLLECTIONS, all Admin-SDK-only, none in firestore.rules, all covered by the
 // catch-all deny at the bottom of the WSF section — the same position
@@ -7451,6 +8105,17 @@ type TurnEntryDoc = {
   /** When the 45 seconds run out. Null except while `assigned`. */
   readyLeaseExpiresAt: FirebaseFirestore.Timestamp | null;
   readyAt: FirebaseFirestore.Timestamp | null;
+  /**
+   * KIOSK-EXPECTED-TURN-1. THE EXPECTED-TURN REFERENCE: random, minted by the
+   * call that assigned this entry to a station, and never changed while that
+   * assignment lasts. It is what a station names when it starts, cancels or
+   * completes THIS turn, so a delayed command for one visitor can never land
+   * on the next. It is not a uid, not a credential (every station command
+   * still needs the station secret) and not derived from anything about the
+   * person. Cleared when a revocation returns the turn to the line, so the
+   * revoked screen's reference matches nothing; the next call mints a new one.
+   */
+  stationTurnRef?: string | null;
   /** THE CANONICAL ATTEMPT, minted once at start and bound here. */
   attemptId: string | null;
   attemptStationId: string | null;
@@ -7463,6 +8128,10 @@ type TurnEntryDoc = {
   leftAt?: FirebaseFirestore.Timestamp | null;
   /** 'member' | 'station' | 'lease'. Never a uid. */
   endedBy?: string | null;
+  /** KIOSK-TURN-LIFECYCLE-1: when a revocation returned this turn to the line,
+   * and why ('stationRevoked'). Not an ending: the entry is `waiting` again. */
+  requeuedAt?: FirebaseFirestore.Timestamp | null;
+  requeueReason?: string | null;
 };
 
 /** wsfTurnLines/{lineId} — the event's line. */
@@ -7548,6 +8217,23 @@ function mintTurnAttemptId(): string {
   return `turn_${randomBytes(18).toString('base64url')}`;
 }
 
+/** KIOSK-EXPECTED-TURN-1: one opaque reference per station assignment. */
+function mintStationTurnRef(): string {
+  return `tr_${randomBytes(18).toString('base64url')}`;
+}
+
+function normalizeStationTurnRef(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  return /^tr_[A-Za-z0-9_-]{16,64}$/.test(v) ? v : null;
+}
+
+/** The station's command must name a turn: missing is an old client. */
+function requireStationTurnRef(v: unknown): string {
+  const ref = normalizeStationTurnRef(v);
+  if (!ref) throw new HttpsError('invalid-argument', TURN_REF_MISSING_MESSAGE);
+  return ref;
+}
+
 /**
  * The label a screen may show, normalized here and refused here.
  *
@@ -7580,10 +8266,55 @@ const TURN_IN_PROGRESS_MESSAGE =
   'Finish or cancel the turn on this screen before calling the next person.';
 const TURN_NOT_READY_MESSAGE = 'Ask them to tap “I’m ready” on their phone first.';
 const TURN_NOBODY_MESSAGE = 'Nobody is up at this screen.';
+/** KIOSK-EXPECTED-TURN-1: a station command that names no turn. An old
+ * screen build fails here safely instead of acting on whoever is up now. */
+const TURN_REF_MISSING_MESSAGE = 'This screen needs an update before it can run a turn.';
+/** KIOSK-EXPECTED-TURN-1: a command for a turn this screen is no longer on. */
+const TURN_STALE_MESSAGE = 'That turn has moved on. This screen now shows the current one.';
+const TURN_NOT_RUNNING_MESSAGE = 'That turn is not running.';
 const TURN_OTHER_ACTIVITY_MESSAGE =
   'You’re already in the line at this event. Finish or leave that turn first.';
 const TURN_LEASE_LAPSED_MESSAGE =
   'That turn timed out. Get back in line and the screen will call you again.';
+
+/**
+ * EXPO-CLOSED-GOAL-QUEUE-GATE-1 (GAP-2). The sentence the contribute path has
+ * always given a goal that is not `active`, and the line now gives it too.
+ */
+const TURN_GOAL_CLOSED_MESSAGE = 'This goal is closed.';
+
+/**
+ * Whether a goal is open for a turn, READ INSIDE THE CALLER'S TRANSACTION.
+ *
+ * A closed goal admits nobody: join, call, ready and start each refuse it
+ * before they create or advance anything. The read is transactional on
+ * purpose. resolveTurnEvent reads the goal before the transaction begins, and
+ * a status taken from there would let a goal that closes in between still
+ * take a place, assign one, close a lease or mint an attempt. Read here, the
+ * goal document is in the transaction's read set: a closure that commits
+ * first is seen, and one that commits during the transaction conflicts with
+ * it, so the two are serialized one way or the other and never interleave.
+ *
+ * A goal that has gone missing is not open either.
+ */
+async function turnGoalOpenIn(
+  tx: FirebaseFirestore.Transaction,
+  goalId: string
+): Promise<boolean> {
+  return (await openTurnGoalIn(tx, goalId)) !== null;
+}
+
+/** The same transactional read, returning the open goal itself (or null), for
+ * a caller that needs more of it than "is it open". */
+async function openTurnGoalIn(
+  tx: FirebaseFirestore.Transaction,
+  goalId: string
+): Promise<GoalDoc | null> {
+  const snap = await tx.get(getFirestore().doc(`wsfGoals/${goalId}`));
+  if (!snap.exists) return null;
+  const goal = snap.data() as GoalDoc;
+  return goal.status === 'active' ? goal : null;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // THE EVENT, RESOLVED FROM A GOAL.
@@ -7762,6 +8493,10 @@ type TurnHallAssignment = {
   /** And what it is CALLED, so the room can read which of the event's
    * activities this turn is. */
   activityTitle: string;
+  /** KIOSK-EXPECTED-TURN-1: the opaque reference this station must send back
+   * with Start, Cancel and Complete for THIS turn. Given only to the station
+   * that holds the secret (this projection is station-authorized). */
+  turnRef: string | null;
 };
 
 /** The ten-second result. A CODE and a number — never a name. */
@@ -7821,6 +8556,7 @@ function hallAssignment(entry: TurnEntryDoc, now: number): TurnHallAssignment | 
     readySecondsLeft,
     activityUnit: typeof entry.activityUnit === 'string' ? entry.activityUnit : '',
     activityTitle: typeof entry.activityTitle === 'string' ? entry.activityTitle : '',
+    turnRef: normalizeStationTurnRef(entry.stationTurnRef),
   };
 }
 
@@ -7928,6 +8664,51 @@ function recoverLapsedTurn(
   }
 }
 
+/**
+ * KIOSK-TURN-LIFECYCLE-1: give a turn back to the line, inside a transaction
+ * that has already done its reads. Used when the station holding the turn is
+ * revoked.
+ *
+ * IT IS NOT AN ENDING. The person did nothing wrong, so:
+ *   - the entry is `waiting` again, at the POSITION IT ALREADY HAD. Positions
+ *     are handed out once and never reused, so theirs is older than anyone who
+ *     joined after them, and the next "Call next" at the event reaches them
+ *     first;
+ *   - their one place at the event (wsfTurnMembers) is untouched, and so are
+ *     their name and code: the code is still theirs and still unique;
+ *   - every trace of the station goes: the assignment, its label, the lease,
+ *     the ready tap, and the expected-turn reference, so the revoked screen's
+ *     reference matches nothing;
+ *   - a started-but-unrecorded attempt is DROPPED. A minted attempt that was
+ *     never contributed is not a number anywhere (see wsfLeaveTurnLine), and
+ *     the next screen to start this turn mints its own. Dropping it inside the
+ *     same transaction is what keeps the count honest: a phone completion
+ *     that commits first finds the turn still active and marks it done, and
+ *     this function is then never called for it; one that commits after finds
+ *     the turn waiting with no attempt and records nothing.
+ */
+function returnTurnToLine(
+  tx: FirebaseFirestore.Transaction,
+  entryRef: FirebaseFirestore.DocumentReference,
+  entry: TurnEntryDoc
+): void {
+  tx.update(entryRef, {
+    status: 'waiting' satisfies TurnStatus,
+    lineStatusKey: turnStatusKey(entry.lineId, 'waiting'),
+    assignedAt: null,
+    assignedStationId: null,
+    assignedStationLabel: null,
+    readyLeaseExpiresAt: null,
+    readyAt: null,
+    stationTurnRef: null,
+    attemptId: null,
+    attemptStationId: null,
+    attemptStartedAt: null,
+    requeuedAt: FieldValue.serverTimestamp(),
+    requeueReason: 'stationRevoked',
+  });
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // wsfEventContext — what this QR resolves to.
 //
@@ -7959,6 +8740,7 @@ export const wsfEventContext = onCall<EventContextRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const goalId = normalizeStringId(request.data?.goalId);
     if (!goalId) {
@@ -8000,6 +8782,19 @@ export const wsfEventContext = onCall<EventContextRequest>(
 // at its existing position and with its existing code, and writes nothing —
 // including no rewrite of calledName, because a second tap must not silently
 // relabel somebody who is already on a screen.
+//
+// ONE CONTRIBUTION MEANS ONE (KIOSK-TURN-LIFECYCLE-1). Under a goal that takes
+// one contribution from each member, a member whose contribution is already
+// recorded is refused at the door, with the contribution's own sentence
+// (ONE_CONTRIBUTION_MESSAGE), from the contribution's own evidence
+// (priorContributionCount), read in this transaction. Before this the line
+// took their place, called them, started them, and only refused at the very
+// end. The check is on the activity they chose, so at a combined event an
+// activity they have not recorded still admits them. It comes after the
+// membership and closed-goal checks, so it is said only to a member, and
+// before the existing-place return, so a member who recorded on their own
+// phone while in line is told too; that refusal writes nothing, and the place
+// they hold stays theirs until they leave it.
 // ─────────────────────────────────────────────────────────────────────────────
 
 type JoinTurnLineRequest = { goalId?: unknown; calledName?: unknown };
@@ -8019,6 +8814,7 @@ export const wsfJoinTurnLine = onCall<JoinTurnLineRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const uid = request.auth.uid;
 
     // Shape first, and before anything is read: a refusal here depends on the
@@ -8047,6 +8843,26 @@ export const wsfJoinTurnLine = onCall<JoinTurnLineRequest>(
       // AUTHORIZATION BEFORE ANYTHING IS SAID.
       const membership = await readActiveMembership(tx, event.communityGroupId, uid);
       if (!membership) notFound();
+
+      // A CLOSED GOAL ADMITS NOBODY — said only to a member, after the
+      // authorization, so it tells a stranger nothing the not-found did not.
+      // Refused before any read that could lead to a write, so a refused join
+      // creates no place, no entry and no line, and recovers nothing either.
+      const goal = await openTurnGoalIn(tx, goalId);
+      if (!goal) {
+        throw new HttpsError('failed-precondition', TURN_GOAL_CLOSED_MESSAGE);
+      }
+
+      // ONE CONTRIBUTION MEANS ONE: the same gate, the same evidence and the
+      // same sentence as the contribution itself. Also refused before any
+      // write.
+      if (goalRepeatPolicy(goal) === 'once') {
+        const memberTotalSnap = await tx.get(db.doc(`wsfGoalMemberTotals/${goalId}_${uid}`));
+        const recorded = await priorContributionCount(tx, goalId, uid, memberTotalSnap);
+        if ((recorded ?? 0) > 0) {
+          throw new HttpsError('failed-precondition', ONE_CONTRIBUTION_MESSAGE);
+        }
+      }
 
       const memberSnap = await tx.get(memberRef);
       const heldEntryId = normalizeStringId(
@@ -8194,8 +9010,11 @@ type MyTurnResponse = {
     /** True once a station has started this turn and bound its attempt. */
     attemptOpen: boolean;
   } | null;
-  /** Their own last recorded turn at this event, if any. */
-  receipt: { amount: number; unit: string; goalId: string } | null;
+  /** Their own last recorded turn at this event, if any. `entryId` names the
+   * turn it was recorded for (KIOSK-EXPECTED-TURN-1), so a phone that lost an
+   * answer matches it to THAT entry rather than to any entry on the goal; it is
+   * null on a receipt stored before the field existed. */
+  receipt: { amount: number; unit: string; goalId: string; entryId: string | null } | null;
 };
 
 export const wsfMyTurn = onCall<MyTurnRequest>(
@@ -8204,6 +9023,7 @@ export const wsfMyTurn = onCall<MyTurnRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const goalId = normalizeStringId(request.data?.goalId);
     if (!goalId) {
@@ -8223,6 +9043,7 @@ export const wsfMyTurn = onCall<MyTurnRequest>(
           amount: typeof stored.amount === 'number' ? stored.amount : 0,
           unit: typeof stored.unit === 'string' ? stored.unit : '',
           goalId: typeof stored.goalId === 'string' ? stored.goalId : '',
+          entryId: normalizeStringId(stored.entryId),
         }
       : null;
 
@@ -8301,6 +9122,7 @@ export const wsfTurnReady = onCall<TurnReadyRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const entryId = normalizeStringId(request.data?.entryId);
     if (!entryId) {
@@ -8317,7 +9139,7 @@ export const wsfTurnReady = onCall<TurnReadyRequest>(
     // person their place back. So the transaction returns a verdict and
     // commits its writes; the sentence is raised afterwards.
     const outcome = await db.runTransaction(
-      async (tx): Promise<TurnReadyResponse | 'lapsed'> => {
+      async (tx): Promise<TurnReadyResponse | 'lapsed' | 'closed'> => {
         const snap = await tx.get(entryRef);
         if (!snap.exists) notFound();
         const entry = snap.data() as TurnEntryDoc;
@@ -8332,6 +9154,9 @@ export const wsfTurnReady = onCall<TurnReadyRequest>(
           };
         }
         if (entry.status !== 'assigned') return 'lapsed';
+        // A CLOSED GOAL: the tap advances nothing. Not even the lapse recovery
+        // below runs — a refusal is not a reason to end somebody's place.
+        if (!(await turnGoalOpenIn(tx, entry.goalId))) return 'closed';
         if (isTurnLeaseLapsed(entry, now)) {
           recoverLapsedTurn(tx, entryRef, entry);
           return 'lapsed';
@@ -8352,6 +9177,9 @@ export const wsfTurnReady = onCall<TurnReadyRequest>(
     );
     if (outcome === 'lapsed') {
       throw new HttpsError('failed-precondition', TURN_LEASE_LAPSED_MESSAGE);
+    }
+    if (outcome === 'closed') {
+      throw new HttpsError('failed-precondition', TURN_GOAL_CLOSED_MESSAGE);
     }
     return outcome;
   }
@@ -8382,6 +9210,7 @@ export const wsfLeaveTurnLine = onCall<LeaveTurnLineRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const entryId = normalizeStringId(request.data?.entryId);
     if (!entryId) {
@@ -8518,9 +9347,11 @@ export const wsfCallNext = onCall<CallNextRequest>(
     const { stationId, stationRef } = authorized;
     const lineId = event.lineId;
     const lineRef = db.doc(`wsfTurnLines/${lineId}`);
+    // Minted outside the transaction so a Firestore retry re-uses it.
+    const turnRef = mintStationTurnRef();
 
     const outcome = await db.runTransaction(
-      async (tx): Promise<'called' | 'empty' | 'blocked'> => {
+      async (tx): Promise<'called' | 'empty' | 'blocked' | 'closed'> => {
         // ── every read first, as a Firestore transaction requires ──
         const stationSnap = await tx.get(stationRef);
         if (!stationSnap.exists) return 'empty';
@@ -8530,6 +9361,16 @@ export const wsfCallNext = onCall<CallNextRequest>(
         // must not be able to call anybody.
         if (station.status !== 'active') return 'empty';
         const label = stationVisibleLabel(station);
+
+        // WHICH OF THE EVENT'S ACTIVITIES ARE OPEN, read in this transaction.
+        // Every one closed: the call is refused and writes nothing at all.
+        // Some closed: a place on a closed activity is never called — and is
+        // not ended either; the next place on an open activity is.
+        const openGoalIds = new Set<string>();
+        for (const activity of event.activities) {
+          if (await turnGoalOpenIn(tx, activity.goalId)) openGoalIds.add(activity.goalId);
+        }
+        if (openGoalIds.size === 0) return 'closed';
 
         // Read for its own sake as well as for the counter: it puts the line
         // document in this transaction's read set, which is half of the
@@ -8559,10 +9400,12 @@ export const wsfCallNext = onCall<CallNextRequest>(
             .limit(TURN_WAITING_LIMIT)
         );
         const candidates = sortTurnEntries(
-          waitingSnap.docs.map((d) => ({
-            id: d.id,
-            position: (d.data() as TurnEntryDoc).position ?? 0,
-          }))
+          waitingSnap.docs
+            .filter((d) => openGoalIds.has((d.data() as TurnEntryDoc).goalId))
+            .map((d) => ({
+              id: d.id,
+              position: (d.data() as TurnEntryDoc).position ?? 0,
+            }))
         );
         const chosen = candidates[0] ?? null;
         const chosenRef = chosen ? db.doc(`wsfTurnEntries/${chosen.id}`) : null;
@@ -8604,7 +9447,12 @@ export const wsfCallNext = onCall<CallNextRequest>(
           recoverLapsedTurn(tx, previousRef, previous);
         }
 
-        if (!chosenRef || !chosenEntry || chosenEntry.status !== 'waiting') {
+        if (
+          !chosenRef ||
+          !chosenEntry ||
+          chosenEntry.status !== 'waiting' ||
+          !openGoalIds.has(chosenEntry.goalId)
+        ) {
           // Nobody to call — an empty line, or the entry this transaction
           // picked was taken by the other station and this is the retry that
           // saw an empty line afterwards. Clearing the pointer is correct
@@ -8624,6 +9472,7 @@ export const wsfCallNext = onCall<CallNextRequest>(
           // when it ends without agreeing on a clock.
           readyLeaseExpiresAt: Timestamp.fromMillis(now + TURN_READY_LEASE_MS),
           readyAt: null,
+          stationTurnRef: turnRef,
         });
         // The cached pointer the screen reads. It carries the fields the hall
         // may see and no others — a uid must not reach a station document
@@ -8634,11 +9483,16 @@ export const wsfCallNext = onCall<CallNextRequest>(
             calledName: chosenEntry.calledName,
             position: chosenEntry.position,
             calledAt: Timestamp.fromMillis(now),
+            turnRef,
           },
         });
         return 'called';
       }
     );
+
+    if (outcome === 'closed') {
+      throw new HttpsError('failed-precondition', TURN_GOAL_CLOSED_MESSAGE);
+    }
 
     // Read back afterwards, so what the screen paints is what the line says,
     // not what this call believed it would say.
@@ -8672,7 +9526,7 @@ export const wsfCallNext = onCall<CallNextRequest>(
 // again once it is terminal.
 // ─────────────────────────────────────────────────────────────────────────────
 
-type StartTurnRequest = { stationId?: unknown; secret?: unknown };
+type StartTurnRequest = { stationId?: unknown; secret?: unknown; expectedTurn?: unknown };
 type StartTurnResponse = TurnStateResponse & {
   started: boolean;
   /** The activity THEY chose, so the screen runs the right one. Public goal
@@ -8685,6 +9539,8 @@ export const wsfStartTurn = onCall<StartTurnRequest>(
   async (request): Promise<StartTurnResponse> => {
     const now = Date.now();
     const authorized = await authorizeStationForTurn(request.data, request.rawRequest, now);
+    // KIOSK-EXPECTED-TURN-1: the start names the turn it is for.
+    const expectedTurn = requireStationTurnRef(request.data?.expectedTurn);
     const event = await resolveTurnEvent(authorized.goalId);
     const db = getFirestore();
     const { stationId, stationRef } = authorized;
@@ -8716,14 +9572,19 @@ export const wsfStartTurn = onCall<StartTurnRequest>(
           message: STATION_REJECTED_MESSAGE,
         };
       }
-      const servingId = normalizeStringId(
-        (station.serving as { entryId?: unknown } | null | undefined)?.entryId
-      );
+      const stale = { kind: 'refused', code: 'failed-precondition', message: TURN_STALE_MESSAGE } as const;
+      // KIOSK-EXPECTED-TURN-1: the screen must still be on THE turn the
+      // command names. A delayed start for A after B was called is refused
+      // here and touches nothing.
+      const serving = station.serving as { entryId?: unknown; turnRef?: unknown } | null | undefined;
+      if (normalizeStationTurnRef(serving?.turnRef) !== expectedTurn) return stale;
+      const servingId = normalizeStringId(serving?.entryId);
       if (!servingId) return nobody;
       const entryRef = db.doc(`wsfTurnEntries/${servingId}`);
       const entrySnap = await tx.get(entryRef);
       if (!entrySnap.exists) return nobody;
       const entry = entrySnap.data() as TurnEntryDoc;
+      if (normalizeStationTurnRef(entry.stationTurnRef) !== expectedTurn) return stale;
 
       // THE NARROW AUTHORITY, stated as two equalities: this line, and a turn
       // THIS station called. A station cannot reach into another's.
@@ -8733,6 +9594,16 @@ export const wsfStartTurn = onCall<StartTurnRequest>(
       if (entry.status === 'active' && normalizeStringId(entry.attemptId)) {
         // Already started. The same attempt, and not a second one.
         return { kind: 'started', goalId: entry.goalId };
+      }
+      // A CLOSED GOAL: no attempt is minted and nothing advances — the lapse
+      // recovery below included. A turn started before the closure keeps its
+      // attempt (the replay above writes nothing); its Record is what refuses.
+      if (!(await turnGoalOpenIn(tx, entry.goalId))) {
+        return {
+          kind: 'refused',
+          code: 'failed-precondition',
+          message: TURN_GOAL_CLOSED_MESSAGE,
+        };
       }
       if (entry.status !== 'ready') {
         if (isTurnLeaseLapsed(entry, now)) {
@@ -8781,104 +9652,141 @@ export const wsfStartTurn = onCall<StartTurnRequest>(
  * response, or finishing on the phone after starting at the station all land
  * on the same (goal, uid, attemptId) key and record exactly once.
  *
- * ORDER MATTERS, and it is deliberate: the CONTRIBUTION commits first, then
- * the turn is marked done. The contribution is the durable truth; the entry is
- * bookkeeping. If the bookkeeping write is lost, a retry re-runs the
- * contribution (which reports `alreadyRecorded` and writes nothing) and
- * finishes the bookkeeping, so the two converge without a reconciler.
+ * KIOSK-EXPECTED-TURN-1: ONE TRANSACTION, NOT TWO. The turn's own checks and
+ * its bookkeeping now run INSIDE the contribution's transaction (the
+ * TurnCompletionHook), so there is no gap between "this turn is still running"
+ * and "record it":
+ *   • a cancel or a lapse that commits first is seen, and nothing is recorded
+ *     for a turn that is no longer running;
+ *   • a contribution that commits first marks the turn done in the same
+ *     commit, so a cancel after it finds nothing live to end;
+ *   • a replay of an attempt already recorded (a lost answer, a retry, the
+ *     phone and the screen racing) returns the same receipt and writes NOTHING
+ *     to the line, the station or the hall — so an old turn never clears,
+ *     counts for or changes the turn that is up now.
  */
 async function completeTurnEntry(args: {
   entryRef: FirebaseFirestore.DocumentReference;
   entry: TurnEntryDoc;
   count: unknown;
+  /** Who is finishing it, re-checked inside the transaction. */
+  by: { kind: 'station'; stationId: string; turnRef: string } | { kind: 'member'; uid: string };
 }): Promise<ContributeResponse> {
-  const { entryRef, entry } = args;
+  const { entryRef, entry, by } = args;
   const attemptId = normalizeStringId(entry.attemptId);
   if (!attemptId) {
     throw new HttpsError('failed-precondition', 'That turn has not been started yet.');
   }
-  const receipt = await performContribution({
-    uid: entry.uid,
-    goalId: entry.goalId,
-    attemptId,
-    count: args.count,
-  });
-
   const db = getFirestore();
   const lineId = entry.lineId;
-  const stationId = normalizeStringId(entry.attemptStationId);
+  const attemptStationId = normalizeStringId(entry.attemptStationId);
+  const stationRef = attemptStationId ? db.doc(`wsfKioskStations/${attemptStationId}`) : null;
   const at = Date.now();
-  const amount = typeof receipt.addedCount === 'number' ? receipt.addedCount : 0;
-  const unit = typeof receipt.unit === 'string' ? receipt.unit : '';
 
-  await db.runTransaction(async (tx) => {
-    const snap = await tx.get(entryRef);
-    if (!snap.exists) return;
-    const current = snap.data() as TurnEntryDoc;
-    const stationRef = stationId ? db.doc(`wsfKioskStations/${stationId}`) : null;
-    const stationSnap = stationRef ? await tx.get(stationRef) : null;
+  // What the transaction read, carried from `read` to `write`.
+  let current: TurnEntryDoc | null = null;
+  let stationSnap: FirebaseFirestore.DocumentSnapshot | null = null;
 
-    if (current.status !== 'done') {
+  const hook: TurnCompletionHook = {
+    async read(tx, contributionExists) {
+      const [snap, sSnap] = await Promise.all([
+        tx.get(entryRef),
+        stationRef ? tx.get(stationRef) : Promise.resolve(null),
+      ]);
+      if (!snap.exists) throw new HttpsError('failed-precondition', TURN_NOBODY_MESSAGE);
+      current = snap.data() as TurnEntryDoc;
+      stationSnap = sSnap;
+      // The binding, re-checked where it cannot change underneath us.
+      if (normalizeStringId(current.attemptId) !== attemptId) {
+        throw new HttpsError('failed-precondition', TURN_STALE_MESSAGE);
+      }
+      if (by.kind === 'station') {
+        if (
+          normalizeStringId(current.attemptStationId) !== by.stationId ||
+          normalizeStationTurnRef(current.stationTurnRef) !== by.turnRef
+        ) {
+          throw new HttpsError('failed-precondition', TURN_STALE_MESSAGE);
+        }
+        // A screen revoked since its credential was checked records nothing.
+        const station = sSnap && sSnap.exists ? (sSnap.data() as StationDoc) : null;
+        if (!station || station.status !== 'active') {
+          throw new HttpsError('permission-denied', STATION_REJECTED_MESSAGE);
+        }
+      } else if (current.uid !== by.uid) {
+        notFound();
+      }
+      // A turn that is no longer running records nothing new. An attempt
+      // that is ALREADY recorded may always replay its own receipt.
+      if (!contributionExists && current.status !== 'active') {
+        throw new HttpsError('failed-precondition', TURN_NOT_RUNNING_MESSAGE);
+      }
+    },
+    write(tx, outcome) {
+      const live = current;
+      // Bookkeeping happens once: on the commit that records the attempt, or
+      // on the replay that finds it recorded but the turn still open (a
+      // completion from before this transaction existed). A turn already done,
+      // cancelled or lapsed is never touched by a replay.
+      if (!live || live.status !== 'active') return;
       tx.update(entryRef, {
         status: 'done' satisfies TurnStatus,
         lineStatusKey: turnStatusKey(lineId, 'done'),
         doneAt: FieldValue.serverTimestamp(),
         endedBy: 'result',
         readyLeaseExpiresAt: null,
-        resultAmount: amount,
-        resultUnit: unit,
+        resultAmount: outcome.amount,
+        resultUnit: outcome.unit,
       });
-    }
-    // THE PLACE COMES BACK. A finished turn frees the account's one place at
-    // the event, so they may get back in line — at the BACK of it.
-    const uid = normalizeStringId(current.uid);
-    if (uid) {
-      tx.delete(db.doc(`wsfTurnMembers/${turnMemberDocId(lineId, uid)}`));
-      // THE RECOVERABLE RECEIPT. Written under the person's own uid, so a
-      // phone that lost the response to its own completion can still be shown
-      // exactly what happened — after every name has left every screen.
-      tx.set(db.doc(`wsfTurnReceipts/${turnMemberDocId(lineId, uid)}`), {
-        entryId: entryRef.id,
-        goalId: current.goalId,
-        attemptId,
-        amount,
-        unit,
-        recordedAtMillis: at,
-      } satisfies TurnReceiptDoc);
-    }
-    // ALL PRIOR NAME AND SESSION UI IS CLEARED, in the same transaction that
-    // records the result.
-    //
-    // THE NAME GOES; THE POINTER STAYS. Two things had to be true at once and
-    // they pulled in opposite directions. The hall must show no name the
-    // instant a turn is recorded — which it does anyway, because hallAssignment
-    // projects nothing from a `done` entry — and a station whose completion
-    // response was LOST must be able to press the button again and land on the
-    // same attempt rather than on "nobody is up". Clearing the pointer would
-    // have taken that retry away. So the name is blanked where it was cached
-    // and the entry id is kept, which is the smallest thing that keeps both:
-    // nothing a screen can read carries a name, and the retry still knows
-    // whose turn it was finishing. The pointer is replaced outright by the
-    // next call, and cleared by a cancel.
-    if (stationRef && stationSnap?.exists) {
-      const station = stationSnap.data() as StationDoc;
-      const servingId = normalizeStringId(
-        (station.serving as { entryId?: unknown } | null | undefined)?.entryId
-      );
-      if (servingId === entryRef.id) tx.update(stationRef, { 'serving.calledName': '' });
-    }
-    if (stationId) {
-      tx.set(
-        db.doc(`wsfTurnLines/${lineId}`),
-        {
-          lastResult: { stationId, code: current.code, amount, unit, atMillis: at },
-        },
-        { merge: true }
-      );
-    }
-  });
+      // THE PLACE COMES BACK. A finished turn frees the account's one place at
+      // the event, so they may get back in line — at the BACK of it.
+      const uid = normalizeStringId(live.uid);
+      if (uid) {
+        tx.delete(db.doc(`wsfTurnMembers/${turnMemberDocId(lineId, uid)}`));
+        // THE RECOVERABLE RECEIPT, under the person's own uid.
+        tx.set(db.doc(`wsfTurnReceipts/${turnMemberDocId(lineId, uid)}`), {
+          entryId: entryRef.id,
+          goalId: live.goalId,
+          attemptId,
+          amount: outcome.amount,
+          unit: outcome.unit,
+          recordedAtMillis: at,
+        } satisfies TurnReceiptDoc);
+      }
+      // THE NAME GOES; THE POINTER STAYS — and only if the screen is still on
+      // THIS turn. A screen already on the next person is not touched.
+      const sSnap = stationSnap as FirebaseFirestore.DocumentSnapshot | null;
+      if (stationRef && sSnap?.exists) {
+        const station = sSnap.data() as StationDoc;
+        const servingId = normalizeStringId(
+          (station.serving as { entryId?: unknown } | null | undefined)?.entryId
+        );
+        if (servingId === entryRef.id) tx.update(stationRef, { 'serving.calledName': '' });
+      }
+      if (attemptStationId) {
+        tx.set(
+          db.doc(`wsfTurnLines/${lineId}`),
+          {
+            lastResult: {
+              stationId: attemptStationId,
+              code: live.code,
+              amount: outcome.amount,
+              unit: outcome.unit,
+              atMillis: at,
+            },
+          },
+          { merge: true }
+        );
+      }
+    },
+  };
 
-  return receipt;
+  return performContribution({
+    uid: entry.uid,
+    goalId: entry.goalId,
+    attemptId,
+    count: args.count,
+    turn: hook,
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -8898,8 +9806,52 @@ async function completeTurnEntry(args: {
 // goal takes one contribution from each member…"), which names nobody.
 // ─────────────────────────────────────────────────────────────────────────────
 
-type CompleteTurnRequest = { stationId?: unknown; secret?: unknown; count?: unknown };
+type CompleteTurnRequest = {
+  stationId?: unknown;
+  secret?: unknown;
+  count?: unknown;
+  /** KIOSK-EXPECTED-TURN-1: the turn this result is for. Required. */
+  expectedTurn?: unknown;
+};
+/**
+ * THE COMPLETION'S OWN RECEIPT (KIOSK-EXPECTED-TURN-1), for the turn this
+ * Record was FOR — the entry the server found by the captured `expectedTurn`,
+ * never whoever the hall now serves and never anything the caller names.
+ *
+ * A WHITELIST, because the answer lands on a shared screen: no uid, no own
+ * credit, no profile, no email, and not the member's contribution response
+ * forwarded whole. It lives only in this credential-authorized response —
+ * never in wsfTurnState, the pulse, the QR or the hall.
+ *
+ * HONEST ABSENCE. A value the server does not know, or this screen may not be
+ * told, is null — never 0:
+ *   • sharedTotal/target/status are given only when the goal's aggregate may
+ *     be shown on a public display (evaluateGoalAggregateAccess with no
+ *     caller, the same route wsfGoalPulse's display path uses) AND the
+ *     canonical contribution returned them. sharedTotal is the canonical
+ *     post-commit observation of `goalId`'s own total, in `unit` — for a
+ *     combined event that is the ACTIVITY's total, never the parent's. No
+ *     before/after pair is derived from it.
+ *   • crossedTarget is the canonical per-attempt value, forwarded as is (it is
+ *     never true today; see ContributeResponse), and null where the shared
+ *     state is withheld.
+ */
+type StationTurnReceipt = {
+  entryId: string;
+  goalId: string;
+  addedCount: number;
+  unit: string;
+  alreadyRecorded: boolean;
+  sharedTotal: number | null;
+  target: number | null;
+  status: GoalStatus | null;
+  crossedTarget: boolean | null;
+};
+
 type CompleteTurnResponse = TurnStateResponse & {
+  /** The entry this Record completed (see StationTurnReceipt). */
+  entryId: string;
+  receipt: StationTurnReceipt;
   recorded: { amount: number; unit: string; alreadyRecorded: boolean };
   /** Whether anybody is waiting. ONE ROUND PER TURN WHILE ANYONE WAITS: when
    * this is true the screen offers nothing but "Call next", and a person who
@@ -8912,36 +9864,64 @@ export const wsfCompleteTurn = onCall<CompleteTurnRequest>(
   async (request): Promise<CompleteTurnResponse> => {
     const now = Date.now();
     const authorized = await authorizeStationForTurn(request.data, request.rawRequest, now);
+    const expectedTurn = requireStationTurnRef(request.data?.expectedTurn);
     const event = await resolveTurnEvent(authorized.goalId);
     const db = getFirestore();
     const lineId = event.lineId;
 
-    const stationSnap = await authorized.stationRef.get();
-    const station = stationSnap.exists
-      ? (stationSnap.data() as StationDoc)
-      : authorized.station;
-    const servingId = normalizeStringId(
-      (station.serving as { entryId?: unknown } | null | undefined)?.entryId
-    );
-    if (!servingId) throw new HttpsError('failed-precondition', TURN_NOBODY_MESSAGE);
-    const entryRef = db.doc(`wsfTurnEntries/${servingId}`);
-    const entrySnap = await entryRef.get();
-    if (!entrySnap.exists) throw new HttpsError('failed-precondition', TURN_NOBODY_MESSAGE);
-    const entry = entrySnap.data() as TurnEntryDoc;
+    // KIOSK-EXPECTED-TURN-1: THE TURN IS FOUND BY ITS OWN REFERENCE, not by
+    // whoever this screen is on when the request lands. A delayed result for A
+    // after B was called is A's result — recorded or replayed for A — and the
+    // screen's pointer to B is never consulted, cleared or changed.
+    const found = await db
+      .collection('wsfTurnEntries')
+      .where('stationTurnRef', '==', expectedTurn)
+      .limit(1)
+      .get();
+    if (found.empty) throw new HttpsError('failed-precondition', TURN_STALE_MESSAGE);
+    const entryRef = found.docs[0]!.ref;
+    const entry = found.docs[0]!.data() as TurnEntryDoc;
 
     // THE NARROW AUTHORITY. This station, this line, this station's attempt.
-    if (entry.lineId !== lineId) throw new HttpsError('failed-precondition', TURN_NOBODY_MESSAGE);
-    if (entry.attemptStationId !== authorized.stationId) {
-      throw new HttpsError('failed-precondition', TURN_NOBODY_MESSAGE);
+    if (entry.lineId !== lineId || entry.attemptStationId !== authorized.stationId) {
+      throw new HttpsError('failed-precondition', TURN_STALE_MESSAGE);
     }
-    if (entry.status !== 'active' && entry.status !== 'done') {
+    if (!normalizeStringId(entry.attemptId)) {
       throw new HttpsError('failed-precondition', TURN_NOT_READY_MESSAGE);
     }
 
-    const receipt = await completeTurnEntry({ entryRef, entry, count: request.data?.count });
+    const receipt = await completeTurnEntry({
+      entryRef,
+      entry,
+      count: request.data?.count,
+      by: { kind: 'station', stationId: authorized.stationId, turnRef: expectedTurn },
+    });
+    const goalSnap = await db.doc(`wsfGoals/${entry.goalId}`).get();
+    const goal = goalSnap.exists ? (goalSnap.data() as GoalDoc) : null;
+    const displayAllowed = goal ? (await evaluateGoalAggregateAccess(goal, null)).allowed : false;
+    const shared = displayAllowed && typeof receipt.sharedTotal === 'number';
+    const unit =
+      typeof receipt.unit === 'string'
+        ? receipt.unit
+        : goal && typeof goal.unit === 'string'
+          ? goal.unit
+          : '';
+    const stationReceipt: StationTurnReceipt = {
+      entryId: entryRef.id,
+      goalId: entry.goalId,
+      addedCount: receipt.addedCount,
+      unit,
+      alreadyRecorded: receipt.alreadyRecorded === true,
+      sharedTotal: shared ? (receipt.sharedTotal as number) : null,
+      target: shared && typeof receipt.target === 'number' ? receipt.target : null,
+      status: shared && receipt.status ? receipt.status : null,
+      crossedTarget: shared && typeof receipt.crossedTarget === 'boolean' ? receipt.crossedTarget : null,
+    };
     const state = await readTurnState(authorized, lineId, Date.now());
     return {
       ...state,
+      entryId: entryRef.id,
+      receipt: stationReceipt,
       recorded: {
         amount: typeof receipt.addedCount === 'number' ? receipt.addedCount : 0,
         unit: typeof receipt.unit === 'string' ? receipt.unit : '',
@@ -8973,6 +9953,7 @@ export const wsfCompleteMyTurn = onCall<CompleteMyTurnRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const entryId = normalizeStringId(request.data?.entryId);
     if (!entryId) {
@@ -8986,10 +9967,15 @@ export const wsfCompleteMyTurn = onCall<CompleteMyTurnRequest>(
     const entry = entrySnap.data() as TurnEntryDoc;
     if (entry.uid !== uid) notFound();
     if (entry.status !== 'active' && entry.status !== 'done') {
-      throw new HttpsError('failed-precondition', 'That turn is not running.');
+      throw new HttpsError('failed-precondition', TURN_NOT_RUNNING_MESSAGE);
     }
 
-    const receipt = await completeTurnEntry({ entryRef, entry, count: request.data?.count });
+    const receipt = await completeTurnEntry({
+      entryRef,
+      entry,
+      count: request.data?.count,
+      by: { kind: 'member', uid },
+    });
     return { receipt, status: 'done' };
   }
 );
@@ -9005,25 +9991,29 @@ export const wsfCompleteMyTurn = onCall<CompleteMyTurnRequest>(
 // records no result, because there was none.
 // ─────────────────────────────────────────────────────────────────────────────
 
-type CancelTurnRequest = { stationId?: unknown; secret?: unknown };
+type CancelTurnRequest = { stationId?: unknown; secret?: unknown; expectedTurn?: unknown };
 
 export const wsfCancelTurn = onCall<CancelTurnRequest>(
   { region: 'us-central1', invoker: 'public' },
   async (request): Promise<TurnStateResponse> => {
     const now = Date.now();
     const authorized = await authorizeStationForTurn(request.data, request.rawRequest, now);
+    // KIOSK-EXPECTED-TURN-1: the cancel names the turn it is for.
+    const expectedTurn = requireStationTurnRef(request.data?.expectedTurn);
     const event = await resolveTurnEvent(authorized.goalId);
     const db = getFirestore();
     const lineId = event.lineId;
     const { stationId, stationRef } = authorized;
 
-    await db.runTransaction(async (tx) => {
+    const cancelled = await db.runTransaction(async (tx): Promise<'done' | 'stale'> => {
       const stationSnap = await tx.get(stationRef);
-      if (!stationSnap.exists) return;
+      if (!stationSnap.exists) return 'stale';
       const station = stationSnap.data() as StationDoc;
-      const servingId = normalizeStringId(
-        (station.serving as { entryId?: unknown } | null | undefined)?.entryId
-      );
+      const serving = station.serving as { entryId?: unknown; turnRef?: unknown } | null | undefined;
+      // A delayed cancel for A, arriving after B was called, ends nobody and
+      // clears nothing: B keeps the screen.
+      if (normalizeStationTurnRef(serving?.turnRef) !== expectedTurn) return 'stale';
+      const servingId = normalizeStringId(serving?.entryId);
       const entryRef = servingId ? db.doc(`wsfTurnEntries/${servingId}`) : null;
       const entrySnap = entryRef ? await tx.get(entryRef) : null;
 
@@ -9032,6 +10022,7 @@ export const wsfCancelTurn = onCall<CancelTurnRequest>(
         if (
           entry.lineId === lineId &&
           entry.assignedStationId === stationId &&
+          normalizeStationTurnRef(entry.stationTurnRef) === expectedTurn &&
           isTurnLive(entry.status)
         ) {
           tx.update(entryRef, {
@@ -9046,8 +10037,1119 @@ export const wsfCancelTurn = onCall<CancelTurnRequest>(
         }
       }
       tx.update(stationRef, { serving: null });
+      return 'done';
     });
+    if (cancelled === 'stale') throw new HttpsError('failed-precondition', TURN_STALE_MESSAGE);
 
     return readTurnState(authorized, lineId, Date.now());
+  }
+);
+
+// ═════════════════════════════════════════════════════════════════════════════
+// W8 — THE SOCIAL LAYER: COMMUNITY PRESENCE, WITH MEMBER-CONTROLLED PRIVACY
+//
+// The owner's decision of 2026-09-22: the member experience must visibly feel
+// like a community, so presence is COMMUNITY-VISIBLE BY DEFAULT — and that
+// means visible to authenticated ACTIVE MEMBERS OF THAT COMMUNITY and nobody
+// else. It does not mean internet-public. Every public, kiosk, station and
+// display path in this file is untouched by this block, and the public
+// wsfGoalRecentAdditions payload above is not widened: it still publishes
+// { amount, unit, at } and nothing that names anyone.
+//
+// NO firestore.rules CHANGE SUPPORTS THIS BLOCK, and that is a property rather
+// than an omission. wsfMemberProfiles is owner-only, wsfMemberships is
+// owner-only, and wsfContributions has no match block at all so it falls to the
+// catch-all deny. Every read below is an Admin-SDK read behind a membership
+// gate, so the feature adds NO new client read surface.
+// ═════════════════════════════════════════════════════════════════════════════
+
+const VIS_PRIVATE = 'private';
+const VIS_VISIBLE = 'visible';
+type Vis = typeof VIS_PRIVATE | typeof VIS_VISIBLE;
+
+/**
+ * TWO SETTINGS, STORED UNDER TWO NEW NAMES.
+ *
+ * `communityNameVisibility`  — may my NAME be shown to other members here.
+ * `communityActivityVisibility` — may my CONTRIBUTIONS appear in this
+ *                                 community's activity.
+ *
+ * DELIBERATELY NOT REUSING `visibility`, the field name PR #390 used. #390
+ * asked the same question under the OPPOSITE default, so a row written by
+ * either generation of the code would be indistinguishable while silently
+ * meaning something different. New names cannot collide.
+ *
+ * STRING ENUMS, NOT BOOLEANS — #390's lesson, and it survives the reversal.
+ * `Boolean(x)` is true for `1`, `'false'`, `'no'`, `{}` and `[]`, and a missing
+ * boolean defaults somewhere. Two named values mean a stored anything-else can
+ * be RECOGNISED as neither, which is what the resolver below depends on.
+ */
+const FIELD_NAME_VIS = 'communityNameVisibility';
+const FIELD_ACTIVITY_VIS = 'communityActivityVisibility';
+
+/**
+ * THE DEFAULT, AND THE FIRESTORE TRAP IT WALKS INTO.
+ *
+ * #390 made private-the-default true by making `visibility == 'visible'` an
+ * INDEX FILTER with no branch below it: a row missing the field could not
+ * match. Reversing that default CANNOT be done by inverting the filter —
+ *
+ *   A Firestore inequality (`!=`, `not-in`) ALSO fails to match documents that
+ *   are MISSING the field. `where('visibility','!=','private')` would silently
+ *   exclude exactly the legacy rows the owner's rule says must be visible, and
+ *   today that is EVERY membership row, because no row carries the field yet.
+ *
+ * So resolution lives here, in code, where the safe side has flipped with the
+ * default. It is THREE-WAY, not a boolean:
+ *
+ *   'private'            -> private   an explicit choice
+ *   'visible'            -> visible   an explicit choice
+ *   absent/undefined/null-> VISIBLE   the owner's rule
+ *   anything else        -> PRIVATE   an unrecognised value is not a decision
+ *                                     to publish. wsfSetCommunityVisibility
+ *                                     cannot write one, so this arises only
+ *                                     from an import or a hand-edit — and
+ *                                     those must never publish a name.
+ */
+function resolveVisibility(stored: unknown): Vis {
+  if (stored === undefined || stored === null) return VIS_VISIBLE;
+  if (stored === VIS_VISIBLE) return VIS_VISIBLE;
+  return VIS_PRIVATE;
+}
+
+type OwnMembership = { role: string; name: Vis; activity: Vis; photo: Vis };
+
+/**
+ * The caller's own membership row, proven to be theirs.
+ *
+ * THE DOCUMENT ID IS NOT THE AUTHORITY — THE FIELDS ARE. firestore.rules reads
+ * `resource.data.userId == request.auth.uid` and states that the doc id is
+ * never parsed. On a row where the two disagree, keying the gate off the id
+ * while keying the name fan-out off the field means one person's tap publishes
+ * a different person's name.
+ *
+ * ONE REFUSAL FOR EVERY NEGATIVE CASE. No such community, never joined,
+ * removed, departed, a blank status, a missing status — all the same
+ * `permission-denied` with the same sentence, so the pair of refusals cannot be
+ * used to enumerate which community ids are real. This is also why nothing here
+ * reads wsfCommunityGroups: that is where a distinguishable not-found would
+ * come from.
+ */
+async function requireOwnActiveMembership(
+  db: FirebaseFirestore.Firestore,
+  groupId: string,
+  uid: string
+): Promise<OwnMembership> {
+  const snap = await db.doc(`wsfMemberships/${groupId}_${uid}`).get();
+  if (!snap.exists) throw new HttpsError('permission-denied', 'Members only.');
+  const data = snap.data() as Record<string, unknown>;
+  if (data.userId !== uid || data.groupId !== groupId) {
+    throw new HttpsError('permission-denied', 'Members only.');
+  }
+  // `!== active`, never an allowlist of bad statuses: a positive test refuses
+  // 'removed', 'departed', '', a missing field, `true` and 'Active' alike.
+  if (data.membershipStatus !== MEMBERSHIP_ACTIVE) {
+    throw new HttpsError('permission-denied', 'Members only.');
+  }
+  return {
+    role: typeof data.role === 'string' ? data.role : 'member',
+    name: resolveVisibility(data[FIELD_NAME_VIS]),
+    activity: resolveVisibility(data[FIELD_ACTIVITY_VIS]),
+    // PROFILE-PHOTOS-FIREBASE-1: Show my photo, per community, same three-way default.
+    photo: resolveVisibility(data[PHOTO_VIS_FIELD]),
+  };
+}
+
+type SetVisibilityRequest = {
+  groupId?: unknown;
+  name?: unknown;
+  activity?: unknown;
+};
+
+/**
+ * A member changes their OWN visibility in ONE community.
+ *
+ * THERE IS NO `targetUid`, AND THAT ABSENCE IS THE ENFORCEMENT. The Champion
+ * action family (wsfRemoveMember, wsfReinstateMember, wsfDesignateChampion)
+ * shares the shape `{ groupId, targetUid }` and opens each handler with a
+ * Champion check; copying one as a starting point would import both the
+ * parameter and a Champion override of a self-only setting in a single paste.
+ * This is modelled on wsfLeaveCommunity instead — the file's one existing
+ * callable that acts on the caller's own membership.
+ *
+ * For the same reason nothing here writes a `*ByUid` field. Those exist only
+ * because the actor differs from the subject, and here it never can; such a
+ * field on this write would be the signature of the override this callable
+ * does not have.
+ *
+ * PER COMMUNITY, so a member may be visible at church and private at work.
+ */
+export const wsfSetCommunityVisibility = onCall<SetVisibilityRequest>(
+  { region: 'us-central1' },
+  async (request): Promise<{ groupId: string; name: Vis; activity: Vis }> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    requireRealIdentity(request);
+    const uid = request.auth.uid;
+    const groupId = normalizeStringId(request.data?.groupId);
+    if (!groupId) throw new HttpsError('invalid-argument', 'groupId is required.');
+
+    // THE LITERAL, OR NOTHING. Not `Boolean(...)`, not a truthiness test.
+    // `true`, `1`, `'Visible'`, `' visible'`, `{}` and `['visible']` are all
+    // refused, and refused WITHOUT WRITING, so a malformed request can never be
+    // the reason somebody's name appears or disappears.
+    const patch: Record<string, unknown> = {};
+    for (const [key, field] of [
+      ['name', FIELD_NAME_VIS],
+      ['activity', FIELD_ACTIVITY_VIS],
+    ] as const) {
+      const v = (request.data as Record<string, unknown> | undefined)?.[key];
+      if (v === undefined) continue; // absent means "leave this one alone"
+      if (v !== VIS_PRIVATE && v !== VIS_VISIBLE) {
+        throw new HttpsError('invalid-argument', `${key} must be 'private' or 'visible'.`);
+      }
+      patch[field] = v;
+    }
+    if (Object.keys(patch).length === 0) {
+      throw new HttpsError('invalid-argument', 'name or activity is required.');
+    }
+
+    const db = getFirestore();
+    await requireOwnActiveMembership(db, groupId, uid);
+
+    await db
+      .doc(`wsfMemberships/${groupId}_${uid}`)
+      .set({ ...patch, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+
+    // Re-read so the response is the SETTLED stored value rather than an echo
+    // of the request: the client renders what is stored, not what it asked for.
+    const settled = await requireOwnActiveMembership(db, groupId, uid);
+    return { groupId, name: settled.name, activity: settled.activity };
+  }
+);
+
+/*
+  NOTHING IS WRITTEN AT CREATE, JOIN, REJOIN OR REINSTATEMENT — ON PURPOSE.
+  #390 wrote `visibility: 'private'` on create and RESET it on both
+  reactivation paths. Under the owner's new rule those resets are not merely
+  unnecessary, they would be the bug: absence already means visible, and both
+  reactivation writes are `{ merge: true }`, which preserves every field it does
+  not name. So a member who explicitly chose privacy, left, and came back stays
+  private, and a Champion reinstating them CANNOT republish their name by a
+  unilateral act. The no-Champion-override guarantee is preserved by writing no
+  code at all in those paths, which is why there is no diff in them.
+*/
+
+/** One listed member. Two fields, and the type is the whitelist. */
+type CommunityMemberEntry = { displayName: string; role: string };
+type CommunityMembersRequest = { groupId?: unknown; cursor?: unknown };
+
+const MEMBERS_PAGE = 50;
+/**
+ * A guard against unbounded server work, NOT a product limit on community size.
+ * Names live in wsfMemberProfiles rather than on the membership row, so a
+ * name-ordered page cannot be read ordered — the set is read and sorted before
+ * it is cut. Reaching this THROWS rather than truncating: a refusal is honest
+ * and visible, a quietly shortened list is neither.
+ */
+const MEMBERS_MAX = 2000;
+
+/**
+ * The continuation token: AN OFFSET INTO THE NAME-SORTED ARRAY, and nothing
+ * else.
+ *
+ * NOT A FIRESTORE CURSOR. `startAfter(lastDoc)` on wsfMemberships serialises
+ * `{groupId}_{uid}` — a uid in plaintext, handed to the client and echoed back
+ * on every page. An integer says only "how far down an alphabetical list you
+ * are", which the caller worked out by reading the page it already has.
+ */
+function encodeOffsetCursor(offset: number): string {
+  return Buffer.from(JSON.stringify({ o: offset }), 'utf8').toString('base64url');
+}
+
+function decodeOffsetCursor(raw: unknown): number | null {
+  if (raw === undefined || raw === null || raw === '') return 0;
+  if (typeof raw !== 'string' || raw.length > 128) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as {
+      o?: unknown;
+    };
+    const o = parsed?.o;
+    if (typeof o !== 'number' || !Number.isInteger(o) || o < 0 || o > MEMBERS_MAX) return null;
+    return o;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The members of one community who are visible in it, to a member of that same
+ * community — one bounded page at a time.
+ *
+ * THE ONE STRUCTURAL PROTECTION, stated first: `userId` is not in the response
+ * and not in the type. A name with no uid beside it is not a handle on anybody
+ * — it cannot be joined to a contribution, a goal or a turn. Do not add `uid`,
+ * `memberId`, `membershipId` or `id` "for React keys"; the client keys on the
+ * array index.
+ *
+ * ALSO DELIBERATELY ABSENT: any total, visibleCount, hiddenCount or hasMore —
+ * memberCount is already returned by wsfMyCommunities over ALL active
+ * memberships, so a second number here would make "how many people are hiding"
+ * a subtraction the product performs for the reader. The residual is
+ * unavoidable; a stated feature of it is not. Also no per-entry visibility
+ * (appearing in the list IS the setting) and no timestamps (when somebody
+ * became visible turns a polled list into an authoritative timeline).
+ */
+export const wsfCommunityMembers = onCall<CommunityMembersRequest>(
+  // NO `invoker: 'public'`. That marker is a NO-OP IN THE EMULATOR and enforced
+  // only by Cloud Run IAM at deploy, so a mistaken one here would pass every
+  // local test and first take effect in front of real people.
+  { region: 'us-central1' },
+  async (
+    request
+  ): Promise<{ members: CommunityMemberEntry[]; nextCursor: string | null }> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    requireRealIdentity(request);
+    const uid = request.auth.uid;
+    const groupId = normalizeStringId(request.data?.groupId);
+    if (!groupId) throw new HttpsError('invalid-argument', 'groupId is required.');
+    const offset = decodeOffsetCursor(request.data?.cursor);
+    if (offset === null) throw new HttpsError('invalid-argument', 'cursor is not valid.');
+
+    const db = getFirestore();
+    // THE GATE IS PHYSICALLY ABOVE THE QUERY: a caller who is not an active
+    // member is refused before any other member's row is read into this
+    // function at all.
+    await requireOwnActiveMembership(db, groupId, uid);
+
+    // EQUALITY ONLY, so Firestore serves this by merging single-field indexes
+    // and no composite index is required. The visibility decision cannot live
+    // here — see resolveVisibility for why an inequality would be wrong.
+    const snap = await db
+      .collection('wsfMemberships')
+      .where('groupId', '==', groupId)
+      .where('membershipStatus', '==', MEMBERSHIP_ACTIVE)
+      .limit(MEMBERS_MAX + 1)
+      .get();
+
+    if (snap.size > MEMBERS_MAX) {
+      // Neither the count nor the groupId nor any name reaches the client or
+      // the log: the operator learns the shape, the member gets a refusal
+      // rather than a list that lies.
+      console.error('[wsfCommunityMembers] active set exceeds the safety valve');
+      throw new HttpsError(
+        'failed-precondition',
+        'This community is too large to list right now.'
+      );
+    }
+
+    // Keep only rows this product actually wrote, and key the profile lookup
+    // off the `userId` FIELD — the authority — after proving it agrees with
+    // the id.
+    const rows: { userId: string; role: string }[] = [];
+    const seen = new Set<string>();
+    for (const doc of snap.docs) {
+      const d = doc.data() as Record<string, unknown>;
+      if (typeof d.userId !== 'string' || d.userId === '') continue;
+      if (doc.id !== `${groupId}_${d.userId}`) continue;
+      if (seen.has(d.userId)) continue;
+      if (resolveVisibility(d[FIELD_NAME_VIS]) !== VIS_VISIBLE) continue;
+      seen.add(d.userId);
+      rows.push({ userId: d.userId, role: typeof d.role === 'string' ? d.role : 'member' });
+    }
+
+    // NEVER ZIPPED BY INDEX. getAll returns one snapshot per ref INCLUDING
+    // missing ones, so filtering while zipping against `rows` by position
+    // shifts every later name one place — and publishes it beside somebody
+    // else's role. A map keyed by uid cannot do that.
+    const byUid = new Map<string, string>();
+    const CHUNK = 300;
+    for (let start = 0; start < rows.length; start += CHUNK) {
+      const chunk = rows.slice(start, start + CHUNK);
+      const snaps = await db.getAll(...chunk.map((r) => db.doc(`wsfMemberProfiles/${r.userId}`)));
+      for (const sn of snaps) {
+        if (!sn.exists) continue;
+        const dn = (sn.data() as { displayName?: unknown }).displayName;
+        if (typeof dn !== 'string' || dn.trim() === '') continue;
+        byUid.set(sn.id, dn.trim());
+      }
+    }
+
+    const all: CommunityMemberEntry[] = [];
+    for (const row of rows) {
+      const displayName = byUid.get(row.userId);
+      if (displayName === undefined) continue; // no name is not a listable member
+      all.push({ displayName, role: row.role });
+    }
+    all.sort((a, b) => a.displayName.localeCompare(b.displayName));
+
+    const page = all.slice(offset, offset + MEMBERS_PAGE);
+    const next = offset + MEMBERS_PAGE;
+    return {
+      members: page,
+      nextCursor: next < all.length ? encodeOffsetCursor(next) : null,
+    };
+  }
+);
+
+// ═════════════════════════════════════════════════════════════════════════════
+// PROFILE-PHOTOS-FIREBASE-1 — a member's own photo, and the faces a community
+// may see.
+//
+// Scope: #578 6043515827 (frozen) and #365 6043554729. Pure helpers, the JPEG
+// rebuild and the response whitelists live in profilePhotos.ts.
+//
+// THE AUDIENCE IS ENFORCED HERE, NOT IN CSS. The bytes live in the server-only
+// collection wsfProfilePhotos/{uid}, which firestore.rules' catch-all denies to
+// every client, so a photo leaves the server only through these callables:
+//   • the OWNER, through wsfMyProfilePhoto, everywhere and always;
+//   • an ACTIVE MEMBER of a community, through wsfCommunityFacePhotos, for
+//     another active member of THAT community whose name AND Show my photo are
+//     both visible there (a hidden name hides the face too).
+// Nothing else: no signed-out caller, no kiosk or station (they have no
+// account), no public preview, display or pulse. Every handler here requires
+// request.auth and none is `invoker: 'public'`.
+//
+// NO URL EXISTS. A photo is returned as base64 bytes inside an authenticated
+// callable answer, keyed by an opaque token that is re-minted on every upload
+// and cleared on removal. A token is not a credential: every fetch re-checks
+// the audience at read time, so hiding, removing, leaving or being removed
+// takes effect on the next request.
+//
+// GENERATIONS. Every write names the `expectedRevision` it was made against and
+// an idempotent `operationId`, inside one transaction on the owner's document:
+// a retried request returns its own settled result; a write made against an
+// older revision (a stale upload finishing after a removal or a newer upload
+// on another device) is refused and changes nothing. The account is always
+// request.auth.uid; no request names another account.
+// ═════════════════════════════════════════════════════════════════════════════
+
+type ProfilePhotoDoc = {
+  userId?: unknown;
+  revision?: unknown;
+  photoToken?: unknown;
+  jpeg?: unknown;
+  side?: unknown;
+  portraitDecision?: unknown;
+  lastOperationId?: unknown;
+};
+
+const PORTRAIT_DECISIONS: readonly PortraitDecision[] = ['used', 'skipped', 'removed'];
+
+function photoRef(db: FirebaseFirestore.Firestore, uid: string) {
+  return db.doc(`wsfProfilePhotos/${uid}`);
+}
+
+/** The stored document, only if it is this account's (the userId field is the authority, as on memberships). */
+function ownPhotoDoc(snap: FirebaseFirestore.DocumentSnapshot, uid: string): ProfilePhotoDoc | null {
+  if (!snap.exists) return null;
+  const d = snap.data() as ProfilePhotoDoc;
+  return d.userId === uid ? d : null;
+}
+
+function storedBytes(v: unknown): Buffer | null {
+  if (Buffer.isBuffer(v)) return v;
+  if (v instanceof Uint8Array) return Buffer.from(v);
+  return null;
+}
+
+function ownPhotoState(d: ProfilePhotoDoc | null): OwnPhotoState {
+  const revision = normalizeRevision(d?.revision) ?? 0;
+  const token = normalizePhotoToken(d?.photoToken);
+  const jpeg = storedBytes(d?.jpeg);
+  const side = typeof d?.side === 'number' && Number.isInteger(d.side) ? d.side : null;
+  const photo = token && jpeg && side !== null ? { token, revision, side, jpegBase64: jpeg.toString('base64') } : null;
+  const decision = PORTRAIT_DECISIONS.includes(d?.portraitDecision as PortraitDecision)
+    ? (d!.portraitDecision as PortraitDecision)
+    : null;
+  return { revision, photo, portrait: { decision, eligible: decision === null && photo === null } };
+}
+
+function requirePhotoWriteIds(data: { expectedRevision?: unknown; operationId?: unknown } | undefined) {
+  const expectedRevision = normalizeRevision(data?.expectedRevision);
+  if (expectedRevision === null) throw new HttpsError('invalid-argument', 'expectedRevision is required.');
+  const operationId = normalizeOperationId(data?.operationId);
+  if (operationId === null) throw new HttpsError('invalid-argument', 'operationId is required.');
+  return { expectedRevision, operationId };
+}
+
+/** The caller's own photo state: the photo (bytes included), its revision, and the portrait decision. */
+type MyProfilePhotoRequest = Record<string, never>;
+
+export const wsfMyProfilePhoto = onCall<MyProfilePhotoRequest>(
+  { region: 'us-central1' },
+  async (request): Promise<OwnPhotoState> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    requireRealIdentity(request);
+    const uid = request.auth.uid;
+    const db = getFirestore();
+    return ownPhotoState(ownPhotoDoc(await photoRef(db, uid).get(), uid));
+  }
+);
+
+type SetProfilePhotoRequest = {
+  jpegBase64?: unknown;
+  expectedRevision?: unknown;
+  operationId?: unknown;
+  source?: unknown;
+};
+
+/**
+ * Upload or replace the caller's photo. The bytes must be the small square JPEG
+ * crop; they are rebuilt without metadata (canonicalJpeg) before anything is
+ * stored. `source: 'portrait'` is the one-time movement-camera portrait: it is
+ * refused when a photo already exists or a portrait decision was already made,
+ * and it records the decision 'used'.
+ */
+export const wsfSetProfilePhoto = onCall<SetProfilePhotoRequest>(
+  { region: 'us-central1' },
+  async (request): Promise<OwnPhotoState & { replayed: boolean }> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    requireRealIdentity(request);
+    const uid = request.auth.uid;
+    const { expectedRevision, operationId } = requirePhotoWriteIds(request.data);
+    const rawSource = request.data?.source ?? 'library';
+    if (!PHOTO_SOURCES.includes(rawSource as PhotoSource)) {
+      throw new HttpsError('invalid-argument', "source must be 'library', 'camera' or 'portrait'.");
+    }
+    const source = rawSource as PhotoSource;
+    const raw = decodeBase64Strict(request.data?.jpegBase64);
+    if (!raw) {
+      const tooLong = typeof request.data?.jpegBase64 === 'string' && request.data.jpegBase64.length > 220_000;
+      throw new HttpsError('invalid-argument', tooLong ? PHOTO_MSG.tooLarge : PHOTO_MSG.notJpeg);
+    }
+    const canon = canonicalJpeg(raw);
+    if (!canon.ok) throw new HttpsError('invalid-argument', PHOTO_MSG[canon.reason]);
+
+    const db = getFirestore();
+    const ref = photoRef(db, uid);
+    // Minted OUTSIDE the transaction so a Firestore retry writes the same token.
+    const token = mintPhotoToken();
+    return db.runTransaction(async (tx) => {
+      const d = ownPhotoDoc(await tx.get(ref), uid);
+      if (d && d.lastOperationId === operationId) return { ...ownPhotoState(d), replayed: true };
+      const current = ownPhotoState(d);
+      if (current.revision !== expectedRevision) throw new HttpsError('failed-precondition', PHOTO_MSG.stale);
+      if (source === 'portrait') {
+        if (current.photo) throw new HttpsError('failed-precondition', PHOTO_MSG.portraitHasPhoto);
+        if (current.portrait.decision !== null) throw new HttpsError('failed-precondition', PHOTO_MSG.portraitDecided);
+      }
+      const next = {
+        userId: uid,
+        revision: current.revision + 1,
+        photoToken: token,
+        jpeg: canon.jpeg,
+        side: canon.side,
+        portraitDecision: source === 'portrait' ? 'used' : current.portrait.decision,
+        lastOperationId: operationId,
+        updatedAt: FieldValue.serverTimestamp(),
+      };
+      tx.set(ref, next);
+      return { ...ownPhotoState(next), replayed: false };
+    });
+  }
+);
+
+/**
+ * Remove the caller's photo everywhere: the bytes and the token are cleared,
+ * the revision moves on (so a stale upload cannot bring it back), and a member
+ * who never made a portrait decision is not prompted again ('removed').
+ * Removing when there is no photo changes nothing.
+ */
+export const wsfRemoveProfilePhoto = onCall<{ expectedRevision?: unknown; operationId?: unknown }>(
+  { region: 'us-central1' },
+  async (request): Promise<OwnPhotoState & { replayed: boolean }> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    requireRealIdentity(request);
+    const uid = request.auth.uid;
+    const { expectedRevision, operationId } = requirePhotoWriteIds(request.data);
+    const db = getFirestore();
+    const ref = photoRef(db, uid);
+    return db.runTransaction(async (tx) => {
+      const d = ownPhotoDoc(await tx.get(ref), uid);
+      if (d && d.lastOperationId === operationId) return { ...ownPhotoState(d), replayed: true };
+      const current = ownPhotoState(d);
+      if (current.revision !== expectedRevision) throw new HttpsError('failed-precondition', PHOTO_MSG.stale);
+      if (!current.photo) return { ...current, replayed: false };
+      const next = {
+        userId: uid,
+        revision: current.revision + 1,
+        photoToken: null,
+        jpeg: null,
+        side: null,
+        portraitDecision: current.portrait.decision ?? 'removed',
+        lastOperationId: operationId,
+        updatedAt: FieldValue.serverTimestamp(),
+      };
+      tx.set(ref, next);
+      return { ...ownPhotoState(next), replayed: false };
+    });
+  }
+);
+
+/**
+ * Record "Skip" for the one-time portrait offer, so no device asks again. The
+ * first decision wins and is never cleared ('used' comes from a portrait
+ * upload, 'removed' from a removal); a later call returns the settled state.
+ */
+export const wsfSetPortraitDecision = onCall<{ decision?: unknown }>(
+  { region: 'us-central1' },
+  async (request): Promise<OwnPhotoState> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    requireRealIdentity(request);
+    const uid = request.auth.uid;
+    if (request.data?.decision !== 'skipped') {
+      throw new HttpsError('invalid-argument', "decision must be 'skipped'.");
+    }
+    const db = getFirestore();
+    const ref = photoRef(db, uid);
+    return db.runTransaction(async (tx) => {
+      const d = ownPhotoDoc(await tx.get(ref), uid);
+      const current = ownPhotoState(d);
+      if (current.portrait.decision !== null) return current;
+      tx.set(
+        ref,
+        { userId: uid, revision: current.revision, portraitDecision: 'skipped', updatedAt: FieldValue.serverTimestamp() },
+        { merge: true }
+      );
+      return { ...current, portrait: { decision: 'skipped' as const, eligible: false } };
+    });
+  }
+);
+
+/**
+ * Show my photo, per community (default ON, the W8 three-way rule). 'private'
+ * HIDES the photo from this community only: it is kept, still shown to its
+ * owner, and still shown in other communities. Removal is wsfRemoveProfilePhoto.
+ * Self-only, exactly like wsfSetCommunityVisibility: no targetUid exists.
+ */
+export const wsfSetCommunityPhotoVisibility = onCall<{ groupId?: unknown; photo?: unknown }>(
+  { region: 'us-central1' },
+  async (request): Promise<{ groupId: string; photo: Vis }> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    requireRealIdentity(request);
+    const uid = request.auth.uid;
+    const groupId = normalizeStringId(request.data?.groupId);
+    if (!groupId) throw new HttpsError('invalid-argument', 'groupId is required.');
+    const v = request.data?.photo;
+    if (v !== VIS_PRIVATE && v !== VIS_VISIBLE) {
+      throw new HttpsError('invalid-argument', "photo must be 'private' or 'visible'.");
+    }
+    const db = getFirestore();
+    await requireOwnActiveMembership(db, groupId, uid);
+    await db
+      .doc(`wsfMemberships/${groupId}_${uid}`)
+      .set({ [PHOTO_VIS_FIELD]: v, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    const settled = await requireOwnActiveMembership(db, groupId, uid);
+    return { groupId, photo: settled.photo };
+  }
+);
+
+/**
+ * The faces of one community, to an active member of it: the caller ("you",
+ * shown first by the client) and one bounded, name-sorted page of the OTHER
+ * members whose names are visible there (the same rows wsfCommunityMembers
+ * lists). Each entry is the whitelist FaceEntry: a name, a role, and a photo
+ * token only when that member's Show my photo is on here and a photo exists.
+ * No uid, email, profile field, count of hidden members or timestamp.
+ */
+export const wsfCommunityFaces = onCall<CommunityMembersRequest>(
+  { region: 'us-central1' },
+  async (request): Promise<FacesResponse> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    requireRealIdentity(request);
+    const uid = request.auth.uid;
+    const groupId = normalizeStringId(request.data?.groupId);
+    if (!groupId) throw new HttpsError('invalid-argument', 'groupId is required.');
+    const offset = decodeOffsetCursor(request.data?.cursor);
+    if (offset === null) throw new HttpsError('invalid-argument', 'cursor is not valid.');
+
+    const db = getFirestore();
+    const own = await requireOwnActiveMembership(db, groupId, uid);
+
+    const snap = await db
+      .collection('wsfMemberships')
+      .where('groupId', '==', groupId)
+      .where('membershipStatus', '==', MEMBERSHIP_ACTIVE)
+      .limit(MEMBERS_MAX + 1)
+      .get();
+    if (snap.size > MEMBERS_MAX) {
+      console.error('[wsfCommunityFaces] active set exceeds the safety valve');
+      throw new HttpsError('failed-precondition', 'This community is too large to list right now.');
+    }
+
+    const rows: { userId: string; role: string; photo: Vis }[] = [];
+    const seen = new Set<string>([uid]);
+    for (const doc of snap.docs) {
+      const d = doc.data() as Record<string, unknown>;
+      if (typeof d.userId !== 'string' || d.userId === '') continue;
+      if (doc.id !== `${groupId}_${d.userId}`) continue;
+      if (seen.has(d.userId)) continue;
+      if (resolveVisibility(d[FIELD_NAME_VIS]) !== VIS_VISIBLE) continue;
+      seen.add(d.userId);
+      rows.push({
+        userId: d.userId,
+        role: typeof d.role === 'string' ? d.role : 'member',
+        photo: resolveVisibility(d[PHOTO_VIS_FIELD]),
+      });
+    }
+
+    const names = new Map<string, string>();
+    const want = [uid, ...rows.map((r) => r.userId)];
+    for (let start = 0; start < want.length; start += 300) {
+      const chunk = want.slice(start, start + 300);
+      const snaps = await db.getAll(...chunk.map((u) => db.doc(`wsfMemberProfiles/${u}`)));
+      for (const sn of snaps) {
+        if (!sn.exists) continue;
+        const dn = (sn.data() as { displayName?: unknown }).displayName;
+        if (typeof dn === 'string' && dn.trim() !== '') names.set(sn.id, dn.trim());
+      }
+    }
+
+    const listed = rows
+      .filter((r) => names.has(r.userId))
+      .map((r) => ({ ...r, displayName: names.get(r.userId)! }))
+      .sort((a, b) => a.displayName.localeCompare(b.displayName));
+    const page = listed.slice(offset, offset + MEMBERS_PAGE);
+
+    // Tokens for this page only (and the caller), never the bytes: a field mask
+    // keeps the JPEG out of this read entirely.
+    const tokenOf = new Map<string, string>();
+    const photoUids = [uid, ...page.filter((r) => r.photo === VIS_VISIBLE).map((r) => r.userId)];
+    const photoSnaps = await db.getAll(...photoUids.map((u) => photoRef(db, u)), {
+      fieldMask: ['userId', 'photoToken'],
+    });
+    for (const sn of photoSnaps) {
+      if (!sn.exists) continue;
+      const d = sn.data() as ProfilePhotoDoc;
+      const t = normalizePhotoToken(d.photoToken);
+      if (d.userId === sn.id && t) tokenOf.set(sn.id, t);
+    }
+
+    const members: FaceEntry[] = page.map((r) => {
+      const t = r.photo === VIS_VISIBLE ? tokenOf.get(r.userId) : undefined;
+      return { displayName: r.displayName, role: r.role, photo: t ? { token: t } : null };
+    });
+    const next = offset + MEMBERS_PAGE;
+    const youToken = tokenOf.get(uid);
+    return {
+      you: {
+        displayName: names.get(uid) ?? null,
+        photo: youToken ? { token: youToken } : null,
+        photoVisibility: own.photo,
+      },
+      members,
+      nextCursor: next < listed.length ? encodeOffsetCursor(next) : null,
+    };
+  }
+);
+
+/**
+ * The bytes for photo tokens the caller saw in wsfCommunityFaces for the SAME
+ * community. Each token is re-checked now: its owner must still be an active
+ * member here with a visible name and Show my photo on (or be the caller).
+ * A token that fails, or no longer names a stored photo, is simply left out —
+ * the client falls back to initials. The answer never says why.
+ */
+export const wsfCommunityFacePhotos = onCall<{ groupId?: unknown; tokens?: unknown }>(
+  { region: 'us-central1' },
+  async (request): Promise<FacePhotosResponse> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    requireRealIdentity(request);
+    const uid = request.auth.uid;
+    const groupId = normalizeStringId(request.data?.groupId);
+    if (!groupId) throw new HttpsError('invalid-argument', 'groupId is required.');
+    const rawTokens = request.data?.tokens;
+    if (!Array.isArray(rawTokens) || rawTokens.length === 0 || rawTokens.length > MAX_TOKENS_PER_FETCH) {
+      throw new HttpsError('invalid-argument', `tokens must list 1 to ${MAX_TOKENS_PER_FETCH} photo tokens.`);
+    }
+    const tokens: string[] = [];
+    for (const t of rawTokens) {
+      const n = normalizePhotoToken(t);
+      if (!n) throw new HttpsError('invalid-argument', 'tokens must list photo tokens.');
+      if (!tokens.includes(n)) tokens.push(n);
+    }
+
+    const db = getFirestore();
+    await requireOwnActiveMembership(db, groupId, uid);
+
+    const found = await db.collection('wsfProfilePhotos').where('photoToken', 'in', tokens).get();
+    const candidates: { owner: string; token: string; jpeg: Buffer }[] = [];
+    for (const doc of found.docs) {
+      const d = doc.data() as ProfilePhotoDoc;
+      const t = normalizePhotoToken(d.photoToken);
+      const jpeg = storedBytes(d.jpeg);
+      if (d.userId !== doc.id || !t || !jpeg || !tokens.includes(t)) continue;
+      candidates.push({ owner: doc.id, token: t, jpeg });
+    }
+
+    const others = [...new Set(candidates.map((c) => c.owner).filter((o) => o !== uid))];
+    const permitted = new Set<string>([uid]);
+    if (others.length) {
+      const snaps = await db.getAll(...others.map((o) => db.doc(`wsfMemberships/${groupId}_${o}`)));
+      for (const sn of snaps) {
+        if (!sn.exists) continue;
+        const m = sn.data() as Record<string, unknown>;
+        const owner = sn.id.slice(groupId.length + 1);
+        if (m.userId !== owner || m.groupId !== groupId || m.membershipStatus !== MEMBERSHIP_ACTIVE) continue;
+        if (resolveVisibility(m[FIELD_NAME_VIS]) !== VIS_VISIBLE) continue;
+        if (resolveVisibility(m[PHOTO_VIS_FIELD]) !== VIS_VISIBLE) continue;
+        permitted.add(owner);
+      }
+    }
+
+    const byToken = new Map(candidates.filter((c) => permitted.has(c.owner)).map((c) => [c.token, c.jpeg]));
+    return {
+      photos: tokens.filter((t) => byToken.has(t)).map((t) => ({ token: t, jpegBase64: byToken.get(t)!.toString('base64') })),
+    };
+  }
+);
+
+/**
+ * THE WALL-CLOCK OFFSET OF A ZONE AT AN INSTANT, in milliseconds.
+ *
+ * Derived by asking the runtime what the wall clock reads in that zone at that
+ * instant and subtracting the instant. There is no offset table to go stale and
+ * no hard-coded DST rule to be wrong twice a year.
+ */
+function zoneOffsetMs(utcMs: number, timeZone: string): number | null {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      hour12: false,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    }).formatToParts(new Date(utcMs));
+    const get = (t: string): number => {
+      const p = parts.find((x) => x.type === t);
+      return p ? Number(p.value) : Number.NaN;
+    };
+    let hour = get('hour');
+    // Some ICU builds render midnight as hour 24 under hour12:false.
+    if (hour === 24) hour = 0;
+    const y = get('year');
+    const mo = get('month');
+    const d = get('day');
+    const mi = get('minute');
+    const se = get('second');
+    if (![y, mo, d, hour, mi, se].every(Number.isFinite)) return null;
+    return Date.UTC(y, mo - 1, d, hour, mi, se) - utcMs;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * THE INSTANT AT WHICH THE CURRENT LOCAL DAY BEGAN, IN A GIVEN ZONE.
+ *
+ * REQUIRED BY THE DIRECTOR'S SECOND CORRECTION: "today" must be the goal's
+ * OWN stored timezone, never Cloud Functions host time, never accidental UTC,
+ * and never the caller device's arbitrary local day — otherwise a member in one
+ * place changes what "today" means for everyone else in the community.
+ *
+ * Computed twice on purpose. The zone's offset AT MIDNIGHT can differ from its
+ * offset NOW — that is exactly what a DST transition is — so the first estimate
+ * is re-measured at the candidate instant and corrected. Getting this wrong
+ * moves the boundary by an hour on two days a year, which is precisely when a
+ * "people moved today" count would be quietly wrong and nobody would notice.
+ *
+ * Returns null when the zone cannot be resolved. The caller renders NOTHING on
+ * null; it never falls back to a different clock.
+ */
+function zonedDayStartMs(utcMs: number, timeZone: string): number | null {
+  const off1 = zoneOffsetMs(utcMs, timeZone);
+  if (off1 === null) return null;
+  const wall = new Date(utcMs + off1);
+  const midnightWall = Date.UTC(wall.getUTCFullYear(), wall.getUTCMonth(), wall.getUTCDate());
+  const candidate = midnightWall - off1;
+  const off2 = zoneOffsetMs(candidate, timeZone);
+  if (off2 === null) return null;
+  return off2 === off1 ? candidate : midnightWall - off2;
+}
+
+type ActivityEntry = {
+  /**
+   * The contributor's name, or null for a member whose ACTIVITY is visible
+   * while their NAME is not.
+   *
+   * NULL IS A STATE THE UI RENDERS, not an error to filter out: that member
+   * still moved the shared total, and dropping their row would under-report the
+   * community's activity to make the feed tidier.
+   */
+  displayName: string | null;
+  amount: number;
+  unit: string;
+  /** Minute-level. Second-level time is never published. */
+  at: string;
+};
+
+type CommunityActivityRequest = {
+  groupId?: unknown;
+  goalId?: unknown;
+  cursor?: unknown;
+};
+
+const ACTIVITY_PAGE = 20;
+/** How far back one call will read to try to prove the day window. */
+const ACTIVITY_SCAN_MAX = 400;
+
+/**
+ * The activity cursor carries A TIME AND A TIE-BREAKER, never a document.
+ *
+ * `startAfter(lastDoc)` on wsfContributions would serialise
+ * `{goalId}_{uid}_{attemptId}` — a uid in plaintext — which is the same trap
+ * #390 identified on the membership collection. A millisecond plus "how many
+ * rows sharing that exact millisecond you have already seen" is exact across a
+ * page boundary and names nobody.
+ */
+function encodeActivityCursor(beforeMs: number, skip: number): string {
+  return Buffer.from(JSON.stringify({ b: beforeMs, s: skip }), 'utf8').toString('base64url');
+}
+
+function decodeActivityCursor(raw: unknown): { b: number; s: number } | null {
+  if (raw === undefined || raw === null || raw === '') return { b: Number.MAX_SAFE_INTEGER, s: 0 };
+  if (typeof raw !== 'string' || raw.length > 256) return null;
+  try {
+    const p = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as {
+      b?: unknown;
+      s?: unknown;
+    };
+    if (typeof p?.b !== 'number' || !Number.isFinite(p.b) || p.b < 0) return null;
+    if (typeof p?.s !== 'number' || !Number.isInteger(p.s) || p.s < 0 || p.s > ACTIVITY_SCAN_MAX) {
+      return null;
+    }
+    return { b: p.b, s: p.s };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * ONE BOUNDED PAGE OF A COMMUNITY'S RECENT MOVEMENT, to a member of it.
+ *
+ * Read over the REAL contribution ledger. wsfContributions already carries
+ * userId, communityGroupId, count, unit and a server createdAt on every row, so
+ * this needs no new write path, no duplicated counter and no denormalised
+ * identity snapshot — which is the seam the direction asked to be proven before
+ * one was invented.
+ *
+ * PRIVACY IS EVALUATED AT READ TIME, FROM THE CURRENT MEMBERSHIP ROW. No
+ * display name is ever written into contribution history to render a feed, so
+ * turning a name off removes identity from OLD activity too — the retroactive
+ * property the owner's decision requires.
+ *
+ * THE FIELD WHITELIST IS THE TYPE. Never returned: userId, email, attemptId,
+ * shardIndex, crossedTarget, member totals, tokens, private profile fields, or
+ * second-level time.
+ */
+export const wsfCommunityActivity = onCall<CommunityActivityRequest>(
+  // NO `invoker: 'public'`, for the reason stated on wsfCommunityMembers.
+  { region: 'us-central1' },
+  async (
+    request
+  ): Promise<{
+    entries: ActivityEntry[];
+    contributorsToday: number | null;
+    nextCursor: string | null;
+  }> => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    requireRealIdentity(request);
+    const uid = request.auth.uid;
+    const groupId = normalizeStringId(request.data?.groupId);
+    if (!groupId) throw new HttpsError('invalid-argument', 'groupId is required.');
+    const goalId = normalizeStringId(request.data?.goalId);
+    const cursor = decodeActivityCursor(request.data?.cursor);
+    if (cursor === null) throw new HttpsError('invalid-argument', 'cursor is not valid.');
+
+    const db = getFirestore();
+    await requireOwnActiveMembership(db, groupId, uid);
+
+    /*
+      REQUIRES THE COMPOSITE INDEX
+        wsfContributions (communityGroupId ASC, createdAt DESC)
+      declared in firestore.indexes.json on this branch and NOT DEPLOYED here.
+      The emulator does not enforce indexes, so this query passes locally with
+      or without it; that is exactly why the declaration is written down and
+      pinned by a test rather than discovered in front of real people.
+    */
+    let q = db
+      .collection('wsfContributions')
+      .where('communityGroupId', '==', groupId)
+      .orderBy('createdAt', 'desc');
+    if (cursor.b !== Number.MAX_SAFE_INTEGER) {
+      q = q.where('createdAt', '<=', Timestamp.fromMillis(cursor.b));
+    }
+    const snap = await q.limit(ACTIVITY_SCAN_MAX).get();
+
+    type Row = { userId: string; amount: number; unit: string; ms: number; goalId: string };
+    const scanned: Row[] = [];
+    for (const doc of snap.docs) {
+      const d = doc.data() as Record<string, unknown>;
+      const createdAt = d.createdAt;
+      if (!(createdAt instanceof Timestamp)) continue; // an unwritten server time is not a fact
+      const amount = d.count;
+      if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) continue;
+      if (typeof d.userId !== 'string' || d.userId === '') continue;
+      scanned.push({
+        userId: d.userId,
+        amount,
+        unit: typeof d.unit === 'string' ? d.unit : '',
+        ms: createdAt.toMillis(),
+        goalId: typeof d.goalId === 'string' ? d.goalId : '',
+      });
+    }
+    // Skip the rows at the boundary millisecond the previous page already
+    // returned, so a tie across a page edge neither repeats nor drops a row.
+    const afterSkip = cursor.s > 0 ? scanned.slice(cursor.s) : scanned;
+
+    // Every distinct contributor in this scan, resolved ONCE from their CURRENT
+    // membership row in THIS community.
+    const uids = [...new Set(afterSkip.map((r) => r.userId))];
+    const nameVis = new Map<string, Vis>();
+    const activityVis = new Map<string, Vis>();
+    const CHUNK = 300;
+    for (let i = 0; i < uids.length; i += CHUNK) {
+      const chunk = uids.slice(i, i + CHUNK);
+      const snaps = await db.getAll(
+        ...chunk.map((u) => db.doc(`wsfMemberships/${groupId}_${u}`))
+      );
+      for (const sn of snaps) {
+        const d = sn.exists ? (sn.data() as Record<string, unknown>) : undefined;
+        // A contributor who is no longer an active member of this community is
+        // not shown by name. Their effort still counts in the shared total.
+        const active = d !== undefined && d.membershipStatus === MEMBERSHIP_ACTIVE;
+        const owner = sn.id.slice(groupId.length + 1);
+        nameVis.set(owner, active ? resolveVisibility(d?.[FIELD_NAME_VIS]) : VIS_PRIVATE);
+        activityVis.set(owner, active ? resolveVisibility(d?.[FIELD_ACTIVITY_VIS]) : VIS_PRIVATE);
+      }
+    }
+
+    // Names, for the contributors who are showing both.
+    const wanted = [
+      ...new Set(
+        afterSkip
+          .filter(
+            (r) => activityVis.get(r.userId) === VIS_VISIBLE && nameVis.get(r.userId) === VIS_VISIBLE
+          )
+          .map((r) => r.userId)
+      ),
+    ];
+    const names = new Map<string, string>();
+    for (let i = 0; i < wanted.length; i += CHUNK) {
+      const chunk = wanted.slice(i, i + CHUNK);
+      const snaps = await db.getAll(...chunk.map((u) => db.doc(`wsfMemberProfiles/${u}`)));
+      for (const sn of snaps) {
+        if (!sn.exists) continue;
+        const dn = (sn.data() as { displayName?: unknown }).displayName;
+        if (typeof dn !== 'string' || dn.trim() === '') continue;
+        names.set(sn.id, dn.trim());
+      }
+    }
+
+    /*
+      ACTIVITY PRIVACY OMITS THE ROW; NAME PRIVACY ONLY REMOVES THE NAME.
+
+      Walked with the RAW index kept, because the continuation token has to be
+      expressed in the scan's own ordering. Paging off the filtered list would
+      mean the next call skipped a number of rows counted in a sequence it will
+      never see, and every hidden row at the boundary millisecond would shift
+      the page edge by one.
+    */
+    const entries: ActivityEntry[] = [];
+    let lastRawIndex = -1;
+    for (let i = 0; i < afterSkip.length && entries.length < ACTIVITY_PAGE; i += 1) {
+      const r = afterSkip[i]!;
+      if (activityVis.get(r.userId) !== VIS_VISIBLE) continue;
+      entries.push({
+        displayName:
+          nameVis.get(r.userId) === VIS_VISIBLE ? (names.get(r.userId) ?? null) : null,
+        amount: r.amount,
+        unit: r.unit,
+        at: isoMinute(r.ms),
+      });
+      lastRawIndex = i;
+    }
+
+    /*
+      "X PEOPLE MOVED TODAY" — THE LINE MOST LIKELY TO BE A LIE, SO THE MOST
+      GUARDED. It is returned only when ALL of this holds:
+
+        · a goalId was given and that goal belongs to THIS community;
+        · the goal carries a resolvable IANA timezone, so "today" is the goal's
+          own local day rather than host time, UTC or a caller's device clock;
+        · the goal's own active window can be read; and
+        · THE SCAN PROVABLY REACHED BACK PAST THE WINDOW START — either it
+          returned fewer rows than its cap, or its oldest row predates the
+          start. A scan that stopped inside the window can only under-count, and
+          an under-count presented as a count is a lie.
+
+      Otherwise it is null and the UI renders NOTHING: never "at least N", never
+      an estimate, and never the row count standing in for a person count.
+
+      Members whose ACTIVITY is private are still counted here. It is an
+      aggregate, like the shared total and the member count, and the settled
+      rule is that private members remain counted in aggregates with their
+      identity hidden.
+    */
+    let contributorsToday: number | null = null;
+    if (goalId !== null && cursor.b === Number.MAX_SAFE_INTEGER) {
+      const goalSnap = await db.doc(`wsfGoals/${goalId}`).get();
+      const goal = goalSnap.exists ? (goalSnap.data() as GoalDoc) : null;
+      if (goal !== null && goal.communityGroupId === groupId) {
+        const tz = normalizeIanaTimezone(goal.timezone);
+        const startsAt = goal.startsAt instanceof Timestamp ? goal.startsAt.toMillis() : null;
+        const endsAt = goal.endsAt instanceof Timestamp ? goal.endsAt.toMillis() : null;
+        const nowMs = Date.now();
+        if (tz !== null && startsAt !== null && endsAt !== null) {
+          const dayStart = zonedDayStartMs(nowMs, tz);
+          if (dayStart !== null) {
+            // The goal's own active-window semantics bound the day: a goal that
+            // began at noon has no "today" before noon, and one that has ended
+            // counts nothing after its end.
+            const from = Math.max(dayStart, startsAt);
+            const to = Math.min(nowMs, endsAt);
+            const covered = scanned.length < ACTIVITY_SCAN_MAX || (scanned.at(-1)?.ms ?? 0) < from;
+            if (covered && from <= to) {
+              const movers = new Set(
+                scanned
+                  .filter((r) => r.goalId === goalId && r.ms >= from && r.ms <= to)
+                  .map((r) => r.userId)
+              );
+              contributorsToday = movers.size;
+            }
+          }
+        }
+      }
+    }
+
+    /*
+      A CURSOR ONLY WHEN THERE IS PROVABLY SOMETHING AFTER IT: either raw rows
+      remain in this scan, or the scan hit its cap and the rest is unread. A
+      cursor emitted at a true end costs the caller one empty round trip and
+      makes "no more activity" indistinguishable from "ask again".
+
+      `skip` is how many rows sharing the boundary millisecond have ALREADY been
+      consumed across all pages — the ones at or before the boundary in this
+      scan, plus the ones an earlier page skipped at that same millisecond.
+      Firestore breaks ties on the document key, so that ordering is stable and
+      the next page resumes exactly where this one stopped.
+    */
+    let nextCursor: string | null = null;
+    const moreRaw = lastRawIndex >= 0 && lastRawIndex + 1 < afterSkip.length;
+    const scanCapped = scanned.length >= ACTIVITY_SCAN_MAX;
+    if (lastRawIndex >= 0 && (moreRaw || scanCapped)) {
+      const boundaryMs = afterSkip[lastRawIndex]!.ms;
+      let skip = 0;
+      for (let i = 0; i <= lastRawIndex; i += 1) {
+        if (afterSkip[i]!.ms === boundaryMs) skip += 1;
+      }
+      if (boundaryMs === cursor.b) skip += cursor.s;
+      nextCursor = encodeActivityCursor(boundaryMs, skip);
+    }
+
+    return { entries, contributorsToday, nextCursor };
   }
 );

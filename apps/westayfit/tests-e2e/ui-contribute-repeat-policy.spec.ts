@@ -388,8 +388,16 @@ test('once: today’s copy is unchanged, no second contribution is offered, and 
   await expect(page.getByTestId(`wsf-community-your-part-${goalId}`)).toBeVisible({
     timeout: 20_000,
   });
+  // SLICE 2, item 7. THE SAME FACT IS NOT STATED TWICE ON ONE SCREEN.
+  // The hero above now says "You've recorded 20 squats." — the number, in the
+  // first viewport — so Your part no longer repeats it. It carries what the
+  // hero does not: that the part is counted, and where. The number itself is
+  // still asserted, one line down, on the surface that actually shows it.
+  await expect(page.getByTestId(`wsf-community-goal-complete-${goalId}`)).toContainText(
+    'You’ve recorded 20 squats.'
+  );
   await expect(page.getByTestId(`wsf-community-your-part-${goalId}`)).toContainText(
-    'You’ve added 20 squats to this goal.'
+    'Counted in the shared total above.'
   );
   // SLICE 1. The Your-part duplicate is gone from every goal now, so asserting
   // its absence here would pass for the wrong reason and prove nothing about

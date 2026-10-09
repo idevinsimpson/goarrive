@@ -1,0 +1,51 @@
+{
+  "stage": "MIGRATED",
+  "label": "MIGRATED BUILD 91392f9d / NOT ACCEPTED",
+  "device": "390x640",
+  "journey": "wordmark-home",
+  "before": {
+    "path": "/community",
+    "moveSheets": 0,
+    "communityInstances": 1,
+    "tabBars": 1,
+    "loadingPainted": 0,
+    "scroll": null
+  },
+  "after": {
+    "path": "/community/w9afp2ca-muhf6rss-3a0adbw640",
+    "moveSheets": 0,
+    "communityInstances": 2,
+    "tabBars": 1,
+    "loadingPainted": 0,
+    "scroll": null
+  },
+  "loadingSeen": [
+    "wsf-community-loading"
+  ],
+  "frames": [
+    {
+      "file": "MIGRATED-wordmark-home-000ms-390x640.png",
+      "mark": 0,
+      "shutterMs": 87,
+      "sha256": "508557193a48682a7a963a8594eb96299798722ade64002245e6795b5c86b0d8"
+    },
+    {
+      "file": "MIGRATED-wordmark-home-150ms-390x640.png",
+      "mark": 150,
+      "shutterMs": 336,
+      "sha256": "b702140b37e34a6bf1a5f05141bdc62641a9cc814eb99e573c1691ba8ebf10bb"
+    },
+    {
+      "file": "MIGRATED-wordmark-home-400ms-390x640.png",
+      "mark": 400,
+      "shutterMs": 518,
+      "sha256": "b702140b37e34a6bf1a5f05141bdc62641a9cc814eb99e573c1691ba8ebf10bb"
+    },
+    {
+      "file": "MIGRATED-wordmark-home-settled-390x640.png",
+      "mark": -1,
+      "shutterMs": 1975,
+      "sha256": "b702140b37e34a6bf1a5f05141bdc62641a9cc814eb99e573c1691ba8ebf10bb"
+    }
+  ]
+}

@@ -1,5 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
+import { clearVerifyGate } from './helpers/mobile';
+
 /**
  * E3.5 §3C — sign-in and password polish. Covers the surfaces Devin's
  * 2026-09-06 Safari retest found broken:
@@ -82,9 +84,7 @@ async function signUpVerifyAndSetupProfile(
   await expect(page.getByTestId('wsf-verify')).toBeVisible({ timeout: 15_000 });
   await sendSettled;
   await markEmailVerified(email);
-  await page.getByTestId('wsf-verify-check').click();
-
-  await expect(page.getByTestId('wsf-profile')).toBeVisible({ timeout: 15_000 });
+  await clearVerifyGate(page, 'wsf-profile', 15_000);
   await page.getByTestId('wsf-profile-termsCheckbox').click();
   await page.getByTestId('wsf-profile-submit').click();
 

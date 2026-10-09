@@ -746,3 +746,58 @@ describe('wsfContribute — concurrent replay of one attempt', () => {
     expect(second.status).toBe('active');
   }, 30_000);
 });
+
+describe('KIOSK-UNVERIFIED-PARTICIPANT-1 — an unverified account contributes like any member', () => {
+  function unverified(uid: string, data: Data): Parameters<typeof wsfContribute.run>[0] {
+    return {
+      auth: { uid, token: { email_verified: false } },
+      data,
+      rawRequest: {},
+      acceptsStreaming: false,
+    } as any;
+  }
+
+  test('phone contribution, own receipt, idempotent retry, and the same credit after verifying', async () => {
+    const { goalId, communityGroupId } = await seedGoal({ target: 100 });
+    const uid = uniq('unverified');
+    await seedMembership(communityGroupId, uid, { role: 'member' });
+
+    const first = await wsfContribute.run(unverified(uid, { goalId, attemptId: 'unverified-attempt-1', count: 12 }));
+    expect(first).toMatchObject({ addedCount: 12, ownCredit: 12, alreadyRecorded: false, sharedTotal: 12 });
+    const retry = await wsfContribute.run(unverified(uid, { goalId, attemptId: 'unverified-attempt-1', count: 12 }));
+    expect(retry).toMatchObject({ addedCount: 12, ownCredit: 12, alreadyRecorded: true, sharedTotal: 12 });
+
+    const receipt = await wsfMyContribution.run(unverified(uid, { goalId }) as any);
+    expect(receipt).toMatchObject({ ownCredit: 12 });
+
+    // The same uid, now verified: the same attempt is still one record, and
+    // the credit is the credit it already had.
+    const verified = await wsfContribute.run(makeRequest(uid, { goalId, attemptId: 'unverified-attempt-1', count: 12 }));
+    expect(verified).toMatchObject({ ownCredit: 12, alreadyRecorded: true });
+    expect(await directContributionCount(goalId)).toBe(1);
+    expect(await directShardSum(goalId)).toBe(12);
+  });
+
+  test('every existing refusal still applies to an unverified caller', async () => {
+    const { goalId, communityGroupId } = await seedGoal({ target: 100 });
+    const stranger = uniq('unverified-stranger');
+    const refuse = async (uid: string, data: Data) => {
+      try {
+        await wsfContribute.run(unverified(uid, data));
+        return 'accepted';
+      } catch (e) {
+        return (e as HttpsError).code;
+      }
+    };
+    expect(await refuse(stranger, { goalId, attemptId: 'unverified-stranger-1', count: 5 })).toBe('permission-denied');
+    const removed = uniq('unverified-removed');
+    await seedMembership(communityGroupId, removed, { role: 'member', membershipStatus: 'removed' });
+    expect(await refuse(removed, { goalId, attemptId: 'unverified-removed-1', count: 5 })).toBe('permission-denied');
+    const closed = await seedGoal({ status: 'closed' });
+    const member = uniq('unverified-member');
+    await seedMembership(closed.communityGroupId, member, { role: 'member' });
+    expect(await refuse(member, { goalId: closed.goalId, attemptId: 'unverified-closed-1', count: 5 })).toBe('failed-precondition');
+    expect(await refuse(member, { goalId: closed.goalId, attemptId: 'unverified-zero-1', count: 0 })).toBe('invalid-argument');
+    expect(await directShardSum(goalId)).toBe(0);
+  });
+});

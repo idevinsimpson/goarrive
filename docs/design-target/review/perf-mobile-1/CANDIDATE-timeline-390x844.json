@@ -1,0 +1,89 @@
+{
+  "stage": "CANDIDATE",
+  "commit": "889e9775",
+  "device": "390x844",
+  "instrumentation": "every callable answer held 1500 ms after Home settled",
+  "journeys": {
+    "progress": {
+      "shutterMsFromPress": [
+        80,
+        166,
+        603,
+        2995
+      ],
+      "loadingPainted": {}
+    },
+    "you": {
+      "shutterMsFromPress": [
+        72,
+        153,
+        601,
+        2991
+      ],
+      "loadingPainted": {}
+    },
+    "move": {
+      "shutterMsFromPress": [
+        124,
+        316,
+        601,
+        2992
+      ],
+      "loadingPainted": {}
+    }
+  },
+  "frames": [
+    {
+      "file": "CANDIDATE-progress-000ms-390x844.png",
+      "sha256": "3d768dab9c01f1deae647351368992112c9f25de5c3a02773f070ed514db4286"
+    },
+    {
+      "file": "CANDIDATE-progress-150ms-390x844.png",
+      "sha256": "3d768dab9c01f1deae647351368992112c9f25de5c3a02773f070ed514db4286"
+    },
+    {
+      "file": "CANDIDATE-progress-600ms-390x844.png",
+      "sha256": "3d768dab9c01f1deae647351368992112c9f25de5c3a02773f070ed514db4286"
+    },
+    {
+      "file": "CANDIDATE-progress-settled-390x844.png",
+      "sha256": "3d768dab9c01f1deae647351368992112c9f25de5c3a02773f070ed514db4286"
+    },
+    {
+      "file": "CANDIDATE-you-000ms-390x844.png",
+      "sha256": "c6787b4f876d68f4b4161568ec24933e8dc40e423644c32e6c8d1a36c30816e6"
+    },
+    {
+      "file": "CANDIDATE-you-150ms-390x844.png",
+      "sha256": "c6787b4f876d68f4b4161568ec24933e8dc40e423644c32e6c8d1a36c30816e6"
+    },
+    {
+      "file": "CANDIDATE-you-600ms-390x844.png",
+      "sha256": "c6787b4f876d68f4b4161568ec24933e8dc40e423644c32e6c8d1a36c30816e6"
+    },
+    {
+      "file": "CANDIDATE-you-settled-390x844.png",
+      "sha256": "c6787b4f876d68f4b4161568ec24933e8dc40e423644c32e6c8d1a36c30816e6"
+    },
+    {
+      "file": "CANDIDATE-move-000ms-390x844.png",
+      "sha256": "a3cb99d7ba9cd4bad8289309862396516cf49f19e0a3b89e6abdb27904f0ec86"
+    },
+    {
+      "file": "CANDIDATE-move-150ms-390x844.png",
+      "sha256": "cc27f7f940bacc1f0f8797f58a89b75eb64b1031bc9cd21d17173f61ef144090"
+    },
+    {
+      "file": "CANDIDATE-move-600ms-390x844.png",
+      "sha256": "cc27f7f940bacc1f0f8797f58a89b75eb64b1031bc9cd21d17173f61ef144090"
+    },
+    {
+      "file": "CANDIDATE-move-settled-390x844.png",
+      "sha256": "846f7e925cd84303322cabcc31e820d1838c4be3e27d0f37eafbb1bcd43bc923"
+    }
+  ],
+  "video": {
+    "file": "CANDIDATE-timeline-390x844.webm",
+    "sha256": "75a1e95896e7448395cdd0b35c18f3b667d14c9c9ad48a82e959c3bc66af1cac"
+  }
+}
