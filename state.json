@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "bf4c91cc53542f19e283463dd709625019f66e0d6716aa6ba1cd03d79b77870f",
-  "eventCount": 1071,
+  "ledgerHead": "90d42c7d2bfafe0150be5779a14f568ef09aa76b2d843f7774c0b4c0681e6430",
+  "eventCount": 1073,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -3045,7 +3045,9 @@
       "proof": null,
       "served": null,
       "releasedQueueIndex": null,
-      "reviewedBy": [],
+      "reviewedBy": [
+        "W3"
+      ],
       "subjectPaths": [
         "docs/westayfit/ops/production/RUNBOOK_WSF_PRODUCTION_DEPLOY_1.md"
       ],
@@ -3063,7 +3065,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6085096208
+          "id": 6085475734
         }
       },
       "review": {
@@ -6379,11 +6381,15 @@
       "packet": "PROD-RUNTIME-SA-AUTH-ROLE-1",
       "worker": "W3",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6085358340
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6085413447
+      },
+      "superseded": true
     }
   },
   "fastpath": {
