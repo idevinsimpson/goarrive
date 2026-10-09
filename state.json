@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "f64fe59e0644e41033ad82ce4d40ca5d4c0b8499bfdb049c92605273e7f930e5",
-  "eventCount": 1079,
+  "ledgerHead": "bfd5a6097d7d2ff6835bd5f7cb61faa7e1eedf2e0f2316063c325cef7de3b57b",
+  "eventCount": 1080,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -6460,8 +6460,10 @@
       "packet": "LOVABLE-REVIEWED-BUILD-1",
       "worker": "W4",
       "reason": "release",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        6090832846
+      ],
       "ack": null
     }
   },
