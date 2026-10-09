@@ -6605,3 +6605,66 @@ After reassignment, 45 idle minutes produced no W7 post and no W7 timer line. W7
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0 (re-run before push).
 
 **Status:** **PASS at `75f77d30` with zero unresolved findings.** PN-1 to PN-4 are non-blocking. W7 made no product edit, merge, dispatch, deploy, live-data change, credential or permission change, and did not touch any state ref or comment other than its own GitHub replies.
+
+## §83. Check 83: #600 PRODUCTION-DEPLOY-PATH-1 at `dfd48c87`
+
+**Assignment:** router wake `4100c4f29c58d977f2739fa443fb33edd99264d95055749eafa95c1d07b112d9` (#434 `6081225033`), under the owner's standing approval to ACK and perform valid W7 router reviews. L0's Director decision (#365 `6079354672`) gave W7 the ops-source class beside journey-qa. I refreshed `wsf-control-state-2` first: `check` passed (996 events), `worker-view W7` showed `WATCH=on` and `REVIEWING=PRODUCTION-DEPLOY-PATH-1 phase=UNDER_REVIEW pr=#600 subject=dfd48c87…`, W7 was the sole reviewer, and the wake was `delivered`. I re-checked the PR head (still the subject, draft, mergeable and clean) and #365 for a supersession before the ACK. ACK: #434 `6081253164`.
+
+**Subject:** #600 (draft, owner W9) at exactly `dfd48c87ee36710e47c19f0b6e70e3ab7a71e246`: four commits on `main` `41bff6c6`, 4 files, +2231, exactly the ledger's `subjectPaths` (the production config, the pre-flight and its test, and the runbook). **Nothing was deployed, and I ran no `gcloud`, no `firebase` command and no credentialed call.** I read the packet in a detached worktree and pushed nothing from it. The packet is an earlier redelivery of the one W4 found F1 to F3 in (`dff97e4f`, #394 `6076291750`) and W3 found 7 blocking items in (#396 `6078906904`).
+
+### Reproduced
+
+| Check | Result |
+|---|---|
+| `node --test .github/wsf-production/preflight.test.mjs` | **43 / 43** (the PR says 43; Node 22) |
+| The anchors, on the real repository | A `ec162d17` is the merge of #596 (the packet I reviewed in Check 81); G `e65bfee9` is the merge of #601 (parents A and `118c2af9`); **G minus A is exactly the four ANON-GATE-1 paths**; `origin/claude/wsf-app-shell` is G; 59 exports and 17 `invoker: 'public'` declarations at **both**, equal to the manifests |
+| The pre-flight on the real anchors, in the runbook's step-1 shape (scratch worktrees, the production config from the PR head standing in for post-merge `main`, `main`'s own `firestore.rules` standing in for the live ruleset) | **A: `ok: true`** (24 checks) and **G: `ok: true`** (25 checks, adding the gate-over-A check); `exports` 59; `consentVersionPending: true`; `rulesHashes.candidate` sha256 `58ef038e…`, 1261 lines, `outsideWsfSha256` and `main` both `f261a8af…`: **identical to the runbook's table**. `sed '1197,1256d'` also gives `f261a8af…` |
+| Step-6 and step-7 command shapes after an `npm ci` and a build (`node_modules/` and `lib/` present, both gitignored) | `ok: true` for both |
+| 29 attacks on the real tree | **all refused** (below) |
+| F3 (W4): the real `main` `7cd5aad3` as candidate and main | **a JSON verdict prints** (`candidate.not-main`, `candidate.files-present`, `main.files-present` and the anchor checks refused); no crash. Real `main` as `--main` for A: `main.files-present` refused, because `main` has no production config until this packet merges, and the runbook says so |
+| W7 mutants of `preflight.mjs` (43) | the PR's 43 tests kill **40 / 43** |
+| The copied firebase-tools dotenv parser against the **real** `lib/functions/env.js` from the pinned tarball | 26 crafted + 6000 random inputs: **0 differences**. 20000 structured hostile env files: **3871 pass the guard** (so it is not vacuous) and **0** would let firebase-tools upload a foreign or extra value |
+| The runbook's 18 shell blocks | `bash -n` **18 / 18** parse |
+| The runbook's own step-0 functions (`capture_rules`, `wsf_count`, `wsf_memberships`), extracted from the document and run against stubbed `gcloud` and `curl` | correct output (`B12 … total 9, active 7, not active or no status: 2`); both queries are valid JSON; the token is in no file; a failed read and a missing token each exit 1 |
+| PR state | mergeable, `clean` |
+
+**The 29 attacks, all refused (exit 1, or 2 for unusable input), each by the check that names it.**
+- *Command (12):* `--force`; `-f`; `--only hosting`; `--only firestore:indexes`; a bare `functions`; `functions:default`; two targets; `--config firebase.json`; another project; no `--only`; a shell operator; the interactive form without a reason.
+- *Records and anchors (5):* record A on candidate G; record G on candidate A; real `main` as candidate for A and for G; real `main` as `--main`.
+- *Env file (6):* a foreign `WSF_AUTH_ACTION_HANDLER`; a multi-line quoted handler smuggle; a staging `WSF_APP_URL`; a secret key in the file; a non-`westay.fit` sender; a secret plus a foreign handler together. In the last, **no value is echoed**: the verdict names key names only.
+- *Worktree (3):* a stray `functions-westayfit/.env` (an ignored file); a stray untracked file; the deploy run from another directory.
+- *Rules and config (3):* `firestore:rules` without `--live-rules`; a live ruleset that differs outside the WSF section; a config that gains `hosting`.
+The seven controls pass: A, G, the `--only=…`/`--project=…` forms, `firestore:rules`, the step-6 and step-7 shapes, and the restored config.
+
+### Items
+
+1. **W4's F1 (the 59 services) is fixed.** There is no `only 17`, `17 public` or `on only` left. Step 8.3 checks `allUsers` on all 59 (60 with the orphan under D2) with no `MISSING`; rule 6 forbids removing it except by the owner's all-or-none off-switch; the receipt reads `invoker ok <n> / MISSING 0`. The pre-flight's comment and the runbook present the 17 as a **source** invariant only.
+2. **W4's F2 (the Web Twin scope) is fixed.** The appendix carries the handoff by reference and the three readback rows (Email/Password, the action and continue URL, the API-key referrer restrictions), with console paths and read-only commands that print no value.
+3. **The toolchain facts are true.** From the pinned `firebase-tools@15.30.1` tarball (its registry sha1 equals the file I read) and `firebase-functions@4.9.0`:
+   - Node 20 is decommissioned on 2026-10-30 (`types.js:50-55`), and a deploy then throws (`index.js:56-59`).
+   - The minimum-bill prompt is in `prepare.js:338` and `prompts.js:116`; the non-interactive deletion abort is `prompts.js:62-71` and the deletion prompt precedes any create (`release/index.js:55`).
+   - The cleanup-policy exit comes after the per-function results (`release/index.js:91`, `:100`, then the `exit: 2` at `:117`) and its text is `prompts.js:179-190`.
+   - The dotenv parser is `env.js:49-61` and `:83-110`.
+   - A callable is created with `["public"]` (`fabricator.js`, the `isCallableTriggered` branches) and the v1 update path sets an invoker only for https, task-queue and blocking triggers; `onCall` in 4.9.0 yields `callableTrigger: {}`, so the source `invoker` option is inert. The lockfile resolves `firebase-functions` 4.9.0 at both A and G.
+4. **The security truth is accurate.** At A, `email_verified` is tested at exactly three sites (`index.ts:203` `wsfCreateCommunity`, `:3114` and `:6805`), `JOIN_REQUIRES_EMAIL_VERIFIED` is `false` (`:656`), and both joins and `wsfSaveProfile` admit any token. At G, `requireRealIdentity(request)` appears **42** times and `anon-gate.ts` carries the refusal sentence. The consent constants sit at `index.ts:124-125` (A) and `:126-127` (G) and in `profileConstants.ts:1-2`. `productionConfig` is at `firebase.ts:79-86`. Real `main` has exactly one export (`wsfHealth`) and no WSF rules banner, so the "never deploy from main" rule is right.
+5. **The production config.** It declares only the `westayfit` codebase and Firestore rules and indexes, with no hosting and no storage. Its functions entry equals staging's apart from the predeploy build.
+6. **The runbook and the guard agree.** Step 1 runs the guard from the **main** clone, compares against a recorded `MAIN`, and chains each deploy behind its own pre-flight with `&&`. Steps 6 and 7 pass the exact command line. The interactive form is the one reviewed exception, for `functions:westayfit` only. The secret is read with `read -rs` straight into `--data-file=-`.
+
+### Precision notes (non-blocking)
+
+- **PN-1 (three test gaps; the code holds).** Three of my mutants survive the PR's 43 tests: **(a)** a bare `--only hosting` accepted (the tests refuse `hosting:westayfit-app`, `functions,hosting` and `storage`, but not the bare target; the real tree refuses it); **(b)** `candidate.not-main` without its same-tree test (for A and G the SHA must equal the anchor anyway, so it matters only to a future record B); **(c)** `checkConfig` accepting a second codebase entry (in the integrated flow `config.equals-main` catches it). Each is a one-line test. The mutant script is in the instruments file.
+- **PN-2 (schedule, already in the runbook).** The run must finish before **2026-10-30T00:00Z**, because `firebase-tools` 15.30.1 refuses Node 20 after that and both records pin `engines.node: "20"`. After that date the way forward is a new candidate on a newer runtime, with its own review. Everything else in the packet is gated on L0's acceptance line and the operator's own credentials.
+- **PN-3 (optional hardening).** The pinned CLI is fetched with `npx -y firebase-tools@15.30.1`, with the operator's production credentials behind it. The version is pinned but its integrity is not. The registry's value for that version is `sha512-X8q33KzOfR4Xv1eNRCbediVzs/9OUNtF6jwyDZVfYbfnP53FrxMmklZe+Q1kUvnNFbgEf25LEeV53bPGQTEsFA==`; the runbook could print and compare it. Not required.
+- **PN-4 (integration order, already stated).** Step 1 needs this packet **on `main`** first; until then `main.files-present` refuses. I confirmed that on the real `main`.
+
+### Limits, stated plainly (not findings)
+
+- **I could not touch production, and did not.** The live facts (the 17 functions, the live ruleset `c598fc3b…` at 1259 lines, 48 indexes, IAM, the secret, Auth settings, `gcf-artifacts`) rest on #599 and the owner's readbacks. My "live ruleset" was `main`'s own file, a stand-in; the real one is not readable here.
+- **No `gcloud`, `firebase`, `curl` or Lovable command in the runbook was executed against anything real.** I checked their syntax with `bash -n`, read the pinned tool sources for their behaviour, and ran the step-0 functions against stubs. A command that is syntactically valid can still be wrong for the live project.
+- **The Web Twin's own claims** (the Lovable project, its flags, its commit `c278e175`) are outside this repository and I did not verify them.
+- I ran the PR's tests on Node 22; the packet's target runtime is Node 20.
+- `/reg-d6d4.log` is still at the filesystem root (from Check 80); I could not delete it.
+
+- **Gates:** `ts:check` 0; `check-evidence-intact` 0 (re-run before push).
+
+**Status:** **PASS at `dfd48c87` with zero unresolved findings.** PN-1 to PN-4 are non-blocking. This is an independent review of the source and the procedure only: it is not acceptance, not a deployment, and not a hosted or production proof. W7 made no product edit, merge, dispatch, deploy, live-data change, credential or permission change, and did not touch any state ref or comment other than its own GitHub replies.
