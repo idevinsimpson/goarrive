@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "fd88aba4c52576cb5f3ab5613862c28f687edd1d078f6ce5aaa2feda8403c9ac",
-  "eventCount": 945,
+  "ledgerHead": "f93c18531934a581ac6e41d46e36c434f7d0abbe96e2b4dbc2d65d1b21658ada",
+  "eventCount": 947,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -20,7 +20,7 @@
   "canonical": {
     "developmentBranch": "claude/wsf-app-shell",
     "developmentSha": "ec162d17a0540e936741027f9b8f90dd372cfaf4",
-    "operationalMain": "0f1fd58551eb78ea0a88619d265611865986d75a"
+    "operationalMain": "df8d4d69f41f70971c5918c36d776b9af07d1bcb"
   },
   "staging": {
     "servedSha": "ab77fbfce97e60c1c22492397b2ab6b491f9e0db",
@@ -1370,7 +1370,7 @@
       },
       "label": "Pin ec162d17 through the reviewed full staging path: RECOVERY-3 scope plus the three reservation-gap paths (verify-deployment 49->59 cases, Home manifest and home-journey retarget)",
       "origin": "ledger",
-      "phase": "ACCEPTED",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -1382,7 +1382,7 @@
         "subjectSha": "55ff46bdc958785e76dcb2bb7118649b3d19657b",
         "prHeadSha": "55ff46bdc958785e76dcb2bb7118649b3d19657b",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "df8d4d69f41f70971c5918c36d776b9af07d1bcb"
       },
       "proof": null,
       "served": null,
@@ -1421,8 +1421,8 @@
           "id": 6078295700
         },
         "lastTransition": {
-          "kind": "comment",
-          "id": 6078295700
+          "kind": "pull_request",
+          "id": 597
         }
       },
       "review": {
