@@ -269,6 +269,27 @@ export function harness(bugs, { dir = tmp() } = {}) {
 // ═════════════════════════════════════════════════════════════════════════════
 // EXPO-ATTENDEE-HOSTED-DRIVERS-1: the expo attendee surfaces at 5705dc3b.
 // ═════════════════════════════════════════════════════════════════════════════
+/**
+ * A waiting phone learns of its call on its next poll, not at the instant the
+ * station calls: app/queue/[goalId].tsx polls every TURN_POLL_MS = 3_000 while
+ * waiting (ec162d17). Until then the phone still shows the line, and I'm ready
+ * is not on the page; a driver that taps it at once taps nothing (run 37912780869).
+ */
+const CALL_SEEN_MS = 3_000;
+/**
+ * The no-show notice lasts ONE poll. When a lapsed place comes back gone, the
+ * page says Your turn timed out; its next read, TURN_POLL_MS = 3_000 later,
+ * finds the place still gone and no longer live, and the notice is replaced by
+ * You're not in the line (app/queue/[goalId].tsx at ec162d17, unchanged since
+ * ab77fbfc). A driver that reads once after a sleep misses it (run 37912780869).
+ */
+const NO_SHOW_NOTICE_MS = 3_000;
+/**
+ * A station learns that its called member said I'm ready on its next state
+ * poll (STATE_POLL_MS = 2_000, app/station/[goalId].tsx at ec162d17): until
+ * then Start stays disabled, so a driver must wait for it to open.
+ */
+const STATION_SEES_READY_MS = 2_000;
 const NO_SHOW_SENTENCE = 'The screen called you and the 45 seconds ran out, so it moved on. Get back in line and it will call you again.';
 const LEASE_MS = 45_000;
 const RESULT_MS = 10_000;
@@ -368,7 +389,7 @@ export function expoServer(be, bugs = {}) {
       for (const e of S.entries.values()) if (e.stationId === st.id && lapsed(e)) end(e, 'noShow', 'lease');
       const next = waiting(st.goalId).sort((a, b) => a.seq - b.seq)[0];
       if (!next) throw fail('Nobody is waiting.');
-      Object.assign(next, { status: 'assigned', stationId: st.id, leaseAt: S.now + (bugs.noShowNotEnded ? 1e12 : LEASE_MS) });
+      Object.assign(next, { status: 'assigned', stationId: st.id, calledAt: S.now, leaseAt: S.now + (bugs.noShowNotEnded ? 1e12 : bugs.noShowEarly ? 10_000 : bugs.noShowShortLease ? 36_000 : bugs.noShowLongLease ? 50_000 : LEASE_MS) });
       if (!open(st.goalId) && bugs.closedCallAdvances) throw fail(CLOSED);
       return next;
     },
@@ -379,6 +400,7 @@ export function expoServer(be, bugs = {}) {
       if (!open(e.goalId) && !bugs.closedReady && !bugs.closedReadyAdvances) throw fail(closedFor('Ready'));
       if (lapsed(e)) throw fail('not called');
       e.status = 'ready';
+      e.readyAt = S.now;
       if (!open(e.goalId) && bugs.closedReadyAdvances) throw fail(CLOSED);
       if (bugs.readyOpensOther) for (const o of S.entries.values()) if (o !== e && o.status === 'assigned') o.status = 'ready';
     },
@@ -422,6 +444,8 @@ export function expoServer(be, bugs = {}) {
     contribute,
   };
   be.callables.wsfApproveStation = ({ goalId, code, slot }) => {
+    // normalizeStationSlot (index.ts:5745-5749): an event has two station slots.
+    if (slot !== 1 && slot !== 2) throw fail('slot must be 1 or 2.', 'INVALID_ARGUMENT');
     const pairing = S.pairings.get(code);
     if (!pairing || pairing.goalId !== goalId) throw fail('no such code');
     const id = rand('station');
@@ -531,7 +555,8 @@ function expoPage(be, server, bugs, ctx, context) {
       if (bugs.offlinePhoneClaims && ctx.offline) add('wsf-queue-receipt-amount', { text: '25 squats recorded.' });
       const e = server.myTurn(g, ctx.uid);
       if (e && server.live(e)) {
-        if (e.status === 'waiting') {
+        const unseenCall = e.status === 'assigned' && typeof e.calledAt === 'number' && S.now < e.calledAt + CALL_SEEN_MS;
+        if (e.status === 'waiting' || unseenCall) {
           add('wsf-queue-waiting', { text: 'You’re in the line' });
           add('wsf-queue-switch-to-phone', { click: async () => { await invoke('wsfLeaveTurnLine', () => server.leave(e.id, 'memberToPhone')); go(`/contribute/${g}`); } });
         } else {
@@ -540,6 +565,10 @@ function expoPage(be, server, bugs, ctx, context) {
           add('wsf-queue-called-name', { text: e.name });
           add('wsf-queue-code', { text: e.code });
           add('wsf-queue-station', { text: `Go to ${bugs.wrongStationLabel ? 'Station 1' : stn.label}.` });
+          // The server's own countdown of the lease, refreshed on every 1-second poll (wsfMyTurn readySecondsLeft).
+          // noShowEarly: the countdown still runs to 45 while the call itself lapses at 10.
+          const offerEnds = bugs.noShowEarly ? e.calledAt + LEASE_MS : e.leaseAt;
+          if (e.status === 'assigned') add('wsf-queue-lease', { text: `${Math.max(0, Math.ceil((offerEnds - S.now) / 1000))}s to say you’re coming` });
           if (e.status === 'assigned') {
             add('wsf-queue-ready', { click: async () => {
               st.actionError = null;
@@ -549,12 +578,17 @@ function expoPage(be, server, bugs, ctx, context) {
         }
         if (st.actionError) add('wsf-queue-leave-error', { text: st.actionError });
       } else {
-        const noShow = e && (e.status === 'noShow' || server.lapsed(e));
+        // noShowEarly: the call lapses after 10 seconds, under a countdown that still reads
+        // its 45, and the phone keeps saying so; only watching the countdown run down tells.
+        const noShow = e && (e.status === 'noShow' || server.lapsed(e)) && (bugs.noShowEarly || S.now < e.leaseAt + NO_SHOW_NOTICE_MS);
         if (e && e.status === 'done' && !bugs.receiptHidden) add('wsf-queue-receipt-amount', { text: `${e.result} squats recorded.` });
         if (e && e.result !== null && e.status === 'left' && bugs.letGoReceipt) add('wsf-queue-receipt-amount', { text: `${e.result} squats recorded.` });
         add('wsf-queue-not-in-line');
-        add('wsf-queue-standing', { text: `${noShow && !bugs.noShowWording ? 'Your turn timed out' : 'You’re not in the line'}\n${noShow ? NO_SHOW_SENTENCE : 'Join from the event page.'}` });
-        add('wsf-queue-not-in-line-reason', { text: noShow && !bugs.noShowWording ? NO_SHOW_SENTENCE : 'Join from the event page.' });
+        const timedOutHeading = noShow && !bugs.noShowWording && !bugs.noShowHeading;
+        const timedOutReason = noShow && !bugs.noShowWording && !bugs.noShowReason;
+        const reason = timedOutReason ? NO_SHOW_SENTENCE : 'Join from the event page.';
+        add('wsf-queue-standing', { text: `${timedOutHeading ? 'Your turn timed out' : 'You’re not in the line'}\n${reason}` });
+        add('wsf-queue-not-in-line-reason', { text: reason });
       }
       return N;
     }
@@ -568,7 +602,11 @@ function expoPage(be, server, bugs, ctx, context) {
       const gl = server.goal(g);
       const shared = server.total(g) + (bugs.phoneStale && st.path === `/contribute/${g}` && !st.receipt ? -15 : 0);
       add('wsf-contribute-shared-total', { text: `${fmt(shared)} of ${fmt(gl.target)} squats` });
-      add('wsf-contribute-own-credit', { text: `Your total on this goal: ${bugs.nextSeesPrevious && kioskMode() ? 20 : server.own(g, ctx.uid)} squats` });
+      // On a kiosk receipt own credit is a tile whose label is styled textTransform: uppercase
+      // (contribute/[goalId].tsx:2078-2079 at ec162d17); innerText reads it in capitals, as the
+      // served page does (run 37912780869). Elsewhere it is one plain sentence.
+      const ownLabel = kioskMode() && st.receipt ? 'YOUR TOTAL ON THIS GOAL:' : 'Your total on this goal:';
+      add('wsf-contribute-own-credit', { text: `${ownLabel} ${bugs.nextSeesPrevious && kioskMode() ? 20 : server.own(g, ctx.uid)} squats` });
       if (kioskMode()) add('wsf-kiosk-finish-chrome');
       if (bugs.finishOnPhone && !kioskMode()) add('wsf-kiosk-finish', { text: 'Finish' });
       if (st.receipt) {
@@ -599,9 +637,10 @@ function expoPage(be, server, bugs, ctx, context) {
     }
     if (st.path.startsWith('/kiosk/')) {
       const gl = server.goal(g);
-      add('wsf-kiosk-screen', { text: `Fixture Expo Community\nFixture Expo Squats\n${fmt(server.total(g))} of ${fmt(gl.target)} squats${bugs.finishKeepsCredit ? '\nYour total on this goal: 20 squats' : ''}` });
+      add('wsf-kiosk-screen', { text: `Fixture Expo Community\nFixture Expo Squats\n${fmt(server.total(g))} of ${fmt(gl.target)} squats${bugs.finishKeepsCredit ? '\nYOUR TOTAL ON THIS GOAL: 20 squats' : ''}${bugs.finishKeepsNameCaps ? '\nFIXTURE ATTENDEE 1' : ''}` });
       add('wsf-kiosk-start', { text: 'Contribute here', click: () => { if (bugs.finishKeepsSession && ctx.uid) { go(`/contribute/${g}`, '?kiosk=1'); return; } signOut(); go(`/contribute/${g}`, '?kiosk=1'); } });
       add('wsf-kiosk-shared-total', { text: fmt(server.total(g)) });
+      add('wsf-kiosk-total-line', { text: `${fmt(server.total(g))} of ${fmt(gl.target)} squats` });
       return N;
     }
     if (st.path.startsWith('/station/')) {
@@ -613,18 +652,23 @@ function expoPage(be, server, bugs, ctx, context) {
       const view = { ...live, serving: live.serving || st.heldTurn || null, result: st.localResult && S.now < st.localResult.until ? st.localResult : live.result };
       add('wsf-station-screen');
       add('wsf-station-label', { text: stn.label });
-      add('wsf-station-total-line', { text: view.totalLine });
-      add('wsf-station-percent', { text: view.percent });
-      add('wsf-station-status', { text: view.status });
+      // A venue-width screen drops its hero (the total, percent and status) while a turn
+      // runs there (turnRunningWide, app/station/[goalId].tsx at ec162d17).
+      if (!(ctx.viewport.width >= 900 && view.serving?.status === 'active')) {
+        add('wsf-station-total-line', { text: view.totalLine });
+        add('wsf-station-percent', { text: view.percent });
+        add('wsf-station-status', { text: view.status });
+      }
       add('wsf-station-queue-count', { text: view.count });
       if (view.result) add('wsf-station-queue-result', { text: `${view.result.code} · ${view.result.amount} squats recorded.` });
       if (view.serving) {
         add('wsf-station-queue-serving', { text: view.serving.name });
         add('wsf-station-queue-code', { text: view.serving.code });
         const active = view.serving.status === 'active';
+        const readySeen = view.serving.status === 'ready' && S.now >= (view.serving.readyAt ?? 0) + STATION_SEES_READY_MS;
         add('wsf-station-turn-action', {
           text: active ? 'Record this turn' : 'Start their turn',
-          disabled: !active && view.serving.status !== 'ready',
+          disabled: !active && !readySeen,
           click: async () => {
             st.stationError = null;
             try {
@@ -678,7 +722,7 @@ function expoPage(be, server, bugs, ctx, context) {
       percent: `${Math.min(100, Math.floor((t / gl.target) * 1000) / 10)}% complete`,
       status: t >= gl.target ? `${fmt(t - gl.target)} beyond our goal · still open` : `${fmt(gl.target - t)} to go`,
       count: n === 0 ? 'Nobody is waiting.' : n === 1 ? '1 person waiting.' : `${n} people waiting.`,
-      serving: e ? { name: e.name, code: e.code, status: e.status } : null,
+      serving: e ? { name: e.name, code: e.code, status: e.status, readyAt: e.readyAt ?? null } : null,
       result,
       anyName: keepsName ? `${stn.result.name} ${stn.result.code}` : (bugs.hallShowsName ? [...S.entries.values()].map((x) => x.name).join(' ') : null),
     };
@@ -713,7 +757,9 @@ function expoPage(be, server, bugs, ctx, context) {
       if (u.pathname.startsWith('/station/')) st.pairing = server.requestPairing(goalOf());
     },
     url: () => `https://staging.example.test${st.path}${st.search}`,
-    waitForTimeout: async (ms) => { server.advance(ms); },
+    // Playwright's clock.install keeps the page clock flowing in real time, so a wait
+    // on an installed page moves its clock too; runFor then adds on top.
+    waitForTimeout: async (ms) => { server.advance(ms); if (st.clock) st.clock.t += ms; },
     waitForURL: async (pred) => { if (!pred(new URL(page.url()))) throw new Error('page.waitForURL: Timeout exceeded'); },
     locator,
     getByTestId: (id) => locator(`[data-testid="${id}"]`),

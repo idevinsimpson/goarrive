@@ -125,21 +125,21 @@
     {
       "id": "closed-goal-turn",
       "entry": "/station/{goalId}",
-      "setup": "one event with four enrolled stations: a member mid-turn at Station 1, a member who tapped I'm ready at Station 2, a member called to Station 3, and a member waiting while Station 4 is idle; a fifth member has the event page open with a name chosen; then the goal is closed",
+      "setup": "two events, each with its own two enrolled stations (the backend admits station slots 1 and 2 only): in the first, a member mid-turn at Station 1, a member who tapped I'm ready at Station 2, and the event's own display open to read its total; in the second, a member waiting while Station 2 is idle, a fifth member with its event page open and a name chosen, and, last of all, a member called to Station 1 (a call lapses after 45 seconds); then both goals are closed",
       "actions": [
-        "enter 12 on Station 1 and record",
-        "press Start their turn on Station 2",
-        "tap I'm ready on the phone of the member called to Station 3",
-        "press Call next on Station 4",
-        "the fifth member presses join on the event page"
+        "tap I'm ready on the phone of the member called to the second event's Station 1",
+        "enter 12 on the first event's Station 1 and record",
+        "press Start their turn on the first event's Station 2",
+        "press Call next on the second event's Station 2",
+        "the fifth member presses join on the second event's page"
       ],
       "expected": [
         "recording the turn started before the closure: Station 1 prints This goal is closed.",
-        "nothing is recorded and the shared total does not move",
+        "nothing is recorded and neither event's shared total moves",
         "no member's phone shows a receipt",
         "Start their turn is refused: Station 2 prints This goal is closed., shows no count to record and still serves the same member",
-        "I'm ready is refused: the called member's phone prints This goal is closed. and still shows them called to Station 3",
-        "Call next is refused: Station 4 prints This goal is closed. and serves nobody, and the waiting member's phone still shows them in the line",
+        "I'm ready is refused: the called member's phone prints This goal is closed. and still shows them called to the second event's Station 1",
+        "Call next is refused: the second event's idle Station 2 prints This goal is closed. and serves nobody, and the waiting member's phone still shows them in the line",
         "joining is refused: the event page prints This goal is closed., the member does not reach the queue page, and the hall's waiting count does not change"
       ],
       "knownExclusions": [

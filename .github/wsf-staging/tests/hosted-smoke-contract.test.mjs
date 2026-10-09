@@ -790,6 +790,30 @@ test('the hosted turn-service row drives the real journey with real identities, 
   );
 });
 
+test('the hosted turn-service row names the turn on every station command (KIOSK-EXPECTED-TURN-1, #587)', () => {
+  // Since ec162d17 wsfStartTurn, wsfCompleteTurn and wsfCancelTurn refuse a
+  // station command that does not name its turn: INVALID_ARGUMENT, "This screen
+  // needs an update before it can run a turn." (run 37912780869 failed here).
+  const body = caseSource('caseTurnContract');
+  assert.ok(SMOKE.includes('const STATION_TURN_REF = /^tr_[A-Za-z0-9_-]{16,64}$/;'), 'the row has no turn-binding shape to check against');
+  const bind = body.indexOf('const turnRef = called.assigned?.turnRef;');
+  assert.notEqual(bind, -1, 'the binding is not taken from the station\'s own Call next');
+  const check = body.indexOf('STATION_TURN_REF.test(turnRef)');
+  assert.ok(check > bind, 'the binding is used without being checked');
+  for (const [step, fn] of [['start the turn', 'wsfStartTurn'], ['retry at the screen', 'wsfCompleteTurn']]) {
+    const at = body.indexOf(`turnCall('${step}', '${fn}', {`);
+    assert.notEqual(at, -1, `the row no longer calls ${fn} as '${step}'`);
+    assert.ok(at > check, `${fn} runs before the binding is checked`);
+    assert.ok(/expectedTurn: turnRef\b/.test(body.slice(at, body.indexOf('});', at))), `${fn} does not name the turn it was pressed for`);
+  }
+  let commands = 0;
+  for (const m of body.matchAll(/turnCall\([^,]+, '(wsfStartTurn|wsfCompleteTurn|wsfCancelTurn)', \{([\s\S]*?)\}/g)) {
+    commands += 1;
+    assert.ok(/expectedTurn: turnRef\b/.test(m[2]), `a ${m[1]} call omits expectedTurn`);
+  }
+  assert.equal(commands, 2, 'the row should send exactly the two station commands it exercises');
+});
+
 /**
  * Cleanup, which is the half that can leave staging dirty.
  *

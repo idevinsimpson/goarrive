@@ -353,6 +353,16 @@ const EXPO_DEFECTS = [
   ['line-place-ends', 'switchKeepsPlace', ['switched', 'noShow', 'letGo']],
   ['line-place-ends', 'noShowNotEnded', ['noShow', 'letGo']],
   ['line-place-ends', 'noShowWording', ['noShow']],
+  // Run 37912780869: the lapse is watched, not slept through, so the row reads the
+  // 45 seconds off the phone's own countdown. A call that lapses under a countdown
+  // still running (its notice left on screen), and a call offered for less or for
+  // more than its 45 seconds with the real one-poll notice, each fail the row.
+  ['line-place-ends', 'noShowEarly', ['noShow']],
+  ['line-place-ends', 'noShowShortLease', ['noShow']],
+  ['line-place-ends', 'noShowLongLease', ['noShow']],
+  // The heading and the reason are each required: either one wrong fails the row.
+  ['line-place-ends', 'noShowHeading', ['noShow']],
+  ['line-place-ends', 'noShowReason', ['noShow']],
   ['line-place-ends', 'letGoReceipt', ['letGo', 'onlyTen']],
   ['closed-goal-turn', 'closedRecords', ['refused', 'nothing', 'noReceipt']],
   // EXPO-CLOSED-GOAL-QUEUE-GATE-1 (#571): each gate skipped, or saying the sentence after it advanced.
@@ -379,6 +389,8 @@ const EXPO_DEFECTS = [
   ['shared-screen-finish', 'nextSeesPrevious', ['next']],
   ['shared-screen-finish', 'countdownNoFinish', ['countdown']],
   ['shared-screen-finish', 'stayIgnored', ['countdown']],
+  // The previous person's name left in a capitalised label: the leftover check reads words, not case.
+  ['shared-screen-finish', 'finishKeepsNameCaps', ['finish']],
 ];
 for (const [id, bug, rows] of EXPO_DEFECTS) {
   await test(`EXPO ${id} fails on a seeded defect (${bug}), exactly on the row(s) ${rows.join(', ')}, without throwing`, async () => {
@@ -387,6 +399,126 @@ for (const [id, bug, rows] of EXPO_DEFECTS) {
     assert.ok(d.opened.every((c) => c.__ctx.closed), 'a failing journey still closes every device');
   });
 }
+
+// ---- what run 37912780869 met on the served build, pinned in the model --------------
+/*
+ * Main's drivers at df8d4d69 failed on hosted staging because the served build
+ * (ec162d17) behaves as below. The model must keep behaving so, or the fixed
+ * drivers would be proved against a kinder product than the one they meet.
+ */
+const BASE = 'https://staging.example.test';
+async function modelPage(h, viewport = { width: 390, height: 844 }) {
+  return (await h.page.context().browser().newContext({ viewport })).newPage();
+}
+async function modelStation(h, ev, slot) {
+  const p = await modelPage(h, { width: 1280, height: 720 });
+  await p.goto(`${BASE}/station/${ev.goalId}`);
+  await h.kit.approveStation(ev, (await p.getByTestId('wsf-station-pairing-code').innerText()).replace(/\s+/g, ''), slot);
+  return p;
+}
+async function modelPhoneInLine(h, ev, member, name) {
+  const p = await modelPage(h);
+  await h.kit.signIn(p, BASE, member);
+  h.server.join(ev.goalId, member.uid, name);
+  await p.goto(`${BASE}/queue/${ev.goalId}`);
+  return p;
+}
+const shows = async (p, id) => (await p.getByTestId(id).count()) === 1;
+
+await test('EXPO MODEL (run 37912780869): station enrolment admits slot 1 or 2 only, as normalizeStationSlot does', async () => {
+  const h = expoHarness();
+  const ev = await h.kit.expoEvent('slots', { attendees: 1, target: 100, seeded: 0 });
+  await modelStation(h, ev, 1);
+  await modelStation(h, ev, 2);
+  await assert.rejects(() => modelStation(h, ev, 3), /wsfApproveStation refused: INVALID_ARGUMENT/);
+});
+
+await test('EXPO MODEL (run 37912780869): a phone shows its call on its next poll, and a station sees I\'m ready on its next poll', async () => {
+  const h = expoHarness();
+  const ev = await h.kit.expoEvent('polls', { attendees: 1, target: 100, seeded: 0 });
+  const [m] = ev.attendees;
+  const station = await modelStation(h, ev, 1);
+  const phone = await modelPhoneInLine(h, ev, m, 'Fixture P');
+  await station.getByTestId('wsf-station-call-next').click();
+  assert.equal(await shows(phone, 'wsf-queue-ready'), false, 'the phone showed the call before its next poll');
+  await phone.waitForTimeout(3_000);
+  assert.equal(await shows(phone, 'wsf-queue-ready'), true, 'the phone never showed the call');
+  await phone.getByTestId('wsf-queue-ready').click();
+  assert.equal(await station.getByTestId('wsf-station-turn-action').isDisabled(), true, 'the station opened Start before its next poll');
+  await station.waitForTimeout(2_000);
+  assert.equal(await station.getByTestId('wsf-station-turn-action').isDisabled(), false, 'the station never opened Start');
+});
+
+await test('EXPO MODEL (run 37912780869): the no-show notice shows once the 45 seconds run out and is gone one poll later', async () => {
+  const h = expoHarness();
+  const ev = await h.kit.expoEvent('notice', { attendees: 1, target: 100, seeded: 0 });
+  const [m] = ev.attendees;
+  const station = await modelStation(h, ev, 1);
+  const phone = await modelPhoneInLine(h, ev, m, 'Fixture N');
+  await station.getByTestId('wsf-station-call-next').click();
+  await phone.waitForTimeout(3_000);
+  assert.equal(await phone.getByTestId('wsf-queue-lease').innerText(), '42s to say you’re coming', 'the phone does not count the call down from its 45 seconds');
+  await phone.waitForTimeout(41_000);
+  assert.equal(await shows(phone, 'wsf-queue-called'), true, 'the call ended before its 45 seconds');
+  assert.equal(await phone.getByTestId('wsf-queue-lease').innerText(), '1s to say you’re coming');
+  await phone.waitForTimeout(1_000);
+  assert.match(await phone.getByTestId('wsf-queue-standing').innerText(), /^Your turn timed out/);
+  await phone.waitForTimeout(3_000);
+  assert.match(await phone.getByTestId('wsf-queue-standing').innerText(), /^You’re not in the line/, 'the notice outlived its one poll');
+});
+
+await test('EXPO MODEL: a venue-width station hides its total while a turn runs there, and shows it again once the turn ends', async () => {
+  const h = expoHarness();
+  const ev = await h.kit.expoEvent('hero', { attendees: 1, target: 100, seeded: 0 });
+  const [m] = ev.attendees;
+  const station = await modelStation(h, ev, 1);
+  const phone = await modelPhoneInLine(h, ev, m, 'Fixture H');
+  assert.equal(await shows(station, 'wsf-station-total-line'), true);
+  await station.getByTestId('wsf-station-call-next').click();
+  await phone.waitForTimeout(3_000);
+  await phone.getByTestId('wsf-queue-ready').click();
+  await station.waitForTimeout(2_000);
+  assert.equal(await shows(station, 'wsf-station-total-line'), true, 'a ready member hides nothing');
+  await station.getByTestId('wsf-station-turn-action').click();
+  assert.equal(await shows(station, 'wsf-station-total-line'), false, 'the total stayed on a running venue screen');
+  await station.getByTestId('wsf-station-turn-count').fill('7');
+  await station.getByTestId('wsf-station-turn-action').click();
+  assert.equal(await station.getByTestId('wsf-station-total-line').innerText(), '7 of 100 squats');
+});
+
+await test('EXPO MODEL: an installed kiosk clock keeps flowing during waits, and runFor adds on top', async () => {
+  const h = expoHarness();
+  const ev = await h.kit.expoEvent('clock', { attendees: 1, target: 100, seeded: 0 });
+  const [k] = ev.attendees;
+  const page = await modelPage(h, { width: 800, height: 1280 });
+  await page.clock.install();
+  await h.kit.signIn(page, BASE, k);
+  await page.goto(`${BASE}/contribute/${ev.goalId}?kiosk=1`);
+  await page.getByTestId('wsf-contribute-entry').fill('20');
+  await page.getByTestId('wsf-contribute-review').click();
+  await page.getByTestId('wsf-contribute-submit').click();
+  assert.equal(await page.getByTestId('wsf-kiosk-countdown').innerText(), 'Finishing in 90 seconds');
+  await page.waitForTimeout(20_000);
+  assert.equal(await page.getByTestId('wsf-kiosk-countdown').innerText(), 'Finishing in 70 seconds', 'the installed clock stood still during a wait');
+  await page.clock.runFor(70_000);
+  assert.equal(await page.getByTestId('wsf-kiosk-start').count(), 1, 'the kiosk did not finish once waited and run-for time together passed 90 s');
+});
+
+await test('EXPO MODEL (run 37912780869): the kiosk receipt reads its own-credit label in capitals through innerText; the entry line and a phone receipt do not', async () => {
+  const h = expoHarness();
+  const ev = await h.kit.expoEvent('caps', { attendees: 2, target: 100, seeded: 0 });
+  const [k, p] = ev.attendees;
+  for (const [member, search, label] of [[k, '?kiosk=1', 'YOUR TOTAL ON THIS GOAL:'], [p, '', 'Your total on this goal:']]) {
+    const page = await modelPage(h, { width: 800, height: 1280 });
+    await h.kit.signIn(page, BASE, member);
+    await page.goto(`${BASE}/contribute/${ev.goalId}${search}`);
+    assert.equal(await page.getByTestId('wsf-contribute-own-credit').innerText(), 'Your total on this goal: 0 squats');
+    await page.getByTestId('wsf-contribute-entry').fill('20');
+    await page.getByTestId('wsf-contribute-review').click();
+    await page.getByTestId('wsf-contribute-submit').click();
+    assert.equal(await page.getByTestId('wsf-contribute-own-credit').innerText(), `${label} 20 squats`);
+  }
+});
 
 await test('EXPO: everything a journey makes the PRODUCT write is tracked; the REAL cleaner then leaves the store empty, read back', async () => {
   for (const id of EXPO_IDS) {
