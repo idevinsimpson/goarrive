@@ -1,0 +1,51 @@
+{
+  "_comment": [
+    "PRODUCTION deploy config for We Stay Fit on the SHARED goarrive project.",
+    "PRODUCTION-DEPLOY-PATH-1 (#365 6075293313). Used only by the operator runbook",
+    "docs/westayfit/ops/production/RUNBOOK_WSF_PRODUCTION_DEPLOY_1.md, which copies",
+    "this file into a checkout of the reviewed candidate (never operational main)",
+    "and runs .github/wsf-production/preflight.mjs against it first.",
+    "",
+    "It exists because firebase.json is the GoArrive default: its hosting has no",
+    "site (it resolves to goarrive.web.app), it carries GoArrive's `default`",
+    "functions codebase, and it declares Storage. Any WSF command through it is",
+    "one typo away from GoArrive.",
+    "",
+    "Declared here and nothing else: the `westayfit` functions codebase and",
+    "Firestore rules/indexes. NO hosting (Lovable serves app.westay.fit), NO",
+    "storage (WSF stores no Cloud Storage object). So `--only functions:westayfit`",
+    "cannot reach GoArrive's functions, and no target here can reach",
+    "goarrive.web.app, even by mistake.",
+    "",
+    "Firestore is declared because the WSF rules section must be live for the",
+    "client's direct reads, but the ruleset is SHARED: the runbook deploys",
+    "`firestore:rules` only after the live ruleset is shown equal to main outside",
+    "the WSF section, and creates the two WSF composite indexes with gcloud rather",
+    "than `firestore:indexes` unless the index readback shows every main index",
+    "already present.",
+    "",
+    "Mirrors firebase.westayfit.staging.json minus hosting. Keep the functions",
+    "entry in sync with it."
+  ],
+  "functions": [
+    {
+      "source": "functions-westayfit",
+      "codebase": "westayfit",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log",
+        "*.local",
+        "gha-creds-*.json"
+      ],
+      "predeploy": [
+        "npm --prefix \"$RESOURCE_DIR\" run build"
+      ]
+    }
+  ],
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  }
+}
