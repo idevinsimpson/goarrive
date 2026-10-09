@@ -214,3 +214,46 @@ print(len(ids), 'distinct ids;', len(missing), 'not literal in the product:', mi
 # then: DeviceChoice.tsx builds `${testID}-personal|shared`; FollowAlongCard.tsx builds `${testIDPrefix}-start|pause|stop|timer`;
 # wsf-player-results is a results DIRECTORY constant in hosted-player-journey.mjs, not a test id.
 ```
+
+## Instrument 6: `rowdiff.py` (no assertion removed or weakened)
+
+Run over main's and the head's `journeys/expo-attendee.mjs`: **42 rows in both, none removed, none added.** Seven of main's conjuncts are replaced or moved and eight
+conjuncts are new in the head, all by relocation or by an equal-or-stronger replacement: `closedGoalTurn.call` and `.ready` name the second event's stations (`t2Said`,
+`Go to Station 1.`); `linePlaceEnds.letGo` gains `letGo`; in `linePlaceEnds.noShow` the heading and reason conjuncts move inside `timedOut`,
+beside the new `stood` (the lease bounds); `sharedScreenFinish.finish` and `.next` compare the whole credit text case-blind
+(`isCredit(n)`, a full-string comparison, so a wrong figure or wording still fails).
+
+```python
+import re, sys
+# W7: compare every assertion row's top-level && conjuncts between main's driver and the PR's driver.
+# usage: python3 rowdiff.py <main expo-attendee.mjs> <head expo-attendee.mjs>
+def rows(src):
+    out = {}
+    heads = [(m.start(), m.group(1)) for m in re.finditer(r"^async function (\w+)\(", src, re.M)]
+    for m in re.finditer(r"row\('(\w+)'\)\(", src):
+        i = m.end(); depth = 1; j = i; arg_end = None
+        while depth > 0:
+            c = src[j]
+            if c in '([{': depth += 1
+            elif c in ')]}': depth -= 1
+            elif c == ',' and depth == 1 and arg_end is None: arg_end = j
+            j += 1
+        expr = src[i:(arg_end if arg_end else j - 1)]
+        fn = [n for p, n in heads if p < m.start()][-1]
+        terms = []; d = 0; cur = ''; k = 0
+        while k < len(expr):
+            c = expr[k]
+            if c in '([{': d += 1
+            elif c in ')]}': d -= 1
+            if d == 0 and expr[k:k + 2] == '&&': terms.append(cur.strip()); cur = ''; k += 2; continue
+            cur += c; k += 1
+        terms.append(cur.strip())
+        out[(fn, m.group(1))] = [re.sub(r'\s+', ' ', t) for t in terms]
+    return out
+base, head = rows(open(sys.argv[1]).read()), rows(open(sys.argv[2]).read())
+print('rows base', len(base), 'head', len(head), '| removed', sorted(set(base) - set(head)), '| added', sorted(set(head) - set(base)))
+for k in sorted(set(base) & set(head)):
+    gone = [t for t in base[k] if t not in head[k]]; new = [t for t in head[k] if t not in base[k]]
+    if gone or new:
+        print(k); [print('  - base only:', t[:160]) for t in gone]; [print('  + head only:', t[:160]) for t in new]
+```

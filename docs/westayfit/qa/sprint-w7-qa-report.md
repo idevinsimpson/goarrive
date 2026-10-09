@@ -6738,6 +6738,16 @@ The PR proves the drivers against a hermetic model it also wrote. The model is a
 - One smoke row of 24 was run.
 - `/reg-d6d4.log` is still at the filesystem root (from Check 80); I could not delete it.
 
+### Addendum: L0's relay items (#434 relay `trig_01PHUravor4pJNtvPRuhce67`, read after the verdict)
+
+L0's one-shot relay for this wake asked for six checks and an evidence table. It reached this session after my verdict was posted. Four were already in the verdict; I did the other two explicitly **before** answering, so that a gap would have meant withdrawing the PASS.
+
+- **Item 1, the payloads match the server.** `requireStationTurnRef` (`index.ts:8115-8119` at `ec162d17`) calls `normalizeStationTurnRef` (`:8109-8112`), whose pattern `/^tr_[A-Za-z0-9_-]{16,64}$/` is **character for character** the smoke's `STATION_TURN_REF` (`hosted-package-e-smoke.mjs:1659`). It guards `wsfStartTurn` (`:9341`), `wsfCompleteTurn` (`:9665`) and `wsfCancelTurn` (`:9799`). The server mints `tr_` plus 18 random bytes in base64url, which is 24 characters, inside the bound. The smoke row sends `expectedTurn` on the Start and on the retried Record, and **passes against that server** on the emulators.
+- **Items 2 and 3, a harness cause and a fix for every failure, and no weakened assertion.** All 7 changed files sit under `.github/wsf-staging`: no product file changed. Comparing every assertion row of main's driver with the head's: **42 rows in both, none removed and none added** (instrument 6). Seven of main's conjuncts are replaced or moved and eight are new in the head, all by relocation or by an equal-or-stronger replacement. The two tap-before-shown failures are fixed by **waiting and then requiring** (`sayReady`, `readyThenStart`), not by dropping a check. The `noShow` heading and reason are still required (now inside `timedOut`), beside the new lease bounds. The case-blind credit match compares the whole string, so a wrong figure or wording still fails.
+- **Item 4, the model's timings are real:** shown in item 2 above.
+- **Item 5, the suites:** 118 and 46 at the exact head, and all 28 suites in `run-all.mjs`.
+- **Item 6, the evidence entry is honest that the hosted proof is owed:** it says in terms *"Not established: the smoke's turn-service row and the five fixed journeys are unproven on hosted staging until a hosted run uses this harness. Everything above about them is hermetic."* It also says the run's row-level card was not read because the download was refused, and that how hosted reached *no attempt yet* on lost-answer was not established. It makes no hosted-pass claim.
+
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0 (re-run before push).
 
 **Status:** **PASS at `7f42ba1c` with zero unresolved findings.** PN-1 to PN-5 are non-blocking. This is independent journey QA of the harness source: it is not acceptance, a deployment, or a hosted proof. W7 made no product edit, merge, dispatch, deploy, live-data change, credential or permission change, and did not touch any state ref or comment other than its own GitHub replies.
