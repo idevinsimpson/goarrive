@@ -6,34 +6,58 @@
  * PRODUCTION-DEPLOY-PATH-1 (#365 6075293313). Production is the SHARED
  * `goarrive` Firebase project, and GoArrive lives there too. This guard runs on
  * an operator's local clone BEFORE any credentialed command. It answers one
- * question: is this exact candidate, with this exact config and this exact
- * command, a WSF-only deploy that cannot reach GoArrive?
+ * question: is this exact candidate, with this exact config, this exact
+ * worktree and this exact command, a WSF-only deploy that cannot reach
+ * GoArrive?
  *
  * PURE AND NETWORK-FREE. It reads local git objects (`git show`,
- * `git merge-base`) and the files it is given. It never fetches, never logs in,
- * never writes a file, and never runs firebase or gcloud. It prints one JSON
- * verdict on stdout. Exit 0 means every check passed; exit 1 means at least
- * one refused; exit 2 means the inputs themselves were unusable.
+ * `git merge-base`, `git status`) and the files it is given. It never fetches,
+ * never logs in, never writes a file, and never runs firebase or gcloud. It
+ * prints one JSON verdict on stdout, and never a value from the env file. Exit
+ * 0 means every check passed; exit 1 means at least one refused; exit 2 means
+ * the inputs themselves were unusable.
  *
- * WHAT IT REFUSES, AND WHY (the inventory is #599 at 711ecca1):
- *   - A candidate that is operational main, or that does not descend from the
- *     reviewed development anchor ec162d17. Main has ONE WSF export, so a
- *     functions:westayfit deploy from it would prune every other WSF function.
+ * WHAT IT REFUSES, AND WHY (the inventory is #599 at 80b603c7):
+ *   - A candidate that is operational main, or that is not the reviewed
+ *     development anchor ec162d17 (A) or a descendant of it (B). Main has ONE
+ *     WSF export, so a functions:westayfit deploy from it would prune every
+ *     other `westayfit` function. The anchor is fixed here; the CLI cannot
+ *     replace it.
+ *   - A candidate or main missing a file the checks read: refused as a check,
+ *     so the verdict always prints.
  *   - An export list different from the candidate's reviewed manifest (59
- *     names at A), or a different set of `invoker: 'public'` declarations (17).
+ *     names at A). The 17 `invoker: 'public'` declarations are checked as a
+ *     SOURCE invariant only: with firebase-functions 4.9.0 and firebase-tools
+ *     15.30.1 the option is inert for onCall, and every callable gets
+ *     `allUsers` run.invoker when it is created (#599 section 3).
  *   - A firestore.rules that differs from main's anywhere outside the single
- *     WSF section, or whose WSF section matches a non-wsf path, or that loses
- *     the catch-all deny. The ruleset is shared: deploying it replaces
- *     GoArrive's rules too.
+ *     WSF section, whose WSF section matches any path that is not a wsf*
+ *     collection or has unbalanced braces, or that loses the catch-all deny.
+ *     The ruleset is shared: deploying it replaces GoArrive's rules too, so a
+ *     rules deploy also needs the live ruleset, which must equal main outside
+ *     its own WSF section.
  *   - Indexes that drop or change any of main's, or add a non-WSF one.
  *   - A production config that declares anything beyond the `westayfit`
- *     functions codebase and Firestore rules/indexes (no hosting, no storage).
- *   - A deploy command with --force, any Hosting or Storage target, a bare
- *     `functions` target, GoArrive's `default` codebase, a missing --only,
- *     firebase.json, or any project other than goarrive.
- *   - For candidate B: a consent version still pending, server and client
- *     constants that disagree, or any change beyond the consent constants and
- *     the policy text.
+ *     functions codebase and Firestore rules/indexes, or that differs from
+ *     main's reviewed file (its predeploy runs with the operator's
+ *     credentials).
+ *   - A deploy worktree whose HEAD is not the candidate, or that holds any
+ *     change beyond the production config and the functions env file; and an
+ *     env file that does not set WSF_APP_URL to https://app.westay.fit and a
+ *     westay.fit sender.
+ *   - A deploy command with --force, any Hosting or Storage target,
+ *     `firestore:indexes` (the runbook creates the two WSF indexes with
+ *     gcloud), a bare `functions` target, GoArrive's `default` codebase, a
+ *     missing --only, firebase.json, any project other than goarrive, or any
+ *     flag given twice (firebase-tools keeps the last one). --non-interactive
+ *     is required, with ONE named exception: `--interactive-reason
+ *     minimum-bill` checks the reviewed interactive functions command the
+ *     runbook uses when the non-interactive one stopped on the minimum-bill
+ *     prompt (#599 S2), and then --non-interactive must be absent.
+ *   - For candidate B: a consent version that is pending, blank or a
+ *     placeholder, server and client constants that disagree, or any change
+ *     beyond the consent constants, the policy text, and test files that
+ *     change only by the version string.
  */
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -46,6 +70,9 @@ export const PRODUCTION_PROJECT = 'goarrive';
 export const PRODUCTION_CONFIG = 'firebase.westayfit.production.json';
 export const WSF_CODEBASE = 'westayfit';
 export const WSF_SOURCE = 'functions-westayfit';
+export const WSF_APP_URL = 'https://app.westay.fit';
+export const ENV_FILE = `${WSF_SOURCE}/.env.${PRODUCTION_PROJECT}`;
+export const PENDING_CONSENT = 'pending-approval-2026-08-25';
 
 /** The 59 exports of functions-westayfit/src/index.ts at ec162d17, in source order. Candidate B adds none. */
 export const CANDIDATE_A_EXPORTS = Object.freeze([
@@ -64,7 +91,13 @@ export const CANDIDATE_A_EXPORTS = Object.freeze([
   'wsfCommunityFacePhotos', 'wsfCommunityActivity',
 ]);
 
-/** The 17 exports that declare `invoker: 'public'` at ec162d17. Every other export must not. */
+/**
+ * The 17 exports that DECLARE `invoker: 'public'` in source at ec162d17: a
+ * source-identity invariant, and NOT the deployed IAM. For onCall the option is
+ * inert with these versions; every one of the 59 receives `allUsers`
+ * run.invoker when it is created, and each handler's own auth check is the
+ * control (#599 section 3).
+ */
 export const CANDIDATE_A_PUBLIC = Object.freeze([
   'wsfPreviewCommunity', 'wsfResolveMarker', 'wsfPublicPreviewLabel', 'wsfChallengePulse',
   'wsfSendPasswordResetEmail', 'wsfGoalPulse', 'wsfGoalRecentAdditions', 'wsfStationRequestPairing',
@@ -72,10 +105,15 @@ export const CANDIDATE_A_PUBLIC = Object.freeze([
   'wsfTurnState', 'wsfCallNext', 'wsfStartTurn', 'wsfCompleteTurn', 'wsfCancelTurn',
 ]);
 
-const SERVER_CONSENT_FILE = 'functions-westayfit/src/index.ts';
+const SERVER_CONSENT_FILE = `${WSF_SOURCE}/src/index.ts`;
 const CLIENT_CONSENT_FILE = 'apps/westayfit/src/profileConstants.ts';
-/** Paths a candidate B may change relative to A: the consent constants, and the policy text they version. */
-export const CANDIDATE_B_ALLOWED_PATHS = Object.freeze([SERVER_CONSENT_FILE, CLIENT_CONSENT_FILE, 'apps/westayfit/src/legalContent.ts']);
+/** Paths a candidate B may change relative to A: the consent constants, and the policy text they version. None but index.ts is deployed. */
+export const CANDIDATE_B_ALLOWED_PATHS = Object.freeze([
+  SERVER_CONSENT_FILE, CLIENT_CONSENT_FILE, 'apps/westayfit/src/legalContent.ts',
+  'apps/westayfit/legal/terms.md', 'apps/westayfit/legal/privacy.md',
+]);
+/** Test trees that pin the consent version. B may change a file here by that version string and nothing else. None is deployed. */
+export const CANDIDATE_B_VERSION_ONLY_PREFIXES = Object.freeze([`${WSF_SOURCE}/tests/`, 'apps/westayfit/tests-e2e/']);
 const CONSENT_NAMES = ['WSF_ACCEPTED_TERMS_VERSION', 'WSF_ACCEPTED_PRIVACY_VERSION'];
 const SHA40 = /^[0-9a-f]{40}$/;
 
@@ -136,11 +174,14 @@ export function checkExports(indexSource, manifest = CANDIDATE_A_EXPORTS, public
     check('exports.match-manifest', missing.length === 0 && extra.length === 0 && dupes.length === 0,
       `${names.length} exports; manifest ${manifest.length}` + (missing.length ? `; missing ${missing.join(',')}` : '') + (extra.length ? `; unexpected ${extra.join(',')}` : '') + (dupes.length ? `; duplicated ${dupes.join(',')}` : '')),
     check('exports.public-invokers', pubMissing.length === 0 && pubExtra.length === 0 && JSON.stringify(sorted(publicNames)) === JSON.stringify(sorted(publicManifest)),
-      `${publicNames.length} declare invoker 'public'; expected ${publicManifest.length}` + (pubMissing.length ? `; missing ${pubMissing.join(',')}` : '') + (pubExtra.length ? `; unexpected ${pubExtra.join(',')}` : '')),
+      `source invariant, not deployed IAM: ${publicNames.length} declare invoker 'public'; expected ${publicManifest.length}` + (pubMissing.length ? `; missing ${pubMissing.join(',')}` : '') + (pubExtra.length ? `; unexpected ${pubExtra.join(',')}` : '')),
   ];
 }
 
 const CATCH_ALL = /^\s*match \/\{document=\*\*\} \{\s*$/;
+/** Any `match /` token, however it is spaced, with line comments removed first. */
+const MATCH_TOKEN = /\bmatch\s*\//;
+const ruleLine = (l) => l.replace(/\/\/.*$/, '');
 
 /**
  * Splits firestore.rules into what is outside the WSF section and the section
@@ -152,7 +193,7 @@ export function splitWsfSection(rulesText) {
   const lines = rulesText.split('\n');
   const banner = lines.findIndex((l) => /WE STAY FIT \(WSF\)/.test(l));
   const catchAll = lines.findIndex((l) => CATCH_ALL.test(l));
-  const lastMatch = [...lines.keys()].filter((i) => /^\s*match \//.test(lines[i])).pop();
+  const lastMatch = [...lines.keys()].filter((i) => MATCH_TOKEN.test(ruleLine(lines[i]))).pop();
   const catchAllLast = catchAll !== -1 && lastMatch === catchAll;
   if (banner === -1) return { outside: rulesText, section: '', catchAll: catchAll !== -1, wellFormed: catchAllLast };
   let start = banner;
@@ -163,19 +204,44 @@ export function splitWsfSection(rulesText) {
   return { outside, section, catchAll: true, wellFormed: catchAllLast };
 }
 
+/** Every match in a WSF section must open a wsf* collection, and its braces must balance. */
+export function wsfSectionScope(section) {
+  const code = section.split('\n').map(ruleLine).join('\n');
+  const bad = [...code.matchAll(/\bmatch\s*\/(\S*)/g)].map((m) => m[1]).filter((p) => !/^wsf[A-Z]\w*\//.test(p));
+  const balanced = (code.match(/\{/g) ?? []).length === (code.match(/\}/g) ?? []).length;
+  return { bad, balanced, ok: bad.length === 0 && balanced };
+}
+
+/** The first line where two texts differ, for a refusal that says where to look. Rules text is not secret. */
+function firstDifference(a, b) {
+  const x = a.split('\n');
+  const y = b.split('\n');
+  for (let i = 0; i < Math.max(x.length, y.length); i += 1) {
+    if (x[i] !== y[i]) {
+      const cut = (s) => (s === undefined ? '(end of file)' : JSON.stringify(s.length > 120 ? `${s.slice(0, 120)}…` : s));
+      return `outside-section line ${i + 1}: live ${cut(x[i])} vs main ${cut(y[i])}`;
+    }
+  }
+  return 'no difference';
+}
+
 export function checkRules(candidateRules, mainRules, liveRules) {
   const cand = splitWsfSection(candidateRules);
   const main = splitWsfSection(mainRules);
-  const nonWsf = [...cand.section.matchAll(/^\s*match \/([^/{\s]+)/gm)].map((m) => m[1]).filter((p) => !/^wsf[A-Z]/.test(p));
+  const scope = wsfSectionScope(cand.section);
   const out = [
     check('rules.catch-all-last', cand.wellFormed, cand.wellFormed ? 'the catch-all deny is present and is the last match' : 'the catch-all deny is missing, misplaced, or not the last match'),
     check('rules.outside-wsf-equals-main', cand.outside === main.outside, cand.outside === main.outside ? 'byte-equal to main outside the WSF section' : 'differs from main outside the WSF section'),
-    check('rules.wsf-section-wsf-only', nonWsf.length === 0, nonWsf.length ? `the WSF section matches non-wsf paths: ${nonWsf.join(',')}` : 'every match in the WSF section is a wsf* collection'),
+    check('rules.wsf-section-wsf-only', scope.ok, scope.bad.length ? `the WSF section matches non-wsf paths: ${scope.bad.join(',')}` : scope.balanced ? 'every match in the WSF section is a wsf* collection' : 'the WSF section has unbalanced braces'),
   ];
   if (liveRules !== undefined) {
     const live = splitWsfSection(liveRules);
-    out.push(check('rules.live-outside-wsf-equals-main', live.outside === main.outside,
-      live.outside === main.outside ? 'the live ruleset equals main outside any WSF section: the rules step is lawful' : 'the live ruleset differs from main outside the WSF section: skip the rules step and escalate'));
+    const liveScope = wsfSectionScope(live.section);
+    const lawful = live.outside === main.outside && liveScope.ok;
+    out.push(check('rules.live-outside-wsf-equals-main', lawful,
+      lawful ? 'the live ruleset equals main outside its WSF section, which holds only wsf* matches: the rules step is lawful'
+        : live.outside !== main.outside ? `the live ruleset differs from main outside the WSF section (${firstDifference(live.outside, main.outside)}): skip the rules step and escalate`
+          : `the live WSF section holds non-wsf rules (${liveScope.bad.join(',') || 'unbalanced braces'}): skip the rules step and escalate`));
   }
   return out;
 }
@@ -216,10 +282,25 @@ export function checkConfig(config) {
   ];
 }
 
-const ALLOWED_ONLY = new Set([`functions:${WSF_CODEBASE}`, 'firestore:rules', 'firestore:indexes']);
+/** `firestore:indexes` is not here: the runbook creates the two WSF composites with gcloud, and a full index deploy would also create GoArrive's. */
+const ALLOWED_ONLY = new Set([`functions:${WSF_CODEBASE}`, 'firestore:rules']);
+const FLAG_ALIAS = { '-P': '--project', '-c': '--config', '-f': '--force' };
+/** The only reason the pre-flight accepts a command without --non-interactive (#599 S2). */
+export const INTERACTIVE_REASONS = Object.freeze(['minimum-bill']);
 
-/** The exact deploy command the operator will run, as one string. Quotes are not supported and are refused. */
-export function checkCommand(command) {
+/** The --only targets of a command, or [] when it has none. */
+export function commandTargets(command) {
+  const argv = String(command ?? '').trim().split(/\s+/).filter(Boolean);
+  const i = argv.findIndex((a) => a === '--only' || a.startsWith('--only='));
+  if (i === -1) return [];
+  return (argv[i].includes('=') ? argv[i].slice(argv[i].indexOf('=') + 1) : argv[i + 1] ?? '').split(',').filter(Boolean);
+}
+
+/**
+ * The exact deploy command the operator will run, as one string. Quotes are not supported and are refused.
+ * `interactiveReason` is the one reviewed exception to --non-interactive, and only for the functions target.
+ */
+export function checkCommand(command, { interactiveReason } = {}) {
   const argv = String(command ?? '').trim().split(/\s+/).filter(Boolean);
   const problems = [];
   if (/["'`$;|&<>]/.test(String(command))) problems.push('quotes, substitutions and shell operators are not allowed');
@@ -230,10 +311,17 @@ export function checkCommand(command) {
     return argv[i].includes('=') ? argv[i].slice(argv[i].indexOf('=') + 1) : argv[i + 1];
   };
   const flags = argv.filter((a) => a.startsWith('-'));
-  if (flags.some((f) => f === '--force' || f === '-f' || f.startsWith('--force='))) problems.push('--force is refused: a prune or index deletion must never be accepted blindly');
-  if (!flags.includes('--non-interactive')) problems.push('--non-interactive is required, so a deletion prompt aborts instead of being answered');
-  if (value('--project') !== PRODUCTION_PROJECT && value('-P') !== PRODUCTION_PROJECT) problems.push(`--project must be ${PRODUCTION_PROJECT}`);
-  if (value('--config') !== PRODUCTION_CONFIG && value('-c') !== PRODUCTION_CONFIG) problems.push(`--config must be ${PRODUCTION_CONFIG} (never firebase.json)`);
+  if (flags.some((f) => f === '--force' || f === '-f' || f.startsWith('--force='))) problems.push('--force is refused: a prune, a minimum-bill increase or a cleanup policy must never be accepted blindly');
+  if (interactiveReason === undefined) {
+    if (!flags.includes('--non-interactive')) problems.push('--non-interactive is required, so a deletion prompt aborts instead of being answered');
+  } else if (!INTERACTIVE_REASONS.includes(interactiveReason)) {
+    problems.push(`interactive reason ${interactiveReason} is not reviewed (allowed: ${INTERACTIVE_REASONS.join(', ')})`);
+  } else {
+    if (flags.includes('--non-interactive')) problems.push(`the ${interactiveReason} form is the interactive command: drop --non-interactive, or drop --interactive-reason`);
+    if (value('--only') !== `functions:${WSF_CODEBASE}`) problems.push(`the ${interactiveReason} form applies only to --only functions:${WSF_CODEBASE}`);
+  }
+  if ((value('--project') ?? value('-P')) !== PRODUCTION_PROJECT) problems.push(`--project must be ${PRODUCTION_PROJECT}`);
+  if ((value('--config') ?? value('-c')) !== PRODUCTION_CONFIG) problems.push(`--config must be ${PRODUCTION_CONFIG} (never firebase.json)`);
   const only = value('--only');
   if (!only) problems.push('--only is required: a bare deploy reaches every target in the config');
   else {
@@ -243,6 +331,7 @@ export function checkCommand(command) {
   }
   const takesValue = new Set(['--project', '-P', '--config', '-c', '--only']);
   const known = new Set([...takesValue, '--force', '-f', '--non-interactive']);
+  const seen = new Set();
   for (let i = 2; i < argv.length; i += 1) {
     const a = argv[i];
     const base = a.includes('=') ? a.slice(0, a.indexOf('=')) : a;
@@ -250,10 +339,46 @@ export function checkCommand(command) {
       problems.push(`stray argument ${a}`);
       continue;
     }
+    if (/^-[^-]=/.test(a)) problems.push(`${a}: write -X value, not -X=value`);
+    const canon = FLAG_ALIAS[base] ?? base;
+    if (seen.has(canon)) problems.push(`${canon} is given more than once: firebase-tools uses the last one`);
+    seen.add(canon);
     if (!known.has(base)) problems.push(`flag ${base} is not part of the reviewed command`);
     if (takesValue.has(base) && !a.includes('=')) i += 1;
   }
-  return [check('command.reviewed-shape', problems.length === 0, problems.length ? problems.join('; ') : `firebase deploy --only ${only} --project ${PRODUCTION_PROJECT} --config ${PRODUCTION_CONFIG} --non-interactive`)];
+  const shape = `firebase deploy --only ${only} --project ${PRODUCTION_PROJECT} --config ${PRODUCTION_CONFIG}` + (interactiveReason === undefined ? ' --non-interactive' : ` (interactive: ${interactiveReason})`);
+  return [check('command.reviewed-shape', problems.length === 0, problems.length ? problems.join('; ') : shape)];
+}
+
+/**
+ * The functions env file the deploy will upload. firebase-tools replaces a
+ * function's whole env with it, so both values must be present. Reports key
+ * names only, never a value except the public app URL.
+ */
+export function checkEnvFile(text) {
+  const env = {};
+  const bad = [];
+  for (const raw of String(text ?? '').split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const m = /^([A-Z_][A-Z0-9_]*)=(.*)$/.exec(line);
+    if (!m) {
+      bad.push('a line that is not KEY=value');
+      continue;
+    }
+    let v = m[2].trim();
+    const q = /^(["'])(.*)\1$/.exec(v);
+    if (q) v = q[2];
+    env[m[1]] = v;
+  }
+  const keys = Object.keys(env);
+  const allowed = new Set(['WSF_EMAIL_FROM', 'WSF_APP_URL', 'WSF_AUTH_ACTION_HANDLER']);
+  const extra = keys.filter((k) => !allowed.has(k));
+  const problems = [...bad];
+  if (extra.length) problems.push(`unexpected keys ${extra.join(',')} (no secret belongs in the env file)`);
+  if (env.WSF_APP_URL !== WSF_APP_URL) problems.push(`WSF_APP_URL must be ${WSF_APP_URL}`);
+  if (!/@westay\.fit>?$/.test(env.WSF_EMAIL_FROM ?? '')) problems.push('WSF_EMAIL_FROM must be set to a westay.fit sender');
+  return [check('worktree.env-file', problems.length === 0, problems.length ? problems.join('; ') : `${ENV_FILE} sets ${keys.sort().join(', ')}; WSF_APP_URL=${WSF_APP_URL}`)];
 }
 
 export function readConsent(serverSource, clientSource) {
@@ -271,12 +396,19 @@ export function blankConsent(src) {
   return out;
 }
 
+/** An approved version is a real token: not pending, not blank, not a placeholder. */
+export function isApprovedVersion(v) {
+  return typeof v === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]{3,63}$/.test(v) && !/^pending/i.test(v) && !/^(tbd|todo|tbc|placeholder|x+|none|null|undefined|draft)$/i.test(v);
+}
+
 export function checkConsent(record, consent) {
   const agree = CONSENT_NAMES.every((n) => consent[n].server !== null && consent[n].server === consent[n].client);
-  const pending = CONSENT_NAMES.some((n) => /^pending-approval/.test(consent[n].server ?? '') || /^pending-approval/.test(consent[n].client ?? ''));
   const values = CONSENT_NAMES.map((n) => `${n}=${consent[n].server}`).join(' ');
   const out = [check('consent.server-equals-client', agree, agree ? values : 'server and client consent constants disagree or are missing')];
-  if (record === 'B') out.push(check('consent.approved-version', !pending, pending ? 'B must carry the approved version, not pending-approval' : values));
+  if (record === 'B') {
+    const approved = CONSENT_NAMES.every((n) => isApprovedVersion(consent[n].server) && isApprovedVersion(consent[n].client));
+    out.push(check('consent.approved-version', approved, approved ? values : 'B must carry an approved version: not pending, blank or a placeholder'));
+  }
   return out;
 }
 
@@ -294,13 +426,20 @@ function gitOk(repo, args) {
   }
 }
 const show = (repo, sha, file) => git(repo, ['show', `${sha}:${file}`]);
+const has = (repo, sha, file) => gitOk(repo, ['cat-file', '-e', `${sha}:${file}`]);
+const showOrNull = (repo, sha, file) => (has(repo, sha, file) ? show(repo, sha, file) : null);
+
+/** Files the checks read at each commit. A missing one is a refusal, never a crash. */
+const CANDIDATE_FILES = [`${WSF_SOURCE}/src/index.ts`, 'firestore.rules', 'firestore.indexes.json', CLIENT_CONSENT_FILE];
+const MAIN_FILES = ['firestore.rules', 'firestore.indexes.json', PRODUCTION_CONFIG];
 
 /**
  * Every check for one candidate. Inputs are explicit and full SHAs only; the
  * caller supplies the main SHA it fetched, never a branch name, so the verdict
- * names exactly what was compared.
+ * names exactly what was compared. `anchor` exists for synthetic tests; the
+ * CLI never accepts it.
  */
-export function runPreflight({ repo = '.', record, candidate, main, anchor = ANCHOR_A, config, command, liveRules, manifest = CANDIDATE_A_EXPORTS, publicManifest = CANDIDATE_A_PUBLIC }) {
+export function runPreflight({ repo = '.', record, candidate, main, anchor = ANCHOR_A, config, command, interactiveReason, liveRules, worktree, envFile, manifest = CANDIDATE_A_EXPORTS, publicManifest = CANDIDATE_A_PUBLIC }) {
   const checks = [];
   if (record !== 'A' && record !== 'B') return { ok: false, usage: 'record must be A or B' };
   for (const [name, sha] of [['candidate', candidate], ['main', main], ['anchor', anchor]]) {
@@ -310,14 +449,29 @@ export function runPreflight({ repo = '.', record, candidate, main, anchor = ANC
 
   checks.push(check('candidate.not-main', candidate !== main && git(repo, ['rev-parse', `${candidate}^{tree}`]) !== git(repo, ['rev-parse', `${main}^{tree}`]),
     candidate === main ? 'the candidate IS operational main' : 'the candidate is not main and does not share main\'s tree'));
+  const candMissing = CANDIDATE_FILES.filter((f) => !has(repo, candidate, f));
+  const mainMissing = MAIN_FILES.filter((f) => !has(repo, main, f));
+  checks.push(check('candidate.files-present', candMissing.length === 0, candMissing.length ? `the candidate lacks ${candMissing.join(',')}` : `the candidate has ${CANDIDATE_FILES.join(', ')}`));
+  checks.push(check('main.files-present', mainMissing.length === 0, mainMissing.length ? `main lacks ${mainMissing.join(',')}` : `main has ${MAIN_FILES.join(', ')}`));
+  const filesOk = candMissing.length === 0 && mainMissing.length === 0;
+
   if (record === 'A') {
     checks.push(check('candidate.is-anchor-A', candidate === anchor, candidate === anchor ? `A is exactly ${anchor}` : `A must be exactly ${anchor}`));
   } else {
     const descends = candidate !== anchor && gitOk(repo, ['merge-base', '--is-ancestor', anchor, candidate]);
     checks.push(check('candidate.B-descends-from-A', descends, descends ? `B descends from ${anchor}` : `B must be a descendant of ${anchor}, not ${anchor} itself`));
-    if (descends) {
+    if (descends && filesOk) {
       const changed = git(repo, ['diff', '--name-only', anchor, candidate]).split('\n').filter(Boolean);
-      const outside = changed.filter((p) => !CANDIDATE_B_ALLOWED_PATHS.includes(p));
+      const next = readConsent(show(repo, candidate, SERVER_CONSENT_FILE), '');
+      const versions = [PENDING_CONSENT, ...CONSENT_NAMES.map((n) => next[n].server).filter(Boolean)].sort((a, b) => b.length - a.length);
+      const norm = (s) => versions.reduce((t, v) => t.split(v).join('<consent-version>'), s);
+      const versionOnly = (p) => {
+        if (!CANDIDATE_B_VERSION_ONLY_PREFIXES.some((pre) => p.startsWith(pre))) return false;
+        const a = showOrNull(repo, anchor, p);
+        const c = showOrNull(repo, candidate, p);
+        return a !== null && c !== null && norm(a) === norm(c);
+      };
+      const outside = changed.filter((p) => !CANDIDATE_B_ALLOWED_PATHS.includes(p) && !versionOnly(p));
       checks.push(check('candidate.B-changes-only-consent', outside.length === 0, outside.length ? `B changes ${outside.join(',')}` : `B changes only ${changed.join(',') || 'nothing'}`));
       const sameServer = blankConsent(show(repo, anchor, SERVER_CONSENT_FILE)) === blankConsent(show(repo, candidate, SERVER_CONSENT_FILE));
       const sameClient = blankConsent(show(repo, anchor, CLIENT_CONSENT_FILE)) === blankConsent(show(repo, candidate, CLIENT_CONSENT_FILE));
@@ -326,15 +480,38 @@ export function runPreflight({ repo = '.', record, candidate, main, anchor = ANC
     }
   }
 
-  checks.push(...checkExports(show(repo, candidate, `${WSF_SOURCE}/src/index.ts`), manifest, publicManifest));
-  checks.push(...checkRules(show(repo, candidate, 'firestore.rules'), show(repo, main, 'firestore.rules'), liveRules));
-  checks.push(...checkIndexes(JSON.parse(show(repo, candidate, 'firestore.indexes.json')), JSON.parse(show(repo, main, 'firestore.indexes.json'))));
+  const targets = commandTargets(command);
+  const deploysFunctions = targets.includes(`functions:${WSF_CODEBASE}`);
+  const deploysRules = targets.includes('firestore:rules');
+  let consent = null;
+  if (filesOk) {
+    checks.push(...checkExports(show(repo, candidate, `${WSF_SOURCE}/src/index.ts`), manifest, publicManifest));
+    checks.push(...checkRules(show(repo, candidate, 'firestore.rules'), show(repo, main, 'firestore.rules'), liveRules));
+    checks.push(...checkIndexes(JSON.parse(show(repo, candidate, 'firestore.indexes.json')), JSON.parse(show(repo, main, 'firestore.indexes.json'))));
+    const sameAsMain = JSON.stringify(config) === JSON.stringify(JSON.parse(show(repo, main, PRODUCTION_CONFIG)));
+    checks.push(check('config.equals-main', sameAsMain, sameAsMain ? `equals ${PRODUCTION_CONFIG} at main` : `differs from main's reviewed ${PRODUCTION_CONFIG} (predeploy, ignore and comments included)`));
+    consent = readConsent(show(repo, candidate, SERVER_CONSENT_FILE), show(repo, candidate, CLIENT_CONSENT_FILE));
+    checks.push(...checkConsent(record, consent));
+  }
   checks.push(...checkConfig(config));
-  if (command !== undefined) checks.push(...checkCommand(command));
-  const consent = readConsent(show(repo, candidate, SERVER_CONSENT_FILE), show(repo, candidate, CLIENT_CONSENT_FILE));
-  checks.push(...checkConsent(record, consent));
-  const consentPending = Object.values(consent).some((v) => /^pending-approval/.test(v.server ?? ''));
+  if (command !== undefined) checks.push(...checkCommand(command, { interactiveReason }));
+  else if (interactiveReason !== undefined) checks.push(check('command.reviewed-shape', false, 'an interactive reason needs the --command it applies to'));
+  if (deploysRules) {
+    checks.push(check('rules.live-ruleset-supplied', liveRules !== undefined, liveRules !== undefined ? 'the live ruleset was supplied and compared' : 'a rules deploy needs --live-rules: the shared ruleset may only be replaced when it equals main outside its WSF section'));
+  }
+  if (deploysFunctions || deploysRules) {
+    checks.push(check('worktree.supplied', worktree !== undefined, worktree !== undefined ? `the deploy worktree is ${worktree}` : 'a deploy needs --worktree: firebase-tools deploys the working tree, not the commit'));
+  }
+  if (worktree !== undefined) {
+    const head = gitOk(worktree, ['rev-parse', '--verify', 'HEAD']) ? git(worktree, ['rev-parse', 'HEAD']).trim() : '';
+    checks.push(check('worktree.at-candidate', head === candidate, head === candidate ? `worktree HEAD is ${candidate}` : `worktree HEAD ${head || '(not a git worktree)'} is not the candidate`));
+    const allowedNew = new Set([`?? ${PRODUCTION_CONFIG}`, `?? ${ENV_FILE}`]);
+    const dirty = head ? git(worktree, ['status', '--porcelain', '--untracked-files=all']).split('\n').filter(Boolean).filter((l) => !allowedNew.has(l)) : ['(not a git worktree)'];
+    checks.push(check('worktree.clean', dirty.length === 0, dirty.length ? `unreviewed changes: ${dirty.join(', ')}` : `only ${PRODUCTION_CONFIG} and ${ENV_FILE} are added`));
+    if (deploysFunctions) checks.push(...checkEnvFile(envFile));
+  }
 
+  const consentVersion = consent ? Object.fromEntries(CONSENT_NAMES.map((n) => [n, consent[n].server])) : null;
   return {
     ok: checks.every((c) => c.ok),
     record,
@@ -342,8 +519,10 @@ export function runPreflight({ repo = '.', record, candidate, main, anchor = ANC
     main,
     anchor,
     project: PRODUCTION_PROJECT,
-    exports: parseExports(show(repo, candidate, `${WSF_SOURCE}/src/index.ts`)).names.length,
-    signUpMustStayClosed: consentPending,
+    ...(interactiveReason !== undefined ? { interactiveReason } : {}),
+    exports: filesOk ? parseExports(show(repo, candidate, `${WSF_SOURCE}/src/index.ts`)).names.length : null,
+    consentVersion,
+    consentVersionPending: consent ? Object.values(consent).some((v) => /^pending/.test(v.server ?? '')) : null,
     checks,
   };
 }
@@ -358,31 +537,54 @@ export function parseArgs(argv) {
     const k = a.slice(2);
     const v = argv[i + 1];
     if (v === undefined || v.startsWith('--')) return { error: `--${k} needs a value` };
+    if (k in out) return { error: `--${k} is given more than once` };
     out[k] = v;
     i += 1;
   }
   return out;
 }
 
-const USAGE = 'usage: node .github/wsf-production/preflight.mjs --record A|B --candidate <sha40> --main <sha40> --config firebase.westayfit.production.json [--command "firebase deploy ..."] [--live-rules <file>] [--repo <dir>] [--anchor <sha40>]';
+const USAGE = 'usage: node .github/wsf-production/preflight.mjs --record A|B --candidate <sha40> --main <sha40> --config firebase.westayfit.production.json [--command "firebase deploy ..."] [--interactive-reason minimum-bill] [--worktree <dir>] [--live-rules <file>] [--repo <dir>]';
 
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
-  const args = parseArgs(process.argv.slice(2));
-  const allowed = new Set(['record', 'candidate', 'main', 'config', 'command', 'live-rules', 'repo', 'anchor']);
+/** The CLI as a function: argv in, { code, verdict } out. `anchor` is for synthetic tests only and is never read from argv. */
+export function cli(argv, { anchor = ANCHOR_A } = {}) {
+  const args = parseArgs(argv);
+  const allowed = new Set(['record', 'candidate', 'main', 'config', 'command', 'interactive-reason', 'live-rules', 'repo', 'worktree']);
   const unknown = Object.keys(args).filter((k) => k !== 'error' && !allowed.has(k));
   if (args.error || unknown.length || !args.record || !args.candidate || !args.main || !args.config) {
-    console.log(JSON.stringify({ ok: false, usage: args.error ?? (unknown.length ? `unknown option ${unknown.join(',')}` : USAGE) }));
-    process.exit(2);
+    return { code: 2, verdict: { ok: false, usage: args.error ?? (unknown.length ? `unknown option ${unknown.join(',')}` : USAGE) } };
   }
+  const read = (file) => {
+    try {
+      return { text: fs.readFileSync(file, 'utf8') };
+    } catch {
+      return { error: `cannot read ${file}` };
+    }
+  };
+  const cfg = read(args.config);
   let config;
   try {
-    config = JSON.parse(fs.readFileSync(args.config, 'utf8'));
+    config = JSON.parse(cfg.text ?? '');
   } catch {
-    console.log(JSON.stringify({ ok: false, usage: `cannot read ${args.config} as JSON` }));
-    process.exit(2);
+    return { code: 2, verdict: { ok: false, usage: `cannot read ${args.config} as JSON` } };
   }
-  const liveRules = args['live-rules'] === undefined ? undefined : fs.readFileSync(args['live-rules'], 'utf8');
-  const verdict = runPreflight({ repo: args.repo ?? '.', record: args.record, candidate: args.candidate, main: args.main, anchor: args.anchor ?? ANCHOR_A, config, command: args.command, liveRules });
+  let liveRules;
+  if (args['live-rules'] !== undefined) {
+    const r = read(args['live-rules']);
+    if (r.error || !r.text.trim()) return { code: 2, verdict: { ok: false, usage: `${r.error ?? `${args['live-rules']} is empty`}: re-capture the live ruleset` } };
+    liveRules = r.text;
+  }
+  let envFile;
+  if (args.worktree !== undefined) {
+    const e = read(path.join(args.worktree, ENV_FILE));
+    envFile = e.text ?? '';
+  }
+  const verdict = runPreflight({ repo: args.repo ?? '.', record: args.record, candidate: args.candidate, main: args.main, anchor, config, command: args.command, interactiveReason: args['interactive-reason'], liveRules, worktree: args.worktree, envFile });
+  return { code: verdict.usage ? 2 : verdict.ok ? 0 : 1, verdict };
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  const { code, verdict } = cli(process.argv.slice(2));
   console.log(JSON.stringify(verdict, null, 2));
-  process.exit(verdict.usage ? 2 : verdict.ok ? 0 : 1);
+  process.exit(code);
 }
