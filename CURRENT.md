@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=fc70991faf15ed3fe05d11c973f497e8bb53c97ccbae1f9c08c064d7eaa07473 events=927 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=25a1ca4fa7f3f0c682ded421026df485a1c5844d07bb51f2a6c760625653a054 events=933 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `fc70991faf15ed3fe05d11c973f497e8bb53c97ccbae1f9c08c064d7eaa07473` (927 events)
+- Ledger head: `25a1ca4fa7f3f0c682ded421026df485a1c5844d07bb51f2a6c760625653a054` (933 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -14,7 +14,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 - Unattended fast-path dispatch: ENABLED (set-fastpath)
 - Staging target (fast path): `ab77fbfce97e60c1c22492397b2ab6b491f9e0db` (KIOSK-PAIRING-CLARITY-PROOF-1), checked against the full-path pin `a31276516e786ac8f848269de4c839b3b9e13123`
 - Staging retry authorized once (authorize-retry, decision 5955316632): `ab77fbfce97e60c1c22492397b2ab6b491f9e0db` (KIOSK-PAIRING-CLARITY-PROOF-1) after failed run 37012494776, repaired by STAGING-FASTPATH-INVENTORY-BASELINE-FIX at `745b4f6270a90555757b9b01255ee77f0a74e8fb`; spent once any newer attempt at that target exists
-- Critical path: none
+- Critical path: PRODUCTION-DEPLOY-PATH-1 (UNDER_REVIEW, W9)
 - Schema: v2. Every line is written by the `wsf-control-writer` App and names its authority class and rule.
 - Contracts pinned: autonomy-architecture@9ca268d2 (`docs/westayfit/ops/AUTONOMY_ARCHITECTURE_1B_1C.md`); autonomy-contract@9ca268d2 (`docs/westayfit/ops/AUTONOMY_ACCEPTANCE_CONTRACT.md`); capabilities@9ca268d2 (`docs/westayfit/ops/control/capabilities.v1.json`); control-state@9ca268d2 (`docs/westayfit/ops/CONTROL_STATE.md`); fable-operating-protocol@9ca268d2 (`docs/westayfit/ops/control/contracts/FABLE_OPERATING_PROTOCOL_v1.md`); north-star-journeys@9ca268d2 (`docs/westayfit/ops/journeys/NORTH_STAR_JOURNEY_MANIFEST.v1.json`); owner-test-card@9ca268d2 (`docs/westayfit/ops/control/contracts/OWNER_TEST_CARD_AND_SMOKE_CONTRACT.md`); program-director-skill@9ca268d2 (`.claude/skills/wsf-program-director/SKILL.md`); staging-control-plane@9ca268d2 (`skills/wsf-staging-deploy/SKILL.md`); worker-inboxes@9ca268d2 (`docs/westayfit/ops/control/contracts/WORKER_INBOXES.md`); writer@89351735 (`tools/wsf-control`); writer-workflow@cc33f4e7 (`.github/workflows/wsf-control-reconcile.yml`)
 - **SHADOW CURRENT.** This rendering is comment 5878724949 on #365. The human CURRENT (comment 5847443607) stays authoritative until Step 5 exits; nothing routes or wakes from this page.
@@ -33,12 +33,13 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | W4 | #394 | — | EXPO-FULL-STAGING-RECOVERY-4 | — | — | — | — | on |
 | W5 | #395 | — | — | — | — | — | — | off |
 | W7 | #434 | — | — | — | — | — | — | off |
-| W9 | #497 | — | — | PRODUCTION-DEPLOY-PATH-1 | EVENT-LIFECYCLE-BACKEND-RECOVERY-1, MEMBER-TRUTH-BACKEND-1 | EXPO-PRIZE-WIRING-2 | EXPO-PRIZE-WIRING-2 | off |
+| W9 | #497 | ANON-GATE-1 | — | PRODUCTION-DEPLOY-PATH-1 | EVENT-LIFECYCLE-BACKEND-RECOVERY-1, MEMBER-TRUTH-BACKEND-1 | — | — | on |
 
 ## Packets
 
 | Packet | Owner | Kind | Completes at | Origin | Phase | PR | Subject | PR head | Evidence | Merge | Proof | Reviewers | Released by | Last transition | Blocked by | Label | Review policy | Pending finding |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| ANON-GATE-1 | W9 | work | INTEGRATED (source-only) | ledger | RELEASED | — | — | — | — | — | — | — | comment:6077733181 | comment:6077733181 | — | Refuse anonymous-provider Firebase tokens at every WSF callable auth site (requireRealIdentity + optionalRealUid), with refusal tests; the release gate named in the production forensics | 1×ops-source then director | — |
 | AUTONOMY-ROUTER-1C | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #544 | 37c49bbd | 37c49bbd | — | 5f7b63c9 | — | W4 | comment:5882824399 | pull_request:544 | — | Serial step 6: state-derived routing, wakes, and real-event proof | 1×ops-source then director | — |
 | AUTONOMY-ROUTER-1C-INTEGRATE | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #545 | fd697e0f | fd697e0f | — | 8ba39e19 | — | W4 | comment:5929164484 | pull_request:545 | — | Step 6 correction: derive integrate from ACCEPTED plus merged PR with same-cycle or successor reconcile and idempotency proof | 1×ops-source then director | — |
 | AUTONOMY-STATE-1B | W3 | work | INTEGRATED (source-only) | bootstrap | INTEGRATED | #538 | 073b7946 | 073b7946 | — | d42a3307 | — | — | comment:5857966052 | comment:5857966052 | — | Serial step 5: authoritative control state, App writer, bootstrap and shadow reconcile | 1×ops-source then director | — |
@@ -61,7 +62,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | EXPO-LATEST-FULL-STAGING-PIN-1 | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #573 | a0bb252a | a0bb252a | — | 65b8b798 | — | W4 | comment:5970558946 | pull_request:573 | — | Pin the latest accepted expo candidate and activate the fixed closed-goal hosted journey through the existing full staging path | 1×ops-source then director | — |
 | EXPO-MOVEMENT-VIDEO-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #575 | 526cea95 | 526cea95 | — | 0745c732 | — | W4 | comment:5971282758 | pull_request:575 | — | Loop approved demo media in the existing shared player with truthful fallback and no contribution side effects | 1×journey-qa then director | — |
 | EXPO-PRIZE-WIRING-1 | W9 | work | INTEGRATED (source-only) | ledger | WITHDRAWN | — | — | — | — | — | — | — | — | comment:6075293113 | — | Wire the accepted expo prize-drawing core into the central function index with operator-only enable, status and receipt callables and the contribution trigger, nothing enabled by default | 1×ops-source+1×security then director | — |
-| EXPO-PRIZE-WIRING-2 | W9 | work | INTEGRATED (source-only) | ledger | QUEUED | — | — | — | — | — | — | — | — | comment:6075293756 | — | Wire the accepted expo prize-drawing core into the central function index with operator-only enable, status and receipt callables and the contribution trigger, nothing enabled by default | 1×ops-source+1×security then director | — |
+| EXPO-PRIZE-WIRING-2 | W9 | work | INTEGRATED (source-only) | ledger | WITHDRAWN | — | — | — | — | — | — | — | — | comment:6077728166 | — | Wire the accepted expo prize-drawing core into the central function index with operator-only enable, status and receipt callables and the contribution trigger, nothing enabled by default | 1×ops-source+1×security then director | — |
 | EXPO-STATION-LOST-ANSWER-COPY-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #564 | 1d290f74 | 1d290f74 | — | 5be74f3f | — | W4 | comment:5963613447 | pull_request:564 | — | Replace station vendor error text with existing product-safe callable wording without changing retry truth | 1×journey-qa then director | — |
 | KIOSK-EXPECTED-TURN-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #587 | 4bc9a0b8 | 4bc9a0b8 | — | 934f24f0 | — | W4 | comment:6042840991 | pull_request:587 | — | Bind kiosk mutations to the intended turn and preserve exactly-once phone and station completion | 1×journey-qa then director | — |
 | KIOSK-EXPECTED-TURN-NATIVE-CALLER-1 | W7 | work | INTEGRATED (source-only) | ledger | WITHDRAWN | — | — | — | — | — | — | — | comment:6044062885 | comment:6059488593 | — | Wire native station commands to the exact turn and preserve safe retry across later visitors | 1×journey-qa then director | — |
@@ -238,6 +239,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | 5da493455e28 | W3 | EXPO-FULL-STAGING-RECOVERY-4 | release | acked | 6076634226 | comment:6076764787 |
 | 6be4be116f01 | W9 | PRODUCTION-DEPLOY-PATH-1 | handback | acked | 6077005855 | comment:6077245630 |
 | 6c1797699e57 | W4 | PRODUCTION-FIREBASE-INVENTORY-1 | review | acked | 6077006063 | comment:6077068917 |
-| 1868e30865e5 | W4 | EXPO-FULL-STAGING-RECOVERY-4 | review | delivered | 6077681002 | — |
+| 1868e30865e5 | W4 | EXPO-FULL-STAGING-RECOVERY-4 | review | acked | 6077681002 | comment:6077765445 |
 | f9e0a83b767e | W3 | PRODUCTION-DEPLOY-PATH-1 | review | delivered | 6077681219 | — |
+| 65dfcb5bfddb | W9 | ANON-GATE-1 | release | requested | — | — |
 

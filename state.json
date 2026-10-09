@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "fc70991faf15ed3fe05d11c973f497e8bb53c97ccbae1f9c08c064d7eaa07473",
-  "eventCount": 927,
+  "ledgerHead": "25a1ca4fa7f3f0c682ded421026df485a1c5844d07bb51f2a6c760625653a054",
+  "eventCount": 933,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -29,7 +29,7 @@
     "rollbackSha": "a31276516e786ac8f848269de4c839b3b9e13123",
     "pinPr": 522
   },
-  "criticalPath": null,
+  "criticalPath": "PRODUCTION-DEPLOY-PATH-1",
   "workers": {
     "W3": {
       "inbox": 396,
@@ -65,11 +65,71 @@
     "W4": [],
     "W5": [],
     "W7": [],
-    "W9": [
-      "EXPO-PRIZE-WIRING-2"
-    ]
+    "W9": []
   },
   "packets": {
+    "ANON-GATE-1": {
+      "owner": "W9",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Refuse anonymous-provider Firebase tokens at every WSF callable auth site (requireRealIdentity + optionalRealUid), with refusal tests; the release gate named in the production forensics",
+      "origin": "ledger",
+      "phase": "RELEASED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": 497,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": 0,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "functions-westayfit/src/index.ts",
+        "functions-westayfit/src/anon-gate.ts",
+        "functions-westayfit/tests/anon-gate.test.ts",
+        "functions-westayfit/tests/",
+        "docs/westayfit/ops/security/ANON-GATE-1.md"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6077731662
+        },
+        "released": {
+          "kind": "comment",
+          "id": 6077733181
+        },
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6077733181
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
+      "pendingFinding": null
+    },
     "AUTONOMY-ROUTER-1C": {
       "owner": "W3",
       "kind": "work",
@@ -1589,7 +1649,7 @@
       },
       "label": "Wire the accepted expo prize-drawing core into the central function index with operator-only enable, status and receipt callables and the contribution trigger, nothing enabled by default",
       "origin": "ledger",
-      "phase": "QUEUED",
+      "phase": "WITHDRAWN",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": null,
@@ -1625,7 +1685,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6075293756
+          "id": 6077728166
         }
       },
       "review": {
@@ -5567,11 +5627,14 @@
       "packet": "EXPO-FULL-STAGING-RECOVERY-4",
       "worker": "W4",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6077681002
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6077765445
+      }
     },
     "f9e0a83b767e40169b5b7c50fb05489cbb061e8bf70a34302c54483cc49b5b50": {
       "packet": "PRODUCTION-DEPLOY-PATH-1",
@@ -5581,6 +5644,14 @@
       "comments": [
         6077681219
       ],
+      "ack": null
+    },
+    "65dfcb5bfddb5179533815ff9864a35f85cb0678c409f2d84f8c66a95331eded": {
+      "packet": "ANON-GATE-1",
+      "worker": "W9",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
