@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "992e9a72cb3db40cb8c6df73c4dbbf67990062b7e9af61cc724dfe796831f661",
-  "eventCount": 1016,
+  "ledgerHead": "e2304bfb63575c7f27bc921363c85d26b9673e62c45aa5f9a8e6d182e7ce2e3b",
+  "eventCount": 1021,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -20,7 +20,7 @@
   "canonical": {
     "developmentBranch": "claude/wsf-app-shell",
     "developmentSha": "e65bfee9eecb2370f602d09880da604709fba58a",
-    "operationalMain": "7cd5aad36e9a1403ad63f070a4ffa87657ae8faa"
+    "operationalMain": "1d3f1c2c52badf4273d900a5ca8ba662fce66c43"
   },
   "staging": {
     "servedSha": "ec162d17a0540e936741027f9b8f90dd372cfaf4",
@@ -29,7 +29,7 @@
     "rollbackSha": "ab77fbfce97e60c1c22492397b2ab6b491f9e0db",
     "pinPr": 597
   },
-  "criticalPath": "PRODUCTION-DEPLOY-PATH-1",
+  "criticalPath": null,
   "workers": {
     "W3": {
       "inbox": 396,
@@ -66,9 +66,7 @@
     "W4": [],
     "W5": [],
     "W7": [],
-    "W9": [
-      "KIOSK-TURN-LIFECYCLE-1"
-    ]
+    "W9": []
   },
   "packets": {
     "ANON-GATE-1": {
@@ -2199,10 +2197,10 @@
       },
       "label": "Revoke ends/requeues that station's assigned/ready/active line entry (seen via wsfMyTurn/wsfTurnState); wsfJoinTurnLine refuses an already-recorded member (one-contribution reason); tests; doc note",
       "origin": "ledger",
-      "phase": "QUEUED",
+      "phase": "RELEASED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
-      "inbox": null,
+      "inbox": 497,
       "pr": null,
       "reviewers": [],
       "artifact": {
@@ -2213,7 +2211,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": null,
+      "releasedQueueIndex": 0,
       "reviewedBy": [],
       "subjectPaths": [
         "functions-westayfit/src/index.ts",
@@ -2228,11 +2226,14 @@
           "kind": "comment",
           "id": 6079353576
         },
-        "released": null,
+        "released": {
+          "kind": "comment",
+          "id": 6082013157
+        },
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6079353576
+          "id": 6082013157
         }
       },
       "review": {
@@ -3015,7 +3016,7 @@
       },
       "label": "Reviewed WSF-only production deploy path for goarrive: production-only Firebase config, network-free pre-flight guard, operator runbook with candidates A/B, receipts, rollback; nothing deployed",
       "origin": "ledger",
-      "phase": "ACCEPTED",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -3027,7 +3028,7 @@
         "subjectSha": "dfd48c87ee36710e47c19f0b6e70e3ab7a71e246",
         "prHeadSha": "dfd48c87ee36710e47c19f0b6e70e3ab7a71e246",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "1d3f1c2c52badf4273d900a5ca8ba662fce66c43"
       },
       "proof": null,
       "served": null,
@@ -3057,8 +3058,8 @@
           "id": 6081789402
         },
         "lastTransition": {
-          "kind": "comment",
-          "id": 6081789402
+          "kind": "pull_request",
+          "id": 600
         }
       },
       "review": {
@@ -6188,10 +6189,21 @@
       "packet": "LOVABLE-DEVICE-QA-2",
       "worker": "W3",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6081988232
       ],
+      "ack": {
+        "kind": "comment",
+        "id": 6082110470
+      }
+    },
+    "c0b43c67f852402c09d5441a663b530b3971a10c9f3f90628844b395e5535827": {
+      "packet": "KIOSK-TURN-LIFECYCLE-1",
+      "worker": "W9",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
