@@ -26,6 +26,13 @@
  *
  * The password is held in memory for the browser sign-in and never written:
  * not to the manifest, the results or a log line.
+ *
+ * The unverified ordinary participant (KIOSK-UNVERIFIED-STAGING-RECOVERY-1):
+ * createUnverifiedUser keeps emailVerified:false and is read back to prove it;
+ * joinableEvent is a public community with a join link and an approved marker
+ * and NO visitor membership, so the visitor is admitted only by the product;
+ * expectVisitor and claimMemberships claim what that admission writes. Nothing
+ * verifies an address, and createVerifiedUser and signIn are unchanged.
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -277,8 +284,148 @@ export function createFixtureKit({
   /** The goal closes, as a closure leaves it: status only, the rest untouched. */
   const closeGoal = (event) => patchDoc(`wsfGoals/${event.goalId}`, { status: 'closed', updatedAt: now() });
 
+  // ---- the unverified ordinary participant (KIOSK-UNVERIFIED-PARTICIPANT-1, #586) --------
+  const identityUrl = (op) => `https://identitytoolkit.googleapis.com/v1/projects/${projectId}/accounts:${op}`;
+  /** Admin read of accounts by uid or by email; `{}` is the documented "none". */
+  async function lookupAccounts(by) {
+    const body = await request(identityUrl('lookup'), { method: 'POST', admin: true, body: by });
+    if (body.users !== undefined && !Array.isArray(body.users)) throw new Error('the account lookup returned users of an unexpected type');
+    return body.users || [];
+  }
+
+  /**
+   * An account whose address stays UNVERIFIED: the same admin create, the same
+   * run-specific synthetic email and the same in-memory password as
+   * createVerifiedUser, with emailVerified:false. Nothing here or later
+   * verifies it. Two things the verified maker does not need:
+   * - the create is read back, and an account that came back verified is
+   *   refused (it is already tracked, so cleanup still removes it);
+   * - a create whose answer is lost may still have made the account, so the
+   *   kit looks it up by its synthetic email and tracks it before failing.
+   */
+  async function createUnverifiedUser(label, displayName = `WSF ${label}`) {
+    const email = `wsf-${runTag}-${label}-${crypto.randomBytes(2).toString('hex')}@example.com`;
+    const password = `Wsf!${crypto.randomBytes(18).toString('base64url')}`;
+    let body;
+    try {
+      body = await request(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${encodeURIComponent(apiKey)}`, {
+        method: 'POST', admin: true,
+        body: { targetProjectId: projectId, email, password, displayName, emailVerified: false, disabled: false, returnSecureToken: false },
+      });
+    } catch (e) {
+      let found = [];
+      try { found = await lookupAccounts({ email: [email] }); } catch {
+        throw new Error(`${e.message}; the account may exist under this run's synthetic email and could not be looked up`);
+      }
+      for (const u of found) if (typeof u?.localId === 'string' && u.localId) cleanup.users.add(u.localId);
+      persist();
+      throw new Error(`${e.message}; ${found.length ? 'the account was created anyway and is tracked for cleanup' : 'no account was created'}`);
+    }
+    const uid = body?.localId;
+    if (typeof uid !== 'string' || !uid) throw new Error('the account create returned no localId');
+    cleanup.users.add(uid);
+    persist();
+    const [made] = await lookupAccounts({ localId: [uid] });
+    if (made?.emailVerified !== false) throw new Error('the unverified fixture account was not stored as unverified');
+    return { uid, email, password };
+  }
+
+  /**
+   * A community a visitor joins through the REAL admission path: public (so
+   * link-joinable), with its own join code; one open squats goal that allows
+   * more than one contribution; and an approved, active marker
+   * `wsfMarkers/<runTag>-<label>` naming both. Its only member is a placeholder
+   * founding Champion. No membership or profile is made for any visitor:
+   * joining, and saving a profile, are the product's to do.
+   */
+  async function joinableEvent(label, { target, seeded }) {
+    const t = now();
+    const tag = `${runTag}-${label}`;
+    const markerSlug = tag.toLowerCase();
+    if (!/^[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?$/.test(markerSlug)) throw new Error('this run tag cannot name a marker');
+    const champion = `e5cchamp-${tag}`;
+    const groupId = `e5cgrp-${tag}`;
+    const goalId = `e5cgoal-${tag}`;
+    const joinCode = crypto.randomBytes(18).toString('base64url');
+    const communityName = 'Fixture Open Community';
+    const goalTitle = 'Fixture Open Squats';
+    await putDoc(`wsfCommunityGroups/${groupId}`, {
+      displayName: communityName, groupType: 'custom', joinPolicy: 'public', joinCode, createdByUserId: champion,
+      lifecycleStatus: 'active', isSample: false, createdAt: t, updatedAt: t,
+    });
+    await putDoc(`wsfMemberships/${groupId}_${champion}`, {
+      groupId, userId: champion, role: 'foundingChampion', membershipStatus: 'active',
+      communityNameVisibility: 'private', communityActivityVisibility: 'private', createdAt: t, updatedAt: t,
+    });
+    await putDoc(`wsfGoals/${goalId}`, {
+      ownerUid: champion, communityGroupId: groupId, title: goalTitle, target, unit: 'squats', status: 'active',
+      startsAt: new Date(t.getTime() - DAY), endsAt: new Date(t.getTime() + 7 * DAY), timezone: 'America/New_York',
+      repeatPolicy: 'multiple', aggregateDisplayAuthorized: true, createdAt: t, updatedAt: t,
+    });
+    await shards(goalId, seeded);
+    await putDoc(`wsfMarkers/${markerSlug}`, { label: 'Fixture Flag', active: true, communityGroupId: groupId, goalId, kioskMode: 'off' });
+    return {
+      setupId: `${label}: one synthetic public community with a join link and an approved marker, one open squats goal (target ${target}, seeded ${seeded}), no visitor membership`,
+      groupId, goalId, joinCode, markerSlug, communityName, goalTitle, target, seeded,
+    };
+  }
+
+  /**
+   * Before a visitor saves a profile or joins: the two documents the product
+   * will write for them, claimed by their deterministic names. Their own
+   * membership is run-tagged, which is what lets the cleaner admit the
+   * untagged wsfMemberProfiles/<uid> it links.
+   */
+  function expectVisitor(event, account) {
+    trackDoc(`wsfMemberships/${event.groupId}_${account.uid}`);
+    trackDoc(`wsfMemberProfiles/${account.uid}`);
+  }
+
+  /**
+   * Every membership the product holds for this account, found by its uid and
+   * claimed: run-tagged ones by path, any other (a join that landed in another
+   * community) as LINKED through the uid, which the cleaner checks against the
+   * stored record before it deletes. A read for cleanup, never an assertion.
+   */
+  async function claimMemberships(account) {
+    const rows = await request(`${docUrl('').replace(/\/$/, '')}:runQuery`, {
+      method: 'POST', admin: true,
+      body: { structuredQuery: { from: [{ collectionId: 'wsfMemberships' }], where: { fieldFilter: { field: { fieldPath: 'userId' }, op: 'EQUAL', value: { stringValue: account.uid } } }, limit: 50 } },
+    });
+    if (!Array.isArray(rows)) throw new Error('the membership query returned an unexpected shape');
+    let claimed = 0;
+    for (const row of rows) {
+      const name = row?.document?.name;
+      if (typeof name !== 'string') continue;
+      const docPath = name.slice(name.indexOf('/documents/') + '/documents/'.length);
+      if (!/^wsfMemberships\/[^/]+$/.test(docPath)) throw new Error('the membership query named a document outside wsfMemberships');
+      if (docPath.includes(runTag)) trackDoc(docPath);
+      else if (!cleanup.docs.has(docPath)) trackLinked(docPath, account.uid);
+      claimed += 1;
+    }
+    return claimed;
+  }
+
+  /**
+   * Sign in through the product's own /signin page and report where it lands,
+   * WITHOUT treating any landing as success: a page that keeps an account at
+   * /verify-email is the diagnosis the caller records, never a member journey.
+   * Throws only when the page never leaves /signin (the sign-in itself failed).
+   */
+  async function signInLanding(page, baseUrl, account) {
+    await page.goto(`${baseUrl}/signin`);
+    await page.getByTestId('wsf-signin-email').waitFor({ state: 'visible', timeout: 30_000 });
+    await page.getByTestId('wsf-signin-email').fill(account.email);
+    await page.getByTestId('wsf-signin-password').fill(account.password);
+    await page.getByTestId('wsf-signin-submit').click();
+    await page.waitForURL((u) => !/^\/signin\b/.test(new URL(u).pathname), { timeout: 60_000 });
+    await page.waitForTimeout(3_000); // one auth hop more (home -> /verify-email or /profile-setup) settles here
+    return new URL(page.url()).pathname;
+  }
+
   return {
     memberInTwoCommunities, signIn, expoEvent, approveStation, trackPlace, trackContribution, trackStationTurn, closeGoal,
+    createUnverifiedUser, createVerifiedUser, joinableEvent, expectVisitor, claimMemberships, signInLanding,
     manifestPath: cleanupManifest,
     tracked: () => ({ users: cleanup.users.size, docs: cleanup.docs.size, linked: cleanup.linked.size }),
   };

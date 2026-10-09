@@ -622,6 +622,7 @@ const SUPERSEDED_REFUSALS = [
   ['a different rollback target', () => { const c = with_((j) => { j._pinInvariants.servedBaseline.rollbackTarget = P; }); return SUPERSEDED({ 'ops-head': c.ops, 'superseded-approval': c.file }); }, /rolls back to .*, not the served/],
   ['a different measured inventory', () => { const c = with_((j) => { j.expectedPriorFunctions = 4; }); return SUPERSEDED({ 'ops-head': c.ops, 'superseded-approval': c.file }); }, /expects 4 prior functions/],
   ['a different retained function set', () => { const c = with_((j) => { j.candidateAddedFunctions = []; }); return SUPERSEDED({ 'ops-head': c.ops, 'superseded-approval': c.file }); }, /does not retain/],
+  ['a direct replacement carrying history the deployed approval does not explain (an unvisited never-served link)', () => { const c = with_((j) => { j._previousPackageLabeldeadbeef = 'HISTORICAL, a pin the chain never visits'; }); return SUPERSEDED({ 'ops-head': c.ops, 'superseded-approval': c.file }); }, /the superseded approval replaced the deployed pin directly, but it carries history the deployed approval and its rotation do not explain \(_previousPackageLabeldeadbeef\): a never-served approval the chain does not visit/],
   ['ancestry that never rotated the deployed pin out', () => { const c = with_((j) => { delete j[`_previousPackageLabel${P.slice(0, 8)}`]; }); return SUPERSEDED({ 'ops-head': c.ops, 'superseded-approval': c.file }); }, /has not rotated the deployed pin/],
   ['a superseded file that is not JSON', () => { const c = supersededCase('{'); return SUPERSEDED({ 'ops-head': c.ops, 'superseded-approval': c.file }); }, /is not JSON/],
   ['a superseded file that does not exist', () => SUPERSEDED({ 'superseded-approval': path.join(root, 'absent.json') }), /missing or unreadable/],
@@ -636,15 +637,35 @@ for (const [name, make, re] of SUPERSEDED_REFUSALS) {
   });
 }
 
-// ---- EXPO-LATEST-FULL-STAGING-PIN-1: a bounded two-link chain (Director #396 5970631460) ------
-// P deployed (served S by run 7) -> CS never served -> CS2 never served -> candidate CS3.
+// ---- EXPO-LATEST-FULL-STAGING-PIN-1: a bounded chain (Director #396 5970631460), one link longer in
+// EXPO-FULL-STAGING-RECOVERY-3 (Director #365 6043989729, owner consent 6074607727) --------------
+// P deployed (served S by run 7) -> CS -> CS2 -> CS3, each never served, each approved on ONE operational
+// history: every never-served approval stands at a commit that is an ancestor of the next one's, which is
+// how operational main records them, and where each link's own file is read back.
+let chainN = 0;
+/** `json` as the approval at a new operational commit descending from `from`. */
+function chainedCase(json, from) {
+  const text = typeof json === 'string' ? json : serialize(json);
+  chainN += 1;
+  g('checkout', '-q', '-b', `ops-chain-${chainN}`, from);
+  write('.github/wsf-staging/approved-candidate.json', text);
+  const ops = commit(`ops-chain-${chainN}`);
+  g('checkout', '-q', 'main');
+  const file = path.join(root, `chained-${chainN}.json`);
+  fs.writeFileSync(file, text);
+  return { file, ops };
+}
 g('checkout', '-q', 'served');
 write('apps/westayfit/app/new-route.tsx', 'after the second never-served pin\n');
 const CS3 = commit('the candidate after two never-served pins');
+write('apps/westayfit/app/new-route.tsx', 'after the third never-served pin\n');
+const CS4 = commit('the candidate after three never-served pins');
+write('apps/westayfit/app/new-route.tsx', 'after the fourth never-served pin\n');
+const CS5 = commit('the candidate after four never-served pins');
 g('checkout', '-q', 'main');
 const SUP_CHAIN1 = run(SUPERSEDED({ out: path.join(root, 'sup-chain1.json') })); // CS2 superseding CS
 assert.equal(SUP_CHAIN1.code, 0, SUP_CHAIN1.err);
-const chainL = supersededCase(SUP_CHAIN1.text);
+const chainL = chainedCase(SUP_CHAIN1.text, supL.ops);
 const CHAIN = (over = {}) => LEDGER(S, { candidate: CS3, 'ops-head': chainL.ops, 'superseded-approval': chainL.file, ...over });
 
 test('CHAIN (fail-before shape): the single-link rule alone cannot accept an approval that superseded a never-served one', () => {
@@ -688,8 +709,17 @@ test('CHAIN leaves ordinary and single-link output byte-identical', () => {
   assert.doesNotMatch(SUP_CHAIN1.text, /priorNeverServed|It had itself superseded/);
 });
 
+test('CHAIN: an inner link whose own approval is NOT on the operational history the chain stands on is refused (the pre-RECOVERY-3 sibling-branch shape)', () => {
+  // CS's approval stands at supL.ops; an operational head that does not descend from it cannot vouch for it.
+  const sibling = supersededCase(SUP_CHAIN1.text);
+  const r = run(CHAIN({ 'ops-head': sibling.ops, 'superseded-approval': sibling.file }));
+  assert.equal(r.code, 1);
+  assert.match(r.err, /inner link 1 cannot be proved: [0-9a-f]{8}, where it records [0-9a-f]{8} stood, is not an operational commit before/);
+  assert.equal(r.text, null);
+});
+
 const chainJson = () => JSON.parse(SUP_CHAIN1.text);
-const chainWith = (f) => { const j = chainJson(); f(j, j._pinInvariants.supersededApproval); const c = supersededCase(j); return CHAIN({ 'ops-head': c.ops, 'superseded-approval': c.file }); };
+const chainWith = (f) => { const j = chainJson(); f(j, j._pinInvariants.supersededApproval); const c = chainedCase(j, supL.ops); return CHAIN({ 'ops-head': c.ops, 'superseded-approval': c.file }); };
 const CHAIN_REFUSALS = [
   ['an inner link recorded as served', () => chainWith((j, i) => { i.served = true; }), /is not recorded as never served/],
   ['an inner link with no served flag at all', () => chainWith((j, i) => { delete i.served; }), /has no served/],
@@ -700,14 +730,21 @@ const CHAIN_REFUSALS = [
   ['a wrong inner anchoring run', () => chainWith((j, i) => { i.anchoringRun = 999; }), /anchored on run 999/],
   ['inner lineage checks not recorded as held', () => chainWith((j, i) => { i.descendsFromServed = false; }), /does not record its own lineage checks/],
   ['an inner link that does not descend from the served SHA', () => chainWith((j, i) => { i.approvedAppSha = C_SIDE; j._pinInvariants.previousApprovedAppSha = C_SIDE; j[`_previousPackageLabel${C_SIDE.slice(0, 8)}`] = 'x'; }), /does not descend from the served SHA/],
-  ['an inner link that is not an ancestor of the superseded SHA', () => chainWith((j, i) => { i.approvedAppSha = CS3; j._pinInvariants.previousApprovedAppSha = CS3; j[`_previousPackageLabel${CS3.slice(0, 8)}`] = 'x'; }), /is not an ancestor of the superseded SHA/],
+  ['an inner link that is not an ancestor of the approval that replaced it', () => chainWith((j, i) => { i.approvedAppSha = CS4; j._pinInvariants.previousApprovedAppSha = CS4; j[`_previousPackageLabel${CS4.slice(0, 8)}`] = 'x'; }), /is not an ancestor of [0-9a-f]{8}, the approval that replaced it/],
+  ['an inner link that is the candidate itself (a cycle through the candidate)', () => chainWith((j, i) => { i.approvedAppSha = CS3; j._pinInvariants.previousApprovedAppSha = CS3; j[`_previousPackageLabel${CS3.slice(0, 8)}`] = 'x'; }), /is the served SHA, the deployed pin, the candidate, the superseded SHA or a link already in the chain/],
   ['an inner SHA that is not a commit', () => chainWith((j, i) => { i.approvedAppSha = 'd'.repeat(40); j._pinInvariants.previousApprovedAppSha = 'd'.repeat(40); }), /is not a commit/],
-  ['an inner SHA that is the served SHA', () => chainWith((j, i) => { i.approvedAppSha = S; j._pinInvariants.previousApprovedAppSha = S; }), /is the served SHA, the deployed pin or the superseded SHA/],
+  ['an inner SHA that is the served SHA', () => chainWith((j, i) => { i.approvedAppSha = S; j._pinInvariants.previousApprovedAppSha = S; }), /is the served SHA, the deployed pin, the candidate, the superseded SHA or a link already in the chain/],
   ['an inner link never rotated into history', () => chainWith((j) => { delete j[`_previousPackageLabel${CS.slice(0, 8)}`]; }), /has not rotated/],
-  ['a three-link chain (an inner link that is itself a chain)', () => chainWith((j, i) => { i.priorNeverServed = CS; }), /is itself a chain/],
+  ['a record naming an earlier never-served link its own approval does not have', () => chainWith((j, i) => { i.priorNeverServed = CS; }), /names an earlier never-served .* own approval replaced the deployed pin directly/],
+  ['a malformed priorNeverServed', () => chainWith((j, i) => { i.priorNeverServed = 'cs'; }), /priorNeverServed is not a valid SHA/],
   ['a malformed inner record', () => chainWith((j) => { j._pinInvariants.supersededApproval = 'f84346d3'; }), /record is malformed/],
   ['an inner record with an unknown key', () => chainWith((j, i) => { i.trusted = true; }), /carries an unknown trusted/],
   ['a missing inner record', () => chainWith((j) => { delete j._pinInvariants.supersededApproval; }), /did not replace the deployed approval/],
+  ['an inner record naming an operational commit that is not one', () => chainWith((j, i) => { i.matchesOperationalHead = 'e'.repeat(40); }), /names no operational commit/],
+  ['an inner record naming an operational commit before the anchoring run', () => chainWith((j, i) => { i.matchesOperationalHead = B0; }), /is not on operational main after run 7/],
+  ['an inner record naming an operational commit whose approval is another SHA', () => chainWith((j, i) => { i.matchesOperationalHead = RUN_MAIN; }), /the approval at [0-9a-f]{8} names [0-9a-f]{40}, not/],
+  ['history that does not quote the inner link\'s own label', () => chainWith((j) => { j[`_previousPackageLabel${CS.slice(0, 8)}`] += ' (edited)'; }), /is not [0-9a-f]{8}'s own approval at [0-9a-f]{8}, rotated as a never-served pin/],
+  ['history that does not quote the inner link\'s own boundary note', () => chainWith((j) => { j[`_previousFullCandidateNote${CS.slice(0, 8)}`] = 'HISTORICAL, rewritten'; }), /_previousFullCandidateNote[0-9a-f]{8} is not [0-9a-f]{8}'s own approval/],
   ['stale run evidence on the chained approval', () => chainWith((j) => { j._pinInvariants.run.id = 999; }), /stale run evidence/],
   ['a stale marker on the chained approval', () => chainWith((j) => { j._pinInvariants.run.verifiedMarker = P; }), /stale run or marker/],
   ['a different rollback on the chained approval', () => chainWith((j) => { j._pinInvariants.servedBaseline.rollbackTarget = P; }), /rolls back to .*, not the served/],
@@ -718,6 +755,223 @@ const CHAIN_REFUSALS = [
 for (const [name, make, re] of CHAIN_REFUSALS) {
   test(`REFUSED (chain): ${name}`, () => {
     const r = run(make());
+    assert.equal(r.code, 1, `expected a refusal: ${r.out}`);
+    assert.match(r.err, re);
+    assert.match(r.err, /PIN=refused/);
+    assert.equal(r.text, null, 'a refusal must not write the output');
+  });
+}
+
+// ---- EXPO-FULL-STAGING-RECOVERY-3: three never-served approvals, and never a fourth ---------------------------
+// P deployed (served S) -> CS -> CS2 -> CS3, all never served -> CS4. The real chain this mirrors is
+// a3127651 deployed (run 60 served ab77fbfc) -> 5705dc3b -> f84346d3 -> 0d3598d4 -> ec162d17.
+const SUP_CHAIN2 = run(CHAIN({ out: path.join(root, 'sup-chain2.json') })); // CS3 superseding CS2 (over CS)
+assert.equal(SUP_CHAIN2.code, 0, SUP_CHAIN2.err);
+const chain3L = chainedCase(SUP_CHAIN2.text, chainL.ops);
+const CHAIN3 = (over = {}) => LEDGER(S, { candidate: CS4, 'ops-head': chain3L.ops, 'superseded-approval': chain3L.file, ...over });
+
+test('CHAIN3 (fail-before): the two-link bound refused exactly this shape; the record still names one prior only', () => {
+  const rec = SUP_CHAIN2.json._pinInvariants.supersededApproval;
+  assert.equal(rec.approvedAppSha, CS2);
+  assert.equal(rec.priorNeverServed, CS, 'CS3 says CS2 had superseded CS');
+  assert.equal(SUP_CHAIN2.json._pinInvariants.previousApprovedAppSha, CS2);
+});
+
+test('CHAIN3: three never-served approvals, each proved from its own file, roll back to S and are named outermost first', () => {
+  const r = run(CHAIN3());
+  assert.equal(r.code, 0, r.err);
+  const j = r.json;
+  const [s8, cs8, cs28, cs38] = [S.slice(0, 8), CS.slice(0, 8), CS2.slice(0, 8), CS3.slice(0, 8)];
+  assert.equal(j.approvedAppSha, CS4);
+  assert.ok(j._fullCandidateNote.startsWith(`${CS4} is measured against ${S}, the SHA run 7 (1001) served in ledger fast-path mode and whose hosted marker that run observed. ` +
+    `The SHA this file previously approved, ${CS3}, was NEVER SERVED: it was approved on operational main after run 7, descends from ${s8}, is an ancestor of the candidate, ` +
+    `and is superseded by this pin before any deploy. It had itself superseded ${CS2}, also NEVER SERVED, which had superseded ${CS}, also NEVER SERVED. ` +
+    `The historical pin ${P}, which run 7's operational main still named, is approval ancestry only: that run did not deploy it.`), j._fullCandidateNote);
+  assert.ok(j._rollbackNote.includes(`The previous known-good served app SHA is ${S}:`));
+  assert.ok(j._rollbackNote.includes(`The approval this pin replaces named ${CS3}, which no deploy served (superseded before any deploy); it is not a rollback target.`));
+  assert.equal(j[`_previousPackageLabel${cs38}`], `HISTORICAL, the label of the ${cs38} pin, which no deploy served: run 7 (1001), the last deploy-mode run, served ${s8}, and this pin supersedes it before any deploy: THE NEW LABEL`);
+  for (const [k, from] of [[cs28, SUP_CHAIN2], [cs8, SUP_CHAIN1], [P.slice(0, 8), SUP_LEDGER]]) {
+    assert.equal(j[`_previousPackageLabel${k}`], from.json[`_previousPackageLabel${k}`], `${k}'s label is kept as written`);
+  }
+  const inv = j._pinInvariants;
+  assert.equal(inv.previousApprovedAppSha, CS3);
+  assert.equal(inv.servedBaseline.rollbackTarget, S);
+  assert.deepEqual(inv.supersededApproval, {
+    approvedAppSha: CS3, served: false, servedAppSha: S, lastDeployedApprovalSha: P,
+    descendsFromServed: true, ancestorOfCandidate: true, anchoringRun: 1001, matchesOperationalHead: chain3L.ops, priorNeverServed: CS2,
+  });
+  assert.equal(inv.fastPath.eligible, false);
+  assert.ok(r.out.includes(`PIN_PREVIOUS=${CS3}\nPIN_SUPERSEDED_NEVER_SERVED=${CS3}\nPIN_SERVED=${S}\nPIN_ROLLBACK=${S}\n`), r.out);
+  assert.equal(run(CHAIN3()).text, r.text, 'deterministic');
+});
+
+test('CHAIN4: a fourth never-served approval is refused, and nothing is written', () => {
+  const sup4 = run(CHAIN3({ out: path.join(root, 'sup-chain3.json') }));
+  assert.equal(sup4.code, 0, sup4.err);
+  const c = chainedCase(sup4.text, chain3L.ops);
+  const r = run(LEDGER(S, { candidate: CS5, 'ops-head': c.ops, 'superseded-approval': c.file }));
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.err, new RegExp(`never-served chain is too long: ${CS2.slice(0, 8)} itself superseded ${CS.slice(0, 8)}, a fourth never-served approval; at most three never-served approvals may be superseded`));
+  assert.match(r.err, /PIN=refused/);
+  assert.equal(r.text, null);
+});
+
+/**
+ * The three never-served approvals as generated, each edited by `edit`, committed one after another on one
+ * operational branch, each record pointing at the commit its link stands at (unless an edit says otherwise).
+ * Unedited, it is the valid CHAIN3 shape; each edit tampers with exactly one thing at one depth.
+ */
+let c3N = 0;
+function chain3With(edit = {}) {
+  const noop = () => {};
+  const cs = JSON.parse(SUP_LEDGER.text);
+  const cs2 = JSON.parse(SUP_CHAIN1.text);
+  const cs3 = JSON.parse(SUP_CHAIN2.text);
+  c3N += 1;
+  g('checkout', '-q', '-b', `ops-c3-${c3N}`, OPS);
+  const at = {};
+  (edit.cs || noop)(cs, cs._pinInvariants);
+  if (edit.sideCs) g('checkout', '-q', '-b', `side-c3-${c3N}`, OPS);
+  write('.github/wsf-staging/approved-candidate.json', serialize(cs));
+  at.cs = commit('cs');
+  if (edit.sideCs) g('checkout', '-q', `ops-c3-${c3N}`);
+  if (edit.gap) { g('rm', '-q', '.github/wsf-staging/approved-candidate.json'); at.gap = commit('no approval file here'); }
+  cs2._pinInvariants.supersededApproval.matchesOperationalHead = at.cs;
+  (edit.cs2 || noop)(cs2, cs2._pinInvariants.supersededApproval, at);
+  write('.github/wsf-staging/approved-candidate.json', serialize(cs2));
+  at.cs2 = commit('cs2');
+  if (edit.sideCs) g('merge', '-q', '-s', 'ours', '--no-edit', `side-c3-${c3N}`);
+  cs3._pinInvariants.supersededApproval.matchesOperationalHead = at.cs2;
+  (edit.cs3 || noop)(cs3, cs3._pinInvariants.supersededApproval, at);
+  const text = serialize(cs3);
+  write('.github/wsf-staging/approved-candidate.json', text);
+  at.cs3 = commit('cs3');
+  g('checkout', '-q', 'main');
+  const file = path.join(root, `c3-${c3N}.json`);
+  fs.writeFileSync(file, text);
+  return LEDGER(S, { candidate: CS4, 'ops-head': at.cs3, 'superseded-approval': file });
+}
+
+test('CHAIN3 builder, unedited, is the valid chain (so each refusal below is its one edit)', () => {
+  const r = run(chain3With());
+  assert.equal(r.code, 0, r.err);
+  assert.equal(r.json._pinInvariants.supersededApproval.priorNeverServed, CS2);
+});
+
+const CHAIN3_REFUSALS = [
+  // depth 1: the record CS3 keeps of CS2, and CS2's own file
+  ['depth 1: its record points at the commit where CS stands, whose approval is CS', { cs3: (j, i, at) => { i.matchesOperationalHead = at.cs; } }, /inner link 1 cannot be proved: the approval at [0-9a-f]{8} names [0-9a-f]{40}, not/],
+  ['depth 1: its record points at an operational commit on another branch', { cs3: (j, i) => { i.matchesOperationalHead = OPS_APPROVAL_ONLY; } }, /inner link 1 cannot be proved: .* is not an operational commit before/],
+  ['depth 1: its record points at a commit with no approval file', { gap: true, cs3: (j, i, at) => { i.matchesOperationalHead = at.gap; } }, /inner link 1 cannot be proved: there is no approval file at/],
+  ['depth 1: its record drops the earlier never-served CS', { cs3: (j, i) => { delete i.priorNeverServed; } }, /inner link 1 cannot be proved: its record names no earlier never-served approval/],
+  ['depth 1: its record names a different earlier never-served SHA', { cs3: (j, i) => { i.priorNeverServed = CS3; } }, /inner link 1 cannot be proved: its record names the earlier never-served .* own approval replaced/],
+  ['depth 1: CS2\'s own file was changed after CS3 rotated it (a changed historical blob)', { cs2: (j) => { j.packageLabel = 'REWRITTEN AFTER THE FACT'; } }, /inner link 1 cannot be proved: .* is not [0-9a-f]{8}'s own approval at/],
+  ['depth 1: CS3\'s history misquotes CS2\'s note', { cs3: (j) => { j[`_previousExpectedPriorFunctionsNote${CS2.slice(0, 8)}`] += ' '; } }, /inner link 1 cannot be proved: [0-9a-f]{8}'s _previousExpectedPriorFunctionsNote/],
+  ['depth 1: CS2\'s own file records stale run evidence', { cs2: (j, i) => { j._pinInvariants.run.id = 999; } }, /inner link 1 cannot be proved: .*stale run evidence/],
+  ['depth 1: CS2\'s own file rolls back elsewhere', { cs2: (j) => { j._pinInvariants.servedBaseline.rollbackTarget = P; } }, /inner link 1 cannot be proved: .*rolls back to/],
+  ['depth 1: CS3 carries CS\'s history differently from CS2\'s own file', { cs3: (j) => { j[`_previousPackageLabel${CS.slice(0, 8)}`] += ' '; } }, /inner link 1 cannot be proved: [0-9a-f]{8} does not carry _previousPackageLabel[0-9a-f]{8} exactly as [0-9a-f]{8}'s own approval at [0-9a-f]{8} has it/],
+  ['depth 1: CS3 drops history CS2\'s own file kept', { cs3: (j) => { delete j[`_previousFullCandidateNote${P.slice(0, 8)}`]; } }, /inner link 1 cannot be proved: [0-9a-f]{8} does not carry _previousFullCandidateNote[0-9a-f]{8} exactly/],
+  ['depth 1: CS3\'s invariants hand-edited to say it replaced CS directly, hiding CS2', { cs3: (j, i, at) => { i.approvedAppSha = CS; i.matchesOperationalHead = at.cs; delete i.priorNeverServed; j._pinInvariants.previousApprovedAppSha = CS; } }, /inner link 1 cannot be proved: [0-9a-f]{8} carries history that neither [0-9a-f]{8}'s own approval nor its rotation explains \(_previousExpectedPriorFunctionsNote[0-9a-f]{8}, _previousFullCandidateNote[0-9a-f]{8}, _previousPackageLabel[0-9a-f]{8}\): a never-served approval the chain does not visit/],
+  ['depth 1: CS2\'s own file is not a westayfit-staging approval', { cs2: (j) => { j.project = 'westayfit-production'; } }, /inner link 1 cannot be proved: the approval at [0-9a-f]{8} is not a westayfit-staging approval object/],
+  ['depth 1: CS2\'s own file records another candidate in its invariants', { cs2: (j) => { j._pinInvariants.candidate = CS3; } }, /inner link 1 cannot be proved: the approval at [0-9a-f]{8} records the candidate [0-9a-f]{40}, not/],
+  ['depth 1: CS2\'s own file was generated from the same run id on another operational main', { cs2: (j) => { j._pinInvariants.run.operationalMain = P; } }, /inner link 1 cannot be proved: .*stale run evidence/],
+  ['depth 1: CS2\'s own file records no superseded approval though it replaced CS', { cs2: (j) => { delete j._pinInvariants.supersededApproval; } }, /inner link 1 cannot be proved: .* records no superseded approval/],
+  // depth 2: the record CS2 keeps of CS, and CS's own file
+  ['depth 2: CS recorded as served', { cs2: (j, i) => { i.served = true; } }, /inner link 2 cannot be proved: [0-9a-f]{8} is not recorded as never served/],
+  ['depth 2: CS\'s record claims an earlier never-served link', { cs2: (j, i) => { i.priorNeverServed = P; } }, /inner link 2 cannot be proved: its record names an earlier never-served .* replaced the deployed pin directly/],
+  ['depth 2, tampered alone: CS2 says it replaced CS3, which CS3\'s record contradicts', { cs2: (j, i) => { i.approvedAppSha = CS3; j._pinInvariants.previousApprovedAppSha = CS3; } }, /inner link 1 cannot be proved: its record names the earlier never-served .* own approval replaced/],
+  // Consistent tampering of both records, so the depth-2 checks themselves are reached.
+  ['depth 2: a cycle (CS2 says it replaced CS3, and CS3\'s record agrees)', { cs2: (j, i) => { i.approvedAppSha = CS3; j._pinInvariants.previousApprovedAppSha = CS3; }, cs3: (j, i) => { i.priorNeverServed = CS3; } }, /inner link 2 cannot be proved: [0-9a-f]{8} is the served SHA, the deployed pin, the candidate, the superseded SHA or a link already in the chain/],
+  ['depth 2: a repeat of link 1 (CS2 says it replaced itself, and both records agree)', { cs2: (j, i) => { i.approvedAppSha = CS2; j._pinInvariants.previousApprovedAppSha = CS2; }, cs3: (j, i) => { i.priorNeverServed = CS2; } }, /inner link 2 cannot be proved: [0-9a-f]{8} is the served SHA, the deployed pin, the candidate, the superseded SHA or a link already in the chain/],
+  ['depth 2: the served SHA as a never-served link (both records agree)', { cs2: (j, i) => { i.approvedAppSha = S; j._pinInvariants.previousApprovedAppSha = S; }, cs3: (j, i) => { i.priorNeverServed = S; } }, /inner link 2 cannot be proved: .* is the served SHA/],
+  ['depth 2: CS2 carries the deployed pin\'s history differently from CS\'s own file (and CS3 carries CS2\'s)', { cs2: (j) => { j[`_previousPackageLabel${P.slice(0, 8)}`] += ' '; }, cs3: (j) => { j[`_previousPackageLabel${P.slice(0, 8)}`] += ' '; } }, /inner link 2 cannot be proved: [0-9a-f]{8} does not carry _previousPackageLabel[0-9a-f]{8} exactly as/],
+  ['depth 2: CS carries history the deployed approval does not explain, carried faithfully by CS2 and CS3', { cs: (j) => { j._previousPackageLabeldeadbeef = 'x'; }, cs2: (j) => { j._previousPackageLabeldeadbeef = 'x'; }, cs3: (j) => { j._previousPackageLabeldeadbeef = 'x'; } }, /inner link 2 cannot be proved: [0-9a-f]{8}'s own approval replaced the deployed pin directly, but it carries history the deployed approval and its rotation do not explain \(_previousPackageLabeldeadbeef\)/],
+  ['depth 2: CS stood on a side branch merged into operational main only after CS2 was approved', { sideCs: true }, /inner link 2 cannot be proved: [0-9a-f]{8}, where it records [0-9a-f]{8} stood, is not an operational commit before [0-9a-f]{8}, where the approval that replaced it stands/],
+  ['depth 2: CS\'s own file was changed after CS2 rotated it', { cs: (j) => { j._fullCandidateNote = 'REWRITTEN'; } }, /inner link 2 cannot be proved: [0-9a-f]{8}'s _previousFullCandidateNote[0-9a-f]{8} is not [0-9a-f]{8}'s own approval/],
+  ['depth 2: CS\'s own file names another SHA', { cs: (j) => { j.approvedAppSha = CS2; } }, /inner link 2 cannot be proved: the approval at [0-9a-f]{8} names [0-9a-f]{40}, not/],
+  ['depth 2: CS\'s own file records a stale marker', { cs: (j, inv) => { inv.run.verifiedMarker = P; } }, /inner link 2 cannot be proved: .*stale run or marker/],
+  ['depth 2: CS\'s own file expects another inventory', { cs: (j) => { j.expectedPriorFunctions = 4; } }, /inner link 2 cannot be proved: .*expects 4 prior functions/],
+  ['depth 2: CS\'s own file retains another set', { cs: (j) => { j.candidateAddedFunctions = []; } }, /inner link 2 cannot be proved: .*does not retain/],
+  ['depth 2: CS\'s own file never rotated the deployed pin out', { cs: (j) => { delete j[`_previousPackageLabel${P.slice(0, 8)}`]; } }, /inner link 2 cannot be proved: .*has not rotated the deployed pin/],
+  ['depth 2: CS\'s own file replaced the deployed pin yet records a superseded approval', { cs: (j, inv) => { inv.supersededApproval = { approvedAppSha: P }; } }, /inner link 2 cannot be proved: .*replaced the deployed pin directly yet records a superseded approval/],
+];
+for (const [name, edit, re] of CHAIN3_REFUSALS) {
+  test(`REFUSED (three links): ${name}`, () => {
+    const r = run(chain3With(edit));
+    assert.equal(r.code, 1, `expected a refusal: ${r.out}`);
+    assert.match(r.err, re);
+    assert.match(r.err, /PIN=refused/);
+    assert.equal(r.text, null, 'a refusal must not write the output');
+  });
+}
+
+// ---- EXPO-FULL-STAGING-RECOVERY-3: new functions, exactly as git measures them -------------------------------
+g('checkout', '-q', 'fn');
+write('functions-westayfit/src/index.ts', fn(['wsfAlpha', 'wsfBeta', 'wsfGamma', 'wsfDelta', 'wsfEpsilon']));
+const C_FUNCTIONS2 = commit('adds two callables');
+write('functions-westayfit/src/index.ts', fn(['wsfAlpha', 'wsfGamma', 'wsfDelta']));
+const C_REMOVES = commit('drops a callable while adding one');
+write('functions-westayfit/src/index.ts', `${fn(['wsfAlpha', 'wsfBeta', 'wsfGamma', 'wsfDelta'])}export * from './more';\n`);
+const C_REEXPORTS = commit('re-exports, which no line scan can count');
+g('checkout', '-q', '-b', 'ops-verifier-delta', OPS);
+write('.github/wsf-staging/verify-deployment.mjs', VERIFIER.replace("  'wsfbeta',\n", "  'wsfbeta',\n  'wsfdelta',\n"));
+const OPS_VERIFIER_DELTA = commit('ops head whose verifier already expects wsfdelta');
+write('.github/wsf-staging/verify-deployment.mjs', 'const EXPECTED = readSomewhereElse();\n');
+const OPS_VERIFIER_UNREADABLE = commit('ops head whose verifier has no BASE_EXPECTED literal');
+g('checkout', '-q', 'main');
+const approvalRetainsDelta = path.join(root, 'approval-retains-delta.json');
+fs.writeFileSync(approvalRetainsDelta, serialize({ ...approval0, candidateAddedFunctions: ['wsfgamma', 'wsfdelta'] }));
+
+test('ADDED FUNCTIONS: the one callable git measures as new is listed after the retained set, recorded and printed', () => {
+  const r = run({ candidate: C_FUNCTIONS, 'added-functions': 'wsfdelta' });
+  assert.equal(r.code, 0, r.err);
+  const j = r.json;
+  assert.deepEqual(j.candidateAddedFunctions, ['wsfgamma', 'wsfdelta'], 'retained first, then the new names');
+  assert.equal(j.expectedPriorFunctions, 3, 'the prior stays the measured BEFORE');
+  assert.deepEqual(j._pinInvariants.newFunctions, { names: ['wsfdelta'], measuredAgainst: P, exportsBefore: 3, exportsAfter: 4, removed: [] });
+  assert.ok(j._expectedPriorFunctionsNote.includes(`THIS PIN ADDS ONE FUNCTION to candidateAddedFunctions, measured with git as exported by the candidate and not by ${P.slice(0, 8)} (3 -> 4 exports, none removed): wsfdelta. ` +
+    'Its deploy is expected to create exactly these (3 -> 4). With this file in the operational checkout the verifier\'s EXPECTED set is the base plus all two listed names, '), j._expectedPriorFunctionsNote);
+  assert.ok(j._expectedPriorFunctionsNote.includes('THIS PIN CHANGES THE FUNCTION SOURCE. Which functions its deploy creates and removes is derived below from the export delta git measures; ' +
+    'anything beyond their names (configuration, triggers, regions) is NOT derived here and needs explicit review. '), j._expectedPriorFunctionsNote);
+  assert.ok(j._expectedPriorFunctionsNote.endsWith('Its deploy is expected to create exactly these (3 -> 4). With this file in the operational checkout the verifier\'s EXPECTED set is the base plus all two listed names, ' +
+    'so a verification before that deploy has created them fails, by design. The measured prior is the verifier\'s 2-name base plus the one name this file already listed. A function that is not listed fails verification as present but not expected; ' +
+    'a listed service that disappears fails, named. A retaining rollback (re-pin to an older candidate while the two listed services remain deployed) must keep ' +
+    'candidateAddedFunctions and keep expectedPriorFunctions at the measured BEFORE; removing a name while its service remains is invalid (SOCIAL-ROLLOUT-SEQUENCE.md section 6a).'), j._expectedPriorFunctionsNote);
+  assert.doesNotMatch(j._expectedPriorFunctionsNote, /is still the|the three services|Before this deploy|what its deploy creates or removes is NOT derived/, 'no sentence still describes the expected set as unchanged, or the creations as underived');
+  assert.equal(j._pinInvariants.fastPath.reasons.includes('the candidate\'s exports are not the verifier\'s expected set'), false, 'the verifier now expects exactly what the candidate exports');
+  assert.match(r.out, /PIN_EXPECTED_PRIOR_FUNCTIONS=3\nPIN_ADDED_FUNCTIONS=wsfdelta\n/);
+  assert.equal(run({ candidate: C_FUNCTIONS, 'added-functions': 'wsfdelta' }).text, r.text, 'deterministic');
+  const two = run({ candidate: C_FUNCTIONS2, 'added-functions': 'wsfepsilon,wsfdelta' });
+  assert.equal(two.code, 0, two.err);
+  assert.deepEqual(two.json.candidateAddedFunctions, ['wsfgamma', 'wsfdelta', 'wsfepsilon'], 'new names sorted');
+});
+
+test('ADDED FUNCTIONS: without the flag a function-adding candidate generates exactly as before, the retained set untouched', () => {
+  const r = run({ candidate: C_FUNCTIONS });
+  assert.equal(r.code, 0, r.err);
+  assert.deepEqual(r.json.candidateAddedFunctions, ['wsfgamma']);
+  assert.equal(r.json._pinInvariants.newFunctions, undefined);
+  assert.doesNotMatch(r.text, /THIS PIN ADDS/);
+  assert.doesNotMatch(r.out, /PIN_ADDED_FUNCTIONS/);
+  assert.ok(r.json._pinInvariants.fastPath.reasons.includes('the candidate\'s exports are not the verifier\'s expected set'));
+});
+
+const ADDED_REFUSALS = [
+  ['a new callable left out', { candidate: C_FUNCTIONS2, 'added-functions': 'wsfdelta' }, /new and not listed: wsfepsilon/],
+  ['a name that is not new', { candidate: C_FUNCTIONS, 'added-functions': 'wsfdelta,wsfzeta' }, /listed and not new: wsfzeta/],
+  ['a retained name listed again', { candidate: C_FUNCTIONS, 'added-functions': 'wsfdelta,wsfgamma' }, /listed and not new: wsfgamma/],
+  ['additions where the candidate adds nothing', { candidate: C, 'added-functions': 'wsfdelta' }, /listed and not new: wsfdelta/],
+  ['a candidate that removes a callable', { candidate: C_REMOVES, 'added-functions': 'wsfdelta' }, /no longer exports wsfbeta, which [0-9a-f]{8} exports: this workflow cannot remove a function/],
+  ['a name given twice', { candidate: C_FUNCTIONS, 'added-functions': 'wsfdelta,wsfdelta' }, /names a function twice/],
+  ['a name that is not a lower-case wsf service name', { candidate: C_FUNCTIONS, 'added-functions': 'wsfDelta' }, /must be a comma list of lower-case wsf service names/],
+  ['an export set that cannot be measured', { candidate: C_REEXPORTS, 'added-functions': 'wsfdelta' }, /cannot be/],
+  ['a new callable the verifier at the operational head already expects', { candidate: C_FUNCTIONS, 'ops-head': OPS_VERIFIER_DELTA, 'added-functions': 'wsfdelta' }, /--added-functions names wsfdelta, already in the verifier's expected set/],
+  ['a verifier base that cannot be read at the operational head', { candidate: C_FUNCTIONS, 'ops-head': OPS_VERIFIER_UNREADABLE, 'added-functions': 'wsfdelta' }, /--added-functions needs the verifier's base inventory, which cannot be read at [0-9a-f]{8}/],
+  ['a new callable the previous approval already retains', { approval: approvalRetainsDelta, candidate: C_FUNCTIONS, 'added-functions': 'wsfdelta' }, /--added-functions names wsfdelta, already in the verifier's expected set/],
+];
+for (const [name, over, re] of ADDED_REFUSALS) {
+  test(`REFUSED (added functions): ${name}`, () => {
+    const r = run(over);
     assert.equal(r.code, 1, `expected a refusal: ${r.out}`);
     assert.match(r.err, re);
     assert.match(r.err, /PIN=refused/);
@@ -738,10 +992,14 @@ test('verifierBase reads the array literal and ignores quoted words in comments'
   assert.equal(verifierBase('const OTHER = [];'), null);
 });
 
-test('on this branch, the verifier base plus candidateAddedFunctions equals expectedPriorFunctions', () => {
+test('on this branch, the verifier base plus the RETAINED candidateAddedFunctions equals expectedPriorFunctions, and the pin\'s new functions are exactly the rest', () => {
   const base = verifierBase(fs.readFileSync(path.resolve('.github/wsf-staging/verify-deployment.mjs'), 'utf8'));
   const approval = JSON.parse(fs.readFileSync(path.resolve('.github/wsf-staging/approved-candidate.json'), 'utf8'));
-  assert.equal(base.length + approval.candidateAddedFunctions.length, approval.expectedPriorFunctions);
+  const added = approval._pinInvariants?.newFunctions?.names ?? [];
+  const retained = approval.candidateAddedFunctions.filter((n) => !added.includes(n));
+  assert.equal(base.length + retained.length, approval.expectedPriorFunctions, 'the prior is the measured BEFORE: base plus the retained set');
+  assert.deepEqual(approval.candidateAddedFunctions, [...retained, ...added], 'retained first, then the new functions');
+  assert.equal(new Set([...base, ...approval.candidateAddedFunctions]).size, base.length + approval.candidateAddedFunctions.length, 'no name is expected twice');
 });
 
 // ---- golden: replay #508 from #502 ---------------------------------------------------------

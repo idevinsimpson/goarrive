@@ -217,7 +217,7 @@ export function rollbackNote({ previous, run, m, served = null, superseded = nul
   return `${s} A note, not a gate: no script reads it.`;
 }
 
-export function expectedPriorNote({ previous, run, added, m, served = null }) {
+export function expectedPriorNote({ previous, run, added, m, served = null, newFunctions = null }) {
   const base = run.after - added.length;
   const what = served ? `served ${s8(previous)} in ledger fast-path mode over the historical pin ${s8(served.pin)}` : `candidate ${s8(previous)}`;
   let s = `${run.after}, the measured live inventory. Run ${run.id} (run ${run.number}, ${run.date}, ${what} ` +
@@ -226,10 +226,34 @@ export function expectedPriorNote({ previous, run, added, m, served = null }) {
     'HOSTED_MARKER_MATCHES=true and VERIFY=pass. read-inventory.mjs refuses a deploy whose live count differs from this number. ';
   if (sameFunctions(m)) {
     s += `THIS PIN'S DEPLOY IS EXPECTED TO CREATE NOTHING (${run.after} -> ${run.after}, CREATED_THIS_DEPLOY=none) and to lose nothing. `;
+  } else if (newFunctions) {
+    s += 'THIS PIN CHANGES THE FUNCTION SOURCE. Which functions its deploy creates and removes is derived below from the export ' +
+      'delta git measures; anything beyond their names (configuration, triggers, regions) is NOT derived here and needs explicit review. ';
   } else {
     s += 'THIS PIN CHANGES THE FUNCTION SOURCE, so what its deploy creates or removes is NOT derived here and needs explicit review. ';
   }
+  if (newFunctions) {
+    const n = newFunctions.names.length;
+    s += `THIS PIN ADDS ${word(n)} FUNCTION${n === 1 ? '' : 'S'} to candidateAddedFunctions, measured with git as exported by the candidate ` +
+      `and not by ${s8(newFunctions.measuredAgainst)} (${newFunctions.exportsBefore} -> ${newFunctions.exportsAfter} exports, none removed): ` +
+      `${list(newFunctions.names)}. Its deploy is expected to create exactly these (${run.after} -> ${run.after + n}). With this file in ` +
+      `the operational checkout the verifier's EXPECTED set is the base plus all ${lower(added.length + n)} listed names, so a verification ` +
+      'before that deploy has created them fails, by design. ';
+  }
   const baseOk = m.verifier.base !== null && m.verifier.base.length === base;
+  if (newFunctions) {
+    // Same facts as below, worded for a pin whose deploy grows the expected set (the wording without the flag is unchanged).
+    const kept = `the ${lower(added.length)} name${added.length === 1 ? '' : 's'} this file already listed`;
+    const all = lower(added.length + newFunctions.names.length);
+    s += baseOk
+      ? `The measured prior is the verifier's ${base}-name base plus ${kept}. `
+      : `The verifier's base (${m.verifier.base === null ? 'unreadable' : m.verifier.base.length} names at ${s8(m.verifier.ref)}) plus ` +
+        `${kept} does NOT equal this prior; review the expected set before dispatch. `;
+    return s + 'A function that is not listed fails verification as present but not expected; a listed service that disappears fails, named. ' +
+      `A retaining rollback (re-pin to an older candidate while the ${all} listed services remain deployed) must keep ` +
+      'candidateAddedFunctions and keep expectedPriorFunctions at the measured BEFORE; removing a name while its service ' +
+      'remains is invalid (SOCIAL-ROLLOUT-SEQUENCE.md section 6a).';
+  }
   s += baseOk
     ? `The verifier's EXPECTED set is still the ${base}-name base plus the ${lower(added.length)} names in candidateAddedFunctions, ` +
       'read from this file in the operational checkout, which equals this prior. '
@@ -249,7 +273,8 @@ export function boundaryNote({ previous, candidate, run, m, served = null, super
       `${served ? 'served in ledger fast-path mode' : 'deployed'} and whose hosted marker that run observed. ` +
       `The SHA this file previously approved, ${superseded.sha}, was NEVER SERVED: it was approved on operational main after ` +
       `run ${run.number}, descends from ${s8(previous)}, is an ancestor of the candidate, and is superseded by this pin before any deploy.` +
-      (superseded.chainedFrom ? ` It had itself superseded ${superseded.chainedFrom}, also NEVER SERVED.` : '') +
+      (superseded.chainedFrom ? ` It had itself superseded ${superseded.chainedFrom}, also NEVER SERVED` +
+        (superseded.chain?.length > 1 ? `, which had superseded ${superseded.chain[1]}, also NEVER SERVED.` : '.') : '') +
       (served ? ` The historical pin ${served.pin}, which run ${run.number}'s operational main still named, is approval ancestry only: that run did not deploy it.` : ''));
   } else parts.push(served
     ? `${candidate} is measured against ${previous}, the SHA run ${run.number} (${run.id}) served in ledger fast-path mode and whose ` +
@@ -302,7 +327,7 @@ function lineageReasons(m, previous, candidate) {
   return reasons;
 }
 
-export function invariants({ previous, candidate, run, added, m, milestone = null, served = null, superseded = null }) {
+export function invariants({ previous, candidate, run, added, m, milestone = null, served = null, superseded = null, newFunctions = null }) {
   const reasons = lineageReasons(m, previous, candidate);
   if (superseded) reasons.push(`the approval this pin replaces (${s8(superseded.sha)}) was never served`);
   // A ledger-served baseline must be clean against the historical pin too:
@@ -365,6 +390,15 @@ export function invariants({ previous, candidate, run, added, m, milestone = nul
         ...(superseded.chainedFrom ? { priorNeverServed: superseded.chainedFrom } : {}),
       },
     } : {}),
+    ...(newFunctions ? {
+      newFunctions: {
+        names: newFunctions.names,
+        measuredAgainst: newFunctions.measuredAgainst,
+        exportsBefore: newFunctions.exportsBefore,
+        exportsAfter: newFunctions.exportsAfter,
+        removed: [],
+      },
+    } : {}),
     releaseEnvironment: m.releaseEnvironment,
     milestone,
     fastPath: {
@@ -390,8 +424,48 @@ function insertHistory(entries, prefix, key, value, anchor) {
   else entries.push([key, value]);
 }
 
+/**
+ * The three history entries a pin writes for the never-served approval `file`
+ * it supersedes, keyed as nextApproval() inserts them. One definition, so the
+ * chain proof (proveLink) checks a holder's history against exactly what this
+ * script writes.
+ */
+export function supersededHistory(file, { run, previous }) {
+  const p8 = s8(file.approvedAppSha);
+  return {
+    [`_previousExpectedPriorFunctionsNote${p8}`]: `HISTORICAL, the note as it stood for the ${p8} pin, which was never served (superseded before any deploy): ${file._expectedPriorFunctionsNote}`,
+    [`_previousFullCandidateNote${p8}`]: `HISTORICAL, the boundary note for the ${p8} pin, which was never served: ${file._fullCandidateNote}`,
+    [`_previousPackageLabel${p8}`]: `HISTORICAL, the label of the ${p8} pin, which no deploy served: run ${run.number} (${run.id}), the last deploy-mode run, ` +
+      `served ${s8(previous)}, and this pin supersedes it before any deploy: ${file.packageLabel}`,
+  };
+}
+
+/** The history an approval holds: its `_previous*` keys, sorted. */
+const historyKeys = (o) => Object.keys(o).filter((k) => k.startsWith('_previous')).sort();
+
+/**
+ * The history entries `approval` holds that `from` (the approval it replaced) does not explain: an
+ * approval's history is exactly the one before it plus that one's three rotated entries. An entry
+ * nothing explains is a never-served approval the chain does not visit (a hand edit to the
+ * invariants could otherwise skip a link and slip past MAX_NEVER_SERVED).
+ */
+function unexplainedHistory(approval, from) {
+  const f8 = s8(from.approvedAppSha);
+  const known = new Set([...historyKeys(from), `_previousExpectedPriorFunctionsNote${f8}`, `_previousFullCandidateNote${f8}`, `_previousPackageLabel${f8}`]);
+  return historyKeys(approval).filter((k) => !known.has(k));
+}
+
+/** Why a never-served approval that replaced the deployed one directly does not stand on its history, or null. */
+function directHistoryProblem(approval, deployed) {
+  const changed = historyKeys(deployed).filter((k) => approval[k] !== deployed[k]);
+  if (changed.length) return `it does not carry ${changed.join(', ')} exactly as the deployed approval has it`;
+  const extra = unexplainedHistory(approval, deployed);
+  if (extra.length) return `it carries history the deployed approval and its rotation do not explain (${extra.join(', ')}): a never-served approval the chain does not visit`;
+  return null;
+}
+
 /** The pure part: previous approval + measured facts -> next approval object. */
-export function nextApproval(deployed, { candidate, run, label, acceptedOn, m, milestone = null, served = null, superseded = null }) {
+export function nextApproval(deployed, { candidate, run, label, acceptedOn, m, milestone = null, served = null, superseded = null, newFunctions = null }) {
   if (served && served.pin !== deployed.approvedAppSha) refuse('the served baseline does not name this file\'s pin as its historical pin');
   // The SHA staging serves: what the notes measure against and roll back to.
   const previous = served ? served.sha : deployed.approvedAppSha;
@@ -400,18 +474,18 @@ export function nextApproval(deployed, { candidate, run, label, acceptedOn, m, m
   if (superseded && superseded.approval.approvedAppSha !== superseded.sha) refuse('the superseded approval does not name the superseded SHA');
   const prev = superseded ? superseded.approval : deployed;
   const p8 = s8(prev.approvedAppSha);
-  const added = Array.isArray(prev.candidateAddedFunctions) ? [...prev.candidateAddedFunctions] : [];
+  const retained = Array.isArray(prev.candidateAddedFunctions) ? [...prev.candidateAddedFunctions] : [];
+  const added = newFunctions ? [...retained, ...newFunctions.names] : retained;
   for (const k of [`_previousPackageLabel${p8}`, `_previousExpectedPriorFunctionsNote${p8}`, `_previousFullCandidateNote${p8}`]) {
     if (Object.hasOwn(prev, k)) refuse(`the approval already carries ${k}: ${p8} has been rotated out once`);
   }
   for (const k of ['packageLabel', '_expectedPriorFunctionsNote', '_fullCandidateNote']) {
     if (typeof prev[k] !== 'string' || prev[k] === '') refuse(`the approval has no ${k} to rotate into history`);
   }
-  const ran = superseded
-    ? `no deploy served: run ${run.number} (${run.id}), the last deploy-mode run, served ${s8(previous)}, and this pin supersedes it before any deploy`
-    : served
+  const ran = served
     ? `run ${run.number} (${run.id}) did not deploy: that run served ${s8(previous)} in ledger fast-path mode, ${run.before} -> ${run.after} with CREATED_THIS_DEPLOY=${run.created} and VERIFY=pass`
     : `run ${run.number} (${run.id}) deployed ${run.before} -> ${run.after} with CREATED_THIS_DEPLOY=${run.created} and VERIFY=pass`;
+  const hist = superseded ? supersededHistory(prev, { run, previous }) : null;
 
   const entries = Object.entries(prev).filter(([k]) => k !== '_pinInvariants');
   const set = (k, v) => {
@@ -422,21 +496,22 @@ export function nextApproval(deployed, { candidate, run, label, acceptedOn, m, m
   set('packageLabel', label);
   set('sourceAcceptedOn', acceptedOn);
   set('expectedPriorFunctions', run.after);
+  if (newFunctions) set('candidateAddedFunctions', added);
   set('_rollbackNote', rollbackNote({ previous, run, m, served, superseded }));
-  set('_expectedPriorFunctionsNote', expectedPriorNote({ previous, run, added, m, served }));
+  set('_expectedPriorFunctionsNote', expectedPriorNote({ previous, run, added: retained, m, served, newFunctions }));
   set('_fullCandidateNote', boundaryNote({ previous, candidate, run, m, served, superseded }));
   insertHistory(entries, '_previousExpectedPriorFunctionsNote', `_previousExpectedPriorFunctionsNote${p8}`,
-    superseded
-      ? `HISTORICAL, the note as it stood for the ${p8} pin, which was never served (superseded before any deploy): ${prev._expectedPriorFunctionsNote}`
+    hist
+      ? hist[`_previousExpectedPriorFunctionsNote${p8}`]
       : served
       ? `HISTORICAL, the note as it stood for the ${p8} pin, which run ${run.number} did not deploy (it served ${s8(previous)} in ledger fast-path mode): ${prev._expectedPriorFunctionsNote}`
       : `HISTORICAL, the note as it stood for the ${p8} pin, true until run ${run.number} deployed it: ${prev._expectedPriorFunctionsNote}`,
     '_expectedPriorFunctionsNote');
   insertHistory(entries, '_previousFullCandidateNote', `_previousFullCandidateNote${p8}`,
-    `HISTORICAL, the boundary note for the ${p8} pin${superseded ? ', which was never served' : ''}: ${prev._fullCandidateNote}`, '_fullCandidateNote');
+    hist ? hist[`_previousFullCandidateNote${p8}`] : `HISTORICAL, the boundary note for the ${p8} pin: ${prev._fullCandidateNote}`, '_fullCandidateNote');
   insertHistory(entries, '_previousPackageLabel', `_previousPackageLabel${p8}`,
-    `HISTORICAL, the label of the ${p8} pin, which ${ran}: ${prev.packageLabel}`, null);
-  entries.push(['_pinInvariants', invariants({ previous, candidate, run, added, m, milestone, served, superseded })]);
+    hist ? hist[`_previousPackageLabel${p8}`] : `HISTORICAL, the label of the ${p8} pin, which ${ran}: ${prev.packageLabel}`, null);
+  entries.push(['_pinInvariants', invariants({ previous, candidate, run, added, m, milestone, served, superseded, newFunctions })]);
   return Object.fromEntries(entries);
 }
 
@@ -449,7 +524,7 @@ const FLAGS = {
   'inventory-before': 'int', 'inventory-after': 'int', created: 'created',
   verify: 'str', 'hosted-marker': 'str', 'hosted-verify': 'str',
   'label-file': 'path', 'accepted-on': 'date', out: 'path', receipt: 'path?', manifest: 'path?',
-  'run-title': 'str', 'served-sha': 'sha?', 'run-marker': 'sha?', 'superseded-approval': 'path?',
+  'run-title': 'str', 'served-sha': 'sha?', 'run-marker': 'sha?', 'superseded-approval': 'path?', 'added-functions': 'names?',
 };
 
 export function parseArgs(argv) {
@@ -469,6 +544,7 @@ export function parseArgs(argv) {
     if (t === 'int' && !/^(0|[1-9][0-9]*)$/.test(v)) refuse(`--${k} must be a non-negative integer`);
     if (t === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(v)) refuse(`--${k} must be YYYY-MM-DD`);
     if (t === 'created' && !/^(none|wsf[a-z0-9]+(,wsf[a-z0-9]+)*)$/.test(v)) refuse('--created must be none or a comma list of lower-case wsf service names');
+    if (t === 'names' && !/^wsf[a-z0-9]+(,wsf[a-z0-9]+)*$/.test(v)) refuse('--added-functions must be a comma list of lower-case wsf service names');
   }
   return a;
 }
@@ -555,15 +631,16 @@ function servedBaseline(repo, a, { pin, candidate }) {
  * descends from the served SHA and is an ancestor of the candidate. Anything
  * else refuses; nothing is inferred.
  *
- * A BOUNDED CHAIN (EXPO-LATEST-FULL-STAGING-PIN-1, Director #396 5970631460). The
- * superseded approval may itself have superseded one never-served approval,
- * which it records in its own _pinInvariants.supersededApproval. That inner link
- * is accepted only as written there and re-proved against git here: never served,
- * the same deployed pin, served SHA and anchoring run, descended from the served
- * SHA and an ancestor of the superseded SHA, rotated into its history, and NOT
- * itself chained. So at most two never-served approvals stand between the
- * deployed pin and the candidate, and nothing older is trusted.
+ * A BOUNDED CHAIN (EXPO-LATEST-FULL-STAGING-PIN-1, Director #396 5970631460;
+ * one link longer in EXPO-FULL-STAGING-RECOVERY-3, Director #365 6043989729 with
+ * the owner's consent 6074607727). The superseded approval may itself stand on
+ * never-served approvals, each recorded in the _pinInvariants of the file that
+ * replaced it. Each inner link is accepted only as recorded there AND as its own
+ * approval file says, read from git at the operational commit the record names
+ * (innerChain). At most MAX_NEVER_SERVED never-served approvals stand between
+ * the deployed pin and the candidate, and nothing older is trusted.
  */
+export const MAX_NEVER_SERVED = 3;
 function supersededApproval(repo, a, { deployed, deployedText, served, run, candidate }) {
   const file = a['superseded-approval'];
   if (file === undefined) return null;
@@ -593,11 +670,10 @@ function supersededApproval(repo, a, { deployed, deployedText, served, run, cand
   if (!inv || typeof inv !== 'object' || !inv.run) refuse('the superseded approval carries no _pinInvariants: there is no evidence of the run it was generated from');
   const didNotReplace = () => refuse(`the superseded approval's invariants do not record ${s8(deployed.approvedAppSha)} -> ${s8(sha)}: it did not replace the deployed approval`);
   if (inv.candidate !== sha) didNotReplace();
-  let chainedFrom = null;
+  let chain = [];
   if (inv.previousApprovedAppSha !== deployed.approvedAppSha) {
-    const inner = inv.supersededApproval;
-    if (inner === undefined) didNotReplace();
-    chainedFrom = innerLink(repo, { inner, inv, sup, sha, deployed, servedSha, run });
+    if (inv.supersededApproval === undefined) didNotReplace();
+    chain = innerChain(repo, { inv, sup, sha, deployed, served, servedSha, run, opsHead, candidate });
   }
   if (inv.run.id !== run.id || inv.run.operationalMain !== run.main) {
     refuse(`the superseded approval was generated from run ${inv.run.id} on ${inv.run.operationalMain}, not run ${run.id} on ${run.main}: stale run evidence`);
@@ -616,31 +692,161 @@ function supersededApproval(repo, a, { deployed, deployedText, served, run, cand
   if (set(sup.candidateAddedFunctions) !== set(deployed.candidateAddedFunctions)) refuse('the superseded approval does not retain the deployed approval\'s candidateAddedFunctions exactly');
   const d8 = s8(deployed.approvedAppSha);
   if (!Object.hasOwn(sup, `_previousPackageLabel${d8}`)) refuse(`the superseded approval has not rotated the deployed pin ${d8} into history: its ancestry is not the deployed approval's`);
-  return { sha, approval: sup, deployedPin: deployed.approvedAppSha, opsHead, chainedFrom };
+  if (chain.length === 0) {
+    const why = directHistoryProblem(sup, deployed);
+    if (why) refuse(`the superseded approval replaced the deployed pin directly, but ${why}`);
+  }
+  return { sha, approval: sup, deployedPin: deployed.approvedAppSha, opsHead, chainedFrom: chain[0] ?? null, chain };
 }
 
-/** The one inner never-served link a superseded approval may carry, re-proved; see supersededApproval(). */
-function innerLink(repo, { inner, inv, sup, sha, deployed, servedSha, run }) {
-  const bad = (why) => refuse(`the superseded approval's inner link cannot be proved: ${why}`);
-  if (inner === null || typeof inner !== 'object' || Array.isArray(inner)) bad('its supersededApproval record is malformed');
+/**
+ * The never-served links a superseded approval stands on, outermost first. Each
+ * link is the SHA its holder (the file that replaced it) names as
+ * previousApprovedAppSha and records in _pinInvariants.supersededApproval, and
+ * is accepted only when BOTH hold:
+ *   - the record, re-proved against git: never served; the same deployed pin,
+ *     served SHA and anchoring run; descended from the served SHA; a strict
+ *     ancestor of its holder; not the served SHA, the deployed pin, the
+ *     candidate or any SHA already in the chain (no cycle);
+ *   - the link's OWN approval file, read from git at the operational commit the
+ *     record names (matchesOperationalHead), which must be an operational commit
+ *     after the anchoring run's main and strictly before its holder's: it names
+ *     the link, was generated by this script from the same run, marker,
+ *     rollback, inventory and retained set, rotated the deployed pin out, and is
+ *     what its holder's history quotes word for word; every history entry it
+ *     kept, its holder still carries verbatim (history is append-only), and
+ *     the holder carries nothing the link and its rotation do not explain (no
+ *     link the chain does not visit). The link that replaced the deployed pin
+ *     carries the deployed approval's history the same way.
+ * A link whose own file replaced the deployed pin ends the chain and must say
+ * nothing earlier; a link that chains must name exactly the prior its record
+ * names. More than MAX_NEVER_SERVED never-served approvals in all refuses.
+ */
+function innerChain(repo, { inv, sup, sha, deployed, served, servedSha, run, opsHead, candidate }) {
+  const chain = [];
+  const seen = new Set([servedSha, deployed.approvedAppSha, candidate, sha]);
+  let holder = { approval: sup, inv, sha, commit: opsHead };
+  let record = inv.supersededApproval;
+  for (;;) {
+    if (1 + chain.length + 1 > MAX_NEVER_SERVED) {
+      refuse(`the superseded approval's never-served chain is too long: ${s8(holder.sha)} itself superseded ${s8(String(holder.inv.previousApprovedAppSha))}, ` +
+        `a fourth never-served approval; at most ${lower(MAX_NEVER_SERVED)} never-served approvals may be superseded`);
+    }
+    const link = proveLink(repo, { record, holder, depth: chain.length + 1, deployed, served, servedSha, run, seen });
+    chain.push(link.sha);
+    seen.add(link.sha);
+    const bad = (why) => refuse(`the superseded approval's inner link ${chain.length} cannot be proved: ${why}`);
+    if (link.inv.previousApprovedAppSha === deployed.approvedAppSha) {
+      if (Object.hasOwn(record, 'priorNeverServed')) bad(`its record names an earlier never-served ${record.priorNeverServed}, but ${s8(link.sha)}'s own approval replaced the deployed pin directly`);
+      if (link.inv.supersededApproval !== undefined) bad(`${s8(link.sha)}'s own approval replaced the deployed pin directly yet records a superseded approval`);
+      const why = directHistoryProblem(link.approval, deployed);
+      if (why) bad(`${s8(link.sha)}'s own approval replaced the deployed pin directly, but ${why}`);
+      return chain;
+    }
+    if (!Object.hasOwn(record, 'priorNeverServed')) bad(`its record names no earlier never-served approval, but ${s8(link.sha)}'s own approval replaced ${link.inv.previousApprovedAppSha}`);
+    if (record.priorNeverServed !== link.inv.previousApprovedAppSha) bad(`its record names the earlier never-served ${record.priorNeverServed}, but ${s8(link.sha)}'s own approval replaced ${link.inv.previousApprovedAppSha}`);
+    if (link.inv.supersededApproval === undefined) bad(`${s8(link.sha)}'s own approval replaced ${link.inv.previousApprovedAppSha} but records no superseded approval`);
+    holder = { approval: link.approval, inv: link.inv, sha: link.sha, commit: record.matchesOperationalHead };
+    record = link.inv.supersededApproval;
+  }
+}
+
+/** One never-served link, re-proved from its record and from its own approval file; see innerChain(). */
+function proveLink(repo, { record, holder, depth, deployed, served, servedSha, run, seen }) {
+  const bad = (why) => refuse(`the superseded approval's inner link ${depth} cannot be proved: ${why}`);
+  if (record === null || typeof record !== 'object' || Array.isArray(record)) bad('its supersededApproval record is malformed');
   const keys = ['approvedAppSha', 'served', 'servedAppSha', 'lastDeployedApprovalSha', 'descendsFromServed', 'ancestorOfCandidate', 'anchoringRun', 'matchesOperationalHead'];
-  for (const k of keys) if (!Object.hasOwn(inner, k)) bad(`its supersededApproval record has no ${k}`);
-  if (Object.hasOwn(inner, 'priorNeverServed')) bad('it is itself a chain; at most two never-served approvals may be superseded');
-  for (const k of Object.keys(inner)) if (!keys.includes(k)) bad(`its supersededApproval record carries an unknown ${k}`);
-  const p = inner.approvedAppSha;
+  for (const k of keys) if (!Object.hasOwn(record, k)) bad(`its supersededApproval record has no ${k}`);
+  for (const k of Object.keys(record)) if (![...keys, 'priorNeverServed'].includes(k)) bad(`its supersededApproval record carries an unknown ${k}`);
+  const p = record.approvedAppSha;
   if (typeof p !== 'string' || !SHA.test(p)) bad('it names no valid SHA');
-  if (p !== inv.previousApprovedAppSha) bad(`it names ${p}, but the approval says it replaced ${inv.previousApprovedAppSha}`);
-  if (inner.served !== false) bad(`${s8(p)} is not recorded as never served`);
-  if (inner.lastDeployedApprovalSha !== deployed.approvedAppSha) bad(`it was measured from the deployed pin ${inner.lastDeployedApprovalSha}, not ${deployed.approvedAppSha}`);
-  if (inner.servedAppSha !== servedSha) bad(`it records the served SHA ${inner.servedAppSha}, not ${servedSha}`);
-  if (inner.anchoringRun !== run.id) bad(`it was anchored on run ${inner.anchoringRun}, not run ${run.id}`);
-  if (inner.descendsFromServed !== true || inner.ancestorOfCandidate !== true) bad('it does not record its own lineage checks as held');
+  if (p !== holder.inv.previousApprovedAppSha) bad(`it names ${p}, but the approval says it replaced ${holder.inv.previousApprovedAppSha}`);
+  if (record.served !== false) bad(`${s8(p)} is not recorded as never served`);
+  if (record.lastDeployedApprovalSha !== deployed.approvedAppSha) bad(`it was measured from the deployed pin ${record.lastDeployedApprovalSha}, not ${deployed.approvedAppSha}`);
+  if (record.servedAppSha !== servedSha) bad(`it records the served SHA ${record.servedAppSha}, not ${servedSha}`);
+  if (record.anchoringRun !== run.id) bad(`it was anchored on run ${record.anchoringRun}, not run ${run.id}`);
+  if (record.descendsFromServed !== true || record.ancestorOfCandidate !== true) bad('it does not record its own lineage checks as held');
+  if (Object.hasOwn(record, 'priorNeverServed') && (typeof record.priorNeverServed !== 'string' || !SHA.test(record.priorNeverServed))) bad('its priorNeverServed is not a valid SHA');
   if (!isCommit(repo, p)) bad(`${p} is not a commit in ${repo}`);
-  if (p === servedSha || p === deployed.approvedAppSha || p === sha) bad(`${s8(p)} is the served SHA, the deployed pin or the superseded SHA itself`);
+  if (seen.has(p)) bad(`${s8(p)} is the served SHA, the deployed pin, the candidate, the superseded SHA or a link already in the chain`);
   if (!isAncestor(repo, servedSha, p)) bad(`${s8(p)} does not descend from the served SHA ${s8(servedSha)}`);
-  if (!isAncestor(repo, p, sha)) bad(`${s8(p)} is not an ancestor of the superseded SHA ${s8(sha)}`);
-  if (!Object.hasOwn(sup, `_previousPackageLabel${s8(p)}`)) bad(`the approval has not rotated ${s8(p)} into its history`);
-  return p;
+  if (!isAncestor(repo, p, holder.sha)) bad(`${s8(p)} is not an ancestor of ${s8(holder.sha)}, the approval that replaced it`);
+  if (!Object.hasOwn(holder.approval, `_previousPackageLabel${s8(p)}`)) bad(`the approval has not rotated ${s8(p)} into its history`);
+
+  // ITS OWN FILE: the approval at the operational commit where the record says it stood.
+  const at = record.matchesOperationalHead;
+  if (typeof at !== 'string' || !SHA.test(at) || !isCommit(repo, at)) bad(`it names no operational commit for ${s8(p)}`);
+  if (at === holder.commit || !isAncestor(repo, at, holder.commit)) {
+    bad(`${s8(at)}, where it records ${s8(p)} stood, is not an operational commit before ${s8(holder.commit)}, where the approval that replaced it stands`);
+  }
+  if (!isAncestor(repo, run.main, at)) bad(`${s8(at)} is not on operational main after run ${run.number}'s ${s8(run.main)}: ${s8(p)} was not approved after that run`);
+  const text = git(repo, ['show', `${at}:${APPROVAL_REL}`], { allowFail: true });
+  if (text === null) bad(`there is no approval file at ${s8(at)}`);
+  let file;
+  try { file = JSON.parse(text); } catch { bad(`the approval file at ${s8(at)} is not JSON`); }
+  if (file === null || typeof file !== 'object' || Array.isArray(file) || file.project !== 'westayfit-staging') bad(`the approval at ${s8(at)} is not a westayfit-staging approval object`);
+  if (file.approvedAppSha !== p) bad(`the approval at ${s8(at)} names ${file.approvedAppSha}, not ${p}`);
+  const finv = file._pinInvariants;
+  if (!finv || typeof finv !== 'object' || !finv.run) bad(`the approval at ${s8(at)} carries no _pinInvariants`);
+  if (finv.candidate !== p) bad(`the approval at ${s8(at)} records the candidate ${finv.candidate}, not ${p}`);
+  if (finv.run.id !== run.id || finv.run.operationalMain !== run.main) {
+    bad(`the approval at ${s8(at)} was generated from run ${finv.run.id} on ${finv.run.operationalMain}, not run ${run.id} on ${run.main}: stale run evidence`);
+  }
+  const fServed = finv.run.servedAppSha ?? null;
+  const fMarker = finv.run.verifiedMarker ?? null;
+  if (served ? (fServed !== served.sha || fMarker !== served.marker) : (fServed !== null || fMarker !== null)) {
+    bad(`the approval at ${s8(at)} records the run served ${fServed} (marker ${fMarker}), not this run's ${served ? served.sha : 'pin'}: stale run or marker`);
+  }
+  const rollback = finv.servedBaseline ? finv.servedBaseline.rollbackTarget : finv.previousApprovedAppSha;
+  if (rollback !== servedSha) bad(`the approval at ${s8(at)} rolls back to ${rollback}, not the served ${servedSha}`);
+  if (file.expectedPriorFunctions !== run.after || file.expectedPriorFunctions !== deployed.expectedPriorFunctions) {
+    bad(`the approval at ${s8(at)} expects ${file.expectedPriorFunctions} prior functions, not the measured ${run.after}`);
+  }
+  const set = (x) => JSON.stringify(Array.isArray(x) ? x : null);
+  if (set(file.candidateAddedFunctions) !== set(deployed.candidateAddedFunctions)) bad(`the approval at ${s8(at)} does not retain the deployed approval's candidateAddedFunctions exactly`);
+  if (!Object.hasOwn(file, `_previousPackageLabel${s8(deployed.approvedAppSha)}`)) bad(`the approval at ${s8(at)} has not rotated the deployed pin ${s8(deployed.approvedAppSha)} into history`);
+  for (const [k, v] of Object.entries(supersededHistory(file, { run, previous: servedSha }))) {
+    if (holder.approval[k] !== v) bad(`${s8(holder.sha)}'s ${k} is not ${s8(p)}'s own approval at ${s8(at)}, rotated as a never-served pin`);
+  }
+  // History is append-only: whatever the link's own file kept as history, its holder still carries verbatim.
+  for (const [k, v] of Object.entries(file)) {
+    if (k.startsWith('_previous') && holder.approval[k] !== v) bad(`${s8(holder.sha)} does not carry ${k} exactly as ${s8(p)}'s own approval at ${s8(at)} has it`);
+  }
+  const extra = unexplainedHistory(holder.approval, file);
+  if (extra.length) bad(`${s8(holder.sha)} carries history that neither ${s8(p)}'s own approval nor its rotation explains (${extra.join(', ')}): a never-served approval the chain does not visit`);
+  return { sha: p, approval: file, inv: finv };
+}
+
+/**
+ * NEW FUNCTIONS (EXPO-FULL-STAGING-RECOVERY-3; the owner's approval in the W3
+ * session). A candidate that exports callables the served build does not fails
+ * the verifier as "present but not expected" unless the pin lists them in
+ * candidateAddedFunctions (SOCIAL-ROLLOUT-SEQUENCE.md section 6, step 4).
+ * --added-functions names them and is accepted only when it is EXACTLY what git
+ * measures: the candidate's exports minus the served build's, with nothing
+ * removed (this workflow cannot remove a function), none already expected (the
+ * verifier base or the retained list) and none named twice. Nothing is inferred:
+ * without the flag the retained list is carried exactly as before.
+ */
+function addedFunctions(flag, { m, base, retained }) {
+  if (flag === undefined) return null;
+  const names = flag.split(',');
+  if (new Set(names).size !== names.length) refuse('--added-functions names a function twice');
+  if (m.exports.previous === null || m.exports.candidate === null) refuse(`--added-functions needs the exports of ${s8(base)} and of the candidate measured, and one of them cannot be`);
+  if (m.verifier.base === null) refuse(`--added-functions needs the verifier's base inventory, which cannot be read at ${s8(m.verifier.ref)}`);
+  const removed = m.exports.previous.filter((n) => !m.exports.candidate.includes(n));
+  if (removed.length) refuse(`the candidate no longer exports ${removed.join(', ')}, which ${s8(base)} exports: this workflow cannot remove a function`);
+  const measured = m.exports.candidate.filter((n) => !m.exports.previous.includes(n));
+  const missing = measured.filter((n) => !names.includes(n));
+  const extra = names.filter((n) => !measured.includes(n));
+  if (missing.length || extra.length) {
+    refuse(`--added-functions is not the export delta git measures from ${s8(base)} to the candidate: ` +
+      [missing.length ? `new and not listed: ${missing.join(', ')}` : '', extra.length ? `listed and not new: ${extra.join(', ')}` : ''].filter(Boolean).join('; '));
+  }
+  const kept = Array.isArray(retained) ? retained : [];
+  const already = names.filter((n) => kept.includes(n) || m.verifier.base.includes(n));
+  if (already.length) refuse(`--added-functions names ${already.join(', ')}, already in the verifier's expected set`);
+  return { names: [...names].sort(), measuredAgainst: base, exportsBefore: m.exports.previous.length, exportsAfter: m.exports.candidate.length };
 }
 
 export function generate(argv) {
@@ -689,8 +895,9 @@ export function generate(argv) {
   const base = served ? served.sha : previous;
   const m = measure(repo, { previous: base, candidate, runMain: a['run-main'], opsHead: a['ops-head'] });
   if (served) served.mPin = measure(repo, { previous, candidate, runMain: a['run-main'], opsHead: a['ops-head'] });
+  const newFunctions = addedFunctions(a['added-functions'], { m, base, retained: (superseded ? superseded.approval : prev).candidateAddedFunctions });
   const milestone = milestoneFor(repo, a, { previous: base, candidate });
-  const next = nextApproval(prev, { candidate, run, label, acceptedOn: a['accepted-on'], m, milestone, served, superseded });
+  const next = nextApproval(prev, { candidate, run, label, acceptedOn: a['accepted-on'], m, milestone, served, superseded, newFunctions });
   return { args: a, next, text: serialize(next) };
 }
 
@@ -702,6 +909,7 @@ function receiptText({ next }) {
     ...(inv.supersededApproval ? [`PIN_SUPERSEDED_NEVER_SERVED=${inv.supersededApproval.approvedAppSha}`] : []),
     ...(inv.servedBaseline ? [`PIN_SERVED=${inv.servedBaseline.servedAppSha}`, `PIN_ROLLBACK=${inv.servedBaseline.rollbackTarget}`] : []),
     `PIN_EXPECTED_PRIOR_FUNCTIONS=${next.expectedPriorFunctions}`,
+    ...(inv.newFunctions ? [`PIN_ADDED_FUNCTIONS=${inv.newFunctions.names.join(',')}`] : []),
     `PIN_PROTECTED_DELTA=${inv.protectedPathDelta.length}`,
     `PIN_FAST_PATH=${inv.fastPath.eligible ? 'eligible' : 'ineligible'}`,
     ...inv.fastPath.reasons.map((r) => `PIN_FAST_PATH_REASON=${r}`),

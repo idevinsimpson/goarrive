@@ -73,6 +73,17 @@ export const EXPO_ROWS = Object.freeze({
     next: 'the next person starts at the sign-in gate and their own credit reads zero, while the shared total keeps both people\'s contributions',
     countdown: 'left untouched, the countdown performs the same Finish and Stay puts it back',
   },
+  'unverified-participant': {
+    signin: 'signing in, the unverified account is taken to its profile step, not held at a verification page',
+    profile: 'the profile step offers the unverified account its name form, and Save profile moves on',
+    marker: 'the approved marker offers Join Fixture Open Community, and joining shows How will you take part?',
+    link: 'the community\'s join link then opens the same community for the member',
+    contribute: 'Move on my phone records 15: Your total on this goal: 15 squats, and the shared total of 115 counts it once',
+    history: 'Your progress lists the goal with YOURS 15 squats',
+    fresh: 'in a fresh browser with nothing stored, signing in again reaches the same member, whose progress still reads YOURS 15 squats',
+    round: 'a new round of 10 is accepted: Your total on this goal: 25 squats, and a shared total of 125',
+    control: 'a verified account with no profile, on the same path, lands on its profile step, saves it, joins by the marker and records its own 5',
+  },
 });
 
 const PHONE = { width: 390, height: 844 };
@@ -681,6 +692,158 @@ async function sharedScreenFinish({ page, baseUrl, fixtures }) {
   return result(r, ev);
 }
 
+// ---- 9. unverified-participant ------------------------------------------------------------
+/*
+ * KIOSK-UNVERIFIED-STAGING-RECOVERY-1: an ordinary participant whose address is
+ * NOT verified, on the native app's hosted web build (not the Lovable Web Twin),
+ * admitted only through the real path: the approved marker, then the
+ * community's join link. #586 opened profile, joins and contribution to such an
+ * account on the server. Every row reads what the page renders; where the app's
+ * own screens still stop the account, the row fails and names the screen that
+ * did. Nothing verifies an address: the verification page's Resend and I have
+ * verified are never pressed, so a run sends no mail. A verified account with
+ * no profile walks the same path as the control.
+ */
+const UNVERIFIED_STOPS = Object.freeze({
+  'wsf-verify': 'held at the verification page (Check your email.), whose only ways on are verifying or signing out',
+  'wsf-profile-unverified': 'the profile page shows only Verify your email before completing your profile.',
+  'wsf-marker-verify': 'the marker shows Confirm your email to join in place of its Join button',
+  // The marker's own error card: its service did not answer (as a new service is, until its transport is opened).
+  'wsf-marker-error': null,
+  'wsf-join-submit-error': null, // the product's own refusal, read from the page
+  'wsf-contribute-not-found': null,
+  'wsf-contribute-signed-out': null,
+});
+/** No synthetic address ever reaches a result: the pages above can print the signed-in email. */
+const scrub = (s) => String(s ?? '').replace(/[^\s@]+@[^\s@]+/g, '[address]');
+/** Where the page stopped the account, in words: the path (a join link's code withheld) and the screen it shows. */
+async function stopSeen(page) {
+  const where = pathOf(page).replace(/^\/join\/.+$/, '/join/[link]');
+  for (const [id, said] of Object.entries(UNVERIFIED_STOPS)) {
+    if (await present(page, id)) return `${where}: ${said ?? scrub(((await vis(page, id).innerText()) || '').replace(/\s+/g, ' ').trim())}`;
+  }
+  return `${where}: none of the expected screens`;
+}
+async function firstOf(page, ids, timeout = 30_000) {
+  let hit = null;
+  await until(page, async () => { for (const id of ids) if (await present(page, id)) { hit = id; return true; } return false; }, timeout);
+  return hit;
+}
+const STOP_IDS = Object.keys(UNVERIFIED_STOPS);
+/** The profile step: the name form, the terms, Save profile. False when the form is not offered. */
+async function saveProfile(phone, baseUrl, name) {
+  if (pathOf(phone) !== '/profile-setup') await phone.goto(`${baseUrl}/profile-setup`);
+  if ((await firstOf(phone, ['wsf-profile-displayName', ...STOP_IDS], 30_000)) !== 'wsf-profile-displayName') return false;
+  await type(phone, 'wsf-profile-displayName', name);
+  await tap(phone, 'wsf-profile-termsCheckbox');
+  await tap(phone, 'wsf-profile-submit');
+  return until(phone, async () => pathOf(phone) !== '/profile-setup', 30_000);
+}
+/** The approved marker's Join. Returns the button's words and whether How will you take part? followed. */
+async function joinByMarker(phone, baseUrl, fixtures, ev, account) {
+  await phone.goto(`${baseUrl}/go/${ev.markerSlug}`);
+  const hit = await firstOf(phone, ['wsf-marker-join-button', 'wsf-marker-choose', ...STOP_IDS], 40_000);
+  if (hit !== 'wsf-marker-join-button') return { offered: null, joined: false, hit };
+  const offered = ((await vis(phone, 'wsf-marker-join-button').innerText()) || '').replace(/\s+/g, ' ').trim();
+  await tap(phone, 'wsf-marker-join-button');
+  const joined = await shown(phone, 'wsf-marker-choose', 30_000);
+  await fixtures.claimMemberships(account);
+  return { offered, joined, hit };
+}
+/** From the marker, Move on my phone, then record `count`. */
+async function recordFromMarker(phone, baseUrl, fixtures, ev, account, count) {
+  await phone.goto(`${baseUrl}/go/${ev.markerSlug}`);
+  if ((await firstOf(phone, ['wsf-marker-phone', 'wsf-marker-join-button', ...STOP_IDS], 40_000)) !== 'wsf-marker-phone') return false;
+  await tap(phone, 'wsf-marker-phone');
+  if (!(await until(phone, async () => pathOf(phone) === `/contribute/${ev.goalId}` && (await present(phone, 'wsf-contribute-entry-screen')), 40_000))) return false;
+  return recordOnPhone(phone, fixtures, ev, account, count);
+}
+const ownCredit = (n) => `Your total on this goal: ${n} squats`;
+const yoursLine = (n) => `YOURS ${n} squats`;
+/** The sign-in gates: landing on one of these is not reaching the member. */
+const GATE_SCREEN = /^\/(signin|verify-email|profile-setup)$/;
+
+async function unverifiedParticipant({ page, baseUrl, fixtures }) {
+  const r = recorder();
+  const row = tagged(r, EXPO_ROWS['unverified-participant']);
+  const ev = await fixtures.joinableEvent('unverified', { target: 1000, seeded: 100 });
+  const visitor = await fixtures.createUnverifiedUser('unverified-v', 'Fixture Visitor');
+  const control = await fixtures.createVerifiedUser('unverified-c', 'Fixture Control');
+  // What the product will write for each of them, claimed before they act.
+  fixtures.expectVisitor(ev, visitor);
+  fixtures.expectVisitor(ev, control);
+  const dev = devices(page);
+  try {
+    const first = await dev.open(PHONE);
+    const phone = first.page;
+    const landed = await fixtures.signInLanding(phone, baseUrl, visitor);
+    r.did('signed in on the visitor\'s own phone with an account whose address is not verified');
+    row('signin')(landed === '/profile-setup', landed === '/profile-setup' ? landed : await stopSeen(phone));
+
+    const saved = await saveProfile(phone, baseUrl, 'Fixture Visitor');
+    r.did(saved ? 'typed a name, accepted the terms and pressed Save profile' : 'opened the profile step');
+    row('profile')(saved, saved ? `moved on to ${pathOf(phone)}` : await stopSeen(phone));
+
+    const m = await joinByMarker(phone, baseUrl, fixtures, ev, visitor);
+    r.did(m.offered ? 'opened the approved marker and pressed its Join' : 'opened the approved marker');
+    row('marker')(m.offered === `Join ${ev.communityName}` && m.joined, m.offered ? `${m.offered}; ${m.joined ? 'How will you take part?' : 'no choice followed'}` : await stopSeen(phone));
+
+    await phone.goto(`${baseUrl}/join/${ev.joinCode}`);
+    const j = await firstOf(phone, ['wsf-join-submit', 'wsf-join-invalid', 'wsf-join-error'], 40_000);
+    if (j === 'wsf-join-submit') await tap(phone, 'wsf-join-submit');
+    r.did('opened the community\'s join link and pressed Join');
+    await until(phone, async () => pathOf(phone) === `/community/${ev.groupId}` || (await present(phone, 'wsf-join-submit-error')), 30_000);
+    const home = pathOf(phone) === `/community/${ev.groupId}`;
+    const name = home ? await textWhen(phone, 'wsf-community-name', (t) => t === ev.communityName, 30_000) : null;
+    await fixtures.claimMemberships(visitor);
+    row('link')(home && name === ev.communityName, home ? `the community page, named ${name}` : await stopSeen(phone));
+
+    const recorded = await recordFromMarker(phone, baseUrl, fixtures, ev, visitor, 15);
+    r.did(recorded ? 'pressed Move on my phone, entered 15, pressed Review, then Record' : 'looked for Move on my phone on the marker');
+    const own = recorded ? await textWhen(phone, 'wsf-contribute-own-credit', (t) => t === ownCredit(15), 30_000) : null;
+    const shared = recorded ? await textWhen(phone, 'wsf-contribute-shared-total', (t) => countOf(t) === 115, 30_000) : null;
+    row('contribute')(recorded && own === ownCredit(15) && countOf(shared) === 115, recorded ? `${own}; ${shared}` : `nothing recorded: ${await stopSeen(phone)}`);
+
+    await phone.goto(`${baseUrl}/activity`);
+    const yours = await textWhen(phone, `wsf-activity-goal-${ev.goalId}-yours`, (t) => t === yoursLine(15), 20_000);
+    r.did('opened Your progress');
+    row('history')(yours === yoursLine(15), yours ?? 'the goal is not listed');
+
+    await first.context.close();
+    const second = await dev.open(PHONE);
+    const fresh = second.page;
+    r.did('cleared the browser: a new one with no cookies, storage or saved sign-in');
+    const again = await fixtures.signInLanding(fresh, baseUrl, visitor);
+    r.did('signed in again as the same visitor');
+    const reached = !GATE_SCREEN.test(again) ? again : await stopSeen(fresh);
+    await fresh.goto(`${baseUrl}/activity`);
+    const kept = await textWhen(fresh, `wsf-activity-goal-${ev.goalId}-yours`, (t) => t === yoursLine(15), 20_000);
+    row('fresh')(!GATE_SCREEN.test(again) && kept === yoursLine(15), `${reached}; ${kept ?? 'the goal is not listed'}`);
+
+    await fresh.goto(`${baseUrl}/contribute/${ev.goalId}`);
+    const entry = (await firstOf(fresh, ['wsf-contribute-entry-screen', ...STOP_IDS], 40_000)) === 'wsf-contribute-entry-screen';
+    const ten = entry && await recordOnPhone(fresh, fixtures, ev, visitor, 10);
+    r.did(ten ? 'recorded a new round of 10' : 'opened the contribution page for a new round');
+    const own2 = ten ? await textWhen(fresh, 'wsf-contribute-own-credit', (t) => t === ownCredit(25), 30_000) : null;
+    const shared2 = ten ? await textWhen(fresh, 'wsf-contribute-shared-total', (t) => countOf(t) === 125, 30_000) : null;
+    row('round')(ten && own2 === ownCredit(25) && countOf(shared2) === 125, ten ? `${own2}; ${shared2}` : `nothing recorded: ${await stopSeen(fresh)}`);
+
+    // The control: verified, with no profile and no membership, on the same path.
+    const cp = (await dev.open(PHONE)).page;
+    const cLanded = await fixtures.signInLanding(cp, baseUrl, control);
+    const cSaved = cLanded === '/profile-setup' && await saveProfile(cp, baseUrl, 'Fixture Control');
+    const cm = cSaved ? await joinByMarker(cp, baseUrl, fixtures, ev, control) : { joined: false };
+    const cRecorded = cm.joined && await recordFromMarker(cp, baseUrl, fixtures, ev, control, 5);
+    const cOwn = cRecorded ? await textWhen(cp, 'wsf-contribute-own-credit', (t) => t === ownCredit(5), 30_000) : null;
+    r.did('the verified control signed in, saved a profile, joined by the marker and recorded 5');
+    row('control')(cSaved && cm.joined && cOwn === ownCredit(5),
+      cOwn === ownCredit(5) ? `${cLanded}; ${cOwn}` : `${cLanded}; saved ${cSaved}; joined ${cm.joined}; ${cRecorded ? cOwn : await stopSeen(cp)}`);
+  } finally {
+    await dev.closeAll();
+  }
+  return result(r, ev);
+}
+
 export const expoDrivers = Object.freeze({
   'event-use-my-phone': eventUseMyPhone,
   'event-join-line': eventJoinLine,
@@ -690,4 +853,5 @@ export const expoDrivers = Object.freeze({
   'line-place-ends': linePlaceEnds,
   'closed-goal-turn': closedGoalTurn,
   'shared-screen-finish': sharedScreenFinish,
+  'unverified-participant': unverifiedParticipant,
 });
