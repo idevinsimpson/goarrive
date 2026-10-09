@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "7a90669d0c553d5871b0eebd38b6eb7ae0253ec9563d9483cdea9cbf0b7a02ea",
-  "eventCount": 858,
+  "ledgerHead": "1869153b3b362980aa5b08db1328c65d31ea55cf2e5dbadd060e55428a18d598",
+  "eventCount": 863,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -19,8 +19,8 @@
   },
   "canonical": {
     "developmentBranch": "claude/wsf-app-shell",
-    "developmentSha": "9a506766dce251fd500c2a93ca0ccafd7c847690",
-    "operationalMain": "f95bc0a623df475966ae61fc2b1a23e54f085962"
+    "developmentSha": "ec162d17a0540e936741027f9b8f90dd372cfaf4",
+    "operationalMain": "41bff6c643ab4537d47a0732da48cfb86dc64b6b"
   },
   "staging": {
     "servedSha": "ab77fbfce97e60c1c22492397b2ab6b491f9e0db",
@@ -2008,7 +2008,7 @@
       },
       "label": "Finish the consented staging pin with verified approval ancestry, the registered unverified hosted driver and tracked synthetic fixtures",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -2022,7 +2022,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         ".github/wsf-staging/approved-candidate.json",
@@ -2049,7 +2049,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6074824513
+          "id": 6074964040
         }
       },
       "review": {
@@ -2428,7 +2428,7 @@
       },
       "label": "Read-only production Firebase source-vs-deployed inventory, Web Twin activation prerequisites and WSF-only rollout and rollback plan",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -2442,7 +2442,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         "docs/westayfit/ops/production/PRODUCTION_FIREBASE_INVENTORY_1.md",
@@ -2462,7 +2462,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6074831300
+          "id": 6074970106
         }
       },
       "review": {
@@ -5085,21 +5085,27 @@
       "packet": "KIOSK-UNVERIFIED-STAGING-RECOVERY-2",
       "worker": "W3",
       "reason": "release",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6074915277
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6074964040
+      }
     },
     "877d34282cd75373be17661e4130f3d52a777fc55bacdca4f7be63bd41e8c576": {
       "packet": "PRODUCTION-FIREBASE-INVENTORY-1",
       "worker": "W9",
       "reason": "release",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6074915391
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6074970106
+      }
     }
   },
   "fastpath": {
