@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "6a02ce3d01977348e39f86dc37aaa1d494e8df88f9a77784c2b5d76f3c1bd1df",
-  "eventCount": 918,
+  "ledgerHead": "b39655939fadb02d310a96207b43b0824546d88c61cd67d83cead7ac15914e4d",
+  "eventCount": 925,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1308,15 +1308,17 @@
       },
       "label": "Pin ec162d17 through the reviewed full staging path: RECOVERY-3 scope plus the three reservation-gap paths (verify-deployment 49->59 cases, Home manifest and home-journey retarget)",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
-      "pr": null,
-      "reviewers": [],
+      "pr": 597,
+      "reviewers": [
+        "W4"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "55ff46bdc958785e76dcb2bb7118649b3d19657b",
+        "prHeadSha": "55ff46bdc958785e76dcb2bb7118649b3d19657b",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -1353,7 +1355,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6076764787
+          "id": 6077468045
         }
       },
       "review": {
@@ -1366,7 +1368,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "EXPO-LATEST-FULL-STAGING-PIN-1": {
@@ -2697,17 +2699,17 @@
       },
       "label": "Reviewed WSF-only production deploy path for goarrive: production-only Firebase config, network-free pre-flight guard, operator runbook with candidates A/B, receipts, rollback; nothing deployed",
       "origin": "ledger",
-      "phase": "CHANGES_REQUESTED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
       "pr": 600,
       "reviewers": [
-        "W4"
+        "W3"
       ],
       "artifact": {
-        "subjectSha": "dff97e4f1af9285f8a38d2c0f4123afb2b28cce6",
-        "prHeadSha": "dff97e4f1af9285f8a38d2c0f4123afb2b28cce6",
+        "subjectSha": "03a8549725c67f5e38cb6c3a9de78c3378dcb2d4",
+        "prHeadSha": "03a8549725c67f5e38cb6c3a9de78c3378dcb2d4",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -2735,7 +2737,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6076291750
+          "id": 6077519159
         }
       },
       "review": {
@@ -2748,7 +2750,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 1,
+      "deliveries": 2,
       "pendingFinding": null
     },
     "PRODUCTION-FIREBASE-INVENTORY-1": {
@@ -5530,7 +5532,8 @@
       "ack": {
         "kind": "comment",
         "id": 6076764787
-      }
+      },
+      "superseded": true
     },
     "6be4be116f01d77f14167889ef6cce0bf6de6036958133ccf7950b8d39f8cfbd": {
       "packet": "PRODUCTION-DEPLOY-PATH-1",
@@ -5543,7 +5546,8 @@
       "ack": {
         "kind": "comment",
         "id": 6077245630
-      }
+      },
+      "superseded": true
     },
     "6c1797699e579a17c95fd06b3b127e1ca951a48d5e96d060c9141f2b5964834f": {
       "packet": "PRODUCTION-FIREBASE-INVENTORY-1",
@@ -5558,6 +5562,22 @@
         "id": 6077068917
       },
       "superseded": true
+    },
+    "1868e30865e574e5fda8fcca137e77399c5566ea985250e5a7e6fc49206cb235": {
+      "packet": "EXPO-FULL-STAGING-RECOVERY-4",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
+    },
+    "f9e0a83b767e40169b5b7c50fb05489cbb061e8bf70a34302c54483cc49b5b50": {
+      "packet": "PRODUCTION-DEPLOY-PATH-1",
+      "worker": "W3",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
