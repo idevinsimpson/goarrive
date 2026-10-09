@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "7c784eb56805cbf071d3dc0642910c236d8b633e0860c9e3661a64acd79be3ff",
-  "eventCount": 1056,
+  "ledgerHead": "b87ea8258bde24c015acb35158410042f78dec68f6a7af5396058940a22abeee",
+  "eventCount": 1058,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2622,7 +2622,9 @@
       "proof": null,
       "served": null,
       "releasedQueueIndex": null,
-      "reviewedBy": [],
+      "reviewedBy": [
+        "W3"
+      ],
       "subjectPaths": [
         ".github/workflows/wsf-staging-deploy.yml",
         ".github/wsf-staging/hosted-lovable-device-matrix.mjs",
@@ -2644,7 +2646,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6084079035
+          "id": 6084592990
         }
       },
       "review": {
@@ -6332,11 +6334,15 @@
       "packet": "LOVABLE-DEVICE-QA-2",
       "worker": "W3",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6084262288
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6084514655
+      },
+      "superseded": true
     },
     "c42d1a3446a631e8f2db1e7e582af0b5984676c3148394e662ef10cd74a81a63": {
       "packet": "PROD-RUNTIME-SA-AUTH-ROLE-1",
