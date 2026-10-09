@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "1869153b3b362980aa5b08db1328c65d31ea55cf2e5dbadd060e55428a18d598",
-  "eventCount": 863,
+  "ledgerHead": "f41a77d6cfc269ea06e8e775cb07ae1c417438389f642286a6661d66a456efda",
+  "eventCount": 868,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -65,7 +65,9 @@
     "W4": [],
     "W5": [],
     "W7": [],
-    "W9": []
+    "W9": [
+      "EXPO-PRIZE-WIRING-1"
+    ]
   },
   "packets": {
     "AUTONOMY-ROUTER-1C": {
@@ -1230,6 +1232,73 @@
       "deliveries": 2,
       "pendingFinding": null
     },
+    "EXPO-FULL-STAGING-RECOVERY-3": {
+      "owner": "W3",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Pin the latest accepted development head through the reviewed full staging path with the operational marker rewrite, verified approval ancestry, registered unverified driver and synthetic fixtures",
+      "origin": "ledger",
+      "phase": "RELEASED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": 396,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": 0,
+      "reviewedBy": [],
+      "subjectPaths": [
+        ".github/wsf-staging/approved-candidate.json",
+        ".github/wsf-staging/journeys/manifest.json",
+        ".github/wsf-staging/journeys/expo-attendee.mjs",
+        ".github/wsf-staging/tests/changed-journey-drivers.test.mjs",
+        ".github/wsf-staging/tests/pin-candidate.test.mjs",
+        "docs/westayfit/qa/kiosk-unverified-participant-staging-pin-1.md",
+        ".github/wsf-staging/pin-candidate.mjs",
+        ".github/wsf-staging/journeys/fixture-kit.mjs",
+        ".github/wsf-staging/tests/hosted-changed-journeys.test.mjs",
+        "firebase.westayfit.staging.json"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6075042219
+        },
+        "released": {
+          "kind": "comment",
+          "id": 6075043474
+        },
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6075043474
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
+      "pendingFinding": null
+    },
     "EXPO-LATEST-FULL-STAGING-PIN-1": {
       "owner": "W3",
       "kind": "work",
@@ -1372,6 +1441,71 @@
         "after": "director"
       },
       "deliveries": 2,
+      "pendingFinding": null
+    },
+    "EXPO-PRIZE-WIRING-1": {
+      "owner": "W9",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Wire the accepted expo prize-drawing core into the central function index with operator-only enable, status and receipt callables and the contribution trigger, nothing enabled by default",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "functions-westayfit/src/index.ts",
+        "functions-westayfit/src/expo-prize/callables.ts",
+        "functions-westayfit/tests/expo-prize/wiring.test.ts",
+        "docs/westayfit/expo-prize/README.md",
+        "docs/westayfit/expo-prize/EVIDENCE.md",
+        "docs/westayfit/DATA_OWNERSHIP.md",
+        "firestore.indexes.json"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6075073293
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6075073293
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          },
+          {
+            "class": "security",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
       "pendingFinding": null
     },
     "EXPO-STATION-LOST-ANSWER-COPY-1": {
@@ -2008,7 +2142,7 @@
       },
       "label": "Finish the consented staging pin with verified approval ancestry, the registered unverified hosted driver and tracked synthetic fixtures",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "WITHDRAWN",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -2049,7 +2183,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6074964040
+          "id": 6075036000
         }
       },
       "review": {
@@ -5092,7 +5226,8 @@
       "ack": {
         "kind": "comment",
         "id": 6074964040
-      }
+      },
+      "superseded": true
     },
     "877d34282cd75373be17661e4130f3d52a777fc55bacdca4f7be63bd41e8c576": {
       "packet": "PRODUCTION-FIREBASE-INVENTORY-1",
@@ -5106,6 +5241,14 @@
         "kind": "comment",
         "id": 6074970106
       }
+    },
+    "e1511ca4b4937cf9c3913d50ad7348f68d739679f3d302625a1b239fe5417c48": {
+      "packet": "EXPO-FULL-STAGING-RECOVERY-3",
+      "worker": "W3",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
