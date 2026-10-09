@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "143aba1dfb94753b39c960ca8d4d4f0d07f2d80342b8908df96e0a48b29ea006",
-  "eventCount": 882,
+  "ledgerHead": "e7453040cb644708ec99dc41ca2b13caab0f2dc111f62bc0daf54d41ce32de44",
+  "eventCount": 885,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2627,7 +2627,7 @@
       },
       "label": "Reviewed WSF-only production deploy path for goarrive: production-only Firebase config, network-free pre-flight guard, operator runbook with candidates A/B, receipts, rollback; nothing deployed",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -2641,7 +2641,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         "firebase.westayfit.production.json",
@@ -2663,7 +2663,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6075293540
+          "id": 6075521276
         }
       },
       "review": {
@@ -2738,7 +2738,10 @@
         "after": "director"
       },
       "deliveries": 1,
-      "pendingFinding": null
+      "pendingFinding": {
+        "kind": "comment",
+        "id": 6075479691
+      }
     },
     "PROFILE-PHOTOS-FIREBASE-1": {
       "owner": "W9",
@@ -5395,17 +5398,21 @@
       "ack": {
         "kind": "comment",
         "id": 6075395067
-      }
+      },
+      "superseded": true
     },
     "b65fbb58ba73ffd63287aca62f75ffcb731d536a159962ef60467ed4ce2525ae": {
       "packet": "PRODUCTION-DEPLOY-PATH-1",
       "worker": "W9",
       "reason": "release",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6075401735
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6075521276
+      }
     }
   },
   "fastpath": {
