@@ -1,0 +1,54 @@
+{
+  "_comment": [
+    "PRODUCTION deploy config for We Stay Fit on the SHARED goarrive project.",
+    "PRODUCTION-DEPLOY-PATH-1 (#365 6075293313). Used only by the operator runbook",
+    "docs/westayfit/ops/production/RUNBOOK_WSF_PRODUCTION_DEPLOY_1.md, which copies",
+    "this file into a checkout of the reviewed candidate (never operational main)",
+    "and runs .github/wsf-production/preflight.mjs against it first.",
+    "",
+    "It exists because firebase.json is the GoArrive default: its hosting has no",
+    "site (it resolves to goarrive.web.app), it carries GoArrive's `default`",
+    "functions codebase, and it declares Storage. Any WSF command through it is",
+    "one typo away from GoArrive.",
+    "",
+    "Declared here and nothing else: the `westayfit` functions codebase and",
+    "Firestore rules/indexes. NO hosting (Lovable serves app.westay.fit), NO",
+    "storage (WSF stores no Cloud Storage object). So `--only functions:westayfit`",
+    "cannot reach GoArrive's functions, and no target here can reach",
+    "goarrive.web.app, even by mistake.",
+    "",
+    "Firestore is declared because the WSF rules section must be live for the",
+    "client's direct reads, but the ruleset is SHARED: the runbook deploys",
+    "`firestore:rules` only after the live ruleset, re-read just before, is shown",
+    "equal to main outside its WSF section. The two WSF composite indexes are",
+    "created with gcloud; the pre-flight refuses `firestore:indexes`, which would",
+    "also create any of main's indexes that production lacks.",
+    "",
+    "Its functions entry is staging's (firebase.westayfit.staging.json) with the",
+    "same source, codebase and ignore list, plus one predeploy build: staging",
+    "builds lib/ in its workflow, and here the operator's deploy builds it from",
+    "the candidate's own source. Keep source, codebase and ignore in sync with",
+    "staging. Unlike staging it declares firestore (above) and no hosting."
+  ],
+  "functions": [
+    {
+      "source": "functions-westayfit",
+      "codebase": "westayfit",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log",
+        "*.local",
+        "gha-creds-*.json"
+      ],
+      "predeploy": [
+        "npm --prefix \"$RESOURCE_DIR\" run build"
+      ]
+    }
+  ],
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  }
+}
