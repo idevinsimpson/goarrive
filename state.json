@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "64b6f15a33192f4d36e2f47690fe240a5c433391b51bf4283ea2784194438833",
-  "eventCount": 1024,
+  "ledgerHead": "6787443817a6dbba96f0979717245e4c9fda7ac419bc729108618ba849101f59",
+  "eventCount": 1025,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -3706,7 +3706,9 @@
       "proof": null,
       "served": null,
       "releasedQueueIndex": null,
-      "reviewedBy": [],
+      "reviewedBy": [
+        "W7"
+      ],
       "subjectPaths": [
         ".github/wsf-staging/hosted-package-e-smoke.mjs",
         ".github/wsf-staging/hosted-player-journey.mjs",
@@ -3728,7 +3730,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6081657051
+          "id": 6082390768
         }
       },
       "review": {
@@ -6183,7 +6185,8 @@
       "ack": {
         "kind": "comment",
         "id": 6081779104
-      }
+      },
+      "superseded": true
     },
     "58c46f112cacd338ecb41de7294f2ff1c58c1cefc9f0813320602615030067fe": {
       "packet": "LOVABLE-DEVICE-QA-2",
