@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=933abb7877d6fd3bb7a71b00bf304282a3b5af61f88c685e5323938cf68ecdf9 events=1066 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=092187288bf36a85ce86eb694b9c4eefc2b45992b082988f26865b5339292a65 events=1070 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `933abb7877d6fd3bb7a71b00bf304282a3b5af61f88c685e5323938cf68ecdf9` (1066 events)
+- Ledger head: `092187288bf36a85ce86eb694b9c4eefc2b45992b082988f26865b5339292a65` (1070 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -29,11 +29,11 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 
 | Worker | Inbox | Active now | Reviewing | Waiting on review | Blocked | Next | Queue | WATCH |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| W3 | #396 | — | — | WORKER-EXECUTION-PROFILES-1 | NORTHSTAR-MIRROR-INTAKE-1 | — | — | off |
+| W3 | #396 | — | PROD-RUNTIME-SA-AUTH-ROLE-1 | WORKER-EXECUTION-PROFILES-1 | NORTHSTAR-MIRROR-INTAKE-1 | — | — | on |
 | W4 | #394 | — | — | — | — | — | — | off |
 | W5 | #395 | — | — | — | — | — | — | off |
 | W7 | #434 | — | — | — | — | — | — | off |
-| W9 | #497 | PROD-RUNTIME-SA-AUTH-ROLE-1 | — | — | EVENT-LIFECYCLE-BACKEND-RECOVERY-1, MEMBER-TRUTH-BACKEND-1 | — | — | on |
+| W9 | #497 | — | — | PROD-RUNTIME-SA-AUTH-ROLE-1 | EVENT-LIFECYCLE-BACKEND-RECOVERY-1, MEMBER-TRUTH-BACKEND-1 | — | — | off |
 
 ## Packets
 
@@ -82,7 +82,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | MEMBER-TRUTH-BACKEND-1 | W9 | work | INTEGRATED (source-only) | ledger | BLOCKED (from ACKED) | — | — | — | — | — | — | — | comment:6029989725 | comment:6035507739 | TOGETHER-CROSSING-DESIGN-DECISION (Director and Owner) | Unblock real member Together crossing and privacy-safe public preview labels for the shared Firebase backend and Lovable Web Twin | 1×journey-qa then director | — |
 | MOVE-CAMERA-NATIVE-PORT-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #577 | d6d47879 | d6d47879 | — | 856e20e0 | — | W7 | comment:5997538756 | pull_request:577 | — | Port the owner-accepted camera-assisted squat MOVE North Star into the current Expo app without automatic contribution credit | 1×journey-qa then director | — |
 | NORTHSTAR-MIRROR-INTAKE-1 | W3 | work | INTEGRATED (source-only) | ledger | BLOCKED (from ACKED) | — | — | — | — | — | — | — | comment:6035534615 | comment:6040736205 | W3-SOURCE-EDIT-CONSENT (Devin) | Complete the existing automatic Lovable delta receiver so Devin never has to relay native handoffs | 1×ops-source then director | — |
-| PROD-RUNTIME-SA-AUTH-ROLE-1 | W9 | work | INTEGRATED (source-only) | ledger | CHANGES_REQUESTED | #607 | aedf1f11 | aedf1f11 | — | — | — | W4 | comment:6083892481 | comment:6084690889 | — | Runbook B13: read back the production WSF functions' runtime service account roles (email action links need Identity Toolkit permission); owner by-name grant before step 6; step 8 line, receipt field | 1×ops-source then director | — |
+| PROD-RUNTIME-SA-AUTH-ROLE-1 | W9 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #607 | def247c0 | def247c0 | — | — | — | W3 | comment:6083892481 | comment:6085096208 | — | Runbook B13: read back the production WSF functions' runtime service account roles (email action links need Identity Toolkit permission); owner by-name grant before step 6; step 8 line, receipt field | 1×ops-source then director | — |
 | PRODUCTION-DEPLOY-PATH-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #600 | dfd48c87 | dfd48c87 | — | 1d3f1c2c | — | W7 | comment:6075293540 | pull_request:600 | — | Reviewed WSF-only production deploy path for goarrive: production-only Firebase config, network-free pre-flight guard, operator runbook with candidates A/B, receipts, rollback; nothing deployed | 1×ops-source then director | — |
 | PRODUCTION-FIREBASE-INVENTORY-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #599 | 80b603c7 | 80b603c7 | — | 0f1fd585 | — | W4 | comment:6074831300 | comment:6077389004 | — | Read-only production Firebase source-vs-deployed inventory, Web Twin activation prerequisites and WSF-only rollout and rollback plan | 1×ops-source then director | — |
 | PROFILE-PHOTOS-FIREBASE-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #593 | 57fd86b8 | 57fd86b8 | — | b8381195 | — | W4 | comment:6052427068 | pull_request:593 | — | Canonical private profile photos and permitted community roster for native and Lovable staging | 1×journey-qa then director | — |
@@ -266,4 +266,5 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | a0840d851f6f | W3 | LOVABLE-DEVICE-QA-2 | review | acked | 6084262288 | comment:6084514655 |
 | c42d1a3446a6 | W4 | PROD-RUNTIME-SA-AUTH-ROLE-1 | review | acked | 6084460251 | comment:6084690889 |
 | 8c029aed1170 | W9 | PROD-RUNTIME-SA-AUTH-ROLE-1 | handback | acked | 6084946355 | comment:6085042337 |
+| 18044780b993 | W3 | PROD-RUNTIME-SA-AUTH-ROLE-1 | review | requested | — | — |
 
