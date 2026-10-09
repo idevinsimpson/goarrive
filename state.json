@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "c24bfa61b1060bcc0e1d73996959789dbef168d3069d8e49a1236e98bdcf7ee6",
-  "eventCount": 912,
+  "ledgerHead": "a8a314776ab6f03995c228c131a2632b1871d05c75c1680fe16f0402083219e6",
+  "eventCount": 913,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -5541,11 +5541,14 @@
       "packet": "PRODUCTION-FIREBASE-INVENTORY-1",
       "worker": "W4",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6077006063
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6077068917
+      }
     }
   },
   "fastpath": {
