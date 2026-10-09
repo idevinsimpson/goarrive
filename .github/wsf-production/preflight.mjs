@@ -60,12 +60,27 @@
  *     change only by the version string.
  */
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 /** The reviewed development anchor: candidate A exactly, and B's parent line. */
 export const ANCHOR_A = 'ec162d17a0540e936741027f9b8f90dd372cfaf4';
+/**
+ * Record G, the GATED successor: `claude/wsf-app-shell` after ANON-GATE-1 (#601)
+ * merged over A (#365 6078945971 item 6). It must be exactly this commit, and
+ * its difference from A must be exactly CANDIDATE_G_DELTA_PATHS.
+ */
+export const ANCHOR_G = 'e65bfee9eecb2370f602d09880da604709fba58a';
+export const CANDIDATE_G_DELTA_PATHS = Object.freeze([
+  'docs/westayfit/ops/security/ANON-GATE-1.md',
+  'functions-westayfit/src/anon-gate.ts',
+  'functions-westayfit/src/index.ts',
+  'functions-westayfit/tests/callable/wsf-anon-gate.test.ts',
+]);
+/** The only action handler a production env file may name: the callables' own default. */
+export const PRODUCTION_ACTION_HANDLER = 'https://goarrive.firebaseapp.com/__/auth/action';
 export const PRODUCTION_PROJECT = 'goarrive';
 export const PRODUCTION_CONFIG = 'firebase.westayfit.production.json';
 export const WSF_CODEBASE = 'westayfit';
@@ -181,7 +196,19 @@ export function checkExports(indexSource, manifest = CANDIDATE_A_EXPORTS, public
 const CATCH_ALL = /^\s*match \/\{document=\*\*\} \{\s*$/;
 /** Any `match /` token, however it is spaced, with line comments removed first. */
 const MATCH_TOKEN = /\bmatch\s*\//;
-const ruleLine = (l) => l.replace(/\/\/.*$/, '');
+/** A rules line with its `//` comment removed, where `//` inside a quoted string is not a comment. */
+function ruleLine(l) {
+  let quote = null;
+  for (let i = 0; i < l.length; i += 1) {
+    const c = l[i];
+    if (quote) {
+      if (c === '\\') i += 1;
+      else if (c === quote) quote = null;
+    } else if (c === "'" || c === '"') quote = c;
+    else if (c === '/' && l[i + 1] === '/') return l.slice(0, i);
+  }
+  return l;
+}
 
 /**
  * Splits firestore.rules into what is outside the WSF section and the section
@@ -325,7 +352,9 @@ export function checkCommand(command, { interactiveReason } = {}) {
   const only = value('--only');
   if (!only) problems.push('--only is required: a bare deploy reaches every target in the config');
   else {
-    for (const t of only.split(',')) {
+    const targets = only.split(',');
+    if (targets.length !== 1) problems.push(`--only must name exactly one target per deploy, not ${targets.length}: firebase-tools would release them in its own order`);
+    for (const t of targets) {
       if (!ALLOWED_ONLY.has(t)) problems.push(`target ${t} is refused (allowed: ${[...ALLOWED_ONLY].join(', ')})`);
     }
   }
@@ -377,6 +406,9 @@ export function checkEnvFile(text) {
   const problems = [...bad];
   if (extra.length) problems.push(`unexpected keys ${extra.join(',')} (no secret belongs in the env file)`);
   if (env.WSF_APP_URL !== WSF_APP_URL) problems.push(`WSF_APP_URL must be ${WSF_APP_URL}`);
+  if ('WSF_AUTH_ACTION_HANDLER' in env && env.WSF_AUTH_ACTION_HANDLER !== PRODUCTION_ACTION_HANDLER) {
+    problems.push(`WSF_AUTH_ACTION_HANDLER, when set, must be ${PRODUCTION_ACTION_HANDLER}: the oobCode links go to it`);
+  }
   if (!/@westay\.fit>?$/.test(env.WSF_EMAIL_FROM ?? '')) problems.push('WSF_EMAIL_FROM must be set to a westay.fit sender');
   return [check('worktree.env-file', problems.length === 0, problems.length ? problems.join('; ') : `${ENV_FILE} sets ${keys.sort().join(', ')}; WSF_APP_URL=${WSF_APP_URL}`)];
 }
@@ -415,11 +447,11 @@ export function checkConsent(record, consent) {
 // ── the git-backed run ──────────────────────────────────────────────────────
 
 function git(repo, args) {
-  return execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
+  return execFileSync('git', ['--no-optional-locks', '-C', repo, ...args], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
 }
 function gitOk(repo, args) {
   try {
-    execFileSync('git', ['-C', repo, ...args], { stdio: 'ignore' });
+    execFileSync('git', ['--no-optional-locks', '-C', repo, ...args], { stdio: 'ignore' });
     return true;
   } catch {
     return false;
@@ -439,10 +471,11 @@ const MAIN_FILES = ['firestore.rules', 'firestore.indexes.json', PRODUCTION_CONF
  * names exactly what was compared. `anchor` exists for synthetic tests; the
  * CLI never accepts it.
  */
-export function runPreflight({ repo = '.', record, candidate, main, anchor = ANCHOR_A, config, command, interactiveReason, liveRules, worktree, envFile, manifest = CANDIDATE_A_EXPORTS, publicManifest = CANDIDATE_A_PUBLIC }) {
+export function runPreflight({ repo = '.', record, candidate, main, anchor = ANCHOR_A, anchorG = ANCHOR_G, config, command, interactiveReason, liveRules, worktree, envFile, cwd, manifest = CANDIDATE_A_EXPORTS, publicManifest = CANDIDATE_A_PUBLIC }) {
   const checks = [];
-  if (record !== 'A' && record !== 'B') return { ok: false, usage: 'record must be A or B' };
-  for (const [name, sha] of [['candidate', candidate], ['main', main], ['anchor', anchor]]) {
+  if (record !== 'A' && record !== 'B' && record !== 'G') return { ok: false, usage: 'record must be A, B or G' };
+  const shas = [['candidate', candidate], ['main', main], ['anchor', anchor], ...(record === 'G' ? [['gated anchor', anchorG]] : [])];
+  for (const [name, sha] of shas) {
     if (!SHA40.test(sha ?? '')) return { ok: false, usage: `${name} must be a full 40-character SHA` };
     if (!gitOk(repo, ['cat-file', '-e', `${sha}^{commit}`])) return { ok: false, usage: `${name} ${sha} is not a commit in this clone (fetch it first; this guard never fetches)` };
   }
@@ -457,6 +490,15 @@ export function runPreflight({ repo = '.', record, candidate, main, anchor = ANC
 
   if (record === 'A') {
     checks.push(check('candidate.is-anchor-A', candidate === anchor, candidate === anchor ? `A is exactly ${anchor}` : `A must be exactly ${anchor}`));
+  } else if (record === 'G') {
+    checks.push(check('candidate.is-anchor-G', candidate === anchorG, candidate === anchorG ? `G is exactly ${anchorG}` : `G must be exactly ${anchorG}`));
+    const descends = candidate !== anchor && gitOk(repo, ['merge-base', '--is-ancestor', anchor, candidate]);
+    const changed = descends ? git(repo, ['diff', '--name-only', anchor, candidate]).split('\n').filter(Boolean).sort() : [];
+    const exact = descends && JSON.stringify(changed) === JSON.stringify([...CANDIDATE_G_DELTA_PATHS].sort());
+    checks.push(check('candidate.G-is-the-gate-over-A', exact,
+      exact ? `G descends from ${anchor} and changes exactly ${CANDIDATE_G_DELTA_PATHS.join(', ')}`
+        : descends ? `G must change exactly ${CANDIDATE_G_DELTA_PATHS.join(', ')} over ${anchor}; it changes ${changed.join(',') || 'nothing'}`
+          : `G must descend from ${anchor}`));
   } else {
     const descends = candidate !== anchor && gitOk(repo, ['merge-base', '--is-ancestor', anchor, candidate]);
     checks.push(check('candidate.B-descends-from-A', descends, descends ? `B descends from ${anchor}` : `B must be a descendant of ${anchor}, not ${anchor} itself`));
@@ -484,7 +526,17 @@ export function runPreflight({ repo = '.', record, candidate, main, anchor = ANC
   const deploysFunctions = targets.includes(`functions:${WSF_CODEBASE}`);
   const deploysRules = targets.includes('firestore:rules');
   let consent = null;
+  let rulesHashes = null;
   if (filesOk) {
+    const sha = (t) => createHash('sha256').update(t).digest('hex');
+    const lines = (t) => t.split('\n').length - (t.endsWith('\n') ? 1 : 0);
+    const candRules = show(repo, candidate, 'firestore.rules');
+    const mainRules = show(repo, main, 'firestore.rules');
+    rulesHashes = {
+      candidate: { sha256: sha(candRules), lines: lines(candRules), outsideWsfSha256: sha(splitWsfSection(candRules).outside) },
+      main: { sha256: sha(mainRules), lines: lines(mainRules) },
+      ...(liveRules !== undefined ? { live: { sha256: sha(liveRules), lines: lines(liveRules), outsideWsfSha256: sha(splitWsfSection(liveRules).outside) } } : {}),
+    };
     checks.push(...checkExports(show(repo, candidate, `${WSF_SOURCE}/src/index.ts`), manifest, publicManifest));
     checks.push(...checkRules(show(repo, candidate, 'firestore.rules'), show(repo, main, 'firestore.rules'), liveRules));
     checks.push(...checkIndexes(JSON.parse(show(repo, candidate, 'firestore.indexes.json')), JSON.parse(show(repo, main, 'firestore.indexes.json'))));
@@ -505,9 +557,26 @@ export function runPreflight({ repo = '.', record, candidate, main, anchor = ANC
   if (worktree !== undefined) {
     const head = gitOk(worktree, ['rev-parse', '--verify', 'HEAD']) ? git(worktree, ['rev-parse', 'HEAD']).trim() : '';
     checks.push(check('worktree.at-candidate', head === candidate, head === candidate ? `worktree HEAD is ${candidate}` : `worktree HEAD ${head || '(not a git worktree)'} is not the candidate`));
-    const allowedNew = new Set([`?? ${PRODUCTION_CONFIG}`, `?? ${ENV_FILE}`]);
-    const dirty = head ? git(worktree, ['status', '--porcelain', '--untracked-files=all']).split('\n').filter(Boolean).filter((l) => !allowedNew.has(l)) : ['(not a git worktree)'];
-    checks.push(check('worktree.clean', dirty.length === 0, dirty.length ? `unreviewed changes: ${dirty.join(', ')}` : `only ${PRODUCTION_CONFIG} and ${ENV_FILE} are added`));
+    // Ignored files count too: firebase-tools uploads and loads them (a stray
+    // functions-westayfit/.env is read before .env.goarrive). Only the install
+    // and the build output may exist without being reviewed. `matching` lists an
+    // ignored directory once, as `dir/`, instead of every file inside it.
+    const allowed = new Set([`?? ${PRODUCTION_CONFIG}`, `?? ${ENV_FILE}`, `!! ${WSF_SOURCE}/node_modules/`, `!! ${WSF_SOURCE}/lib/`]);
+    const dirty = head ? git(worktree, ['status', '--porcelain', '--untracked-files=all', '--ignored=matching']).split('\n').filter(Boolean).filter((l) => !allowed.has(l)) : ['(not a git worktree)'];
+    checks.push(check('worktree.clean', dirty.length === 0, dirty.length ? `unreviewed changes, ignored files included: ${dirty.join(', ')}` : `only ${PRODUCTION_CONFIG} and ${ENV_FILE} are added (plus ${WSF_SOURCE}/node_modules and lib)`));
+    if (deploysFunctions || deploysRules) {
+      const real = (d) => {
+        try {
+          return fs.realpathSync(d);
+        } catch {
+          return null;
+        }
+      };
+      const here = cwd === undefined ? null : real(cwd);
+      const there = real(worktree);
+      const same = here !== null && here === there;
+      checks.push(check('worktree.is-cwd', same, same ? 'the deploy runs from the checked worktree' : `the deploy must run from the worktree it was checked against (cd into ${worktree}); it would run from ${cwd ?? '(unknown)'}`));
+    }
     if (deploysFunctions) checks.push(...checkEnvFile(envFile));
   }
 
@@ -518,8 +587,10 @@ export function runPreflight({ repo = '.', record, candidate, main, anchor = ANC
     candidate,
     main,
     anchor,
+    ...(record === 'G' ? { anchorG } : {}),
     project: PRODUCTION_PROJECT,
     ...(interactiveReason !== undefined ? { interactiveReason } : {}),
+    rulesHashes,
     exports: filesOk ? parseExports(show(repo, candidate, `${WSF_SOURCE}/src/index.ts`)).names.length : null,
     consentVersion,
     consentVersionPending: consent ? Object.values(consent).some((v) => /^pending/.test(v.server ?? '')) : null,
@@ -544,10 +615,19 @@ export function parseArgs(argv) {
   return out;
 }
 
-const USAGE = 'usage: node .github/wsf-production/preflight.mjs --record A|B --candidate <sha40> --main <sha40> --config firebase.westayfit.production.json [--command "firebase deploy ..."] [--interactive-reason minimum-bill] [--worktree <dir>] [--live-rules <file>] [--repo <dir>]';
+const USAGE = 'usage: node .github/wsf-production/preflight.mjs --record A|B|G --candidate <sha40> --main <sha40> --config firebase.westayfit.production.json [--command "firebase deploy ..."] [--interactive-reason minimum-bill] [--worktree <dir>] [--live-rules <file>] [--repo <dir>]';
 
-/** The CLI as a function: argv in, { code, verdict } out. `anchor` is for synthetic tests only and is never read from argv. */
-export function cli(argv, { anchor = ANCHOR_A } = {}) {
+/** The CLI as a function: argv in, { code, verdict } out. The anchors are for synthetic tests only and are never read from argv. */
+export function cli(argv, { anchor = ANCHOR_A, anchorG = ANCHOR_G, cwd = process.cwd() } = {}) {
+  try {
+    return cliUnsafe(argv, { anchor, anchorG, cwd });
+  } catch (e) {
+    // Fails closed AND says so: a malformed file or a git error still prints a verdict.
+    return { code: 2, verdict: { ok: false, usage: `unusable input: ${String(e?.message ?? e).split('\n')[0].slice(0, 300)}` } };
+  }
+}
+
+function cliUnsafe(argv, { anchor, anchorG, cwd }) {
   const args = parseArgs(argv);
   const allowed = new Set(['record', 'candidate', 'main', 'config', 'command', 'interactive-reason', 'live-rules', 'repo', 'worktree']);
   const unknown = Object.keys(args).filter((k) => k !== 'error' && !allowed.has(k));
@@ -579,7 +659,7 @@ export function cli(argv, { anchor = ANCHOR_A } = {}) {
     const e = read(path.join(args.worktree, ENV_FILE));
     envFile = e.text ?? '';
   }
-  const verdict = runPreflight({ repo: args.repo ?? '.', record: args.record, candidate: args.candidate, main: args.main, anchor, config, command: args.command, interactiveReason: args['interactive-reason'], liveRules, worktree: args.worktree, envFile });
+  const verdict = runPreflight({ repo: args.repo ?? '.', record: args.record, candidate: args.candidate, main: args.main, anchor, anchorG, config, command: args.command, interactiveReason: args['interactive-reason'], liveRules, worktree: args.worktree, envFile, cwd });
   return { code: verdict.usage ? 2 : verdict.ok ? 0 : 1, verdict };
 }
 

@@ -24,8 +24,11 @@
     "created with gcloud; the pre-flight refuses `firestore:indexes`, which would",
     "also create any of main's indexes that production lacks.",
     "",
-    "Mirrors firebase.westayfit.staging.json minus hosting. Keep the functions",
-    "entry in sync with it."
+    "Its functions entry is staging's (firebase.westayfit.staging.json) with the",
+    "same source, codebase and ignore list, plus one predeploy build: staging",
+    "builds lib/ in its workflow, and here the operator's deploy builds it from",
+    "the candidate's own source. Keep source, codebase and ignore in sync with",
+    "staging. Unlike staging it declares firestore (above) and no hosting."
   ],
   "functions": [
     {

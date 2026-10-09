@@ -13,6 +13,7 @@
  */
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -20,6 +21,9 @@ import test from 'node:test';
 
 import {
   ANCHOR_A,
+  ANCHOR_G,
+  CANDIDATE_G_DELTA_PATHS,
+  PRODUCTION_ACTION_HANDLER,
   CANDIDATE_A_EXPORTS,
   CANDIDATE_A_PUBLIC,
   checkCommand,
@@ -121,6 +125,7 @@ function history() {
     'firestore.rules': GOARRIVE_RULES,
     'firestore.indexes.json': MAIN_INDEXES,
     'firebase.westayfit.production.json': PROD_CONFIG,
+    '.gitignore': 'functions-westayfit/node_modules/\nfunctions-westayfit/lib/\n.env\n',
     'functions-westayfit/src/index.ts': indexTs(['wsfHealth'], []),
     'apps/westayfit/src/profileConstants.ts': profileConstants(),
   }, 'root');
@@ -154,8 +159,20 @@ const run = (h, over = {}) => {
   const candidate = over.candidate ?? h.anchor;
   const worktree = 'worktree' in over ? over.worktree : worktreeAt(h, candidate);
   const envFile = 'envFile' in over ? over.envFile : GOOD_ENV;
-  return runPreflight({ repo: h.dir, record: 'A', candidate, main: h.main, anchor: h.anchor, config: PROD_CONFIG, command: REVIEWED, ...over, worktree, envFile });
+  const cwd = 'cwd' in over ? over.cwd : worktree;
+  return runPreflight({ repo: h.dir, record: 'A', candidate, main: h.main, anchor: h.anchor, config: PROD_CONFIG, command: REVIEWED, ...over, worktree, envFile, cwd });
 };
+/** The gated successor G: exactly the four ANON-GATE-1 paths changed over A. */
+function gatedSuccessor(h, extra = {}) {
+  git(h.dir, 'checkout', '-q', '-b', `g-${Object.keys(extra).length}-${Date.now().toString(36)}`, h.anchor);
+  return commit(h.dir, {
+    'functions-westayfit/src/index.ts': indexTs(undefined, undefined, undefined, "// import { requireRealIdentity } from './anon-gate';"),
+    'functions-westayfit/src/anon-gate.ts': 'export const ANONYMOUS_REFUSAL = "Sign in with an email account.";\n',
+    'functions-westayfit/tests/callable/wsf-anon-gate.test.ts': '// synthetic\n',
+    'docs/westayfit/ops/security/ANON-GATE-1.md': '# synthetic\n',
+    ...extra,
+  }, 'G: the gate');
+}
 
 // ── exports ─────────────────────────────────────────────────────────────────
 
@@ -451,7 +468,7 @@ test('git: a deploy needs the worktree, at the candidate, with nothing but the c
     write(wtx, { [extra]: 'synthetic\n' });
     const v = run(h, { worktree: wtx });
     assert.deepEqual(failed(v.checks), ['worktree.clean'], extra);
-    assert.match(v.checks.find((c) => c.id === 'worktree.clean').detail, new RegExp(`\\?\\? ${extra.replace('.', '\\.')}`), extra);
+    assert.match(v.checks.find((c) => c.id === 'worktree.clean').detail, new RegExp(`(\\?\\?|!!) ${extra.replace('.', '\\.')}`), extra);
   }
   const notGit = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-preflight-notgit-'));
   assert.deepEqual(failed(run(h, { worktree: notGit }).checks).sort(), ['worktree.at-candidate', 'worktree.clean']);
@@ -546,7 +563,7 @@ test('git: short or unknown SHAs and an unknown record are usage errors, never v
   const h = history();
   assert.match(run(h, { candidate: h.anchor.slice(0, 8) }).usage, /40-character/);
   assert.match(run(h, { main: 'f'.repeat(40) }).usage, /not a commit/);
-  assert.match(run(h, { record: 'C' }).usage, /A or B/);
+  assert.match(run(h, { record: 'C' }).usage, /A, B or G/);
 });
 
 // ── the CLI and its purity ──────────────────────────────────────────────────
@@ -555,10 +572,10 @@ test('cli: the in-process CLI reads the worktree env file and returns exit 0 / 1
   const h = history();
   const wt = worktreeAt(h, h.anchor);
   const base = ['--repo', h.dir, '--config', path.join(wt, 'firebase.westayfit.production.json'), '--record', 'A', '--main', h.main];
-  const ok = cli([...base, '--candidate', h.anchor, '--command', REVIEWED, '--worktree', wt], { anchor: h.anchor });
+  const ok = cli([...base, '--candidate', h.anchor, '--command', REVIEWED, '--worktree', wt], { anchor: h.anchor, cwd: wt });
   assert.equal(ok.code, 0, JSON.stringify(ok.verdict));
   const noEnv = worktreeAt(h, h.anchor, null);
-  const missingEnv = cli([...base, '--candidate', h.anchor, '--command', REVIEWED, '--worktree', noEnv], { anchor: h.anchor });
+  const missingEnv = cli([...base, '--candidate', h.anchor, '--command', REVIEWED, '--worktree', noEnv], { anchor: h.anchor, cwd: noEnv });
   assert.equal(missingEnv.code, 1);
   assert.deepEqual(failed(missingEnv.verdict.checks), ['worktree.env-file']);
   const liveFile = path.join(wt, '..', `${path.basename(wt)}-live.rules`);
@@ -570,11 +587,11 @@ test('cli: the in-process CLI reads the worktree env file and returns exit 0 / 1
   const reviewed = cli([...base, '--candidate', h.anchor, '--command', REVIEWED, '--worktree', wt]);
   assert.equal(reviewed.code, 2);
   assert.equal(reviewed.verdict.usage, `anchor ${ANCHOR_A} is not a commit in this clone (fetch it first; this guard never fetches)`);
-  const interactive = cli([...base, '--candidate', h.anchor, '--command', REVIEWED.replace(' --non-interactive', ''), '--interactive-reason', 'minimum-bill', '--worktree', wt], { anchor: h.anchor });
+  const interactive = cli([...base, '--candidate', h.anchor, '--command', REVIEWED.replace(' --non-interactive', ''), '--interactive-reason', 'minimum-bill', '--worktree', wt], { anchor: h.anchor, cwd: wt });
   assert.equal(interactive.code, 0, JSON.stringify(interactive.verdict));
   assert.equal(interactive.verdict.interactiveReason, 'minimum-bill');
-  assert.equal(cli([...base, '--candidate', h.anchor, '--command', REVIEWED.replace(' --non-interactive', ''), '--worktree', wt], { anchor: h.anchor }).code, 1);
-  const twice = cli([...base, '--candidate', h.anchor, '--command', REVIEWED, '--worktree', wt, '--candidate', h.main], { anchor: h.anchor });
+  assert.equal(cli([...base, '--candidate', h.anchor, '--command', REVIEWED.replace(' --non-interactive', ''), '--worktree', wt], { anchor: h.anchor, cwd: wt }).code, 1);
+  const twice = cli([...base, '--candidate', h.anchor, '--command', REVIEWED, '--worktree', wt, '--candidate', h.main], { anchor: h.anchor, cwd: wt });
   assert.equal(twice.code, 2);
   assert.match(twice.verdict.usage, /--candidate is given more than once/);
 });
@@ -598,6 +615,122 @@ test('cli: the script prints one JSON verdict, exits 2 on unusable input, refuse
   assert.equal(git(h.dir, 'status', '--porcelain'), before);
 });
 
+// ── record G: the gated successor ───────────────────────────────────────────
+
+test('record G: the reviewed gate over A passes; it must be exactly the G anchor and change exactly the four paths', () => {
+  assert.equal(ANCHOR_G, 'e65bfee9eecb2370f602d09880da604709fba58a');
+  assert.deepEqual([...CANDIDATE_G_DELTA_PATHS].sort(), ['docs/westayfit/ops/security/ANON-GATE-1.md', 'functions-westayfit/src/anon-gate.ts', 'functions-westayfit/src/index.ts', 'functions-westayfit/tests/callable/wsf-anon-gate.test.ts']);
+  const h = history();
+  const g = gatedSuccessor(h);
+  const ok = run(h, { record: 'G', candidate: g, anchorG: g });
+  assert.deepEqual(failed(ok.checks), []);
+  assert.equal(ok.anchorG, g);
+  assert.equal(ok.consentVersionPending, true);
+  // Another commit offered as G.
+  assert.deepEqual(failed(run(h, { record: 'G', candidate: h.anchor, anchorG: g }).checks).sort(), ['candidate.G-is-the-gate-over-A', 'candidate.is-anchor-G']);
+  // A G that changes one path more than the gate.
+  const wider = gatedSuccessor(h, { 'firestore.rules': withWsf(GOARRIVE_RULES) + '\n' });
+  assert.ok(failed(run(h, { record: 'G', candidate: wider, anchorG: wider }).checks).includes('candidate.G-is-the-gate-over-A'));
+  // A G that does not descend from A.
+  git(h.dir, 'checkout', '-q', 'main');
+  const offLine = commit(h.dir, { 'functions-westayfit/src/anon-gate.ts': 'x\n' }, 'not over A');
+  assert.ok(failed(run(h, { record: 'G', candidate: offLine, anchorG: offLine }).checks).includes('candidate.G-is-the-gate-over-A'));
+  // G's exact tree on A's parent: the same four-path diff, but not over A.
+  const sibling = git(h.dir, 'commit-tree', `${g}^{tree}`, '-p', h.root, '-m', 'the gate, not over A');
+  assert.deepEqual(git(h.dir, 'diff', '--name-only', h.anchor, sibling).split('\n').filter(Boolean).sort(), [...CANDIDATE_G_DELTA_PATHS].sort());
+  assert.deepEqual(failed(run(h, { record: 'G', candidate: sibling, anchorG: sibling }).checks), ['candidate.G-is-the-gate-over-A']);
+  // G is not A, and A is not G.
+  assert.ok(failed(run(h, { record: 'A', candidate: g }).checks).includes('candidate.is-anchor-A'));
+});
+
+test('record G: the CLI compares with the reviewed e65bfee9, which a synthetic clone lacks', () => {
+  const h = history();
+  const wt = worktreeAt(h, h.anchor);
+  const r = cli(['--repo', h.dir, '--config', path.join(wt, 'firebase.westayfit.production.json'), '--record', 'G', '--main', h.main, '--candidate', h.anchor], { anchor: h.anchor, cwd: wt });
+  assert.equal(r.code, 2);
+  assert.equal(r.verdict.usage, `gated anchor ${ANCHOR_G} is not a commit in this clone (fetch it first; this guard never fetches)`);
+});
+
+// ── non-blocking hardening (W3 #396 6078906904) ─────────────────────────────
+
+test('command: --only names exactly one target, never two and never one twice', () => {
+  for (const bad of [
+    REVIEWED.replace('functions:westayfit', 'functions:westayfit,firestore:rules'),
+    REVIEWED.replace('functions:westayfit', 'firestore:rules,functions:westayfit'),
+    REVIEWED.replace('functions:westayfit', 'functions:westayfit,functions:westayfit'),
+  ]) {
+    const r = checkCommand(bad);
+    assert.deepEqual(failed(r), ['command.reviewed-shape'], bad);
+    assert.match(r[0].detail, /exactly one target/, bad);
+  }
+});
+
+test('env file: WSF_AUTH_ACTION_HANDLER, when set, must be the production default handler', () => {
+  assert.deepEqual(failed(checkEnvFile(`${GOOD_ENV}WSF_AUTH_ACTION_HANDLER=${PRODUCTION_ACTION_HANDLER}\n`)), []);
+  for (const v of ['', 'https://evil.example.invalid/__/auth/action', 'https://westayfit-staging.firebaseapp.com/__/auth/action']) {
+    assert.deepEqual(failed(checkEnvFile(`${GOOD_ENV}WSF_AUTH_ACTION_HANDLER=${v}\n`)), ['worktree.env-file'], v);
+  }
+});
+
+test('worktree: a gitignored stray env file is refused; the install and build output are not', () => {
+  const h = history();
+  const wt = worktreeAt(h, h.anchor, `${GOOD_ENV}# ignored-check\n`);
+  write(wt, { 'functions-westayfit/node_modules/pkg/index.js': '//\n', 'functions-westayfit/lib/index.js': '//\n' });
+  assert.deepEqual(failed(run(h, { worktree: wt }).checks), []);
+  write(wt, { 'functions-westayfit/.env': 'WSF_AUTH_ACTION_HANDLER=https://evil.example.invalid/\n' });
+  const v = run(h, { worktree: wt });
+  assert.deepEqual(failed(v.checks), ['worktree.clean']);
+  assert.match(v.checks.find((c) => c.id === 'worktree.clean').detail, /!! functions-westayfit\/\.env/);
+});
+
+test('worktree: a deploy must run from the worktree it was checked against', () => {
+  const h = history();
+  const v = run(h, { cwd: h.dir });
+  assert.deepEqual(failed(v.checks), ['worktree.is-cwd']);
+  assert.deepEqual(failed(run(h, { cwd: undefined }).checks), ['worktree.is-cwd']);
+  // The rules deploy is bound the same way.
+  assert.deepEqual(failed(run(h, { command: RULES_CMD, liveRules: GOARRIVE_RULES, cwd: h.dir }).checks), ['worktree.is-cwd']);
+  // Without a deploy command there is nothing to bind.
+  assert.deepEqual(failed(run(h, { command: undefined, cwd: h.dir }).checks), []);
+});
+
+test('rules: `//` inside a quoted string does not hide a match that follows it', () => {
+  // Multi-line, so the braces stay balanced even when the line is cut at the `//`:
+  // only the quote handling can see the match that follows the string.
+  const sneaky = `${WSF_SECTION}    match /wsfX/{id} {\n      allow read: if resource.data.url == "https://x"; match /coaches/{doc} { allow write: if true; }\n    }\n`;
+  assert.deepEqual(failed(checkRules(withWsf(GOARRIVE_RULES, sneaky), GOARRIVE_RULES)), ['rules.wsf-section-wsf-only']);
+  assert.deepEqual(wsfSectionScope(sneaky).bad, ['coaches/{doc}']);
+  // Single quotes are strings too.
+  assert.equal(wsfSectionScope(sneaky.replace('"https://x"', "'https://x'")).ok, false);
+  // An escaped quote does not close the string, so the `//` after it is still inside it.
+  const escaped = `${WSF_SECTION}    match /wsfZ/{id} {\n      allow read: if resource.data.s == "a\\"// "; match /coaches/{doc} { allow write: if true; }\n    }\n`;
+  assert.equal(wsfSectionScope(escaped).ok, false);
+  // A real comment after a string still is one.
+  assert.equal(wsfSectionScope(`${WSF_SECTION}    match /wsfY/{id} {\n      allow read: if resource.data.s == 'a'; // match /coaches/{doc}\n    }\n`).ok, true);
+});
+
+test('verdict: the rules hashes are reported for the runbook to compare', () => {
+  const h = history();
+  const v = run(h, { command: RULES_CMD, liveRules: GOARRIVE_RULES });
+  const sha = (t) => createHash('sha256').update(t).digest('hex');
+  assert.equal(v.rulesHashes.candidate.sha256, sha(withWsf(GOARRIVE_RULES)));
+  assert.equal(v.rulesHashes.candidate.outsideWsfSha256, sha(GOARRIVE_RULES));
+  assert.equal(v.rulesHashes.main.sha256, sha(GOARRIVE_RULES));
+  assert.equal(v.rulesHashes.live.outsideWsfSha256, sha(GOARRIVE_RULES));
+  assert.equal(v.rulesHashes.candidate.lines, withWsf(GOARRIVE_RULES).split('\n').length - 1);
+});
+
+test('cli: a malformed file or a git failure still prints a verdict (exit 2), never a crash', () => {
+  const h = history();
+  git(h.dir, 'checkout', '-q', '-b', 'bad-json', h.anchor);
+  const bad = commit(h.dir, { 'firestore.indexes.json': '{ not json' }, 'bad indexes');
+  const wt = worktreeAt(h, bad);
+  const r = cli(['--repo', h.dir, '--config', path.join(wt, 'firebase.westayfit.production.json'), '--record', 'A', '--main', h.main, '--candidate', bad], { anchor: h.anchor, cwd: wt });
+  assert.equal(r.code, 2);
+  assert.equal(r.verdict.ok, false);
+  assert.match(r.verdict.usage, /^unusable input: /);
+});
+
 test('purity: the guard has no network, no file writes, and runs no command but git', () => {
   const src = fs.readFileSync(SCRIPT, 'utf8');
   for (const banned of [/\bfetch\(/, /node:https?\b/, /node:net\b/, /node:dgram\b/, /writeFile/, /appendFile/, /createWriteStream/, /mkdirSync/, /rmSync/, /unlinkSync/]) {
@@ -605,5 +738,7 @@ test('purity: the guard has no network, no file writes, and runs no command but 
   }
   const spawned = [...src.matchAll(/execFileSync\(\s*'([^']+)'/g)].map((m) => m[1]);
   assert.deepEqual([...new Set(spawned)], ['git']);
+  // Every git call is lock-free, so even `git status` writes nothing.
+  for (const m of src.matchAll(/execFileSync\(\s*'git',\s*\[([^\]]*)/g)) assert.match(m[1], /^'--no-optional-locks'/);
   assert.doesNotMatch(src, /(^|[^.\w])(spawn|spawnSync|exec|execSync)\(/m);
 });
