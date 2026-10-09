@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "0e83ea236de6f9ee4e633b2af241fdb14fd9fa1a754916e4aba19bfad28d8ef2",
-  "eventCount": 982,
+  "ledgerHead": "9adf3bb58464229421b419151bb6cda103098a51dcc21b0a0600199fa98827f7",
+  "eventCount": 984,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2961,7 +2961,7 @@
       ],
       "artifact": {
         "subjectSha": "03a8549725c67f5e38cb6c3a9de78c3378dcb2d4",
-        "prHeadSha": "03a8549725c67f5e38cb6c3a9de78c3378dcb2d4",
+        "prHeadSha": "87735995be009ec20844dbdf37e5007253b5f11f",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -3845,7 +3845,9 @@
       "proof": null,
       "served": null,
       "releasedQueueIndex": null,
-      "reviewedBy": [],
+      "reviewedBy": [
+        "W7"
+      ],
       "subjectPaths": [
         ".github/workflows/wsf-control-reconcile.yml",
         "tools/wsf-control/tests/shadow.test.mjs",
@@ -3865,7 +3867,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6079217689
+          "id": 6079667142
         }
       },
       "review": {
@@ -6047,7 +6049,8 @@
       "ack": {
         "kind": "comment",
         "id": 6079510595
-      }
+      },
+      "superseded": true
     },
     "9c107c6d3441f25f33aaa7ef8c44c4afd0517377353c5a01723e3a2cf6050a37": {
       "packet": "LOVABLE-DEVICE-QA-1",
