@@ -18,11 +18,13 @@
  * the inputs themselves were unusable.
  *
  * WHAT IT REFUSES, AND WHY (the inventory is #599 at 80b603c7):
- *   - A candidate that is operational main, or that is not the reviewed
- *     development anchor ec162d17 (A) or a descendant of it (B). Main has ONE
- *     WSF export, so a functions:westayfit deploy from it would prune every
- *     other `westayfit` function. The anchor is fixed here; the CLI cannot
- *     replace it.
+ *   - A candidate that is operational main, or that is not its record's
+ *     reviewed commit: exactly ec162d17 (A); exactly e65bfee9 (G, the
+ *     ANON-GATE-1 merge #601), which must descend from A and change exactly
+ *     its four paths; or a descendant of A that changes only consent values
+ *     (B). Main has ONE WSF export, so a functions:westayfit deploy from it
+ *     would prune every other `westayfit` function. The anchors are fixed
+ *     here; the CLI cannot replace them.
  *   - A candidate or main missing a file the checks read: refused as a check,
  *     so the verdict always prints.
  *   - An export list different from the candidate's reviewed manifest (59
@@ -42,14 +44,19 @@
  *     main's reviewed file (its predeploy runs with the operator's
  *     credentials).
  *   - A deploy worktree whose HEAD is not the candidate, or that holds any
- *     change beyond the production config and the functions env file; and an
- *     env file that does not set WSF_APP_URL to https://app.westay.fit and a
- *     westay.fit sender.
+ *     change beyond the production config and the functions env file, ignored
+ *     files included (only functions-westayfit/node_modules/ and lib/ may
+ *     exist unreviewed); a deploy that would not run from that worktree; and
+ *     an env file that does not set WSF_APP_URL to https://app.westay.fit and
+ *     a westay.fit sender, sets WSF_AUTH_ACTION_HANDLER to anything but the
+ *     production default, or reads differently through firebase-tools' own
+ *     parser.
  *   - A deploy command with --force, any Hosting or Storage target,
  *     `firestore:indexes` (the runbook creates the two WSF indexes with
  *     gcloud), a bare `functions` target, GoArrive's `default` codebase, a
- *     missing --only, firebase.json, any project other than goarrive, or any
- *     flag given twice (firebase-tools keeps the last one). --non-interactive
+ *     missing --only, more than one --only target, firebase.json, any project
+ *     other than goarrive, or any flag given twice (firebase-tools keeps the
+ *     last one). --non-interactive
  *     is required, with ONE named exception: `--interactive-reason
  *     minimum-bill` checks the reviewed interactive functions command the
  *     runbook uses when the non-interactive one stopped on the minimum-bill
@@ -380,9 +387,44 @@ export function checkCommand(command, { interactiveReason } = {}) {
 }
 
 /**
+ * firebase-tools 15.30.1's own dotenv parser (lib/functions/env.js:49-61 and
+ * 83-110), copied verbatim apart from a fresh regex per call. It lets a quoted
+ * value run across lines and processes escapes in double quotes, so the
+ * pre-flight compares what firebase-tools will upload, not only its own
+ * line-by-line reading of the file (W9 handback 2 review).
+ */
+const FT_ESCAPES = { '\\n': '\n', '\\r': '\r', '\\t': '\t', '\\v': '\v', '\\\\': '\\', "\\'": "'", '\\"': '"' };
+export function firebaseToolsEnvParse(data) {
+  const lineRe = new RegExp('^' + '\\s*' + '(?:export)?' + '\\s*' + '([\\w./]+)' + '\\s*=[\\f\\t\\v]*' + '(' + "\\s*'(?:\\\\'|[^'])*'|" + '\\s*"(?:\\\\"|[^"])*"|' + '[^#\\r\\n]*' + ')?' + '\\s*' + '(?:#[^\\n]*)?' + '$', 'gms');
+  const envs = {};
+  const errors = [];
+  data = data.replace(/\r\n?/, '\n');
+  let match;
+  while ((match = lineRe.exec(data))) {
+    let [, k, v] = match;
+    v = (v || '').trim();
+    const quotesMatch = /^(["'])(.*)\1$/ms.exec(v);
+    if (quotesMatch != null) {
+      v = quotesMatch[2];
+      if (quotesMatch[1] === '"') v = v.replace(/\\[nrtv\\'"]/g, (m) => FT_ESCAPES[m]);
+    }
+    envs[k] = v;
+  }
+  for (let line of data.replace(lineRe, '').split(/[\r\n]+/)) {
+    line = line.trim();
+    if (line.startsWith('#')) continue;
+    if (line.length) errors.push(line);
+  }
+  return { envs, errors };
+}
+
+/**
  * The functions env file the deploy will upload. firebase-tools replaces a
- * function's whole env with it, so both values must be present. Reports key
- * names only, never a value except the public app URL.
+ * function's whole env with it, so both values must be present. One plain
+ * KEY=value per line, each key once, and the file must read exactly the same
+ * through firebase-tools' own parser: a multi-line or escaped value could
+ * otherwise carry a foreign WSF_AUTH_ACTION_HANDLER past the pins below.
+ * Reports key names only, never a value except the public app URL.
  */
 export function checkEnvFile(text) {
   const env = {};
@@ -395,11 +437,16 @@ export function checkEnvFile(text) {
       bad.push('a line that is not KEY=value');
       continue;
     }
+    if (m[1] in env) bad.push(`${m[1]} is set more than once`);
     let v = m[2].trim();
     const q = /^(["'])(.*)\1$/.exec(v);
     if (q) v = q[2];
+    else if (/^["']/.test(v)) bad.push(`${m[1]} opens a quote it does not close on the same line`);
     env[m[1]] = v;
   }
+  const ft = firebaseToolsEnvParse(String(text ?? ''));
+  const sameRead = ft.errors.length === 0 && JSON.stringify(Object.entries(ft.envs).sort()) === JSON.stringify(Object.entries(env).sort());
+  if (!sameRead) bad.push('firebase-tools 15.30.1 reads this file differently (a multi-line, escaped or commented value): write one plain KEY=value per line');
   const keys = Object.keys(env);
   const allowed = new Set(['WSF_EMAIL_FROM', 'WSF_APP_URL', 'WSF_AUTH_ACTION_HANDLER']);
   const extra = keys.filter((k) => !allowed.has(k));

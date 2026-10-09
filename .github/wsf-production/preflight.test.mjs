@@ -30,6 +30,7 @@ import {
   checkConfig,
   checkConsent,
   checkEnvFile,
+  firebaseToolsEnvParse,
   checkExports,
   checkIndexes,
   checkRules,
@@ -670,6 +671,35 @@ test('env file: WSF_AUTH_ACTION_HANDLER, when set, must be the production defaul
   for (const v of ['', 'https://evil.example.invalid/__/auth/action', 'https://westayfit-staging.firebaseapp.com/__/auth/action']) {
     assert.deepEqual(failed(checkEnvFile(`${GOOD_ENV}WSF_AUTH_ACTION_HANDLER=${v}\n`)), ['worktree.env-file'], v);
   }
+});
+
+test('env file: a value firebase-tools would read differently is refused (multi-line, escaped, repeated, exported)', () => {
+  const H = PRODUCTION_ACTION_HANDLER;
+  // The independent review's payload: our line reader would see the reviewed
+  // handler, firebase-tools a quoted value that runs across lines to a foreign host.
+  for (const q of ["'", '"']) {
+    const smuggled = `${GOOD_ENV}WSF_AUTH_ACTION_HANDLER=${q}https://evil.example.invalid/__/auth/action\nWSF_AUTH_ACTION_HANDLER=${H}\n#${q}\n`;
+    assert.match(firebaseToolsEnvParse(smuggled).envs.WSF_AUTH_ACTION_HANDLER, /evil\.example\.invalid/, q);
+    const [c] = checkEnvFile(smuggled);
+    assert.equal(c.ok, false, q);
+    assert.match(c.detail, /does not close on the same line/, q);
+    assert.doesNotMatch(c.detail, /evil|goarrive\.firebaseapp/, q);
+  }
+  // Each refusal on its own.
+  const refusedFor = {
+    'an escape firebase-tools expands': 'WSF_EMAIL_FROM="Synthetic\\n<synthetic@westay.fit>"\nWSF_APP_URL=https://app.westay.fit\n',
+    'a trailing comment firebase-tools drops': `${GOOD_ENV}WSF_AUTH_ACTION_HANDLER=${H} # note\n`,
+    'a key set twice': `${GOOD_ENV}WSF_APP_URL=https://app.westay.fit\n`,
+    'an export prefix': `${GOOD_ENV}export WSF_AUTH_ACTION_HANDLER=${H}\n`,
+  };
+  for (const [why, text] of Object.entries(refusedFor)) assert.deepEqual(failed(checkEnvFile(text)), ['worktree.env-file'], why);
+  assert.match(checkEnvFile(refusedFor['an escape firebase-tools expands'])[0].detail, /reads this file differently/);
+  assert.match(checkEnvFile(refusedFor['a key set twice'])[0].detail, /set more than once/);
+  // The reviewed form reads the same both ways, quoted or not.
+  for (const ok of [GOOD_ENV, `# synthetic\n${GOOD_ENV}`, GOOD_ENV.replace(/\n/g, '\r\n'), 'WSF_EMAIL_FROM=Synthetic Sender <synthetic@westay.fit>\nWSF_APP_URL=https://app.westay.fit\n', `${GOOD_ENV}WSF_AUTH_ACTION_HANDLER='${H}'\n`]) {
+    assert.deepEqual(failed(checkEnvFile(ok)), [], ok);
+  }
+  assert.deepEqual(firebaseToolsEnvParse(GOOD_ENV), { envs: { WSF_EMAIL_FROM: 'Synthetic Sender <synthetic@westay.fit>', WSF_APP_URL: 'https://app.westay.fit' }, errors: [] });
 });
 
 test('worktree: a gitignored stray env file is refused; the install and build output are not', () => {

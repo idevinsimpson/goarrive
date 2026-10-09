@@ -33,7 +33,7 @@
 | Owner's option (#365) | Record | Candidate SHA | What it is |
 |---|---|---|---|
 | **A:** launch now, the gate as a fast-follow packet | `A` | `ec162d17a0540e936741027f9b8f90dd372cfaf4` | the launch backend, **ungated**: an anonymous token can save a profile and join (see "Security review item") |
-| **B:** launch gated | `G` | `e65bfee9eecb2370f602d09880da604709fba58a` | A plus ANON-GATE-1 (#601): exactly four paths over A, and an anonymous token is refused at every signed-in callable |
+| **B:** launch gated | `G` | `e65bfee9eecb2370f602d09880da604709fba58a` | A plus ANON-GATE-1 (#601): exactly four paths over A, and an anonymous token is refused at all 42 signed-in callables (`wsfHealth`, which reads and writes nothing, is the one exemption) |
 
 - **The operator types the record and the SHA from L0's acceptance line, never from this table.** The table only shows what each record admits. The pre-flight refuses any SHA that is not its record's anchor.
 - **"Record B" is not the owner's option B.** Record B is the legal-consent record ("Candidate records", below), and it is off the launch path.
@@ -88,7 +88,7 @@
 | Status | the owner's **option A** | the owner's **option B** | **off the launch path:** a future record |
 | What deploys | backend only: `functions:westayfit` (59 exports), the WSF Firestore rules section, the 2 WSF composite indexes. 17 exports *declare* `invoker: 'public'` in source. That declaration is inert for `onCall`: all 59 receive `allUsers` when created. | the same 59 exports, the same 17 inert declarations, and a `firestore.rules` and `firestore.indexes.json` byte-equal to A's | the same; B changes no export, rule or index |
 | Anonymous tokens | admitted wherever a token is enough ("Security review item") | refused at all 42 signed-in callables with `failed-precondition` / "Sign in with an email account."; treated as signed out at the 4 optional-uid sites | as A |
-| Consent | `pending-approval-2026-08-25` in `functions-westayfit/src/index.ts:124-125` and `apps/westayfit/src/profileConstants.ts:1-2`. The owner decided to launch on it. The pre-flight reports `consentVersionPending: true`. | the same as A | the approved version, equal in both files. The pre-flight refuses a pending, blank or placeholder version. |
+| Consent | `pending-approval-2026-08-25` in `functions-westayfit/src/index.ts:124-125` and `apps/westayfit/src/profileConstants.ts:1-2`. The owner decided to launch on it. The pre-flight reports `consentVersionPending: true`. | the same version as A, at `functions-westayfit/src/index.ts:126-127` and `apps/westayfit/src/profileConstants.ts:1-2` (`consentVersionPending: true`) | the approved version, equal in both files. The pre-flight refuses a pending, blank or placeholder version. |
 | Sign-up | opens on the owner's go after the step-9 receipt (the Lovable flag). Every profile then records consent to the pending version, an owner-accepted risk. `wsfSaveProfile` is already served today from the older source. | the same as A | after legal review (PR #598) and L0's acceptance of B's exact SHA |
 | Allowed diff from A | — | **exactly** `docs/westayfit/ops/security/ANON-GATE-1.md`, `functions-westayfit/src/anon-gate.ts`, `functions-westayfit/src/index.ts` and `functions-westayfit/tests/callable/wsf-anon-gate.test.ts` | the consent values in `index.ts` and `profileConstants.ts` (everything else byte-equal); `apps/westayfit/src/legalContent.ts`, `apps/westayfit/legal/terms.md` and `privacy.md`; and test files under `functions-westayfit/tests/` and `apps/westayfit/tests-e2e/` that change by the version string only |
 | Pre-flight | `--record A` | `--record G` | `--record B` |
@@ -151,7 +151,7 @@ Run these from `~/wsf-prod`. Paste each answer on #365. "Gates" says which step 
 | **B8** Storage rules | Rules API release `projects/goarrive/releases/firebase.storage/goarrive.firebasestorage.app`, or Console › Storage › Rules | any. Recorded only. | **No.** No WSF step touches Storage. |
 | **B9** Hosting and DNS | `firebase hosting:sites:list --project goarrive`, then `for N in westay.fit app.westay.fit; do echo "== $N"; dig +short NS "$N"; dig +short CNAME "$N"; dig +short A "$N"; done` | any. Recorded only. | **No.** There is no Hosting step, and Lovable serves `app.westay.fit`. |
 | **B11** cleanup policy | `gcloud artifacts repositories describe gcf-artifacts --location=us-central1 --project=goarrive --format="yaml(cleanupPolicies,labels)"` | any cleanup policy, or the `firebase-functions-cleanup-opted-out` label | **Yes, step 6.** If neither is present, step 5.5 is an owner decision before step 6. |
-| **B12** memberships the new rules would exclude | `wsf_memberships` (0.4); it prints counts only | `not active or no status: 0` | **Yes, step 7.** The candidate's `wsfIsGroupMember` reads only rows with `membershipStatus == 'active'`. A non-zero count is that many live memberships whose holders would lose their direct reads of their group's documents. **Stop and escalate before step 2.** Rows the candidate writes always carry `'active'` (`index.ts:276`, `:908`). |
+| **B12** memberships the new rules would exclude | `wsf_memberships` (0.4); it prints counts only | `not active or no status: 0` | **Yes: it gates step 7, and it is settled before step 2.** The candidate's `wsfIsGroupMember` reads only rows with `membershipStatus == 'active'`. A non-zero count is that many live memberships whose holders would lose their direct reads of their group's documents, so **stop and escalate before step 2**, while nothing has landed. Rows either candidate writes always carry `'active'` (`index.ts:276` and `:908` at `ec162d17`; `:280` and `:913` at `e65bfee9`). |
 
 ### 0.4 Captures
 
@@ -313,6 +313,7 @@ ENV
 - **Quote the sender.** It has spaces and angle brackets. Quoted and unquoted forms both parse, and quoting avoids surprises.
 - **Never put a key here, and write no other env file.** `firebase-tools` loads `functions-westayfit/.env` before `.env.goarrive`. The pre-flight refuses any such file, ignored or not, and any key but the reviewed ones. It checks `WSF_APP_URL` and the `westay.fit` sender without printing a value.
 - **`WSF_AUTH_ACTION_HANDLER`:** leave it unset. The callables then use `https://goarrive.firebaseapp.com/__/auth/action` (#599 2.3). If it is set at all, the pre-flight accepts only that exact value, because the action links go to it.
+- **One plain `KEY=value` per line,** as above: no key twice, no `export`, no trailing comment, and no quote left open across lines. The pre-flight also reads the file with `firebase-tools` 15.30.1's own parser and refuses it unless both readings agree, so no multi-line or escaped value can carry a different handler or URL past it.
 
 ## Step 4: Auth (already done; nothing changes in this run)
 
@@ -565,10 +566,11 @@ L0 records this as the DEPLOYMENT RECEIPT. It is not acceptance, and it is not a
   - a `wsf*` set other than the 17;
   - a ruleset that changed between step 0 and step 7;
   - a B12 count other than 0.
-- Any CLI prompt or message that mentions deletion, the minimum bill, a cleanup policy or `--force`. There are three exceptions:
+- Any CLI prompt or message that mentions deletion, the minimum bill, a cleanup policy or `--force`, except the four this runbook names and reads:
   - the named single-function delete in step 5;
   - step 5.5's opt-out prompt, by the owner's decision;
-  - the reviewed S2 interactive form in step 6, and only its `wsfCheckIn` minimum-bill question.
+  - step 6's non-interactive minimum-bill abort, when `Pass the --force option to deploy functions that increase the minimum bill` is its only error. It leads only to S2's interactive form, and that form's one `wsfCheckIn` minimum-bill question;
+  - step 6's cleanup-policy exit (`Functions successfully deployed but could not set up cleanup policy … Pass the --force option …`), only when the owner declined step 5.5 and no per-function line above it says `Failed`. Read it as step 6 says, then continue to step 7.
 - A `set invoker` failure, a `Failed` per-function line, or a `MISSING` invoker in step 8.
 - Any GoArrive function, revision, service IAM, index, rule or hosting release changing.
 - A missing permission. Never widen IAM mid-run to make a step pass; escalate.
@@ -622,7 +624,7 @@ Each change also updates the Twin's own test that asserts both checked-in switch
 
 **What the Twin needs before step 1.** It all comes from the step-9 receipt:
 - **The callable names, with their new revisions and update times:** all 59, from the receipt's `wsf-functions-after.txt` and `wsf-run-after.txt`. That includes the 11 Phase-1 journey callables: `wsfSendVerificationEmail`, `wsfSaveProfile`, `wsfPreviewCommunity`, `wsfJoinCommunity`, `wsfMyCommunities`, `wsfListGoals`, `wsfContribute`, `wsfMyContribution`, `wsfGoalPulse`, `wsfGoalRecentAdditions` and `wsfSendPasswordResetEmail`.
-- **The record and SHA deployed**, A or G, because under G an anonymous session gets "Sign in with an email account." from every signed-in callable.
+- **The record and SHA deployed**, A or G, because under G an anonymous session gets "Sign in with an email account." from all 42 signed-in callables.
 - **The Firestore rules release name.**
 - **Both WSF indexes READY.**
 - **An authorized-domain readback showing `app.westay.fit`.**
