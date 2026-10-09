@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "8d814d810445f9b682da6f5bc4d75439dff559b361ae9a4e51e46b05a12a46ea",
-  "eventCount": 1022,
+  "ledgerHead": "64b6f15a33192f4d36e2f47690fe240a5c433391b51bf4283ea2784194438833",
+  "eventCount": 1024,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2197,7 +2197,7 @@
       },
       "label": "Revoke ends/requeues that station's assigned/ready/active line entry (seen via wsfMyTurn/wsfTurnState); wsfJoinTurnLine refuses an already-recorded member (one-contribution reason); tests; doc note",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -2211,7 +2211,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         "functions-westayfit/src/index.ts",
@@ -2233,7 +2233,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6082013157
+          "id": 6082315169
         }
       },
       "review": {
@@ -6202,11 +6202,14 @@
       "packet": "KIOSK-TURN-LIFECYCLE-1",
       "worker": "W9",
       "reason": "release",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6082182898
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6082315169
+      }
     }
   },
   "fastpath": {
