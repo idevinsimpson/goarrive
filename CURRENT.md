@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=e466597b41831c6ba7069fc3c03bb5ab52fce0c4129cbe4761e9ba643dd264ef events=940 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=f3f1a1838c24a5570263c710499843f838bebd95fe0f02ba2e561c4cac4b752a events=944 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `e466597b41831c6ba7069fc3c03bb5ab52fce0c4129cbe4761e9ba643dd264ef` (940 events)
+- Ledger head: `f3f1a1838c24a5570263c710499843f838bebd95fe0f02ba2e561c4cac4b752a` (944 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -29,17 +29,17 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 
 | Worker | Inbox | Active now | Reviewing | Waiting on review | Blocked | Next | Queue | WATCH |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| W3 | #396 | — | PRODUCTION-DEPLOY-PATH-1 | EXPO-FULL-STAGING-RECOVERY-4, WORKER-EXECUTION-PROFILES-1 | NORTHSTAR-MIRROR-INTAKE-1 | — | — | on |
-| W4 | #394 | — | — | — | — | — | — | off |
+| W3 | #396 | — | PRODUCTION-DEPLOY-PATH-1 | WORKER-EXECUTION-PROFILES-1 | NORTHSTAR-MIRROR-INTAKE-1 | — | — | on |
+| W4 | #394 | — | ANON-GATE-1 | — | — | — | — | on |
 | W5 | #395 | — | — | — | — | — | — | off |
 | W7 | #434 | — | — | — | — | — | — | off |
-| W9 | #497 | ANON-GATE-1 | — | PRODUCTION-DEPLOY-PATH-1 | EVENT-LIFECYCLE-BACKEND-RECOVERY-1, MEMBER-TRUTH-BACKEND-1 | — | — | on |
+| W9 | #497 | — | — | ANON-GATE-1, PRODUCTION-DEPLOY-PATH-1 | EVENT-LIFECYCLE-BACKEND-RECOVERY-1, MEMBER-TRUTH-BACKEND-1 | — | — | off |
 
 ## Packets
 
 | Packet | Owner | Kind | Completes at | Origin | Phase | PR | Subject | PR head | Evidence | Merge | Proof | Reviewers | Released by | Last transition | Blocked by | Label | Review policy | Pending finding |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| ANON-GATE-1 | W9 | work | INTEGRATED (source-only) | ledger | ACKED | — | — | — | — | — | — | — | comment:6077733181 | comment:6077926364 | — | Refuse anonymous-provider Firebase tokens at every WSF callable auth site (requireRealIdentity + optionalRealUid), with refusal tests; the release gate named in the production forensics | 1×ops-source then director | — |
+| ANON-GATE-1 | W9 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #601 | 118c2af9 | 118c2af9 | — | — | — | W4 | comment:6077733181 | comment:6078167242 | — | Refuse anonymous-provider Firebase tokens at every WSF callable auth site (requireRealIdentity + optionalRealUid), with refusal tests; the release gate named in the production forensics | 1×ops-source then director | — |
 | AUTONOMY-ROUTER-1C | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #544 | 37c49bbd | 37c49bbd | — | 5f7b63c9 | — | W4 | comment:5882824399 | pull_request:544 | — | Serial step 6: state-derived routing, wakes, and real-event proof | 1×ops-source then director | — |
 | AUTONOMY-ROUTER-1C-INTEGRATE | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #545 | fd697e0f | fd697e0f | — | 8ba39e19 | — | W4 | comment:5929164484 | pull_request:545 | — | Step 6 correction: derive integrate from ACCEPTED plus merged PR with same-cycle or successor reconcile and idempotency proof | 1×ops-source then director | — |
 | AUTONOMY-STATE-1B | W3 | work | INTEGRATED (source-only) | bootstrap | INTEGRATED | #538 | 073b7946 | 073b7946 | — | d42a3307 | — | — | comment:5857966052 | comment:5857966052 | — | Serial step 5: authoritative control state, App writer, bootstrap and shadow reconcile | 1×ops-source then director | — |
@@ -58,7 +58,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | EXPO-ATTENDEE-JOURNEY-PROOF-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #563 | 12e70c5a | 12e70c5a | — | 0669c446 | — | W4 | comment:5963015704 | pull_request:563 | — | Prove the existing attendee phone and two-station journey and expose only real missing seams; test and evidence source, not live expo acceptance | 1×journey-qa then director | — |
 | EXPO-CLOSED-GOAL-QUEUE-GATE-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #571 | 3a3ddb55 | 3a3ddb55 | — | 0d3598d4 | — | W4 | comment:5967515210 | pull_request:571 | — | Close GAP-2 by refusing queue and turn admission after a goal closes without changing the existing expo systems | 1×journey-qa then director | — |
 | EXPO-FULL-STAGING-RECOVERY-3 | W3 | work | INTEGRATED (source-only) | ledger | WITHDRAWN | — | — | — | — | — | — | — | comment:6075043474 | comment:6076522602 | — | Pin the latest accepted development head through the reviewed full staging path with the operational marker rewrite, verified approval ancestry, registered unverified driver and synthetic fixtures | 1×ops-source then director | — |
-| EXPO-FULL-STAGING-RECOVERY-4 | W3 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #597 | 55ff46bd | 55ff46bd | — | — | — | W4 | comment:6076523104 | comment:6078118205 | — | Pin ec162d17 through the reviewed full staging path: RECOVERY-3 scope plus the three reservation-gap paths (verify-deployment 49->59 cases, Home manifest and home-journey retarget) | 1×ops-source then director | — |
+| EXPO-FULL-STAGING-RECOVERY-4 | W3 | work | INTEGRATED (source-only) | ledger | ACCEPTED | #597 | 55ff46bd | 55ff46bd | — | — | — | W4 | comment:6076523104 | comment:6078295700 | — | Pin ec162d17 through the reviewed full staging path: RECOVERY-3 scope plus the three reservation-gap paths (verify-deployment 49->59 cases, Home manifest and home-journey retarget) | 1×ops-source then director | — |
 | EXPO-LATEST-FULL-STAGING-PIN-1 | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #573 | a0bb252a | a0bb252a | — | 65b8b798 | — | W4 | comment:5970558946 | pull_request:573 | — | Pin the latest accepted expo candidate and activate the fixed closed-goal hosted journey through the existing full staging path | 1×ops-source then director | — |
 | EXPO-MOVEMENT-VIDEO-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #575 | 526cea95 | 526cea95 | — | 0745c732 | — | W4 | comment:5971282758 | pull_request:575 | — | Loop approved demo media in the existing shared player with truthful fallback and no contribution side effects | 1×journey-qa then director | — |
 | EXPO-PRIZE-WIRING-1 | W9 | work | INTEGRATED (source-only) | ledger | WITHDRAWN | — | — | — | — | — | — | — | — | comment:6075293113 | — | Wire the accepted expo prize-drawing core into the central function index with operator-only enable, status and receipt callables and the contribution trigger, nothing enabled by default | 1×ops-source+1×security then director | — |
@@ -242,4 +242,5 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | 1868e30865e5 | W4 | EXPO-FULL-STAGING-RECOVERY-4 | review | acked | 6077681002 | comment:6077765445 |
 | f9e0a83b767e | W3 | PRODUCTION-DEPLOY-PATH-1 | review | acked | 6077681219, 6078019028 | comment:6078077972 |
 | 65dfcb5bfddb | W9 | ANON-GATE-1 | release | acked | 6077850130 | comment:6077926364 |
+| f4339d1e8c33 | W4 | ANON-GATE-1 | review | requested | — | — |
 

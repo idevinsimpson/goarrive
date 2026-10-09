@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "e466597b41831c6ba7069fc3c03bb5ab52fce0c4129cbe4761e9ba643dd264ef",
-  "eventCount": 940,
+  "ledgerHead": "f3f1a1838c24a5570263c710499843f838bebd95fe0f02ba2e561c4cac4b752a",
+  "eventCount": 944,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -77,15 +77,17 @@
       },
       "label": "Refuse anonymous-provider Firebase tokens at every WSF callable auth site (requireRealIdentity + optionalRealUid), with refusal tests; the release gate named in the production forensics",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
-      "pr": null,
-      "reviewers": [],
+      "pr": 601,
+      "reviewers": [
+        "W4"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "118c2af99ce8bffd62243fe00f64531f620c3afd",
+        "prHeadSha": "118c2af99ce8bffd62243fe00f64531f620c3afd",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -114,7 +116,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6077926364
+          "id": 6078167242
         }
       },
       "review": {
@@ -127,7 +129,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "AUTONOMY-ROUTER-1C": {
@@ -1368,7 +1370,7 @@
       },
       "label": "Pin ec162d17 through the reviewed full staging path: RECOVERY-3 scope plus the three reservation-gap paths (verify-deployment 49->59 cases, Home manifest and home-journey retarget)",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "ACCEPTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -1414,10 +1416,13 @@
           "kind": "comment",
           "id": 6076523104
         },
-        "accepted": null,
+        "accepted": {
+          "kind": "comment",
+          "id": 6078295700
+        },
         "lastTransition": {
           "kind": "comment",
-          "id": 6078118205
+          "id": 6078295700
         }
       },
       "review": {
@@ -5664,7 +5669,16 @@
       "ack": {
         "kind": "comment",
         "id": 6077926364
-      }
+      },
+      "superseded": true
+    },
+    "f4339d1e8c3326be5b745c1b860832508439da9ace95e9f3abe761a7956b4311": {
+      "packet": "ANON-GATE-1",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
