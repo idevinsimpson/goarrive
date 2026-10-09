@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "9980faa9a512d9644ee99971163945434018dd962aac0cc6c29ff78e4fe4fbb1",
-  "eventCount": 848,
+  "ledgerHead": "ac0c01deb744404e819fddb14c24ed334be4412572a78b98db9617b3b8907f7b",
+  "eventCount": 856,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -29,7 +29,7 @@
     "rollbackSha": "a31276516e786ac8f848269de4c839b3b9e13123",
     "pinPr": 522
   },
-  "criticalPath": null,
+  "criticalPath": "PRODUCTION-FIREBASE-INVENTORY-1",
   "workers": {
     "W3": {
       "inbox": 396,
@@ -1930,7 +1930,7 @@
       },
       "label": "Finish the blocked staging pin with verified approval ancestry and tracked unverified synthetic fixtures",
       "origin": "ledger",
-      "phase": "BLOCKED",
+      "phase": "WITHDRAWN",
       "phaseBeforeBlock": "ACKED",
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -1983,7 +1983,73 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6065521680
+          "id": 6074820448
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
+      "pendingFinding": null
+    },
+    "KIOSK-UNVERIFIED-STAGING-RECOVERY-2": {
+      "owner": "W3",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Finish the consented staging pin with verified approval ancestry, the registered unverified hosted driver and tracked synthetic fixtures",
+      "origin": "ledger",
+      "phase": "RELEASED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": 396,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": 0,
+      "reviewedBy": [],
+      "subjectPaths": [
+        ".github/wsf-staging/approved-candidate.json",
+        ".github/wsf-staging/journeys/manifest.json",
+        ".github/wsf-staging/journeys/expo-attendee.mjs",
+        ".github/wsf-staging/tests/changed-journey-drivers.test.mjs",
+        ".github/wsf-staging/tests/pin-candidate.test.mjs",
+        "docs/westayfit/qa/kiosk-unverified-participant-staging-pin-1.md",
+        ".github/wsf-staging/pin-candidate.mjs",
+        ".github/wsf-staging/journeys/fixture-kit.mjs",
+        ".github/wsf-staging/tests/hosted-changed-journeys.test.mjs"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6074823456
+        },
+        "released": {
+          "kind": "comment",
+          "id": 6074824513
+        },
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6074824513
         }
       },
       "review": {
@@ -2338,6 +2404,65 @@
         "lastTransition": {
           "kind": "comment",
           "id": 6040736205
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
+      "pendingFinding": null
+    },
+    "PRODUCTION-FIREBASE-INVENTORY-1": {
+      "owner": "W9",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Read-only production Firebase source-vs-deployed inventory, Web Twin activation prerequisites and WSF-only rollout and rollback plan",
+      "origin": "ledger",
+      "phase": "RELEASED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": 497,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": 0,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "docs/westayfit/ops/production/PRODUCTION_FIREBASE_INVENTORY_1.md",
+        "docs/westayfit/ops/production/wsf-production-inventory.v1.json"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6074830303
+        },
+        "released": {
+          "kind": "comment",
+          "id": 6074831300
+        },
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6074831300
         }
       },
       "review": {
@@ -4955,6 +5080,22 @@
         "id": 6064282086
       },
       "superseded": true
+    },
+    "00c0938bdf850e4248dbd1061c38f66055ae5fb4ef49aea45ba4863ac64e613f": {
+      "packet": "KIOSK-UNVERIFIED-STAGING-RECOVERY-2",
+      "worker": "W3",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
+    },
+    "877d34282cd75373be17661e4130f3d52a777fc55bacdca4f7be63bd41e8c576": {
+      "packet": "PRODUCTION-FIREBASE-INVENTORY-1",
+      "worker": "W9",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
