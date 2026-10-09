@@ -384,6 +384,141 @@ in.** The identical boundary is what made this easy to misread.
   wrong: the fix worked and uncovered the next defect. Two different bugs can share a
   boundary.
 
+## Run 61 — `37912780869`, main `df8d4d6`, app `ec162d1` (mode=deploy)
+
+FAILED in the Package E smoke and the changed journeys. **Every failure was a harness
+defect on the #587 contract or on timing; no row in this run shows a product refusal
+that was wrong.** Fixed by STAGING-TURN-DRIVERS-1.
+
+- **Served build:** `PASS correct staging build — health marker ec162d1`.
+- **Smoke:** `RESULTS=24`, `FAILURES=1`. The one failure is
+  `hosted turn-service contract — start the turn: application refusal (INVALID_ARGUMENT)`.
+  This is #587 KIOSK-EXPECTED-TURN-1 working: `wsfStartTurn`, `wsfCompleteTurn` and
+  `wsfCancelTurn` now refuse a command that does not name its turn (`expectedTurn`), and
+  the row's raw callables named none.
+  - **Fix:** the row reads `called.assigned.turnRef`, requires it to match
+    `^tr_[A-Za-z0-9_-]{16,64}$`, and sends it as `expectedTurn` on both the start and the
+    retried record.
+  - **Test:** a structural test in `hosted-smoke-contract.test.mjs` rejects a station
+    command that omits it.
+- **Changed journeys:** `3 passed, 6 failed, 0 blocked`. `event-use-my-phone`,
+  `event-join-line` and `two-station-turns` passed. This was the **first hosted run** of
+  the expo attendee drivers: run 60's main (`b4b479a6`) did not contain them, and the
+  pins between were never served. Cleanup was `COMPLETE`: 242/242
+  documents and 28/28 users. The row-level card is in the run's artifact, which was not
+  read: this environment refused the download. Each cause below is therefore taken from
+  the printed message and the `ec162d17` source, then reproduced on the hermetic model.
+  - **`phone-and-stations-converge` and `station-lost-answer`** — *"the started turn
+    carries no attempt yet"*.
+    - **Where:** that message is `fixture-kit.mjs` `trackStationTurn`, which finds no
+      attempt on the turn entry. No turn had begun.
+    - **Cause:** the drivers tapped I'm ready straight after Call next. A waiting phone
+      learns of its call on its next poll (`TURN_POLL_MS = 3_000`), so the tap often found
+      no button. Start never opened, and the drivers ignored both the `enabled` wait and
+      `startTurn`'s answer.
+    - **Fix:** `sayReady` waits up to 25 s for the phone to show I'm ready. Each step is
+      then required by name: the tap, Start enabled, and the turn begun. A step that does
+      not happen ends the journey naming it.
+  - **`closed-goal-turn`** — *"wsfApproveStation refused: INVALID_ARGUMENT"*.
+    - **Cause:** the driver enrolled four stations on one event. `normalizeStationSlot`
+      admits slot 1 or 2 only.
+    - **Fix:** the journey now runs on two events with two stations each. The manifest
+      entry's setup, actions and expected rows say so.
+    - **Found in review, not by the run:** only a called place lapses, after 45 s, and a
+      ready one never does (`isTurnLeaseLapsed`). Main's order called the member for the
+      `ready` row before a waiter's join, a fifth member's page load and two other
+      refusals, which on hosted could outlast the call.
+    - **Fix:** that member is now called last, just before the closure, and the `ready`
+      row is read first after it.
+    - **Also found in review:** a venue-width station hides its total while a turn runs
+      there (`turnRunningWide`). The `nothing` row read the first event's total from the
+      station running that turn, so it could never hold on hosted.
+    - **Fix:** that total is now read from the event's own display (`/kiosk/{goal}`),
+      which runs no turn. Its pulse cache lives for 2 s.
+  - **`line-place-ends`** — *"an expected assertion did not hold"*, the `noShow` row.
+    - **Cause:** the phone says Your turn timed out for **one poll**. Its next read, 3 s
+      later, finds the place still gone and drops the notice (`app/queue/[goalId].tsx`
+      :178-181, unchanged since `ab77fbfc`).
+    - The driver slept 47 s and then read once, so it passed or failed by chance. A
+      simulation over the real poll timing puts that at about 58% pass.
+    - The emulator proof (#563) never slept: it waits for the sentence.
+    - **Fix:** the 45 seconds are read off the phone's own countdown (`wsf-queue-lease`,
+      which the server computes from the lease on every 1-second poll).
+      - When the call first shows, the countdown must stand at 40 to 45 s.
+      - It is then watched down to its last 3 s with the call still standing.
+      - Only then is the phone watched until it shows the heading and the reason in one
+        read.
+
+      A call that ends early, or one offered for longer, fails the row. Main's single read
+      rejected a short call only by accident and accepted a long one.
+    - The Let them go setup is folded into its row, so a step that does not happen fails
+      that row by name instead of throwing.
+  - **`shared-screen-finish`** — *"an expected assertion did not hold"*.
+    - **Cause:** on the kiosk receipt, own credit is a tile whose label is styled
+      `textTransform: uppercase` (`app/contribute/[goalId].tsx`:2078-2079). `innerText`
+      reads it as `YOUR TOTAL ON THIS GOAL: 20 squats`, so the exact-match reads in
+      `finish` and `next` could not hold.
+    - The emulator's `toHaveText` compares `textContent` and never saw the capitals.
+    - The row's evidence string left the credit text out (main's template was
+      `start ${atStart}; signed-out gate ${gate}`), so even the unread card could not
+      say why `finish` failed. It now prints the credit text it read.
+    - **Fix:** match the words and the figure, not the case, as run 57 taught the Home
+      pill. The leftover-values checks are case-blind too, so a capitalised leftover is
+      still caught.
+    - `countdown` holds: the installed clock keeps flowing in real time, and the
+      20 seconds the failing credit read used to waste no longer eat into the margin.
+  - **`unverified-participant`** failed, as its manifest entry expects. Not touched.
+- **The player journey** did not run in run 61 (its job was skipped).
+  `hosted-player-journey.mjs` was examined against #587 and **needs no change**:
+  - it waits for the ready panel before pressing I'm ready;
+  - it starts the turn through the station's own Start, which sends `expectedTurn` itself
+    at `ec162d17`;
+  - the phone records through `wsfCompleteMyTurn`, which is not a station command.
+- **The hermetic model now behaves as the served build does**, so main's drivers fail on
+  it as they did on hosted, four of the five with run 61's own message:
+  - a phone shows its call 3 s after the station calls;
+  - a station sees I'm ready 2 s after it is pressed;
+  - the no-show notice lasts one poll;
+  - the kiosk tile's label reads in capitals;
+  - station enrolment refuses a slot other than 1 or 2;
+  - a venue-width station hides its total while a turn runs there;
+  - a page with an installed clock keeps it flowing during waits.
+
+  On that model, main's drivers show run 61's own pattern: the same three journeys pass,
+  and five fail:
+  - `converge` (*no attempt yet*);
+  - `lost-answer` (Start still disabled). The model refuses a click on a disabled control
+    at once, so this journey stops before `trackStationTurn` and does not reproduce
+    hosted's *no attempt yet*. How hosted reached that message is not established here;
+  - `closed-goal-turn` (*INVALID_ARGUMENT*);
+  - `line-place-ends` `noShow` (*Join from the event page.*);
+  - `shared-screen-finish` `finish` and `next`.
+
+  The fixed drivers pass all of them, and each seeded defect still fails exactly its named
+  rows.
+  - **Pinned:** six model tests hold those served behaviours in place, so a kinder model
+    cannot quietly prove the drivers.
+  - **New defects:**
+    - `noShowEarly`, where the call lapses at 10 s under a countdown still running and the
+      notice stays. Only the countdown watch catches it.
+    - `noShowShortLease` (36 s) and `noShowLongLease` (50 s), with the real one-poll
+      notice. The countdown bounds catch them.
+    - `noShowHeading` and `noShowReason`, where one of the two is wrong.
+    - `finishKeepsNameCaps`, where the previous name is left in a capitalised label.
+  - **Mutants:** 21 of 22 driver and model mutants are killed. The survivor drops a
+    setup guard whose failure the next step already names. All 5 smoke-row mutants are
+    killed.
+- **A product observation, not changed here and not asserted either way:**
+  - the timed-out notice is gone 3 s after it appears, so a member who looks at their phone
+    later sees You're not in the line with no reason given;
+  - a station's Let them go, on a member whose phone last saw the call but not their I'm
+    ready, shows Your turn timed out for that one poll.
+
+  Both are product questions for the queue screen, outside this packet.
+- **Not established:** the smoke's turn-service row and the five fixed journeys are
+  unproven on hosted staging until a hosted run uses this harness. Everything above about
+  them is hermetic.
+
 ## Still not established by any run — CURRENT
 
 - **The player journey end to end.** Runs 33 and 36 both failed before the queue. What

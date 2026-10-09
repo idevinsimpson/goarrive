@@ -61,11 +61,11 @@ export const EXPO_ROWS = Object.freeze({
   },
   'closed-goal-turn': {
     refused: 'recording the turn started before the closure: Station 1 prints This goal is closed.',
-    nothing: 'nothing is recorded and the shared total does not move',
+    nothing: 'nothing is recorded and neither event\'s shared total moves',
     noReceipt: 'no member\'s phone shows a receipt',
     start: 'Start their turn is refused: Station 2 prints This goal is closed., shows no count to record and still serves the same member',
-    ready: 'I\'m ready is refused: the called member\'s phone prints This goal is closed. and still shows them called to Station 3',
-    call: 'Call next is refused: Station 4 prints This goal is closed. and serves nobody, and the waiting member\'s phone still shows them in the line',
+    ready: 'I\'m ready is refused: the called member\'s phone prints This goal is closed. and still shows them called to the second event\'s Station 1',
+    call: 'Call next is refused: the second event\'s idle Station 2 prints This goal is closed. and serves nobody, and the waiting member\'s phone still shows them in the line',
     join: 'joining is refused: the event page prints This goal is closed., the member does not reach the queue page, and the hall\'s waiting count does not change',
   },
   'shared-screen-finish': {
@@ -91,6 +91,7 @@ const SCREEN = { width: 1280, height: 720 };
 const TABLET = { width: 800, height: 1280 };
 const TURN_CODE = /^[A-HJ-NP-Z2-9]{3}$/;
 const NO_SHOW = 'The screen called you and the 45 seconds ran out, so it moved on. Get back in line and it will call you again.';
+const LEASE_LEFT = /^\d+s to say you’re coming$/;
 const KIOSK_IDLE_MS = 90_000;
 
 // ---- page reads ---------------------------------------------------------------------
@@ -109,6 +110,11 @@ async function isDisabled(page, id) { return (await present(page, id)) && vis(pa
 /** Press a control if the page is showing it; a missing control is reported by the row that needed it, never thrown past. */
 async function tap(page, id) { if (!(await present(page, id))) return false; await vis(page, id).click(); return true; }
 async function type(page, id, value) { if (!(await present(page, id))) return false; await vis(page, id).fill(value); return true; }
+/** What a control says at this instant, or null when the page is not showing it. */
+async function textNow(page, id) {
+  if (!(await present(page, id))) return null;
+  return ((await vis(page, id).innerText({ timeout: 2_000 })) || '').replace(/\s+/g, ' ').trim();
+}
 const hallText = async (page) => `${await page.evaluate(() => document.body.innerText)}\n${await page.content()}`;
 const pathOf = (page) => new URL(page.url()).pathname;
 const countOf = (text) => Number(/(\d[\d,]*)/.exec(text || '')?.[1]?.replace(/,/g, '') ?? NaN);
@@ -169,6 +175,25 @@ async function callNext(station, name) {
 async function startTurn(station) {
   await tap(station, 'wsf-station-turn-action');
   return shown(station, 'wsf-station-turn-record', 25_000);
+}
+/** A setup step that did not happen ends the journey, named; it is never passed over. */
+function need(ok, why) {
+  if (!ok) throw new Error(why);
+}
+/**
+ * The member answers the call on their own phone. I'm ready is pressed only
+ * once the phone SHOWS the call: pressed earlier it is not on the page, the tap
+ * does nothing, and the station can never open Start (run 37912780869).
+ */
+async function sayReady(phone, name) {
+  need(await shown(phone, 'wsf-queue-ready', 25_000), `${name}'s phone never showed the call, so I'm ready was never offered`);
+  need(await tap(phone, 'wsf-queue-ready'), `${name}'s phone could not press I'm ready`);
+}
+/** Ready on the phone, then Start at the station; each step is required, by name. */
+async function readyThenStart(phone, station, where, name) {
+  await sayReady(phone, name);
+  need(await enabled(station, 'wsf-station-turn-action', 25_000), `${where} never offered Start their turn after ${name} said ready`);
+  need(await startTurn(station), `${where} pressed Start their turn and no turn began`);
 }
 /** A phone records `count` on its contribution screen; its attempt is tracked as the request leaves. */
 async function recordOnPhone(phone, fixtures, ev, member, count) {
@@ -347,13 +372,11 @@ async function phoneAndStationsConverge({ page, baseUrl, fixtures }) {
     const eB = await joinLine(pB, baseUrl, fixtures, ev, atOne, 'Fixture B');
     const eC = await joinLine(pC, baseUrl, fixtures, ev, atTwo, 'Fixture C');
     const c1 = await callNext(s1, 'Fixture B');
+    need(c1.serving === 'Fixture B', `Station 1 called ${c1.serving ?? 'nobody'}, not Fixture B`);
     const c2 = await callNext(s2, 'Fixture C');
-    await tap(pB, 'wsf-queue-ready');
-    await tap(pC, 'wsf-queue-ready');
-    await enabled(s1, 'wsf-station-turn-action', 25_000);
-    await enabled(s2, 'wsf-station-turn-action', 25_000);
-    await startTurn(s1);
-    await startTurn(s2);
+    need(c2.serving === 'Fixture C', `Station 2 called ${c2.serving ?? 'nobody'}, not Fixture C`);
+    await readyThenStart(pB, s1, 'Station 1', 'Fixture B');
+    await readyThenStart(pC, s2, 'Station 2', 'Fixture C');
     await fixtures.trackStationTurn(ev, atOne, eB);
     await fixtures.trackStationTurn(ev, atTwo, eC);
     r.did('two members mid-turn at Station 1 and Station 2');
@@ -412,10 +435,9 @@ async function stationLostAnswer({ page, baseUrl, fixtures }) {
     const phoneDevice = await openPhone(dev, fixtures, baseUrl, member);
     const phone = phoneDevice.page;
     const entry = await joinLine(phone, baseUrl, fixtures, ev, member, 'Fixture R');
-    await callNext(station, 'Fixture R');
-    await tap(phone, 'wsf-queue-ready');
-    await enabled(station, 'wsf-station-turn-action', 25_000);
-    await startTurn(station);
+    const call = await callNext(station, 'Fixture R');
+    need(call.serving === 'Fixture R', `Station 1 called ${call.serving ?? 'nobody'}, not Fixture R`);
+    await readyThenStart(phone, station, 'Station 1', 'Fixture R');
     await fixtures.trackStationTurn(ev, member, entry);
     r.did('one member mid-turn at Station 1 after tapping I\'m ready');
     await phoneDevice.context.setOffline(true);
@@ -483,23 +505,53 @@ async function linePlaceEnds({ page, baseUrl, fixtures }) {
     await callNext(station, 'Fixture N');
     const called = await shown(pN, 'wsf-queue-called', 25_000);
     r.did('second member was called and did not answer');
-    await page.waitForTimeout(47_000); // the real 45-second lease, on the hosted clock
-    const reason = await textWhen(pN, 'wsf-queue-not-in-line-reason', (t) => t === NO_SHOW, 30_000);
-    const heading = await textWhen(pN, 'wsf-queue-standing', (t) => t.includes('Your turn timed out'), 10_000);
+    // The real 45-second lease, on the hosted clock, WATCHED rather than slept
+    // through. The phone says Your turn timed out for one poll only: its next
+    // read (TURN_POLL_MS = 3_000, app/queue/[goalId].tsx at ec162d17) finds the
+    // place still gone and drops the notice. A single read after a 47-second
+    // sleep lands in or after that window by chance (run 37912780869).
+    //
+    // The lease is read off the phone's own countdown (wsf-queue-lease, which
+    // the server computes from the lease on every 1-second poll): first seen,
+    // it stands at the full 45 seconds less at most one waiting poll and its
+    // round trips; it is then watched down to its last seconds with the call
+    // still standing, and only then may the notice come. A call that ends
+    // early, or one offered for longer, fails the row.
+    const offeredFor = countOf(await textWhen(pN, 'wsf-queue-lease', (t) => LEASE_LEFT.test(t), 5_000));
+    const lastSeconds = countOf(await textWhen(pN, 'wsf-queue-lease', (t) => LEASE_LEFT.test(t) && countOf(t) <= 3, 50_000));
+    const stood = offeredFor >= 40 && offeredFor <= 45 && lastSeconds <= 3;
+    let reason = null;
+    let heading = null;
+    const timedOut = stood && (await until(pN, async () => {
+      reason = await textNow(pN, 'wsf-queue-not-in-line-reason');
+      heading = await textNow(pN, 'wsf-queue-standing');
+      return reason === NO_SHOW && Boolean(heading?.includes('Your turn timed out'));
+    }, 15_000));
     const empty = (await shown(station, 'wsf-station-queue-serving-empty', 25_000)) && !(await present(station, 'wsf-station-turn-action'));
-    row('noShow')(called && reason === NO_SHOW && Boolean(heading?.includes('Your turn timed out')) && empty, `${reason}; station ${empty ? 'empty' : 'still serving'}`);
+    row('noShow')(called && stood && timedOut && empty,
+      `${stood ? reason : `the call was offered for ${offeredFor}s and was last seen at ${lastSeconds}s`}; station ${empty ? 'empty' : 'still serving'}`);
 
     await joinLine(pR, baseUrl, fixtures, ev, released, 'Fixture L');
-    await callNext(station, 'Fixture L');
-    await tap(pR, 'wsf-queue-ready');
-    await enabled(station, 'wsf-station-turn-action', 25_000);
-    await tap(station, 'wsf-station-turn-cancel');
-    r.did('third member tapped I\'m ready; the station pressed Let them go');
-    const stationEmpty = await shown(station, 'wsf-station-queue-serving-empty', 25_000);
-    const out = await shown(pR, 'wsf-queue-not-in-line', 30_000);
-    const standing = await textWhen(pR, 'wsf-queue-standing', (t) => t.includes('You’re not in the line'), 10_000);
+    // Each step toward Let them go is part of the row: a step that did not happen
+    // fails the row by name, never silently (run 37912780869).
+    const callL = await callNext(station, 'Fixture L');
+    const calledL = callL.serving === 'Fixture L';
+    const offered = calledL && (await shown(pR, 'wsf-queue-ready', 25_000));
+    const said = offered && (await tap(pR, 'wsf-queue-ready'));
+    const opened = said && (await enabled(station, 'wsf-station-turn-action', 25_000));
+    const letGo = opened && (await enabled(station, 'wsf-station-turn-cancel', 10_000)) && (await tap(station, 'wsf-station-turn-cancel'));
+    const missed = !calledL ? `the station called ${callL.serving ?? 'nobody'}, not Fixture L`
+      : !offered ? 'Fixture L\'s phone never showed the call'
+        : !said ? 'Fixture L\'s phone could not press I\'m ready'
+          : !opened ? 'the station never offered Start their turn after Fixture L said ready'
+            : !letGo ? 'the station never offered Let them go' : null;
+    r.did(letGo ? 'third member tapped I\'m ready; the station pressed Let them go' : `stopped before Let them go: ${missed}`);
+    const stationEmpty = letGo && (await shown(station, 'wsf-station-queue-serving-empty', 25_000));
+    const out = letGo && (await shown(pR, 'wsf-queue-not-in-line', 30_000));
+    const standing = letGo ? await textWhen(pR, 'wsf-queue-standing', (t) => t.includes('You’re not in the line'), 10_000) : null;
     const noReceipt = !(await present(pR, 'wsf-queue-receipt-amount'));
-    row('letGo')(stationEmpty && out && Boolean(standing?.includes('You’re not in the line')) && noReceipt, `${standing}; receipt ${noReceipt ? 'none' : 'shown'}`);
+    row('letGo')(letGo && stationEmpty && out && Boolean(standing?.includes('You’re not in the line')) && noReceipt,
+      missed ?? `${standing}; receipt ${noReceipt ? 'none' : 'shown'}`);
 
     const total = await textWhen(station, 'wsf-station-total-line', (t) => t === '10 of 1,000 squats', 30_000);
     const quiet = !(await present(pN, 'wsf-queue-receipt-amount')) && noReceipt;
@@ -519,96 +571,123 @@ async function linePlaceEnds({ page, baseUrl, fixtures }) {
  * the screen that shows it.
  */
 const CLOSED = 'This goal is closed.';
+/*
+ * The backend admits two station slots per event (`normalizeStationSlot`:
+ * slot 1 or 2), so the four windows stand on TWO events, each with its own two
+ * stations, and both goals are closed. Run 37912780869 failed here enrolling
+ * a third and fourth station: wsfApproveStation refused, INVALID_ARGUMENT.
+ */
 async function closedGoalTurn({ page, baseUrl, fixtures }) {
   const r = recorder();
   const row = tagged(r, EXPO_ROWS['closed-goal-turn']);
-  const ev = await fixtures.expoEvent('closed', { attendees: 5, target: 1000, seeded: 200 });
-  const [started, readied, called, waiter, joiner] = ev.attendees;
+  const ev = await fixtures.expoEvent('closed', { attendees: 2, target: 1000, seeded: 200 });
+  const ev2 = await fixtures.expoEvent('closed2', { attendees: 3, target: 1000, seeded: 200 });
+  const [started, readied] = ev.attendees;
+  const [called, waiter, joiner] = ev2.attendees;
   const dev = devices(page);
   try {
     const s1 = (await openStation(dev, fixtures, baseUrl, ev, 1)).page;
     const s2 = (await openStation(dev, fixtures, baseUrl, ev, 2)).page;
-    const s3 = (await openStation(dev, fixtures, baseUrl, ev, 3)).page;
-    const s4 = (await openStation(dev, fixtures, baseUrl, ev, 4)).page;
+    const t1 = (await openStation(dev, fixtures, baseUrl, ev2, 1)).page;
+    const t2 = (await openStation(dev, fixtures, baseUrl, ev2, 2)).page;
+    // The first event's own public display, which never runs a turn: both of its
+    // stations will (a venue-width screen hides its total while a turn runs there,
+    // turnRunningWide, app/station/[goalId].tsx at ec162d17), so its total is read here.
+    const display = (await dev.open(TABLET)).page;
+    await display.goto(`${baseUrl}/kiosk/${ev.goalId}`);
+    need(await shown(display, 'wsf-kiosk-total-line', 40_000), 'the first event\'s display never showed its total');
     const [pA, pB, pC, pW, pD] = (await Promise.all([started, readied, called, waiter, joiner]
       .map((m) => openPhone(dev, fixtures, baseUrl, m)))).map((d) => d.page);
 
+    // The first event: a turn running at Station 1, a member ready at Station 2.
     const entryA = await joinLine(pA, baseUrl, fixtures, ev, started, 'Fixture Z');
-    await callNext(s1, 'Fixture Z');
-    await tap(pA, 'wsf-queue-ready');
-    await enabled(s1, 'wsf-station-turn-action', 25_000);
-    await startTurn(s1);
+    const callA = await callNext(s1, 'Fixture Z');
+    need(callA.serving === 'Fixture Z', `the first event's Station 1 called ${callA.serving ?? 'nobody'}, not Fixture Z`);
+    await readyThenStart(pA, s1, 'the first event\'s Station 1', 'Fixture Z');
     await fixtures.trackStationTurn(ev, started, entryA);
     await joinLine(pB, baseUrl, fixtures, ev, readied, 'Fixture Y');
-    await callNext(s2, 'Fixture Y');
-    await tap(pB, 'wsf-queue-ready');
-    await enabled(s2, 'wsf-station-turn-action', 25_000);
-    await joinLine(pC, baseUrl, fixtures, ev, called, 'Fixture X');
-    await callNext(s3, 'Fixture X');
-    await shown(pC, 'wsf-queue-ready', 25_000);
-    await joinLine(pW, baseUrl, fixtures, ev, waiter, 'Fixture V');
-    const waitingBefore = await textWhen(s4, 'wsf-station-queue-count', (t) => t === '1 person waiting.', 25_000);
-    const inLineBefore = await shown(pW, 'wsf-queue-waiting', 25_000);
-    // The fifth member is one tap from joining when the goal closes.
-    await openEvent(pD, baseUrl, ev);
+    const callB = await callNext(s2, 'Fixture Y');
+    need(callB.serving === 'Fixture Y', `the first event's Station 2 called ${callB.serving ?? 'nobody'}, not Fixture Y`);
+    await sayReady(pB, 'Fixture Y');
+    need(await enabled(s2, 'wsf-station-turn-action', 25_000), 'the first event\'s Station 2 never offered Start their turn after Fixture Y said ready');
+    // The second event: the member to be called stands first in its line, the
+    // member who will wait behind them, and a fifth member is one tap from
+    // joining when it closes.
+    await joinLine(pC, baseUrl, fixtures, ev2, called, 'Fixture X');
+    await joinLine(pW, baseUrl, fixtures, ev2, waiter, 'Fixture V');
+    await openEvent(pD, baseUrl, ev2);
     await tap(pD, 'wsf-event-queue-start');
     await shown(pD, 'wsf-event-queue-name', 15_000);
     await type(pD, 'wsf-event-queue-name', 'Fixture U');
-    const before = await textWhen(s1, 'wsf-station-total-line', (t) => t === '200 of 1,000 squats', 25_000);
-    r.did('one event: a turn running at Station 1, a member ready at Station 2, one called to Station 3, one waiting with Station 4 idle, and a fifth on the event page with a name chosen');
+    const before = await textWhen(display, 'wsf-kiosk-total-line', (t) => t === '200 of 1,000 squats', 25_000);
+    const before2 = await textWhen(t1, 'wsf-station-total-line', (t) => t === '200 of 1,000 squats', 25_000);
+    // Called LAST, just before the closure. A call holds for 45 seconds and only
+    // a called (assigned) place lapses (isTurnLeaseLapsed at ec162d17); the
+    // ready row needs this call still standing when it is read, so nothing slow
+    // stands between the call and that row.
+    const callC = await callNext(t1, 'Fixture X');
+    need(callC.serving === 'Fixture X', `the second event's Station 1 called ${callC.serving ?? 'nobody'}, not Fixture X`);
+    need(await shown(pC, 'wsf-queue-ready', 25_000), 'Fixture X\'s phone never showed the call');
+    const waitingBefore = await textWhen(t2, 'wsf-station-queue-count', (t) => t === '1 person waiting.', 25_000);
+    const inLineBefore = await shown(pW, 'wsf-queue-waiting', 25_000);
+    r.did('two events: in the first a turn running at Station 1 and a member ready at Station 2; in the second a member called to Station 1, one waiting with Station 2 idle, and a fifth on its event page with a name chosen');
     await fixtures.closeGoal(ev);
-    r.did('the goal was closed');
+    await fixtures.closeGoal(ev2);
+    r.did('both goals were closed');
 
-    // Station 1: the turn that started before the closure.
+    // FIRST, the one window with a clock on it: the member called to the second
+    // event's Station 1. Ready advances nothing.
+    const pressedReady = await tap(pC, 'wsf-queue-ready');
+    r.did('tapped I\'m ready on the phone of the member called to the second event\'s Station 1');
+    const cSaid = await textWhen(pC, 'wsf-queue-leave-error', (t) => t === CLOSED, 25_000);
+    const stillCalled = (await present(pC, 'wsf-queue-called')) && (await present(pC, 'wsf-queue-ready'));
+    const where = await textWhen(pC, 'wsf-queue-station', (t) => t === 'Go to Station 1.', 10_000);
+    row('ready')(pressedReady && cSaid === CLOSED && stillCalled && where === 'Go to Station 1.',
+      `${cSaid}; ${stillCalled ? 'still called' : 'no longer called'}; ${where}`);
+
+    // The first event's Station 1: the turn that started before the closure.
     await type(s1, 'wsf-station-turn-count', '12');
     await tap(s1, 'wsf-station-turn-action');
-    r.did('entered 12 on Station 1 and recorded');
+    r.did('entered 12 on the first event\'s Station 1 and recorded');
     const said = await textWhen(s1, 'wsf-station-queue-error', (t) => t === CLOSED, 25_000);
     row('refused')(said === CLOSED, said);
 
-    // Station 2: a member ready; start mints nothing.
+    // The first event's Station 2: a member ready; start mints nothing.
     const pressedStart = await tap(s2, 'wsf-station-turn-action');
-    r.did('pressed Start their turn on Station 2');
+    r.did('pressed Start their turn on the first event\'s Station 2');
     const s2Said = await textWhen(s2, 'wsf-station-queue-error', (t) => t === CLOSED, 25_000);
     const noRecord = !(await present(s2, 'wsf-station-turn-record')) && !(await present(s2, 'wsf-station-turn-count'));
     const s2Serving = await textWhen(s2, 'wsf-station-queue-serving', (t) => t === 'Fixture Y', 10_000);
     row('start')(pressedStart && s2Said === CLOSED && noRecord && s2Serving === 'Fixture Y',
       `${s2Said}; record field ${noRecord ? 'absent' : 'shown'}; serving ${s2Serving}`);
 
-    // The member called to Station 3: ready advances nothing.
-    const pressedReady = await tap(pC, 'wsf-queue-ready');
-    r.did('tapped I\'m ready on the phone of the member called to Station 3');
-    const cSaid = await textWhen(pC, 'wsf-queue-leave-error', (t) => t === CLOSED, 25_000);
-    const stillCalled = (await present(pC, 'wsf-queue-called')) && (await present(pC, 'wsf-queue-ready'));
-    const where = await textWhen(pC, 'wsf-queue-station', (t) => t === 'Go to Station 3.', 10_000);
-    row('ready')(pressedReady && cSaid === CLOSED && stillCalled && where === 'Go to Station 3.',
-      `${cSaid}; ${stillCalled ? 'still called' : 'no longer called'}; ${where}`);
-
-    // Station 4, idle, with a member waiting: nobody is called.
-    const pressedCall = await tap(s4, 'wsf-station-call-next');
-    r.did('pressed Call next on Station 4');
-    const s4Said = await textWhen(s4, 'wsf-station-queue-error', (t) => t === CLOSED, 25_000);
-    const servesNobody = !(await present(s4, 'wsf-station-queue-serving'));
+    // The second event's Station 2, idle, with a member waiting: nobody is called.
+    const pressedCall = await tap(t2, 'wsf-station-call-next');
+    r.did('pressed Call next on the second event\'s Station 2');
+    const t2Said = await textWhen(t2, 'wsf-station-queue-error', (t) => t === CLOSED, 25_000);
+    const servesNobody = !(await present(t2, 'wsf-station-queue-serving'));
     const stillWaiting = await shown(pW, 'wsf-queue-waiting', 10_000);
     const wCalled = await present(pW, 'wsf-queue-called');
-    row('call')(pressedCall && s4Said === CLOSED && servesNobody && waitingBefore === '1 person waiting.' && inLineBefore && stillWaiting && !wCalled,
-      `${s4Said}; ${servesNobody ? 'serves nobody' : 'serves someone'}; waiting member ${stillWaiting && !wCalled ? 'still in the line' : 'moved'}`);
+    row('call')(pressedCall && t2Said === CLOSED && servesNobody && waitingBefore === '1 person waiting.' && inLineBefore && stillWaiting && !wCalled,
+      `${t2Said}; ${servesNobody ? 'serves nobody' : 'serves someone'}; waiting member ${stillWaiting && !wCalled ? 'still in the line' : 'moved'}`);
 
-    // The fifth member: no place.
-    const hallBeforeJoin = await textWhen(s4, 'wsf-station-queue-count', (t) => /waiting/.test(t), 10_000);
+    // The fifth member: no place in the second event.
+    const hallBeforeJoin = await textWhen(t2, 'wsf-station-queue-count', (t) => /waiting/.test(t), 10_000);
     const pressedJoin = await tap(pD, 'wsf-event-queue-join');
-    r.did('the fifth member pressed join on the event page');
+    r.did('the fifth member pressed join on the second event\'s page');
     const dSaid = await textWhen(pD, 'wsf-event-queue-error', (t) => t === CLOSED, 25_000);
     await page.waitForTimeout(4_000);
-    const stayed = pathOf(pD) === `/event/${ev.goalId}` && !(await present(pD, 'wsf-queue-screen'));
-    const hallAfterJoin = await textWhen(s4, 'wsf-station-queue-count', (t) => t === hallBeforeJoin, 10_000);
+    const stayed = pathOf(pD) === `/event/${ev2.goalId}` && !(await present(pD, 'wsf-queue-screen'));
+    const hallAfterJoin = await textWhen(t2, 'wsf-station-queue-count', (t) => t === hallBeforeJoin, 10_000);
     row('join')(pressedJoin && dSaid === CLOSED && stayed && Boolean(hallBeforeJoin) && hallAfterJoin === hallBeforeJoin,
       `${dSaid}; ${pathOf(pD)}; hall ${hallBeforeJoin} -> ${hallAfterJoin}`);
 
     await page.waitForTimeout(6_000);
-    const after = await textWhen(s1, 'wsf-station-total-line', (t) => t === '200 of 1,000 squats', 10_000);
+    const after = await textWhen(display, 'wsf-kiosk-total-line', (t) => t === '200 of 1,000 squats', 10_000);
+    const after2 = await textWhen(t1, 'wsf-station-total-line', (t) => t === '200 of 1,000 squats', 10_000);
     const noResult = !(await present(s1, 'wsf-station-queue-result'));
-    row('nothing')(before === '200 of 1,000 squats' && after === '200 of 1,000 squats' && noResult, `${before} -> ${after}`);
+    row('nothing')(before === '200 of 1,000 squats' && after === '200 of 1,000 squats' && before2 === '200 of 1,000 squats' && after2 === '200 of 1,000 squats' && noResult,
+      `first ${before} -> ${after}; second ${before2} -> ${after2}`);
     const receipts = [];
     for (const [name, p] of [['Station 1 turn', pA], ['ready', pB], ['called', pC], ['waiting', pW], ['joiner', pD]]) {
       if (await present(p, 'wsf-queue-receipt-amount')) receipts.push(name);
@@ -617,7 +696,7 @@ async function closedGoalTurn({ page, baseUrl, fixtures }) {
   } finally {
     await dev.closeAll();
   }
-  return result(r, ev);
+  return result(r, { setupId: `${ev.setupId}; ${ev2.setupId}` });
 }
 
 // ---- 8. shared-screen-finish --------------------------------------------------------------
@@ -633,6 +712,18 @@ async function signInAtKiosk(kiosk, account) {
   return gate && entry;
 }
 const credit = (n) => `Your total on this goal: ${n} squats`;
+/*
+ * The kiosk receipt shows own credit as a tile whose label is styled
+ * textTransform: uppercase (app/contribute/[goalId].tsx:2078-2079 at ec162d17),
+ * and innerText reads the CSS casing: "YOUR TOTAL ON THIS GOAL: 20 squats". The
+ * emulator proof's toHaveText reads textContent and never saw it; the hosted read
+ * did (run 37912780869). Match the words and the figure, not the case, as run 57
+ * taught the Home pill (home.mjs). A wrong figure or wording still fails.
+ */
+const sameWords = (a, b) => typeof a === 'string' && typeof b === 'string' && a.toLowerCase() === b.toLowerCase();
+const isCredit = (n) => (t) => sameWords(t, credit(n));
+/** Whether a screen's text still carries any of `values`, in any case. */
+const carries = (text, values) => values.filter((v) => text.toLowerCase().includes(v.toLowerCase()));
 async function sharedScreenFinish({ page, baseUrl, fixtures }) {
   const r = recorder();
   const row = tagged(r, EXPO_ROWS['shared-screen-finish']);
@@ -641,36 +732,38 @@ async function sharedScreenFinish({ page, baseUrl, fixtures }) {
   const dev = devices(page);
   try {
     const kiosk = (await dev.open(TABLET)).page;
-    await kiosk.clock.install(); // the 90 seconds run on the page's own clock
+    // The 90 seconds run on the page's own clock. An installed clock keeps
+    // flowing in real time; each runFor adds on top of what has already passed.
+    await kiosk.clock.install();
     await kiosk.goto(`${baseUrl}/kiosk/${ev.goalId}`);
     await shown(kiosk, 'wsf-kiosk-screen', 40_000);
     await signInAtKiosk(kiosk, first);
     await recordOnPhone(kiosk, fixtures, ev, first, 20);
     r.did('started, signed in and recorded 20 on the shared screen');
-    const ownFirst = await textWhen(kiosk, 'wsf-contribute-own-credit', (t) => t === credit(20), 20_000);
+    const ownFirst = await textWhen(kiosk, 'wsf-contribute-own-credit', isCredit(20), 20_000);
     await tap(kiosk, 'wsf-kiosk-finish');
     r.did('pressed Finish');
     const atStart = await shown(kiosk, 'wsf-kiosk-start', 20_000);
     const startText = await kiosk.evaluate(() => document.body.innerText);
-    const leftovers = [first.email, 'Fixture Attendee 1', credit(20), '20 squats'].filter((s) => startText.includes(s));
+    const leftovers = carries(startText, [first.email, 'Fixture Attendee 1', credit(20), '20 squats']);
     const noState = !(await present(kiosk, 'wsf-contribute-receipt')) && !(await present(kiosk, 'wsf-contribute-pending')) && !(await present(kiosk, 'wsf-kiosk-unresolved-note'));
     await tap(kiosk, 'wsf-kiosk-start');
     r.did('started again as the next person');
     const gate = await shown(kiosk, 'wsf-contribute-signed-out', 20_000);
-    row('finish')(ownFirst === credit(20) && atStart && leftovers.length === 0 && noState && gate,
-      leftovers.length ? `the start screen still carried ${leftovers.length} of the previous person's values` : `start ${atStart}; signed-out gate ${gate}`);
+    row('finish')(isCredit(20)(ownFirst) && atStart && leftovers.length === 0 && noState && gate,
+      leftovers.length ? `the start screen still carried ${leftovers.length} of the previous person's values` : `${ownFirst}; start ${atStart}; signed-out gate ${gate}`);
     await tap(kiosk, 'wsf-contribute-signin-link');
     await shown(kiosk, 'wsf-signin-email', 20_000);
     await type(kiosk, 'wsf-signin-email', next.email);
     await type(kiosk, 'wsf-signin-password', next.password);
     await tap(kiosk, 'wsf-signin-submit');
     await shown(kiosk, 'wsf-contribute-entry-screen', 40_000);
-    const zero = await textWhen(kiosk, 'wsf-contribute-own-credit', (t) => t === credit(0), 20_000);
+    const zero = await textWhen(kiosk, 'wsf-contribute-own-credit', isCredit(0), 20_000);
     await recordOnPhone(kiosk, fixtures, ev, next, 5);
     r.did('the next person signed in and recorded 5');
     const both = await textWhen(kiosk, 'wsf-contribute-shared-total', (t) => countOf(t) === 125, 20_000);
-    const ownNext = await textWhen(kiosk, 'wsf-contribute-own-credit', (t) => t === credit(5), 20_000);
-    row('next')(gate && zero === credit(0) && countOf(both) === 125 && ownNext === credit(5), `${zero}; ${both}; ${ownNext}`);
+    const ownNext = await textWhen(kiosk, 'wsf-contribute-own-credit', isCredit(5), 20_000);
+    row('next')(gate && isCredit(0)(zero) && countOf(both) === 125 && isCredit(5)(ownNext), `${zero}; ${both}; ${ownNext}`);
     const full = await textWhen(kiosk, 'wsf-kiosk-countdown', (t) => /^Finishing in \d+ seconds?$/.test(t), 10_000);
     await kiosk.clock.runFor(60_000);
     const midway = countOf(await textWhen(kiosk, 'wsf-kiosk-countdown', () => true, 5_000));
@@ -681,7 +774,7 @@ async function sharedScreenFinish({ page, baseUrl, fixtures }) {
     await kiosk.clock.runFor(KIOSK_IDLE_MS + 2_000);
     const finished = await shown(kiosk, 'wsf-kiosk-start', 20_000);
     const after = await kiosk.evaluate(() => document.body.innerText);
-    const clean = ![next.email, 'Fixture Attendee 2', credit(5)].some((s) => after.includes(s));
+    const clean = carries(after, [next.email, 'Fixture Attendee 2', credit(5)]).length === 0;
     await tap(kiosk, 'wsf-kiosk-start');
     const signedOut = await shown(kiosk, 'wsf-contribute-signed-out', 20_000);
     row('countdown')(Boolean(full) && midway <= 31 && putBack >= 85 && finished && clean && signedOut,

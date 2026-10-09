@@ -1649,6 +1649,14 @@ const TURN_RESULT_MS = 10_000;
 /** NOT_FOUND_MESSAGE. The same sentence an unknown id gets, which is the
  * point: an entryId must not reveal whose place it is. */
 const TURN_GENERIC_REFUSAL = 'This link is not valid.';
+/**
+ * KIOSK-EXPECTED-TURN-1 (#587, served from ec162d17): every station Start,
+ * Record and Cancel names the turn it was pressed for, as `expectedTurn`. The
+ * value is the opaque binding the server hands only to the calling station, in
+ * its own state response (`assigned.turnRef`). Without it the server answers
+ * INVALID_ARGUMENT, "This screen needs an update before it can run a turn."
+ */
+const STATION_TURN_REF = /^tr_[A-Za-z0-9_-]{16,64}$/;
 
 /** Names what a call hit, so a closed door is never read as a refusal. */
 function turnCallFailure(step, response) {
@@ -1894,8 +1902,16 @@ async function caseTurnContract() {
   assert(ready?.status === 'ready', `ready left the turn in ${ready?.status}`);
 
   // ── THE TURN ITSELF: STARTED AT THE SCREEN, FINISHED ON THE PHONE ─────────
+  // The station names the turn it starts by the binding its own Call next was
+  // handed. Checked before use: a missing or malformed binding is a contract
+  // break to name, not a value to send.
+  const turnRef = called.assigned?.turnRef;
+  assert(
+    typeof turnRef === 'string' && STATION_TURN_REF.test(turnRef),
+    'the station was handed no turn binding (assigned.turnRef) for the turn it called'
+  );
   const started = await turnCall('start the turn', 'wsfStartTurn', {
-    stationId: stationOne.stationId, secret: stationOne.secret,
+    stationId: stationOne.stationId, secret: stationOne.secret, expectedTurn: turnRef,
   });
   assert(started?.started === true, 'the station could not start the ready turn');
   assert(started.activity?.goalId === activityA, 'the screen started the wrong activity');
@@ -1932,7 +1948,7 @@ async function caseTurnContract() {
   // presses its own button after the phone already finished: it is the same
   // attempt, so it must add nothing.
   const atStation = await turnCall('retry at the screen', 'wsfCompleteTurn', {
-    stationId: stationOne.stationId, secret: stationOne.secret, count: TURN_COUNT,
+    stationId: stationOne.stationId, secret: stationOne.secret, expectedTurn: turnRef, count: TURN_COUNT,
   });
   assert(
     atStation?.recorded?.alreadyRecorded === true,
