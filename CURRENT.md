@@ -1,16 +1,16 @@
-<!-- wsf-control ledgerHead=68c3552aa036faf0188607757f4260965ec0cdfe135e67bda03400638f500d64 events=948 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=918868dd6e8a39f05f1821f577b73b580429c61291e983bff19f83e9897767b9 events=950 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `68c3552aa036faf0188607757f4260965ec0cdfe135e67bda03400638f500d64` (948 events)
+- Ledger head: `918868dd6e8a39f05f1821f577b73b580429c61291e983bff19f83e9897767b9` (950 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
 - Canonical: development `claude/wsf-app-shell` at `ec162d17a0540e936741027f9b8f90dd372cfaf4`; operational main `df8d4d69f41f70971c5918c36d776b9af07d1bcb`
-- Staging: serves `ab77fbfce97e60c1c22492397b2ab6b491f9e0db` (run 37025084843, #60); rollback `a31276516e786ac8f848269de4c839b3b9e13123`; pin PR #522
+- Staging: serves `ec162d17a0540e936741027f9b8f90dd372cfaf4` (run 37912780869, #61); rollback `ab77fbfce97e60c1c22492397b2ab6b491f9e0db`; pin PR #597
 - Unattended fast-path dispatch: ENABLED (set-fastpath)
 - Staging target (fast path): `ab77fbfce97e60c1c22492397b2ab6b491f9e0db` (KIOSK-PAIRING-CLARITY-PROOF-1), checked against the full-path pin `a31276516e786ac8f848269de4c839b3b9e13123`
 - Staging retry authorized once (authorize-retry, decision 5955316632): `ab77fbfce97e60c1c22492397b2ab6b491f9e0db` (KIOSK-PAIRING-CLARITY-PROOF-1) after failed run 37012494776, repaired by STAGING-FASTPATH-INVENTORY-BASELINE-FIX at `745b4f6270a90555757b9b01255ee77f0a74e8fb`; spent once any newer attempt at that target exists
@@ -30,7 +30,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | Worker | Inbox | Active now | Reviewing | Waiting on review | Blocked | Next | Queue | WATCH |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | W3 | #396 | — | PRODUCTION-DEPLOY-PATH-1 | WORKER-EXECUTION-PROFILES-1 | NORTHSTAR-MIRROR-INTAKE-1 | — | — | on |
-| W4 | #394 | — | ANON-GATE-1 | — | — | — | — | on |
+| W4 | #394 | — | — | — | — | — | — | off |
 | W5 | #395 | — | — | — | — | — | — | off |
 | W7 | #434 | — | — | — | — | — | — | off |
 | W9 | #497 | — | — | ANON-GATE-1, PRODUCTION-DEPLOY-PATH-1 | EVENT-LIFECYCLE-BACKEND-RECOVERY-1, MEMBER-TRUTH-BACKEND-1 | — | — | off |
@@ -39,7 +39,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 
 | Packet | Owner | Kind | Completes at | Origin | Phase | PR | Subject | PR head | Evidence | Merge | Proof | Reviewers | Released by | Last transition | Blocked by | Label | Review policy | Pending finding |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| ANON-GATE-1 | W9 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #601 | 118c2af9 | 118c2af9 | — | — | — | W4 | comment:6077733181 | comment:6078167242 | — | Refuse anonymous-provider Firebase tokens at every WSF callable auth site (requireRealIdentity + optionalRealUid), with refusal tests; the release gate named in the production forensics | 1×ops-source then director | — |
+| ANON-GATE-1 | W9 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #601 | 118c2af9 | 118c2af9 | — | — | — | W4 | comment:6077733181 | comment:6078693648 | — | Refuse anonymous-provider Firebase tokens at every WSF callable auth site (requireRealIdentity + optionalRealUid), with refusal tests; the release gate named in the production forensics | 1×ops-source then director | — |
 | AUTONOMY-ROUTER-1C | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #544 | 37c49bbd | 37c49bbd | — | 5f7b63c9 | — | W4 | comment:5882824399 | pull_request:544 | — | Serial step 6: state-derived routing, wakes, and real-event proof | 1×ops-source then director | — |
 | AUTONOMY-ROUTER-1C-INTEGRATE | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #545 | fd697e0f | fd697e0f | — | 8ba39e19 | — | W4 | comment:5929164484 | pull_request:545 | — | Step 6 correction: derive integrate from ACCEPTED plus merged PR with same-cycle or successor reconcile and idempotency proof | 1×ops-source then director | — |
 | AUTONOMY-STATE-1B | W3 | work | INTEGRATED (source-only) | bootstrap | INTEGRATED | #538 | 073b7946 | 073b7946 | — | d42a3307 | — | — | comment:5857966052 | comment:5857966052 | — | Serial step 5: authoritative control state, App writer, bootstrap and shadow reconcile | 1×ops-source then director | — |

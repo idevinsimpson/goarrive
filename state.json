@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "68c3552aa036faf0188607757f4260965ec0cdfe135e67bda03400638f500d64",
-  "eventCount": 948,
+  "ledgerHead": "918868dd6e8a39f05f1821f577b73b580429c61291e983bff19f83e9897767b9",
+  "eventCount": 950,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -23,11 +23,11 @@
     "operationalMain": "df8d4d69f41f70971c5918c36d776b9af07d1bcb"
   },
   "staging": {
-    "servedSha": "ab77fbfce97e60c1c22492397b2ab6b491f9e0db",
-    "runId": 37025084843,
-    "runNumber": 60,
-    "rollbackSha": "a31276516e786ac8f848269de4c839b3b9e13123",
-    "pinPr": 522
+    "servedSha": "ec162d17a0540e936741027f9b8f90dd372cfaf4",
+    "runId": 37912780869,
+    "runNumber": 61,
+    "rollbackSha": "ab77fbfce97e60c1c22492397b2ab6b491f9e0db",
+    "pinPr": 597
   },
   "criticalPath": "PRODUCTION-DEPLOY-PATH-1",
   "workers": {
@@ -94,7 +94,9 @@
       "proof": null,
       "served": null,
       "releasedQueueIndex": null,
-      "reviewedBy": [],
+      "reviewedBy": [
+        "W4"
+      ],
       "subjectPaths": [
         "functions-westayfit/src/index.ts",
         "functions-westayfit/src/anon-gate.ts",
@@ -116,7 +118,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6078167242
+          "id": 6078693648
         }
       },
       "review": {
@@ -5683,7 +5685,8 @@
       "ack": {
         "kind": "comment",
         "id": 6078504660
-      }
+      },
+      "superseded": true
     }
   },
   "fastpath": {
