@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "c011d0af0890e8fd98e11a28566a1ec43a8483ec31ade167a4100d674d1f2901",
-  "eventCount": 1037,
+  "ledgerHead": "356139dae4c2272f959fcb7de1ce02cd3dc449cd0dfb2c17f67014dc62a45a7c",
+  "eventCount": 1038,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -6244,8 +6244,10 @@
       "packet": "LOVABLE-DEVICE-QA-2",
       "worker": "W4",
       "reason": "handback",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        6083581143
+      ],
       "ack": null
     }
   },
