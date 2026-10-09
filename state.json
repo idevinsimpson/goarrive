@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "79fd73723b6880c313e8f6246197af6fef7144d1d0fa41b28e2855cc62963c7a",
-  "eventCount": 1034,
+  "ledgerHead": "c011d0af0890e8fd98e11a28566a1ec43a8483ec31ade167a4100d674d1f2901",
+  "eventCount": 1037,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2197,7 +2197,7 @@
       },
       "label": "Revoke ends/requeues that station's assigned/ready/active line entry (seen via wsfMyTurn/wsfTurnState); wsfJoinTurnLine refuses an already-recorded member (one-contribution reason); tests; doc note",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "ACCEPTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -2234,10 +2234,13 @@
           "kind": "comment",
           "id": 6082013157
         },
-        "accepted": null,
+        "accepted": {
+          "kind": "comment",
+          "id": 6083346531
+        },
         "lastTransition": {
           "kind": "comment",
-          "id": 6083142596
+          "id": 6083346531
         }
       },
       "review": {
@@ -2602,7 +2605,7 @@
       },
       "label": "Proof-only lovable-device-matrix mode in the staging workflow: four viewports over the accepted Web Twin journeys on the trial host, PASS/FAIL/BLOCKED rows with screenshots; L0-dispatched; + mode pins",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "CHANGES_REQUESTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 394,
@@ -2641,7 +2644,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6081787714
+          "id": 6082951147
         }
       },
       "review": {
@@ -6206,7 +6209,8 @@
       "ack": {
         "kind": "comment",
         "id": 6082110470
-      }
+      },
+      "superseded": true
     },
     "c0b43c67f852402c09d5441a663b530b3971a10c9f3f90628844b395e5535827": {
       "packet": "KIOSK-TURN-LIFECYCLE-1",
@@ -6235,6 +6239,14 @@
         "id": 6082935914
       },
       "superseded": true
+    },
+    "02309f89937c5c5824b13fa4d93b07157fe51caed049d7949abedff84da8affe": {
+      "packet": "LOVABLE-DEVICE-QA-2",
+      "worker": "W4",
+      "reason": "handback",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
