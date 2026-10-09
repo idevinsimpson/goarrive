@@ -277,10 +277,10 @@ await test('EXPO: the live manifest is the exact milestone for the approved buil
   const m = live();
   assert.deepEqual(validateManifest(m), []);
   assert.equal(m.milestone, 'EXPO-ATTENDEE-JOURNEY-PROOF-1');
-  assert.equal(m.productSha, '0d3598d4a1dc72411b6d80d375335b84a497efdb');
+  assert.equal(m.productSha, 'ec162d17a0540e936741027f9b8f90dd372cfaf4');
   assert.equal(m.productSha, APPROVED, 'the manifest names exactly the build staging is approved to serve');
   assert.equal(m.previousKnownGoodSha, 'ab77fbfce97e60c1c22492397b2ab6b491f9e0db');
-  assert.deepEqual(m.journeys.map((j) => j.id), EXPO_IDS);
+  assert.deepEqual(m.journeys.map((j) => j.id), [...EXPO_IDS, 'unverified-participant']);
   assert.equal(checkManifestObject(m, { approvedSha: APPROVED, drivers }).status, 'valid');
   for (const id of EXPO_IDS) assert.equal(drivers[id], expoDrivers[id], `${id} is registered in journeys/index.mjs`);
   const { [EXPO_IDS[0]]: _gone, ...without } = drivers;
@@ -296,6 +296,13 @@ await test('EXPO: the store-only claims are named as exclusions and asserted by 
   const byId = Object.fromEntries(m.journeys.map((j) => [j.id, j]));
   assert.match(byId['phone-and-stations-converge'].knownExclusions.join(' '), /recorded as the attempt that station started, and that the target crossing is recorded once for the goal and credited to no single member: stored facts the hosted screens do not show/);
   assert.match(byId['station-lost-answer'].knownExclusions.join(' '), /describeCallableError.*never internal.*J2b/);
+  // EXPO-FULL-STAGING-RECOVERY-3: at ec162d17 a lost Record prints #596's sentence; the exclusion says so.
+  assert.match(byId['station-lost-answer'].knownExclusions.join(' '), /a lost Record .* prints No answer yet for \{code\}\. “Try again” sends the result \(\{n\}\) again for that turn — it can’t count twice\., with a Try again control/);
+  assert.match(byId['two-station-turns'].knownExclusions.join(' '), /expectedTurn.*a request fact the hosted screens do not show/);
+  // Each change this build makes without a hosted driver is named UNPROVEN, never asserted.
+  assert.match(byId['event-use-my-phone'].knownExclusions.join(' '), /MOVE-CAMERA-NATIVE-PORT-1, #577.*EXPO-MOVEMENT-VIDEO-1, #575.*UNPROVEN here/);
+  assert.match(byId['unverified-participant'].knownExclusions.join(' '), /MEMBER-PREVIEW-LABEL-1.*PROFILE-PHOTOS-FIREBASE-1, #593.*UNPROVEN here/);
+  assert.match(byId['unverified-participant'].knownExclusions.join(' '), /expected to FAIL on its eight visitor rows/);
   // GAP-2 is fixed at the approved build (#571): its exclusion is gone, and the store-only half of the gate stays named.
   assert.doesNotMatch(JSON.stringify(m), /GAP-2/);
   assert.match(byId['closed-goal-turn'].knownExclusions.join(' '), /creates or advances no entry, place, assignment, lease or attempt document: stored facts the hosted screens do not show; proved on emulators by EXPO-CLOSED-GOAL-QUEUE-GATE-1/);
@@ -435,9 +442,9 @@ await test('EXPO: a failed cleanup is INCOMPLETE and keeps the manifest, though 
   assert.ok(fs.existsSync(d.kit.manifestPath), 'the manifest stays for recovery');
 });
 
-await test('EXPO: through the runner (live manifest, real registry), the REAL cleaner and the card CLI: all eight PASSED and cleanup COMPLETE', async () => {
+await test('EXPO: through the runner (the live manifest\'s eight attendee journeys, real registry), the REAL cleaner and the card CLI: all eight PASSED and cleanup COMPLETE', async () => {
   const d = tmp();
-  const m = live();
+  const m = { ...live(), journeys: live().journeys.filter((j) => EXPO_IDS.includes(j.id)) };
   const mf = path.join(d, 'manifest.json');
   fs.writeFileSync(mf, JSON.stringify(m));
   const changed = path.join(d, 'evidence', 'changed-journeys');
@@ -470,7 +477,7 @@ await test('EXPO: through the runner (live manifest, real registry), the REAL cl
 
 await test('EXPO: a seeded defect through the runner is a FAILED journey and a FAILED card naming the row, never PASSED', async () => {
   const d = tmp();
-  const m = live();
+  const m = { ...live(), journeys: live().journeys.filter((j) => EXPO_IDS.includes(j.id)) };
   const mf = path.join(d, 'manifest.json');
   fs.writeFileSync(mf, JSON.stringify(m));
   const changed = path.join(d, 'evidence', 'changed-journeys');
@@ -902,11 +909,14 @@ const cleanAll = async (h) => {
   return c;
 };
 
-await test('UNVERIFIED: the driver is registered beside the expo drivers and asserts nine rows; the live manifest names it only with the pin', () => {
+await test('UNVERIFIED: the driver is registered beside the expo drivers, asserts nine rows, and the live manifest names it word for word', () => {
   assert.equal(drivers['unverified-participant'], expoDrivers['unverified-participant']);
   assert.equal(typeof drivers['unverified-participant'], 'function');
   assert.deepEqual(Object.keys(EXPO_ROWS['unverified-participant']), UNVERIFIED_ROWS);
-  assert.equal(live().journeys.some((j) => j.id === 'unverified-participant'), false, 'the manifest row lands with the pin that names its build');
+  const j = live().journeys.find((x) => x.id === 'unverified-participant');
+  assert.ok(j, 'the live manifest names the journey');
+  assert.deepEqual(j.expected, Object.values(EXPO_ROWS['unverified-participant']));
+  assert.equal(j.entry, '/go/{markerSlug}');
 });
 
 await test('UNVERIFIED at 819c26f0 as served: every visitor row fails on the screen that holds the account, the verified control passes, nothing is verified or mailed', async () => {
@@ -980,6 +990,45 @@ await test('UNVERIFIED: the driver reaches the store only through these kit call
   const kitSrc = fs.readFileSync(path.resolve('.github/wsf-staging/journeys/fixture-kit.mjs'), 'utf8');
   assert.equal(kitSrc.match(/emailVerified: true/g).length, 1, 'only createVerifiedUser makes a verified account');
   assert.doesNotMatch(kitSrc, /accounts:update|setAccountInfo|oobCode|sendOobCode/, 'nothing in the kit changes or verifies an account');
+});
+
+async function unverifiedThroughRunner(opts) {
+  const d = tmp();
+  const m = { ...live(), journeys: live().journeys.filter((j) => j.id === 'unverified-participant') };
+  const mf = path.join(d, 'manifest.json');
+  fs.writeFileSync(mf, JSON.stringify(m));
+  const changed = path.join(d, 'evidence', 'changed-journeys');
+  const h = unverifiedHarness(opts);
+  const browser = { newContext: (o) => h.page.context().browser().newContext(o), close: async () => {} };
+  const hook = await runHook({ WSF_JOURNEY_MANIFEST: mf, WSF_STAGING_URL: 'https://staging.example.test', WSF_APPROVED_SHA: APPROVED, WSF_RESULT_DIR: path.join(d, 'evidence') }, {
+    fetch: async () => ({ ok: true, text: async () => `commit ${APPROVED.slice(0, 7)}` }), launch: async () => browser, fixtures: () => h.fixtures,
+  });
+  const receipt = path.join(changed, 'cleanup-receipt.json');
+  const { server, base } = await serve(h.be);
+  const cleanup = await runCleanup(base, h.kit.manifestPath, receipt);
+  server.close();
+  const card = spawnSync(process.execPath, [CARD, '--manifest', mf, '--results', path.join(changed, 'changed-journeys.json'),
+    '--cleanup-manifest', h.kit.manifestPath, '--cleanup-receipt', receipt, '--staging-url', 'https://staging.example.test', '--out', path.join(changed, 'card.md')], { encoding: 'utf8' });
+  return { hook, cleanup, card, h };
+}
+
+await test('UNVERIFIED through the runner and the card, at the build as served: FAILED, the eight visitor rows named, cleanup COMPLETE', async () => {
+  const t = await unverifiedThroughRunner();
+  const [x] = t.hook.results.results;
+  assert.equal(x.journeyId, 'unverified-participant');
+  assert.equal(x.status, 'failed');
+  assert.deepEqual(x.assertions.filter((a) => !a.ok).map((a) => tagOf(a.expected)), ['signin', 'profile', 'marker', 'link', 'contribute', 'history', 'fresh', 'round']);
+  assert.equal(t.cleanup.receipt.status, 'COMPLETE');
+  assert.equal(t.h.be.docs.size + t.h.be.accounts.size, 0);
+  assert.match(t.card.stdout, /OWNER_CARD_SUMMARY=FAILED/);
+});
+
+await test('UNVERIFIED through the runner and the card, once the native screens are repaired: PASSED, cleanup COMPLETE', async () => {
+  const t = await unverifiedThroughRunner({ repaired: true });
+  const [x] = t.hook.results.results;
+  assert.equal(x.status, 'passed', x.reason);
+  assert.equal(t.cleanup.receipt.status, 'COMPLETE');
+  assert.match(t.card.stdout, /OWNER_CARD_CLEANUP=COMPLETE\nOWNER_CARD_SUMMARY=PASSED/);
 });
 
 console.log(`\nchanged-journey-drivers: ${passed} passed`);

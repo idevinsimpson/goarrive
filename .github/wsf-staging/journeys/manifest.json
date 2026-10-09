@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "milestone": "EXPO-ATTENDEE-JOURNEY-PROOF-1",
-  "productSha": "0d3598d4a1dc72411b6d80d375335b84a497efdb",
+  "productSha": "ec162d17a0540e936741027f9b8f90dd372cfaf4",
   "previousKnownGoodSha": "ab77fbfce97e60c1c22492397b2ab6b491f9e0db",
   "journeys": [
     {
@@ -21,7 +21,8 @@
       ],
       "knownExclusions": [
         "Safari and native builds: not exercised; hosted Chromium only",
-        "a printed QR code: the event address is opened directly, not scanned"
+        "a printed QR code: the event address is opened directly, not scanned",
+        "camera counting in Move mode (MOVE-CAMERA-NATIVE-PORT-1, #577) and the approved movement demo that loops in the player (EXPO-MOVEMENT-VIDEO-1, #575): changed by this build and UNPROVEN here, with no hosted driver; this journey records on the entry step, which they do not change"
       ]
     },
     {
@@ -62,7 +63,8 @@
       ],
       "knownExclusions": [
         "printed station signage and kiosk hardware",
-        "the follow-along player's timing and feel: owner device review"
+        "the follow-along player's timing and feel: owner device review",
+        "that each Start, Record and Let them go carries the station's own binding to the turn it was pressed for (expectedTurn, #587 KIOSK-EXPECTED-TURN-1 and #596): a request fact the hosted screens do not show; proved on emulators by the functions wsf-kiosk-expected-turn tests and #596's stationTurnOperation suite (W7 check 81), not by this hosted journey"
       ]
     },
     {
@@ -98,7 +100,7 @@
         "while offline the phone claims no result; once reconnected it shows 25 squats recorded."
       ],
       "knownExclusions": [
-        "the sentence the station prints for a lost answer: from this build (#564) the station maps it through the app's describeCallableError rule, so it prints a product sentence, That didn’t go through. Try again. or We couldn’t reach the server. Check your connection and try again., and never internal; proved on emulators by expo-attendee-journey J2b, not asserted by this hosted journey"
+        "the sentences the station prints when an answer is lost, which this hosted journey does not assert word for word: from this build a lost Record (this journey) stays the screen's own unanswered operation (#596, KIOSK-EXPECTED-TURN-NATIVE-CALLER-RECOVERY-2) and prints No answer yet for {code}. “Try again” sends the result ({n}) again for that turn — it can’t count twice., with a Try again control that resends the same turn and count; a lost Call next still maps through the app's describeCallableError rule (#564) to That didn’t go through. Try again. or We couldn’t reach the server. Check your connection and try again., and never internal; proved on emulators by #596's stationTurnOperation suite and expo-attendee-journey J2 and J2b (W7 check 81), not by this hosted journey"
       ]
     },
     {
@@ -164,6 +166,38 @@
         "kiosk hardware lock-down: this is in-app confinement, not a device lock",
         "a mailbox: the walk-up uses an account that already exists",
         "the 90-second countdown runs on the page's own clock, advanced in the browser, not waited out"
+      ]
+    },
+    {
+      "id": "unverified-participant",
+      "entry": "/go/{markerSlug}",
+      "setup": "native app, hosted web build: a fresh synthetic account whose address is not verified (no profile, no membership) on its own phone; a public community with a join link and an approved marker for one open squats goal (target 1000, seeded 100); a separate verified account with no profile as the control",
+      "actions": [
+        "sign in, then save a profile",
+        "open the approved marker and press Join, then open the community's join link and press Join",
+        "from the marker press Move on my phone and record 15, then open Your progress",
+        "in a fresh browser with nothing stored, sign in again, open Your progress, and record a new round of 10",
+        "the verified control signs in, saves a profile, joins by the marker and records 5"
+      ],
+      "expected": [
+        "signing in, the unverified account is taken to its profile step, not held at a verification page",
+        "the profile step offers the unverified account its name form, and Save profile moves on",
+        "the approved marker offers Join Fixture Open Community, and joining shows How will you take part?",
+        "the community's join link then opens the same community for the member",
+        "Move on my phone records 15: Your total on this goal: 15 squats, and the shared total of 115 counts it once",
+        "Your progress lists the goal with YOURS 15 squats",
+        "in a fresh browser with nothing stored, signing in again reaches the same member, whose progress still reads YOURS 15 squats",
+        "a new round of 10 is accepted: Your total on this goal: 25 squats, and a shared total of 125",
+        "a verified account with no profile, on the same path, lands on its profile step, saves it, joins by the marker and records its own 5"
+      ],
+      "knownExclusions": [
+        "the native screens at this build still hold an unverified account (signin.tsx:121 and :63, profile-setup.tsx:113, MarkerEntryScreen.tsx:269), so this journey is expected to FAIL on its eight visitor rows, each naming the screen that holds the account, while the verified control passes; #586 changed only the server, and the client change is a separate slice",
+        "the Lovable Web Twin: another host, proved by its own runner (LOVABLE-KIOSK-HOSTED-PROOF-1), not this journey",
+        "the same uid: the screens never show one; the same account signs in both times and its own total carries over",
+        "a mailbox or a verified address: no mail is sent and nothing is verified; Resend and I have verified are never pressed",
+        "Safari and native iOS/Android builds: hosted Chromium only",
+        "the per-IP preview bucket (wsfPreviewRateLimits) the marker and link pages increment: shared product state, not a fixture",
+        "the link-preview label (MEMBER-PREVIEW-LABEL-1, wsfPublicPreviewLabel) and profile and community-face photos (PROFILE-PHOTOS-FIREBASE-1, #593): changed by this build and UNPROVEN here, with no hosted driver; the PHOTO exclusion stands"
       ]
     }
   ]

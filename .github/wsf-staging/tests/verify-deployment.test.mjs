@@ -68,8 +68,9 @@ function startMock({ functions = ALL, services = null, health = SHA.slice(0, 7),
  * thing. The live approval now names three additions, so the legacy cases run
  * against an explicit no-additions approval written next to a copy of the
  * script (the same resolution rule the script uses in the real checkout), and
- * the LIVE approval has its own cases below: a 49-function project passes and
- * reports exactly the three; a 46-function project fails, naming them.
+ * the LIVE approval has its own cases below: since the ec162d17 pin, a
+ * 59-function project passes and reports exactly the ten that pin adds; a
+ * 46-function project fails, naming the three.
  */
 function run(base, beforeFile, dir) {
   return new Promise((resolve) => {
@@ -517,21 +518,35 @@ await test("an approved addition that is SHUT is reported, never failed as pre-e
   );
 });
 
-await test('the LIVE approval against a 49-function project passes and reports exactly the three social services as created', async () => {
+/**
+ * The ten services the ec162d17 pin adds over the measured 49 (#365 6075042219,
+ * EXPO-FULL-STAGING-RECOVERY-4): the marker pair (EVERGREEN-MARKER-ENTRY-1), the
+ * public preview label (MEMBER-PREVIEW-LABEL-1) and the seven photo callables
+ * (PROFILE-PHOTOS-FIREBASE-1, #593). Written out, not imported, like the lists
+ * above: the approval and this fixture change as two deliberate acts.
+ */
+const ADDED_59 = [
+  'wsfcommunityfacephotos', 'wsfcommunityfaces', 'wsfjoinviamarker', 'wsfmyprofilephoto', 'wsfpublicpreviewlabel',
+  'wsfremoveprofilephoto', 'wsfresolvemarker', 'wsfsetcommunityphotovisibility', 'wsfsetportraitdecision', 'wsfsetprofilephoto',
+];
+
+await test('the LIVE approval against a 59-function project passes and reports exactly the ten new services as created (49 -> 59)', async () => {
   // The real script beside the real approval — the resolution the deploy job
-  // uses. HISTORICAL SHAPE, KEPT: this is the 46 -> 49 rollout run 47 performed
-  // for 7ee70e4. The verifier still accepts it with the live approval (a project
-  // restored to 46 would be re-populated the same way); the NEXT run's reviewed
-  // shape is 49 -> 49 and has its own case below.
+  // uses — against a project that deployed the ec162d17 pin completely. Until
+  // that pin this case kept the historical 46 -> 49 rollout run 47 performed
+  // for 7ee70e4; the live approval now demands the ten as well, so that shape
+  // no longer passes with it (the WITH_SOCIAL fixture case above keeps a
+  // social-only approval covered).
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-v-'));
   const all49 = [...ALL, ...SOCIAL];
-  const { server, base } = await startMock({ functions: all49, services: all49.map((n) => svc(n)) });
-  const r = await runFrom(VERIFY, base, beforeFile(d, ALL), d);
+  const all59 = [...all49, ...ADDED_59];
+  const { server, base } = await startMock({ functions: all59, services: all59.map((n) => svc(n)) });
+  const r = await runFrom(VERIFY, base, beforeFile(d, all49), d);
   server.close();
   assert.equal(r.code, 0, r.err);
   assert.match(r.out, /VERIFY=pass/);
-  assert.match(r.out, /EXPECTED_INVENTORY=49/);
-  assert.deepEqual(r.receipt.inventory.createdThisDeploy, [...SOCIAL].sort());
+  assert.match(r.out, /EXPECTED_INVENTORY=59/);
+  assert.deepEqual(r.receipt.inventory.createdThisDeploy, [...ADDED_59].sort());
 });
 
 await test('the LIVE approval against a 46-function project FAILS, naming the three it authorizes and did not get', async () => {
@@ -545,28 +560,32 @@ await test('the LIVE approval against a 46-function project FAILS, naming the th
   for (const n of SOCIAL) assert.match(r.err, new RegExp(`${n} absent — the approval authorizes this addition and the deploy did not produce it`));
 });
 
-await test('the live approval file names exactly the three reviewed social additions over the measured 49', async () => {
+await test('the live approval file names exactly the three social additions and the ten reviewed new ones over the measured 49', async () => {
   // Read from the repository, not a fixture. Until the f2f901a pin this case
   // asserted that the live approval carried NO additions; that pin flipped it
   // deliberately. Until the 502b1e8d pin it asserted a prior of 46, the BEFORE
   // of run 47. Run 47 (35937603929) measured INVENTORY_AFTER=49, so the prior
-  // is now 49: the three social services are DEPLOYED, and they stay listed
+  // is 49: the three social services are DEPLOYED, and they stay listed
   // because the verifier's expected set is the 46-name base plus this list.
   // Dropping them while they remain deployed would fail every later deploy as
-  // "present but not expected" (SOCIAL-ROLLOUT-SEQUENCE.md section 6a).
+  // "present but not expected" (SOCIAL-ROLLOUT-SEQUENCE.md section 6a). Until
+  // the ec162d17 pin the list was exactly the three and the next deploy created
+  // nothing; that pin appends the ten git measures as new (49 -> 59 exports),
+  // so its deploy is expected to create exactly those ten.
   const live = JSON.parse(fs.readFileSync(LIVE_APPROVAL, 'utf8'));
-  assert.deepEqual(live.candidateAddedFunctions, SOCIAL, 'the live approval must name exactly the three reviewed additions');
+  assert.deepEqual(live.candidateAddedFunctions, [...SOCIAL, ...ADDED_59], 'the live approval must name exactly the three retained and the ten reviewed additions');
   assert.equal(live.expectedPriorFunctions, 49);
   assert.equal(
     live.expectedPriorFunctions,
     ALL.length + SOCIAL.length,
-    'the measured prior equals the verifier expected set, so the reviewed next deploy creates nothing'
+    'the measured prior is the base plus the three already deployed, so the reviewed deploy starts from 49'
   );
+  assert.equal(ALL.length + live.candidateAddedFunctions.length, 59, 'and the verifier expects 59 after it');
   assert.match(live.approvedAppSha, /^[0-9a-f]{40}$/);
 });
 
 /**
- * THE LIVE PIN, END TO END, ON THE STAGING RUN 47 LEFT BEHIND.
+ * THE LIVE PIN, END TO END, ON THE STAGING RUN 60 LEFT BEHIND (the measured 49).
  *
  * Two real scripts beside the real approval, in the deploy job's order:
  * read-inventory.mjs (the pre-deploy gate that compares the live count with
@@ -576,9 +595,11 @@ await test('the live approval file names exactly the three reviewed social addit
  * what refused the 46 pin against a live 49, so the gate is part of this case.
  *
  * The three social services are modelled as run 47 measured them: DEPLOYED
- * and SHUT (invoker_iam_check_enabled). The receipt must REPORT that and name
- * them for the separate transport approval. VERIFY=pass here is an inventory
- * and transport REPORT, never a claim that the social features work.
+ * and SHUT (invoker_iam_check_enabled). The ten the ec162d17 pin adds are
+ * modelled as firebase-tools is expected to leave them, also SHUT: the deploy
+ * identity cannot set their invoker policy. The receipt must REPORT that and
+ * name them for the separate transport approval. VERIFY=pass here is an
+ * inventory and transport REPORT, never a claim that the features work.
  */
 function inventoryGate(dir, liveNames, approvalPath = LIVE_APPROVAL) {
   const raw = path.join(dir, 'functions-list.json');
@@ -588,35 +609,37 @@ function inventoryGate(dir, liveNames, approvalPath = LIVE_APPROVAL) {
   return { code: r.status, out: r.stdout || '', err: r.stderr || '', beforePath: out };
 }
 const ALL49 = [...ALL, ...SOCIAL];
-const SHUT_SOCIAL = ALL49.map((n) => (SOCIAL.includes(n) ? svc(n, { invokerIamDisabled: false }) : svc(n)));
+const ALL59 = [...ALL49, ...ADDED_59];
+const SHUT_LISTED = ALL59.map((n) => (SOCIAL.includes(n) || ADDED_59.includes(n) ? svc(n, { invokerIamDisabled: false }) : svc(n)));
 
-await test('the LIVE pin on a 49-function staging: the gate admits BEFORE 49 and the verifier passes 49 -> 49, creating nothing, losing nothing, and REPORTING the three SHUT', async () => {
+await test('the LIVE pin on a 49-function staging: the gate admits BEFORE 49 and the verifier passes 49 -> 59, creating exactly the ten, losing nothing, and REPORTING them SHUT', async () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-v-'));
   const gate = inventoryGate(d, ALL49);
   assert.equal(gate.code, 0, `the pre-deploy gate must admit the measured live 49: ${gate.err}`);
   assert.match(gate.out, /PREFLIGHT_BEFORE=49/);
   assert.match(gate.out, /PREFLIGHT_BASELINE_MATCHES_APPROVAL=true/);
 
-  const { server, base } = await startMock({ functions: ALL49, services: SHUT_SOCIAL });
+  const { server, base } = await startMock({ functions: ALL59, services: SHUT_LISTED });
   const r = await runFrom(VERIFY, base, gate.beforePath, d);
   server.close();
   assert.equal(r.code, 0, r.err);
   assert.match(r.out, /VERIFY=pass/);
   assert.match(r.out, /INVENTORY_BEFORE=49/);
-  assert.match(r.out, /INVENTORY_AFTER=49/);
-  assert.match(r.out, /EXPECTED_INVENTORY=49/);
-  assert.match(r.out, /CREATED_THIS_DEPLOY=none/);
-  assert.deepEqual(r.receipt.inventory.createdThisDeploy, [], 'the reviewed next deploy creates nothing');
+  assert.match(r.out, /INVENTORY_AFTER=59/);
+  assert.match(r.out, /EXPECTED_INVENTORY=59/);
+  assert.ok(r.out.includes(`CREATED_THIS_DEPLOY=${[...ADDED_59].sort().join(',')}\n`), r.out);
+  assert.deepEqual(r.receipt.inventory.createdThisDeploy, [...ADDED_59].sort(), 'the reviewed deploy creates exactly the ten');
   assert.deepEqual(r.receipt.inventory.lostThisDeploy, [], 'and loses nothing');
   assert.doesNotMatch(r.err, /present but not expected|expected but absent|now gone/);
-  for (const n of SOCIAL) {
+  for (const n of [...SOCIAL, ...ADDED_59]) {
     assert.equal(r.receipt.candidateServiceTransports[n], 'invoker_iam_check_enabled', `${n} is reported as measured, SHUT`);
   }
-  assert.deepEqual(r.receipt.preExistingTransportDrifted, [], 'a SHUT social service is reported, not failed as drift');
+  assert.deepEqual(r.receipt.preExistingTransportDrifted, [], 'a SHUT listed service is reported, not failed as drift');
   assert.equal(r.receipt.candidateServiceTransportRequiresSeparateApproval, true, 'SHUT is named for the separate transport approval, never declared usable');
   assert.deepEqual(
-    r.receipt.candidateServiceTransportNeedingApproval.filter((n) => SOCIAL.includes(n)).sort(),
-    [...SOCIAL].sort()
+    r.receipt.candidateServiceTransportNeedingApproval.filter((n) => ADDED_59.includes(n)).sort(),
+    [...ADDED_59].sort(),
+    'each of the ten is named for the separate transport approval'
   );
 });
 
