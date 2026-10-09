@@ -1,0 +1,1713 @@
+{
+  "schema": "wsf-production-inventory.v1",
+  "packet": "PRODUCTION-FIREBASE-INVENTORY-1",
+  "authority": {
+    "queue": "#365 6074830303",
+    "release": "#365 6074831300",
+    "criticalPath": "#365 6074833005",
+    "ownerDecisions": [
+      "#365 6072718440",
+      "#365 6073175126",
+      "#365 6074580396",
+      "#365 6074607727",
+      "#365 6074643881",
+      "#365 6075884941 (launch on the pending consent version; candidate A is the launch candidate)",
+      "#365 6075844761 (Path A: the owner runs the reviewed runbook with his own credentials)"
+    ],
+    "priorFactSheet": "#365 6070407860",
+    "opsSourceFinding": "#394 6075479691 (W4 F1 invoker + the 1197-1256 nit)",
+    "ownerReadback": "#365 6076170543 (2026-10-09T07:05Z)",
+    "readbackReceipt": "#365 6076227694 (L0)",
+    "readbackCorrections": "#365 6076230776 (L0)"
+  },
+  "inventoriedAt": "2026-10-09T05:45Z",
+  "revisedAt": "2026-10-09T07:57Z",
+  "revisedWith": [
+    "W4 F1 + nit (#394 6075479691)",
+    "owner production readbacks (#365 6076170543), receipted (#365 6076227694)",
+    "inventory-side results of W9 adversarial review of #599/#600 against the pinned firebase-tools 15.30.1 and firebase-functions 4.9.0 sources (one skeptic per finding)"
+  ],
+  "inventoriedBy": "W9 (source inspection, GitHub read-only API, pinned package sources); live facts only from the owner readback",
+  "refs": {
+    "operationalMain": "41bff6c643ab4537d47a0732da48cfb86dc64b6b",
+    "development_candidateA": "ec162d17a0540e936741027f9b8f90dd372cfaf4",
+    "stagingServedApp": "ab77fbfce97e60c1c22492397b2ab6b491f9e0db",
+    "stagingOpsAtDeploy": "b4b479a62d380edfe3f792bfa6e6090d4979f9c4",
+    "lovableHostedSource": "77172f45a2c100c85975bd4437a8aed95831f36b",
+    "lovableDeployment": "b4b9d8d1-ed6a-49a7-966d-af688c3a0d39",
+    "liveRulesSourceMatch": [
+      "620c1689",
+      "d6e26933"
+    ]
+  },
+  "evidenceVocabulary": [
+    "SOURCE INSPECTED",
+    "DEPLOYMENT RECEIPT",
+    "HOSTED VERIFIED",
+    "READBACK RECEIPT",
+    "SOURCE-MATCHED",
+    "BLOCKED"
+  ],
+  "evidenceNotes": {
+    "READBACK RECEIPT": "the owner's credentialed, read-only readback of live goarrive, receipted by L0; proves served state; NOT a deployment receipt for any candidate",
+    "SOURCE-MATCHED": "a readback whose content hash equals a repository blob, so the served text is known exactly",
+    "neverInferred": "source is never treated as proof of what is deployed"
+  },
+  "sessionLimits": {
+    "credentials": "none used by W9; no gcloud/firebase login, no token, no staging WIF identity, no other worker credential",
+    "egress": "anonymous HTTPS GETs to the six hosts refused by this session proxy (CONNECT 403) at 2026-10-09T05:38:43Z; external DNS does not resolve in this sandbox",
+    "mutationsByW9": "none",
+    "mutationsByReadback": "one, authorized: the owner added app.westay.fit to the Auth authorized domains"
+  },
+  "bottomLine": [
+    "Production already serves an older WSF backend not from this repository: 17 wsf* callables (2026-09-15T02:45Z), a 2026-09-01 rules release with an older WSF section (SOURCE-MATCHED), no WSF composite index, and no production deployment receipt for any reviewed candidate.",
+    "Candidate A (ec162d17) updates 16 live WSF functions in place, creates 43, releases a WSF rules section that is only stricter than the live one, adds 2 indexes, and orphans wsfListCommunityGoals (explicit recorded decision needed; behaviour depends on its codebase label, B4d).",
+    "Toolchain deploy stoppers for a --non-interactive deploy without --force: S1 Node.js 20 decommission 2026-10-30; S2 wsfCheckIn minimum-bill prompt (B4c); S3 gcf-artifacts cleanup policy (B11).",
+    "Operational main must never be the source of a WSF production deploy (1 export, no WSF rules section, placeholder web config); a forced or prompt-accepted functions:westayfit deploy from main would prune every other westayfit-labelled WSF function (B4d).",
+    "Consent: the owner decided to launch on pending-approval-2026-08-25 (#365 6075884941); owner-accepted risk.",
+    "Phase-1 prerequisites read back: app.westay.fit authorized, Email/Password enabled, allUsers permitted by org policy, WSF web app registration exists.",
+    "Open: WSF_APP_URL points at an expired staging channel; Resend sending domain unread (B3b); 2 of 11 P1 journey callables not served; Anonymous sign-in enabled (GoArrive share uses it); deploy before 2026-10-30.",
+    "Standing GoArrive hazards today: H1 a GoArrive rules deploy from main removes the live WSF section; H2 a GoArrive functions deploy from main lists live WSF functions for deletion (H2a/H2b by label, B4d)."
+  ],
+  "rows": {
+    "R1_projectIdentity": {
+      "R1.1 production project selected by source": {
+        "evidence": "SOURCE INSPECTED",
+        "main_41bff6c6": ".firebaserc default goarrive; apps/westayfit/src/firebase.ts hardcodes projectId goarrive, authDomain goarrive.firebaseapp.com, storageBucket goarrive.firebasestorage.app",
+        "development_ec162d17": "apps/westayfit/src/firebase.ts:21 PROD_PROJECT_ID goarrive; productionConfig at :79-86; staging selected only by complete EXPO_PUBLIC_WSF_STAGING_* config plus EXPO_PUBLIC_WSF_ENV (src/stagingEnv.ts), which refuses production identifiers; emulator demo-wsf-local only on a loopback host"
+      },
+      "R1.2 staging project": {
+        "evidence": "SOURCE INSPECTED + DEPLOYMENT RECEIPT",
+        "fact": "separate Firebase project westayfit-staging (WIF pool projects/857281977774/.../wsf-staging-github), Hosting site westayfit-staging, channel URL https://westayfit-staging--staging-4a616y5m.web.app (.github/workflows/wsf-staging-deploy.yml:148-155 @ main); production is the SHARED goarrive project"
+      },
+      "R1.3 WSF web app registration in goarrive": {
+        "evidence": "SOURCE INSPECTED + READBACK RECEIPT",
+        "live": {
+          "evidence": "READBACK RECEIPT",
+          "readback": "#365 6076170543 B1",
+          "receipt": "#365 6076227694",
+          "fact": "goarrive holds two web apps, \"We Stay Fit\" and \"GoArrive Web\"; the owner confirmed the WSF appId equals development productionConfig appId; L0 confirmed Lovable pinned public config c783f0b4 matches"
+        },
+        "development_ec162d17": "appId shape 1:<goarrive project number>:web:<22 hex>, distinct from GoArrive web appId (same shape, different value); apiKey/messagingSenderId are per-project and equal GoArrive values (not reproduced here)",
+        "main_41bff6c6_DRIFT": "apps/westayfit/src/firebase.ts carries the scaffold placeholder: a different sender id, a non-hex appId suffix (westayfit-app) and a different apiKey; a WSF build from main would not address the real registration"
+      }
+    },
+    "R2_auth": {
+      "R2.1 authorized domains": {
+        "evidence": "READBACK RECEIPT",
+        "readback": "#365 6076170543 B2 + step 9",
+        "receipt": "#365 6076227694",
+        "fact": "app.westay.fit is present: the owner added it 2026-10-09 (before: absent; after: present), the readback's one authorized mutation. westay.fit absent. Lovable trial host absent, as expected (it runs on westayfit-staging). The list also holds goarrive.web.app, westayfit-app.web.app and several preview-channel domains incl. expired staging channels (pruning is hygiene, not a Phase-1 need). The mail callables mint links with continue URL WSF_APP_URL, which must be on this list."
+      },
+      "R2.2 providers": {
+        "evidence": "SOURCE INSPECTED + READBACK RECEIPT",
+        "live": {
+          "evidence": "READBACK RECEIPT",
+          "readback": "#365 6076170543 B2",
+          "receipt": "#365 6076227694",
+          "fact": "Email/Password enabled, password required; Anonymous sign-in ENABLED"
+        },
+        "source": "the WSF client uses Email/Password only; GoArrive's share page uses anonymous sign-in (apps/goarrive/app/share/[shareId].tsx:105 signInAnonymously), so disabling the provider on the shared project would break GoArrive",
+        "wsfExposureToAnonymousToken": {
+          "evidence": "SOURCE INSPECTED @ ec162d17",
+          "verifiedEmailGated": [
+            "wsfCreateCommunity",
+            "wsfJoinCommunity",
+            "wsfJoinViaMarker",
+            "wsfCreateGoal",
+            "wsfCreateCombinedGoal",
+            "wsfSendVerificationEmail"
+          ],
+          "consequence": "an anonymous caller can never become a member, and member-gated callables refuse it",
+          "requestAuthOnly": "37 signed-in callables check only request.auth; among those that write without membership, wsfSaveProfile creates a wsfMemberProfiles doc and, once candidate A creates them, the photo setters write a wsfProfilePhotos doc of up to 160 KB per anonymous uid",
+          "reviewItem": "security seat: a follow-on code change refusing request.auth.token.firebase.sign_in_provider === \"anonymous\" in WSF callables; not a provider toggle"
+        }
+      },
+      "R2.3 verification / reset mail path": {
+        "evidence": "SOURCE INSPECTED",
+        "fact": "client never calls Firebase built-in mail; wsfSendVerificationEmail / wsfSendPasswordResetEmail mint the link with the Admin SDK and send via Resend (functions-westayfit/src/index.ts:327-400 @ ec162d17). Required at runtime: secret WSF_EMAIL_API_KEY, env WSF_EMAIL_FROM, env WSF_APP_URL; optional WSF_AUTH_ACTION_HANDLER, default https://goarrive.firebaseapp.com/__/auth/action. Missing config fails closed with failed-precondition."
+      },
+      "R2.3 live action URL": {
+        "evidence": "READBACK RECEIPT",
+        "readback": "#365 6076170543 step 11",
+        "receipt": "#365 6076227694",
+        "fact": "the project custom action URL is GoArrive's https://goarrive.web.app/reset-password; WSF retargets its own links, so no change"
+      },
+      "R2.4 production mail config": {
+        "evidence": "READBACK RECEIPT",
+        "live": {
+          "evidence": "READBACK RECEIPT",
+          "readback": "#365 6076170543 B3",
+          "receipt": "#365 6076227694",
+          "fact": "WSF_EMAIL_API_KEY versions 1 and 2 enabled, version 2 referenced by Cloud Run (no value read); service wsfsendverificationemail present in us-central1; WSF_EMAIL_FROM is a display-name noreply@ sender on westay.fit; WSF_APP_URL = https://westayfit-app--staging-uoria6cq.web.app, an EXPIRED staging channel: the deploy must set https://app.westay.fit"
+        },
+        "stillOwed": {
+          "evidence": "BLOCKED",
+          "readback": "B3b",
+          "operator": "Devin",
+          "readOnlyCommand": "Resend dashboard > Domains: is westay.fit verified for sending?"
+        }
+      },
+      "R2.5 Lovable Web Twin against production without a native release": {
+        "evidence": "READBACK RECEIPT + SOURCE INSPECTED",
+        "readBack": "domain present (R2.1), config correct (R1.3), Email/Password enabled (R2.2)",
+        "notYetInPlace": "the live WSF rules are the older section (R4.1); 2 journey callables absent and the rest run older source (R3); the mail URL is wrong (R2.4)",
+        "answer": "candidate A's deploy is the remaining backend step; a native release is NOT a dependency"
+      },
+      "R2.6 web API key referrer restriction": {
+        "evidence": "READBACK RECEIPT",
+        "readback": "#365 6076170543 B10",
+        "receipt": "#365 6076227694",
+        "fact": "the Firebase browser key has no HTTP-referrer restriction (browserKeyRestrictions: {}), so app.westay.fit is not excluded; hardening is a later, separate change"
+      }
+    },
+    "R3_callables": {
+      "counts": {
+        "development_ec162d17_candidateA": 59,
+        "stagingServed_ab77fbfc": 49,
+        "operationalMain_41bff6c6": 1,
+        "production": 17
+      },
+      "production": {
+        "evidence": "READBACK RECEIPT",
+        "readback": "#365 6076170543 B4",
+        "receipt": "#365 6076227694",
+        "fact": "17 wsf* callables, all GEN_2 ACTIVE, last updated 2026-09-15T02:45:23Z-02:45:31Z"
+      },
+      "productionServedNames": [
+        "wsfAdjustGoal",
+        "wsfChallengePulse",
+        "wsfCheckIn",
+        "wsfContribute",
+        "wsfCreateCommunity",
+        "wsfCreateGoal",
+        "wsfGoalPulse",
+        "wsfHealth",
+        "wsfJoinCommunity",
+        "wsfListChallenge",
+        "wsfListCommunityGoals",
+        "wsfMyCommunities",
+        "wsfMyContribution",
+        "wsfPreviewCommunity",
+        "wsfSaveProfile",
+        "wsfSendPasswordResetEmail",
+        "wsfSendVerificationEmail"
+      ],
+      "againstCandidateA": {
+        "keptUpdatedInPlace": [
+          "wsfAdjustGoal",
+          "wsfChallengePulse",
+          "wsfCheckIn",
+          "wsfContribute",
+          "wsfCreateCommunity",
+          "wsfCreateGoal",
+          "wsfGoalPulse",
+          "wsfHealth",
+          "wsfJoinCommunity",
+          "wsfListChallenge",
+          "wsfMyCommunities",
+          "wsfMyContribution",
+          "wsfPreviewCommunity",
+          "wsfSaveProfile",
+          "wsfSendPasswordResetEmail",
+          "wsfSendVerificationEmail"
+        ],
+        "created": [
+          "wsfApproveStation",
+          "wsfCallNext",
+          "wsfCancelTurn",
+          "wsfCloseCombinedGoal",
+          "wsfCombinedGoalPulse",
+          "wsfCommunityActivity",
+          "wsfCommunityFacePhotos",
+          "wsfCommunityFaces",
+          "wsfCommunityMembers",
+          "wsfCompleteMyTurn",
+          "wsfCompleteTurn",
+          "wsfCreateCombinedGoal",
+          "wsfDesignateChampion",
+          "wsfEventContext",
+          "wsfGoalRecentAdditions",
+          "wsfJoinTurnLine",
+          "wsfJoinViaMarker",
+          "wsfLeaveCommunity",
+          "wsfLeaveTurnLine",
+          "wsfListGoals",
+          "wsfListStations",
+          "wsfMyProfilePhoto",
+          "wsfMyTurn",
+          "wsfPublicPreviewLabel",
+          "wsfReinstateMember",
+          "wsfRemoveMember",
+          "wsfRemoveProfilePhoto",
+          "wsfRepairCombinedGoal",
+          "wsfResetJoinCode",
+          "wsfResolveMarker",
+          "wsfRevokeStation",
+          "wsfSetCommunityPhotoVisibility",
+          "wsfSetCommunityVisibility",
+          "wsfSetGoalDisplayAuthorization",
+          "wsfSetPortraitDecision",
+          "wsfSetProfilePhoto",
+          "wsfStartTurn",
+          "wsfStationClaimPairing",
+          "wsfStationPairingStatus",
+          "wsfStationRequestPairing",
+          "wsfStationState",
+          "wsfTurnReady",
+          "wsfTurnState"
+        ],
+        "orphanNotExportedByCandidate": [
+          "wsfListCommunityGoals"
+        ],
+        "orphanNote": "the canonical client calls wsfListGoals; whether candidate A's deploy tries to delete the orphan depends on its codebase label (B4d, R6 codebaseLabels)"
+      },
+      "liveSourceNotInRepository": "git log --all -S wsfListCommunityGoals finds nothing, and none of the 60 commits that touch functions-westayfit/src/index.ts exports these 17; there is no source anchor in the repository for the live functions, and deleting wsfListCommunityGoals cannot be undone from repository source",
+      "phase1JourneyServed": {
+        "served": [
+          "wsfContribute",
+          "wsfGoalPulse",
+          "wsfJoinCommunity",
+          "wsfMyCommunities",
+          "wsfMyContribution",
+          "wsfPreviewCommunity",
+          "wsfSaveProfile",
+          "wsfSendPasswordResetEmail",
+          "wsfSendVerificationEmail"
+        ],
+        "notServed": [
+          "wsfGoalRecentAdditions",
+          "wsfListGoals"
+        ],
+        "note": "the served ones run the older source"
+      },
+      "addedSinceStagingServed": [
+        "wsfCommunityFacePhotos",
+        "wsfCommunityFaces",
+        "wsfJoinViaMarker",
+        "wsfMyProfilePhoto",
+        "wsfPublicPreviewLabel",
+        "wsfRemoveProfilePhoto",
+        "wsfResolveMarker",
+        "wsfSetCommunityPhotoVisibility",
+        "wsfSetPortraitDecision",
+        "wsfSetProfilePhoto"
+      ],
+      "allRegions": "us-central1 (all 59)",
+      "appCheck": "not declared on any export",
+      "nodeRuntime": "functions-westayfit/package.json engines.node \"20\"",
+      "minInstances": "wsfCheckIn only: projectID == goarrive ? 1 : 0 (index.ts:1985); production keeps one warm instance (cost)",
+      "invokerDeclaredPublic": [
+        "wsfPreviewCommunity",
+        "wsfResolveMarker",
+        "wsfPublicPreviewLabel",
+        "wsfChallengePulse",
+        "wsfSendPasswordResetEmail",
+        "wsfGoalPulse",
+        "wsfGoalRecentAdditions",
+        "wsfStationRequestPairing",
+        "wsfStationPairingStatus",
+        "wsfStationClaimPairing",
+        "wsfStationState",
+        "wsfCombinedGoalPulse",
+        "wsfTurnState",
+        "wsfCallNext",
+        "wsfStartTurn",
+        "wsfCompleteTurn",
+        "wsfCancelTurn"
+      ],
+      "invokerDeclarationsAreInert": "for onCall that option is INERT with these versions: firebase-functions 4.9.0 builds every onCall endpoint as callableTrigger: {} and maps invoker only for onRequest (lib/v2/providers/https.js:110-111 vs :176); firebase-tools 15.30.1 grants allUsers roles/run.invoker to every callable on CREATE unconditionally (lib/deploy/functions/release/fabricator.js:486-489) and sets no invoker for callables on UPDATE (:600-629). Every one of the 59 is public at the Cloud Run layer once created; a redeploy leaves an existing service's IAM as it is. A browser's Firebase ID token is not a Cloud Run IAM credential, so the 42 callables that declare no invoker (all of them signed-in) reach their handlers only through the public invoker the CLI grants anyway; each handler's own request.auth check is the control. The source comments and functions-westayfit/tests/deploy-config/sprint-w8-social-invoker.test.ts treat the declaration as the transport control; with these versions it is not (noted, not changed). Corrected per W4 #394 6075479691 F1.",
+      "orgPolicy": {
+        "evidence": "READBACK RECEIPT",
+        "readback": "#365 6076170543 B8",
+        "receipt": "#365 6076227694",
+        "fact": "iam.allowedPolicyMemberDomains: listPolicy.allValues=ALLOW, so allUsers is permitted"
+      },
+      "deployStoppers": {
+        "evidence": "SOURCE INSPECTED in firebase-tools 15.30.1",
+        "appliesTo": "firebase deploy --only functions:westayfit --non-interactive without --force",
+        "S1_node20Decommission": {
+          "fact": "nodejs20 decommissionDate \"2026-10-30\" (lib/deploy/functions/runtimes/supported/types.js:50-55); from that instant the CLI throws \"Runtime Node.js 20 was decommissioned ...\" (runtimes/supported/index.js:56-59)",
+          "bites": "any functions deploy of the candidate on or after 2026-10-30T00:00Z, including a deploy-based rollback",
+          "settledBy": "deploy before then, or a new candidate record on a newer runtime (a reviewed source change)"
+        },
+        "S2_minimumBill": {
+          "fact": "promptForMinInstances runs before anything is created (prepare.js:338); a wanted endpoint whose min-instance cost exceeds the live one makes --non-interactive throw \"Pass the --force option to deploy functions that increase the minimum bill\" (prompts.js:116-145)",
+          "bites": "wsfCheckIn resolves to 1 on goarrive; the repository declared a literal minInstances: 1 until 1cbf2319 (2026-09-16); the live function was deployed 2026-09-15 from source not in this repository, so its value is not known",
+          "settledBy": "B4c: 1 passes; 0 or absent aborts before anything is created"
+        },
+        "S3_artifactCleanupPolicy": {
+          "fact": "after release the CLI checks gcf-artifacts in each deployed region; no firebase-functions-cleanup policy, no other cleanup policy and no firebase-functions-cleanup-opted-out label makes --non-interactive throw \"Functions successfully deployed but could not set up cleanup policy ...\" (lib/functions/artifacts.js:121-161, prompts.js:179-190)",
+          "bites": "us-central1 after a SUCCESSFUL deploy: non-zero exit although the functions are live",
+          "settledBy": "B11; --force is not the remedy: it sets a 1-day cleanup policy (artifacts.js:23) on a repository GoArrive images share"
+        },
+        "orphanDeletion": "a fourth stop of the same kind (prompts.js:62-71), if the orphan is labelled westayfit (B4d)"
+      },
+      "stillOwed": {
+        "B4b_revisions": {
+          "evidence": "BLOCKED",
+          "readback": "B4b",
+          "operator": "Devin",
+          "readOnlyCommand": "gcloud run services list --project=goarrive --region=us-central1 --format=\"table(metadata.name,status.latestReadyRevisionName)\"   (serving revision of each of the 16 kept services: the functions rollback anchor)"
+        },
+        "B4c_minInstances": {
+          "evidence": "BLOCKED",
+          "readback": "B4c",
+          "operator": "Devin",
+          "readOnlyCommand": "gcloud functions describe wsfCheckIn --gen2 --region=us-central1 --project=goarrive --format=\"value(serviceConfig.minInstanceCount)\""
+        },
+        "B4d_codebaseLabels": {
+          "evidence": "BLOCKED",
+          "readback": "B4d",
+          "operator": "Devin",
+          "readOnlyCommand": "gcloud functions list --project=goarrive --regions=us-central1 --filter=\"name~/functions/wsf\" --format=\"yaml(name,labels)\"   (is firebase-functions-codebase: westayfit on each of the 17?)"
+        },
+        "B5_invokerIam": {
+          "evidence": "BLOCKED",
+          "readback": "B5",
+          "operator": "Devin",
+          "readOnlyCommand": "gcloud run services get-iam-policy <service> --region=us-central1 --project=goarrive   (each kept service should already list allUsers; a redeploy will not repair one that lost it)"
+        },
+        "B11_cleanupPolicy": {
+          "evidence": "BLOCKED",
+          "readback": "B11",
+          "operator": "Devin",
+          "readOnlyCommand": "gcloud artifacts repositories describe gcf-artifacts --location=us-central1 --project=goarrive --format=\"yaml(cleanupPolicies,labels)\""
+        }
+      },
+      "notExported": "Event lifecycle (PR #595, held on security review); raffle/promotion modules (functions-westayfit/src/expo-prize/*)",
+      "table": [
+        {
+          "name": "wsfHealth",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "ops",
+          "invokedByCanonicalClient": false,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "served",
+            "updateTime": "2026-09-15T02:45:23.969633482Z",
+            "liveSource": "not in this repository",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "updated in place"
+          }
+        },
+        {
+          "name": "wsfSaveProfile",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "phase1-journey",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "served",
+            "updateTime": "2026-09-15T02:45:29.760123152Z",
+            "liveSource": "not in this repository",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "updated in place"
+          },
+          "consent": "server-side stamp WSF_ACCEPTED_TERMS_VERSION / WSF_ACCEPTED_PRIVACY_VERSION = pending-approval-2026-08-25 (functions-westayfit/src/index.ts:124-125 @ ec162d17); owner decision #365 6075884941: launch on this version"
+        },
+        {
+          "name": "wsfCreateCommunity",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "phase1-supporting",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "served",
+            "updateTime": "2026-09-15T02:45:30.589559935Z",
+            "liveSource": "not in this repository",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "updated in place"
+          }
+        },
+        {
+          "name": "wsfSendVerificationEmail",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "phase1-journey",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "served",
+            "updateTime": "2026-09-15T02:45:28.136851481Z",
+            "liveSource": "not in this repository",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "updated in place"
+          }
+        },
+        {
+          "name": "wsfPreviewCommunity",
+          "region": "us-central1",
+          "invokerDeclared": "public",
+          "minInstances": null,
+          "handlerAuth": "none (signed-out by design)",
+          "phase1": "phase1-journey",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "served",
+            "updateTime": "2026-09-15T02:45:27.861348690Z",
+            "liveSource": "not in this repository",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "updated in place"
+          }
+        },
+        {
+          "name": "wsfJoinCommunity",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "phase1-journey",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "served",
+            "updateTime": "2026-09-15T02:45:31.768631611Z",
+            "liveSource": "not in this repository",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "updated in place"
+          }
+        },
+        {
+          "name": "wsfResolveMarker",
+          "region": "us-central1",
+          "invokerDeclared": "public",
+          "minInstances": null,
+          "handlerAuth": "none (signed-out by design)",
+          "phase1": "phase1-supporting",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": false,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfJoinViaMarker",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "phase1-supporting",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": false,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfPublicPreviewLabel",
+          "region": "us-central1",
+          "invokerDeclared": "public",
+          "minInstances": null,
+          "handlerAuth": "none (signed-out by design)",
+          "phase1": "phase2-kiosk-display",
+          "invokedByCanonicalClient": false,
+          "inStagingServedSource_ab77fbfc": false,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfResetJoinCode",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "phase1-supporting",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfRemoveMember",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "hidden-not-required-phase1",
+          "invokedByCanonicalClient": false,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfLeaveCommunity",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "phase1-supporting",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfReinstateMember",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "hidden-not-required-phase1",
+          "invokedByCanonicalClient": false,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfDesignateChampion",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "hidden-not-required-phase1",
+          "invokedByCanonicalClient": false,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfListChallenge",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "legacy-challenge",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "served",
+            "updateTime": "2026-09-15T02:45:26.913067021Z",
+            "liveSource": "not in this repository",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "updated in place"
+          }
+        },
+        {
+          "name": "wsfCheckIn",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": "checkInMinInstances",
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "legacy-challenge",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "served",
+            "updateTime": "2026-09-15T02:45:31.604933072Z",
+            "liveSource": "not in this repository",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "updated in place"
+          }
+        },
+        {
+          "name": "wsfMyCommunities",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "phase1-journey",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "served",
+            "updateTime": "2026-09-15T02:45:30.239649191Z",
+            "liveSource": "not in this repository",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "updated in place"
+          }
+        },
+        {
+          "name": "wsfChallengePulse",
+          "region": "us-central1",
+          "invokerDeclared": "public",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "legacy-challenge",
+          "invokedByCanonicalClient": false,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "served",
+            "updateTime": "2026-09-15T02:45:28.318351585Z",
+            "liveSource": "not in this repository",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "updated in place"
+          }
+        },
+        {
+          "name": "wsfSendPasswordResetEmail",
+          "region": "us-central1",
+          "invokerDeclared": "public",
+          "minInstances": null,
+          "handlerAuth": "none (signed-out by design)",
+          "phase1": "phase1-journey",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "served",
+            "updateTime": "2026-09-15T02:45:30.610500014Z",
+            "liveSource": "not in this repository",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "updated in place"
+          }
+        },
+        {
+          "name": "wsfCreateGoal",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "phase1-supporting",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "served",
+            "updateTime": "2026-09-15T02:45:30.008418890Z",
+            "liveSource": "not in this repository",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "updated in place"
+          }
+        },
+        {
+          "name": "wsfContribute",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "phase1-journey",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "served",
+            "updateTime": "2026-09-15T02:45:30.235640127Z",
+            "liveSource": "not in this repository",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "updated in place"
+          }
+        },
+        {
+          "name": "wsfGoalPulse",
+          "region": "us-central1",
+          "invokerDeclared": "public",
+          "minInstances": null,
+          "handlerAuth": "none (signed-out by design)",
+          "phase1": "phase1-journey",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "served",
+            "updateTime": "2026-09-15T02:45:28.075388924Z",
+            "liveSource": "not in this repository",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "updated in place"
+          }
+        },
+        {
+          "name": "wsfGoalRecentAdditions",
+          "region": "us-central1",
+          "invokerDeclared": "public",
+          "minInstances": null,
+          "handlerAuth": "none (signed-out by design)",
+          "phase1": "phase1-journey",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfMyContribution",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "phase1-journey",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "served",
+            "updateTime": "2026-09-15T02:45:31.434042827Z",
+            "liveSource": "not in this repository",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "updated in place"
+          }
+        },
+        {
+          "name": "wsfListGoals",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "phase1-journey",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfSetGoalDisplayAuthorization",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "phase1-supporting",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfAdjustGoal",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "hidden-not-required-phase1",
+          "invokedByCanonicalClient": false,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "served",
+            "updateTime": "2026-09-15T02:45:30.529055171Z",
+            "liveSource": "not in this repository",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "updated in place"
+          }
+        },
+        {
+          "name": "wsfStationRequestPairing",
+          "region": "us-central1",
+          "invokerDeclared": "public",
+          "minInstances": null,
+          "handlerAuth": "none (signed-out by design)",
+          "phase1": "phase2-kiosk-display",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfStationPairingStatus",
+          "region": "us-central1",
+          "invokerDeclared": "public",
+          "minInstances": null,
+          "handlerAuth": "pairing id from the kiosk request, no sign-in",
+          "phase1": "phase2-kiosk-display",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfApproveStation",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "phase2-kiosk-display",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfStationClaimPairing",
+          "region": "us-central1",
+          "invokerDeclared": "public",
+          "minInstances": null,
+          "handlerAuth": "pairing id from the kiosk request, no sign-in",
+          "phase1": "phase2-kiosk-display",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfStationState",
+          "region": "us-central1",
+          "invokerDeclared": "public",
+          "minInstances": null,
+          "handlerAuth": "station credential (stationId + secret), no sign-in",
+          "phase1": "phase2-kiosk-display",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfListStations",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "phase2-kiosk-display",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfRevokeStation",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "phase2-kiosk-display",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfCreateCombinedGoal",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "phase2-kiosk-display",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfCloseCombinedGoal",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "hidden-not-required-phase1",
+          "invokedByCanonicalClient": false,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfRepairCombinedGoal",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "hidden-not-required-phase1",
+          "invokedByCanonicalClient": false,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfCombinedGoalPulse",
+          "region": "us-central1",
+          "invokerDeclared": "public",
+          "minInstances": null,
+          "handlerAuth": "none (signed-out by design)",
+          "phase1": "phase2-kiosk-display",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfEventContext",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "phase2-kiosk-display",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfJoinTurnLine",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "phase2-kiosk-display",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfMyTurn",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "phase2-kiosk-display",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfTurnReady",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "phase2-kiosk-display",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfLeaveTurnLine",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "phase2-kiosk-display",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfTurnState",
+          "region": "us-central1",
+          "invokerDeclared": "public",
+          "minInstances": null,
+          "handlerAuth": "station credential (stationId + secret), no sign-in",
+          "phase1": "phase2-kiosk-display",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfCallNext",
+          "region": "us-central1",
+          "invokerDeclared": "public",
+          "minInstances": null,
+          "handlerAuth": "station credential (stationId + secret), no sign-in",
+          "phase1": "phase2-kiosk-display",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfStartTurn",
+          "region": "us-central1",
+          "invokerDeclared": "public",
+          "minInstances": null,
+          "handlerAuth": "station credential (stationId + secret), no sign-in",
+          "phase1": "phase2-kiosk-display",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfCompleteTurn",
+          "region": "us-central1",
+          "invokerDeclared": "public",
+          "minInstances": null,
+          "handlerAuth": "station credential (stationId + secret), no sign-in",
+          "phase1": "phase2-kiosk-display",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfCompleteMyTurn",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "phase2-kiosk-display",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfCancelTurn",
+          "region": "us-central1",
+          "invokerDeclared": "public",
+          "minInstances": null,
+          "handlerAuth": "station credential (stationId + secret), no sign-in",
+          "phase1": "phase2-kiosk-display",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfSetCommunityVisibility",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "phase1-supporting",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfCommunityMembers",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "phase1-supporting",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfMyProfilePhoto",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "hidden-not-required-phase1",
+          "invokedByCanonicalClient": false,
+          "inStagingServedSource_ab77fbfc": false,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfSetProfilePhoto",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "hidden-not-required-phase1",
+          "invokedByCanonicalClient": false,
+          "inStagingServedSource_ab77fbfc": false,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfRemoveProfilePhoto",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "hidden-not-required-phase1",
+          "invokedByCanonicalClient": false,
+          "inStagingServedSource_ab77fbfc": false,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfSetPortraitDecision",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "hidden-not-required-phase1",
+          "invokedByCanonicalClient": false,
+          "inStagingServedSource_ab77fbfc": false,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfSetCommunityPhotoVisibility",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "hidden-not-required-phase1",
+          "invokedByCanonicalClient": false,
+          "inStagingServedSource_ab77fbfc": false,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfCommunityFaces",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "hidden-not-required-phase1",
+          "invokedByCanonicalClient": false,
+          "inStagingServedSource_ab77fbfc": false,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfCommunityFacePhotos",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "hidden-not-required-phase1",
+          "invokedByCanonicalClient": false,
+          "inStagingServedSource_ab77fbfc": false,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        },
+        {
+          "name": "wsfCommunityActivity",
+          "region": "us-central1",
+          "invokerDeclared": "not declared",
+          "minInstances": null,
+          "handlerAuth": "signed-in (handler checks request.auth)",
+          "phase1": "phase1-supporting",
+          "invokedByCanonicalClient": true,
+          "inStagingServedSource_ab77fbfc": true,
+          "productionServed": {
+            "state": "not served",
+            "evidence": "READBACK RECEIPT",
+            "readback": "#365 6076170543 B4",
+            "candidateA": "created"
+          }
+        }
+      ]
+    },
+    "R4_rulesIndexesStorage": {
+      "R4.1 Firestore rules": {
+        "source": {
+          "evidence": "SOURCE INSPECTED",
+          "main_41bff6c6": "1201 lines, NO WSF section",
+          "development_ec162d17": "1261 lines = main + one 60-line WSF section (lines 1197-1256) before the catch-all deny (1257); outside that section byte-identical to main. Section: wsfMemberProfiles owner read, owner create/update only with a verified email and adultConfirmation == true, delete false; wsfCommunityGroups current-member read, client writes false; wsfMemberships owner read by the userId field, client writes false"
+        },
+        "deployed": {
+          "evidence": "READBACK RECEIPT + SOURCE-MATCHED",
+          "readback": "#365 6076170543 B6",
+          "release": "projects/goarrive/releases/cloud.firestore",
+          "ruleset": "projects/goarrive/rulesets/1e14eab9-a23f-437f-8418-918b9eaefe65",
+          "updateTime": "2026-09-01T03:44:08.775669Z",
+          "lines": 1259,
+          "sha256": "c598fc3b96c6f16946c5791dbf4a9c6afee39899e5c208bbec56d0f98193a8bf",
+          "sourceMatch": "equals firestore.rules at 620c1689 (2026-08-27) and d6e26933 (2026-09-06)",
+          "computedWith": ".github/wsf-production/preflight.mjs split (#600)",
+          "outsideWsfSection": "byte-equal to main: a rules deploy of candidate A changes only the WSF section",
+          "wsfSectionDiff": "live 58 lines vs candidate 60 lines differ in one place: live wsfIsGroupMember checks only that a membership row exists (a removed or departed member still passes); the candidate also requires membershipStatus == \"active\"",
+          "verdict": "deploying candidate A's rules is strictly tighter for WSF and leaves GoArrive unchanged"
+        },
+        "launchCritical": "the WSF client reads wsfMemberProfiles (signin, signup, verify-email, profile-setup), wsfMemberships and wsfCommunityGroups (community, goals/new) directly",
+        "staleInvariant": "the rules still require adultConfirmation; wsfSaveProfile no longer writes it (DECISIONS 2026-09-06 removed the age gate) and profiles are written by the Admin SDK, so the rule is inert for create; reconcile with the approved 13+ eligibility later",
+        "shared": "one ruleset for the whole goarrive project: deploying firestore.rules replaces GoArrive rules too (standing hazard H1, R6)"
+      },
+      "R4.2 Firestore composite indexes": {
+        "source": {
+          "evidence": "SOURCE INSPECTED",
+          "main_41bff6c6": "48 composite, 0 WSF; 2 field overrides, 0 WSF",
+          "development_ec162d17": "50 composite = main + wsfContributions(communityGroupId ASC, createdAt DESC) + wsfGoalMemberTotals(userId ASC, updatedAt DESC); field overrides unchanged"
+        },
+        "deployed": {
+          "evidence": "READBACK RECEIPT",
+          "readback": "#365 6076170543 B7",
+          "receipt": "#365 6076227694",
+          "fact": "48 composite indexes, 0 WSF, all READY; the count equals main's 48, identity not compared field by field; the 2 WSF composites must be created"
+        },
+        "note": "every other WSF query is equality-only or single-field"
+      },
+      "R4.3 Storage rules": {
+        "source": {
+          "evidence": "SOURCE INSPECTED",
+          "fact": "storage.rules identical on main and development; no WSF path; ends in catch-all deny (line 77); WSF stores no Cloud Storage object"
+        },
+        "deployed": {
+          "evidence": "BLOCKED",
+          "readback": "B8",
+          "operator": "Devin",
+          "readOnlyCommand": "Rules API release projects/goarrive/releases/firebase.storage/goarrive.firebasestorage.app",
+          "consolePath": "Firebase console > Storage > Rules"
+        },
+        "note": "no WSF step touches Storage"
+      }
+    },
+    "R5_hosting": {
+      "R5.1 app.westay.fit": {
+        "evidence": "HOSTED VERIFIED (cited, not re-verified by W9)",
+        "source": "#365 6073175126 (posted 2026-10-09T02:42Z): Lovable deployment b4b9d8d1-ed6a-49a7-966d-af688c3a0d39 of source 77172f45 serves a fail-closed shell; zero Firebase/external calls signed out; production flag OFF",
+        "owner": "Lovable, not Firebase Hosting, serves this name"
+      },
+      "R5.2 westay.fit marketing": {
+        "evidence": "BLOCKED",
+        "readback": "B9",
+        "operator": "Devin",
+        "readOnlyCommand": "host and DNS of westay.fit",
+        "fact": "no WSF source or workflow in this repository touches it"
+      },
+      "R5.3 Firebase Hosting site westayfit-app": {
+        "evidence": "SOURCE INSPECTED (+ indication)",
+        "fact": "named in firebase.westayfit.json; the authorized-domain list includes westayfit-app.web.app and a westayfit-app--staging channel, which Firebase adds when a site or channel exists: a strong indication the site exists in goarrive, not a Hosting readback",
+        "phase1Role": "none: Lovable is the sole Web Twin frontend",
+        "live": {
+          "evidence": "BLOCKED",
+          "readback": "B9",
+          "operator": "Devin",
+          "readOnlyCommand": "firebase hosting:sites:list --project goarrive"
+        }
+      },
+      "R5.4 GoArrive Hosting": {
+        "evidence": "SOURCE INSPECTED",
+        "fact": "firebase.json hosting has no site key, so it resolves to goarrive.web.app; a WSF action must never run a bare firebase deploy or --only hosting with firebase.json"
+      },
+      "R5.5 Lovable trial host": {
+        "evidence": "HOSTED VERIFIED (cited)",
+        "fact": "we-stay-fit-foundation-trial.lovable.app is the staging owner-test host on westayfit-staging; not production"
+      }
+    },
+    "R6_goarriveBoundary": {
+      "wsfOnly": {
+        "codebase": "functions-westayfit, codebase westayfit (firebase.json functions[1])",
+        "rulesSection": "firestore.rules @ ec162d17 lines 1197-1256",
+        "secret": "WSF_EMAIL_API_KEY",
+        "collections": [
+          "wsfChallengeCounters",
+          "wsfChallengeMoves",
+          "wsfChallengeParticipants",
+          "wsfChallenges",
+          "wsfCheckIns",
+          "wsfCombinedCounters",
+          "wsfCombinedCredits",
+          "wsfCombinedGoalClaims",
+          "wsfCombinedGoals",
+          "wsfCommunityGroups",
+          "wsfContributions",
+          "wsfGoalAdjustments",
+          "wsfGoalCounters",
+          "wsfGoalMemberTotals",
+          "wsfGoals",
+          "wsfKioskPairings",
+          "wsfKioskStations",
+          "wsfMarkers",
+          "wsfMemberProfiles",
+          "wsfMemberships",
+          "wsfPasswordResetSends",
+          "wsfPreviewRateLimits",
+          "wsfProfilePhotos",
+          "wsfStationRateLimits",
+          "wsfTurnEntries",
+          "wsfTurnLines",
+          "wsfTurnMembers",
+          "wsfTurnReceipts",
+          "wsfVerificationSends"
+        ],
+        "sourceOnlyCollections": "wsfPromotion* (unexported raffle modules)"
+      },
+      "shared": [
+        "the Auth user pool and providers (including Anonymous, which GoArrive's share page uses)",
+        "the Firestore database and its single ruleset and index set",
+        "the Storage bucket and rules",
+        "Secret Manager",
+        "Cloud Run and IAM, including the default compute service account: no WSF export sets serviceAccount, so WSF and GoArrive functions that set none share this runtime identity; deploying a function that uses WSF_EMAIL_API_KEY grants that account roles/secretmanager.secretAccessor on the secret (firebase-tools 15.30.1 lib/deploy/functions/ensure.js:81, :122), so those GoArrive functions can read it as well",
+        "the gcf-artifacts Artifact Registry repository in us-central1 (container images; cleanup policy B11)",
+        "billing",
+        "the project custom Auth action URL and email templates",
+        "the browser API key"
+      ],
+      "goarriveCodeTouchingWsf": "none: functions/src references no wsf collection; no Auth blocking or user-onCreate triggers; the one all-users scan (seedMissingCoachDocs) acts only on role coach/admin claims",
+      "functionsWestayfitOnlyDeploy": "firebase deploy --only functions:westayfit touches only the westayfit codebase: it updates the 16 kept WSF functions and creates 43. If the live wsfListCommunityGoals carries the westayfit label it would delete it; with --non-interactive and no --force the CLI aborts instead. Either way the orphan needs an explicit decision first (#600). Never deploy WSF functions from main (1 export).",
+      "codebaseLabels": {
+        "evidence": "SOURCE INSPECTED in firebase-tools 15.30.1",
+        "fact": "a deployed function belongs to a codebase only through its firebase-functions-codebase label; a function without it counts as default (lib/gcp/cloudfunctionsv2.js:288-297 sets it, :449 reads it). On deploy a live function is first assigned to the codebase whose source exports the same name, and only the rest by label (lib/deploy/functions/functionsDeployHelper.js:117-134). Candidate A's deploy therefore updates the 16 kept functions whatever their labels, and labels them westayfit.",
+        "unread": "the labels of the 17 live functions (B4d): they decide the orphan's fate and whether H2a or H2b applies"
+      },
+      "standingHazards": {
+        "holds": "today, before any WSF deploy, until main carries the WSF backend",
+        "H1_rules": "the live ruleset already has a WSF section (R4.1) and main's firestore.rules has none; firebase.json declares firestore.rules, so any GoArrive deploy including firestore:rules from main removes the live WSF section and WSF's direct client reads fail closed (and again after candidate A's rules are released). Hold GoArrive rules deploys or merge the WSF section to main first; re-read the release after any GoArrive rules deploy.",
+        "H2a_functions_labelledWestayfit": "firebase.json declares both codebases (functions[0] default, functions[1] westayfit) and GoArrive's documented functions deploy is a bare firebase deploy --only functions (.claude/deployment-and-build.md:49): from main it also deploys main's 1-export westayfit codebase, redeploys wsfHealth from main and lists every other westayfit-labelled WSF function for deletion. GoArrive deploys must name --only functions:default.",
+        "H2b_functions_unlabelled": "unlabelled WSF functions count as default, GoArrive's own codebase: ANY GoArrive functions deploy from main, --only functions:default included, lists every unlabelled WSF function for deletion, because main's functions/ exports none of them. Candidate A relabels the 16 kept functions westayfit, so afterwards only an unlabelled orphan would remain exposed.",
+        "both": "under --non-interactive the deploy aborts; with --force or a Yes at the prompt it deletes the listed functions"
+      },
+      "regressionPlan": [
+        "functions: capture gcloud functions list --project=goarrive across ALL regions before and after (GoArrive also declares us-east1 functions, functions/src/index.ts:8661 and :8905 on main; the B4 readback covered us-central1 only); every non-wsf function keeps its UPDATE_TIME. functions:list has no revision column: compare revisions with gcloud run services list --project=goarrive --region=<each region> --format=\"table(metadata.name,status.latestReadyRevisionName)\"",
+        "rules: the live ruleset equals main outside the WSF section (R4.1, computed); GoArrive rule tests and the WSF rules suite (functions-westayfit/jest.rules.config.cjs, 28 tests) pass on the exact candidate file in the emulator",
+        "indexes: compare against the LIVE before-capture (B7: 48, all READY), not main's file; every captured index still READY and the only new ones are the 2 WSF indexes",
+        "hosting: no Hosting deploy of any kind",
+        "smoke: a GoArrive coach, member and platformAdmin each sign in and load home, and a GoArrive share link still works (it uses anonymous sign-in)"
+      ]
+    },
+    "R7_drift": [
+      {
+        "row": "web app config",
+        "main": "placeholder",
+        "development": "real registration",
+        "stagingServed": "n/a",
+        "production": "WSF app exists; appId = development's (READBACK RECEIPT B1)",
+        "stillMissing": null
+      },
+      {
+        "row": "callables",
+        "main": "1",
+        "development": "59",
+        "stagingServed": "49 (DEPLOYMENT RECEIPT: deployment 6811752332, run 37025084843 #60, success 2026-10-02T15:24:10Z)",
+        "production": "17, 2026-09-15, source not in repo; 16 in candidate A, 1 orphan (READBACK RECEIPT B4)",
+        "stillMissing": "B4b revisions of the 16 (rollback anchor); B4c; B4d"
+      },
+      {
+        "row": "firestore.rules WSF section",
+        "main": "absent",
+        "development": "60 lines (active-member check)",
+        "stagingServed": "not deployed by the staging workflow",
+        "production": "58 lines, SOURCE-MATCHED to 620c1689; outside = main (READBACK RECEIPT B6)",
+        "stillMissing": null
+      },
+      {
+        "row": "WSF composite indexes",
+        "main": "0",
+        "development": "2",
+        "stagingServed": "not deployed by the staging workflow",
+        "production": "0 (48 total, all READY; READBACK RECEIPT B7)",
+        "stillMissing": null
+      },
+      {
+        "row": "storage.rules",
+        "main": "= development",
+        "development": "no WSF path",
+        "stagingServed": "not deployed by the staging workflow",
+        "production": "not read",
+        "stillMissing": "B8 (no WSF step touches it)"
+      },
+      {
+        "row": "firebase.westayfit.json",
+        "main": "no rewrites",
+        "development": "13 rewrites incl /go/**",
+        "stagingServed": "staging config (on main) has 12, no /go/**, site westayfit-staging",
+        "production": "site westayfit-app indicated by authorized domains",
+        "stillMissing": "B9"
+      },
+      {
+        "row": "mail env",
+        "main": "n/a",
+        "development": "needs WSF_EMAIL_FROM, WSF_APP_URL",
+        "stagingServed": "written by the staging workflow",
+        "production": "WSF_APP_URL = expired staging channel (READBACK RECEIPT B3)",
+        "stillMissing": "B3b Resend domain"
+      },
+      {
+        "row": "consent version",
+        "main": "n/a",
+        "development": "pending-approval-2026-08-25 (server and client)",
+        "stagingServed": "same",
+        "production": "live source not in repo",
+        "stillMissing": "none: the owner launches on pending (#365 6075884941)"
+      }
+    ],
+    "R8_deploymentMethodAndIam": {
+      "today": "no reviewed production deploy workflow: 22 registered workflows, the only deploy workflow is wsf-staging-deploy (WIF to westayfit-staging only); the Deployments API holds no production receipt; the 2026-09-15 production WSF functions were deployed outside any recorded workflow",
+      "chosenPath": "Path A (#365 6075844761): the owner runs the reviewed runbook (#600) with his own credentials",
+      "permissionsNeeded": {
+        "functions:westayfit": "Cloud Functions Admin; Cloud Run Admin (the CLI sets allUsers run.invoker on each CREATED WSF callable service); Service Account User on the runtime account; Cloud Build and Artifact Registry writer; Secret Manager admin",
+        "firestore:rules": "Firebase Rules Admin",
+        "indexes": "Cloud Datastore Index Admin",
+        "hosting": "not needed"
+      },
+      "holders": {
+        "evidence": "READBACK RECEIPT",
+        "readback": "#365 6076170543 B8",
+        "receipt": "#365 6076227694",
+        "fact": "project Owners include the operator's own account and one other owner account; iam.allowedPolicyMemberDomains allValues=ALLOW, so allUsers is permitted; the full IAM output is retained by the owner and not reproduced"
+      }
+    },
+    "R9_rollback": {
+      "reversible": [
+        {
+          "surface": "the 16 kept WSF functions",
+          "anchor": "their current Cloud Run revisions (B4b), recorded before deploy; their source is not in this repository",
+          "method": "gcloud run services update-traffic <service> --region=us-central1 --project=goarrive --to-revisions=<revision>=100. That revision carries its own env (the old WSF_APP_URL) and the secret version it pinned; a later firebase deploy replaces it. A source redeploy is not a rollback here: no prior source in the repository, functions:list records none, a smaller source aborts on deletion under --non-interactive, and any functions deploy fails after 2026-10-30 (S1)."
+        },
+        {
+          "surface": "the 43 new WSF functions",
+          "anchor": "none existed before",
+          "method": "firebase functions:delete <name> --region us-central1 --project goarrive, by name; it asks for confirmation and under --non-interactive without --force it aborts, so it runs interactively, one named function at a time; deleting a function also deletes its Cloud Run service and that service's IAM policy"
+        },
+        {
+          "surface": "Firestore rules",
+          "anchor": "ruleset 1e14eab9-a23f-437f-8418-918b9eaefe65; source = firestore.rules at 620c1689",
+          "method": "re-release that ruleset (console Rules history roll back, or the Rules API release update); first re-read the release: if GoArrive released rules after the WSF deploy, re-releasing 1e14eab9 would undo GoArrive's change too"
+        },
+        {
+          "surface": "WSF_APP_URL env",
+          "anchor": "the current value (R2.4)",
+          "method": "comes back with the routed-back revisions; already known to be broken"
+        },
+        {
+          "surface": "WSF_EMAIL_API_KEY",
+          "anchor": "versions 1 and 2 enabled, v2 referenced (R2.4)",
+          "method": "no new version planned; if one is added, disable it only after no deployed revision pins it (a deploy pins the version latest resolved to)"
+        },
+        {
+          "surface": "app.westay.fit authorized domain",
+          "anchor": "absent before the readback; added 2026-10-09 by the owner, not by a deploy",
+          "method": "not part of a deploy rollback; remove only if WSF Phase 1 is abandoned"
+        },
+        {
+          "surface": "app.westay.fit hosting",
+          "anchor": "Lovable deployment b4b9d8d1-ed6a-49a7-966d-af688c3a0d39 (fail-closed shell)",
+          "method": "the Lovable owner re-publishes it, with flags OFF"
+        },
+        {
+          "surface": "2 WSF composite indexes",
+          "anchor": "none needed (additive)",
+          "method": "leave them, or delete the two"
+        }
+      ],
+      "nonReversible": [
+        "wsfListCommunityGoals deletion: its source is in no repository commit, so it cannot be redeployed from here once deleted",
+        "real member data in wsf* collections and the shared Auth user pool, once signup opens",
+        "consent records stamped pending-approval-2026-08-25 at signup (owner decision)",
+        "verification and reset emails already sent",
+        "a rules release whose GoArrive sections drift (not the case for candidate A, R4.1)",
+        "any westayfit-codebase function deleted by a prune, including by H2",
+        "--force side effects: it accepts every deletion and the minimum-bill increase, and sets a 1-day cleanup policy on the shared gcf-artifacts repository (S3)"
+      ]
+    },
+    "R10_candidate_PROPOSAL_ONLY": {
+      "status": "proposal only: the reviewed runbook is #600",
+      "candidateA": "development ec162d17a0540e936741027f9b8f90dd372cfaf4 exactly, backend only; the LAUNCH CANDIDATE by owner decision #365 6075884941; never operational main",
+      "candidateB": "A plus the consent-version commit: off the launch path; a future record",
+      "preconditions": [
+        "the Director's named acceptance of A's exact SHA after #600's review",
+        "B3b: a verified Resend sending domain for WSF_EMAIL_FROM",
+        "the recorded decision on wsfListCommunityGoals (#600)",
+        "B4b: the revision names of the 16 kept services recorded as the rollback anchor",
+        "the deploy runs before 2026-10-30T00:00Z (S1), otherwise a new candidate record on a newer runtime",
+        "B4c shows the live wsfCheckIn minimum instances at 1 (S2) and B11 shows a cleanup policy or opt-out on gcf-artifacts (S3); either failing is a stop for the runbook to resolve without --force"
+      ],
+      "order": [
+        "1. readbacks still owed (B3b, B4b, B4c, B4d, B5, B11)",
+        "2. pre-flight",
+        "3. the 2 WSF indexes, created with gcloud (additive; wait for READY)",
+        "4. env: WSF_APP_URL=https://app.westay.fit plus the existing sender",
+        "5. rules (lawful: the live ruleset equals main outside the WSF section)",
+        "6. the orphan decision",
+        "7. firebase deploy --only functions:westayfit --project goarrive --config firebase.westayfit.production.json --non-interactive, with no --force",
+        "8. verification"
+      ],
+      "verification": [
+        "exactly the 59 WSF names in us-central1, with every non-wsf function unchanged",
+        "allUsers holds roles/run.invoker on all 59 WSF callable services; never remove it; repair a kept service that lacks it only with an explicit owner decision",
+        "the rules release names the new ruleset, and both WSF indexes are READY",
+        "then the two-account web journey on app.westay.fit after the owner's go",
+        "the GoArrive regression plan (R6)"
+      ],
+      "reviewClasses": [
+        "ops-source",
+        "security"
+      ]
+    }
+  },
+  "readbacks": {
+    "answered": {
+      "source": "#365 6076170543",
+      "B1 web apps": "R1.3",
+      "B2 Auth config": "R2.1, R2.2",
+      "B3 secret and env": "R2.4",
+      "B4 functions": "R3",
+      "B6 rules release": "R4.1",
+      "B7 indexes": "R4.2",
+      "B8 IAM and org policy": "R8",
+      "B10 browser key": "R2.6",
+      "step 11 action URL": "R2.3 live"
+    },
+    "stillOwed": [
+      "B3b",
+      "B4b",
+      "B4c",
+      "B4d",
+      "B5",
+      "B8 (storage rules)",
+      "B9",
+      "B11"
+    ]
+  },
+  "hiddenForPhase1": "Event lifecycle (not exported); profile photos (7 exports); raffle/promotion (not exported); admin/Champion management (wsfRemoveMember, wsfReinstateMember, wsfDesignateChampion, wsfAdjustGoal, wsfCloseCombinedGoal, wsfRepairCombinedGoal): not required for Phase 1, nothing more",
+  "notEstablished": "the readbacks still owed; DNS; hosted re-verification by W9; any deployment of candidate A. Delivered source only: not reviewed, accepted, integrated, staged or deployed."
+}
