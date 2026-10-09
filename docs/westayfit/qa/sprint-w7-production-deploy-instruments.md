@@ -217,3 +217,35 @@ echo "== failure paths"
 curl() { return 22; }; capture_rules out2.rules; echo "exit on read failure: $?"
 gcloud() { return 1; }; capture_rules out3.rules; echo "exit with no token: $?"
 ```
+
+## Instrument 5: `harness.sh` (the runbook's step-6 and step-7 chains, stubbed externals)
+
+`step6.sh` and `step7.sh` are the runbook's own blocks, extracted by the same step as instrument 4 (the blocks containing
+`npm --prefix functions-westayfit ci` and `capture_rules live-firestore.rules \`). Every external (`capture_rules`, `PF`,
+`firebase`, `npm`) is a stub that logs its call. Result: in step 7 a failed re-read, a changed live ruleset and a refused
+pre-flight each stop before `firebase` is called and print `STOP`; a failed deploy prints `STOP` after the call; only the
+all-ok case calls `firebase` and prints no `STOP`. In step 6 a refused pre-flight stops the deploy.
+
+```bash
+# usage: harness.sh <case> ; every external is a stub that logs; HOME is a scratch dir
+case_name="$1"; export HOME=/tmp/claude-0/-home-user-goarrive/7c5b4d17-88ae-5653-a067-ccc063331108/scratchpad/chain600/home-$case_name
+mkdir -p "$HOME/wsf-prod" "$HOME/cand"; export CAND="$HOME/cand"; LOG="$HOME/calls.log"; : > "$LOG"
+printf 'RULES-V1\n' > "$HOME/wsf-prod/live-firestore.rules.step0"
+capture_rules() { echo "capture_rules $1" >> "$LOG"; case "$CAPTURE" in fail) return 1;; same) cp "$HOME/wsf-prod/live-firestore.rules.step0" "$1";; changed) printf 'RULES-V2\n' > "$1";; esac; }
+PF() { echo "PF $*" >> "$LOG"; [ "${PF_EXIT:-0}" = 0 ]; }
+firebase() { echo "firebase $*" >> "$LOG"; [ "${FB_EXIT:-0}" = 0 ]; }
+npm() { echo "npm $*" >> "$LOG"; return "${NPM_EXIT:-0}"; }
+bash_script="$2"
+source "$bash_script" > "$HOME/out.txt" 2>&1
+echo "case=$case_name capture=${CAPTURE:-} pf=${PF_EXIT:-0} fb=${FB_EXIT:-0}: firebase_called=$(grep -c '^firebase ' "$LOG") PF_called=$(grep -c '^PF ' "$LOG") STOP_printed=$(grep -c '^STOP' "$HOME/out.txt")"
+```
+
+## Instrument 6: `scan-evidence` on the packet
+
+```sh
+mkdir -p scan/txt
+cp firebase.westayfit.production.json RUNBOOK_WSF_PRODUCTION_DEPLOY_1.md scan/txt/
+cp preflight.mjs scan/txt/preflight.mjs.txt; cp preflight.test.mjs scan/txt/preflight.test.mjs.txt   # .mjs is not a scanned extension
+node .github/wsf-staging/scan-evidence.mjs scan/txt       # EVIDENCE_SCAN=clean, 4 files, 154782 bytes, exit 0
+# control: a planted ?oobCode= string in a .txt file gives exit 1 and names the rule, never the value
+```
