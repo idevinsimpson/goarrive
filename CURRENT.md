@@ -1,15 +1,15 @@
-<!-- wsf-control ledgerHead=f6274edaec23bfc242aba449146a5d4f7a8e25dc2bd35eee1a6d75887950c5e1 events=960 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=c21e7ad7500e52a7fd40f96c5310449d40c36ad89b36ccec24fc24c5e2a397ca events=967 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `f6274edaec23bfc242aba449146a5d4f7a8e25dc2bd35eee1a6d75887950c5e1` (960 events)
+- Ledger head: `c21e7ad7500e52a7fd40f96c5310449d40c36ad89b36ccec24fc24c5e2a397ca` (967 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
-- Canonical: development `claude/wsf-app-shell` at `ec162d17a0540e936741027f9b8f90dd372cfaf4`; operational main `df8d4d69f41f70971c5918c36d776b9af07d1bcb`
+- Canonical: development `claude/wsf-app-shell` at `e65bfee9eecb2370f602d09880da604709fba58a`; operational main `df8d4d69f41f70971c5918c36d776b9af07d1bcb`
 - Staging: serves `ec162d17a0540e936741027f9b8f90dd372cfaf4` (run 37912780869, #61); rollback `ab77fbfce97e60c1c22492397b2ab6b491f9e0db`; pin PR #597
 - Unattended fast-path dispatch: ENABLED (set-fastpath)
 - Staging target (fast path): `ab77fbfce97e60c1c22492397b2ab6b491f9e0db` (KIOSK-PAIRING-CLARITY-PROOF-1), checked against the full-path pin `a31276516e786ac8f848269de4c839b3b9e13123`
@@ -29,7 +29,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 
 | Worker | Inbox | Active now | Reviewing | Waiting on review | Blocked | Next | Queue | WATCH |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| W3 | #396 | — | — | WORKER-EXECUTION-PROFILES-1 | NORTHSTAR-MIRROR-INTAKE-1 | — | — | off |
+| W3 | #396 | STAGING-TURN-DRIVERS-1 | — | WORKER-EXECUTION-PROFILES-1 | NORTHSTAR-MIRROR-INTAKE-1 | — | — | on |
 | W4 | #394 | WRITER-CONCURRENCY-1 | — | — | — | LOVABLE-DEVICE-QA-1 | LOVABLE-DEVICE-QA-1 | on |
 | W5 | #395 | — | — | — | — | — | — | off |
 | W7 | #434 | — | — | — | — | — | — | off |
@@ -89,9 +89,10 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | STAGING-FRESHNESS-FASTPATH | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #548 | c295d5c1 | c295d5c1 | — | 73d87d4e | — | W4 | comment:5938517396 | pull_request:548 | — | Step 7: automate preview-eligible accepted/integrated to deterministic candidate, pin, existing staging dispatch, and FRESH readback | 1×ops-source then director | — |
 | STAGING-PIN-FASTPATH-SERVED-BASELINE-1 | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #565 | a72a399e | a72a399e | — | e3598578 | — | W9 | comment:5963657922 | pull_request:565 | — | Teach the existing pin generator to represent a ledger-fast-path served baseline truthfully and fail closed otherwise | 1×ops-source then director | — |
 | STAGING-PROOF-RECONCILE-ROUTING-FIX | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #557 | cc180898 | cc180898 | — | 9ca268d2 | — | W4 | comment:5956038540 | pull_request:557 | — | Derive the exact successful staging run proof and pointer sequence when the workflow-run wake is missed | 1×ops-source then director | — |
+| STAGING-TURN-DRIVERS-1 | W3 | work | INTEGRATED (source-only) | ledger | RELEASED | — | — | — | — | — | — | — | comment:6079017108 | comment:6079017108 | — | Bring the staging hosted suite (Package E turn-contract row) and the changed-journey and player drivers to the #587 turn contract (expectedTurn on wsfStartTurn, the attempt a started turn carries) | 1×journey-qa then director | — |
 | TOGETHER-COMPLETION-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #567 | e4e32ed6 | e4e32ed6 | — | 22766935 | — | W4 | comment:5964984624 | pull_request:567 | — | Port the owner-selected Together completion from the frozen Lovable reference to the confirmed member receipt with truthful totals, one-time motion and reduced-motion parity | 1×journey-qa then director | — |
 | WORKER-EXECUTION-PROFILES-1 | W3 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #562 | 0790876b | 0790876b | — | — | — | W4, W9 | comment:5962925247 | comment:5963579258 | — | Finish existing PR 562 credential-mode safety and pilot readiness without activating or replacing live workers | 1×ops-source+1×security then director | — |
-| WRITER-CONCURRENCY-1 | W4 | work | INTEGRATED (source-only) | ledger | RELEASED | — | — | — | — | — | — | — | comment:6078863846 | comment:6078863846 | — | Writer gap fix: keep non-qualifying issue_comment runs out of the wsf-control-writer concurrency group so they never cancel a queued qualifying run; update the workflow test pin and note | 1×ops-source then director | — |
+| WRITER-CONCURRENCY-1 | W4 | work | INTEGRATED (source-only) | ledger | ACKED | — | — | — | — | — | — | — | comment:6078863846 | comment:6079018663 | — | Writer gap fix: keep non-qualifying issue_comment runs out of the wsf-control-writer concurrency group so they never cancel a queued qualifying run; update the workflow test pin and note | 1×ops-source then director | — |
 
 ## Wakes
 
@@ -245,6 +246,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | f9e0a83b767e | W3 | PRODUCTION-DEPLOY-PATH-1 | review | acked | 6077681219, 6078019028 | comment:6078077972 |
 | 65dfcb5bfddb | W9 | ANON-GATE-1 | release | acked | 6077850130 | comment:6077926364 |
 | f4339d1e8c33 | W4 | ANON-GATE-1 | review | acked | 6078366255 | comment:6078504660 |
-| a5506c543e7a | W9 | PRODUCTION-DEPLOY-PATH-1 | handback | delivered | 6078962481 | — |
-| a5d4ea540bc1 | W4 | WRITER-CONCURRENCY-1 | release | delivered | 6078962743 | — |
+| a5506c543e7a | W9 | PRODUCTION-DEPLOY-PATH-1 | handback | acked | 6078962481 | comment:6079051195 |
+| a5d4ea540bc1 | W4 | WRITER-CONCURRENCY-1 | release | acked | 6078962743 | comment:6079018663 |
+| 612a9cd1912a | W3 | STAGING-TURN-DRIVERS-1 | release | requested | — | — |
 

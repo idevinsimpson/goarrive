@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "f6274edaec23bfc242aba449146a5d4f7a8e25dc2bd35eee1a6d75887950c5e1",
-  "eventCount": 960,
+  "ledgerHead": "c21e7ad7500e52a7fd40f96c5310449d40c36ad89b36ccec24fc24c5e2a397ca",
+  "eventCount": 967,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -19,7 +19,7 @@
   },
   "canonical": {
     "developmentBranch": "claude/wsf-app-shell",
-    "developmentSha": "ec162d17a0540e936741027f9b8f90dd372cfaf4",
+    "developmentSha": "e65bfee9eecb2370f602d09880da604709fba58a",
     "operationalMain": "df8d4d69f41f70971c5918c36d776b9af07d1bcb"
   },
   "staging": {
@@ -3490,6 +3490,68 @@
       "deliveries": 2,
       "pendingFinding": null
     },
+    "STAGING-TURN-DRIVERS-1": {
+      "owner": "W3",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Bring the staging hosted suite (Package E turn-contract row) and the changed-journey and player drivers to the #587 turn contract (expectedTurn on wsfStartTurn, the attempt a started turn carries)",
+      "origin": "ledger",
+      "phase": "RELEASED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": 396,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": 0,
+      "reviewedBy": [],
+      "subjectPaths": [
+        ".github/wsf-staging/hosted-package-e-smoke.mjs",
+        ".github/wsf-staging/hosted-player-journey.mjs",
+        ".github/wsf-staging/journeys/",
+        ".github/wsf-staging/tests/",
+        ".github/wsf-staging/HOSTED-RUN-EVIDENCE.md"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6079014429
+        },
+        "released": {
+          "kind": "comment",
+          "id": 6079017108
+        },
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6079017108
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "journey-qa",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
+      "pendingFinding": null
+    },
     "TOGETHER-COMPLETION-1": {
       "owner": "W9",
       "kind": "work",
@@ -3646,7 +3708,7 @@
       },
       "label": "Writer gap fix: keep non-qualifying issue_comment runs out of the wsf-control-writer concurrency group so they never cancel a queued qualifying run; update the workflow test pin and note",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 394,
@@ -3660,7 +3722,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         ".github/workflows/wsf-control-reconcile.yml",
@@ -3681,7 +3743,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6078863846
+          "id": 6079018663
         }
       },
       "review": {
@@ -5816,20 +5878,34 @@
       "packet": "PRODUCTION-DEPLOY-PATH-1",
       "worker": "W9",
       "reason": "handback",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6078962481
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6079051195
+      }
     },
     "a5d4ea540bc1579bea40c0295dd67b5ed80100b9fe4f7e954d8b95ef5c8cc677": {
       "packet": "WRITER-CONCURRENCY-1",
       "worker": "W4",
       "reason": "release",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6078962743
       ],
+      "ack": {
+        "kind": "comment",
+        "id": 6079018663
+      }
+    },
+    "612a9cd1912a0e19f327d350ed7219ba6f5b46d9e294d580a2ff495c00488eb6": {
+      "packet": "STAGING-TURN-DRIVERS-1",
+      "worker": "W3",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
