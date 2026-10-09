@@ -155,6 +155,32 @@ That edit to `.github/wsf-staging/pin-candidate.mjs` was refused by this session
 
 **Expected hosted outcome at 819c26f0.** Until the client prerequisites above ship, this journey is honestly **FAILED** on the eight visitor rows, each naming the screen that holds the account, while the verified control passes. The changed-journey smoke is report-only, so that does not block the deploy; it says what is served.
 
+## The manifest for ec162d17 (lands with the pin)
+
+The live manifest names the pinned build (`productSha` = `approvedAppSha`, enforced by `changed-journey-drivers`), so it moves only with the pin. Below is what it must say for ec162d17, read from source on 2026-10-09.
+
+**What ec162d17 changes for members and stations, beyond the build the attendee drivers were modelled on (0d3598d4).** There are eight first-parent merges:
+
+| Merge | Member/station change | Hosted driver |
+|---|---|---|
+| #596 / #587 (`ec162d17`, `934f24f0`) | Station Start, Record and Let them go carry their own turn; a lost Record prints "No answer yet for {code}. “Try again” sends the result ({n}) again for that turn — it can’t count twice." and offers **Try again**; a Record's result comes from its own receipt | The five station journeys. Every station test ID they read still renders at ec162d17, and their rows still describe the behaviour. The `station-lost-answer` exclusion must change: the lost-answer sentence is now #596's, not #564's `describeCallableError` copy |
+| #586 (`819c26f0`) | Server: an unverified ordinary participant may save a profile, join and contribute | `unverified-participant` (new). FAILED on the visitor rows until the native screens change |
+| EVERGREEN-MARKER-ENTRY-1 (`09cc4cb1`) | `/go/{markerSlug}`: resolve, join by marker, How will you take part? | `unverified-participant` (the verified control joins by marker); the operational `/go/**` rewrite above |
+| MEMBER-PREVIEW-LABEL-1 (`245c7717`) | `wsfPublicPreviewLabel`: link-unfurl labels | **none**: listed as unproven |
+| #577 MOVE-CAMERA-NATIVE-PORT-1 (`856e20e0`) | Move mode: camera screen, body guide, squat counting, Adjust | **none**: listed as unproven. The phone journeys use the record step, which is unchanged |
+| #575 EXPO-MOVEMENT-VIDEO-1 (`0745c732`) | An approved movement demo loops in the player's media slot | **none**: listed as unproven (already an owner device-review exclusion) |
+| #593 PROFILE-PHOTOS-FIREBASE-1 (`b8381195`) | Profile and community-face photos (six callables) | **none**: listed as unproven, and the PHOTO exclusion stays |
+
+**Manifest edits that land with the pin:**
+- `productSha` becomes `ec162d17a0540e936741027f9b8f90dd372cfaf4`; `previousKnownGoodSha` stays `ab77fbfc…`.
+- The `unverified-participant` journey is added, with the row drafted above.
+- The `station-lost-answer` exclusion is restated for #596's sentence.
+- Each change without a driver is named in the exclusions of the journey it touches, as **unproven**, never asserted:
+  - camera and demo video under `event-use-my-phone`;
+  - the preview label and photos under `event-join-line`.
+
+No journey is invented for them.
+
 ## Not in this change
 
 - No product code, functions, rules, index, provider, IAM/WIF, secret, package, production, Lovable or real-participant data.
