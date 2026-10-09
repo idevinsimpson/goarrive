@@ -1,15 +1,15 @@
-<!-- wsf-control ledgerHead=5ae4d7bdac64ded1dde11f045e1e942e24cf4514a75c8bc1033152458209654e events=1030 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=0cd0c81a16968edc27c44ea27132d038d11f80616536f4dee0cc5a1aff2812e3 events=1033 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `5ae4d7bdac64ded1dde11f045e1e942e24cf4514a75c8bc1033152458209654e` (1030 events)
+- Ledger head: `0cd0c81a16968edc27c44ea27132d038d11f80616536f4dee0cc5a1aff2812e3` (1033 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
-- Canonical: development `claude/wsf-app-shell` at `e65bfee9eecb2370f602d09880da604709fba58a`; operational main `1d3f1c2c52badf4273d900a5ca8ba662fce66c43`
+- Canonical: development `claude/wsf-app-shell` at `e65bfee9eecb2370f602d09880da604709fba58a`; operational main `e2384102f42d5c4f47541893a9aea0cbb0b0754c`
 - Staging: serves `ec162d17a0540e936741027f9b8f90dd372cfaf4` (run 37912780869, #61); rollback `ab77fbfce97e60c1c22492397b2ab6b491f9e0db`; pin PR #597
 - Unattended fast-path dispatch: ENABLED (set-fastpath)
 - Staging target (fast path): `ab77fbfce97e60c1c22492397b2ab6b491f9e0db` (KIOSK-PAIRING-CLARITY-PROOF-1), checked against the full-path pin `a31276516e786ac8f848269de4c839b3b9e13123`
@@ -92,7 +92,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | STAGING-FRESHNESS-FASTPATH | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #548 | c295d5c1 | c295d5c1 | — | 73d87d4e | — | W4 | comment:5938517396 | pull_request:548 | — | Step 7: automate preview-eligible accepted/integrated to deterministic candidate, pin, existing staging dispatch, and FRESH readback | 1×ops-source then director | — |
 | STAGING-PIN-FASTPATH-SERVED-BASELINE-1 | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #565 | a72a399e | a72a399e | — | e3598578 | — | W9 | comment:5963657922 | pull_request:565 | — | Teach the existing pin generator to represent a ledger-fast-path served baseline truthfully and fail closed otherwise | 1×ops-source then director | — |
 | STAGING-PROOF-RECONCILE-ROUTING-FIX | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #557 | cc180898 | cc180898 | — | 9ca268d2 | — | W4 | comment:5956038540 | pull_request:557 | — | Derive the exact successful staging run proof and pointer sequence when the workflow-run wake is missed | 1×ops-source then director | — |
-| STAGING-TURN-DRIVERS-1 | W3 | work | INTEGRATED (source-only) | ledger | ACCEPTED | #604 | 7f42ba1c | 7f42ba1c | — | — | — | W7 | comment:6079017108 | comment:6082608679 | — | Bring the staging hosted suite (Package E turn-contract row) and the changed-journey and player drivers to the #587 turn contract (expectedTurn on wsfStartTurn, the attempt a started turn carries) | 1×journey-qa then director | — |
+| STAGING-TURN-DRIVERS-1 | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #604 | 7f42ba1c | 7f42ba1c | — | e2384102 | — | W7 | comment:6079017108 | pull_request:604 | — | Bring the staging hosted suite (Package E turn-contract row) and the changed-journey and player drivers to the #587 turn contract (expectedTurn on wsfStartTurn, the attempt a started turn carries) | 1×journey-qa then director | — |
 | TOGETHER-COMPLETION-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #567 | e4e32ed6 | e4e32ed6 | — | 22766935 | — | W4 | comment:5964984624 | pull_request:567 | — | Port the owner-selected Together completion from the frozen Lovable reference to the confirmed member receipt with truthful totals, one-time motion and reduced-motion parity | 1×journey-qa then director | — |
 | WORKER-EXECUTION-PROFILES-1 | W3 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #562 | 0790876b | 0790876b | — | — | — | W4, W9 | comment:5962925247 | comment:5963579258 | — | Finish existing PR 562 credential-mode safety and pilot readiness without activating or replacing live workers | 1×ops-source+1×security then director | — |
 | WRITER-CONCURRENCY-1 | W4 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #603 | 75f77d30 | 75f77d30 | — | 7cd5aad3 | — | W7 | comment:6078863846 | pull_request:603 | — | Writer gap fix: keep non-qualifying issue_comment runs out of the wsf-control-writer concurrency group so they never cancel a queued qualifying run; update the workflow test pin and note | 1×ops-source then director | — |
@@ -259,5 +259,5 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | 9c018cc05a75 | W7 | STAGING-TURN-DRIVERS-1 | review | acked | 6081767585 | comment:6081779104 |
 | 58c46f112cac | W3 | LOVABLE-DEVICE-QA-2 | review | acked | 6081988232 | comment:6082110470 |
 | c0b43c67f852 | W9 | KIOSK-TURN-LIFECYCLE-1 | release | acked | 6082182898 | comment:6082315169 |
-| 1eac669d5804 | W4 | KIOSK-TURN-LIFECYCLE-1 | review | delivered | 6082822816 | — |
+| 1eac669d5804 | W4 | KIOSK-TURN-LIFECYCLE-1 | review | acked | 6082822816 | comment:6082935914 |
 

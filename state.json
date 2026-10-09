@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "5ae4d7bdac64ded1dde11f045e1e942e24cf4514a75c8bc1033152458209654e",
-  "eventCount": 1030,
+  "ledgerHead": "0cd0c81a16968edc27c44ea27132d038d11f80616536f4dee0cc5a1aff2812e3",
+  "eventCount": 1033,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -20,7 +20,7 @@
   "canonical": {
     "developmentBranch": "claude/wsf-app-shell",
     "developmentSha": "e65bfee9eecb2370f602d09880da604709fba58a",
-    "operationalMain": "1d3f1c2c52badf4273d900a5ca8ba662fce66c43"
+    "operationalMain": "e2384102f42d5c4f47541893a9aea0cbb0b0754c"
   },
   "staging": {
     "servedSha": "ec162d17a0540e936741027f9b8f90dd372cfaf4",
@@ -3691,7 +3691,7 @@
       },
       "label": "Bring the staging hosted suite (Package E turn-contract row) and the changed-journey and player drivers to the #587 turn contract (expectedTurn on wsfStartTurn, the attempt a started turn carries)",
       "origin": "ledger",
-      "phase": "ACCEPTED",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -3703,7 +3703,7 @@
         "subjectSha": "7f42ba1c5bbfaae17578a351c02864f2839f5659",
         "prHeadSha": "7f42ba1c5bbfaae17578a351c02864f2839f5659",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "e2384102f42d5c4f47541893a9aea0cbb0b0754c"
       },
       "proof": null,
       "served": null,
@@ -3734,8 +3734,8 @@
           "id": 6082608679
         },
         "lastTransition": {
-          "kind": "comment",
-          "id": 6082608679
+          "kind": "pull_request",
+          "id": 604
         }
       },
       "review": {
@@ -6224,11 +6224,14 @@
       "packet": "KIOSK-TURN-LIFECYCLE-1",
       "worker": "W4",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6082822816
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6082935914
+      }
     }
   },
   "fastpath": {
