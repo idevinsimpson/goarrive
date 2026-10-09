@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "bb059b78f3091226af8666280d15db8773f986f30879c827401b6f9f5fefdf30",
-  "eventCount": 1076,
+  "ledgerHead": "f64fe59e0644e41033ad82ce4d40ca5d4c0b8499bfdb049c92605273e7f930e5",
+  "eventCount": 1079,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2738,6 +2738,68 @@
         "after": "director"
       },
       "deliveries": 4,
+      "pendingFinding": null
+    },
+    "LOVABLE-REVIEWED-BUILD-1": {
+      "owner": "W4",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Route-aware reviewed-build pin for Lovable expo build 9b9eade5: normalize only the two per-request values, bind documents per route template, keep asset digests exact, negative mutation tests",
+      "origin": "ledger",
+      "phase": "RELEASED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": 394,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": 0,
+      "reviewedBy": [],
+      "subjectPaths": [
+        ".github/wsf-staging/hosted-lovable-kiosk.mjs",
+        ".github/wsf-staging/hosted-lovable-device-matrix.mjs",
+        ".github/wsf-staging/tests/hosted-lovable-kiosk.test.mjs",
+        ".github/wsf-staging/hosted-lovable-device-matrix.test.mjs",
+        "docs/westayfit/qa/lovable-kiosk-hosted-proof-1.md"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6090733639
+        },
+        "released": {
+          "kind": "comment",
+          "id": 6090734914
+        },
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6090734914
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
       "pendingFinding": null
     },
     "MEMBER-PREVIEW-LABEL-1": {
@@ -6393,6 +6455,14 @@
         "id": 6085413447
       },
       "superseded": true
+    },
+    "7adba312fc7c663a0be9ad67b391a263d73be888c704c7ce82f6eb864f04e66d": {
+      "packet": "LOVABLE-REVIEWED-BUILD-1",
+      "worker": "W4",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
