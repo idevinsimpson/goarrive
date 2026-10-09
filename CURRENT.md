@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=4fe0ea039643836239438363abcc3667f3e60292587c58b189a018a814c0c547 events=873 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=626f532f5f8f4fcce3c04e297a188f22642235f88da8dd450125313182b8765e events=878 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `4fe0ea039643836239438363abcc3667f3e60292587c58b189a018a814c0c547` (873 events)
+- Ledger head: `626f532f5f8f4fcce3c04e297a188f22642235f88da8dd450125313182b8765e` (878 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -33,7 +33,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | W4 | #394 | — | PRODUCTION-FIREBASE-INVENTORY-1 | — | — | — | — | on |
 | W5 | #395 | — | — | — | — | — | — | off |
 | W7 | #434 | — | — | — | — | — | — | off |
-| W9 | #497 | — | — | PRODUCTION-FIREBASE-INVENTORY-1 | EVENT-LIFECYCLE-BACKEND-RECOVERY-1, MEMBER-TRUTH-BACKEND-1 | EXPO-PRIZE-WIRING-1 | EXPO-PRIZE-WIRING-1 | off |
+| W9 | #497 | PRODUCTION-DEPLOY-PATH-1 | — | PRODUCTION-FIREBASE-INVENTORY-1 | EVENT-LIFECYCLE-BACKEND-RECOVERY-1, MEMBER-TRUTH-BACKEND-1 | EXPO-PRIZE-WIRING-2 | EXPO-PRIZE-WIRING-2 | on |
 
 ## Packets
 
@@ -59,7 +59,8 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | EXPO-FULL-STAGING-RECOVERY-3 | W3 | work | INTEGRATED (source-only) | ledger | RELEASED | — | — | — | — | — | — | — | comment:6075043474 | comment:6075043474 | — | Pin the latest accepted development head through the reviewed full staging path with the operational marker rewrite, verified approval ancestry, registered unverified driver and synthetic fixtures | 1×ops-source then director | — |
 | EXPO-LATEST-FULL-STAGING-PIN-1 | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #573 | a0bb252a | a0bb252a | — | 65b8b798 | — | W4 | comment:5970558946 | pull_request:573 | — | Pin the latest accepted expo candidate and activate the fixed closed-goal hosted journey through the existing full staging path | 1×ops-source then director | — |
 | EXPO-MOVEMENT-VIDEO-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #575 | 526cea95 | 526cea95 | — | 0745c732 | — | W4 | comment:5971282758 | pull_request:575 | — | Loop approved demo media in the existing shared player with truthful fallback and no contribution side effects | 1×journey-qa then director | — |
-| EXPO-PRIZE-WIRING-1 | W9 | work | INTEGRATED (source-only) | ledger | QUEUED | — | — | — | — | — | — | — | — | comment:6075073293 | — | Wire the accepted expo prize-drawing core into the central function index with operator-only enable, status and receipt callables and the contribution trigger, nothing enabled by default | 1×ops-source+1×security then director | — |
+| EXPO-PRIZE-WIRING-1 | W9 | work | INTEGRATED (source-only) | ledger | WITHDRAWN | — | — | — | — | — | — | — | — | comment:6075293113 | — | Wire the accepted expo prize-drawing core into the central function index with operator-only enable, status and receipt callables and the contribution trigger, nothing enabled by default | 1×ops-source+1×security then director | — |
+| EXPO-PRIZE-WIRING-2 | W9 | work | INTEGRATED (source-only) | ledger | QUEUED | — | — | — | — | — | — | — | — | comment:6075293756 | — | Wire the accepted expo prize-drawing core into the central function index with operator-only enable, status and receipt callables and the contribution trigger, nothing enabled by default | 1×ops-source+1×security then director | — |
 | EXPO-STATION-LOST-ANSWER-COPY-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #564 | 1d290f74 | 1d290f74 | — | 5be74f3f | — | W4 | comment:5963613447 | pull_request:564 | — | Replace station vendor error text with existing product-safe callable wording without changing retry truth | 1×journey-qa then director | — |
 | KIOSK-EXPECTED-TURN-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #587 | 4bc9a0b8 | 4bc9a0b8 | — | 934f24f0 | — | W4 | comment:6042840991 | pull_request:587 | — | Bind kiosk mutations to the intended turn and preserve exactly-once phone and station completion | 1×journey-qa then director | — |
 | KIOSK-EXPECTED-TURN-NATIVE-CALLER-1 | W7 | work | INTEGRATED (source-only) | ledger | WITHDRAWN | — | — | — | — | — | — | — | comment:6044062885 | comment:6059488593 | — | Wire native station commands to the exact turn and preserve safe retry across later visitors | 1×journey-qa then director | — |
@@ -75,6 +76,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | MEMBER-TRUTH-BACKEND-1 | W9 | work | INTEGRATED (source-only) | ledger | BLOCKED (from ACKED) | — | — | — | — | — | — | — | comment:6029989725 | comment:6035507739 | TOGETHER-CROSSING-DESIGN-DECISION (Director and Owner) | Unblock real member Together crossing and privacy-safe public preview labels for the shared Firebase backend and Lovable Web Twin | 1×journey-qa then director | — |
 | MOVE-CAMERA-NATIVE-PORT-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #577 | d6d47879 | d6d47879 | — | 856e20e0 | — | W7 | comment:5997538756 | pull_request:577 | — | Port the owner-accepted camera-assisted squat MOVE North Star into the current Expo app without automatic contribution credit | 1×journey-qa then director | — |
 | NORTHSTAR-MIRROR-INTAKE-1 | W3 | work | INTEGRATED (source-only) | ledger | BLOCKED (from ACKED) | — | — | — | — | — | — | — | comment:6035534615 | comment:6040736205 | W3-SOURCE-EDIT-CONSENT (Devin) | Complete the existing automatic Lovable delta receiver so Devin never has to relay native handoffs | 1×ops-source then director | — |
+| PRODUCTION-DEPLOY-PATH-1 | W9 | work | INTEGRATED (source-only) | ledger | RELEASED | — | — | — | — | — | — | — | comment:6075293540 | comment:6075293540 | — | Reviewed WSF-only production deploy path for goarrive: production-only Firebase config, network-free pre-flight guard, operator runbook with candidates A/B, receipts, rollback; nothing deployed | 1×ops-source then director | — |
 | PRODUCTION-FIREBASE-INVENTORY-1 | W9 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #599 | 711ecca1 | 711ecca1 | — | — | — | W4 | comment:6074831300 | comment:6075126055 | — | Read-only production Firebase source-vs-deployed inventory, Web Twin activation prerequisites and WSF-only rollout and rollback plan | 1×ops-source then director | — |
 | PROFILE-PHOTOS-FIREBASE-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #593 | 57fd86b8 | 57fd86b8 | — | b8381195 | — | W4 | comment:6052427068 | pull_request:593 | — | Canonical private profile photos and permitted community roster for native and Lovable staging | 1×journey-qa then director | — |
 | STAGING-FASTPATH-DOCS-LINEAGE-FIX | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #551 | 963dd558 | 963dd558 | — | 9825aa36 | — | W4 | comment:5944563639 | pull_request:551 | — | Step 7 correction: allow provably non-runtime docs/instruction lineage while preserving fail-closed fast-path invariants | 1×ops-source then director | — |
@@ -229,4 +231,5 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | 877d34282cd7 | W9 | PRODUCTION-FIREBASE-INVENTORY-1 | release | acked | 6074915391 | comment:6074970106 |
 | e1511ca4b493 | W3 | EXPO-FULL-STAGING-RECOVERY-3 | release | delivered | 6075146238 | — |
 | ca9d8c7ea888 | W4 | PRODUCTION-FIREBASE-INVENTORY-1 | review | delivered | 6075255359 | — |
+| b65fbb58ba73 | W9 | PRODUCTION-DEPLOY-PATH-1 | release | requested | — | — |
 

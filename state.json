@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "4fe0ea039643836239438363abcc3667f3e60292587c58b189a018a814c0c547",
-  "eventCount": 873,
+  "ledgerHead": "626f532f5f8f4fcce3c04e297a188f22642235f88da8dd450125313182b8765e",
+  "eventCount": 878,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -66,7 +66,7 @@
     "W5": [],
     "W7": [],
     "W9": [
-      "EXPO-PRIZE-WIRING-1"
+      "EXPO-PRIZE-WIRING-2"
     ]
   },
   "packets": {
@@ -1452,7 +1452,7 @@
       },
       "label": "Wire the accepted expo prize-drawing core into the central function index with operator-only enable, status and receipt callables and the contribution trigger, nothing enabled by default",
       "origin": "ledger",
-      "phase": "QUEUED",
+      "phase": "WITHDRAWN",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": null,
@@ -1488,7 +1488,72 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6075073293
+          "id": 6075293113
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          },
+          {
+            "class": "security",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
+      "pendingFinding": null
+    },
+    "EXPO-PRIZE-WIRING-2": {
+      "owner": "W9",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Wire the accepted expo prize-drawing core into the central function index with operator-only enable, status and receipt callables and the contribution trigger, nothing enabled by default",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "functions-westayfit/src/index.ts",
+        "functions-westayfit/src/expo-prize/callables.ts",
+        "functions-westayfit/tests/expo-prize/wiring.test.ts",
+        "docs/westayfit/expo-prize/README.md",
+        "docs/westayfit/expo-prize/EVIDENCE.md",
+        "docs/westayfit/DATA_OWNERSHIP.md",
+        "firestore.indexes.json"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6075293756
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6075293756
         }
       },
       "review": {
@@ -2538,6 +2603,67 @@
         "lastTransition": {
           "kind": "comment",
           "id": 6040736205
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
+      "pendingFinding": null
+    },
+    "PRODUCTION-DEPLOY-PATH-1": {
+      "owner": "W9",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Reviewed WSF-only production deploy path for goarrive: production-only Firebase config, network-free pre-flight guard, operator runbook with candidates A/B, receipts, rollback; nothing deployed",
+      "origin": "ledger",
+      "phase": "RELEASED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": 497,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": 0,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "firebase.westayfit.production.json",
+        ".github/wsf-production/preflight.mjs",
+        ".github/wsf-production/preflight.test.mjs",
+        "docs/westayfit/ops/production/RUNBOOK_WSF_PRODUCTION_DEPLOY_1.md"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6075293313
+        },
+        "released": {
+          "kind": "comment",
+          "id": 6075293540
+        },
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6075293540
         }
       },
       "review": {
@@ -5263,6 +5389,14 @@
       "comments": [
         6075255359
       ],
+      "ack": null
+    },
+    "b65fbb58ba73ffd63287aca62f75ffcb731d536a159962ef60467ed4ce2525ae": {
+      "packet": "PRODUCTION-DEPLOY-PATH-1",
+      "worker": "W9",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
