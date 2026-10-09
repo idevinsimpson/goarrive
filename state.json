@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "d12152753969b1952d179c70421eb00f6496442df45c4b43da399dba6a101b8f",
-  "eventCount": 910,
+  "ledgerHead": "c24bfa61b1060bcc0e1d73996959789dbef168d3069d8e49a1236e98bdcf7ee6",
+  "eventCount": 912,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -5531,16 +5531,20 @@
       "packet": "PRODUCTION-DEPLOY-PATH-1",
       "worker": "W9",
       "reason": "handback",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        6077005855
+      ],
       "ack": null
     },
     "6c1797699e579a17c95fd06b3b127e1ca951a48d5e96d060c9141f2b5964834f": {
       "packet": "PRODUCTION-FIREBASE-INVENTORY-1",
       "worker": "W4",
       "reason": "review",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        6077006063
+      ],
       "ack": null
     }
   },
