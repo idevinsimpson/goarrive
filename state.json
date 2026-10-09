@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "f93c18531934a581ac6e41d46e36c434f7d0abbe96e2b4dbc2d65d1b21658ada",
-  "eventCount": 947,
+  "ledgerHead": "68c3552aa036faf0188607757f4260965ec0cdfe135e67bda03400638f500d64",
+  "eventCount": 948,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -5676,11 +5676,14 @@
       "packet": "ANON-GATE-1",
       "worker": "W4",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6078366255
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6078504660
+      }
     }
   },
   "fastpath": {
