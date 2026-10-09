@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "fc7e09ef9bdcfcc653d7c64ecdab4680ff7c445085c72acdc996502618499180",
-  "eventCount": 968,
+  "ledgerHead": "442b6cca73780ca6a09bfb2b2bdb668a9ff678c8f288b4335b35dce3c476c1ac",
+  "eventCount": 972,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -67,7 +67,9 @@
     ],
     "W5": [],
     "W7": [],
-    "W9": []
+    "W9": [
+      "KIOSK-REVOKE-ACTIVE-TURN-1"
+    ]
   },
   "packets": {
     "ANON-GATE-1": {
@@ -2131,6 +2133,64 @@
       "deliveries": 3,
       "pendingFinding": null
     },
+    "KIOSK-REVOKE-ACTIVE-TURN-1": {
+      "owner": "W9",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "On wsfRevokeStation, end or requeue that station's assigned/ready/active line entry server-side and surface the new status via wsfMyTurn/wsfTurnState; callable tests; doc note",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "functions-westayfit/src/index.ts",
+        "functions-westayfit/tests/callable/wsf-station-revoke-turn.test.ts",
+        "functions-westayfit/tests/",
+        "docs/westayfit/ops/security/"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6079095202
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6079095202
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
+      "pendingFinding": null
+    },
     "KIOSK-UNVERIFIED-PARTICIPANT-1": {
       "owner": "W9",
       "kind": "work",
@@ -3499,7 +3559,7 @@
       },
       "label": "Bring the staging hosted suite (Package E turn-contract row) and the changed-journey and player drivers to the #587 turn contract (expectedTurn on wsfStartTurn, the attempt a started turn carries)",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -3513,7 +3573,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         ".github/wsf-staging/hosted-package-e-smoke.mjs",
@@ -3536,7 +3596,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6079017108
+          "id": 6079125836
         }
       },
       "review": {
@@ -3708,15 +3768,15 @@
       },
       "label": "Writer gap fix: keep non-qualifying issue_comment runs out of the wsf-control-writer concurrency group so they never cancel a queued qualifying run; update the workflow test pin and note",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "DELIVERED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 394,
-      "pr": null,
+      "pr": 603,
       "reviewers": [],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "75f77d30d2a137ecdb6a1dbc2a2e0241f93fd242",
+        "prHeadSha": "75f77d30d2a137ecdb6a1dbc2a2e0241f93fd242",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -3743,7 +3803,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6079018663
+          "id": 6079217689
         }
       },
       "review": {
@@ -3756,7 +3816,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     }
   },
@@ -5898,17 +5958,21 @@
       "ack": {
         "kind": "comment",
         "id": 6079018663
-      }
+      },
+      "superseded": true
     },
     "612a9cd1912a0e19f327d350ed7219ba6f5b46d9e294d580a2ff495c00488eb6": {
       "packet": "STAGING-TURN-DRIVERS-1",
       "worker": "W3",
       "reason": "release",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6079121090
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6079125836
+      }
     }
   },
   "fastpath": {
