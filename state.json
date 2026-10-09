@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "e7453040cb644708ec99dc41ca2b13caab0f2dc111f62bc0daf54d41ce32de44",
-  "eventCount": 885,
+  "ledgerHead": "193d060a960825b068278701e2e2d16710e3503189b5072321642b2cfec0e990",
+  "eventCount": 890,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2627,15 +2627,17 @@
       },
       "label": "Reviewed WSF-only production deploy path for goarrive: production-only Firebase config, network-free pre-flight guard, operator runbook with candidates A/B, receipts, rollback; nothing deployed",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
-      "pr": null,
-      "reviewers": [],
+      "pr": 600,
+      "reviewers": [
+        "W4"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "dff97e4f1af9285f8a38d2c0f4123afb2b28cce6",
+        "prHeadSha": "dff97e4f1af9285f8a38d2c0f4123afb2b28cce6",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -2663,7 +2665,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6075521276
+          "id": 6075658750
         }
       },
       "review": {
@@ -2676,7 +2678,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "PRODUCTION-FIREBASE-INVENTORY-1": {
@@ -2688,7 +2690,7 @@
       },
       "label": "Read-only production Firebase source-vs-deployed inventory, Web Twin activation prerequisites and WSF-only rollout and rollback plan",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "CHANGES_REQUESTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -2724,7 +2726,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6075126055
+          "id": 6075479691
         }
       },
       "review": {
@@ -2738,10 +2740,7 @@
         "after": "director"
       },
       "deliveries": 1,
-      "pendingFinding": {
-        "kind": "comment",
-        "id": 6075479691
-      }
+      "pendingFinding": null
     },
     "PROFILE-PHOTOS-FIREBASE-1": {
       "owner": "W9",
@@ -5412,7 +5411,24 @@
       "ack": {
         "kind": "comment",
         "id": 6075521276
-      }
+      },
+      "superseded": true
+    },
+    "6fe7e958cb2eb221b8d7a513a63356c0ba85b6447ba34a2c5735a3e5d1be68a8": {
+      "packet": "PRODUCTION-DEPLOY-PATH-1",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
+    },
+    "2652666dd08383555f99350e394eecedcee3b727ead7150972a4353bbea7c12c": {
+      "packet": "PRODUCTION-FIREBASE-INVENTORY-1",
+      "worker": "W9",
+      "reason": "handback",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
