@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "29b7afe3f3ca706d821728122fd9ffca8c8bb019f967a5c528af49999367f5ad",
-  "eventCount": 904,
+  "ledgerHead": "d12152753969b1952d179c70421eb00f6496442df45c4b43da399dba6a101b8f",
+  "eventCount": 910,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2697,7 +2697,7 @@
       },
       "label": "Reviewed WSF-only production deploy path for goarrive: production-only Firebase config, network-free pre-flight guard, operator runbook with candidates A/B, receipts, rollback; nothing deployed",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "CHANGES_REQUESTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -2735,7 +2735,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6075658750
+          "id": 6076291750
         }
       },
       "review": {
@@ -2749,10 +2749,7 @@
         "after": "director"
       },
       "deliveries": 1,
-      "pendingFinding": {
-        "kind": "comment",
-        "id": 6076291750
-      }
+      "pendingFinding": null
     },
     "PRODUCTION-FIREBASE-INVENTORY-1": {
       "owner": "W9",
@@ -2763,7 +2760,7 @@
       },
       "label": "Read-only production Firebase source-vs-deployed inventory, Web Twin activation prerequisites and WSF-only rollout and rollback plan",
       "origin": "ledger",
-      "phase": "CHANGES_REQUESTED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -2772,8 +2769,8 @@
         "W4"
       ],
       "artifact": {
-        "subjectSha": "711ecca12f2a619fe5a85a2546f81443dccd47f8",
-        "prHeadSha": "711ecca12f2a619fe5a85a2546f81443dccd47f8",
+        "subjectSha": "80b603c7a9b28bbe005621500544ebe7c60868e6",
+        "prHeadSha": "80b603c7a9b28bbe005621500544ebe7c60868e6",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -2799,7 +2796,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6075479691
+          "id": 6076909251
         }
       },
       "review": {
@@ -2812,7 +2809,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 1,
+      "deliveries": 2,
       "pendingFinding": null
     },
     "PROFILE-PHOTOS-FIREBASE-1": {
@@ -5514,7 +5511,8 @@
       "ack": {
         "kind": "comment",
         "id": 6075814708
-      }
+      },
+      "superseded": true
     },
     "5da493455e28197a68157fe93b2aea2121b537ea94e132854d6c0ebb1f068d8f": {
       "packet": "EXPO-FULL-STAGING-RECOVERY-4",
@@ -5528,6 +5526,22 @@
         "kind": "comment",
         "id": 6076764787
       }
+    },
+    "6be4be116f01d77f14167889ef6cce0bf6de6036958133ccf7950b8d39f8cfbd": {
+      "packet": "PRODUCTION-DEPLOY-PATH-1",
+      "worker": "W9",
+      "reason": "handback",
+      "status": "requested",
+      "comments": [],
+      "ack": null
+    },
+    "6c1797699e579a17c95fd06b3b127e1ca951a48d5e96d060c9141f2b5964834f": {
+      "packet": "PRODUCTION-FIREBASE-INVENTORY-1",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
