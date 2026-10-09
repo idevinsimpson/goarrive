@@ -1113,7 +1113,12 @@ test('the reconcile workflow keeps its five triggers, gates the writer job on th
   assert.ok(cond.includes("github.event.comment.user.login != 'wsf-control-writer[bot]' &&"), 'the App-bot loop skip stays explicit (the owner gate also excludes it)');
   assert.match(job, /^ {4}environment: wsf-control-writer$/m);
   assert.match(job, /^ {10}ref: main$/m);
-  assert.match(y, /^ {2}group: wsf-control-writer\n {2}cancel-in-progress: false$/m);
+  // WRITER-CONCURRENCY-1: one workflow-level group (an expression; its meaning is pinned below), never cancel-in-progress,
+  // and no job-level group beside it.
+  const code = y.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+  assert.match(y, /^concurrency:\n {2}group: >-\n {4}\$\{\{\n[\s\S]*?\n {4}\}\}\n {2}cancel-in-progress: false\n/m);
+  assert.equal((code.match(/^\s*concurrency:/gm) ?? []).length, 1, 'no job-level concurrency group');
+  assert.equal((code.match(/cancel-in-progress:/g) ?? []).length, 1);
 });
 
 test('Check 71 F1: only login idevinsimpson with author_association OWNER decides; every other association, and a missing one, is refused', () => {
@@ -1153,14 +1158,28 @@ test('Check 71 F1-R2a: a decision needs both timestamps, present and identical; 
   assert.match(decisionIntake(s, [{ id: 99, author: 'goarrive-maia', association: 'COLLABORATOR', createdAt: T, updatedAt: '2026-09-28T13:00:00Z', body: d }]).refused[0].reason, /is not the repository owner/);
 });
 
-/** The job condition evaluated for a context (GitHub's expression subset this `if` uses: ==, !=, &&, ||, contains, fromJSON). */
-function jobIf(yml, ctx) {
-  const job = yml.slice(yml.indexOf('\n  reconcile:\n'));
-  const text = job.slice(job.indexOf('    if: >-') + '    if: >-'.length, job.indexOf('    runs-on:'));
+/** An expression evaluated for a context (GitHub's subset these use: ==, !=, &&, ||, contains, fromJSON, format). Like
+ *  GitHub's, && and || yield an operand, not a boolean. */
+function ghExpr(text, ctx) {
   const expr = text.replace(/fromJSON\(/g, 'JSON.parse(').replace(/([!=])=/g, '$1==')
     .replace(/\bgithub\.([A-Za-z_.]+)/g, (_, p) => `g(${JSON.stringify(p)})`);
   const g = (p) => p.split('.').reduce((o, k) => (o == null ? null : o[k] ?? null), ctx);
-  return Boolean(new Function('g', 'contains', `return (${expr});`)(g, (a, v) => a.includes(v)));
+  const format = (f, ...a) => f.replace(/\{(\d+)\}/g, (_, i) => String(a[Number(i)]));
+  return new Function('g', 'contains', 'format', `return (${expr});`)(g, (a, v) => a.includes(v), format);
+}
+/** The reconcile job's `if` text, and the workflow-level concurrency group's expression without its ${{ }}. */
+function jobIfText(yml) {
+  const job = yml.slice(yml.indexOf('\n  reconcile:\n'));
+  return job.slice(job.indexOf('    if: >-') + '    if: >-'.length, job.indexOf('    runs-on:'));
+}
+function groupText(yml) {
+  const at = yml.indexOf('\nconcurrency:\n  group: >-\n') + '\nconcurrency:\n  group: >-\n'.length;
+  return yml.slice(at, yml.indexOf('\n  cancel-in-progress:', at)).trim().replace(/^\$\{\{/, '').replace(/\}\}$/, '');
+}
+
+/** The job condition evaluated for a context. */
+function jobIf(yml, ctx) {
+  return Boolean(ghExpr(jobIfText(yml), ctx));
 }
 
 test('Check 71 F1: the workflow starts the writer job for an owner comment only; a non-owner is refused even with a valid block', () => {
@@ -1185,6 +1204,54 @@ test('Check 71 F1-R2a: an edited owner comment starts the writer job only when t
   assert.equal(jobIf(y, ev('edited', 'idevinsimpson')), true, 'the owner editing their own comment may start the job (intake still refuses the edited block)');
   for (const sender of ['goarrive-maia', 'external-user', 'wsf-control-writer[bot]', null, undefined]) assert.equal(jobIf(y, ev('edited', sender)), false, `an edit by ${sender} must not start the job`);
   assert.match(y, /\(github\.event\.action != 'edited' \|\| github\.event\.sender\.login == 'idevinsimpson'\) &&/);
+});
+
+test('WRITER-CONCURRENCY-1: only a run whose writer job runs holds the writer group; every other run takes a group of its own', () => {
+  const y = fs.readFileSync(fileURLToPath(new URL('../../../.github/workflows/wsf-control-reconcile.yml', import.meta.url)), 'utf8');
+  // No drift: the group's condition is the job `if`, word for word, and the throwaway group is keyed by the run.
+  const m = groupText(y).trim().match(/^\(([\s\S]*)\)\s*&&\s*'wsf-control-writer'\s*\|\|\s*format\('wsf-control-skip-\{0\}', github\.run_id\)$/);
+  assert.ok(m, 'group shape: (<job if>) && \'wsf-control-writer\' || format(\'wsf-control-skip-{0}\', github.run_id)');
+  const norm = (s) => s.replace(/\s+/g, ' ').replace(/\( /g, '(').replace(/ \)/g, ')').trim();
+  assert.equal(norm(m[1]), norm(jobIfText(y)));
+
+  const main = 'refs/heads/main';
+  let id = 100;
+  const comment = (issue, login = 'idevinsimpson', association = 'OWNER', action = 'created', sender = login) =>
+    ({ ref: main, run_id: ++id, event_name: 'issue_comment', event: { action, sender: { login: sender }, issue: { number: issue }, comment: { user: { login }, author_association: association } } });
+  const other = (event_name, ref = main) => ({ ref, run_id: ++id, event_name, event: {} });
+  const writer = [...[365, 394, 395, 396, 434, 497].map((n) => comment(n)), comment(365, 'idevinsimpson', 'OWNER', 'edited'),
+    other('schedule'), other('workflow_dispatch'), other('workflow_run')];
+  const skipped = [...[578, 597, 601].map((n) => comment(n)), comment(365, 'wsf-control-writer[bot]', 'NONE', 'edited'),
+    comment(394, 'wsf-control-writer[bot]', 'NONE'), comment(365, 'idevinsimpson', 'OWNER', 'edited', 'goarrive-maia'),
+    comment(394, 'goarrive-maia', 'COLLABORATOR'), other('pull_request', 'refs/pull/601/merge'), other('workflow_dispatch', 'refs/heads/claude/x')];
+  const group = (ctx) => ghExpr(groupText(y), ctx);
+  for (const ctx of writer) {
+    assert.equal(jobIf(y, ctx), true);
+    assert.equal(group(ctx), 'wsf-control-writer', JSON.stringify(ctx));
+  }
+  for (const ctx of skipped) {
+    assert.equal(jobIf(y, ctx), false);
+    assert.equal(group(ctx), `wsf-control-skip-${ctx.run_id}`, JSON.stringify(ctx));
+  }
+
+  // The failure this removes, on GitHub's queue rule: per group, one running and one pending run, and a newly queued run
+  // cancels the pending one. A decision runs, a worker block waits, then a comment lands on a PR (or the App edits).
+  const cancelled = (runs, groupOf) => {
+    const groups = new Map();
+    const out = [];
+    for (const r of runs) {
+      const q = groups.get(groupOf(r)) ?? { running: null, pending: null };
+      if (!q.running) q.running = r;
+      else { if (q.pending) out.push(q.pending); q.pending = r; }
+      groups.set(groupOf(r), q);
+    }
+    return out;
+  };
+  const decision = comment(365); const workerBlock = comment(394); const prComment = comment(601);
+  const appEdit = comment(365, 'wsf-control-writer[bot]', 'NONE', 'edited');
+  assert.deepEqual(cancelled([decision, workerBlock, prComment, appEdit], () => 'wsf-control-writer'), [workerBlock, prComment], 'a fixed group drops the worker block');
+  assert.deepEqual(cancelled([decision, workerBlock, prComment, appEdit], group), [], 'non-qualifying runs never displace a writer run');
+  assert.deepEqual(cancelled([decision, workerBlock, comment(396)], group), [workerBlock], 'writer runs still coalesce: each re-derives from fresh facts');
 });
 
 test('bootstrap input: fresh within six hours, never in the future, and operational main is derived, never imported', () => {
