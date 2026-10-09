@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "ef86aee545da54617346be32a9b51a098c87f411c6978607403f23c316d3d221",
-  "eventCount": 998,
+  "ledgerHead": "03af2225dbfa9b4f07dd5be2141a047a81dc42c3618a0669ccd918423733b0f4",
+  "eventCount": 1002,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2536,7 +2536,7 @@
       },
       "label": "Proof-only lovable-device-matrix mode in the staging workflow: four viewports over the accepted Web Twin journeys on the trial host, PASS/FAIL/BLOCKED per row with screenshots; L0-dispatched",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "WITHDRAWN",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 394,
@@ -2572,7 +2572,69 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6081082241
+          "id": 6081289315
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
+      "pendingFinding": null
+    },
+    "LOVABLE-DEVICE-QA-2": {
+      "owner": "W4",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Proof-only lovable-device-matrix mode in the staging workflow: four viewports over the accepted Web Twin journeys on the trial host, PASS/FAIL/BLOCKED rows with screenshots; L0-dispatched; + mode pins",
+      "origin": "ledger",
+      "phase": "RELEASED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": 394,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": 0,
+      "reviewedBy": [],
+      "subjectPaths": [
+        ".github/workflows/wsf-staging-deploy.yml",
+        ".github/wsf-staging/hosted-lovable-device-matrix.mjs",
+        ".github/wsf-staging/hosted-lovable-device-matrix.test.mjs",
+        ".github/wsf-staging/tests/workflow-contract.test.mjs",
+        "docs/westayfit/qa/lovable-device-qa-1.md"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6081290444
+        },
+        "released": {
+          "kind": "comment",
+          "id": 6081291520
+        },
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6081291520
         }
       },
       "review": {
@@ -6068,7 +6130,8 @@
       "ack": {
         "kind": "comment",
         "id": 6081082241
-      }
+      },
+      "superseded": true
     },
     "4100c4f29c58d977f2739fa443fb33edd99264d95055749eafa95c1d07b112d9": {
       "packet": "PRODUCTION-DEPLOY-PATH-1",
@@ -6082,6 +6145,14 @@
         "kind": "comment",
         "id": 6081253164
       }
+    },
+    "1f2c084e755cf79a6a85c45be56bbf5f9bcc10d0ee2be7f991e16d15cb9774cf": {
+      "packet": "LOVABLE-DEVICE-QA-2",
+      "worker": "W4",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
