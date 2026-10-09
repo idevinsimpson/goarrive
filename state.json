@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "bd110f93472a352c38bec1bdb40ee5110fe8bb812591d98250e449a7a5319e80",
-  "eventCount": 938,
+  "ledgerHead": "e466597b41831c6ba7069fc3c03bb5ab52fce0c4129cbe4761e9ba643dd264ef",
+  "eventCount": 940,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1385,7 +1385,9 @@
       "proof": null,
       "served": null,
       "releasedQueueIndex": null,
-      "reviewedBy": [],
+      "reviewedBy": [
+        "W4"
+      ],
       "subjectPaths": [
         ".github/wsf-staging/approved-candidate.json",
         ".github/wsf-staging/journeys/manifest.json",
@@ -1415,7 +1417,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6077468045
+          "id": 6078118205
         }
       },
       "review": {
@@ -5634,18 +5636,22 @@
       "ack": {
         "kind": "comment",
         "id": 6077765445
-      }
+      },
+      "superseded": true
     },
     "f9e0a83b767e40169b5b7c50fb05489cbb061e8bf70a34302c54483cc49b5b50": {
       "packet": "PRODUCTION-DEPLOY-PATH-1",
       "worker": "W3",
       "reason": "review",
-      "status": "redelivered",
+      "status": "acked",
       "comments": [
         6077681219,
         6078019028
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6078077972
+      }
     },
     "65dfcb5bfddb5179533815ff9864a35f85cb0678c409f2d84f8c66a95331eded": {
       "packet": "ANON-GATE-1",
