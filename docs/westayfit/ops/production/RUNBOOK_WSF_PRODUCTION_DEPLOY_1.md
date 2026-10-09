@@ -104,7 +104,7 @@ Each of these stops `firebase deploy --only functions:westayfit --non-interactiv
 | Stopper | When it bites | The reviewed way through |
 |---|---|---|
 | **S1:** Node.js 20 decommission (`runtimes/supported/types.js:50-55`, `index.js:56-59`) | any functions deploy on or after 2026-10-30T00:00Z, including a deploy-based rollback | Finish before then. No flag gets past it. After that date, the way forward is a new candidate record that moves `functions-westayfit` to a newer runtime, reviewed as a source change. |
-| **S2:** the minimum-bill prompt (`prepare.js:338`, `prompts.js:116-176`) | `wsfCheckIn` wants 1 warm instance on `goarrive`, and the live function keeps fewer, or keeps one at a lower cost (B4c) | Step 6 always runs the non-interactive command first. The prompt sits in the pre-checks, before anything is created, so a stop there changes nothing. Then, **if and only if** the only error is `Pass the --force option to deploy functions that increase the minimum bill`, pre-flight and run the **interactive form** (step 6). Answer **Yes** to `Would you like to proceed with deployment?` only when the warning above it lists exactly `wsfCheckIn(us-central1): 1 instances`. At any other prompt, press **Ctrl-C**. The deletion prompt comes before any create (`release/index.js:55`), so nothing has changed at that point. |
+| **S2:** the minimum-bill prompt (`prepare.js:338`, `prompts.js:116-176`) | `wsfCheckIn` wants 1 warm instance on `goarrive`, and the live function keeps fewer, or keeps one at a lower cost (B4c) | Step 6 always runs the non-interactive command first. The prompt sits in the pre-checks, before anything is created, so a stop there changes nothing. Then, **if and only if** the only error is `Pass the --force option to deploy functions that increase the minimum bill`, pre-flight and run the **interactive form** (step 6). Answer **Yes** to `Would you like to proceed with deployment?` only when the warning above it lists exactly the one line `westayfit:wsfCheckIn(us-central1): 1 instances, <memory> of memory each`. Every label of the `westayfit` codebase carries that prefix (`deploy/functions/prompts.js:151-153`, `functionsDeployHelper.js:97-103`). At any other prompt, press **Ctrl-C**. The deletion prompt comes before any create (`release/index.js:55`), so nothing has changed at that point. |
 | **S3:** the `gcf-artifacts` cleanup policy (`artifacts.js:121-161`, `prompts.js:179-190`) | B11 shows no cleanup policy and no `firebase-functions-cleanup-opted-out` label. The deploy then releases the functions, prints its per-function results, and **only then** stops at the cleanup step, exit 1. | **Step 5.5**, an owner decision recorded on #365: the owner's interactive opt-out, which adds only the opt-out label. **Never `--days`, never `--force`:** both set a policy that deletes container images older than N days (default 1) from the repository GoArrive's functions share. If the owner declines, step 6 runs as written and its cleanup-policy exit is expected; step 6 says how to read it. |
 
 The fourth stop of this kind is the pending deletion of the orphan. Step 5 settles it before step 6, and never with `--force`.
@@ -152,6 +152,22 @@ Run these from `~/wsf-prod`. Paste each answer on #365. "Gates" says which step 
 | **B9** Hosting and DNS | `firebase hosting:sites:list --project goarrive`, then `for N in westay.fit app.westay.fit; do echo "== $N"; dig +short NS "$N"; dig +short CNAME "$N"; dig +short A "$N"; done` | any. Recorded only. | **No.** There is no Hosting step, and Lovable serves `app.westay.fit`. |
 | **B11** cleanup policy | `gcloud artifacts repositories describe gcf-artifacts --location=us-central1 --project=goarrive --format="yaml(cleanupPolicies,labels)"` | any cleanup policy, or the `firebase-functions-cleanup-opted-out` label | **Yes, step 6.** If neither is present, step 5.5 is an owner decision before step 6. |
 | **B12** memberships the new rules would exclude | `wsf_memberships` (0.4); it prints counts only | `not active or no status: 0` | **Yes: it gates step 7, and it is settled before step 2.** The candidate's `wsfIsGroupMember` reads only rows with `membershipStatus == 'active'`. A non-zero count is that many live memberships whose holders would lose their direct reads of their group's documents, so **stop and escalate before step 2**, while nothing has landed. Rows either candidate writes always carry `'active'` (`index.ts:276` and `:908` at `ec162d17`; `:280` and `:913` at `e65bfee9`). |
+| **B13** runtime service account of the two mail callables | for each of `wsfSendVerificationEmail` and `wsfSendPasswordResetEmail`: `gcloud functions describe <name> --gen2 --region=us-central1 --project=goarrive --format="value(serviceConfig.serviceAccountEmail)"`, then each account's project roles: `gcloud projects get-iam-policy goarrive --flatten="bindings[].members" --filter="bindings.members:serviceAccount:<email>" --format="value(bindings.role)"` | each account holds a role that carries `firebaseauth.users.sendEmail`. The conservative pass is one of `roles/owner`, `roles/editor` or `roles/firebaseauth.admin` (below). | **Yes, the receipt's mail line, not the deploy.** Without the permission, the deploy still lands. Then `wsfSendVerificationEmail` answers 500 (`internal`). `wsfSendPasswordResetEmail` answers its uniform `{accepted: true}` (200), sends nothing, and logs `[wsfSendPasswordResetEmail] Admin SDK failed <code>`. If it fails, step 5.6 is an owner decision before step 6. |
+
+**B13, the permission behind the mail links.**
+- **The calls.** `wsfSendVerificationEmail` mints its link with the Admin SDK's `generateEmailVerificationLink`, and `wsfSendPasswordResetEmail` with `generatePasswordResetLink`: `functions-westayfit/src/index.ts:567` and `:2445` at `ec162d17`, `:572` and `:2461` at `e65bfee9`. Both go to the Identity Toolkit endpoint `accounts:sendOobCode` (firebase-admin 12.7.0, `lib/auth/auth-api-request.js:659` and `:1358`).
+- **What each answers when the permission is missing.**
+  - Verification throws `internal`, "Could not send the verification email. Try again shortly." (`index.ts:571-578` at `ec162d17`).
+  - Reset logs `[wsfSendPasswordResetEmail] Admin SDK failed <code>` and returns `resetFailed()`, which is `{ accepted: true }`, the same answer as for an unknown address. That is the anti-enumeration shape (`index.ts:2444-2469` and `:2525-2527` at `ec162d17`; `:2460-2485` and `:2541-2543` at `e65bfee9`).
+  - **A reset's 200 proves nothing.** Only the inbox, or that log line, shows whether it sent.
+- **The permission.** Google's Identity Platform access-control table maps that method (`GetOobCode`) to **`firebaseauth.users.sendEmail`**. Google's IAM reference lists it in `roles/firebaseauth.admin` (Firebase Authentication Admin), `roles/identitytoolkit.admin` and `roles/identityplatform.admin`, and Owner and Editor carry the Firebase Authentication permissions; `roles/firebaseauth.viewer` does not. Both pages were read through search results on 2026-10-09, because this session cannot resolve `docs.cloud.google.com`. A role not named here passes only if the console's IAM page shows it carries `firebaseauth.users.sendEmail`.
+- **The account.**
+  - Neither candidate sets a `serviceAccount` on any function, and firebase-functions 4.9.0 emits `serviceAccountEmail` only when one is set (`lib/v2/options.js:99`).
+  - firebase-tools 15.30.1 writes `serviceConfig.serviceAccountEmail` into a function only when the source names one (`gcp/cloudfunctionsv2.js:180-182`). So an update keeps the function's existing account, and only the 43 functions this run creates get the project's default runtime account.
+  - The two mail callables are among the 16 this run updates in place (#599 inventory, `R3_callables.againstCandidateA.keptUpdatedInPlace`), so they keep the account they run as today. Their source is in no commit, so nothing here says which account that is: **the readback decides**.
+  - Step 8.10 re-reads the same two after the run.
+- **Why staging failed and production may not.** Staging's `wsfSendVerificationEmail` answers 500 with `auth/insufficient-permission` from this call, because its runtime account holds no role carrying the permission (#365 `6083224272`). Organizations created on or after 2024-05-03 enforce `iam.automaticIamGrantsForDefaultServiceAccounts` by default, so their default service accounts no longer receive Editor when created. That says nothing about what `goarrive` holds: the readback decides.
+- **Its limit.** The second command lists project-level bindings only. A role inherited from a folder or the organization does not appear. If no listed role passes, treat the permission as **ABSENT**, unless the console's IAM page for the account shows an inherited role that passes.
 
 ### 0.4 Captures
 
@@ -216,6 +232,7 @@ The line `capture_rules` prints is the **rules rollback anchor**. Today it shoul
 - **Date and CLI:** the date is before 2026-10-30, and `firebase --version` printed `15.30.1`.
 - **The live WSF set is still #599's 17** (`functions-before.txt`). If it is not, production has changed since the readback: **stop**.
 - **B3b, B4b, B4d and B12 pass.**
+- **B13 is recorded.** If it fails, the owner's step 5.6 decision is on #365. It does not stop the deploy.
 - **B11 passes, or the owner has recorded step 5.5's decision on #365** (run the opt-out, or decline it).
 - **B4c is recorded.** It predicts whether step 6 needs S2's interactive form.
 - **The org policy still permits `allUsers`.** If it does not, no WSF callable is reachable from the web: **stop and escalate**.
@@ -346,7 +363,11 @@ gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.serv
 ```
 
 **The Director records one decision on #365 before the run:**
-- **D1, delete.** This is **required** when the label is `westayfit`, and it is allowed only when the usage check counts **0** requests, so nothing hosted calls it. Then no served client depends on the function, even if step 6 later stops. Run it interactively, with no `--force`, and answer Yes only if the prompt lists exactly `wsfListCommunityGoals(us-central1)`:
+- **D1, delete.** This is **required** when the label is `westayfit`, and it is allowed only when the usage check counts **0** requests, so nothing hosted calls it. Then no served client depends on the function, even if step 6 later stops. Run it interactively, with no `--force`, and answer Yes to `Are you sure?` only if the prompt (`You are about to delete the following Cloud Functions:`, `deploy/functions/delete.js:50-60`) lists exactly one function, with no `The following managed service accounts will also be deleted` block:
+  - `westayfit:wsfListCommunityGoals(us-central1)` when its label is `westayfit`, the case that requires D1;
+  - `wsfListCommunityGoals(us-central1)`, with no prefix, when it has no codebase label, because an unlabelled function counts as `default` (`functionsDeployHelper.js:97-103`, `gcp/cloudfunctionsv2.js:449`).
+
+  Success prints `functions[<that label>] Successful delete operation.` (`release/fabricator.js:902`).
   ```sh
   firebase functions:delete wsfListCommunityGoals --region us-central1 --project goarrive
   ```
@@ -362,7 +383,7 @@ gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.serv
 
 ## Step 5.5: the `gcf-artifacts` cleanup policy (S3; only when B11 shows neither a policy nor the opt-out label)
 
-This is an **owner decision recorded on #365**, and the only write to a shared resource before step 6. It never runs in step 0.
+This is an **owner decision recorded on #365**, and one of the two owner writes to a shared resource before step 6; step 5.6's grant is the other. It never runs in step 0.
 
 - **Opt out.** The owner runs it interactively:
   ```sh
@@ -376,9 +397,29 @@ This is an **owner decision recorded on #365**, and the only write to a shared r
 
 **Receipt:** the decision id, and the B11 labels after (opt-out) or "declined".
 
+## Step 5.6: the mail links' permission (B13; only when B13 shows no role carrying `firebaseauth.users.sendEmail`)
+
+This is an **owner decision recorded on #365 before step 6**, like step 5.5. It never runs in step 0, and it is decided before the run, not to make a failing step pass mid-run.
+
+- **Grant it, by name, this one binding only:**
+  ```sh
+  gcloud projects add-iam-policy-binding goarrive --member="serviceAccount:<email>" --role=roles/firebaseauth.admin --condition=None
+  ```
+  - `<email>` is each account B13 printed. The two callables may share one. No other member and no other role.
+  - **The account is shared.** If it is the default compute account, GoArrive's functions run as it too (see the secret's rollback row), so they also gain full Firebase Authentication rights. That is why this is the owner's decision and not a step.
+  - **The minimal alternative, as the owner's option:** a project custom role holding only `firebaseauth.users.sendEmail`, bound the same way in place of `roles/firebaseauth.admin`. That is the staging handoff's PROMPT 5b (`idevinsimpson/westayfit` `78156f4`, cited from L0's delta #497 `6084980782` and not read here). The default compute account is shared with GoArrive's functions either way, so either grant reaches them too.
+  - Re-run B13's second command and paste the roles.
+- **Or proceed with mail known-broken.**
+  - Sign-up continues under the unverified-participation policy: the joins do not test `email_verified` (`JOIN_REQUIRES_EMAIL_VERIFIED = false`, `index.ts:656` at `ec162d17`).
+  - Until the grant lands, `wsfSendVerificationEmail` answers 500 (`internal`), so nobody new can verify an address. The three creator callables require a verified email, so they refuse every new account.
+  - `wsfSendPasswordResetEmail` answers `{accepted: true}` and sends nothing. Nobody can reset a password, and nothing on the screen says so.
+  - Step 8.9's first journey step, "receives the verification email", is then expected to fail.
+
+**Receipt:** the decision id, and either the roles after the grant or "proceeding with mail known-broken".
+
 ## Step 6: functions, `westayfit` codebase only
 
-Functions go before rules. If this step stops in its pre-checks (Node.js 20, the minimum bill, a deletion), nothing has landed beyond the additive indexes, the local env file and the decisions of steps 5 and 5.5. The new functions write through the Admin SDK and do not depend on the new rules, and the Lovable flag stays off until step 9.
+Functions go before rules. If this step stops in its pre-checks (Node.js 20, the minimum bill, a deletion), nothing has landed beyond the additive indexes, the local env file and the decisions of steps 5, 5.5 and 5.6. The new functions write through the Admin SDK and do not depend on the new rules, and the Lovable flag stays off until step 9.
 
 ```sh
 cd "$CAND"
@@ -395,7 +436,7 @@ PF --command "firebase deploy --only functions:westayfit --project goarrive --co
     --command "firebase deploy --only functions:westayfit --project goarrive --config firebase.westayfit.production.json" \
     && firebase deploy --only functions:westayfit --project goarrive --config firebase.westayfit.production.json
   ```
-  - Answer **Yes** to `Would you like to proceed with deployment?` only when the warning above it lists exactly `wsfCheckIn(us-central1): 1 instances`.
+  - Answer **Yes** to `Would you like to proceed with deployment?` only when the warning above it lists exactly the one line `westayfit:wsfCheckIn(us-central1): 1 instances, <memory> of memory each` (`deploy/functions/prompts.js:151-153`).
   - At **any** other prompt, press **Ctrl-C**. A deletion prompt comes before any create, so nothing has changed. A cleanup-days prompt comes after the functions are released; Ctrl-C there sets no policy.
 - **It aborts on the Node.js 20 runtime (S1):** the deadline was missed. **Stop.** No function was created or updated.
 - **A function fails at `set invoker`:** that function exists **without** `allUsers`, and a re-run will not repair it, because the update path never sets a callable's invoker. **Stop and escalate.** The repair is an owner decision, applied only to the failed services by name:
@@ -494,8 +535,20 @@ Run every capture from `~/wsf-prod`.
      3. Account 1 records one manual MOVE and gets one confirmed receipt.
      4. Account 2 signs up, saves its profile and joins by the same link, and then sees the same Living WE total.
      5. A third account, signed in but not joined, is refused the member view.
+   - **Mail.** Journey step 1's verification email is the proof of B13.
+     - Under step 5.6's known-broken decision it does not arrive, and `wsfSendVerificationEmail` answers 500.
+     - If anyone requests a password reset, its `{accepted: true}` proves nothing: only the inbox, or the log line `[wsfSendPasswordResetEmail] Admin SDK failed <code>`, shows whether it sent.
    - **First-call smoke, in the browser's network panel, on the first call of each after the go:** `wsfListGoals`, `wsfCommunityMembers`, `wsfCommunityActivity` and `wsfSetCommunityVisibility` (a member's own name and activity visibility in the community: set it, then set it back). Each answers **200** with the callable's own result. A `403` before the handler runs means the service lacks `allUsers`; a CORS failure means the same. Either one: stop and report. Never "fix" it by removing anything.
    - **Receipt:** a second block on #365, `WSF POST-GO JOURNEY`: each step's pass or fail, and the four calls' status codes. No address, uid, link or token.
+10. **The mail links' permission** (B13 again; run with items 1–8, before the go). The two mail callables are **kept** functions: this run updated them in place, and an update keeps their account. Read both:
+    ```sh
+    for F in wsfSendVerificationEmail wsfSendPasswordResetEmail; do
+      echo "$F $(gcloud functions describe "$F" --gen2 --region=us-central1 --project=goarrive --format='value(serviceConfig.serviceAccountEmail)')"
+    done
+    ```
+    - Each is the account B13 read for it. If they differ, the receipt's mail line names each.
+    - Either each account's roles (B13's second command) still carry `firebaseauth.users.sendEmail`, or the owner's step 5.6 decision to proceed with mail known-broken is on #365.
+    - **The live proof is the verification email in step 8.9, or `wsfSendVerificationEmail`'s 500 when it is missing.** The reset callable's status is never proof: it answers `{accepted: true}` whatever happens.
 
 ## Step 9: the receipt to paste on #365
 
@@ -505,7 +558,7 @@ operator: <name>    utc start/end: <..>/<..>    firebase-tools: 15.30.1    befor
 L0 acceptance: #365 <comment id>    record: A | G    candidate sha: <40>    main sha compared: <40>
 preflight: steps 1, 6, 7 ok=true (paste the JSON verdicts; step 6: non-interactive | interactive minimum-bill)
 rules hashes (verdict): candidate 58ef038e… / 1261 lines; outside-WSF = main f261a8af… (yes/no); live before <sha256 prefix> / <lines>
-readbacks owed: B3b <verified yes/no>  B4c <n>  B4d <labels>  B11 <policy | opt-out>  B12 <total/active/other>  (B4b, B5 captured)
+readbacks owed: B3b <verified yes/no>  B4c <n>  B4d <labels>  B11 <policy | opt-out>  B12 <total/active/other>  B13 <pass | ABSENT>  (B4b, B5 captured)
 indexes: wsfContributions READY, wsfGoalMemberTotals READY; every pre-run index still READY (yes/no)
 secret WSF_EMAIL_API_KEY: version pinned <n>   env: WSF_EMAIL_FROM set, WSF_APP_URL=https://app.westay.fit
 auth: app.westay.fit present (added 2026-10-09 by the owner, not by this run); Email/Password enabled (console)
@@ -517,6 +570,7 @@ functions table (name, state, updateTime, codebase): paste wsf-functions-after.t
 revisions (service, latestReadyRevisionName): paste wsf-run-after.txt
 goarrive: functions, revisions, service IAM, indexes unchanged (yes/no); coach/member/admin sign-in ok; share link ok; hosting untouched
 consent: pending-approval-2026-08-25 (owner decision #365 6075884941)
+mail: runtime SA <email>, roles <list>, verification-link permission present|ABSENT (owner decision <comment id>)
 anonymous tokens: refused at 42 callables (record G) | admitted until the gate's fast-follow (record A)
 ```
 
@@ -529,6 +583,7 @@ L0 records this as the DEPLOYMENT RECEIPT. It is not acceptance, and it is not a
 | Rules | Re-read the release first (`cd ~/wsf-prod && capture_rules live-firestore.rules.now`). If it names this run's ruleset, re-release the step-0 ruleset: console › Firestore › Rules › history › roll back to it, or update the `cloud.firestore` release to that `rulesetName`. If GoArrive released rules after this run, **stop and escalate**: re-releasing the step-0 ruleset would undo GoArrive's change too. |
 | The 43 created functions | Delete them one at a time, interactively: `firebase functions:delete <name> --region us-central1 --project goarrive`. Answer Yes only when the prompt lists exactly that one name. Deleting a function also deletes its Cloud Run service and that service's IAM policy. Never delete a `default`-codebase function. |
 | The 16 kept functions | Route each back to the revision in `run-services-before.txt`: `gcloud run services update-traffic <service> --region=us-central1 --project=goarrive --to-revisions=<revision>=100`. That revision carries its own env (the old `WSF_APP_URL`) and the secret version it pinned. **A source redeploy is not a rollback here:** no prior source exists in the repository, a smaller source aborts on deletion under `--non-interactive`, and any functions deploy fails after 2026-10-30. |
+| The mail links' role (step 5.6, only if this run granted it) | An owner decision: `gcloud projects remove-iam-policy-binding goarrive --member="serviceAccount:<email>" --role=roles/firebaseauth.admin --condition=None`. Remove it only if B13 showed the account without that role before the run. Mail then fails again: verification answers 500, and reset answers `{accepted: true}` and sends nothing. |
 | The S3 opt-out label (step 5.5) | Usually leave it: it only stops `firebase-tools` from offering a cleanup policy, and it deletes nothing. To restore the step-0 state anyway, an owner decision: `gcloud artifacts repositories update gcf-artifacts --location=us-central1 --project=goarrive --remove-labels=firebase-functions-cleanup-opted-out`. |
 | The orphan, deleted under D1 (step 5) | **Not reversible** from repository source. |
 | Secret version (only if step 3 added one) | Disable it **only after** no deployed revision pins it: `gcloud secrets versions disable <n> --secret=WSF_EMAIL_API_KEY --project=goarrive`. Compare the secret's IAM with `secret-iam-before.json`. Remove a `secretAccessor` binding only if this run added it **and** no WSF function still uses the secret. The binding is for the default compute account, which GoArrive's functions share. |
