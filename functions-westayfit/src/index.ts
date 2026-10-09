@@ -6,6 +6,8 @@ import { FieldValue, Timestamp, getFirestore, type DocumentReference } from 'fir
 import { defineSecret, projectID } from 'firebase-functions/params';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 
+import { optionalRealUid, requireRealIdentity } from './anon-gate';
+
 import {
   MAX_TOKENS_PER_FETCH,
   MSG as PHOTO_MSG,
@@ -136,6 +138,7 @@ export const wsfSaveProfile = onCall<SaveProfileRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'wsfSaveProfile requires an authenticated caller.');
     }
+    requireRealIdentity(request);
     // KIOSK-UNVERIFIED-PARTICIPANT-1 (owner policy #365 6041359966): an
     // ordinary participant does NOT need a verified email to save their own
     // profile. The caller is still a real authenticated Firebase account and
@@ -200,6 +203,7 @@ export const wsfCreateCommunity = onCall<CreateCommunityRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'wsfCreateCommunity requires an authenticated caller.');
     }
+    requireRealIdentity(request);
     const token = request.auth.token as { email_verified?: boolean };
     if (token.email_verified !== true) {
       throw new HttpsError(
@@ -538,6 +542,7 @@ export const wsfSendVerificationEmail = onCall(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     // The address comes from the token. Never from the caller.
     const email = request.auth.token.email;
     if (typeof email !== 'string' || !email) {
@@ -918,6 +923,7 @@ export const wsfJoinCommunity = onCall<JoinRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     assertJoinEmailVerified(request.auth.token as { email_verified?: boolean });
 
     const uid = request.auth.uid;
@@ -1096,7 +1102,7 @@ export const wsfResolveMarker = onCall<ResolveMarkerRequest>(
     if (!slug) notFound();
 
     const db = getFirestore();
-    const uid = request.auth?.uid ?? null;
+    const uid = optionalRealUid(request);
     return await db.runTransaction(async (tx) => {
       const { marker, group, goal } = await resolveMarkerTx(tx, slug);
       const membership = uid ? await readActiveMembership(tx, marker.communityGroupId, uid) : null;
@@ -1127,6 +1133,7 @@ export const wsfJoinViaMarker = onCall<JoinViaMarkerRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     assertJoinEmailVerified(request.auth.token as { email_verified?: boolean });
 
     const uid = request.auth.uid;
@@ -1357,6 +1364,7 @@ export const wsfResetJoinCode = onCall<ResetJoinCodeRequest>(
   { region: 'us-central1' },
   async (request): Promise<ResetJoinCodeResponse> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const groupId = normalizeStringId(request.data?.groupId);
     if (!groupId) throw new HttpsError('invalid-argument', 'groupId is required.');
@@ -1432,6 +1440,7 @@ export const wsfRemoveMember = onCall<MembershipActionRequest>(
   { region: 'us-central1' },
   async (request): Promise<MembershipActionResponse> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const groupId = normalizeStringId(request.data?.groupId);
     const targetUid = normalizeStringId(request.data?.targetUid);
@@ -1486,6 +1495,7 @@ export const wsfLeaveCommunity = onCall<LeaveRequest>(
   { region: 'us-central1' },
   async (request): Promise<MembershipActionResponse> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const groupId = normalizeStringId(request.data?.groupId);
     if (!groupId) throw new HttpsError('invalid-argument', 'groupId is required.');
@@ -1537,6 +1547,7 @@ export const wsfReinstateMember = onCall<MembershipActionRequest>(
   { region: 'us-central1' },
   async (request): Promise<MembershipActionResponse> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const groupId = normalizeStringId(request.data?.groupId);
     const targetUid = normalizeStringId(request.data?.targetUid);
@@ -1588,6 +1599,7 @@ export const wsfDesignateChampion = onCall<MembershipActionRequest>(
   { region: 'us-central1' },
   async (request): Promise<MembershipActionResponse & { role: string }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const groupId = normalizeStringId(request.data?.groupId);
     const targetUid = normalizeStringId(request.data?.targetUid);
@@ -1846,6 +1858,7 @@ export const wsfListChallenge = onCall<ListChallengeRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const groupId = normalizeStringId(request.data?.groupId);
     if (!groupId) {
@@ -1990,6 +2003,7 @@ export const wsfCheckIn = onCall<CheckInRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const moveId = normalizeStringId(request.data?.moveId);
     if (!moveId) {
@@ -2196,6 +2210,7 @@ export const wsfMyCommunities = onCall(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const db = getFirestore();
 
@@ -2319,6 +2334,7 @@ export const wsfChallengePulse = onCall<PulseRequest>(
     // an id can only ever be consulted once the caller is known to be entitled
     // to that id's data.
     if (!request.auth) notFound();
+    requireRealIdentity(request);
     const callerUid = request.auth.uid;
 
     const ip = extractIp(request.rawRequest as any);
@@ -3111,6 +3127,7 @@ export const wsfCreateGoal = onCall<CreateGoalRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const token = request.auth.token as { email_verified?: boolean };
     if (token.email_verified !== true) {
       throw new HttpsError(
@@ -3757,6 +3774,7 @@ export const wsfContribute = onCall<ContributeRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     // THE ONE CANONICAL CONTRIBUTION. Everything that used to stand here
     // still stands, unchanged and in the same order, in performContribution
     // below: the same normalizations and the same messages, the same
@@ -4482,7 +4500,7 @@ export const wsfGoalPulse = onCall<GoalPulseRequest>(
     // The whole body is readGoalPulseTotals. Nothing is added to, removed
     // from or reordered in what it returns: this response is the settled
     // nine-field contract and this callable is now only its front door.
-    return readGoalPulseTotals(goalId, request.auth?.uid ?? null);
+    return readGoalPulseTotals(goalId, optionalRealUid(request));
   }
 );
 
@@ -4564,7 +4582,7 @@ export const wsfGoalRecentAdditions = onCall<GoalRecentAdditionsRequest>(
     if (!goalSnap.exists) notFound();
     const goal = goalSnap.data() as GoalDoc;
 
-    const access = await evaluateGoalAggregateAccess(goal, request.auth?.uid ?? null);
+    const access = await evaluateGoalAggregateAccess(goal, optionalRealUid(request));
     if (!access.allowed) notFound();
 
     // The read happens only after the gate. Newest first, bounded by the query
@@ -4636,6 +4654,7 @@ export const wsfMyContribution = onCall<MyContributionRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const goalId = normalizeStringId(request.data?.goalId);
     if (!goalId) {
@@ -4984,6 +5003,7 @@ export const wsfListGoals = onCall<ListGoalsRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const uid = request.auth.uid;
 
     const groupId = normalizeStringId(request.data?.groupId);
@@ -5157,6 +5177,7 @@ export const wsfSetGoalDisplayAuthorization = onCall<SetGoalDisplayAuthorization
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const uid = request.auth.uid;
 
     const goalId = normalizeStringId(request.data?.goalId);
@@ -5213,6 +5234,7 @@ export const wsfAdjustGoal = onCall<AdjustGoalRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const uid = request.auth.uid;
 
     const goalId = normalizeStringId(request.data?.goalId);
@@ -6062,6 +6084,7 @@ export const wsfApproveStation = onCall<ApproveStationRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const uid = request.auth.uid;
 
     const goalId = normalizeStringId(request.data?.goalId);
@@ -6450,6 +6473,7 @@ export const wsfListStations = onCall<ListStationsRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const goalId = normalizeStringId(request.data?.goalId);
     if (!goalId) {
@@ -6517,6 +6541,7 @@ export const wsfRevokeStation = onCall<RevokeStationRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const stationId = normalizeStringId(request.data?.stationId);
     if (!stationId) {
@@ -6802,6 +6827,7 @@ export const wsfCreateCombinedGoal = onCall<CreateCombinedGoalRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const token = request.auth.token as { email_verified?: boolean };
     if (token.email_verified !== true) {
       throw new HttpsError(
@@ -7069,6 +7095,7 @@ export const wsfCloseCombinedGoal = onCall<CloseCombinedGoalRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const uid = request.auth.uid;
 
     const setupId = normalizeStringId(request.data?.setupId);
@@ -7264,6 +7291,7 @@ export const wsfRepairCombinedGoal = onCall<RepairCombinedGoalRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const uid = request.auth.uid;
 
     const setupId = normalizeStringId(request.data?.setupId);
@@ -7719,7 +7747,7 @@ export const wsfCombinedGoalPulse = onCall<CombinedGoalPulseRequest>(
       children.push(goal);
     }
 
-    const access = await evaluateCombinedAccess(communityGroupId, children, request.auth?.uid ?? null);
+    const access = await evaluateCombinedAccess(communityGroupId, children, optionalRealUid(request));
     // Byte-identical to the answer an unknown setupId gets, so the URL cannot
     // be used to learn whether a setup exists.
     if (!access.allowed) notFound();
@@ -8568,6 +8596,7 @@ export const wsfEventContext = onCall<EventContextRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const goalId = normalizeStringId(request.data?.goalId);
     if (!goalId) {
@@ -8628,6 +8657,7 @@ export const wsfJoinTurnLine = onCall<JoinTurnLineRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const uid = request.auth.uid;
 
     // Shape first, and before anything is read: a refusal here depends on the
@@ -8824,6 +8854,7 @@ export const wsfMyTurn = onCall<MyTurnRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const goalId = normalizeStringId(request.data?.goalId);
     if (!goalId) {
@@ -8922,6 +8953,7 @@ export const wsfTurnReady = onCall<TurnReadyRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const entryId = normalizeStringId(request.data?.entryId);
     if (!entryId) {
@@ -9009,6 +9041,7 @@ export const wsfLeaveTurnLine = onCall<LeaveTurnLineRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const entryId = normalizeStringId(request.data?.entryId);
     if (!entryId) {
@@ -9751,6 +9784,7 @@ export const wsfCompleteMyTurn = onCall<CompleteMyTurnRequest>(
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'Sign in first.');
     }
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const entryId = normalizeStringId(request.data?.entryId);
     if (!entryId) {
@@ -9985,6 +10019,7 @@ export const wsfSetCommunityVisibility = onCall<SetVisibilityRequest>(
   { region: 'us-central1' },
   async (request): Promise<{ groupId: string; name: Vis; activity: Vis }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const groupId = normalizeStringId(request.data?.groupId);
     if (!groupId) throw new HttpsError('invalid-argument', 'groupId is required.');
@@ -10104,6 +10139,7 @@ export const wsfCommunityMembers = onCall<CommunityMembersRequest>(
     request
   ): Promise<{ members: CommunityMemberEntry[]; nextCursor: string | null }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const groupId = normalizeStringId(request.data?.groupId);
     if (!groupId) throw new HttpsError('invalid-argument', 'groupId is required.');
@@ -10274,6 +10310,7 @@ export const wsfMyProfilePhoto = onCall<MyProfilePhotoRequest>(
   { region: 'us-central1' },
   async (request): Promise<OwnPhotoState> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const db = getFirestore();
     return ownPhotoState(ownPhotoDoc(await photoRef(db, uid).get(), uid));
@@ -10298,6 +10335,7 @@ export const wsfSetProfilePhoto = onCall<SetProfilePhotoRequest>(
   { region: 'us-central1' },
   async (request): Promise<OwnPhotoState & { replayed: boolean }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const { expectedRevision, operationId } = requirePhotoWriteIds(request.data);
     const rawSource = request.data?.source ?? 'library';
@@ -10352,6 +10390,7 @@ export const wsfRemoveProfilePhoto = onCall<{ expectedRevision?: unknown; operat
   { region: 'us-central1' },
   async (request): Promise<OwnPhotoState & { replayed: boolean }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const { expectedRevision, operationId } = requirePhotoWriteIds(request.data);
     const db = getFirestore();
@@ -10387,6 +10426,7 @@ export const wsfSetPortraitDecision = onCall<{ decision?: unknown }>(
   { region: 'us-central1' },
   async (request): Promise<OwnPhotoState> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     if (request.data?.decision !== 'skipped') {
       throw new HttpsError('invalid-argument', "decision must be 'skipped'.");
@@ -10417,6 +10457,7 @@ export const wsfSetCommunityPhotoVisibility = onCall<{ groupId?: unknown; photo?
   { region: 'us-central1' },
   async (request): Promise<{ groupId: string; photo: Vis }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const groupId = normalizeStringId(request.data?.groupId);
     if (!groupId) throw new HttpsError('invalid-argument', 'groupId is required.');
@@ -10446,6 +10487,7 @@ export const wsfCommunityFaces = onCall<CommunityMembersRequest>(
   { region: 'us-central1' },
   async (request): Promise<FacesResponse> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const groupId = normalizeStringId(request.data?.groupId);
     if (!groupId) throw new HttpsError('invalid-argument', 'groupId is required.');
@@ -10543,6 +10585,7 @@ export const wsfCommunityFacePhotos = onCall<{ groupId?: unknown; tokens?: unkno
   { region: 'us-central1' },
   async (request): Promise<FacePhotosResponse> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const groupId = normalizeStringId(request.data?.groupId);
     if (!groupId) throw new HttpsError('invalid-argument', 'groupId is required.');
@@ -10744,6 +10787,7 @@ export const wsfCommunityActivity = onCall<CommunityActivityRequest>(
     nextCursor: string | null;
   }> => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+    requireRealIdentity(request);
     const uid = request.auth.uid;
     const groupId = normalizeStringId(request.data?.groupId);
     if (!groupId) throw new HttpsError('invalid-argument', 'groupId is required.');
