@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "c21e7ad7500e52a7fd40f96c5310449d40c36ad89b36ccec24fc24c5e2a397ca",
-  "eventCount": 967,
+  "ledgerHead": "fc7e09ef9bdcfcc653d7c64ecdab4680ff7c445085c72acdc996502618499180",
+  "eventCount": 968,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -5904,8 +5904,10 @@
       "packet": "STAGING-TURN-DRIVERS-1",
       "worker": "W3",
       "reason": "release",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        6079121090
+      ],
       "ack": null
     }
   },
