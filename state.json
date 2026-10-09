@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "ec6f79d63f395a9d72b73e1abdf5a28dde00128336ce57267bef8c01d99d8d2b",
-  "eventCount": 934,
+  "ledgerHead": "7dd174d43f97dbed3ec283846ed8aaeeab2e17963d8dd53c5af7d25335d236fc",
+  "eventCount": 937,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -77,7 +77,7 @@
       },
       "label": "Refuse anonymous-provider Firebase tokens at every WSF callable auth site (requireRealIdentity + optionalRealUid), with refusal tests; the release gate named in the production forensics",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -91,7 +91,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         "functions-westayfit/src/index.ts",
@@ -114,7 +114,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6077733181
+          "id": 6077926364
         }
       },
       "review": {
@@ -5640,7 +5640,7 @@
       "packet": "PRODUCTION-DEPLOY-PATH-1",
       "worker": "W3",
       "reason": "review",
-      "status": "delivered",
+      "status": "retried",
       "comments": [
         6077681219
       ],
@@ -5650,11 +5650,14 @@
       "packet": "ANON-GATE-1",
       "worker": "W9",
       "reason": "release",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6077850130
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6077926364
+      }
     }
   },
   "fastpath": {
