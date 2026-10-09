@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "861ba4624c86c26a7b38bae755e6ee8f1ff2ac3bf990a1b3646eff2252d9e4c1",
-  "eventCount": 879,
+  "ledgerHead": "143aba1dfb94753b39c960ca8d4d4f0d07f2d80342b8908df96e0a48b29ea006",
+  "eventCount": 882,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -1241,7 +1241,7 @@
       },
       "label": "Pin the latest accepted development head through the reviewed full staging path with the operational marker rewrite, verified approval ancestry, registered unverified driver and synthetic fixtures",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -1255,7 +1255,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         ".github/wsf-staging/approved-candidate.json",
@@ -1283,7 +1283,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6075043474
+          "id": 6075387734
         }
       },
       "review": {
@@ -5375,21 +5375,27 @@
       "packet": "EXPO-FULL-STAGING-RECOVERY-3",
       "worker": "W3",
       "reason": "release",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6075146238
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6075387734
+      }
     },
     "ca9d8c7ea8881393f209054d792973e4c5847e0346ab97a3e9d6b9cc9c3ac174": {
       "packet": "PRODUCTION-FIREBASE-INVENTORY-1",
       "worker": "W4",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6075255359
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6075395067
+      }
     },
     "b65fbb58ba73ffd63287aca62f75ffcb731d536a159962ef60467ed4ce2525ae": {
       "packet": "PRODUCTION-DEPLOY-PATH-1",
