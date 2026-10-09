@@ -10,8 +10,8 @@
 #   - The one exception is the separate `fastpath-dispatch` job below (Step 7, Director ruling #365 5940481437): its
 #     own workflow token may dispatch workflows, it holds no App key, and it acts only behind the owner's recorded
 #     set-fastpath switch.
-#   - One writer at a time: a fixed concurrency group that queues rather than cancels, so a run already
-#     pushing is never killed mid-write.
+#   - One writer at a time: one concurrency group that queues rather than cancels, so a run already
+#     pushing is never killed mid-write. Only runs whose writer job will run enter it (WRITER-CONCURRENCY-1).
 #   - `pull_request`, never `pull_request_target`.
 #   - Comments the App itself posts are skipped (no self-trigger loop), as is any issue outside the six
 #     control inboxes.
@@ -34,8 +34,29 @@ on:
 permissions:
   contents: read
 
+# WRITER-CONCURRENCY-1 (#365 6078735066). GitHub keeps one running and one pending run per group, and a newly queued
+# run CANCELS the pending one. With a fixed group, every issue_comment anywhere in the repository (a comment on a PR,
+# the App's own render edit) queued a run that cancelled the pending writer run and then skipped at the job `if`, so a
+# decision waited for the next qualifying comment or the cron. The group below is the writer group only when the
+# reconcile job's `if` holds; it repeats that condition word for word (shadow.test.mjs pins the two equal). Every
+# other run takes a group of its own, keyed by its run id, so it never displaces a writer run. cancel-in-progress stays
+# false: a writer run already pushing is never killed.
 concurrency:
-  group: wsf-control-writer
+  group: >-
+    ${{
+      (
+        github.ref == 'refs/heads/main' &&
+        (
+          github.event_name != 'issue_comment' || (
+            github.event.comment.user.login != 'wsf-control-writer[bot]' &&
+            github.event.comment.user.login == 'idevinsimpson' &&
+            github.event.comment.author_association == 'OWNER' &&
+            (github.event.action != 'edited' || github.event.sender.login == 'idevinsimpson') &&
+            contains(fromJSON('[365, 394, 395, 396, 434, 497]'), github.event.issue.number)
+          )
+        )
+      ) && 'wsf-control-writer' || format('wsf-control-skip-{0}', github.run_id)
+    }}
   cancel-in-progress: false
 
 jobs:
