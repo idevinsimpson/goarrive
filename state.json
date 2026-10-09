@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "151000dcb2d205e5d86c903a8e0159276618d36585673364528e70e3c02bedda",
-  "eventCount": 977,
+  "ledgerHead": "79ab2797a6ff82b6c1fe897605107e92062687b0052cc45401256c2bde3de1ba",
+  "eventCount": 978,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -6039,8 +6039,10 @@
       "packet": "WRITER-CONCURRENCY-1",
       "worker": "W7",
       "reason": "review",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        6079484002
+      ],
       "ack": null
     }
   },
