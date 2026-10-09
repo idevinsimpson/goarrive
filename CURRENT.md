@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=7dd174d43f97dbed3ec283846ed8aaeeab2e17963d8dd53c5af7d25335d236fc events=937 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=bd110f93472a352c38bec1bdb40ee5110fe8bb812591d98250e449a7a5319e80 events=938 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `7dd174d43f97dbed3ec283846ed8aaeeab2e17963d8dd53c5af7d25335d236fc` (937 events)
+- Ledger head: `bd110f93472a352c38bec1bdb40ee5110fe8bb812591d98250e449a7a5319e80` (938 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -240,6 +240,6 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | 6be4be116f01 | W9 | PRODUCTION-DEPLOY-PATH-1 | handback | acked | 6077005855 | comment:6077245630 |
 | 6c1797699e57 | W4 | PRODUCTION-FIREBASE-INVENTORY-1 | review | acked | 6077006063 | comment:6077068917 |
 | 1868e30865e5 | W4 | EXPO-FULL-STAGING-RECOVERY-4 | review | acked | 6077681002 | comment:6077765445 |
-| f9e0a83b767e | W3 | PRODUCTION-DEPLOY-PATH-1 | review | retried | 6077681219 | — |
+| f9e0a83b767e | W3 | PRODUCTION-DEPLOY-PATH-1 | review | redelivered | 6077681219, 6078019028 | — |
 | 65dfcb5bfddb | W9 | ANON-GATE-1 | release | acked | 6077850130 | comment:6077926364 |
 
