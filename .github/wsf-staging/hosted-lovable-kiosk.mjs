@@ -63,15 +63,14 @@ export const PROJECT_ID = 'westayfit-staging';
  * value here, from a new bind.
  */
 export const REVIEWED_BUILD = Object.freeze({
-  // Lovable db3fd2f2 on the trial host: exactly the LOVABLE_OBSERVED_BUILD line of the credential-free gate bind run
-  // 38018743683 (main 6e8acc31, gate job 114114813301, 02:56Z; L0 #394 6093058625), from two transcriptions of its log.
-  // STALE under step C: those digests are step B's canonical form, so the two param templates cannot match until the
-  // re-pin from L0's step C gate samples (#394 6093295458). Step C adds only the img counts its shape requires (0 on `/`,
-  // 2 on each param template, as DEEPLINK-DRIFT-CONFIRM-1 shows, #394 6093468966); `/`'s digest is unchanged by step C.
+  // Lovable db3fd2f2 on the trial host, in step C's canonical form (the hosting's preview screenshot file name slotted):
+  // exactly the LOVABLE_OBSERVED_BUILD of credential-free gate sample 2, run 38025003360 (job 114133873686, 04:42Z),
+  // which equals sample 1, run 38023220481 (job 114128496599, 04:12Z), though the screenshot was regenerated between
+  // them (d998c69b…_1791604878899, then adf6774a…_1791606014676). Both ran this harness at c551722b on the branch.
   documents: Object.freeze({
     '/': Object.freeze({ sha256: '55f9d9a35c95aeea889644ef8c9408aae6617f32c22de187a134516892b93b03', streamU: 2, nul: 3, img: 0 }),
-    '/display/$goalId': Object.freeze({ sha256: 'b15d36a06b362063ab8b0817d8d35a8e51982dc5b80630420b473e6ec79db2ae', streamU: 2, nul: 5, img: 2 }),
-    '/kiosk/$communityId/$goalId': Object.freeze({ sha256: 'f9a8996609e0e4e6168174263d4cba53e7a3868c67e10fc44cc194cb22934398', streamU: 2, nul: 7, img: 2 }),
+    '/display/$goalId': Object.freeze({ sha256: 'a2d77af0af3ed5ec1f2b49342ae87c02050d37c54b6fdbfee272be40b4da9133', streamU: 2, nul: 5, img: 2 }),
+    '/kiosk/$communityId/$goalId': Object.freeze({ sha256: '8a170c39292d99eba106fd42e45879d8891b60f4880d251756a53c80f949b732', streamU: 2, nul: 7, img: 2 }),
   }),
   assets: Object.freeze({
     'auth-gate-DazlXpxN.js': 'cc598cd6a7f593cc1a983eb248b1d19833ce028232d3cfd8b3d8eac575245ba9',
