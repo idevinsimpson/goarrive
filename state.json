@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "4d75842a5e39e91d4f04160bdf70ea79e66ece97d313352c4aa40b5f41ec1bbd",
-  "eventCount": 1096,
+  "ledgerHead": "75ce26fcf32c75b3f42b811b18ac10bd619cd87395f1c69c436af8fa8068168b",
+  "eventCount": 1098,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2766,7 +2766,9 @@
       "proof": null,
       "served": null,
       "releasedQueueIndex": null,
-      "reviewedBy": [],
+      "reviewedBy": [
+        "W3"
+      ],
       "subjectPaths": [
         ".github/wsf-staging/hosted-lovable-kiosk.mjs",
         ".github/wsf-staging/hosted-lovable-device-matrix.mjs",
@@ -2788,7 +2790,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6092354751
+          "id": 6092545071
         }
       },
       "review": {
@@ -6504,11 +6506,15 @@
       "packet": "LOVABLE-REVIEWED-BUILD-1",
       "worker": "W3",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6092503648
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6092529126
+      },
+      "superseded": true
     }
   },
   "fastpath": {
