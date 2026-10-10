@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "84c9d64f8356850a0c41316ec85405459ea7beb125ff14b909a03a26fc84a5a1",
-  "eventCount": 1187,
+  "ledgerHead": "f901f0b6588c63aaa280dc1e7bb0147f5043d833a1658eabe9ebc82eb82bb3d2",
+  "eventCount": 1188,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -7034,8 +7034,10 @@
       "packet": "LOVABLE-MATRIX-ALIGN-1",
       "worker": "W7",
       "reason": "review",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        6096577933
+      ],
       "ack": null
     }
   },
