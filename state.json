@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "b08a3936593a3c3d918008e731a8f79af4fd61b1a1e572eef5de3f2632d7fbb8",
-  "eventCount": 1107,
+  "ledgerHead": "f436ae9df389bd12748e976b2c1deb9bc9ec983121fc3f97ce03932f5bfcc1fd",
+  "eventCount": 1110,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2818,15 +2818,17 @@
       },
       "label": "Re-pin REVIEWED_BUILD to the next Lovable publish (db3fd2f2) and close LOVABLE-REVIEWED-BUILD-1's carried items: UTF-8 asset fulfilment, CHARSET-name and token-length negatives, QA-note corrections",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 394,
-      "pr": null,
-      "reviewers": [],
+      "pr": 610,
+      "reviewers": [
+        "W3"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "b63e45f09d83fec706a592597483b9288e2290b0",
+        "prHeadSha": "b63e45f09d83fec706a592597483b9288e2290b0",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -2855,7 +2857,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6092833973
+          "id": 6093016498
         }
       },
       "review": {
@@ -2868,7 +2870,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "MEMBER-PREVIEW-LABEL-1": {
@@ -6592,7 +6594,16 @@
       "ack": {
         "kind": "comment",
         "id": 6092833973
-      }
+      },
+      "superseded": true
+    },
+    "7deb73bd204755c57d7f1a0ef201e152f9d48e6d3b9726da284fe743e1398bf3": {
+      "packet": "LOVABLE-REVIEWED-BUILD-2",
+      "worker": "W3",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
