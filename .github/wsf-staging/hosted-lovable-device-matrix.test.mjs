@@ -128,7 +128,7 @@ test('cleanup merge: a visitor uid, its tagged membership and its linked profile
 let served = 0;
 function servedDoc(pathname, extra = '') {
   served += 1;
-  const ts = String(1760050000000 + served * 7919);
+  const ts = `${1 + crypto.randomInt(9)}${String(crypto.randomInt(1e12)).padStart(12, '0')}`; // any 13 digits, per request
   const segs = pathname.split('/').filter(Boolean);
   const route = pathname === '/' ? '/' : segs[0] === 'display' ? '/display/$goalId' : '/kiosk/$communityId/$goalId';
   const ids = segs.slice(1);

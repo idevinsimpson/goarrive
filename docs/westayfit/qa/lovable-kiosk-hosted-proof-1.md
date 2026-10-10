@@ -1,6 +1,6 @@
 # LOVABLE-KIOSK-HOSTED-PROOF-1: the Lovable kiosk proof mode (source)
 
-Director queue #365 `6044515892`, release `6044894488`; W3, inbox #396. **Source only.** No run has happened, and nothing here is a hosted pass.
+Director queue #365 `6044515892`, release `6044894488`; W3, inbox #396. **Source only.** No credentialed run has happened, and nothing here is a hosted pass. The only runs against the host are the credential-free binds of LOVABLE-REVIEWED-BUILD-1 (below).
 
 Rework after Director finding #365 `6045688233` and security detail #589 `6045713631`, then W9's independent finding #497 `6051520120`, then W4's ops-source finding #394 `6051933442` as applied by the Director (#365 `6052330823`). All are covered below.
 
@@ -29,12 +29,19 @@ The digests could not be computed from W3's session, nor from W4's for LOVABLE-R
 
 The bind alone checks a separate, earlier fetch. The Lovable host is mutable, so the build the browser executes could differ: a publish could land between the bind and the browser's loads, or the entry page could load a script from another origin. The guard binds **what the browser loads**.
 
-- **Every request is routed.** Each browser context routes every request through `codeGuard`, with service workers blocked so none can answer around it.
+- **Every request Playwright routes passes the guard.** Each browser context routes its requests through `codeGuard`, with service workers blocked so none can answer around it.
+  - Two kinds of traffic never reach a route, as before this packet:
+    - a WebSocket handshake;
+    - the redirect hops of a request the guard continued, which can only be a passive type or an API-origin data request.
+  - Both carry data, never code (W3 and the Director's delta, R6).
 - **Documents** from the Lovable host (every navigation, deep links like `/kiosk/…` and `/?join=…` included) are fetched once with no redirect followed. Each must be a reviewed route template and valid UTF-8, and must reduce, for the URL requested, to that template's reviewed canonical document with its reviewed count of stream-part timestamps. A document is fulfilled with exactly the bytes read. Any other path is refused.
-- **The host's injected events script** (`/__l5e/events.<id>.js`, the tag that carries the context token) is **blocked**: it is never fetched, fulfilled or run, and it is counted apart from refusals. Only that exact path shape on the Lovable host is blocked, and only as a script.
+- **The host's own scripts are blocked:** the injected `/__l5e/events.<id>.js` (the tag that carries the context token) and `/~flock.js`.
+  - Each is never fetched, fulfilled or run, and is counted apart from refusals.
+  - Only those exact, anchored paths on the Lovable host are blocked, and only as scripts whose URL is exactly origin plus path.
+  - Details are in "The route-aware reviewed build", below.
 - **Scripts and stylesheets** from the Lovable host must be a reviewed `/assets/<name>`, carry that asset's reviewed digest, and are fulfilled with exactly the hashed bytes.
 - **Passive same-origin types** (images, fonts, the manifest) and **data requests** (`fetch`, `xhr`, `eventsource`) to the four API origins pass: Identity Toolkit, Secure Token, Firestore, and the staging callables host.
-- **Everything else is refused:** a redirect, an error status, other bytes, an unreviewed or foreign script, any document or script from an API origin, and any other origin. The refusal is recorded with no query string.
+- **Everything else that reaches the route is refused:** a redirect, an error status, other bytes, an unreviewed or foreign script, any document or script from an API origin, and any other origin's request. The refusal is recorded with no query string.
 - **A refusal stops the journey.** The journey checks after each navigation, so a refusal stops it before the next step:
   - the kiosk is never approved, so the station secret never reaches an unreviewed kiosk;
   - no password is typed into an unreviewed join page.
@@ -47,18 +54,20 @@ The bind alone checks a separate, earlier fetch. The Lovable host is mutable, so
 
 **Why a single digest cannot bind this build.** The Web Twin is TanStack Start and server-rendered (HTML-VARIANCE-1, #365 `6089082668`; the backend lane's measurements, #365 `6089534129`).
 - **Per request**, exactly two values change: the value of the host's `data-context-token` attribute on the `/__l5e/events.*.js` script tag, and each `u:<epoch ms>` inside the `data-tsr-stream-part` script.
-- **Per route**, a deep link's document also differs from `/`, and two ids give two documents. The route source at Lovable `9b9eade5` shows why. `/display/$goalId` and `/kiosk/$communityId/$goalId` have no loaders; they render from their params only, so the ids appear in the rendered markup and in the stream part.
+- **Per route**, a deep link's document also differs from `/`, and two ids give two documents. The route source at Lovable `9b9eade5` shows why. `/display/$goalId` and `/kiosk/$communityId/$goalId` have no loaders; they render from their params only, so their ids appear in the document. The real bind (run `38007859514`) counts each id exactly once per document.
 - **The query string** never reaches the document.
 
 **The canonical document** (`canonicalDocument(text, url)`) is what both the bind and the browser guard hash:
 1. **The URL must be a reviewed route template.** The templates are `ROUTE_TEMPLATES`: `/`, `/display/$goalId` and `/kiosk/$communityId/$goalId`. Those are every document the two proofs load (`/` also with an invite query). Each path param must be 12–128 characters of `A-Z a-z 0-9 _ -`, and no param may contain another. Fixture ids are `e5cgrp-…` and `e5cgoal-…`, about 30 characters.
-2. **Every byte is literal, NUL included.** The first bind on the real host (run `38006215259`) found NUL characters in every document, and they passed the fatal UTF-8 decode, so they really are in the bytes. Following the Director's ruling (#394 `6091249662`):
+2. **Every byte is literal, NUL included, and a leading BOM too.** The first bind on the real host (run `38006215259`) found NUL characters in every document, and they passed the fatal UTF-8 decode, so they really are in the bytes. Following the Director's ruling (#394 `6091249662`):
    - each NUL is kept, not refused;
    - the number of NULs is pinned per template and compared strictly, like the `u:` count;
    - the bind prints that count and the class of each NUL's context: the stream part, another inline script, or markup. It prints counts and classes only, never bytes.
 
-   Nothing is escaped, because no literal text can become a slot (step 6). That is the ruling's aim: a NUL followed by `wsf:` can never be a slot. The guard also requires valid UTF-8.
-3. **The context token.** There must be exactly one `data-context-token=` in the document. Its value must be one quoted token of 8–4096 characters of `A-Z a-z 0-9 . _ ~ : + / = -`, and the attribute must close right after it. That value, and nothing else, is replaced by a fixed slot. A refusal names the kind of character found (quote, angle bracket, whitespace and so on), never the value.
+   Nothing is escaped, because no literal text can become a slot (step 6). That is the ruling's aim: a NUL followed by `wsf:` can never be a slot.
+
+   The bind and the guard decode as valid UTF-8 only. They keep a leading BOM as a character (`ignoreBOM: true`, W3 R1), so a BOM-prefixed document is a byte difference like any other and is refused.
+3. **The context token.** There must be exactly one `data-context-token=` in the document. Its value must be one quoted token of 8–4096 characters of `A-Z a-z 0-9 . _ ~ : + / = -`, and the attribute must close right after it. That value, and nothing else, is replaced by a fixed slot. A refusal names the kind of character found (angle bracket, whitespace, ampersand or other), never the value. A quote cannot be named: the first quote ends the value, so a value carrying one is refused because its attribute does not close right after it.
 4. **The stream part.** There must be exactly one `<script … data-tsr-stream-part …>`. Inside it, every `u:` key (never the tail of another name such as `menu:`) must carry exactly 13 digits. Each is replaced by a fixed slot and counted. A `u:` anywhere else stays exact.
 5. **The URL's own params** go back into their template slots, longest first, and their occurrences are counted.
 6. **The digest** is the sha256 of the result. The result is a list of literal text and slots, serialized as JSON. A slot is an object; literal text is a JSON string, with every character escaped as JSON escapes it. So no byte of a document can stand for a slot, and the mapping is injective. Every other byte is kept, so any other change alters it: a script, an attribute, route data, or a per-request value anywhere else.
@@ -177,7 +186,7 @@ So the first authorized credentialed run can reach these rows: `host-build`, `fi
 
 | Row | How it is measured | Status in this source |
 |---|---|---|
-| host-build | every route template's reviewed canonical document and every reviewed asset digest, exactly, at bind **and** for every document, script and stylesheet the browser loads; the host's events script blocked; nothing else executable is loaded | BLOCKED until the route-aware manifest is pinned |
+| host-build | every route template's reviewed canonical document and every reviewed asset digest, exactly, at bind **and** for every document, script and stylesheet the browser loads; the host's own scripts blocked; nothing else executable is loaded | pinned to Lovable `9b9eade5` (bind run `38007859514`); PASS needs a `--run` after merge |
 | fixture-provenance | kit `expoEvent` (Champion, one verified member, community, goal) plus two `memberInTwoCommunities` accounts that are **not** members of the event community | measured |
 | qr-join | the kiosk's `data-join-url` must be on the same host, carry a join code, and name this goal; A signs in through the product UI (identity checked) and presses **Join**; `wsfJoinCommunity` must answer this community with `alreadyMember === false`; then the phone choice appears | **BLOCKED with the existing kit** (private community, no join code shown). It is measured only for a link-joinable community. |
 | contribution-7 | the **control** sends exactly one `wsfContribute` request, and the receipt's `data-attempt` equals that request's `attemptId` | measured (control) |
@@ -208,13 +217,31 @@ Every browser context is closed in `finally`, including on an early stop.
   - Updated: the journey verifies both kiosk-proof templates and blocks the host's events script on every page; the guard negatives name the template; `classifyRequest` covers templates, the events script and its look-alikes.
 - **`hosted-lovable-device-matrix.test.mjs`: 20 passed.** The pin is the kiosk harness's object. Each document the matrix loads is a reviewed template. The CLI prints the route-aware bind, and a display deep link carrying route data now **fails** the gate instead of being reported. The harness restates no part of the bind.
 - **`tests/workflow-contract.test.mjs`: 103 passed** (unchanged; no workflow change). **`tests/run-all.mjs`** (staging) and **`tools/wsf-control/run-all.mjs`**: all suites passed.
-- **Mutants of the new code: 45 of 46 killed.**
-  - They include all the token, stream-part and param checks; the template match; the events-script block (its path shape, its type, and its counting); the UTF-8 check; the probe agreement; the reference check; the timestamp-count pin; and the probe-line query.
-  - Two survivors of the first pass were real test gaps, and both are now killed: assets walked only from `/`, and the stream part read to the end of the document.
-  - One defect was found in W4's own re-read and fixed: the stream part's end was looked up in a lower-cased copy of the document, whose length can differ (`İ`). Its mutant is killed.
-  - The mutants added for the real-host findings are all killed: slots back in-band (NUL markers), `/~flock.js` no longer blocked or its block broadened, the token or a `u:` cut one character short, a token inside the stream part admitted, and blocked host scripts not printed.
-  - The mutants added for the Director's ruling are all killed: a host script with a query or fragment blocked; the NUL count not compared in the guard, not compared at bind, or not required in the pin; and NULs in another inline script or in the stream part classed wrongly.
+- **Mutants of the new code: 62 of 63 killed** (W4's catalogue, re-run at the review-round head).
+  - They include all the token, stream-part and param checks; the template match; the host-script block (its paths, its type, its counting, its anchors, its case and its exact-URL check); the UTF-8 and BOM handling; the probe agreement; the reference check; the timestamp and NUL counts; the slot boundaries; the canonical JSON form; and the probe-line query.
+  - **Corrected claim.** The earlier version of this note said every mutant added for the real-host findings and the ruling was killed. That was true of W4's own mutants, but not of the reviewers' (W3 #609 `6092037523`, the Director's delta #394 `6092160295`). Those were:
+    - the slots hashed by a plain string join (slot position and presence unbound);
+    - the `u:` cut widened by one or two, or started three digits in;
+    - the token cut widened;
+    - the host-script patterns without an anchor, with an `.+` id or case-insensitive;
+    - an unnamed param slot;
+    - a dropped BOM;
+    - an empty `?` or `#` blocked.
+
+    All of them are in the catalogue now, and all are killed by this round's tests. One of them, the events pattern matched case-insensitively, survived the first re-run and is killed by the upper-case look-alikes.
+  - Earlier rounds: two survivors were real test gaps and are killed (assets walked only from `/`; the stream part read to the end of the document), and one defect from W4's own re-read was fixed (the stream part's end looked up in a lower-cased copy, `İ`).
   - The survivor is equivalent: substituting params shortest first instead of longest first. The overlap check already refuses a param contained in another, and two ids cannot overlap in a document that separates them.
+
+**Review round** (W3's finding #396 `6092038757`, review #609 `6092037523`; the Director's delta #394 `6092160295`). All of it is in the same five paths.
+- **R1: a leading BOM is refused.** The decoder keeps it (`ignoreBOM: true`), so a BOM-prefixed reviewed document reduces to another digest. Both the guard and the bind refuse it: on every load it binds to another digest and the bind fails; on one load it leaves the template unbound.
+- **R2: the token-bearing events tag is bound.** Its `src` made a `data:` URL, its `src` made another `/assets/` name, an attribute added before the token, and an attribute changed before the token: each is refused by the guard and gives another digest at bind.
+- **R3: slot position and presence are bound.** The URL's param removed, inserted in the stream part, or moved is refused, and so are the kiosk params swapped (N1). A fixed vector pins the canonical JSON of a small document: its sha256 is `1d65a5a4…`.
+- **R4: slot boundaries are exact.** The fixtures' timestamps now differ in every digit between requests. The byte after a `u:` value changed, the byte after the token changed, a 12-digit `u:`, and a 7-character token are each refused.
+- **R5: the host-script matches are anchored and exact.** Each of these is refused:
+  - `/~flock.js/x`, `/~flock.json`, `/~flock.js.map` and `/~FLOCK.JS`;
+  - `/__l5e/events.<id>.js/x`, `.jsonp`, `/x/__l5e/…`, `/__l5e/events.a/b.js`, `/__L5E/…` and `EVENTS…JS`;
+  - an empty `?` or `#` on either path. The URL must be exactly origin plus path, which is W3's N2.
+- **R6, N3, N4:** these sections now say what the route does not see, and the host-build row text and the stale lines are corrected. The quote class, which could never be named, is gone, and the text says why.
 
 **LOVABLE-KIOSK-HOSTED-PROOF-1** (the original packet; its single entry-page digest is superseded above):
 - **`tests/hosted-lovable-kiosk.test.mjs`: 21 passed.**

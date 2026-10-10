@@ -12,7 +12,9 @@
  *              observed manifest (templates, names and sha256 only) so a reviewed commit can pin it.
  *   --run      credentialed (the lovable-kiosk job): bind again (drift since the gate refuses), then seed run-tagged
  *              fixtures with the EXISTING kit (journeys/fixture-kit.mjs) and drive the real Lovable UI. Every browser
- *              context routes every request through codeGuard: each document the browser loads must reduce to its
+ *              context routes its requests through codeGuard (Playwright routes every request except a WebSocket
+ *              handshake and the redirect hops of a request the guard continued; those carry data, never code, as
+ *              before this packet): each document the browser loads must reduce to its
  *              template's reviewed canonical document, and each /assets/ script or stylesheet must carry its reviewed
  *              digest (both fulfilled with exactly the bytes read); the host's own injected scripts are blocked, and
  *              nothing else executable is loaded; a refusal fails host-build and stops the journey before the next
@@ -183,7 +185,7 @@ export const API_ORIGINS = Object.freeze([
 ]);
 
 export const ROWS = Object.freeze([
-  ['host-build', 'the exact Lovable host serves exactly the reviewed entry page and asset digests, at bind AND for every document, script and stylesheet the browser loads; nothing else executable is loaded'],
+  ['host-build', 'the exact Lovable host serves exactly the reviewed canonical document of every route template and every reviewed asset digest, at bind AND for every document, script and stylesheet the browser loads; the host\'s own scripts are blocked; nothing else executable is loaded'],
   ['fixture-provenance', 'the event community, goal, Champion and visitors A and B are run-tagged kit fixtures in the cleanup manifest'],
   ['qr-join', 'visitor A, not a member, joins the event community through the kiosk QR link on the Lovable host'],
   ['queue-place', 'the visitor takes one place in the station line'],
@@ -244,9 +246,13 @@ const TOKEN_RE = /data-context-token="([A-Za-z0-9._~:+/=-]{8,4096})"(?=[\s/>])/g
 const STREAM_OPEN_RE = /<script\b[^>]*?\sdata-tsr-stream-part(?=[\s=/>])[^>]*>/gi;
 /** A `u:` key in the stream part (never the tail of another name such as `menu:`), with its value if that is 13 digits. */
 const STREAM_U_RE = /(?<![A-Za-z0-9_$])u:(\d{13}(?!\d))?/g;
-const UTF8 = new TextDecoder('utf-8', { fatal: true });
-/** Which kinds of character a value carries outside a token's, for a refusal reason that never prints the value. */
-const outside = (v) => [[/"/, 'quote'], [/[<>]/, 'angle bracket'], [/\s/, 'whitespace'], [/&/, 'ampersand'], [/[^A-Za-z0-9._~:+/=\-"<>\s&]/, 'other']].filter(([re]) => re.test(v)).map(([, n]) => n);
+/** Valid UTF-8 only, and a leading BOM kept as a character, so it is a byte difference like any other (W3 R1). */
+const UTF8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+/**
+ * Which kinds of character a value carries outside a token's, for a refusal reason that never prints the value. A quote
+ * cannot be among them: the first quote ends the value, and what follows it is judged as the end of the attribute.
+ */
+const outside = (v) => [[/[<>]/, 'angle bracket'], [/\s/, 'whitespace'], [/&/, 'ampersand'], [/[^A-Za-z0-9._~:+/=\-<>\s&]/, 'other']].filter(([re]) => re.test(v)).map(([, n]) => n);
 
 /**
  * The canonical form of one served document for the URL it was served at, and its sha256, or why there is none
@@ -449,7 +455,8 @@ const DATA_TYPES = new Set(['xhr', 'fetch', 'eventsource']);
  * The Lovable host's own injected scripts, never the app's: the events script whose tag carries the context token, and
  * `/~flock.js` (seen in the documents by the bind of run 38006215259). The app reaches them only through optional calls
  * (`window.__lovableEvents?.…`), so they are blocked: never fetched or run, and never a refusal (Director ruling #394
- * 6091249662). Exact paths on the Lovable host, with no query or fragment, scripts only; anything else is refused.
+ * 6091249662). Exact, anchored paths on the Lovable host, with no query or fragment, not even an empty one (the URL is
+ * exactly origin + path), scripts only; anything else is refused.
  */
 const HOST_SCRIPTS = Object.freeze([/^\/__l5e\/events\.[A-Za-z0-9_-]+\.js$/, /^\/~flock\.js$/]);
 /**
@@ -457,8 +464,9 @@ const HOST_SCRIPTS = Object.freeze([/^\/__l5e\/events\.[A-Za-z0-9_-]+\.js$/, /^\
  * fetch). On the Lovable host: every document (each navigation, deep links included) must be a reviewed route template
  * and is verified against that template's reviewed canonical document; every script or stylesheet must be a reviewed
  * /assets/ file with its reviewed digest, except the host's own injected scripts, which are blocked and never run;
- * passive types pass. Elsewhere: only data requests to API_ORIGINS pass. Everything else is refused. `what` never
- * carries a query.
+ * passive types pass. Elsewhere: only data requests to API_ORIGINS pass. Everything else that reaches the route is
+ * refused (a WebSocket handshake and the redirect hops of a continued request never reach it). `what` never carries a
+ * query.
  */
 export function classifyRequest({ url, type, navigation }, reviewed = REVIEWED_BUILD) {
   let u;
@@ -470,7 +478,7 @@ export function classifyRequest({ url, type, navigation }, reviewed = REVIEWED_B
       return m ? { action: 'verify', kind: 'document', template: m.template, want: reviewed?.documents?.[m.template] ?? null, what } : { action: 'abort', reason: `${what} is not a reviewed route template` };
     }
     if (type === 'script' || type === 'stylesheet') {
-      if (type === 'script' && !u.search && !u.hash && HOST_SCRIPTS.some((re) => re.test(u.pathname))) return { action: 'block', what };
+      if (type === 'script' && u.href === `${u.origin}${u.pathname}` && HOST_SCRIPTS.some((re) => re.test(u.pathname))) return { action: 'block', what };
       const name = /^\/assets\/([A-Za-z0-9_.-]+)$/.exec(u.pathname)?.[1];
       return name && Object.hasOwn(reviewed?.assets ?? {}, name) ? { action: 'verify', kind: 'asset', want: reviewed.assets[name], what } : { action: 'abort', reason: `${what} is not a reviewed asset` };
     }
@@ -482,8 +490,9 @@ export function classifyRequest({ url, type, navigation }, reviewed = REVIEWED_B
 
 /**
  * The served-code guard, routed on EVERY browser context of the journey (service workers blocked, so none can answer
- * around it). A verified response is fetched once and fulfilled with exactly the bytes read: an asset only when those
- * bytes carry its reviewed digest, a document only when they are valid UTF-8 and reduce, for the URL requested, to its
+ * around it; Playwright routes every request but a WebSocket handshake and the redirect hops of a continued request,
+ * which carry data, never code). A verified response is fetched once and fulfilled with exactly the bytes read: an asset
+ * only when those bytes carry its reviewed digest, a document only when they are valid UTF-8 (a BOM kept) and reduce, for the URL requested, to its
  * template's reviewed canonical document with the reviewed numbers of stream-part timestamps and NULs. A redirect, an error
  * status, other bytes, an unreviewed or foreign script or document is aborted and recorded; a host script is
  * aborted and counted as blocked. `check()` throws once anything was refused, so the journey stops before the next step

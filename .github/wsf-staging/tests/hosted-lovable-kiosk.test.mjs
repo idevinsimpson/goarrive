@@ -40,14 +40,14 @@ let served = 0;
 function servedDoc(pathname, o = {}) {
   served += 1;
   const token = o.token ?? `ctx.${crypto.randomBytes(12).toString('base64url')}`;
-  const ts = String(1760050000000 + served * 7919);
+  const ts = o.ts ?? `${1 + crypto.randomInt(9)}${String(crypto.randomInt(1e12)).padStart(12, '0')}`; // any 13 digits, per request
   const segs = pathname.split('/').filter(Boolean);
   const route = pathname === '/' ? '/' : segs[0] === 'display' ? '/display/$goalId' : '/kiosk/$communityId/$goalId';
   const ids = o.ids ?? segs.slice(1);
   const matchId = ids.length ? `${route}/${segs[0]}/${ids.join('/')}` : '/';
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"${o.metaAttr ?? ''}><title>WE STAY FIT</title>`
     + `<link rel="stylesheet" href="/assets/index-CCC.css"><link rel="modulepreload" href="/assets/${o.shell ?? 'shell-AAA.js'}">`
-    + `<script src="/__l5e/events.Q1w2E3r4.js" data-context-token="${token}"${o.tokenTail ?? ''} defer></script><script src="/~flock.js" defer></script>${o.head ?? ''}</head>`
+    + `${o.eventsPre ?? '<script src="/__l5e/events.Q1w2E3r4.js" '}data-context-token="${token}"${o.tokenTail ?? ''} defer></script><script src="/~flock.js" defer></script>${o.head ?? ''}</head>`
     + `<body><main data-route="${route}"${ids.map((v, i) => ` data-p${i}="${v}"`).join('')}>\u0000</main>`
     + `<script class="$tsr" data-tsr-stream-part="">$_TSR.router.matches=[{i:"__root__",u:${o.u1 ?? ts},s:"success",x:"\u0000"},{i:"${matchId}",u:${o.u2 ?? ts},s:"${o.status ?? 'success'}"}${o.streamMore ?? ''}]</script>`
     + `${o.body ?? ''}<script type="module" src="/assets/${o.shell ?? 'shell-AAA.js'}"></script></body></html>`;
@@ -110,6 +110,13 @@ test('canonical document: exactly the two per-request values are normalized, and
   assert.equal(k1.sha256, canonOf('/kiosk/Xk4wsfBindProbeComm2/Zq9wsfBindProbeGoal2').sha256);
   assert.deepEqual(k1.params, { communityId: 2, goalId: 2 });
   assert.notEqual(k1.sha256, d1.sha256);
+  // A fixed vector (R3): the canonical form of a small document is exactly this JSON list of literal text and slots.
+  const vectorDoc = '<p data-context-token="tok12345">x</p><script data-tsr-stream-part="">a={u:1234567890123};b="\u0000"</script><i>abcdefghijkl0</i>';
+  const vectorJson = '["<p data-context-token=\\"",{"slot":"token"},"\\">x</p><script data-tsr-stream-part=\\"\\">a={u:",{"slot":"u"},"};b=\\"\\u0000\\"</script><i>",{"slot":"param:goalId"},"</i>"]';
+  const vector = canonicalDocument(vectorDoc, `${LOVABLE_URL}/display/abcdefghijkl0`);
+  assert.equal(vector.sha256, sha(vectorJson), 'the digest is the sha256 of exactly that JSON');
+  assert.equal(vector.sha256, VECTOR_SHA256, 'and that JSON is pinned');
+  assert.deepEqual([vector.streamU, vector.nul, vector.params], [1, 1, { goalId: 1 }]);
   // Only a u: KEY counts: the tail of another name (menu:, menu:abc) is neither a timestamp nor a refusal.
   const menu = canonicalDocument(servedDoc('/', { streamMore: ',{menu:"open",emu:1}' }), `${LOVABLE_URL}/`);
   assert.equal(menu.streamU, 2);
@@ -176,6 +183,24 @@ test('negative mutations: each one is refused, by name or by digest, at bind and
     ['a removed NUL character', '/', servedDoc('/').replace('\u0000</main>', '</main>'), /carries 1 NUL character\(s\), not the reviewed 2/],
     ['a moved NUL character', '/', servedDoc('/').replace('\u0000</main>', '</main>').replace('<title>', '<title>\u0000'), /differs from the reviewed \/ document/],
     ['a second ~flock.js tag', '/', servedDoc('/', { head: '<script src="/~flock.js" defer></script>' }), /differs from the reviewed \/ document/],
+    // R1: a leading BOM is a byte difference (kept by the decoder, so the canonical form differs)
+    ['a leading BOM', '/', `\uFEFF${servedDoc('/')}`, /differs from the reviewed \/ document/],
+    // R2: the tag that carries the token: its src and the attributes before the token are bound
+    ['the events tag src made a data: URL', '/', servedDoc('/', { eventsPre: '<script src="data:text/javascript,steal()" ' }), /differs from the reviewed \/ document/],
+    ['the events tag src made another asset', '/', servedDoc('/', { eventsPre: '<script src="/assets/shell-AAA.js" ' }), /differs from the reviewed \/ document/],
+    ['an attribute added before the token', '/', servedDoc('/', { eventsPre: '<script src="/__l5e/events.Q1w2E3r4.js" async ' }), /differs from the reviewed \/ document/],
+    ['an attribute changed before the token', '/', servedDoc('/', { eventsPre: '<script src="/__l5e/events.Q1w2E3r5.js" ' }), /differs from the reviewed \/ document/],
+    // R3: a slot's position and presence are bound, not only the literal text around it
+    ['the URL\'s param removed', G, servedDoc(G).replace('data-p0="ga1-wsf-bind-probe"', 'data-p0=""'), /differs from the reviewed \/display\/\$goalId document/],
+    ['the URL\'s param inserted in the stream part', G, servedDoc(G).replace('$_TSR.router.matches=', 'ga1-wsf-bind-probe$_TSR.router.matches='), /differs from the reviewed \/display\/\$goalId document/],
+    ['the URL\'s param moved', G, servedDoc(G).replace('data-p0="ga1-wsf-bind-probe"', 'data-p0=""').replace('<title>', '<title>ga1-wsf-bind-probe'), /differs from the reviewed \/display\/\$goalId document/],
+    // N1: the two params of a kiosk document swapped between their slots
+    ['the kiosk params swapped', K, servedDoc(K, { ids: ['ga1-wsf-bind-probe', 'ca1-wsf-bind-probe'] }), /differs from the reviewed \/kiosk/],
+    // R4: the bytes right beside each cut are kept, and each cut is exactly its value
+    ['the byte after a u: value changed', '/', servedDoc('/').replace(/(u:\d{13}),/, '$1;'), /differs from the reviewed \/ document/],
+    ['the byte after the token changed', '/', servedDoc('/').replace(/(data-context-token="[^"]*") defer/, '$1\ndefer'), /differs from the reviewed \/ document/],
+    ['a 12-digit u:', '/', servedDoc('/', { u1: '176005000000' }), /not 13 digits/],
+    ['a 7-character token', '/', servedDoc('/', { token: 'abcdefg' }), /data-context-token value is not one quoted token/],
     ['a param the guard cannot bind', '/display/short', servedDoc('/display/short'), /a path param the guard cannot bind/],
     ['overlapping params', '/kiosk/abcdefghijkl/abcdefghijklmn', servedDoc('/kiosk/abcdefghijkl/abcdefghijklmn'), /two path params overlap/],
   ];
@@ -208,6 +233,7 @@ test('negative mutations: each one is refused, by name or by digest, at bind and
   });
   assert.match(g.summary().violations[0], /is not valid UTF-8/);
 });
+const VECTOR_SHA256 = '1d65a5a400dac8908712c7b82029cc4164b825b70c8609da7d5696c9c97b9e70';
 const PARAM_OK = (p) => Object.values(matchTemplate(p).params).every((v) => /^[A-Za-z0-9_-]{12,128}$/.test(v));
 
 test('the served manifest: every bind probe reduced per template, same-origin assets walked and hashed, references checked', async () => {
@@ -235,6 +261,17 @@ test('the served manifest: every bind probe reduced per template, same-origin as
   assert.match(derived.documents['/display/$goalId'].reason, /2 loads reduce to 2 different canonical documents/);
   assert.equal(bindBuild(derived, EXACT).status, 'FAIL');
   assert.match(bindLines(derived, bindBuild(derived)).join('\n'), /LOVABLE_OBSERVED_DOCUMENT \/display\/\$goalId UNBOUND/);
+  // R1 at bind: a leading BOM is kept, so documents that carry one reduce to another digest; one BOM load unbinds.
+  const bom = await servedManifest(site({ ...SITE, doc: (p) => `\uFEFF${servedDoc(p)}` }).fetchImpl);
+  assert.ok(ROUTE_TEMPLATES.every((t) => bom.documents[t].sha256 && bom.documents[t].sha256 !== DOCS[t].sha256), 'bound, to other digests');
+  assert.equal(bindBuild(bom, EXACT).status, 'FAIL');
+  let firstRoot = true;
+  const oneBom = await servedManifest(site({ ...SITE, doc: (p) => (p === '/' && firstRoot ? ((firstRoot = false), `\uFEFF${servedDoc(p)}`) : servedDoc(p)) }).fetchImpl);
+  assert.equal(oneBom.documents['/'].sha256, null);
+  // R2 at bind: an events tag that loads data: code reduces to another digest, so the bind fails.
+  const dataTag = await servedManifest(site({ ...SITE, doc: (p) => servedDoc(p, { eventsPre: '<script src="data:text/javascript,steal()" ' }) }).fetchImpl);
+  assert.notEqual(dataTag.documents['/'].sha256, DOCS['/'].sha256);
+  assert.equal(bindBuild(dataTag, EXACT).status, 'FAIL');
   // A per-request value outside the two normalized ones (a nonce in an inline script) unbinds `/` the same way.
   const nonce = await servedManifest(site({ ...SITE, doc: (p) => servedDoc(p, { body: `<script>n="${crypto.randomBytes(4).toString('hex')}"</script>` }) }).fetchImpl);
   assert.ok(ROUTE_TEMPLATES.every((t) => nonce.documents[t].sha256 === null), 'every template unbound');
@@ -828,7 +865,11 @@ test('classifyRequest: the reviewed host verifies documents and /assets/ code; A
     [`${L}/assets/other-ZZZ.js`, 'script'], [`${L}/sw.js`, 'script'], [`${L}/c/e5cgrp-e5c-t-1-lk/g/e5cgoal-e5c-t-1-lk`, 'document', true], [`${L}/try`, 'document', true],
     [EVENTS_SCRIPT, 'stylesheet'], [`${L}/__l5e/other.js`, 'script'], [`${L}/__l5e/events.x.js/../evil.js`, 'script'], [`${L}/__l5e/events.Q1w2E3r4.js`, 'document', true],
     [FLOCK_SCRIPT, 'stylesheet'], [`${L}/~flock.js`, 'document', true], [`${L}/~flockX.js`, 'script'], [`${L}/a/~flock.js`, 'script'], [`${L}/~flock.mjs`, 'script'], ['https://cdn.example.test/~flock.js', 'script'],
-    [`${L}/~flock.js?v=1`, 'script'], [`${L}/~flock2.js`, 'script'], [`${L}/x/~flock.js`, 'script'], [`${L}/~flock.js#a`, 'script'], [`${EVENTS_SCRIPT}?v=1`, 'script'], [`${L}/elsewhere/shell-AAA.js`, 'script'], [`${L}/assets/sub/shell-AAA.js`, 'script'], [`${L}/assets/shell-AAA.js/../x.js`, 'script'], [`${L}/x`, 'websocket'],
+    [`${L}/~flock.js?v=1`, 'script'], [`${L}/~flock2.js`, 'script'], [`${L}/x/~flock.js`, 'script'], [`${L}/~flock.js#a`, 'script'], [`${EVENTS_SCRIPT}?v=1`, 'script'],
+    [`${L}/~flock.js/x`, 'script'], [`${L}/~flock.json`, 'script'], [`${L}/~flock.js.map`, 'script'], [`${L}/~FLOCK.JS`, 'script'],
+    [`${EVENTS_SCRIPT}/x`, 'script'], [`${L}/__l5e/events.Q1w2E3r4.jsonp`, 'script'], [`${L}/x/__l5e/events.Q1w2E3r4.js`, 'script'], [`${L}/__l5e/events.a/b.js`, 'script'],
+    [`${L}/~flock.js?`, 'script'], [`${L}/~flock.js#`, 'script'], [`${EVENTS_SCRIPT}?`, 'script'], [`${EVENTS_SCRIPT}#`, 'script'],
+    [`${L}/__L5E/events.Q1w2E3r4.js`, 'script'], [`${L}/__l5e/EVENTS.Q1w2E3r4.JS`, 'script'], [`${L}/elsewhere/shell-AAA.js`, 'script'], [`${L}/assets/sub/shell-AAA.js`, 'script'], [`${L}/assets/shell-AAA.js/../x.js`, 'script'], [`${L}/x`, 'websocket'],
     ['https://identitytoolkit.googleapis.com/x.js', 'script'], ['https://firestore.googleapis.com/', 'document', true], ['https://us-central1-westayfit-staging.cloudfunctions.net/x', 'image'],
     ['https://cdn.example.test/x.js', 'script'], ['https://fonts.googleapis.com/css', 'stylesheet'], ['https://evil.example.test/api', 'fetch'],
     ['https://we-stay-fit-foundation-trial.lovable.app.evil.test/', 'document', true], ['http://we-stay-fit-foundation-trial.lovable.app/', 'document', true], ['not a url', 'script'],

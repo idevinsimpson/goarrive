@@ -16,7 +16,8 @@
  *              EXISTING kit (journeys/fixture-kit.mjs), then at each viewport drive one synthetic visitor through the
  *              product: the signed-out landing and the display, the invite link, sign-up, the honest verification send
  *              state, the profile, the join, the camera screen and its manual fallback (cancelled), Progress and You.
- *              Every browser context routes every request through the kiosk harness's codeGuard. One screenshot per
+ *              Every browser context routes its requests through the kiosk harness's codeGuard (Playwright routes all
+ *              but a WebSocket handshake and the redirect hops of a continued request, which carry data). One screenshot per
  *              cell. Every cell is PASS, FAIL or BLOCKED; results are written in `finally`; exit 0 only when every row
  *              passed.
  *   --require  after blocking cleanup and the evidence scan: recompute the verdict from the written results and the
@@ -77,7 +78,7 @@ export const CELLS = Object.freeze([
 
 /** Every row: the three run rows, then each cell at each viewport (`<cell>@<viewport>`). */
 export const ROWS = Object.freeze([
-  Object.freeze({ id: 'host-build', expected: 'the exact Lovable host serves exactly the reviewed entry page and asset digests, at bind AND for every document, script and stylesheet the browser loads; nothing else executable is loaded' }),
+  Object.freeze({ id: 'host-build', expected: 'the exact Lovable host serves exactly the reviewed canonical document of every route template and every reviewed asset digest, at bind AND for every document, script and stylesheet the browser loads; the host\'s own scripts are blocked; nothing else executable is loaded' }),
   Object.freeze({ id: 'fixture-provenance', expected: 'the joinable community and goal are run-tagged kit fixtures in the cleanup manifest, and every visitor account is in it before its next step' }),
   ...VIEWPORTS.flatMap((v) => CELLS.map((c) => Object.freeze({ id: `${c.id}@${v.id}`, expected: `${v.label}: ${c.expected}` }))),
   Object.freeze({ id: 'cleanup-tracking', expected: 'every visitor account and every product-written document is in the cleanup manifest before cleanup' }),
