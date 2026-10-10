@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "492ed0da9e4187ad2fa6de39c142557dbe1520803c82c01878602b0cc3a6cb68",
-  "eventCount": 1241,
+  "ledgerHead": "64f31baf8dafa7eaf61e764a49dbc98db9e9e93a367a621860937ce9aad3e562",
+  "eventCount": 1243,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -3022,7 +3022,7 @@
       },
       "label": "Fix the hosted regression on main 4da578d7 (run 38079242076): qr-join polls for the choice; the station turn starts from the served member or newcomer path, not a literal Join",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 394,
@@ -3036,7 +3036,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         ".github/wsf-staging/hosted-lovable-kiosk.mjs",
@@ -3057,7 +3057,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6101324338
+          "id": 6101625507
         }
       },
       "review": {
@@ -7340,11 +7340,14 @@
       "packet": "LOVABLE-KIOSK-STATION-DRIVER-2",
       "worker": "W4",
       "reason": "release",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6101565375
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6101625507
+      }
     }
   },
   "fastpath": {
