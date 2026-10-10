@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "b300e5b50d524af65c60da3325d1cf919ba54d5a8716f3694aeea50cfe17a581",
-  "eventCount": 1196,
+  "ledgerHead": "e7550041b4a2a80a363b4c5491428779713eb582bb85f6ad09ec5956b63b8434",
+  "eventCount": 1201,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -20,7 +20,7 @@
   "canonical": {
     "developmentBranch": "claude/wsf-app-shell",
     "developmentSha": "8a067b29420563408e16cff5d91cc77b2ad0fbd8",
-    "operationalMain": "e96cd9474e1ef824605582a5fb95ecd44e34c83d"
+    "operationalMain": "9b2e89e83a3c88dbca66f76b325579e699906769"
   },
   "staging": {
     "servedSha": "ec162d17a0540e936741027f9b8f90dd372cfaf4",
@@ -2544,7 +2544,7 @@
       },
       "label": "Fixture kit: expoEvent can make a link-joinable (public) event community with its real verified Champion, so the kiosk proof's qr-join row can run; default stays private; tests",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -2556,7 +2556,7 @@
         "subjectSha": "693c04ae2f3d2557444875d78b8adf537eaeebae",
         "prHeadSha": "693c04ae2f3d2557444875d78b8adf537eaeebae",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "9b2e89e83a3c88dbca66f76b325579e699906769"
       },
       "proof": null,
       "served": null,
@@ -2580,10 +2580,13 @@
           "kind": "comment",
           "id": 6096266730
         },
-        "accepted": null,
-        "lastTransition": {
+        "accepted": {
           "kind": "comment",
-          "id": 6096801267
+          "id": 6096867589
+        },
+        "lastTransition": {
+          "kind": "pull_request",
+          "id": 616
         }
       },
       "review": {
@@ -2882,7 +2885,7 @@
       },
       "label": "Device matrix: align the display and sign-up cells with served build db3fd2f2 (selector, total and freshness copy; step count read as text), plus W3's carried O-items; REVIEWED_BUILD unchanged",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 394,
@@ -2894,7 +2897,7 @@
         "subjectSha": "bab7e9800072e10df6ad4cc269e6f7794baf2c81",
         "prHeadSha": "bab7e9800072e10df6ad4cc269e6f7794baf2c81",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "70e5d8c98f389fe207872c70540a34296cec249c"
       },
       "proof": null,
       "served": null,
@@ -2921,10 +2924,13 @@
           "kind": "comment",
           "id": 6096205153
         },
-        "accepted": null,
-        "lastTransition": {
+        "accepted": {
           "kind": "comment",
-          "id": 6096669898
+          "id": 6096867013
+        },
+        "lastTransition": {
+          "kind": "pull_request",
+          "id": 614
         }
       },
       "review": {
