@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "bddbb6b6d2aa7d9b41ca44f62939fbaa31b2adfbe3d7d65a5494b2c7a6c7ea98",
-  "eventCount": 1127,
+  "ledgerHead": "ddd54144d401ab93b045bcfee6589733097cdc5caaaf798950de61c2a14ace9a",
+  "eventCount": 1133,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2818,7 +2818,7 @@
       },
       "label": "Re-pin REVIEWED_BUILD to the next Lovable publish (db3fd2f2) and close LOVABLE-REVIEWED-BUILD-1's carried items: UTF-8 asset fulfilment, CHARSET-name and token-length negatives, QA-note corrections",
       "origin": "ledger",
-      "phase": "CHANGES_REQUESTED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 394,
@@ -2827,8 +2827,8 @@
         "W3"
       ],
       "artifact": {
-        "subjectSha": "705256bb40063333572f3d4208d5427a56ca36fd",
-        "prHeadSha": "c551722bea932d25a2ceee6855bc9cf9c535045a",
+        "subjectSha": "6fcaa93c3aff889cfd2e0a6c401de649817d6089",
+        "prHeadSha": "6fcaa93c3aff889cfd2e0a6c401de649817d6089",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -2857,7 +2857,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6093402257
+          "id": 6093950461
         }
       },
       "review": {
@@ -2870,7 +2870,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 2,
+      "deliveries": 3,
       "pendingFinding": null
     },
     "MEMBER-PREVIEW-LABEL-1": {
@@ -4182,7 +4182,7 @@
       },
       "label": "Owner operator access: map the WSF authorization model, gaps vs the owner's event-operator ask, an owner-run read-only account audit (email typed locally, never stored)",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -4196,7 +4196,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         "docs/westayfit/ops/operator-access/WSF_OPERATOR_ACCESS_1.md",
@@ -4217,7 +4217,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6093847482
+          "id": 6094009666
         }
       },
       "review": {
@@ -6696,16 +6696,28 @@
       "ack": {
         "kind": "comment",
         "id": 6093480673
-      }
+      },
+      "superseded": true
     },
     "25ac1951a966439718eebe502d38ba89dddc66de5c5a22870f7e762593575edf": {
       "packet": "WSF-OPERATOR-ACCESS-1",
       "worker": "W9",
       "reason": "release",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6093976688
       ],
+      "ack": {
+        "kind": "comment",
+        "id": 6094009666
+      }
+    },
+    "d477ee8ee348c0c8309dec28a06409dc29ca3ed810a94d968b17d20c760e4a42": {
+      "packet": "LOVABLE-REVIEWED-BUILD-2",
+      "worker": "W3",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
