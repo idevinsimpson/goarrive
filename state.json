@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "e874a12b2930e9f2ecdda0af1ca380ef0a1c2e9cb22812c1eae0f3f90ce40858",
-  "eventCount": 1087,
+  "ledgerHead": "a4a2c85addbd161f3d35240b31c03ccc2b7bd4ff1e31188718c43bbd534be19c",
+  "eventCount": 1089,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2749,7 +2749,7 @@
       },
       "label": "Route-aware reviewed-build pin for Lovable expo build 9b9eade5: normalize only the two per-request values, bind documents per route template, keep asset digests exact, negative mutation tests",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "CHANGES_REQUESTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 394,
@@ -2788,7 +2788,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6091520531
+          "id": 6092038757
         }
       },
       "review": {
@@ -6483,7 +6483,16 @@
       "ack": {
         "kind": "comment",
         "id": 6091653304
-      }
+      },
+      "superseded": true
+    },
+    "a5316f63909d95e8fdfbdfc25401eff586f343509880eba46c9609a99a85e88a": {
+      "packet": "LOVABLE-REVIEWED-BUILD-1",
+      "worker": "W4",
+      "reason": "handback",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
