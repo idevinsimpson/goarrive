@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "4c0f5e63a0c73414882f6c8604ad6c161cc8dd05a68714725ef1866fb4984726",
-  "eventCount": 1210,
+  "ledgerHead": "dea5c70f00856e383a7c4d3bcb3ed2bda90fec19135f11d9ce92e38126923e3b",
+  "eventCount": 1211,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -7154,8 +7154,10 @@
       "packet": "LOVABLE-KIOSK-QR-JOIN-1",
       "worker": "W3",
       "reason": "review",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        6097482658
+      ],
       "ack": null
     }
   },
