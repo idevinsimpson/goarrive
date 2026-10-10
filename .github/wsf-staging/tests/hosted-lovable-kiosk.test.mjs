@@ -10,9 +10,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  API_ORIGINS, FIXED_BLOCKED, LOVABLE_URL, callableLog, cli, REVIEWED_BUILD, ROWS, allPassed, bindBuild, bindLines, browserEnv, checkBase, classifyRequest,
-  codeGuard, hostBuildRow, idHash, mergeIntoManifest, ownCreditOf, receiptVerdict, requireVerdict, results, runJourney, runResults, servedManifest,
-  sharedOf, showsNumber,
+  API_ORIGINS, BIND_PROBES, FIXED_BLOCKED, LOVABLE_URL, ROUTE_TEMPLATES, callableLog, canonicalDocument, cli, REVIEWED_BUILD, ROWS, allPassed, bindBuild,
+  bindLines, browserEnv, checkBase, classifyRequest, codeGuard, documentTypeProblem, hostBuildRow, idHash, matchTemplate, mergeIntoManifest, ownCreditOf, receiptVerdict,
+  requireVerdict, results, runJourney, runResults, servedManifest, sharedOf, showsNumber,
 } from '../hosted-lovable-kiosk.mjs';
 
 let passed = 0;
@@ -31,55 +31,340 @@ test('only exactly the Lovable host is accepted', () => {
   }
 });
 
+/**
+ * A document as the TanStack Start host serves it (HTML-VARIANCE-1, #365 6089082668 and 6089534129): the host's
+ * events script tag with a per-request context token, the stream part with one per-request `u:` per matched route, and
+ * the route's own params in its markup and stream part. `o` switches in one defect at a time.
+ */
+let served = 0;
+function servedDoc(pathname, o = {}) {
+  served += 1;
+  const token = o.token ?? `ctx.${crypto.randomBytes(12).toString('base64url')}`;
+  const ts = o.ts ?? `${1 + crypto.randomInt(9)}${String(crypto.randomInt(1e12)).padStart(12, '0')}`; // any 13 digits, per request
+  const segs = pathname.split('/').filter(Boolean);
+  const route = pathname === '/' ? '/' : segs[0] === 'display' ? '/display/$goalId' : '/kiosk/$communityId/$goalId';
+  const ids = o.ids ?? segs.slice(1);
+  const matchId = ids.length ? `${route}/${segs[0]}/${ids.join('/')}` : '/';
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"${o.metaAttr ?? ''}><title>WE STAY FIT</title>`
+    + `<link rel="stylesheet" href="/assets/index-CCC.css"><link rel="modulepreload" href="/assets/${o.shell ?? 'shell-AAA.js'}">`
+    + `${o.eventsPre ?? '<script src="/__l5e/events.Q1w2E3r4.js" '}data-context-token="${token}"${o.tokenTail ?? ''} defer></script><script src="/~flock.js" defer></script>${o.head ?? ''}</head>`
+    + `<body><main data-route="${route}"${ids.map((v, i) => ` data-p${i}="${v}"`).join('')}>\u0000</main>`
+    + `<script class="$tsr" data-tsr-stream-part="">$_TSR.router.matches=[{i:"__root__",u:${o.u1 ?? ts},s:"success",x:"\u0000"},{i:"${matchId}",u:${o.u2 ?? ts},s:"${o.status ?? 'success'}"}${o.streamMore ?? ''}]</script>`
+    + `${o.body ?? ''}<script type="module" src="/assets/${o.shell ?? 'shell-AAA.js'}"></script></body></html>`;
+}
+const pin = (d) => ({ sha256: d.sha256, streamU: d.streamU, nul: d.nul });
+const canonOf = (p, o) => canonicalDocument(servedDoc(p, o), `${LOVABLE_URL}${p}`);
+
 function site(files) {
   const calls = [];
   const fetchImpl = async (url, init) => {
     calls.push(url);
     assert.equal(init.redirect, 'error', 'redirects are never followed');
     const p = new URL(url).pathname;
-    if (files[p] === undefined) return { ok: false, status: 404, arrayBuffer: async () => new ArrayBuffer(0) };
-    return { ok: true, status: 200, arrayBuffer: async () => Buffer.from(files[p]) };
+    const body = p.startsWith('/assets/') ? files.assets[p] : files.doc(p);
+    if (body === undefined) return { ok: false, status: 404, arrayBuffer: async () => new ArrayBuffer(0) };
+    const type = p.startsWith('/assets/') ? 'text/javascript' : (files.docType?.(p) ?? 'text/html; charset=utf-8');
+    return { ok: true, status: 200, headers: { get: (k) => (k.toLowerCase() === 'content-type' ? type : null) }, arrayBuffer: async () => Buffer.from(body) };
   };
   return { fetchImpl, calls };
 }
 const SITE = {
-  '/': '<html><script type="module" src="/assets/shell-AAA.js"></script><link rel="stylesheet" href="/assets/index-CCC.css"></html>',
-  '/assets/shell-AAA.js': 'import("./connected-kiosk-BBB.js");import "https://cdn.example.test/assets/evil.js";',
-  '/assets/connected-kiosk-BBB.js': 'export const k=1;',
-  '/assets/index-CCC.css': 'body{}',
+  doc: (p) => servedDoc(p),
+  assets: {
+    '/assets/shell-AAA.js': 'import("./connected-kiosk-BBB.js");import "https://cdn.example.test/assets/evil.js";',
+    '/assets/connected-kiosk-BBB.js': 'export const k=1;',
+    '/assets/index-CCC.css': 'body{}',
+  },
 };
-const OBSERVED = { 'connected-kiosk-BBB.js': sha(SITE['/assets/connected-kiosk-BBB.js']), 'index-CCC.css': sha(SITE['/assets/index-CCC.css']), 'shell-AAA.js': sha(SITE['/assets/shell-AAA.js']) };
+const OBSERVED = { 'connected-kiosk-BBB.js': sha(SITE.assets['/assets/connected-kiosk-BBB.js']), 'index-CCC.css': sha(SITE.assets['/assets/index-CCC.css']), 'shell-AAA.js': sha(SITE.assets['/assets/shell-AAA.js']) };
+const DOCS = Object.freeze({
+  '/': pin(canonOf('/')),
+  '/display/$goalId': pin(canonOf('/display/ga1-wsf-bind-probe')),
+  '/kiosk/$communityId/$goalId': pin(canonOf('/kiosk/ca1-wsf-bind-probe/ga1-wsf-bind-probe')),
+});
+const EXACT = Object.freeze({ documents: DOCS, assets: OBSERVED });
 
-test('the served manifest walks same-origin assets only and hashes each one', async () => {
-  const s = site(SITE);
-  const m = await servedManifest(s.fetchImpl);
-  assert.deepEqual(m.assets, OBSERVED);
-  assert.equal(m.indexSha256, sha(SITE['/']));
-  assert.ok(s.calls.every((u) => u.startsWith(`${LOVABLE_URL}/`)), 'never another origin');
-  await assert.rejects(servedManifest(site({ ...SITE, '/assets/connected-kiosk-BBB.js': undefined }).fetchImpl), /HTTP 404|answered/);
-  await assert.rejects(servedManifest(site({ '/': '<html></html>' }).fetchImpl), /names no asset/);
+// ---- the route-aware document binding (LOVABLE-REVIEWED-BUILD-1, queue #365 6090733639) ------------------------
+test('route templates: exactly /, /display/<goal> and /kiosk/<community>/<goal>; every other path is no template', () => {
+  assert.deepEqual(ROUTE_TEMPLATES, ['/', '/display/$goalId', '/kiosk/$communityId/$goalId']);
+  assert.deepEqual(matchTemplate('/'), { template: '/', params: {} });
+  assert.deepEqual(matchTemplate('/display/e5cgoal-e5c-t-1-dm1'), { template: '/display/$goalId', params: { goalId: 'e5cgoal-e5c-t-1-dm1' } });
+  assert.deepEqual(matchTemplate('/kiosk/e5cgrp-e5c-t-1-lk/e5cgoal-e5c-t-1-lk'), { template: '/kiosk/$communityId/$goalId', params: { communityId: 'e5cgrp-e5c-t-1-lk', goalId: 'e5cgoal-e5c-t-1-lk' } });
+  for (const p of ['', '/display', '/display/', '/display/a/b', '/kiosk/a', '/kiosk/a/b/c', '/c/a/g/b', '/go/marker', '/try', '/review/x', '//', '/index.html']) assert.equal(matchTemplate(p), null, p);
+  assert.deepEqual([...new Set(BIND_PROBES.map((p) => matchTemplate(new URL(`${LOVABLE_URL}${p}`).pathname)?.template))], ROUTE_TEMPLATES, 'the bind loads every template, and only templates');
 });
 
-test('binding: empty reviewed manifest BLOCKED; exact PASS; a changed entry page, or changed, extra or missing assets FAIL', () => {
-  assert.equal(Object.keys(REVIEWED_BUILD.assets).length, 0, 'nothing is reviewed yet, so every run stops in the gate');
-  assert.equal(REVIEWED_BUILD.indexSha256, null);
-  const INDEX = sha(SITE['/']);
-  const seen = { indexSha256: INDEX, assets: OBSERVED };
-  assert.equal(bindBuild(seen).status, 'BLOCKED');
-  assert.equal(bindBuild(seen, { assets: { ...OBSERVED } }).status, 'BLOCKED', 'assets without the entry page digest are not a reviewed manifest');
-  assert.equal(bindBuild(seen, { indexSha256: INDEX, assets: {} }).status, 'BLOCKED', 'an entry page digest without assets is not a reviewed manifest');
-  const reviewed = { indexSha256: INDEX, assets: { ...OBSERVED } };
-  assert.equal(bindBuild(seen, reviewed).status, 'PASS');
-  assert.equal(bindBuild({ indexSha256: sha(SITE['/'] + '<script>alert(1)</script>'), assets: OBSERVED }, reviewed).status, 'FAIL', 'identical assets behind a changed entry page (inline script) do not pass');
-  assert.equal(bindBuild({ assets: OBSERVED }, reviewed).status, 'FAIL', 'no observed entry digest');
-  assert.equal(bindBuild({ indexSha256: INDEX, assets: { ...OBSERVED, 'shell-AAA.js': sha('changed') } }, reviewed).status, 'FAIL');
-  assert.equal(bindBuild({ indexSha256: INDEX, assets: { ...OBSERVED, 'extra-ZZZ.js': sha('x') } }, reviewed).status, 'FAIL');
+test('canonical document: exactly the two per-request values are normalized, and the URL\'s own params fill their slots', () => {
+  const a = canonOf('/');
+  const b = canonOf('/');
+  assert.equal(a.template, '/');
+  assert.match(a.sha256, /^[0-9a-f]{64}$/);
+  assert.equal(a.sha256, b.sha256, 'two requests (other token, other timestamps) reduce to one document');
+  assert.equal(a.streamU, 2, 'one u: per matched route');
+  assert.equal(canonicalDocument(servedDoc('/'), `${LOVABLE_URL}/?join=jn1-wsf-bind-probe&goal=ga1-wsf-bind-probe`).sha256, a.sha256, 'the query string never reaches the document');
+  const d1 = canonOf('/display/ga1-wsf-bind-probe');
+  const d2 = canonOf('/display/Zq9wsfBindProbeGoal2');
+  assert.equal(d1.sha256, d2.sha256, 'two goal ids reduce to one display document');
+  assert.deepEqual(d1.params, { goalId: 2 }, 'the id is counted where it appears (markup and stream part)');
+  assert.notEqual(d1.sha256, a.sha256);
+  const k1 = canonOf('/kiosk/ca1-wsf-bind-probe/ga1-wsf-bind-probe');
+  assert.equal(k1.sha256, canonOf('/kiosk/Xk4wsfBindProbeComm2/Zq9wsfBindProbeGoal2').sha256);
+  assert.deepEqual(k1.params, { communityId: 2, goalId: 2 });
+  assert.notEqual(k1.sha256, d1.sha256);
+  // A fixed vector (R3): the canonical form of a small document is exactly this JSON list of literal text and slots.
+  const vectorDoc = '<p data-context-token="tok12345">x</p><script data-tsr-stream-part="">a={u:1234567890123};b="\u0000"</script><i>abcdefghijkl0</i>';
+  const vectorJson = '["<p data-context-token=\\"",{"slot":"token"},"\\">x</p><script data-tsr-stream-part=\\"\\">a={u:",{"slot":"u"},"};b=\\"\\u0000\\"</script><i>",{"slot":"param:goalId"},"</i>"]';
+  const vector = canonicalDocument(vectorDoc, `${LOVABLE_URL}/display/abcdefghijkl0`);
+  assert.equal(vector.sha256, sha(vectorJson), 'the digest is the sha256 of exactly that JSON');
+  assert.equal(vector.sha256, VECTOR_SHA256, 'and that JSON is pinned');
+  assert.deepEqual([vector.streamU, vector.nul, vector.params], [1, 1, { goalId: 1 }]);
+  // Only a u: KEY counts: the tail of another name (menu:, menu:abc) is neither a timestamp nor a refusal.
+  const menu = canonicalDocument(servedDoc('/', { streamMore: ',{menu:"open",emu:1}' }), `${LOVABLE_URL}/`);
+  assert.equal(menu.streamU, 2);
+  assert.notEqual(menu.sha256, a.sha256, 'and it is kept byte for byte');
+  // A u: outside the stream part is not normalized: it stays exact, so another value is another document.
+  const after1 = canonicalDocument(servedDoc('/', { body: '<script>x={u:1760050000001}</script>' }), `${LOVABLE_URL}/`);
+  const after2 = canonicalDocument(servedDoc('/', { body: '<script>x={u:1760050000002}</script>' }), `${LOVABLE_URL}/`);
+  assert.equal(after1.streamU, 2, 'only the stream part\'s u: values are counted');
+  assert.notEqual(after1.sha256, after2.sha256);
+  // A character whose lower case is longer (İ) before the stream part never shifts where the stream part ends.
+  const wide = (o) => canonicalDocument(servedDoc('/', { head: `<title>${'İ'.repeat(40)}</title>`, ...o }), `${LOVABLE_URL}/`);
+  assert.equal(wide({ body: '<script>x={u:1760050000001}</script>' }).streamU, 2);
+  assert.equal(wide().sha256, wide().sha256, 'and two requests still reduce to one document');
+  assert.match(canonicalDocument(servedDoc('/').replace(/(data-tsr-stream-part="">[^<]*)<\/script>[^]*$/, '$1'), `${LOVABLE_URL}/`).reason, /stream-part script is not closed/);
+  // NUL characters are document bytes like any other (the real host's documents carry them): kept, never a slot.
+  assert.ok(servedDoc('/').includes('\u0000'), 'the fake documents carry NULs, as the real ones do');
+  assert.equal(a.nul, 2, 'every NUL is counted');
+  assert.deepEqual(a.nulClasses, { stream: 1, script: 0, markup: 1 }, 'and classed by where it stands');
+  assert.deepEqual(canonOf('/', { body: '<script>x="\u0000\u0000"</script>' }).nulClasses, { stream: 1, script: 2, markup: 1 }, 'another inline script is its own class');
+  const fewer = canonicalDocument(servedDoc('/').replace('\u0000</main>', '</main>'), `${LOVABLE_URL}/`);
+  assert.equal(fewer.nul, 1);
+  assert.notEqual(fewer.sha256, a.sha256, 'removing one NUL changes the digest');
+  // A literal NUL + wsf:token + NUL (the in-band spelling of a slot) is text like any other: never a slot.
+  const tokenSpelled = canonOf('/', { body: '<p>\u0000wsf:token\u0000</p>' });
+  assert.match(tokenSpelled.sha256, /^[0-9a-f]{64}$/);
+  assert.notEqual(tokenSpelled.sha256, canonOf('/', { body: '<p></p>' }).sha256);
+  assert.equal(tokenSpelled.nul, 4);
+  assert.equal(canonOf('/', { body: '\u0000\u0000' }).sha256, canonOf('/', { body: '\u0000\u0000' }).sha256);
+  assert.notEqual(canonOf('/', { body: '\u0000\u0000' }).sha256, canonOf('/', { body: '\u0000 \u0000' }).sha256);
+  // Literal text never stands for a slot: a document that spells a slot (in-band, as a NUL-delimited marker) where the
+  // other carries the id itself does not reduce to the same document.
+  const withId = servedDoc('/display/ga1-wsf-bind-probe');
+  const spelled = withId.replace('data-p0="ga1-wsf-bind-probe"', 'data-p0="\u0000wsf:param:goalId\u0000"');
+  assert.notEqual(spelled, withId);
+  assert.notEqual(canonicalDocument(spelled, `${LOVABLE_URL}/display/ga1-wsf-bind-probe`).sha256, canonicalDocument(withId, `${LOVABLE_URL}/display/ga1-wsf-bind-probe`).sha256);
+  // The token's value never reaches a result.
+  const token = 'tokSECRETvalue.abcDEF123';
+  assert.doesNotMatch(JSON.stringify(canonicalDocument(servedDoc('/', { token }), `${LOVABLE_URL}/`)), /tokSECRET/);
+  assert.doesNotMatch(JSON.stringify(canonicalDocument(servedDoc('/', { token: 'tok>SECRET12345' }), `${LOVABLE_URL}/`)), /tokSECRET|SECRET12345/, 'not in a refusal either');
+});
+
+test('negative mutations: each one is refused, by name or by digest, at bind and in the browser guard', async () => {
+  const G = '/display/ga1-wsf-bind-probe';
+  const K = '/kiosk/ca1-wsf-bind-probe/ga1-wsf-bind-probe';
+  const mutants = [
+    ['a changed script src', '/', servedDoc('/', { shell: 'shell-ZZZ.js' }), /differs from the reviewed \/ document/],
+    ['an added inline script', '/', servedDoc('/', { body: '<script>steal()</script>' }), /differs from the reviewed \/ document/],
+    ['an inline-script change outside u:', G, servedDoc(G, { status: 'error' }), /differs from the reviewed \/display\/\$goalId document/],
+    ['a changed attribute other than the token', '/', servedDoc('/', { metaAttr: ' data-x="1"' }), /differs from the reviewed \/ document/],
+    ['a token value carrying a quote', '/', servedDoc('/', { token: 'abcdefgh"x' }), /data-context-token value is not one quoted token/],
+    ['a token value carrying >', '/', servedDoc('/', { token: 'abcd>efgh1234' }), /data-context-token value is not one quoted token .*angle bracket/],
+    ['a token followed by a second attribute', '/', servedDoc('/', { tokenTail: ' onload="steal()"' }), /differs from the reviewed \/ document/],
+    ['a non-digit u:', '/', servedDoc('/', { u2: '17600500000a0' }), /1 of the 2 u: values in the stream part are not 13 digits/],
+    ['a 14-digit u:', '/', servedDoc('/', { u1: '17600500000001' }), /not 13 digits/],
+    ['an extra stream-part script', '/', servedDoc('/', { body: '<script data-tsr-stream-part="">$_TSR.x=1</script>' }), /2 data-tsr-stream-part scripts, not exactly 1/],
+    ['an extra u: in the stream part', '/', servedDoc('/', { streamMore: ',{i:"/x",u:1760050000000,s:"success"}' }), /carries 3 stream-part u: value\(s\), not the reviewed 2/],
+    ['a param that is not the URL\'s', G, servedDoc(G, { ids: ['Zq9wsfBindProbeGoal2'] }), /differs from the reviewed \/display\/\$goalId document/],
+    ['a kiosk document for another community', K, servedDoc(K, { ids: ['Xk4wsfBindProbeComm2', 'ga1-wsf-bind-probe'] }), /differs from the reviewed \/kiosk/],
+    ['an unknown template', '/c/ca1-wsf-bind-probe/g/ga1-wsf-bind-probe', servedDoc('/'), /is not a reviewed route template/],
+    ['a second context token', '/', servedDoc('/', { head: '<script src="/__l5e/events.Q1w2E3r4.js" data-context-token="abcdefgh1234"></script>' }), /2 data-context-token attributes, not exactly 1/],
+    ['no context token', '/', servedDoc('/').replace(/ data-context-token="[^"]*"/, ''), /0 data-context-token attributes/],
+    ['the only context token inside the stream part', '/', servedDoc('/').replace(/ data-context-token="[^"]*"/, '').replace('$_TSR.router', 'x=\'<a data-context-token="abcdefgh1234">\';$_TSR.router'), /data-context-token attribute is inside the stream part/],
+    ['an added NUL character', '/', servedDoc('/', { body: '\u0000' }), /carries 3 NUL character\(s\), not the reviewed 2/],
+    ['a removed NUL character', '/', servedDoc('/').replace('\u0000</main>', '</main>'), /carries 1 NUL character\(s\), not the reviewed 2/],
+    ['a moved NUL character', '/', servedDoc('/').replace('\u0000</main>', '</main>').replace('<title>', '<title>\u0000'), /differs from the reviewed \/ document/],
+    ['a second ~flock.js tag', '/', servedDoc('/', { head: '<script src="/~flock.js" defer></script>' }), /differs from the reviewed \/ document/],
+    // R1: a leading BOM is a byte difference (kept by the decoder, so the canonical form differs)
+    ['a leading BOM', '/', `\uFEFF${servedDoc('/')}`, /differs from the reviewed \/ document/],
+    // R2: the tag that carries the token: its src and the attributes before the token are bound
+    ['the events tag src made a data: URL', '/', servedDoc('/', { eventsPre: '<script src="data:text/javascript,steal()" ' }), /differs from the reviewed \/ document/],
+    ['the events tag src made another asset', '/', servedDoc('/', { eventsPre: '<script src="/assets/shell-AAA.js" ' }), /differs from the reviewed \/ document/],
+    ['an attribute added before the token', '/', servedDoc('/', { eventsPre: '<script src="/__l5e/events.Q1w2E3r4.js" async ' }), /differs from the reviewed \/ document/],
+    ['an attribute changed before the token', '/', servedDoc('/', { eventsPre: '<script src="/__l5e/events.Q1w2E3r5.js" ' }), /differs from the reviewed \/ document/],
+    // R3: a slot's position and presence are bound, not only the literal text around it
+    ['the URL\'s param removed', G, servedDoc(G).replace('data-p0="ga1-wsf-bind-probe"', 'data-p0=""'), /differs from the reviewed \/display\/\$goalId document/],
+    ['the URL\'s param inserted in the stream part', G, servedDoc(G).replace('$_TSR.router.matches=', 'ga1-wsf-bind-probe$_TSR.router.matches='), /differs from the reviewed \/display\/\$goalId document/],
+    ['the URL\'s param moved', G, servedDoc(G).replace('data-p0="ga1-wsf-bind-probe"', 'data-p0=""').replace('<title>', '<title>ga1-wsf-bind-probe'), /differs from the reviewed \/display\/\$goalId document/],
+    // N1: the two params of a kiosk document swapped between their slots
+    ['the kiosk params swapped', K, servedDoc(K, { ids: ['ga1-wsf-bind-probe', 'ca1-wsf-bind-probe'] }), /differs from the reviewed \/kiosk/],
+    // R4: the bytes right beside each cut are kept, and each cut is exactly its value
+    ['the byte after a u: value changed', '/', servedDoc('/').replace(/(u:\d{13}),/, '$1;'), /differs from the reviewed \/ document/],
+    ['the byte after the token changed', '/', servedDoc('/').replace(/(data-context-token="[^"]*") defer/, '$1\ndefer'), /differs from the reviewed \/ document/],
+    ['a 12-digit u:', '/', servedDoc('/', { u1: '176005000000' }), /not 13 digits/],
+    ['a 7-character token', '/', servedDoc('/', { token: 'abcdefg' }), /data-context-token value is not one quoted token/],
+    // R7: the browser must decode the verified text: a document declared in another charset, or not as HTML, is refused
+    ['a reviewed document served as windows-1252', '/', servedDoc('/'), /served with charset windows-1252, not UTF-8/, 'text/html; charset=windows-1252'],
+    ['a reviewed document served as utf-16le', '/', servedDoc('/'), /served with charset utf-16le, not UTF-8/, 'text/html; charset=utf-16le'],
+    ['a reviewed document served as text/plain', '/', servedDoc('/'), /served as another content type, not text\/html/, 'text/plain; charset=utf-8'],
+    ['a reviewed document served with no content type', '/', servedDoc('/'), /served as no content type, not text\/html/, ''],
+    ['a param the guard cannot bind', '/display/short', servedDoc('/display/short'), /a path param the guard cannot bind/],
+    ['overlapping params', '/kiosk/abcdefghijkl/abcdefghijklmn', servedDoc('/kiosk/abcdefghijkl/abcdefghijklmn'), /two path params overlap/],
+  ];
+  for (const [name, p, body, why, type = 'text/html; charset=utf-8'] of mutants) {
+    const g = codeGuard(EXACT);
+    const out = {};
+    await g.handle({
+      request: () => ({ url: () => `${LOVABLE_URL}${p}`, resourceType: () => 'document', isNavigationRequest: () => true }),
+      async fetch() { return { status: () => 200, headers: () => ({ 'content-type': type }), body: async () => Buffer.from(body) }; },
+      async fulfill() { out.fulfilled = true; },
+      async continue() { out.continued = true; },
+      async abort(code) { out.aborted = code; },
+    });
+    assert.equal(out.fulfilled, undefined, `${name}: never fulfilled`);
+    assert.equal(out.aborted, 'blockedbyclient', name);
+    assert.match(g.summary().violations[0] ?? '', why, name);
+    assert.throws(() => g.check(), /served code outside the reviewed build/, name);
+    if (matchTemplate(p) && PARAM_OK(p) && type === 'text/html; charset=utf-8') {
+      const c = canonicalDocument(body, `${LOVABLE_URL}${p}`);
+      const t = matchTemplate(p).template;
+      assert.ok(!c.sha256 || c.sha256 !== DOCS[t].sha256 || c.streamU !== DOCS[t].streamU, `${name}: the bind's canonical form differs too`);
+    }
+  }
+  // Not valid UTF-8: refused before it is read as text.
+  const g = codeGuard(EXACT);
+  await g.handle({
+    request: () => ({ url: () => `${LOVABLE_URL}/`, resourceType: () => 'document', isNavigationRequest: () => true }),
+    async fetch() { return { status: () => 200, headers: () => ({ 'content-type': 'text/html; charset=utf-8' }), body: async () => Buffer.concat([Buffer.from(servedDoc('/')), Buffer.from([0xff, 0xfe])]) }; },
+    async fulfill() { throw new Error('fulfilled'); }, async abort() {}, async continue() {},
+  });
+  assert.match(g.summary().violations[0], /is not valid UTF-8/);
+});
+const VECTOR_SHA256 = '1d65a5a400dac8908712c7b82029cc4164b825b70c8609da7d5696c9c97b9e70';
+const PARAM_OK = (p) => Object.values(matchTemplate(p).params).every((v) => /^[A-Za-z0-9_-]{12,128}$/.test(v));
+
+test('the served manifest: every bind probe reduced per template, same-origin assets walked and hashed, references checked', async () => {
+  const s = site(SITE);
+  const m = await servedManifest(s.fetchImpl);
+  assert.deepEqual(Object.fromEntries(Object.entries(m.documents).map(([t, d]) => [t, pin(d)])), DOCS, 'one canonical document per template, from all of its loads');
+  assert.ok(ROUTE_TEMPLATES.every((t) => JSON.stringify(m.documents[t].nulClasses) === JSON.stringify({ stream: 1, script: 0, markup: 1 })), 'with the class of each NUL, for the bind lines');
+  assert.deepEqual(m.assets, OBSERVED);
+  assert.deepEqual(m.refusals, [], 'the documents load nothing the guard would refuse (the host events script is blocked, not refused)');
+  assert.deepEqual(m.probes.map((x) => x.path), [...BIND_PROBES]);
+  assert.ok(m.probes.every((x) => x.sha256), 'every probe reduced');
+  assert.deepEqual(s.calls.slice(0, BIND_PROBES.length), BIND_PROBES.map((p) => `${LOVABLE_URL}${p}`), 'the probes first, exactly');
+  assert.ok(s.calls.every((u) => u.startsWith(`${LOVABLE_URL}/`)), 'never another origin');
+  await assert.rejects(servedManifest(site({ ...SITE, assets: { ...SITE.assets, '/assets/connected-kiosk-BBB.js': undefined } }).fetchImpl), /HTTP 404|answered/);
+  await assert.rejects(servedManifest(site({ doc: (p) => servedDoc(p).replace(/<link[^>]*>|<script type="module"[^>]*><\/script>/g, ''), assets: {} }).fetchImpl), /name no asset/);
+  await assert.rejects(servedManifest(site({ ...SITE, doc: (p) => (p === '/' ? servedDoc(p) : undefined) }).fetchImpl), /\/display\/ga1-wsf-bind-probe answered HTTP 404/);
+  // An asset only a deep link loads (its route chunk, preloaded by the server render) is walked and pinned too.
+  const routeChunk = site({ doc: (p) => servedDoc(p, p.startsWith('/display/') ? { head: '<link rel="modulepreload" href="/assets/display-DDD.js">' } : {}), assets: { ...SITE.assets, '/assets/display-DDD.js': 'export const d=1;' } });
+  const rc = await servedManifest(routeChunk.fetchImpl);
+  assert.equal(rc.assets['display-DDD.js'], sha('export const d=1;'));
+  assert.deepEqual(rc.refusals, [], 'so the guard would verify it, not refuse it');
+  // Route data beyond the URL's own params: a display document that carries something derived from its id.
+  const derived = await servedManifest(site({ ...SITE, doc: (p) => (p.startsWith('/display/') ? servedDoc(p, { body: `<p>${p.length}</p>` }) : servedDoc(p)) }).fetchImpl);
+  assert.equal(derived.documents['/display/$goalId'].sha256, null);
+  assert.match(derived.documents['/display/$goalId'].reason, /2 loads reduce to 2 different canonical documents/);
+  assert.equal(bindBuild(derived, EXACT).status, 'FAIL');
+  assert.match(bindLines(derived, bindBuild(derived)).join('\n'), /LOVABLE_OBSERVED_DOCUMENT \/display\/\$goalId UNBOUND/);
+  // R1 at bind: a leading BOM is kept, so documents that carry one reduce to another digest; one BOM load unbinds.
+  const bom = await servedManifest(site({ ...SITE, doc: (p) => `\uFEFF${servedDoc(p)}` }).fetchImpl);
+  assert.ok(ROUTE_TEMPLATES.every((t) => bom.documents[t].sha256 && bom.documents[t].sha256 !== DOCS[t].sha256), 'bound, to other digests');
+  assert.equal(bindBuild(bom, EXACT).status, 'FAIL');
+  let firstRoot = true;
+  const oneBom = await servedManifest(site({ ...SITE, doc: (p) => (p === '/' && firstRoot ? ((firstRoot = false), `\uFEFF${servedDoc(p)}`) : servedDoc(p)) }).fetchImpl);
+  assert.equal(oneBom.documents['/'].sha256, null);
+  // R7 at bind: a document declared in another charset, or not as HTML, is refused by name, and the template unbinds.
+  for (const [type, why] of [['text/html; charset=windows-1252', /served with charset windows-1252, not UTF-8/], ['text/html; charset=utf-16le', /served with charset utf-16le, not UTF-8/], ['application/octet-stream', /not text\/html/]]) {
+    const m2 = await servedManifest(site({ ...SITE, docType: (p) => (p === '/' ? type : undefined) }).fetchImpl);
+    assert.equal(m2.documents['/'].sha256, null, type);
+    assert.match(m2.documents['/'].reason, why, type);
+    assert.equal(bindBuild(m2, EXACT).status, 'FAIL', type);
+  }
+  // R2 at bind: an events tag that loads data: code reduces to another digest, so the bind fails.
+  const dataTag = await servedManifest(site({ ...SITE, doc: (p) => servedDoc(p, { eventsPre: '<script src="data:text/javascript,steal()" ' }) }).fetchImpl);
+  assert.notEqual(dataTag.documents['/'].sha256, DOCS['/'].sha256);
+  assert.equal(bindBuild(dataTag, EXACT).status, 'FAIL');
+  // A per-request value outside the two normalized ones (a nonce in an inline script) unbinds `/` the same way.
+  const nonce = await servedManifest(site({ ...SITE, doc: (p) => servedDoc(p, { body: `<script>n="${crypto.randomBytes(4).toString('hex')}"</script>` }) }).fetchImpl);
+  assert.ok(ROUTE_TEMPLATES.every((t) => nonce.documents[t].sha256 === null), 'every template unbound');
+  // A document reference the guard would refuse fails the bind even when every digest matches.
+  const foreign = site({ ...SITE, doc: (p) => servedDoc(p, { head: '<script src="https://cdn.example.test/tag.js"></script><link rel="stylesheet" href="/other/x.css">' }) });
+  const f = await servedManifest(foreign.fetchImpl);
+  assert.deepEqual(f.refusals, ['script https://cdn.example.test/tag.js is outside the reviewed build and the permitted API origins', 'stylesheet https://we-stay-fit-foundation-trial.lovable.app/other/x.css is not a reviewed asset']);
+  assert.equal(bindBuild(f, { documents: f.documents, assets: f.assets }).status, 'FAIL');
+  assert.match(bindBuild(f, { documents: f.documents, assets: f.assets }).reason, /2 reference\(s\) the code guard would refuse/);
+});
+
+test('document type (L0 R7): text/html with no charset or UTF-8 only; anything else names why', () => {
+  for (const ok of ['text/html', 'text/html; charset=utf-8', 'text/html;charset=UTF-8', 'text/html; charset="utf-8"', 'Text/HTML; charset=utf8']) assert.equal(documentTypeProblem(ok), null, ok);
+  for (const [bad, why] of [
+    ['text/html; charset=windows-1252', /charset windows-1252, not UTF-8/], ['text/html; charset=utf-16le', /charset utf-16le, not UTF-8/], ['text/html; charset=iso-8859-1', /iso-8859-1/],
+    ['text/html; charset=utf-8; charset=windows-1252', /charset utf-8, windows-1252, not UTF-8/], ['text/html; charset=', /charset , not UTF-8/],
+    ['text/plain', /another content type/], ['application/xhtml+xml', /another content type/], ['text/htmlx', /another content type/], ['', /no content type/], [null, /no content type/], [undefined, /no content type/],
+  ]) assert.match(documentTypeProblem(bad), why, String(bad));
+});
+
+test('binding: empty or partial reviewed build BLOCKED; exact PASS; a changed document, timestamp count or asset, or a refused reference FAIL', () => {
+  // The shipped pin: a canonical document for every template and every asset, frozen; it binds to itself exactly.
+  assert.ok(Object.isFrozen(REVIEWED_BUILD) && Object.isFrozen(REVIEWED_BUILD.documents) && Object.isFrozen(REVIEWED_BUILD.assets));
+  assert.deepEqual(Object.keys(REVIEWED_BUILD.documents), ROUTE_TEMPLATES);
+  for (const t of ROUTE_TEMPLATES) {
+    const d = REVIEWED_BUILD.documents[t];
+    assert.ok(Object.isFrozen(d) && /^[0-9a-f]{64}$/.test(d.sha256) && d.streamU === 2 && Number.isInteger(d.nul) && d.nul >= 0, `${t} is pinned`);
+    assert.deepEqual(Object.keys(d), ['sha256', 'streamU', 'nul']);
+  }
+  assert.ok(Object.keys(REVIEWED_BUILD.assets).length > 0 && Object.entries(REVIEWED_BUILD.assets).every(([n, d]) => /^[A-Za-z0-9_.-]+\.(js|css)$/.test(n) && /^[0-9a-f]{64}$/.test(d)));
+  assert.equal(bindBuild({ documents: REVIEWED_BUILD.documents, assets: REVIEWED_BUILD.assets, refusals: [] }).status, 'PASS', 'the shipped pin is a whole reviewed build');
+  assert.equal(bindBuild({ documents: DOCS, assets: OBSERVED, refusals: [] }).status, 'FAIL', 'and another build fails it');
+  const seen = { documents: { ...DOCS }, assets: { ...OBSERVED }, refusals: [] };
+  assert.equal(bindBuild(seen, { documents: {}, assets: {} }).status, 'BLOCKED', 'an empty pin stops every run in the gate');
+  assert.equal(bindBuild(seen, { documents: DOCS, assets: {} }).status, 'BLOCKED', 'documents without assets are not a reviewed build');
+  assert.equal(bindBuild(seen, { documents: {}, assets: OBSERVED }).status, 'BLOCKED', 'assets without documents are not a reviewed build');
+  for (const t of ROUTE_TEMPLATES) {
+    const { [t]: _, ...partial } = DOCS;
+    assert.equal(bindBuild(seen, { documents: partial, assets: OBSERVED }).status, 'BLOCKED', `no ${t} document`);
+    assert.equal(bindBuild(seen, { documents: { ...DOCS, [t]: { sha256: DOCS[t].sha256 } }, assets: OBSERVED }).status, 'BLOCKED', `${t} without its u: count`);
+    assert.equal(bindBuild(seen, { documents: { ...DOCS, [t]: { sha256: DOCS[t].sha256, streamU: 0, nul: 2 } }, assets: OBSERVED }).status, 'BLOCKED', `${t} with no u:`);
+    assert.equal(bindBuild(seen, { documents: { ...DOCS, [t]: { sha256: DOCS[t].sha256, streamU: 2 } }, assets: OBSERVED }).status, 'BLOCKED', `${t} without its NUL count`);
+  }
+  assert.equal(bindBuild(seen, EXACT).status, 'PASS');
+  assert.match(bindBuild(seen, EXACT).reason, /3 reviewed route documents and 3 reviewed assets served exactly/);
+  for (const t of ROUTE_TEMPLATES) {
+    assert.equal(bindBuild({ ...seen, documents: { ...DOCS, [t]: { ...DOCS[t], sha256: sha('other') } } }, EXACT).status, 'FAIL', `${t} changed`);
+    assert.equal(bindBuild({ ...seen, documents: { ...DOCS, [t]: { ...DOCS[t], streamU: 3 } } }, EXACT).status, 'FAIL', `${t} with another u: count`);
+    assert.equal(bindBuild({ ...seen, documents: { ...DOCS, [t]: { ...DOCS[t], nul: 3 } } }, EXACT).status, 'FAIL', `${t} with another NUL count`);
+    assert.equal(bindBuild({ ...seen, documents: { ...DOCS, [t]: { sha256: null, streamU: null, reason: 'x' } } }, EXACT).status, 'FAIL', `${t} unbound`);
+  }
+  assert.equal(bindBuild({ ...seen, assets: { ...OBSERVED, 'shell-AAA.js': sha('changed') } }, EXACT).status, 'FAIL');
+  assert.equal(bindBuild({ ...seen, assets: { ...OBSERVED, 'extra-ZZZ.js': sha('x') } }, EXACT).status, 'FAIL');
   const { 'index-CCC.css': _, ...missing } = OBSERVED;
-  assert.equal(bindBuild({ indexSha256: INDEX, assets: missing }, reviewed).status, 'FAIL');
-  const lines = bindLines(seen, bindBuild(seen));
-  assert.match(lines[0], /^LOVABLE_BUILD=BLOCKED/);
-  assert.equal(lines[1], `LOVABLE_OBSERVED_INDEX ${INDEX}`);
-  assert.deepEqual(lines.slice(2), Object.entries(OBSERVED).map(([n, d]) => `LOVABLE_OBSERVED_ASSET ${n} ${d}`), 'names and digests only, never content');
+  assert.equal(bindBuild({ ...seen, assets: missing }, EXACT).status, 'FAIL');
+  assert.equal(bindBuild({ ...seen, refusals: ['script x'] }, EXACT).status, 'FAIL');
+  assert.equal(bindBuild({ documents: seen.documents, assets: seen.assets }, EXACT).status, 'FAIL', 'an observation with no reference check never passes');
+  assert.equal(bindBuild(undefined, EXACT).status, 'FAIL');
+});
+
+test('bind lines: verdict, documents, probes, refused references, assets and the manifest to pin; never a document or a token', async () => {
+  const token = 'tokSECRETvalue.abcDEF123';
+  const m = await servedManifest(site({ ...SITE, doc: (p) => servedDoc(p, { token }) }).fetchImpl);
+  const lines = bindLines(m, bindBuild(m));
+  assert.match(lines[0], /^LOVABLE_BUILD=FAIL \(the served \/, \/display\/\$goalId, \/kiosk\/\$communityId\/\$goalId documents differ/, 'the fake host is not the pinned build');
+  assert.deepEqual(lines.slice(1, 4), ROUTE_TEMPLATES.map((t) => `LOVABLE_OBSERVED_DOCUMENT ${t} ${DOCS[t].sha256} u=2 nul=2 (stream part 1, other inline script 0, markup 1)`), 'counts and classes of NULs, never bytes');
+  assert.equal(lines.filter((l) => l.startsWith('LOVABLE_DOCUMENT_PROBE ')).length, BIND_PROBES.length);
+  assert.ok(lines.includes(`LOVABLE_DOCUMENT_PROBE /display/Zq9wsfBindProbeGoal2 /display/$goalId ${DOCS['/display/$goalId'].sha256} u=2 nul=2 (stream part 1, other inline script 0, markup 1) params={"goalId":2}`));
+  assert.deepEqual(lines.filter((l) => l.startsWith('LOVABLE_OBSERVED_ASSET ')), Object.entries(OBSERVED).map(([n, d]) => `LOVABLE_OBSERVED_ASSET ${n} ${d}`));
+  const last = lines.at(-1);
+  assert.ok(last.startsWith('LOVABLE_OBSERVED_BUILD '));
+  assert.deepEqual(JSON.parse(last.slice('LOVABLE_OBSERVED_BUILD '.length)), { documents: DOCS, assets: OBSERVED }, 'the line to pin is exactly the observed build');
+  assert.doesNotMatch(lines.join('\n'), /tokSECRET|<html|<script|\$_TSR/, 'names, counts and digests only');
+  assert.ok(lines.includes(`LOVABLE_DOCUMENT_PROBE / (with an invite query) / ${DOCS['/'].sha256} u=2 nul=2 (stream part 1, other inline script 0, markup 1) params={}`));
+  assert.doesNotMatch(lines.join('\n'), /\u0000/, 'no NUL byte is ever printed');
+  assert.deepEqual(lines.filter((l) => l.startsWith('LOVABLE_DOCUMENT_BLOCKED_HOST_SCRIPT ')), [`LOVABLE_DOCUMENT_BLOCKED_HOST_SCRIPT script ${EVENTS_SCRIPT}`, `LOVABLE_DOCUMENT_BLOCKED_HOST_SCRIPT script ${FLOCK_SCRIPT}`], 'what the bind would block is printed, once each');
+  assert.doesNotMatch(lines.join('\n'), /join=|\?/, 'a probe line names the page, never its query');
+  const unbound = bindLines({ ...m, documents: { ...m.documents, '/': { sha256: null, streamU: null, reason: 'r' } } }, { status: 'FAIL', reason: 'x' });
+  assert.ok(!unbound.some((l) => l.startsWith('LOVABLE_OBSERVED_BUILD ')), 'no manifest to pin while a template is unbound');
+  assert.deepEqual(bindLines(null, { status: 'FAIL', reason: 'unreadable' }), ['LOVABLE_BUILD=FAIL (unreadable)']);
 });
 
 // ---- receipt, results and verdict ------------------------------------------------------------------
@@ -166,9 +451,10 @@ test('cleanup merge: run-tagged product documents are added once; anything untag
  * its OWN response, delivered to the page's listeners in that order. `bug` switches on one defect at a time.
  */
 /** The served build the fake host serves, and its reviewed manifest (what a pinned REVIEWED_BUILD would hold). */
-const FAKE_INDEX = '<!doctype html><script type="module" src="/assets/shell-AAA.js"></script><link rel="stylesheet" href="/assets/index-CCC.css">';
 const FAKE_ASSETS = { '/assets/shell-AAA.js': 'export const shell=1;', '/assets/kiosk-BBB.js': 'export const kiosk=1;', '/assets/index-CCC.css': 'body{}' };
-const FAKE_REVIEWED = Object.freeze({ indexSha256: sha(FAKE_INDEX), assets: Object.freeze(Object.fromEntries(Object.entries(FAKE_ASSETS).map(([p, b]) => [p.slice(8), sha(b)]))) });
+const FAKE_REVIEWED = Object.freeze({ documents: DOCS, assets: Object.freeze(Object.fromEntries(Object.entries(FAKE_ASSETS).map(([p, b]) => [p.slice(8), sha(b)]))) });
+const EVENTS_SCRIPT = `${LOVABLE_URL}/__l5e/events.Q1w2E3r4.js`;
+const FLOCK_SCRIPT = `${LOVABLE_URL}/~flock.js`;
 
 /** The kit's verified member of the event community (the phone control), and the member's other goal, read alongside. */
 const CONTROL_UID = 'uid-lk-a0';
@@ -190,17 +476,22 @@ function lovable(bug = {}) {
     }
     server.docs += 1;
     if (bug.redirectDoc) return { status: 302, body: '' };
-    if (bug.deepLinkDiffers && u.pathname.startsWith('/kiosk/')) return { status: 200, body: `${FAKE_INDEX}<script>inline()</script>` };
-    if (bug.driftAfter && server.docs > bug.driftAfter) return { status: 200, body: `${FAKE_INDEX}<!-- republished -->` };
-    return { status: 200, body: FAKE_INDEX };
+    if (bug.deepLinkDiffers && u.pathname.startsWith('/kiosk/')) return { status: 200, body: servedDoc(u.pathname, { body: '<script>inline()</script>' }) };
+    if (bug.driftAfter && server.docs > bug.driftAfter) return { status: 200, body: servedDoc(u.pathname, { body: '<!-- republished -->' }) };
+    return { status: 200, body: servedDoc(u.pathname) };
   };
   /** One browser request through the context's route handler, as Playwright delivers it; resolves to what the handler did. */
   async function load(context, url, type, navigation) {
     let outcome = 'unhandled';
     const route = {
       request: () => ({ url: () => url, resourceType: () => type, isNavigationRequest: () => navigation }),
-      async fetch(o) { assert.equal(o?.maxRedirects, 0, 'a verified response never follows a redirect'); const r = serve(url); return { status: () => r.status, body: async () => Buffer.from(r.body) }; },
-      async fulfill({ body }) { outcome = 'fulfilled'; server.loads.push({ url, type, body: String(body) }); },
+      async fetch(o) {
+        assert.equal(o?.maxRedirects, 0, 'a verified response never follows a redirect');
+        const r = serve(url);
+        const ct = new URL(url).pathname.startsWith('/assets/') ? 'text/javascript' : 'text/html; charset=utf-8';
+        return { status: () => r.status, headers: () => ({ 'content-type': ct, 'x-served': 'lovable' }), body: async () => Buffer.from(r.body) };
+      },
+      async fulfill({ body, headers }) { outcome = 'fulfilled'; server.loads.push({ url, type, body: String(body), contentType: headers?.['content-type'] ?? null, kept: headers?.['x-served'] ?? null }); },
       async continue() { outcome = 'continued'; },
       async abort() { outcome = 'aborted'; },
     };
@@ -212,7 +503,7 @@ function lovable(bug = {}) {
   /** A page load: the document, then what it loads (the kiosk chunk on the kiosk route), plus any injected defect. */
   async function pageLoad(context, url) {
     if ((await load(context, url, 'document', true)) !== 'fulfilled') throw new Error(`page.goto: net::ERR_BLOCKED_BY_CLIENT at ${new URL(url).origin}${new URL(url).pathname}`);
-    const subs = [[`${LOVABLE_URL}/assets/shell-AAA.js`, 'script'], [`${LOVABLE_URL}/assets/index-CCC.css`, 'stylesheet'], [`${LOVABLE_URL}/favicon.ico`, 'image']];
+    const subs = [[EVENTS_SCRIPT, 'script'], [FLOCK_SCRIPT, 'script'], [`${LOVABLE_URL}/assets/shell-AAA.js`, 'script'], [`${LOVABLE_URL}/assets/index-CCC.css`, 'stylesheet'], [`${LOVABLE_URL}/favicon.ico`, 'image']];
     if (new URL(url).pathname.startsWith('/kiosk/')) subs.push([`${LOVABLE_URL}/assets/kiosk-BBB.js`, 'script']);
     if (bug.foreignScript) subs.push(['https://cdn.example.test/x.js', 'script']);
     if (bug.foreignOnJoin && new URL(url).searchParams.has('join')) subs.push(['https://cdn.example.test/join.js', 'script']);
@@ -411,8 +702,15 @@ test('journey with the kit\'s real shape (#589 W4 F1): qr-join BLOCKED by name f
   assert.deepEqual(served.violations, [], 'the browser loaded only the reviewed build');
   assert.equal(hostBuildRow({ status: 'PASS', reason: 'bind' }, served).status, 'PASS');
   assert.equal(served.verified, L.server.loads.length);
-  const reviewedDigests = new Set([FAKE_REVIEWED.indexSha256, ...Object.values(FAKE_REVIEWED.assets)]);
-  assert.ok(L.server.loads.length >= 10 && L.server.loads.every((x) => reviewedDigests.has(sha(x.body))), 'every executed document and asset is fulfilled with exactly the reviewed bytes');
+  const reviewedAssets = new Set(Object.values(FAKE_REVIEWED.assets));
+  const reviewedDoc = (x) => canonicalDocument(x.body, x.url).sha256 === FAKE_REVIEWED.documents[matchTemplate(new URL(x.url).pathname).template].sha256;
+  assert.ok(L.server.loads.length >= 10 && L.server.loads.every((x) => (x.type === 'document' ? reviewedDoc(x) : reviewedAssets.has(sha(x.body)))), 'every executed document reduces to its reviewed template, and every asset is fulfilled with exactly the reviewed bytes');
+  assert.ok(L.server.loads.some((x) => x.type === 'document' && new URL(x.url).pathname.startsWith('/kiosk/')) && L.server.loads.some((x) => x.type === 'document' && new URL(x.url).pathname === '/'), 'both templates the kiosk proof loads were verified');
+  assert.ok(served.blocked.length > 0 && served.blocked.every((w) => w === `script ${EVENTS_SCRIPT}` || w === `script ${FLOCK_SCRIPT}`), 'the host\'s own scripts are blocked on every page, never run');
+  assert.equal(served.blocked.filter((w) => w === `script ${FLOCK_SCRIPT}`).length, served.blocked.filter((w) => w === `script ${EVENTS_SCRIPT}`).length);
+  assert.ok(!L.server.loads.some((x) => x.url === EVENTS_SCRIPT || x.url === FLOCK_SCRIPT), 'and never fulfilled');
+  assert.ok(L.server.loads.filter((x) => x.type === 'document').every((x) => x.contentType === 'text/html; charset=utf-8' && x.kept === 'lovable'), 'every document is fulfilled as UTF-8 HTML, its other headers kept');
+  assert.ok(L.server.loads.filter((x) => x.type !== 'document').every((x) => x.contentType === null), 'an asset keeps its own response headers');
   assert.ok(L.server.contextOpts.length === L.opened() && L.server.contextOpts.every((o) => o.serviceWorkers === 'block'), 'no service worker can answer around the guard');
   assert.equal(statusOf(rows, 'qr-join'), 'BLOCKED');
   assert.match(rows['qr-join'].seen, /only private communities \(joinPolicy private\).*no newcomer QR/);
@@ -493,16 +791,19 @@ test('callableLog (#589 W4 F3): same-name callables for different goals, answere
 
 test('cli (#589 W4 F2): --bind exits non-zero before any credential unless the served build is exactly the reviewed one; --run refuses a non-PASS bind before the kit or a browser', async () => {
   const env = { WSF_LOVABLE_URL: LOVABLE_URL, WSF_PROJECT: 'westayfit-staging' };
-  const exact = { indexSha256: sha(SITE['/']), assets: { ...OBSERVED } };
+  const exact = EXACT;
   const run = async (mode, e, deps) => { const lines = []; const code = await cli(mode, e, { say: (l) => lines.push(l), ...deps }); return { code, lines }; };
   let r = await run('--bind', env, { fetchImpl: site(SITE).fetchImpl, reviewed: exact });
   assert.equal(r.code, 0, 'an exact match exits zero');
   assert.match(r.lines[0], /^LOVABLE_BUILD=PASS/);
   for (const [name, files, reviewed, e, fetches] of [
-    ['the shipped empty REVIEWED_BUILD', SITE, undefined, env, true],
-    ['a drifted entry page', { ...SITE, '/': `${SITE['/']}<!-- republished -->` }, exact, env, true],
-    ['a drifted asset', { ...SITE, '/assets/shell-AAA.js': `${SITE['/assets/shell-AAA.js']};` }, exact, env, true],
-    ['an unreadable asset (HTTP 404)', { ...SITE, '/assets/connected-kiosk-BBB.js': undefined }, exact, env, true],
+    ['the shipped REVIEWED_BUILD (the real pin) against the fake host', SITE, undefined, env, true],
+    ['a drifted entry page', { ...SITE, doc: (p) => servedDoc(p, p === '/' ? { body: '<!-- republished -->' } : {}) }, exact, env, true],
+    ['a drifted kiosk deep link', { ...SITE, doc: (p) => servedDoc(p, p.startsWith('/kiosk/') ? { status: 'pending' } : {}) }, exact, env, true],
+    ['a deep link carrying route data beyond its params', { ...SITE, doc: (p) => servedDoc(p, p.startsWith('/display/') ? { body: `<p>${p.length}</p>` } : {}) }, exact, env, true],
+    ['a drifted asset', { ...SITE, assets: { ...SITE.assets, '/assets/shell-AAA.js': `${SITE.assets['/assets/shell-AAA.js']};` } }, exact, env, true],
+    ['an unreadable asset (HTTP 404)', { ...SITE, assets: { ...SITE.assets, '/assets/connected-kiosk-BBB.js': undefined } }, exact, env, true],
+    ['an unreadable deep link (HTTP 404)', { ...SITE, doc: (p) => (p.startsWith('/kiosk/') ? undefined : servedDoc(p)) }, exact, env, true],
     ['a wrong host', SITE, exact, { ...env, WSF_LOVABLE_URL: 'https://evil.example.test' }, false],
     ['a wrong project', SITE, exact, { ...env, WSF_PROJECT: 'westayfit-prod' }, false],
   ]) {
@@ -521,7 +822,7 @@ test('cli (#589 W4 F2): --bind exits non-zero before any credential unless the s
   let launched = 0;
   const importKit = async () => { imported += 1; return { createFixtureKit: () => { throw new Error('no fixture inputs in this test'); } }; };
   const launch = async () => { launched += 1; throw new Error('no browser in this test'); };
-  for (const [name, files, reviewed] of [['the shipped empty REVIEWED_BUILD', SITE, undefined], ['a drifted entry page', { ...SITE, '/': `${SITE['/']} ` }, exact]]) {
+  for (const [name, files, reviewed] of [['the shipped REVIEWED_BUILD (the real pin) against the fake host', SITE, undefined], ['a drifted entry page', { ...SITE, doc: (p) => `${servedDoc(p)} ` }, exact]]) {
     r = await run('--run', { ...env, WSF_RESULT_DIR: dir }, { fetchImpl: site(files).fetchImpl, ...(reviewed ? { reviewed } : {}), importKit, launch });
     assert.equal(r.code, 1, name);
     assert.equal(imported, 0, `${name}: the kit is never imported`);
@@ -541,8 +842,8 @@ test('cli (#589 W4 F2): --bind exits non-zero before any credential unless the s
 // ---- the served-code guard (#589 W9 finding #497 6051520120): bind what the browser EXECUTES ----------------------
 test('guard negatives: drift after bind, a deep link with other bytes, a redirect, a foreign, unreviewed or changed script: refused, host-build FAIL, and the journey stops before any password is typed', async () => {
   for (const [bug, named] of [
-    [{ driftAfter: 1 }, /document https:\/\/we-stay-fit-foundation-trial\.lovable\.app\/ differs from its reviewed digest/],
-    [{ deepLinkDiffers: true }, /document https:\/\/we-stay-fit-foundation-trial\.lovable\.app\/kiosk\/e5cgrp-e5c-t-1-lk\/e5cgoal-e5c-t-1-lk differs/],
+    [{ driftAfter: 1 }, /document https:\/\/we-stay-fit-foundation-trial\.lovable\.app\/ differs from the reviewed \/ document/],
+    [{ deepLinkDiffers: true }, /document https:\/\/we-stay-fit-foundation-trial\.lovable\.app\/kiosk\/e5cgrp-e5c-t-1-lk\/e5cgoal-e5c-t-1-lk differs from the reviewed \/kiosk\/\$communityId\/\$goalId document/],
     [{ redirectDoc: true }, /answered HTTP 302, not the reviewed file/],
     [{ foreignScript: true }, /script https:\/\/cdn\.example\.test\/x\.js is outside the reviewed build/],
     [{ foreignOnJoin: true, linkJoinable: true }, /script https:\/\/cdn\.example\.test\/join\.js is outside the reviewed build/],
@@ -569,10 +870,10 @@ test('guard negatives: drift after bind, a deep link with other bytes, a redirec
   assert.match(hostBuildRow({ status: 'PASS' }, r.served).seen, /script https:\/\/cdn\.example\.test\/late\.js is outside/);
   assert.equal(hostBuildRow({ status: 'PASS' }, r.served).status, 'FAIL');
   assert.ok(!late.server.loads.some((x) => x.url.includes('cdn.example.test')), 'the foreign script was never fulfilled');
-  // The production default is REVIEWED_BUILD (empty here): the browser is refused the very first document.
+  // The production default is the shipped REVIEWED_BUILD (the real pin): the fake host's very first document is refused.
   const empty = lovable();
   const e = await runJourney({ browser: empty.browser, fixtures: empty.fixtures, base: LOVABLE_URL });
-  assert.match(hostBuildRow({ status: 'PASS' }, e.served).seen, /no reviewed digest is pinned/);
+  assert.match(hostBuildRow({ status: 'PASS' }, e.served).seen, /\/kiosk\/e5cgrp-e5c-t-1-lk\/e5cgoal-e5c-t-1-lk (carries \d+ NUL character\(s\), not the reviewed \d+|differs from the reviewed \/kiosk\/\$communityId\/\$goalId document)/);
   assert.equal(empty.server.passwordFills, 0);
 });
 
@@ -580,13 +881,24 @@ test('classifyRequest: the reviewed host verifies documents and /assets/ code; A
   const R = FAKE_REVIEWED;
   const L = LOVABLE_URL;
   const c = (url, type, navigation = false) => classifyRequest({ url, type, navigation }, R);
-  assert.deepEqual(c(`${L}/kiosk/g/x?join=SECRETCODE`, 'document', true), { action: 'verify', want: R.indexSha256, what: `document ${L}/kiosk/g/x` });
+  assert.deepEqual(c(`${L}/kiosk/e5cgrp-e5c-t-1-lk/e5cgoal-e5c-t-1-lk?join=SECRETCODE`, 'document', true), { action: 'verify', kind: 'document', template: '/kiosk/$communityId/$goalId', want: R.documents['/kiosk/$communityId/$goalId'], what: `document ${L}/kiosk/e5cgrp-e5c-t-1-lk/e5cgoal-e5c-t-1-lk` });
+  assert.deepEqual(c(`${L}/?join=SECRETCODE&goal=e5cgoal-e5c-t-1-lk`, 'document', true), { action: 'verify', kind: 'document', template: '/', want: R.documents['/'], what: `document ${L}/` });
+  assert.equal(c(`${L}/display/e5cgoal-e5c-t-1-dm1`, 'document', true).want, R.documents['/display/$goalId']);
+  assert.deepEqual(c(EVENTS_SCRIPT, 'script'), { action: 'block', what: `script ${EVENTS_SCRIPT}` }, 'the host events script is blocked');
+  assert.deepEqual(c(FLOCK_SCRIPT, 'script'), { action: 'block', what: `script ${FLOCK_SCRIPT}` }, 'and the host\'s ~flock.js');
   assert.equal(c(`${L}/assets/shell-AAA.js`, 'script').want, R.assets['shell-AAA.js']);
   assert.equal(c(`${L}/assets/index-CCC.css`, 'stylesheet').want, R.assets['index-CCC.css']);
   for (const [url, type] of [[`${L}/favicon.ico`, 'image'], [`${L}/font.woff2`, 'font'], [`${L}/manifest.json`, 'manifest']]) assert.equal(c(url, type).action, 'continue', `${type}`);
   for (const o of API_ORIGINS) for (const t of ['fetch', 'xhr', 'eventsource']) assert.equal(c(`${o}/v1/x?key=abc`, t).action, 'continue', `${o} ${t}`);
   for (const [url, type, nav] of [
-    [`${L}/assets/other-ZZZ.js`, 'script'], [`${L}/sw.js`, 'script'], [`${L}/elsewhere/shell-AAA.js`, 'script'], [`${L}/assets/sub/shell-AAA.js`, 'script'], [`${L}/assets/shell-AAA.js/../x.js`, 'script'], [`${L}/x`, 'websocket'],
+    [`${L}/assets/other-ZZZ.js`, 'script'], [`${L}/sw.js`, 'script'], [`${L}/c/e5cgrp-e5c-t-1-lk/g/e5cgoal-e5c-t-1-lk`, 'document', true], [`${L}/try`, 'document', true],
+    [EVENTS_SCRIPT, 'stylesheet'], [`${L}/__l5e/other.js`, 'script'], [`${L}/__l5e/events.x.js/../evil.js`, 'script'], [`${L}/__l5e/events.Q1w2E3r4.js`, 'document', true],
+    [FLOCK_SCRIPT, 'stylesheet'], [`${L}/~flock.js`, 'document', true], [`${L}/~flockX.js`, 'script'], [`${L}/a/~flock.js`, 'script'], [`${L}/~flock.mjs`, 'script'], ['https://cdn.example.test/~flock.js', 'script'],
+    [`${L}/~flock.js?v=1`, 'script'], [`${L}/~flock2.js`, 'script'], [`${L}/x/~flock.js`, 'script'], [`${L}/~flock.js#a`, 'script'], [`${EVENTS_SCRIPT}?v=1`, 'script'],
+    [`${L}/~flock.js/x`, 'script'], [`${L}/~flock.json`, 'script'], [`${L}/~flock.js.map`, 'script'], [`${L}/~FLOCK.JS`, 'script'],
+    [`${EVENTS_SCRIPT}/x`, 'script'], [`${L}/__l5e/events.Q1w2E3r4.jsonp`, 'script'], [`${L}/x/__l5e/events.Q1w2E3r4.js`, 'script'], [`${L}/__l5e/events.a/b.js`, 'script'],
+    [`${L}/~flock.js?`, 'script'], [`${L}/~flock.js#`, 'script'], [`${EVENTS_SCRIPT}?`, 'script'], [`${EVENTS_SCRIPT}#`, 'script'],
+    [`${L}/__L5E/events.Q1w2E3r4.js`, 'script'], [`${L}/__l5e/EVENTS.Q1w2E3r4.JS`, 'script'], [`${L}/elsewhere/shell-AAA.js`, 'script'], [`${L}/assets/sub/shell-AAA.js`, 'script'], [`${L}/assets/shell-AAA.js/../x.js`, 'script'], [`${L}/x`, 'websocket'],
     ['https://identitytoolkit.googleapis.com/x.js', 'script'], ['https://firestore.googleapis.com/', 'document', true], ['https://us-central1-westayfit-staging.cloudfunctions.net/x', 'image'],
     ['https://cdn.example.test/x.js', 'script'], ['https://fonts.googleapis.com/css', 'stylesheet'], ['https://evil.example.test/api', 'fetch'],
     ['https://we-stay-fit-foundation-trial.lovable.app.evil.test/', 'document', true], ['http://we-stay-fit-foundation-trial.lovable.app/', 'document', true], ['not a url', 'script'],
@@ -595,7 +907,8 @@ test('classifyRequest: the reviewed host verifies documents and /assets/ code; A
     assert.equal(v.action, 'abort', `${type} ${url}`);
     assert.doesNotMatch(v.reason, /key=|\?/, 'never a query');
   }
-  assert.equal(classifyRequest({ url: `${L}/`, type: 'document', navigation: true }).want, null, 'the production default (empty) pins no document');
+  assert.equal(classifyRequest({ url: `${L}/`, type: 'document', navigation: true }).want, REVIEWED_BUILD.documents['/'], 'the production default is the shipped pin');
+  assert.equal(c('https://cdn.example.test/__l5e/events.Q1w2E3r4.js', 'script').action, 'abort', 'the block is the Lovable host\'s own path only');
 });
 
 test('codeGuard: fulfils exactly the hashed bytes once verified; refuses a redirect, an error, other bytes or an unreadable answer; check() throws after any refusal', async () => {
@@ -603,22 +916,33 @@ test('codeGuard: fulfils exactly the hashed bytes once verified; refuses a redir
     const out = {};
     return { out, r: {
       request: () => ({ url: () => url, resourceType: () => type, isNavigationRequest: () => navigation }),
-      async fetch(o) { out.maxRedirects = o?.maxRedirects; if (answer instanceof Error) throw answer; return { status: () => answer.status, body: async () => Buffer.from(answer.body) }; },
-      async fulfill({ body }) { out.fulfilled = String(body); },
+      async fetch(o) { out.maxRedirects = o?.maxRedirects; if (answer instanceof Error) throw answer; return { status: () => answer.status, headers: () => ({ 'content-type': answer.type ?? (type === 'document' ? 'text/html; charset=utf-8' : 'text/javascript') }), body: async () => Buffer.from(answer.body) }; },
+      async fulfill({ body, headers }) { out.fulfilled = String(body); if (headers) out.contentType = headers['content-type']; },
       async continue() { out.continued = true; },
       async abort(code) { out.aborted = code; },
     } };
   };
   const g = codeGuard(FAKE_REVIEWED);
-  const ok = route(`${LOVABLE_URL}/kiosk/a/b`, 'document', true, { status: 200, body: FAKE_INDEX });
+  const kioskDoc = servedDoc('/kiosk/e5cgrp-e5c-t-1-lk/e5cgoal-e5c-t-1-lk');
+  const ok = route(`${LOVABLE_URL}/kiosk/e5cgrp-e5c-t-1-lk/e5cgoal-e5c-t-1-lk`, 'document', true, { status: 200, body: kioskDoc });
   await g.handle(ok.r);
-  assert.deepEqual(ok.out, { maxRedirects: 0, fulfilled: FAKE_INDEX });
+  assert.deepEqual(ok.out, { maxRedirects: 0, fulfilled: kioskDoc, contentType: 'text/html; charset=utf-8' }, 'the document is fulfilled with exactly the bytes read, as UTF-8 HTML');
+  // R7: no charset, or UTF-8 spelled any way, is accepted, and the browser is told UTF-8 whatever the host said.
+  for (const type of ['text/html', 'text/html;charset="UTF-8"', 'TEXT/HTML; Charset=utf8']) {
+    const one = codeGuard(FAKE_REVIEWED);
+    const x = route(`${LOVABLE_URL}/kiosk/e5cgrp-e5c-t-1-lk/e5cgoal-e5c-t-1-lk`, 'document', true, { status: 200, body: kioskDoc, type });
+    await one.handle(x.r);
+    assert.deepEqual([x.out.fulfilled, x.out.contentType, one.summary().violations], [kioskDoc, 'text/html; charset=utf-8', []], type);
+  }
+  const ev = route(EVENTS_SCRIPT, 'script', false, { status: 200, body: 'track()' });
+  await g.handle(ev.r);
+  assert.deepEqual(ev.out, { aborted: 'blockedbyclient' }, 'the host events script is never fetched or fulfilled');
   const api = route('https://firestore.googleapis.com/v1/x', 'xhr', false, null);
   await g.handle(api.r);
   assert.deepEqual(api.out, { continued: true });
   g.check();
-  assert.deepEqual(g.summary(), { verified: 1, violations: [] });
-  for (const [answer, why] of [[{ status: 302, body: '' }, /HTTP 302/], [{ status: 500, body: FAKE_INDEX }, /HTTP 500/], [{ status: 200, body: `${FAKE_INDEX} ` }, /differs/], [new Error('net::ERR_FAILED https://x?token=abc'), /could not be read/]]) {
+  assert.deepEqual(g.summary(), { verified: 1, violations: [], blocked: [`script ${EVENTS_SCRIPT}`] });
+  for (const [answer, why] of [[{ status: 302, body: '' }, /HTTP 302/], [{ status: 500, body: servedDoc('/') }, /HTTP 500/], [{ status: 200, body: `${servedDoc('/')} ` }, /differs/], [new Error('net::ERR_FAILED https://x?token=abc'), /could not be read/]]) {
     const one = codeGuard(FAKE_REVIEWED);
     const x = route(`${LOVABLE_URL}/`, 'document', true, answer);
     await one.handle(x.r);
@@ -654,6 +978,7 @@ test('hostBuildRow and browserEnv: PASS needs the bind, a verified load and no r
   assert.equal(hostBuildRow({ status: 'PASS' }, { verified: 0, violations: [] }).status, 'FAIL');
   assert.equal(hostBuildRow({ status: 'PASS' }, { verified: 4, violations: ['script x'] }).status, 'FAIL');
   assert.equal(hostBuildRow({ status: 'PASS' }, { verified: 4, violations: [] }).status, 'PASS');
+  assert.match(hostBuildRow({ status: 'PASS' }, { verified: 4, violations: [], blocked: ['script a', 'script b'] }).seen, /2 host script request\(s\) blocked, not run/);
   const env = browserEnv({ PATH: '/bin', HOME: '/h', WSF_RESULT_DIR: '/r', WSF_GOOGLE_ACCESS_TOKEN: 't', GOOGLE_APPLICATION_CREDENTIALS: '/k', GOOGLE_CLOUD_PROJECT: 'p', CLOUDSDK_AUTH_ACCESS_TOKEN_FILE: '/f', ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'o', ACTIONS_ID_TOKEN_REQUEST_URL: 'u', ACTIONS_RUNTIME_TOKEN: 'r', GITHUB_TOKEN: 'g', GH_TOKEN: 'h' });
   assert.deepEqual(env, { PATH: '/bin', HOME: '/h', WSF_RESULT_DIR: '/r' });
 });
