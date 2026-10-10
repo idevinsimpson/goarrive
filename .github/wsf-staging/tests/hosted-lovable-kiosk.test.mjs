@@ -11,7 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   API_ORIGINS, BIND_PROBES, EVIDENCE_SCAN_RULES, FIXED_BLOCKED, LOVABLE_URL, ROUTE_TEMPLATES, SEEN_MAX, assetTypeProblem, callableLog, canonicalDocument, cli, REVIEWED_BUILD, ROWS, allPassed, bindBuild,
-  bindLines, browserEnv, checkBase, classifyRequest, codeGuard, documentTypeProblem, hostBuildRow, idHash, matchTemplate, mergeIntoManifest, ownCreditOf, receiptVerdict,
+  bindLines, browserEnv, checkBase, classifyRequest, codeGuard, logSafe, documentTypeProblem, hostBuildRow, idHash, matchTemplate, mergeIntoManifest, ownCreditOf, receiptVerdict,
   requireVerdict, results, runJourney, runResults, seenLine, servedManifest, sharedOf, showsNumber,
 } from '../hosted-lovable-kiosk.mjs';
 
@@ -260,6 +260,16 @@ test('negative mutations: each one is refused, by name or by digest, at bind and
     ['a look-alike bucket host (a dot replaced)', G, servedDoc(G, { shotTags: shotTags(SHOT_A).replaceAll('b4.r2.dev', 'b4xr2.dev') }), /0 hosting preview-image link\(s\), not exactly 2/],
     ['another lovp_ segment', G, servedDoc(G, { shotTags: shotTags(SHOT_A).replaceAll('lovp_372ahwppkw9debd61922xf2ayz', 'lovp_472ahwppkw9debd61922xf2ayz') }), /0 hosting preview-image link\(s\), not exactly 2/],
     ['the file-name shape outside the links', G, servedDoc(G, { body: `<p>${SHOT_B}</p>` }), /the preview-image file-name shape appears 1 time\(s\) outside the preview-image links/],
+    // W3 O1 on #610: the shape is counted anywhere, inside longer runs, attribute values and other inline scripts too.
+    ['the file-name shape inside a longer hex run', G, servedDoc(G, { body: `<p>ab${SHOT_B}</p>` }), /the preview-image file-name shape appears 1 time\(s\) outside the preview-image links/],
+    ['the file-name shape inside a longer digit run', G, servedDoc(G, { body: `<p>${SHOT_B}7</p>` }), /the preview-image file-name shape appears 1 time\(s\) outside the preview-image links/],
+    ['the file-name shape inside an attribute value', G, servedDoc(G, { body: `<div data-x="${SHOT_B}"></div>` }), /the preview-image file-name shape appears 1 time\(s\) outside the preview-image links/],
+    ['the file-name shape inside another inline script', G, servedDoc(G, { body: `<script>window.x="${SHOT_B}"</script>` }), /the preview-image file-name shape appears 1 time\(s\) outside the preview-image links/],
+    // W3 O2 on #610: every element of the link frame is literal.
+    ...[['plain http', ['https:', 'http:']], ['Content= in another case', [' content=', ' Content=']], ['the / before lovp_ missing', ['r2.dev/lovp_', 'r2.devlovp_']],
+      ['another character for the dot before png', ['.png"', 'Xpng"']], ['a .jpg file', ['.png"', '.jpg"']], ['a single-quoted closing', ['.png"', ".png'"]], ['a single-quoted opening', [`content="${SHOT_URL}`, `content='${SHOT_URL}`]]]
+      .map(([what, [from, to]]) => [`a screenshot link with ${what}`, G, servedDoc(G, { shotTags: shotTags(SHOT_A).replaceAll(from, to) }), /0 hosting preview-image link\(s\), not exactly 2/]),
+    ['single-quoted screenshot links', G, servedDoc(G, { shotTags: shotTags(SHOT_A).replaceAll(`content="${SHOT_URL}${SHOT_A}.png"`, `content='${SHOT_URL}${SHOT_A}.png'`) }), /0 hosting preview-image link\(s\), not exactly 2/],
     ['a screenshot link on /', '/', servedDoc('/', { shotTags: shotTags(SHOT_A) }), /2 hosting preview-image link\(s\), not exactly 0/],
     ['the kiosk with one screenshot link', K, servedDoc(K, { shotTags: shotTags(SHOT_A).split('><')[0] + '>' }), /1 hosting preview-image link\(s\), not exactly 2/],
     ['a param the guard cannot bind', '/display/short', servedDoc('/display/short'), /a path param the guard cannot bind/],
@@ -475,7 +485,7 @@ test('bind lines: verdict, documents, probes, refused references, assets and the
   assert.deepEqual(lines.filter((l) => l.startsWith('LOVABLE_DOCUMENT_BLOCKED_HOST_SCRIPT ')), [`LOVABLE_DOCUMENT_BLOCKED_HOST_SCRIPT script ${EVENTS_SCRIPT}`, `LOVABLE_DOCUMENT_BLOCKED_HOST_SCRIPT script ${FLOCK_SCRIPT}`], 'what the bind would block is printed, once each');
   assert.doesNotMatch(lines.join('\n'), /join=|\?/, 'a probe line names the page, never its query');
   // Step C: a screenshot file name is printed only in its checked shape, so a hostile value can't inject a log line.
-  const forged = bindLines({ ...m, documents: { ...m.documents, '/display/$goalId': { ...m.documents['/display/$goalId'], previewImages: [SHOT_A, 'x\n::error::injected', `${SHOT_A}"`, SHOT_A.toUpperCase()] } } }, { status: 'FAIL', reason: 'x' });
+  const forged = bindLines({ ...m, documents: { ...m.documents, '/display/$goalId': { ...m.documents['/display/$goalId'], previewImages: [SHOT_A, 'x\n::error::injected', `${SHOT_A}"`, SHOT_A.toUpperCase(), `x\n::error::forged ${SHOT_A}`, `x::error::${SHOT_A}`] } } }, { status: 'FAIL', reason: 'x' });
   assert.ok(forged.find((l) => l.startsWith('LOVABLE_OBSERVED_DOCUMENT /display/$goalId ')).endsWith(` preview-image=${SHOT_A}`));
   assert.doesNotMatch(forged.join('\n'), /::error::|"\s|[A-F]{32}_/, 'nothing else is printed');
   // F7 (W3): a BOM inside a document is no leading BOM.
@@ -1079,6 +1089,10 @@ test('classifyRequest (LOVABLE-GUARD-PING-1): a ping is data to the exact API or
     assert.equal(v.action, 'abort', why);
     assert.doesNotMatch(v.reason, /key=|\?/, 'never a query');
   }
+  // Only the four data types reach an API origin (W3 O2 on #613): every other resource type Playwright reports stays refused.
+  for (const o of API_ORIGINS) for (const type of ['other', 'prefetch', 'websocket', 'cspviolationreport', 'preflight', 'signedexchange', 'image', 'font', 'media', 'manifest', 'texttrack', '']) {
+    assert.equal(c(`${o}${PATH}`, type).action, 'abort', `${type || '(empty)'} ${o}`);
+  }
   // Data, never code: a script, document or stylesheet to any API origin stays refused, navigation or not.
   for (const o of API_ORIGINS) for (const type of ['script', 'document', 'stylesheet']) for (const nav of [false, true]) assert.equal(c(`${o}${PATH}`, type, nav).action, 'abort', `${type} ${o} navigation=${nav}`);
   // Through the guard itself: the beacon is continued with no refusal; a Lovable-host ping is refused and check() throws.
@@ -1102,7 +1116,11 @@ test('seenLine (LOVABLE-GUARD-PING-1 item 7): each row\'s seen text as one addit
   // The copy of the scan's rules is exactly scan-evidence.mjs RULES, in order.
   const scanSrc = fs.readFileSync(new URL('../scan-evidence.mjs', import.meta.url), 'utf8');
   const theirs = [...scanSrc.matchAll(/\bre: \/(.+)\/([a-z]*) \},?$/gm)].map((m) => [m[1], m[2]]);
-  assert.equal(theirs.length, 10);
+  // Count the rule entries themselves (W3 O5 on #613), so a rule written another way is never missed.
+  const rulesBlock = scanSrc.slice(scanSrc.indexOf('const RULES = ['), scanSrc.indexOf('\n];', scanSrc.indexOf('const RULES = [')));
+  const named = (rulesBlock.match(/\{ name: /g) ?? []).length;
+  assert.equal(named, EVIDENCE_SCAN_RULES.length, 'every rule of the scan is in the copy');
+  assert.equal(theirs.length, named, 'and every rule is read as one re: line');
   assert.deepEqual(EVIDENCE_SCAN_RULES.map((re) => [re.source, re.flags]), theirs);
   // A real cell's text is printed exactly.
   const cellText = 'display state notConnected; title the fixture goal; community the fixture community; total not the seeded total of 500; freshness absent';
@@ -1128,6 +1146,8 @@ test('seenLine (LOVABLE-GUARD-PING-1 item 7): each row\'s seen text as one addit
   const samples = [`AIza${'A'.repeat(30)}`, '-----BEGIN PRIVATE KEY-----', '{"private_key": "k"}', `ya29.${'a'.repeat(20)}`, `1//${'a'.repeat(25)}`, 'gha-creds-0a1b2c.json',
     'https://h.test/x?oobCode=abc', `eyJ${'a'.repeat(12)}.${'b'.repeat(12)}.${'c'.repeat(12)}`, 'authorization: Bearer abc', `bu_${'a'.repeat(25)}`, 'Authorization:\nBearer abc'];
   assert.equal(samples.length, EVIDENCE_SCAN_RULES.length + 1);
+  // Withheld after scrubbing too (W3 O3 on #613): white space the raw text keeps, which the collapse makes a match.
+  for (const x of ['BEGIN\u00a0PRIVATE KEY', 'BEGIN  PRIVATE KEY', 'BEGIN\u3000RSA PRIVATE KEY']) assert.equal(seenLine('LOVABLE_SEEN', 'x', `a ${x} b`), withheld, JSON.stringify(x));
   for (const x of samples) {
     const line = seenLine('LOVABLE_SEEN', 'x', `before ${x} after`);
     assert.equal(line, withheld, x);
@@ -1138,6 +1158,27 @@ test('seenLine (LOVABLE-GUARD-PING-1 item 7): each row\'s seen text as one addit
   assert.deepEqual(lines.filter((l) => !l.startsWith('LOVABLE_SEEN ')), [...doc.rows.map((r) => `LOVABLE_ROW ${r.id}=${r.status}`), `LOVABLE_ROWS=0 PASS, 1 FAIL, ${doc.rows.length - 1} BLOCKED`, 'LOVABLE_CLEANUP=success', 'LOVABLE_EVIDENCE_SCAN=success', 'LOVABLE_KIOSK_PROOF=FAIL']);
   doc.rows.forEach((r, i) => assert.equal(lines[2 * i + 1], seenLine('LOVABLE_SEEN', r.id, r.seen), r.id));
   assert.equal(lines[1], `LOVABLE_SEEN host-build ${doc.rows[0].seen}`);
+});
+
+test('no printed line carries the runner\'s legacy command opener ##[ (W3 O1 on #613): the seen lines and every host-text line', async () => {
+  assert.equal(logSafe('a ##[warning title=x]b ###[c ##[##[d'), 'a ## [warning title=x]b ### [c ## [## [d');
+  assert.doesNotMatch(logSafe('##[##[##['), /##\[/);
+  assert.equal(seenLine('LOVABLE_SEEN', 'qr-join', 'stopped: locator.click: ##[warning title=forged]host-build PASS'), 'LOVABLE_SEEN qr-join stopped: locator.click: ## [warning title=forged]host-build PASS');
+  // The host-text lines: the verdict, an unbound document, a refused probe and a refused reference.
+  const hostile = '##[add-mask]FAIL';
+  const lines = bindLines({ documents: { '/': { reason: `served with charset ${hostile}` } }, probes: [{ path: '/display/x?join=y', reason: `served with charset ${hostile}, not UTF-8` }], refusals: [`script https://h.test/${hostile}.js is not a reviewed asset`], blocked: [], assets: {} }, { status: 'FAIL', reason: `served with charset ${hostile}` });
+  for (const prefix of ['LOVABLE_BUILD=FAIL', 'LOVABLE_OBSERVED_DOCUMENT / UNBOUND', 'LOVABLE_DOCUMENT_PROBE /display/x (with an invite query) refused', 'LOVABLE_DOCUMENT_REFUSED_REFERENCE']) assert.ok(lines.find((l) => l.startsWith(prefix))?.includes('## [add-mask]FAIL'), prefix);
+  for (const l of lines) assert.doesNotMatch(l, /##\[/, l);
+  assert.deepEqual(bindLines(null, { status: 'FAIL', reason: hostile }), ['LOVABLE_BUILD=FAIL (## [add-mask]FAIL)']);
+  // End to end: a host that declares that charset, through --bind, --run (a refused bind stops before the kit) and --require.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-lk-cmd-'));
+  const env = { WSF_LOVABLE_URL: LOVABLE_URL, WSF_PROJECT: 'westayfit-staging', WSF_RESULT_DIR: dir, WSF_CLEANUP_OUTCOME: 'success', WSF_SCAN_OUTCOME: 'success' };
+  const said = [];
+  const deps = { fetchImpl: site({ ...SITE, docType: () => `text/html; charset=${hostile}` }).fetchImpl, reviewed: EXACT, importKit: async () => { throw new Error('no kit here'); }, launch: async () => { throw new Error('no browser here'); }, say: (l) => said.push(l) };
+  for (const mode of ['--bind', '--run', '--require']) assert.equal(await cli(mode, env, deps), 1, mode);
+  assert.ok(said.some((l) => /charset ## \[add-mask\]fail/i.test(l)), said.join('\n'));
+  assert.ok(said.some((l) => l.startsWith('LOVABLE_SEEN host-build ')) && said.some((l) => l.startsWith('LOVABLE_KIOSK_PROOF=')));
+  for (const l of said) assert.doesNotMatch(l, /##\[/, l);
 });
 
 test('codeGuard: fulfils exactly the hashed bytes once verified; refuses a redirect, an error, other bytes or an unreadable answer; check() throws after any refusal', async () => {
