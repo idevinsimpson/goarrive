@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "64f31baf8dafa7eaf61e764a49dbc98db9e9e93a367a621860937ce9aad3e562",
-  "eventCount": 1243,
+  "ledgerHead": "b58edd253eb1cb2992ad607d4b49c95e8e34bdc85cdfedfe45ce13e21425ae09",
+  "eventCount": 1246,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -3022,15 +3022,17 @@
       },
       "label": "Fix the hosted regression on main 4da578d7 (run 38079242076): qr-join polls for the choice; the station turn starts from the served member or newcomer path, not a literal Join",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 394,
-      "pr": null,
-      "reviewers": [],
+      "pr": 620,
+      "reviewers": [
+        "W7"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "ba103116ffb48fc4d83cc138e3ff000a024b9fd4",
+        "prHeadSha": "ba103116ffb48fc4d83cc138e3ff000a024b9fd4",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -3057,7 +3059,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6101625507
+          "id": 6102007487
         }
       },
       "review": {
@@ -3070,7 +3072,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "LOVABLE-MATRIX-ALIGN-1": {
@@ -7347,7 +7349,16 @@
       "ack": {
         "kind": "comment",
         "id": 6101625507
-      }
+      },
+      "superseded": true
+    },
+    "cb1a2348ceffdc033f050227fb9dc41272ff54ce139f01135b7e0a0a609db640": {
+      "packet": "LOVABLE-KIOSK-STATION-DRIVER-2",
+      "worker": "W7",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
