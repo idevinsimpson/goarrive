@@ -33,6 +33,11 @@
  * and NO visitor membership, so the visitor is admitted only by the product;
  * expectVisitor and claimMemberships claim what that admission writes. Nothing
  * verifies an address, and createVerifiedUser and signIn are unchanged.
+ *
+ * A link-joinable expo event (KIT-PUBLIC-EXPO-EVENT-1): expoEvent with
+ * `joinPolicy: 'public'` is the same event with its real verified Champion,
+ * written public so that Champion's approved station shows the newcomer QR.
+ * It writes no marker, and the default stays private and unchanged.
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -203,8 +208,19 @@ export function createFixtureKit({
    * One event: a founding Champion, `attendees` members, one community, one open
    * single-activity goal (squats) with display authorized, and its SEEDED total.
    * The seeded total is a fixture number, never anybody's effort.
+   *
+   * The community is private unless `joinPolicy: 'public'` is passed
+   * (KIT-PUBLIC-EXPO-EVENT-1, #365 6096266261). Public makes it link-joinable,
+   * so a station its real verified Champion approves shows the newcomer QR: the
+   * served wsfStationState returns the join code only for a joinPolicy in
+   * LINK_JOINABLE = {public, inviteOnly} (ec162d17 functions-westayfit/src/index.ts
+   * :63, :6386-6398). Only the joinPolicy value differs; the same join code is
+   * written and returned as `joinCode`. Omitted, every write is exactly what it
+   * was, and nothing returns the code. Any other value, `inviteOnly` included,
+   * throws before anything is created.
    */
-  async function expoEvent(label, { attendees, target, seeded }) {
+  async function expoEvent(label, { attendees, target, seeded, joinPolicy }) {
+    if (joinPolicy !== undefined && joinPolicy !== 'public') throw new Error('expoEvent: joinPolicy is either omitted (a private community) or \'public\'');
     const t = now();
     const tag = `${runTag}-${label}`;
     const champion = await createVerifiedUser(`${label}-champ`, 'Fixture Champion');
@@ -212,9 +228,10 @@ export function createFixtureKit({
     for (let i = 0; i < attendees; i += 1) people.push(await createVerifiedUser(`${label}-a${i}`, `Fixture Attendee ${i + 1}`));
     const groupId = `e5cgrp-${tag}`;
     const goalId = `e5cgoal-${tag}`;
+    const joinCode = crypto.randomBytes(16).toString('base64url');
     await putDoc(`wsfCommunityGroups/${groupId}`, {
-      displayName: 'Fixture Expo Community', groupType: 'custom', joinPolicy: 'private',
-      joinCode: crypto.randomBytes(16).toString('base64url'), createdByUserId: champion.uid,
+      displayName: 'Fixture Expo Community', groupType: 'custom', joinPolicy: joinPolicy ?? 'private',
+      joinCode, createdByUserId: champion.uid,
       lifecycleStatus: 'active', isSample: false, createdAt: t, updatedAt: t,
     });
     for (const [who, role] of [[champion, 'foundingChampion'], ...people.map((p) => [p, 'member'])]) {
@@ -233,8 +250,9 @@ export function createFixtureKit({
     // The event's line is named by its goal, so its rows carry this run's tag.
     trackDoc(`wsfTurnLines/goal__${goalId}`);
     return {
-      setupId: `${label}: one synthetic community, one open squats goal (target ${target}, seeded ${seeded}), a Champion and ${attendees} attendee${attendees === 1 ? '' : 's'}`,
+      setupId: `${label}: one synthetic ${joinPolicy === 'public' ? 'public ' : ''}community, one open squats goal (target ${target}, seeded ${seeded}), a Champion and ${attendees} attendee${attendees === 1 ? '' : 's'}`,
       groupId, goalId, target, seeded, champion, attendees: people,
+      ...(joinPolicy === 'public' ? { joinCode } : {}),
     };
   }
 
