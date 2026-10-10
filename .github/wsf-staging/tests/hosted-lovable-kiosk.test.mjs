@@ -47,9 +47,9 @@ function servedDoc(pathname, o = {}) {
   const matchId = ids.length ? `${route}/${segs[0]}/${ids.join('/')}` : '/';
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"${o.metaAttr ?? ''}><title>WE STAY FIT</title>`
     + `<link rel="stylesheet" href="/assets/index-CCC.css"><link rel="modulepreload" href="/assets/${o.shell ?? 'shell-AAA.js'}">`
-    + `<script src="/__l5e/events.Q1w2E3r4.js" data-context-token="${token}"${o.tokenTail ?? ''} defer></script>${o.head ?? ''}</head>`
-    + `<body><main data-route="${route}"${ids.map((v, i) => ` data-p${i}="${v}"`).join('')}></main>`
-    + `<script class="$tsr" data-tsr-stream-part="">$_TSR.router.matches=[{i:"__root__",u:${o.u1 ?? ts},s:"success"},{i:"${matchId}",u:${o.u2 ?? ts},s:"${o.status ?? 'success'}"}${o.streamMore ?? ''}]</script>`
+    + `<script src="/__l5e/events.Q1w2E3r4.js" data-context-token="${token}"${o.tokenTail ?? ''} defer></script><script src="/~flock.js" defer></script>${o.head ?? ''}</head>`
+    + `<body><main data-route="${route}"${ids.map((v, i) => ` data-p${i}="${v}"`).join('')}>\u0000</main>`
+    + `<script class="$tsr" data-tsr-stream-part="">$_TSR.router.matches=[{i:"__root__",u:${o.u1 ?? ts},s:"success",x:"\u0000"},{i:"${matchId}",u:${o.u2 ?? ts},s:"${o.status ?? 'success'}"}${o.streamMore ?? ''}]</script>`
     + `${o.body ?? ''}<script type="module" src="/assets/${o.shell ?? 'shell-AAA.js'}"></script></body></html>`;
 }
 const pin = (d) => ({ sha256: d.sha256, streamU: d.streamU });
@@ -124,6 +124,16 @@ test('canonical document: exactly the two per-request values are normalized, and
   assert.equal(wide({ body: '<script>x={u:1760050000001}</script>' }).streamU, 2);
   assert.equal(wide().sha256, wide().sha256, 'and two requests still reduce to one document');
   assert.match(canonicalDocument(servedDoc('/').replace(/(data-tsr-stream-part="">[^<]*)<\/script>[^]*$/, '$1'), `${LOVABLE_URL}/`).reason, /stream-part script is not closed/);
+  // NUL characters are document bytes like any other (the real host's documents carry them): kept, never a slot.
+  assert.ok(servedDoc('/').includes('\u0000'), 'the fake documents carry NULs, as the real ones do');
+  assert.equal(canonOf('/', { body: '\u0000\u0000' }).sha256, canonOf('/', { body: '\u0000\u0000' }).sha256);
+  assert.notEqual(canonOf('/', { body: '\u0000\u0000' }).sha256, canonOf('/', { body: '\u0000 \u0000' }).sha256);
+  // Literal text never stands for a slot: a document that spells a slot (in-band, as a NUL-delimited marker) where the
+  // other carries the id itself does not reduce to the same document.
+  const withId = servedDoc('/display/ga1-wsf-bind-probe');
+  const spelled = withId.replace('data-p0="ga1-wsf-bind-probe"', 'data-p0="\u0000wsf:param:goalId\u0000"');
+  assert.notEqual(spelled, withId);
+  assert.notEqual(canonicalDocument(spelled, `${LOVABLE_URL}/display/ga1-wsf-bind-probe`).sha256, canonicalDocument(withId, `${LOVABLE_URL}/display/ga1-wsf-bind-probe`).sha256);
   // The token's value never reaches a result.
   const token = 'tokSECRETvalue.abcDEF123';
   assert.doesNotMatch(JSON.stringify(canonicalDocument(servedDoc('/', { token }), `${LOVABLE_URL}/`)), /tokSECRET/);
@@ -150,7 +160,8 @@ test('negative mutations: each one is refused, by name or by digest, at bind and
     ['an unknown template', '/c/ca1-wsf-bind-probe/g/ga1-wsf-bind-probe', servedDoc('/'), /is not a reviewed route template/],
     ['a second context token', '/', servedDoc('/', { head: '<script src="/__l5e/events.Q1w2E3r4.js" data-context-token="abcdefgh1234"></script>' }), /2 data-context-token attributes, not exactly 1/],
     ['no context token', '/', servedDoc('/').replace(/ data-context-token="[^"]*"/, ''), /0 data-context-token attributes/],
-    ['a NUL character', '/', servedDoc('/', { body: '\u0000' }), /NUL character/],
+    ['the only context token inside the stream part', '/', servedDoc('/').replace(/ data-context-token="[^"]*"/, '').replace('$_TSR.router', 'x=\'<a data-context-token="abcdefgh1234">\';$_TSR.router'), /data-context-token attribute is inside the stream part/],
+    ['an added NUL character', '/', servedDoc('/', { body: '\u0000' }), /differs from the reviewed \/ document/],
     ['a param the guard cannot bind', '/display/short', servedDoc('/display/short'), /a path param the guard cannot bind/],
     ['overlapping params', '/kiosk/abcdefghijkl/abcdefghijklmn', servedDoc('/kiosk/abcdefghijkl/abcdefghijklmn'), /two path params overlap/],
   ];
@@ -263,6 +274,7 @@ test('bind lines: verdict, documents, probes, refused references, assets and the
   assert.deepEqual(JSON.parse(last.slice('LOVABLE_OBSERVED_BUILD '.length)), { documents: DOCS, assets: OBSERVED }, 'the line to pin is exactly the observed build');
   assert.doesNotMatch(lines.join('\n'), /tokSECRET|<html|<script|\$_TSR/, 'names, counts and digests only');
   assert.ok(lines.includes(`LOVABLE_DOCUMENT_PROBE / (with an invite query) / ${DOCS['/'].sha256} u=2 params={}`));
+  assert.deepEqual(lines.filter((l) => l.startsWith('LOVABLE_DOCUMENT_BLOCKED_HOST_SCRIPT ')), [`LOVABLE_DOCUMENT_BLOCKED_HOST_SCRIPT script ${EVENTS_SCRIPT}`, `LOVABLE_DOCUMENT_BLOCKED_HOST_SCRIPT script ${FLOCK_SCRIPT}`], 'what the bind would block is printed, once each');
   assert.doesNotMatch(lines.join('\n'), /join=|\?/, 'a probe line names the page, never its query');
   const unbound = bindLines({ ...m, documents: { ...m.documents, '/': { sha256: null, streamU: null, reason: 'r' } } }, { status: 'FAIL', reason: 'x' });
   assert.ok(!unbound.some((l) => l.startsWith('LOVABLE_OBSERVED_BUILD ')), 'no manifest to pin while a template is unbound');
@@ -356,6 +368,7 @@ test('cleanup merge: run-tagged product documents are added once; anything untag
 const FAKE_ASSETS = { '/assets/shell-AAA.js': 'export const shell=1;', '/assets/kiosk-BBB.js': 'export const kiosk=1;', '/assets/index-CCC.css': 'body{}' };
 const FAKE_REVIEWED = Object.freeze({ documents: DOCS, assets: Object.freeze(Object.fromEntries(Object.entries(FAKE_ASSETS).map(([p, b]) => [p.slice(8), sha(b)]))) });
 const EVENTS_SCRIPT = `${LOVABLE_URL}/__l5e/events.Q1w2E3r4.js`;
+const FLOCK_SCRIPT = `${LOVABLE_URL}/~flock.js`;
 
 /** The kit's verified member of the event community (the phone control), and the member's other goal, read alongside. */
 const CONTROL_UID = 'uid-lk-a0';
@@ -399,7 +412,7 @@ function lovable(bug = {}) {
   /** A page load: the document, then what it loads (the kiosk chunk on the kiosk route), plus any injected defect. */
   async function pageLoad(context, url) {
     if ((await load(context, url, 'document', true)) !== 'fulfilled') throw new Error(`page.goto: net::ERR_BLOCKED_BY_CLIENT at ${new URL(url).origin}${new URL(url).pathname}`);
-    const subs = [[EVENTS_SCRIPT, 'script'], [`${LOVABLE_URL}/assets/shell-AAA.js`, 'script'], [`${LOVABLE_URL}/assets/index-CCC.css`, 'stylesheet'], [`${LOVABLE_URL}/favicon.ico`, 'image']];
+    const subs = [[EVENTS_SCRIPT, 'script'], [FLOCK_SCRIPT, 'script'], [`${LOVABLE_URL}/assets/shell-AAA.js`, 'script'], [`${LOVABLE_URL}/assets/index-CCC.css`, 'stylesheet'], [`${LOVABLE_URL}/favicon.ico`, 'image']];
     if (new URL(url).pathname.startsWith('/kiosk/')) subs.push([`${LOVABLE_URL}/assets/kiosk-BBB.js`, 'script']);
     if (bug.foreignScript) subs.push(['https://cdn.example.test/x.js', 'script']);
     if (bug.foreignOnJoin && new URL(url).searchParams.has('join')) subs.push(['https://cdn.example.test/join.js', 'script']);
@@ -602,8 +615,9 @@ test('journey with the kit\'s real shape (#589 W4 F1): qr-join BLOCKED by name f
   const reviewedDoc = (x) => canonicalDocument(x.body, x.url).sha256 === FAKE_REVIEWED.documents[matchTemplate(new URL(x.url).pathname).template].sha256;
   assert.ok(L.server.loads.length >= 10 && L.server.loads.every((x) => (x.type === 'document' ? reviewedDoc(x) : reviewedAssets.has(sha(x.body)))), 'every executed document reduces to its reviewed template, and every asset is fulfilled with exactly the reviewed bytes');
   assert.ok(L.server.loads.some((x) => x.type === 'document' && new URL(x.url).pathname.startsWith('/kiosk/')) && L.server.loads.some((x) => x.type === 'document' && new URL(x.url).pathname === '/'), 'both templates the kiosk proof loads were verified');
-  assert.ok(served.blocked.length > 0 && served.blocked.every((w) => w === `script ${EVENTS_SCRIPT}`), 'the host events script is blocked on every page, never run');
-  assert.ok(!L.server.loads.some((x) => x.url === EVENTS_SCRIPT), 'and never fulfilled');
+  assert.ok(served.blocked.length > 0 && served.blocked.every((w) => w === `script ${EVENTS_SCRIPT}` || w === `script ${FLOCK_SCRIPT}`), 'the host\'s own scripts are blocked on every page, never run');
+  assert.equal(served.blocked.filter((w) => w === `script ${FLOCK_SCRIPT}`).length, served.blocked.filter((w) => w === `script ${EVENTS_SCRIPT}`).length);
+  assert.ok(!L.server.loads.some((x) => x.url === EVENTS_SCRIPT || x.url === FLOCK_SCRIPT), 'and never fulfilled');
   assert.ok(L.server.contextOpts.length === L.opened() && L.server.contextOpts.every((o) => o.serviceWorkers === 'block'), 'no service worker can answer around the guard');
   assert.equal(statusOf(rows, 'qr-join'), 'BLOCKED');
   assert.match(rows['qr-join'].seen, /only private communities \(joinPolicy private\).*no newcomer QR/);
@@ -778,13 +792,15 @@ test('classifyRequest: the reviewed host verifies documents and /assets/ code; A
   assert.deepEqual(c(`${L}/?join=SECRETCODE&goal=e5cgoal-e5c-t-1-lk`, 'document', true), { action: 'verify', kind: 'document', template: '/', want: R.documents['/'], what: `document ${L}/` });
   assert.equal(c(`${L}/display/e5cgoal-e5c-t-1-dm1`, 'document', true).want, R.documents['/display/$goalId']);
   assert.deepEqual(c(EVENTS_SCRIPT, 'script'), { action: 'block', what: `script ${EVENTS_SCRIPT}` }, 'the host events script is blocked');
+  assert.deepEqual(c(FLOCK_SCRIPT, 'script'), { action: 'block', what: `script ${FLOCK_SCRIPT}` }, 'and the host\'s ~flock.js');
   assert.equal(c(`${L}/assets/shell-AAA.js`, 'script').want, R.assets['shell-AAA.js']);
   assert.equal(c(`${L}/assets/index-CCC.css`, 'stylesheet').want, R.assets['index-CCC.css']);
   for (const [url, type] of [[`${L}/favicon.ico`, 'image'], [`${L}/font.woff2`, 'font'], [`${L}/manifest.json`, 'manifest']]) assert.equal(c(url, type).action, 'continue', `${type}`);
   for (const o of API_ORIGINS) for (const t of ['fetch', 'xhr', 'eventsource']) assert.equal(c(`${o}/v1/x?key=abc`, t).action, 'continue', `${o} ${t}`);
   for (const [url, type, nav] of [
     [`${L}/assets/other-ZZZ.js`, 'script'], [`${L}/sw.js`, 'script'], [`${L}/c/e5cgrp-e5c-t-1-lk/g/e5cgoal-e5c-t-1-lk`, 'document', true], [`${L}/try`, 'document', true],
-    [EVENTS_SCRIPT, 'stylesheet'], [`${L}/__l5e/other.js`, 'script'], [`${L}/__l5e/events.x.js/../evil.js`, 'script'], [`${L}/__l5e/events.Q1w2E3r4.js`, 'document', true], [`${L}/elsewhere/shell-AAA.js`, 'script'], [`${L}/assets/sub/shell-AAA.js`, 'script'], [`${L}/assets/shell-AAA.js/../x.js`, 'script'], [`${L}/x`, 'websocket'],
+    [EVENTS_SCRIPT, 'stylesheet'], [`${L}/__l5e/other.js`, 'script'], [`${L}/__l5e/events.x.js/../evil.js`, 'script'], [`${L}/__l5e/events.Q1w2E3r4.js`, 'document', true],
+    [FLOCK_SCRIPT, 'stylesheet'], [`${L}/~flock.js`, 'document', true], [`${L}/~flockX.js`, 'script'], [`${L}/a/~flock.js`, 'script'], [`${L}/~flock.mjs`, 'script'], ['https://cdn.example.test/~flock.js', 'script'], [`${L}/elsewhere/shell-AAA.js`, 'script'], [`${L}/assets/sub/shell-AAA.js`, 'script'], [`${L}/assets/shell-AAA.js/../x.js`, 'script'], [`${L}/x`, 'websocket'],
     ['https://identitytoolkit.googleapis.com/x.js', 'script'], ['https://firestore.googleapis.com/', 'document', true], ['https://us-central1-westayfit-staging.cloudfunctions.net/x', 'image'],
     ['https://cdn.example.test/x.js', 'script'], ['https://fonts.googleapis.com/css', 'stylesheet'], ['https://evil.example.test/api', 'fetch'],
     ['https://we-stay-fit-foundation-trial.lovable.app.evil.test/', 'document', true], ['http://we-stay-fit-foundation-trial.lovable.app/', 'document', true], ['not a url', 'script'],
@@ -857,7 +873,7 @@ test('hostBuildRow and browserEnv: PASS needs the bind, a verified load and no r
   assert.equal(hostBuildRow({ status: 'PASS' }, { verified: 0, violations: [] }).status, 'FAIL');
   assert.equal(hostBuildRow({ status: 'PASS' }, { verified: 4, violations: ['script x'] }).status, 'FAIL');
   assert.equal(hostBuildRow({ status: 'PASS' }, { verified: 4, violations: [] }).status, 'PASS');
-  assert.match(hostBuildRow({ status: 'PASS' }, { verified: 4, violations: [], blocked: ['script a', 'script b'] }).seen, /2 host events script request\(s\) blocked, not run/);
+  assert.match(hostBuildRow({ status: 'PASS' }, { verified: 4, violations: [], blocked: ['script a', 'script b'] }).seen, /2 host script request\(s\) blocked, not run/);
   const env = browserEnv({ PATH: '/bin', HOME: '/h', WSF_RESULT_DIR: '/r', WSF_GOOGLE_ACCESS_TOKEN: 't', GOOGLE_APPLICATION_CREDENTIALS: '/k', GOOGLE_CLOUD_PROJECT: 'p', CLOUDSDK_AUTH_ACCESS_TOKEN_FILE: '/f', ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'o', ACTIONS_ID_TOKEN_REQUEST_URL: 'u', ACTIONS_RUNTIME_TOKEN: 'r', GITHUB_TOKEN: 'g', GH_TOKEN: 'h' });
   assert.deepEqual(env, { PATH: '/bin', HOME: '/h', WSF_RESULT_DIR: '/r' });
 });

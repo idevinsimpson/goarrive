@@ -52,11 +52,11 @@ The bind alone checks a separate, earlier fetch. The Lovable host is mutable, so
 
 **The canonical document** (`canonicalDocument(text, url)`) is what both the bind and the browser guard hash:
 1. **The URL must be a reviewed route template.** The templates are `ROUTE_TEMPLATES`: `/`, `/display/$goalId` and `/kiosk/$communityId/$goalId`. Those are every document the two proofs load (`/` also with an invite query). Each path param must be 12–128 characters of `A-Z a-z 0-9 _ -`, and no param may contain another. Fixture ids are `e5cgrp-…` and `e5cgoal-…`, about 30 characters.
-2. **The document must contain no NUL character.** The guard also requires valid UTF-8.
+2. **Every byte is literal, NUL included.** The first bind on the real host (run `38006215259`) found NUL characters in every document. The guard requires valid UTF-8.
 3. **The context token.** There must be exactly one `data-context-token=` in the document. Its value must be one quoted token of 8–4096 characters of `A-Z a-z 0-9 . _ ~ : + / = -`, and the attribute must close right after it. That value, and nothing else, is replaced by a fixed slot. A refusal names the kind of character found (quote, angle bracket, whitespace and so on), never the value.
 4. **The stream part.** There must be exactly one `<script … data-tsr-stream-part …>`. Inside it, every `u:` key (never the tail of another name such as `menu:`) must carry exactly 13 digits. Each is replaced by a fixed slot and counted. A `u:` anywhere else stays exact.
 5. **The URL's own params** go back into their template slots, longest first, and their occurrences are counted.
-6. **The digest** is the sha256 of the result. Every other byte is kept, so any other change alters it: a script, an attribute, route data, or a per-request value anywhere else.
+6. **The digest** is the sha256 of the result. The result is a list of literal text and slots, serialized as JSON, so no byte of a document can stand for a slot. Every other byte is kept, so any other change alters it: a script, an attribute, route data, or a per-request value anywhere else.
 
 **`REVIEWED_BUILD`** (shared: the device matrix re-exports the kiosk harness's, so both proofs use one pin, and a later publish needs one new value):
 - **`documents`:** template → `{ sha256, streamU }`, the canonical digest and the reviewed number of stream-part timestamps;
@@ -72,8 +72,12 @@ The bind alone checks a separate, earlier fetch. The Lovable host is mutable, so
 
 **The browser guard.**
 - **Documents.** A document must be a reviewed template, valid UTF-8, and must reduce for its own URL to the reviewed canonical document with the reviewed timestamp count. It is fulfilled with exactly the bytes read.
-- **The host's events script.** The injected `/__l5e/events.<id>.js` is **blocked**, never run, and is counted apart from refusals (host-build names the count). Only that exact path shape on the Lovable host is blocked, and only as a script. Any other `/__l5e/` script, the same path as a stylesheet or a document, or the same path on another origin is refused.
-- **Why it is blocked.** It is Lovable's injected script, not the app's. The document digest already binds its tag, and running it would execute host bytes outside the reviewed build, and could send events to an origin the guard refuses.
+- **The host's own scripts.** Two are **blocked**, never run, and counted apart from refusals (host-build names the count):
+  - the injected `/__l5e/events.<id>.js`;
+  - `/~flock.js`, which the first real-host bind found referenced by the documents.
+
+  Only those exact path shapes on the Lovable host are blocked, and only as scripts. Any other `/__l5e/` script, `/~flockX.js`, `/a/~flock.js`, either path as a stylesheet or a document, or either path on another origin is refused. The bind prints each one it would block.
+- **Why they are blocked.** They are Lovable's injected scripts, not the app's. The app reaches them only through optional calls (`window.__lovableEvents?.…`, `src/lib/lovable-error-reporting.ts` at `9b9eade5`), so blocking them changes no app behaviour. The document digest already binds their tags. Running them would execute host bytes outside the reviewed build, and could send events to an origin the guard refuses.
 
 **The negative mutations of the queue**, each refused by the guard with its reason, and each also giving a different canonical form at bind:
 - a changed script `src`;
@@ -90,9 +94,16 @@ The bind alone checks a separate, earlier fetch. The Lovable host is mutable, so
 - a param that is not the URL's (display, and kiosk with another community);
 - an unknown template (`/c/…/g/…`).
 
-Further refusals tested: a second token, no token, a NUL, a param too short to bind, overlapping params, and a document that is not UTF-8.
+Further refusals tested: a second token, no token, the only token inside the stream part, an added NUL (other bytes, so another digest), a param too short to bind, overlapping params, and a document that is not UTF-8. Also tested: literal text that spells a slot where another document has the id never reduces to the same document.
 
-**The pin's status in this change:** see the PR for the current head. It is empty until a bind **of this code** prints the manifest, because the per-template canonical digests are computed by this code from the served documents. The gate runs `38002199884` and `38002201983` (build `9b9eade5`, 23:00Z) printed the asset digests and the old single-digest probe: all three documents DIFFERENT. They cannot supply canonical digests. W4's session cannot reach the Lovable host (CONNECT 403), so the bind has to run where the host is reachable: the gate job of a dispatch on this branch, which is credential-free and stops at the bind by design.
+**The pin's status in this change:** see the PR for the current head. It is empty until a bind **of this code** prints the manifest, because the per-template canonical digests are computed by this code from the served documents. W4's session cannot reach the Lovable host (CONNECT 403), so the bind runs where the host is reachable: the gate job of a dispatch on this branch, which is credential-free and stops at the bind by design.
+- **Runs `38002199884` and `38002201983`** (build `9b9eade5`, 23:00Z, `main`'s code) printed the asset digests and the old single-digest probe: all three documents DIFFERENT. They cannot supply canonical digests.
+- **Run `38006215259`** (23:48Z, this branch at `88ccde75`, gate only) was the first bind of this code. It found three things:
+  - every document carries NUL characters, which that head refused;
+  - the documents reference `/~flock.js`, which that head refused;
+  - the 79 asset digests are the same set run `38002199884` printed.
+
+  The next commit takes the NULs as literal bytes and blocks `/~flock.js`. It needs a second bind.
 
 **Superseded elsewhere.** `docs/westayfit/qa/lovable-device-qa-1.md` (outside this packet's paths) describes the device matrix's old raw-bytes document probe. That probe is removed: the device matrix now uses this route-aware bind.
 
@@ -159,10 +170,11 @@ Every browser context is closed in `finally`, including on an early stop.
   - Updated: the journey verifies both kiosk-proof templates and blocks the host's events script on every page; the guard negatives name the template; `classifyRequest` covers templates, the events script and its look-alikes.
 - **`hosted-lovable-device-matrix.test.mjs`: 20 passed.** The pin is the kiosk harness's object. Each document the matrix loads is a reviewed template. The CLI prints the route-aware bind, and a display deep link carrying route data now **fails** the gate instead of being reported. The harness restates no part of the bind.
 - **`tests/workflow-contract.test.mjs`: 103 passed** (unchanged; no workflow change). **`tests/run-all.mjs`** (staging) and **`tools/wsf-control/run-all.mjs`**: all suites passed.
-- **Mutants of the new code: 33 of 34 killed.**
+- **Mutants of the new code: 39 of 40 killed.**
   - They include all the token, stream-part and param checks; the template match; the events-script block (its path shape, its type, and its counting); the UTF-8 check; the probe agreement; the reference check; the timestamp-count pin; and the probe-line query.
   - Two survivors of the first pass were real test gaps, and both are now killed: assets walked only from `/`, and the stream part read to the end of the document.
   - One defect was found in W4's own re-read and fixed: the stream part's end was looked up in a lower-cased copy of the document, whose length can differ (`İ`). Its mutant is killed.
+  - The mutants added for the real-host findings are all killed: slots back in-band (NUL markers), `/~flock.js` no longer blocked or its block broadened, the token or a `u:` cut one character short, a token inside the stream part admitted, and blocked host scripts not printed.
   - The survivor is equivalent: substituting params shortest first instead of longest first. The overlap check already refuses a param contained in another, and two ids cannot overlap in a document that separates them.
 
 **LOVABLE-KIOSK-HOSTED-PROOF-1** (the original packet; its single entry-page digest is superseded above):

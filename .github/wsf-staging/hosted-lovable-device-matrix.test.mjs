@@ -133,9 +133,9 @@ function servedDoc(pathname, extra = '') {
   const route = pathname === '/' ? '/' : segs[0] === 'display' ? '/display/$goalId' : '/kiosk/$communityId/$goalId';
   const ids = segs.slice(1);
   return `<!DOCTYPE html><html><head><link rel="stylesheet" href="/assets/index-CCC.css">`
-    + `<script src="/__l5e/events.Q1w2E3r4.js" data-context-token="ctx.${crypto.randomBytes(12).toString('base64url')}" defer></script></head>`
-    + `<body><main data-route="${route}"${ids.map((v, i) => ` data-p${i}="${v}"`).join('')}></main>${extra}`
-    + `<script data-tsr-stream-part="">$_TSR.router.matches=[{i:"__root__",u:${ts}},{i:"${route}${ids.length ? pathname : ''}",u:${ts}}]</script>`
+    + `<script src="/__l5e/events.Q1w2E3r4.js" data-context-token="ctx.${crypto.randomBytes(12).toString('base64url')}" defer></script><script src="/~flock.js" defer></script></head>`
+    + `<body><main data-route="${route}"${ids.map((v, i) => ` data-p${i}="${v}"`).join('')}>\u0000</main>${extra}`
+    + `<script data-tsr-stream-part="">$_TSR.router.matches=[{i:"__root__",u:${ts},x:"\u0000"},{i:"${route}${ids.length ? pathname : ''}",u:${ts}}]</script>`
     + `<script type="module" src="/assets/shell-AAA.js"></script></body></html>`;
 }
 const FAKE_ASSETS = { '/assets/shell-AAA.js': 'export const shell=1;', '/assets/index-CCC.css': 'body{}' };
@@ -145,6 +145,7 @@ const FAKE_REVIEWED = Object.freeze({
   assets: Object.freeze(Object.fromEntries(Object.entries(FAKE_ASSETS).map(([p, b]) => [p.slice(8), sha(b)]))),
 });
 const EVENTS_SCRIPT = `${LOVABLE_URL}/__l5e/events.Q1w2E3r4.js`;
+const FLOCK_SCRIPT = `${LOVABLE_URL}/~flock.js`;
 const TAG = 'e5c-mx1abc-0a1b2c';
 
 function twin(bug = {}) {
@@ -192,7 +193,7 @@ function twin(bug = {}) {
   }
   async function pageLoad(context, url) {
     if ((await load(context, url, 'document', true)) !== 'fulfilled') throw new Error(`page.goto: net::ERR_BLOCKED_BY_CLIENT at ${new URL(url).origin}${new URL(url).pathname}`);
-    const subs = [[EVENTS_SCRIPT, 'script'], [`${LOVABLE_URL}/assets/shell-AAA.js`, 'script'], [`${LOVABLE_URL}/assets/index-CCC.css`, 'stylesheet'], [`${LOVABLE_URL}/favicon.ico`, 'image']];
+    const subs = [[EVENTS_SCRIPT, 'script'], [FLOCK_SCRIPT, 'script'], [`${LOVABLE_URL}/assets/shell-AAA.js`, 'script'], [`${LOVABLE_URL}/assets/index-CCC.css`, 'stylesheet'], [`${LOVABLE_URL}/favicon.ico`, 'image']];
     if (bug.foreignOnJoin && new URL(url).searchParams.has('join')) subs.push(['https://cdn.example.test/join.js', 'script']);
     if (bug.foreignOnDisplay && new URL(url).pathname.startsWith('/display/')) subs.push(['https://cdn.example.test/display.js', 'script']);
     if (bug.foreignOnSecondInvite && new URL(url).searchParams.get('goal')?.endsWith('-dm2')) subs.push(['https://cdn.example.test/second.js', 'script']);
@@ -462,7 +463,7 @@ test('journey: every cell PASSES at all four viewports; each visitor is tracked 
   assert.doesNotMatch(doc, /@example\.com|Wsf!/);
   assert.equal(out.served.violations.length, 0);
   assert.ok(out.served.verified > 0);
-  assert.ok(out.served.blocked.length >= VIEWPORTS.length * 4 && out.served.blocked.every((w) => w === `script ${EVENTS_SCRIPT}`), 'the host events script is blocked on every page load, never run');
+  assert.ok(out.served.blocked.length >= VIEWPORTS.length * 8 && out.served.blocked.every((w) => w === `script ${EVENTS_SCRIPT}` || w === `script ${FLOCK_SCRIPT}`), 'the host\'s own scripts are blocked on every page load, never run');
 });
 
 test('journey negatives: each defect fails exactly the cell that measures it, at every viewport', async () => {

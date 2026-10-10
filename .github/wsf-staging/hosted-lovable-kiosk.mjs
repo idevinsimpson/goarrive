@@ -14,7 +14,7 @@
  *              fixtures with the EXISTING kit (journeys/fixture-kit.mjs) and drive the real Lovable UI. Every browser
  *              context routes every request through codeGuard: each document the browser loads must reduce to its
  *              template's reviewed canonical document, and each /assets/ script or stylesheet must carry its reviewed
- *              digest (both fulfilled with exactly the bytes read); the host's injected events script is blocked, and
+ *              digest (both fulfilled with exactly the bytes read); the host's own injected scripts are blocked, and
  *              nothing else executable is loaded; a refusal fails host-build and stops the journey before the next
  *              step. The browser runs with no cloud or workflow credential in its environment. Every row is PASS,
  *              FAIL or BLOCKED; results are written in `finally`; exit 0 only when every row passed.
@@ -148,8 +148,6 @@ export function matchTemplate(pathname) {
 
 /** A path param the guard can bind: a fixture-shaped id, long enough that it cannot stand for other text in a document. */
 const PARAM_RE = /^[A-Za-z0-9_-]{12,128}$/;
-/** A slot the canonical form puts where a normalized value or a param was. NUL never appears in a served document. */
-const SLOT = (name) => `\u0000wsf:${name}\u0000`;
 /** The host's context token: one quoted, token-shaped value, the attribute closed right after it. */
 const TOKEN_RE = /data-context-token="([A-Za-z0-9._~:+/=-]{8,4096})"(?=[\s/>])/g;
 const STREAM_OPEN_RE = /<script\b[^>]*?\sdata-tsr-stream-part(?=[\s=/>])[^>]*>/gi;
@@ -165,7 +163,8 @@ const outside = (v) => [[/"/, 'quote'], [/[<>]/, 'angle bracket'], [/\s/, 'white
  * count: the value of the host's one `data-context-token` attribute, and each `u:<13 digits>` inside the one
  * `data-tsr-stream-part` script. Then each of the URL's own path params is put back into its template slot. Every
  * other byte is kept, so any other difference (a script, an attribute, route data, a per-request value elsewhere)
- * changes the digest. Nothing returned carries the token's value.
+ * changes the digest. The form is a list of literal text and slots, hashed as JSON, so no byte of a document (a NUL
+ * included) can stand for a slot. Nothing returned carries the token's value.
  */
 export function canonicalDocument(text, url) {
   let u;
@@ -176,17 +175,19 @@ export function canonicalDocument(text, url) {
   const params = Object.entries(m.params);
   if (params.some(([, v]) => !PARAM_RE.test(v))) return fail('a path param the guard cannot bind (it must be 12-128 of A-Z, a-z, 0-9, _ and -)');
   if (params.some(([, v], i) => params.some(([, w], j) => i !== j && w.includes(v)))) return fail('two path params overlap');
-  let doc = String(text);
-  if (doc.includes('\u0000')) return fail('the document carries a NUL character');
+  const doc = String(text);
+  const cuts = []; // [start, end, slot]: the byte ranges a slot replaces
   // 1. The host's context token: exactly one attribute, with exactly one token-shaped value.
   const attrs = doc.split('data-context-token=').length - 1;
   if (attrs !== 1) return fail(`${attrs} data-context-token attributes, not exactly 1`);
-  if ([...doc.matchAll(TOKEN_RE)].length !== 1) {
+  const tokens = [...doc.matchAll(TOKEN_RE)];
+  if (tokens.length !== 1) {
     const raw = /data-context-token=("?)([^]{0,4097}?)(?:"|$)/.exec(doc);
     const bad = raw?.[1] === '"' ? outside(raw[2]) : ['no opening quote'];
     return fail(`the data-context-token value is not one quoted token closed by the end of its attribute (${bad.length ? bad.join(', ') : 'the attribute is not closed after the value, or the value is not 8-4096 characters'})`);
   }
-  doc = doc.replace(TOKEN_RE, `data-context-token="${SLOT('token')}"`);
+  const at = tokens[0].index + 'data-context-token="'.length;
+  cuts.push([at, at + tokens[0][1].length, 'token']);
   // 2. TanStack's stream part: exactly one script, and every u: in it is 13 digits.
   const opens = [...doc.matchAll(STREAM_OPEN_RE)];
   if (opens.length !== 1) return fail(`${opens.length} data-tsr-stream-part scripts, not exactly 1`);
@@ -195,20 +196,31 @@ export function canonicalDocument(text, url) {
   close.lastIndex = start;
   const end = close.exec(doc)?.index ?? -1;
   if (end < 0) return fail('the data-tsr-stream-part script is not closed');
+  if (at >= start && at < end) return fail('the data-context-token attribute is inside the stream part');
   let streamU = 0;
   let nonDigit = 0;
-  const part = doc.slice(start, end).replace(STREAM_U_RE, (all, ts) => { streamU += 1; if (!ts) nonDigit += 1; return `u:${SLOT('u')}`; });
+  for (const x of doc.slice(start, end).matchAll(STREAM_U_RE)) {
+    streamU += 1;
+    if (!x[1]) nonDigit += 1; else cuts.push([start + x.index + 2, start + x.index + 2 + 13, 'u']);
+  }
   if (nonDigit) return fail(`${nonDigit} of the ${streamU} u: values in the stream part are not 13 digits`);
   if (!streamU) return fail('the stream part carries no u: value');
-  doc = `${doc.slice(0, start)}${part}${doc.slice(end)}`;
-  // 3. The URL's own params back into their slots, longest first.
+  // 3. Literal text between the cuts, then the URL's own params, longest first, as slots in the literal text only.
+  let parts = [];
+  let from = 0;
+  for (const [a, b, slot] of cuts.sort((x, y) => x[0] - y[0])) { parts.push(doc.slice(from, a), { slot }); from = b; }
+  parts.push(doc.slice(from));
   const counts = {};
-  for (const [name, v] of [...params].sort((a, b) => b[1].length - a[1].length)) {
-    const pieces = doc.split(v);
-    counts[name] = pieces.length - 1;
-    doc = pieces.join(SLOT(`param:${name}`));
+  for (const [name, v] of [...params].sort((x, y) => y[1].length - x[1].length)) {
+    counts[name] = 0;
+    parts = parts.flatMap((p) => {
+      if (typeof p !== 'string') return [p];
+      const pieces = p.split(v);
+      counts[name] += pieces.length - 1;
+      return pieces.flatMap((q, i) => (i ? [{ slot: `param:${name}` }, q] : [q]));
+    });
   }
-  return { template: m.template, sha256: sha256(Buffer.from(doc, 'utf8')), streamU, params: counts };
+  return { template: m.template, sha256: sha256(Buffer.from(JSON.stringify(parts), 'utf8')), streamU, params: counts };
 }
 
 /** The script and stylesheet references a document itself makes (src of a script; href of a stylesheet or modulepreload link). */
@@ -275,8 +287,10 @@ export async function servedManifest(fetchImpl, base = LOVABLE_URL) {
     if (p.endsWith('.js')) for (const r of refs(body.toString('utf8'), true)) if (!Object.hasOwn(assets, r.slice(8)) && !queue.includes(r)) queue.push(r);
   }
   if (!Object.keys(assets).length) throw new Error('the served documents name no asset');
-  const refusals = [...new Set(tags.map((x) => classifyRequest({ ...x, navigation: false }, { documents: {}, assets })).filter((c) => c.action === 'abort').map((c) => c.reason))];
-  return { documents, assets: Object.fromEntries(Object.entries(assets).sort(([a], [b]) => (a < b ? -1 : 1))), probes, refusals };
+  const classified = tags.map((x) => classifyRequest({ ...x, navigation: false }, { documents: {}, assets }));
+  const refusals = [...new Set(classified.filter((c) => c.action === 'abort').map((c) => c.reason))];
+  const blocked = [...new Set(classified.filter((c) => c.action === 'block').map((c) => c.what))];
+  return { documents, assets: Object.fromEntries(Object.entries(assets).sort(([a], [b]) => (a < b ? -1 : 1))), probes, refusals, blocked };
 }
 
 const pinnedDocument = (d) => /^[0-9a-f]{64}$/.test(String(d?.sha256)) && Number.isInteger(d?.streamU) && d.streamU > 0;
@@ -300,7 +314,8 @@ export function bindBuild(observed, reviewed = REVIEWED_BUILD) {
 
 /**
  * The lines a bind prints: the verdict, each template's canonical document, each probe load, any reference the guard
- * would refuse, each asset, and, when every template is bound, the whole manifest as one JSON line to pin. Templates,
+ * would refuse, each host script it would block, each asset, and, when every template is bound, the whole manifest as
+ * one JSON line to pin. Templates,
  * fixed probe paths, names, counts and digests only: never a document's bytes or the token's value.
  */
 export function bindLines(observed, verdict) {
@@ -315,6 +330,7 @@ export function bindLines(observed, verdict) {
     lines.push(`LOVABLE_DOCUMENT_PROBE ${where} ${p.sha256 ? `${p.template} ${p.sha256} u=${p.streamU} params=${JSON.stringify(p.params)}` : `refused (${p.reason})`}`);
   }
   for (const r of observed.refusals ?? []) lines.push(`LOVABLE_DOCUMENT_REFUSED_REFERENCE ${r}`);
+  for (const w of observed.blocked ?? []) lines.push(`LOVABLE_DOCUMENT_BLOCKED_HOST_SCRIPT ${w}`);
   for (const [n, d] of Object.entries(observed.assets ?? {})) lines.push(`LOVABLE_OBSERVED_ASSET ${n} ${d}`);
   if (ROUTE_TEMPLATES.every((t) => pinnedDocument(observed.documents?.[t]))) {
     lines.push(`LOVABLE_OBSERVED_BUILD ${JSON.stringify({ documents: Object.fromEntries(ROUTE_TEMPLATES.map((t) => [t, { sha256: observed.documents[t].sha256, streamU: observed.documents[t].streamU }])), assets: observed.assets })}`);
@@ -324,13 +340,17 @@ export function bindLines(observed, verdict) {
 
 const PASSIVE_TYPES = new Set(['image', 'font', 'media', 'manifest', 'texttrack', 'xhr', 'fetch', 'eventsource']);
 const DATA_TYPES = new Set(['xhr', 'fetch', 'eventsource']);
-/** The host's injected events script, the tag that carries the context token: blocked, never run, never a refusal. */
-const HOST_EVENTS_SCRIPT = /^\/__l5e\/events\.[A-Za-z0-9_-]+\.js$/;
+/**
+ * The Lovable host's own injected scripts, never the app's: the events script whose tag carries the context token, and
+ * `/~flock.js` (seen in the documents by the bind of run 38006215259). The app reaches them only through optional calls
+ * (`window.__lovableEvents?.…`), so they are blocked: never fetched or run, and never a refusal. Exact paths, scripts only.
+ */
+const HOST_SCRIPTS = Object.freeze([/^\/__l5e\/events\.[A-Za-z0-9_-]+\.js$/, /^\/~flock\.js$/]);
 /**
  * What the browser may load (#589 W9 finding #497 6051520120: the digest must bind what EXECUTES, not a neighbouring
  * fetch). On the Lovable host: every document (each navigation, deep links included) must be a reviewed route template
  * and is verified against that template's reviewed canonical document; every script or stylesheet must be a reviewed
- * /assets/ file with its reviewed digest, except the host's injected events script, which is blocked and never run;
+ * /assets/ file with its reviewed digest, except the host's own injected scripts, which are blocked and never run;
  * passive types pass. Elsewhere: only data requests to API_ORIGINS pass. Everything else is refused. `what` never
  * carries a query.
  */
@@ -344,7 +364,7 @@ export function classifyRequest({ url, type, navigation }, reviewed = REVIEWED_B
       return m ? { action: 'verify', kind: 'document', template: m.template, want: reviewed?.documents?.[m.template] ?? null, what } : { action: 'abort', reason: `${what} is not a reviewed route template` };
     }
     if (type === 'script' || type === 'stylesheet') {
-      if (type === 'script' && HOST_EVENTS_SCRIPT.test(u.pathname)) return { action: 'block', what };
+      if (type === 'script' && HOST_SCRIPTS.some((re) => re.test(u.pathname))) return { action: 'block', what };
       const name = /^\/assets\/([A-Za-z0-9_.-]+)$/.exec(u.pathname)?.[1];
       return name && Object.hasOwn(reviewed?.assets ?? {}, name) ? { action: 'verify', kind: 'asset', want: reviewed.assets[name], what } : { action: 'abort', reason: `${what} is not a reviewed asset` };
     }
@@ -359,7 +379,7 @@ export function classifyRequest({ url, type, navigation }, reviewed = REVIEWED_B
  * around it). A verified response is fetched once and fulfilled with exactly the bytes read: an asset only when those
  * bytes carry its reviewed digest, a document only when they are valid UTF-8 and reduce, for the URL requested, to its
  * template's reviewed canonical document with the reviewed number of stream-part timestamps. A redirect, an error
- * status, other bytes, an unreviewed or foreign script or document is aborted and recorded; the host's events script is
+ * status, other bytes, an unreviewed or foreign script or document is aborted and recorded; a host script is
  * aborted and counted as blocked. `check()` throws once anything was refused, so the journey stops before the next step
  * (a sign-in included).
  */
@@ -402,7 +422,7 @@ export function hostBuildRow(bind, served) {
   if (bind?.status !== 'PASS') return { status: bind?.status ?? 'FAIL', seen: bind?.reason ?? 'no bind verdict' };
   if (served?.violations?.length) return { status: 'FAIL', seen: `bind matched, but the browser was served ${served.violations.length} unreviewed request(s): ${served.violations.slice(0, 3).join('; ')}` };
   if (!(served?.verified > 0)) return { status: 'FAIL', seen: 'bind matched, but the browser loaded no verified document' };
-  return { status: 'PASS', seen: `bind matched; ${served.verified} document/asset response(s) the browser loaded matched their reviewed digests; ${served.blocked?.length ?? 0} host events script request(s) blocked, not run; nothing else executable was loaded` };
+  return { status: 'PASS', seen: `bind matched; ${served.verified} document/asset response(s) the browser loaded matched their reviewed digests; ${served.blocked?.length ?? 0} host script request(s) blocked, not run; nothing else executable was loaded` };
 }
 
 /** A --run's results: the journey's rows and the CLI's own, with host-build always from the bind AND what the browser was served. */
