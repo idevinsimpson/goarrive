@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "701b39e59d52eb8e896ac5eaed6e2b6c65f515365e9f7f7b8ee0cf0c70935274",
-  "eventCount": 1249,
+  "ledgerHead": "c63bc3f3a3e7b208e1f100a038df70b5baffb800e71fd873284c9a20864b78ba",
+  "eventCount": 1252,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -20,7 +20,7 @@
   "canonical": {
     "developmentBranch": "claude/wsf-app-shell",
     "developmentSha": "8a067b29420563408e16cff5d91cc77b2ad0fbd8",
-    "operationalMain": "4da578d7f00c221544a2b3d1e9891e06bc4f524e"
+    "operationalMain": "be45236ea92771319e45e0f84199cfc849f9b5f5"
   },
   "staging": {
     "servedSha": "ec162d17a0540e936741027f9b8f90dd372cfaf4",
@@ -3022,7 +3022,7 @@
       },
       "label": "Fix the hosted regression on main 4da578d7 (run 38079242076): qr-join polls for the choice; the station turn starts from the served member or newcomer path, not a literal Join",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 394,
@@ -3034,7 +3034,7 @@
         "subjectSha": "ba103116ffb48fc4d83cc138e3ff000a024b9fd4",
         "prHeadSha": "ba103116ffb48fc4d83cc138e3ff000a024b9fd4",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "be45236ea92771319e45e0f84199cfc849f9b5f5"
       },
       "proof": null,
       "served": null,
@@ -3058,10 +3058,13 @@
           "kind": "comment",
           "id": 6101324338
         },
-        "accepted": null,
-        "lastTransition": {
+        "accepted": {
           "kind": "comment",
-          "id": 6102210607
+          "id": 6102363325
+        },
+        "lastTransition": {
+          "kind": "pull_request",
+          "id": 620
         }
       },
       "review": {
