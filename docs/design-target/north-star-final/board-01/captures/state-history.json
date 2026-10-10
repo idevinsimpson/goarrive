@@ -1,0 +1,14 @@
+{
+  "note": "Synthetic emulator fixture — not real members or activity.",
+  "groupId": "ns01hmucz8bf832c1af",
+  "reached": {
+    "goalId": "ns01hmucz8bf832c1afcr",
+    "total": 515,
+    "target": 500
+  },
+  "short": {
+    "goalId": "ns01hmucz8bf832c1afcu",
+    "total": 90,
+    "target": 400
+  }
+}
