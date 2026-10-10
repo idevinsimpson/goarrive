@@ -11,7 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   API_ORIGINS, BIND_PROBES, EVIDENCE_SCAN_RULES, FIXED_BLOCKED, LOVABLE_URL, ROUTE_TEMPLATES, SEEN_MAX, assetTypeProblem, callableLog, canonicalDocument, cli, REVIEWED_BUILD, ROWS, allPassed, bindBuild,
-  bindLines, browserEnv, checkBase, classifyRequest, codeGuard, logSafe, documentTypeProblem, hostBuildRow, idHash, matchTemplate, mergeIntoManifest, ownCreditOf, receiptVerdict,
+  bindLines, browserEnv, checkBase, classifyRequest, codeGuard, logSafe, productDocsSeen, qrJoinProblem, documentTypeProblem, hostBuildRow, idHash, matchTemplate, mergeIntoManifest, ownCreditOf, receiptVerdict,
   requireVerdict, results, runJourney, runResults, seenLine, servedManifest, sharedOf, showsNumber,
 } from '../hosted-lovable-kiosk.mjs';
 
@@ -583,20 +583,22 @@ test('cleanup merge: run-tagged product documents are added once; anything untag
  * together, progress, menu). One server; each context has its own storage. Every callable is a request object with
  * its OWN response, delivered to the page's listeners in that order. `bug` switches on one defect at a time.
  */
-/** The served build the fake host serves, and its reviewed manifest (what a pinned REVIEWED_BUILD would hold). */
-const FAKE_ASSETS = { '/assets/shell-AAA.js': 'export const shell=1;', '/assets/kiosk-BBB.js': 'export const kiosk=1;', '/assets/index-CCC.css': 'body{}' };
+/** The served build the fake host serves, and its reviewed manifest (what a pinned REVIEWED_BUILD would hold). The shell imports its kiosk chunk, so a bind of the fake host finds all three. */
+const FAKE_ASSETS = { '/assets/shell-AAA.js': 'import("./kiosk-BBB.js");export const shell=1;', '/assets/kiosk-BBB.js': 'export const kiosk=1;', '/assets/index-CCC.css': 'body{}' };
 const FAKE_REVIEWED = Object.freeze({ documents: DOCS, assets: Object.freeze(Object.fromEntries(Object.entries(FAKE_ASSETS).map(([p, b]) => [p.slice(8), sha(b)]))) });
 const EVENTS_SCRIPT = `${LOVABLE_URL}/__l5e/events.a1b2c3d4e5f60718.js`;
 const FLOCK_SCRIPT = `${LOVABLE_URL}/~flock.js`;
 
 /** The kit's verified member of the event community (the phone control), and the member's other goal, read alongside. */
 const CONTROL_UID = 'uid-lk-a0';
+/** The join code the fake kit wrote for its public event; the kiosk's QR carries it unless a defect says otherwise. */
+const KIT_JOIN_CODE = 'JOINCODE0123456789';
 const OTHER_GOAL = 'e5cgoal-other-community';
 
 function lovable(bug = {}) {
   const goalId = 'e5cgoal-e5c-t-1-lk';
   const groupId = 'e5cgrp-e5c-t-1-lk';
-  const server = { shared: 100, own: {}, members: new Set(), contributions: 0, approved: false, requests: [], contextOpts: [], routed: 0, docs: 0, loads: [], passwordFills: 0 };
+  const server = { shared: 100, own: {}, members: new Set(), contributions: 0, approved: false, requests: [], contextOpts: [], routed: 0, docs: 0, loads: [], passwordFills: 0, refused: 0, fillsAfterRefusal: 0 };
   const accounts = {};
   let ctxCount = 0;
   /** What the host answers for one URL. Drift, a different deep link, a redirect and a changed chunk are switchable. */
@@ -631,6 +633,8 @@ function lovable(bug = {}) {
     assert.equal(context.handlers.length, 1, 'every context routes every request through the guard');
     server.routed += 1;
     await context.handlers[0](route);
+    // A refusal of anything but the host's own blocked scripts: from here on, nothing may be typed anywhere.
+    if (outcome === 'aborted' && url !== EVENTS_SCRIPT && url !== FLOCK_SCRIPT) server.refused += 1;
     return outcome;
   }
   /** A page load: the document, then what it loads (the kiosk chunk on the kiosk route), plus any injected defect. */
@@ -710,9 +714,10 @@ function lovable(bug = {}) {
         async count() {
           switch (key) {
             case 'testid:kiosk-pair-code': return view === 'kiosk' ? 1 : 0;
-            // The kit's community is private: the served kiosk shows no join code unless a link-joinable community is faked.
-            case 'css:svg[data-testid="kiosk-qr"]': return view === 'kiosk' && server.approved && bug.linkJoinable ? 1 : 0;
-            case 'text:This goal has no join code to show.': return view === 'kiosk' && server.approved && !bug.linkJoinable ? 1 : 0;
+            // The kit's event is public (link-joinable), so the served kiosk shows the newcomer QR; `noQr` fakes a station
+            // that returns no join code all the same.
+            case 'css:svg[data-testid="kiosk-qr"]': return view === 'kiosk' && server.approved && !bug.noQr ? 1 : 0;
+            case 'text:This goal has no join code to show.': return view === 'kiosk' && server.approved && bug.noQr ? 1 : 0;
             case 'css:[data-connected-join]': case 'role:Join': return uid() && store.session['wsf.pendingJoinCode'] && !bug.noJoinButton ? 1 : 0;
             case 'testid:join-move-phone': return view === 'choose' ? 1 : 0;
             case 'css:section.together-receipt': return move === 'receipt' ? 1 : 0;
@@ -731,13 +736,13 @@ function lovable(bug = {}) {
           return '';
         },
         async getAttribute(name) {
-          if (name === 'data-join-url') return `${bug.qrOrigin ?? LOVABLE_URL}/?join=JOINCODE0123456789&goal=${goalId}`;
+          if (name === 'data-join-url') return `${bug.qrOrigin ?? LOVABLE_URL}/?join=${bug.qrJoin ?? KIT_JOIN_CODE}&goal=${bug.qrGoal ?? goalId}`;
           if (name === 'data-attempt') return bug.otherAttempt ? 'attempt-other0000' : attempt;
           return null;
         },
         async fill(v) {
           if (key === 'label:Email') email = v;
-          else if (key === 'label:Password') { server.passwordFills += 1; if (accounts[email]?.password !== v) throw new Error('wrong password'); }
+          else if (key === 'label:Password') { server.passwordFills += 1; if (server.refused) server.fillsAfterRefusal += 1; if (accounts[email]?.password !== v) throw new Error('wrong password'); }
           else typed = Number(v);
         },
         async click() {
@@ -812,11 +817,11 @@ function lovable(bug = {}) {
   const tracked = { contributions: [], approvals: 0 };
   const fixtures = {
     async expoEvent(label, opts) {
-      assert.deepEqual(opts, { attendees: 1, target: 1000, seeded: 100 }, 'one verified member for the control, made by the kit');
+      assert.deepEqual(opts, { attendees: 1, target: 1000, seeded: 100, joinPolicy: 'public' }, 'the kit\'s public event, with one verified member for the control');
       const m = { uid: CONTROL_UID, email: 'wsf-e5c-t-1-lk-a0-ab12@example.com', password: 'pw-lk-a0' };
       accounts[m.email] = m;
       server.members.add(m.uid);
-      return { setupId: `${label}: one synthetic community, one open squats goal, a Champion and 1 attendee`, groupId, goalId, attendees: [m] };
+      return { setupId: `${label}: one synthetic public community, one open squats goal, a Champion and 1 attendee`, groupId, goalId, attendees: [m], ...(bug.kitNoJoinCode ? {} : { joinCode: KIT_JOIN_CODE }) };
     },
     async memberInTwoCommunities(label) { const m = { uid: `uid-${label}`, email: `wsf-e5c-t-1-${label}@example.com`, password: `pw-${label}` }; accounts[m.email] = m; return { member: m }; },
     async approveStation(ev, code, slot) { assert.equal(code, 'ABC234'); assert.equal(slot, 1); server.approved = !bug.approvalLost; tracked.approvals += 1; return { stationId: 's1', slot }; },
@@ -829,7 +834,7 @@ const statusOf = (rows, id) => rows[id]?.status;
 const PHONE_ROWS = ['contribution-7', 'operation-receipt', 'own-history-shared', 'reopen-static', 'account-isolation'];
 const PASSING = ['fixture-provenance', ...PHONE_ROWS];
 
-test('journey with the kit\'s real shape (#589 W4 F1): qr-join BLOCKED by name for the private community; the verified-member control records 7 once, re-reads, reopens static, and control -> B -> control stays isolated', async () => {
+test('journey with the kit\'s real shape (#589 W4 F1, LOVABLE-KIOSK-QR-JOIN-1): A joins the public event through the QR carrying its own join code; the verified-member control records 7 once, re-reads, reopens static, and control -> B -> control stays isolated', async () => {
   const L = lovable();
   const { rows, productDocs, served } = await runJourney({ browser: L.browser, fixtures: L.fixtures, base: LOVABLE_URL, reviewed: FAKE_REVIEWED });
   assert.deepEqual(served.violations, [], 'the browser loaded only the reviewed build');
@@ -842,30 +847,53 @@ test('journey with the kit\'s real shape (#589 W4 F1): qr-join BLOCKED by name f
   assert.ok(served.blocked.length > 0 && served.blocked.every((w) => w === `script ${EVENTS_SCRIPT}` || w === `script ${FLOCK_SCRIPT}`), 'the host\'s own scripts are blocked on every page, never run');
   assert.equal(served.blocked.filter((w) => w === `script ${FLOCK_SCRIPT}`).length, served.blocked.filter((w) => w === `script ${EVENTS_SCRIPT}`).length);
   assert.ok(!L.server.loads.some((x) => x.url === EVENTS_SCRIPT || x.url === FLOCK_SCRIPT), 'and never fulfilled');
+  assert.equal(L.server.refused, 0, 'nothing but the host\'s own scripts is refused, so the guard negatives\' refusal count is the defect\'s');
   assert.ok(L.server.loads.filter((x) => x.type === 'document').every((x) => x.contentType === 'text/html; charset=utf-8' && x.kept === 'lovable'), 'every document is fulfilled as UTF-8 HTML, its other headers kept');
   assert.ok(L.server.loads.filter((x) => x.type !== 'document').every((x) => x.contentType === null), 'an asset keeps its own response headers');
   assert.ok(L.server.contextOpts.length === L.opened() && L.server.contextOpts.every((o) => o.serviceWorkers === 'block'), 'no service worker can answer around the guard');
-  assert.equal(statusOf(rows, 'qr-join'), 'BLOCKED');
-  assert.match(rows['qr-join'].seen, /only private communities \(joinPolicy private\).*no newcomer QR/);
-  for (const id of PASSING) assert.equal(statusOf(rows, id), 'PASS', `${id}: ${rows[id]?.seen}`);
+  for (const id of ['qr-join', ...PASSING]) assert.equal(statusOf(rows, id), 'PASS', `${id}: ${rows[id]?.seen}`);
+  assert.match(rows['qr-join'].seen, /^join into this community, alreadyMember=false; phone choice shown$/);
+  assert.match(rows['fixture-provenance'].seen, /one synthetic public community/);
   for (const id of PHONE_ROWS) assert.match(rows[id].seen, /^control \(the kit's verified member\)/, `${id} names who measured it`);
   assert.equal(L.tracked.approvals, 1, 'the kiosk is approved as fixture preparation');
   assert.equal(L.server.contributions, 1, 'exactly one contribution');
   assert.deepEqual(L.tracked.contributions, [[CONTROL_UID, 'attempt-1abcdefgh']], 'the attempt is tracked from its request');
-  assert.deepEqual(productDocs, [], 'no join happened, so no membership is product-written');
+  assert.deepEqual(productDocs, ['wsfMemberships/e5cgrp-e5c-t-1-lk_uid-lka'], 'A\'s product-written membership is tracked from the join request');
   assert.ok(L.server.requests.some((x) => x.data?.goalId === OTHER_GOAL), 'the other goal\'s reads were in flight, interleaved');
   assert.equal(L.browser.closed, L.opened(), 'every context is closed');
   for (const id of Object.keys(FIXED_BLOCKED)) assert.equal(rows[id], undefined, `${id} is never measured by the journey`);
   assert.doesNotMatch(JSON.stringify(results(rows)), /pw-lk|@example\.com|uid-lk|JOINCODE/, 'no password, email, raw uid or join code in the results');
 });
 
-test('journey with a link-joinable community: A joins through the QR (membership tracked), and the phone rows are still the control\'s', async () => {
-  const L = lovable({ linkJoinable: true });
-  const { rows, productDocs } = await runJourney({ browser: L.browser, fixtures: L.fixtures, base: LOVABLE_URL, reviewed: FAKE_REVIEWED });
-  for (const id of ['qr-join', ...PASSING]) assert.equal(statusOf(rows, id), 'PASS', `${id}: ${rows[id]?.seen}`);
-  assert.deepEqual(productDocs, ['wsfMemberships/e5cgrp-e5c-t-1-lk_uid-lka'], 'the join\'s membership is tracked from its request');
+test('cli --run with the public event (LOVABLE-KIOSK-QR-JOIN-1): A\'s QR-join membership reaches the cleanup manifest, and cleanup-tracking names it', async () => {
+  const L = lovable();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-lk-run-'));
+  const sdkFile = path.join(dir, 'sdk.json');
+  fs.writeFileSync(sdkFile, JSON.stringify({ projectId: 'westayfit-staging', apiKey: 'fake-api-key' }));
+  const manifest = path.join(dir, 'cleanup.json');
+  fs.writeFileSync(manifest, JSON.stringify({ runTag: 'e5c-t-1', docs: ['wsfGoals/e5cgoal-e5c-t-1-lk'] }));
+  const env = { WSF_LOVABLE_URL: LOVABLE_URL, WSF_PROJECT: 'westayfit-staging', WSF_RESULT_DIR: dir, WSF_SDK_CONFIG_FILE: sdkFile, WSF_GOOGLE_ACCESS_TOKEN: 'fake-token', WSF_CLEANUP_MANIFEST: manifest };
+  let closed = 0;
+  const lines = [];
+  await cli('--run', env, {
+    fetchImpl: site({ doc: (p) => servedDoc(p), assets: FAKE_ASSETS }).fetchImpl,
+    reviewed: FAKE_REVIEWED,
+    importKit: async () => ({ createFixtureKit: () => L.fixtures }),
+    launch: async () => ({ newContext: (o) => L.browser.newContext(o), close: async () => { closed += 1; } }),
+    say: (l) => lines.push(l),
+  });
+  assert.equal(lines[0].startsWith('LOVABLE_BUILD=PASS'), true, lines[0]);
+  const rows = Object.fromEntries(JSON.parse(fs.readFileSync(path.join(dir, 'lovable-kiosk', 'results.json'), 'utf8')).rows.map((r) => [r.id, r]));
+  for (const id of ['host-build', 'qr-join', ...PASSING]) assert.equal(rows[id].status, 'PASS', `${id}: ${rows[id].seen}`);
+  assert.deepEqual(JSON.parse(fs.readFileSync(manifest, 'utf8')).docs, ['wsfGoals/e5cgoal-e5c-t-1-lk', 'wsfMemberships/e5cgrp-e5c-t-1-lk_uid-lka'], 'A\'s membership is added to the cleanup manifest');
+  const named = '1 product-written document(s) added (visitor A\'s membership of the event community, from the QR join); 2 in the manifest';
+  assert.deepEqual([rows['cleanup-tracking'].status, rows['cleanup-tracking'].seen], ['PASS', named]);
+  const at = lines.indexOf('LOVABLE_ROW cleanup-tracking=PASS');
+  assert.equal(lines[at + 1], `LOVABLE_SEEN cleanup-tracking ${named}`);
   assert.deepEqual(L.tracked.contributions, [[CONTROL_UID, 'attempt-1abcdefgh']]);
-  assert.equal(L.browser.closed, L.opened());
+  assert.equal(L.browser.closed, L.opened(), 'every context is closed');
+  assert.equal(closed, 1, 'and the browser');
+  assert.doesNotMatch(lines.join('\n'), /uid-lka|e5cgrp|JOINCODE|fake-token|fake-api-key/, 'no id, join code or credential is printed');
 });
 
 test('journey negatives: each defect fails exactly the row that measures it; a failed QR join never erases the phone control', async () => {
@@ -874,8 +902,10 @@ test('journey negatives: each defect fails exactly the row that measures it; a f
     [{ unit: 'reps' }, 'operation-receipt'], [{ otherAttempt: true }, 'contribution-7'], [{ otherGoal: true }, 'contribution-7'],
     [{ rowTotal: 1 }, 'own-history-shared'], [{ replayReceipt: true }, 'reopen-static'], [{ resendOnReopen: true }, 'reopen-static'],
     [{ pendingLeft: true }, 'reopen-static'], [{ bReadsA: true }, 'account-isolation'], [{ bSeesRow: true }, 'account-isolation'],
-    [{ aReturnsAs: 'uid-someone-else' }, 'account-isolation'], [{ linkJoinable: true, otherGroup: true }, 'qr-join'], [{ linkJoinable: true, noJoinButton: true }, 'qr-join'],
-    [{ linkJoinable: true, qrOrigin: 'https://evil.example.test' }, 'qr-join'], [{ linkJoinable: true, alreadyMember: true }, 'qr-join'], [{ doubleSend: true }, 'contribution-7'],
+    [{ aReturnsAs: 'uid-someone-else' }, 'account-isolation'], [{ otherGroup: true }, 'qr-join'], [{ noJoinButton: true }, 'qr-join'],
+    [{ qrOrigin: 'https://evil.example.test' }, 'qr-join'], [{ alreadyMember: true }, 'qr-join'], [{ doubleSend: true }, 'contribution-7'],
+    // LOVABLE-KIOSK-QR-JOIN-1: a QR with another community's code, another goal, no QR on the public event, no kit code.
+    [{ qrJoin: 'OTHERCODE0123456789' }, 'qr-join'], [{ qrGoal: 'e5cgoal-other' }, 'qr-join'], [{ noQr: true }, 'qr-join'], [{ kitNoJoinCode: true }, 'qr-join'],
     [{ receiptOwn: 8 }, 'own-history-shared'], [{ pulseDrift: 5 }, 'own-history-shared'], [{ aOwnOnReturn: 3 }, 'account-isolation'],
     [{ controlSignInFails: true }, 'contribution-7'],
   ];
@@ -883,11 +913,51 @@ test('journey negatives: each defect fails exactly the row that measures it; a f
     const L = lovable(bug);
     const { rows } = await runJourney({ browser: L.browser, fixtures: L.fixtures, base: LOVABLE_URL, reviewed: FAKE_REVIEWED });
     assert.equal(statusOf(rows, row), 'FAIL', `${JSON.stringify(bug)} must fail ${row}: ${rows[row]?.seen}`);
-    if (bug.qrOrigin) assert.match(rows['qr-join'].seen, /the QR carries no same-host join link/, 'refused by the QR check itself, before any navigation');
+    if (bug.qrOrigin || bug.qrGoal) assert.match(rows['qr-join'].seen, /the QR carries no same-host join link/, 'refused by the QR check itself, before any navigation');
+    if (bug.qrJoin) assert.equal(rows['qr-join'].seen, 'the QR\'s join code is not this community\'s (neither code is printed)');
+    if (bug.noQr) assert.equal(rows['qr-join'].seen, 'the kiosk of this public (link-joinable) event shows "This goal has no join code to show."', 'a FAIL that names what was seen, never BLOCKED');
+    if (bug.kitNoJoinCode) assert.equal(rows['qr-join'].seen, 'the kit returned no join code for its public event');
+    if (bug.alreadyMember) assert.match(rows['qr-join'].seen, /alreadyMember=true/);
+    if (bug.noJoinButton) assert.equal(rows['qr-join'].seen, 'no Join for a visitor who is not a member');
+    if (row === 'qr-join') assert.doesNotMatch(JSON.stringify(results(rows)), /JOINCODE|OTHERCODE/, 'no join code is ever printed');
     if (bug.controlSignInFails) for (const id of PHONE_ROWS) assert.match(rows[id].seen, /the control member's sign-in did not complete/, `${id}: nothing is measured as an unknown identity`);
     if (row === 'qr-join') for (const id of PHONE_ROWS) assert.equal(statusOf(rows, id), 'PASS', `${JSON.stringify(bug)}: the control's ${id} still stands`);
     assert.equal(L.browser.closed, L.opened(), `${JSON.stringify(bug)}: every context is closed`);
   }
+});
+
+test('qrJoinProblem (LOVABLE-KIOSK-QR-JOIN-1): the QR must carry exactly this community\'s join code, on this host, at /, for this goal; no code is ever printed', () => {
+  const ev = { goalId: 'e5cgoal-e5c-t-1-lk', joinCode: 'Kj3_q-9ZxYwV8uTs7rQp6o' };
+  const at = (o = {}) => `${o.origin ?? LOVABLE_URL}${o.path ?? '/'}?join=${o.join ?? ev.joinCode}&goal=${o.goal ?? ev.goalId}`;
+  assert.equal(qrJoinProblem(at(), ev), null);
+  assert.equal(qrJoinProblem(`${LOVABLE_URL}/?goal=${ev.goalId}&join=${ev.joinCode}`, ev), null, 'the parameters in either order');
+  for (const [why, raw, want, e = ev] of [
+    ['another community\'s code', at({ join: 'Zz9_q-9ZxYwV8uTs7rQp6o' }), 'the QR\'s join code is not this community\'s (neither code is printed)'],
+    ['the code with one character changed', at({ join: `${ev.joinCode.slice(0, -1)}p` }), 'the QR\'s join code is not this community\'s (neither code is printed)'],
+    ['the code as a prefix of a longer one', at({ join: `${ev.joinCode}x` }), 'the QR\'s join code is not this community\'s (neither code is printed)'],
+    ['the code in another case', at({ join: ev.joinCode.toUpperCase() }), 'the QR\'s join code is not this community\'s (neither code is printed)'],
+    ['another host', at({ origin: 'https://evil.example.test' }), 'the QR carries no same-host join link for this goal'],
+    ['plain http', at({ origin: 'http://we-stay-fit-foundation-trial.lovable.app' }), 'the QR carries no same-host join link for this goal'],
+    ['another path', at({ path: '/join' }), 'the QR carries no same-host join link for this goal'],
+    ['another goal', at({ goal: 'e5cgoal-other' }), 'the QR carries no same-host join link for this goal'],
+    ['no goal', `${LOVABLE_URL}/?join=${ev.joinCode}`, 'the QR carries no same-host join link for this goal'],
+    ['no join value', `${LOVABLE_URL}/?goal=${ev.goalId}`, 'the QR\'s join value is not a join code (not printed)'],
+    ['a short join value', at({ join: 'abc' }), 'the QR\'s join value is not a join code (not printed)'],
+    ['a join value with other characters', at({ join: 'Kj3_q-9ZxYwV8uTs7rQp6o!' }), 'the QR\'s join value is not a join code (not printed)'],
+    ['no link at all', null, 'the QR carries no join link'],
+    ['not a URL', 'not a url', 'the QR carries no join link'],
+    ['the kit returned no code', at(), 'the kit returned no join code for its public event', { goalId: ev.goalId }],
+    ['the kit returned an empty code', at(), 'the kit returned no join code for its public event', { goalId: ev.goalId, joinCode: '' }],
+  ]) {
+    const v = qrJoinProblem(raw, e);
+    assert.equal(v, want, why);
+    assert.doesNotMatch(v, /Kj3_|Zz9_|abc/, `${why}: no code is printed`);
+  }
+  // cleanup-tracking names what it added by kind, never by ids.
+  assert.equal(productDocsSeen(['wsfMemberships/e5cgrp-e5c-t-1-lk_uid-lka'], 12), '1 product-written document(s) added (visitor A\'s membership of the event community, from the QR join); 12 in the manifest');
+  assert.doesNotMatch(productDocsSeen(['wsfMemberships/e5cgrp-e5c-t-1-lk_uid-lka'], 1), /uid-lka|e5cgrp/);
+  // Anything else (not a top-level membership document) is named only as a product-written document.
+  assert.equal(productDocsSeen(['wsfContributions/e5c-t-1-x', 'wsfMemberships/e5cgrp-e5c-t-1-lk_uid-lka/sub/e5c-t-1'], 3), '2 product-written document(s) added (a product-written document; a product-written document); 3 in the manifest');
 });
 
 test('journey: a contribution whose assertions fail is still tracked for cleanup; a lost approval fails qr-join but not the control', async () => {
@@ -987,7 +1057,7 @@ test('guard negatives: drift after bind, a deep link with other bytes, a redirec
     [{ deepLinkDiffers: true }, /document https:\/\/we-stay-fit-foundation-trial\.lovable\.app\/kiosk\/e5cgrp-e5c-t-1-lk\/e5cgoal-e5c-t-1-lk differs from the reviewed \/kiosk\/\$communityId\/\$goalId document/],
     [{ redirectDoc: true }, /answered HTTP 302, not the reviewed file/],
     [{ foreignScript: true }, /script https:\/\/cdn\.example\.test\/x\.js is outside the reviewed build/],
-    [{ foreignOnJoin: true, linkJoinable: true }, /script https:\/\/cdn\.example\.test\/join\.js is outside the reviewed build/],
+    [{ foreignOnJoin: true }, /script https:\/\/cdn\.example\.test\/join\.js is outside the reviewed build/],
     [{ foreignOnHome: true }, /script https:\/\/cdn\.example\.test\/home\.js is outside the reviewed build/],
     [{ extraChunk: true }, /script https:\/\/we-stay-fit-foundation-trial\.lovable\.app\/assets\/extra-ZZZ\.js is not a reviewed asset/],
     [{ changedChunk: true }, /assets\/kiosk-BBB\.js differs from its reviewed digest/],
@@ -998,10 +1068,16 @@ test('guard negatives: drift after bind, a deep link with other bytes, a redirec
     assert.equal(row.status, 'FAIL', JSON.stringify(bug));
     assert.match(row.seen, named, JSON.stringify(bug));
     assert.doesNotMatch(row.seen, /join=|JOINCODE|\?/, 'no query in what is named');
-    assert.equal(L.server.passwordFills, 0, `${JSON.stringify(bug)}: no password is typed into an unreviewed build`);
+    // Nothing is typed once anything unreviewed was refused, anywhere in the run. Visitor A now signs in on the public
+    // event's join page before the control reaches the home page, so with an unreviewed script on the home page alone
+    // A's one sign-in happens on a page that loaded only reviewed code, and before that refusal (LOVABLE-KIOSK-QR-JOIN-1).
+    assert.equal(L.server.fillsAfterRefusal, 0, `${JSON.stringify(bug)}: no password is typed after anything unreviewed was refused`);
+    assert.equal(L.server.passwordFills, bug.foreignOnHome ? 1 : 0, `${JSON.stringify(bug)}: no password is typed into an unreviewed build`);
+    assert.ok(L.server.refused > 0, `${JSON.stringify(bug)}: the defect was refused`);
     if (!bug.driftAfter && !bug.foreignOnJoin && !bug.foreignOnHome) assert.equal(L.tracked.approvals, 0, `${JSON.stringify(bug)}: an unreviewed kiosk is never approved (it would receive the station secret)`);
     assert.equal(L.server.contributions, 0, `${JSON.stringify(bug)}: nothing is written`);
-    assert.deepEqual(r.productDocs, []);
+    // A's join, made on reviewed pages before the refusal, is the only product-written document, and it is tracked.
+    assert.deepEqual(r.productDocs, bug.foreignOnHome ? ['wsfMemberships/e5cgrp-e5c-t-1-lk_uid-lka'] : []);
     assert.ok(!PASSING.some((id) => id !== 'fixture-provenance' && statusOf(r.rows, id) === 'PASS'), `${JSON.stringify(bug)}: no product row passes on an unreviewed build`);
     assert.equal(L.browser.closed, L.opened(), `${JSON.stringify(bug)}: every context is closed`);
   }
@@ -1140,7 +1216,14 @@ test('seenLine (LOVABLE-GUARD-PING-1 item 7): each row\'s seen text as one addit
     assert.ok(text.endsWith('…'));
     assert.doesNotMatch(text, /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/, 'no lone surrogate');
   }
-  assert.equal(seenLine('LOVABLE_SEEN', 'x', 'b'.repeat(SEEN_MAX)), `LOVABLE_SEEN x ${'b'.repeat(SEEN_MAX)}`, 'exactly SEEN_MAX is kept whole');
+  // The boundary in code points (W7 PN-1 on #614): 299 and 300 are kept whole; 301 becomes 299 and the ellipsis. An
+  // astral character counts once, never as its two UTF-16 units.
+  assert.equal(SEEN_MAX, 300);
+  for (const ch of ['b', '\u{1F600}']) {
+    for (const [n, kept] of [[299, ch.repeat(299)], [300, ch.repeat(300)], [301, `${ch.repeat(299)}…`]]) {
+      assert.equal(seenLine('LOVABLE_SEEN', 'x', ch.repeat(n)), `LOVABLE_SEEN x ${kept}`, `${n} x U+${ch.codePointAt(0).toString(16).toUpperCase()}`);
+    }
+  }
   // A query value (a join code) or an email-shaped string never reaches the log.
   const scrubbed = seenLine('LOVABLE_SEEN', 'x', 'stopped: page.goto https://h.test/?join=SECRETCODE&goal=g1 for a.b+c@example.com');
   assert.doesNotMatch(scrubbed, /SECRETCODE|example\.com|goal=g1/);

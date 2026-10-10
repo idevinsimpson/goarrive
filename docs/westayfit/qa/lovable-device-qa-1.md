@@ -57,6 +57,10 @@ The run rows are `host-build` (the bind and every document and asset the browser
   - `src/styles.css:56` sets `.eyebrow` to `text-transform: uppercase`, and Chromium's `innerText` applies it, so it read "STEP 2 OF 2".
   - The matrix now reads exact copy as text content (`exactText`), which ignores `text-transform`. It does so for every leaf element it compares exactly: the sign-in heading, the display lines, the step count, the camera note, Progress's empty state, You's community and the initials.
   - Container checks, which only test that some copy is included, still read `innerText`, because text content runs block children together.
+  - **Visible leaves only (W7 PN-4 on #614, in LOVABLE-KIOSK-QR-JOIN-1).** Text content also reads hidden text, which `innerText` never did. So `exactText` returns '' unless Playwright's `isVisible()` holds for that leaf, and a leaf with `visibility: hidden` or `display: none` reads as absent. Three fake defects keep the copy in the DOM but hide it, and each fails its cell at all four viewports:
+    - the display's community line fails `display` with "community absent";
+    - the display's second freshness line fails `display` with "freshness … / absent", which shows that the index's own leaf is checked;
+    - the step eyebrow fails `signup` with "step count absent".
 - **What was read:** when one of these checks fails, its seen text quotes the scrubbed text that was read, instead of "other".
 
 A pinned build whose screens moved fails its cells by name.
