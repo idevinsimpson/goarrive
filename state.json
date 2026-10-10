@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "c424729df7c5cad50f9fa9806013f7c86d6008b1185583d45ef0809730b858ef",
-  "eventCount": 1193,
+  "ledgerHead": "b300e5b50d524af65c60da3325d1cf919ba54d5a8716f3694aeea50cfe17a581",
+  "eventCount": 1196,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2561,7 +2561,9 @@
       "proof": null,
       "served": null,
       "releasedQueueIndex": null,
-      "reviewedBy": [],
+      "reviewedBy": [
+        "W4"
+      ],
       "subjectPaths": [
         ".github/wsf-staging/journeys/fixture-kit.mjs",
         ".github/wsf-staging/tests/changed-journey-drivers.test.mjs",
@@ -2581,7 +2583,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6096602354
+          "id": 6096801267
         }
       },
       "review": {
@@ -2897,7 +2899,9 @@
       "proof": null,
       "served": null,
       "releasedQueueIndex": null,
-      "reviewedBy": [],
+      "reviewedBy": [
+        "W7"
+      ],
       "subjectPaths": [
         ".github/wsf-staging/hosted-lovable-device-matrix.mjs",
         ".github/wsf-staging/hosted-lovable-device-matrix.test.mjs",
@@ -2920,7 +2924,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6096503774
+          "id": 6096669898
         }
       },
       "review": {
@@ -7044,17 +7048,22 @@
       "ack": {
         "kind": "comment",
         "id": 6096591120
-      }
+      },
+      "superseded": true
     },
     "ea4b9af559c6db00705046a4c5bcc4756d0329b71e8bc1a2d8737d111406abd9": {
       "packet": "KIT-PUBLIC-EXPO-EVENT-1",
       "worker": "W4",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6096715426
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6096741050
+      },
+      "superseded": true
     }
   },
   "fastpath": {
