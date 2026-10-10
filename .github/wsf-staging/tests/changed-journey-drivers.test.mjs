@@ -15,6 +15,7 @@
  * the hosted run is for, and the report says so.
  */
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -1182,6 +1183,87 @@ await test('UNVERIFIED through the runner and the card, once the native screens 
   assert.equal(x.status, 'passed', x.reason);
   assert.equal(t.cleanup.receipt.status, 'COMPLETE');
   assert.match(t.card.stdout, /OWNER_CARD_CLEANUP=COMPLETE\nOWNER_CARD_SUMMARY=PASSED/);
+});
+
+// ---- KIT-PUBLIC-EXPO-EVENT-1 (#365 6096266261): expoEvent can make a link-joinable event -------------------------
+/**
+ * Every request an expoEvent makes, as one string, with only its random parts named by role: each sign-up's password
+ * and address suffix, and the community's join code. Nothing else is touched, so two equal streams are the same
+ * requests in the same order with the same bodies, byte for byte.
+ */
+function expoStream(be, joinCode) {
+  let text = JSON.stringify(be.requests);
+  for (const pw of be.passwords.values()) text = text.split(pw).join('<password>');
+  return text.split(joinCode).join('<joinCode>').replace(/-[0-9a-f]{4}@example\.com/g, '-<hex>@example.com');
+}
+async function expoKitEvent(extra) {
+  const be = backend();
+  const kit = kitFor(tmp(), be);
+  const ev = await kit.expoEvent('pub', { attendees: 2, target: 100, seeded: 40, ...extra });
+  const group = be.docs.get(`wsfCommunityGroups/${ev.groupId}`);
+  return { be, kit, ev, group, stream: expoStream(be, group.joinCode.stringValue) };
+}
+const plainFields = (f) => Object.fromEntries(Object.entries(f).map(([k, v]) => [k, Object.values(v)[0]]));
+// The default stream for expoEvent('pub', { attendees: 2, target: 100, seeded: 40 }) as main e96cd947 wrote it, before
+// this packet: 2+1 sign-ups, the community, a membership and a profile each, the goal and its 10 shards.
+const EXPO_DEFAULT_STREAM_SHA256 = 'd8604ea2dad22cc73175a5b4bef14323552e45e82525bdade9e1047f6bbf9d3d';
+const EXPO_JOIN_POLICY_REFUSED = { message: "expoEvent: joinPolicy is either omitted (a private community) or 'public'" };
+
+await test('KIT PUBLIC: expoEvent with no joinPolicy writes exactly what it wrote before (a private community) and returns no join code', async () => {
+  for (const extra of [{}, { joinPolicy: undefined }]) {
+    const { be, kit, ev, group, stream } = await expoKitEvent(extra);
+    assert.equal(crypto.createHash('sha256').update(stream).digest('hex'), EXPO_DEFAULT_STREAM_SHA256, 'every request and body, byte for byte, as at e96cd947');
+    assert.deepEqual(plainFields(group), {
+      displayName: 'Fixture Expo Community', groupType: 'custom', joinPolicy: 'private', joinCode: group.joinCode.stringValue, createdByUserId: ev.champion.uid,
+      lifecycleStatus: 'active', isSample: false, createdAt: '2026-09-26T12:00:00.000Z', updatedAt: '2026-09-26T12:00:00.000Z',
+    });
+    assert.match(group.joinCode.stringValue, /^[A-Za-z0-9_-]{22}$/);
+    assert.deepEqual(Object.keys(ev), ['setupId', 'groupId', 'goalId', 'target', 'seeded', 'champion', 'attendees'], 'no joinCode returned');
+    assert.equal(ev.setupId, 'pub: one synthetic community, one open squats goal (target 100, seeded 40), a Champion and 2 attendees');
+    const m = manifestOf(kit);
+    assert.deepEqual(m.docs.filter((p) => !be.docs.has(p)), [`wsfTurnLines/goal__${ev.goalId}`], 'every written document is tracked, plus the event\'s line');
+    assert.ok([...be.docs.keys()].every((p) => m.docs.includes(p)));
+  }
+});
+
+await test('KIT PUBLIC: joinPolicy public writes exactly joinPolicy public with the same join code, returns that code, writes no marker, and the REAL cleaner removes it all', async () => {
+  const pub = await expoKitEvent({ joinPolicy: 'public' });
+  const def = await expoKitEvent({});
+  assert.equal(pub.group.joinPolicy.stringValue, 'public', 'link-joinable: in LINK_JOINABLE at ec162d17 :63');
+  assert.equal(pub.ev.joinCode, pub.group.joinCode.stringValue, 'the code returned is the code written');
+  assert.match(pub.ev.joinCode, /^[A-Za-z0-9_-]{22}$/, 'inside the served code shape, 16-128 base64url (ec162d17 :80-88)');
+  // Only that one value differs: the same requests, order, documents, Champion, attendees, memberships, profiles,
+  // goal, display authorization and shards.
+  const was = '"joinPolicy":{"stringValue":"private"}';
+  assert.equal(def.stream.split(was).length, 2, 'the default writes joinPolicy once');
+  assert.equal(pub.stream, def.stream.replace(was, '"joinPolicy":{"stringValue":"public"}'));
+  assert.deepEqual(Object.keys(pub.ev), [...Object.keys(def.ev), 'joinCode']);
+  assert.equal(pub.ev.setupId, 'pub: one synthetic public community, one open squats goal (target 100, seeded 40), a Champion and 2 attendees');
+  assert.equal([...pub.be.docs.keys()].some((p) => p.startsWith('wsfMarkers/')), false, 'no marker: the station QR needs none');
+  // Run-tagged and tracked like the default; the code reaches neither the manifest nor the setup line.
+  const m = manifestOf(pub.kit);
+  assert.deepEqual(m.docs.filter((p) => !pub.be.docs.has(p)), [`wsfTurnLines/goal__${pub.ev.goalId}`]);
+  assert.ok([...pub.be.docs.keys()].every((p) => m.docs.includes(p)));
+  assert.ok(m.docs.every((p) => p.includes(RUN_TAG) || /^wsfMemberProfiles\//.test(p)));
+  assert.equal(m.users.length, 3);
+  assert.equal(fs.readFileSync(pub.kit.manifestPath, 'utf8').includes(pub.ev.joinCode), false);
+  assert.equal(pub.ev.setupId.includes(pub.ev.joinCode), false);
+  const { server, base } = await serve(pub.be);
+  const c = await runCleanup(base, pub.kit.manifestPath, path.join(tmp(), 'cleanup-receipt.json'));
+  server.close();
+  assert.equal(c.receipt.status, 'COMPLETE', c.out);
+  assert.equal(pub.be.docs.size + pub.be.accounts.size, 0);
+});
+
+await test('KIT PUBLIC: any other joinPolicy, inviteOnly included, throws before anything is created or tracked', async () => {
+  for (const joinPolicy of ['inviteOnly', 'private', 'Public', 'PUBLIC', ' public', 'public ', '', null, false, true, 0, 1, ['public'], { toString: () => 'public' }]) {
+    const be = backend();
+    const kit = kitFor(tmp(), be);
+    await assert.rejects(() => kit.expoEvent('bad', { attendees: 1, target: 100, seeded: 0, joinPolicy }), EXPO_JOIN_POLICY_REFUSED, String(joinPolicy));
+    assert.equal(be.requests.length, 0, `${String(joinPolicy)}: no account and no document`);
+    const m = manifestOf(kit);
+    assert.equal(m.users.length + m.docs.length + m.linkedDocs.length, 0, `${String(joinPolicy)}: nothing tracked`);
+  }
 });
 
 console.log(`\nchanged-journey-drivers: ${passed} passed`);
