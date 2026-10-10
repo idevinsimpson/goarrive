@@ -26,12 +26,6 @@
  *              cleanup and scan outcomes. Exit 0 only on every row PASS, cleanup success and scan success.
  *
  * WHAT IS NOT CLAIMED (rows stay BLOCKED, named):
- *  - the station turn rows (queue place, call, phone-ready, expected-turn start, 60-second round, review, station
- *    Finish): the safe station backend (#587) IS served on staging (its merge 934f24f0 is an ancestor of the deployed
- *    candidate ec162d17, deployment receipt #365 6078582786), and the served build db3fd2f2 sends its expectedTurn
- *    binding (src/wsf/kiosk/expected-turn.ts, EXPECTED_TURN_GATE open; station-port.ts). What is missing is a station
- *    driver: this proof never operates the kiosk's station turn panel (that belongs with the KME-WIRE-1 re-pin), and
- *    an older station path is never driven (LOVABLE-MATRIX-ALIGN-1 item 5);
  *  - the genuinely unverified account: the existing kit creates verified accounts only (#396 6043231980), and no
  *    verification is faked;
  *  - the Champion's approval is the kit's Champion callable (tracked for cleanup), not the Champion UI.
@@ -42,6 +36,14 @@
  * FAILs qr-join by name (LOVABLE-KIOSK-QR-JOIN-1). The QR join never gates the phone rows. Visitor B (not a member) is the
  * isolation check: the served goal reads are membership-gated whatever the join policy (ec162d17 wsfListGoals :4981,
  * wsfMyContribution :4633; wsfGoalPulse reads display authorization only), and B never holds the join code.
+ * The station turn (LOVABLE-KIOSK-STATION-DRIVER-1) is driven last, through the served UI only: the control scans the
+ * kiosk QR on its phone (already a member: wsfJoinCommunity answers alreadyMember and writes nothing, ec162d17
+ * admitByLinkTx), chooses Use the kiosk and takes one place in the line; the bound kiosk calls it; the phone taps I'm
+ * here; the station starts the turn with `expectedTurn` equal to the called turn's `turnRef` (read from the requests,
+ * never printed); the 60-second round runs on the station's own clock and writes nothing, during it or at its end; the
+ * station shows the review; then the phone leaves the line, so the turn ends with no second write (the station's own
+ * Contribute and Finish follow only a station Complete, which this proof never sends) and the station returns to Call
+ * next with nothing of the previous visitor. The phone's contribution-7 stays the run's only contribution.
  *
  * Secrets: account passwords exist only in memory (the kit's), never in a result, log line or file. Identities are
  * recorded as a short sha256 of the uid. Nothing here writes to the Lovable project.
@@ -201,26 +203,23 @@ export const ROWS = Object.freeze([
   ['host-build', 'the exact Lovable host serves exactly the reviewed canonical document of every route template and every reviewed asset digest, at bind AND for every document, script and stylesheet the browser loads; the host\'s own scripts are blocked; nothing else executable is loaded'],
   ['fixture-provenance', 'the event community, goal, Champion and visitors A and B are run-tagged kit fixtures in the cleanup manifest'],
   ['qr-join', 'visitor A, not a member, joins the event community through the kiosk QR link on the Lovable host'],
-  ['queue-place', 'the visitor takes one place in the station line'],
-  ['call', 'the station calls the visitor'],
-  ['phone-ready', 'the visitor taps ready on the phone'],
-  ['expected-turn-start', 'the station starts the expected turn'],
-  ['round-60s', 'the 60-second round runs and writes nothing at timer end'],
-  ['review', 'the station shows the round for review'],
+  ['queue-place', 'the control, on its phone, opens the kiosk QR link, chooses Use the kiosk and takes exactly one place in this goal\'s line under its chosen name; the station counts it'],
+  ['call', 'the station calls that place (its name, its code and a turn binding), and the phone shows it is called'],
+  ['phone-ready', 'the phone taps I\'m here for its own place, and the station shows the visitor ready to start'],
+  ['expected-turn-start', 'the station\'s Start request carries expectedTurn equal to the called turn\'s turnRef, and its answer shows that turn active'],
+  ['round-60s', 'the 60-second round runs on the station and writes nothing, during it or at its end'],
+  ['review', 'the station shows the round for review: the count, Contribute (never pressed) and the phone note'],
   ['contribution-7', 'the phone control (the kit\'s verified member) sends exactly one wsfContribute for this goal with count 7 and a fresh attempt id'],
   ['operation-receipt', 'that request\'s own response: 7 added, alreadyRecorded false, an integer own credit and shared total in the goal\'s unit, and the screen shows exactly that total'],
   ['own-history-shared', 'fresh reads for the selected test goal: own credit up by exactly 7 and equal to the receipt, the shared total equal to the receipt, and the exact entry in the control\'s own history'],
   ['reopen-static', 'reopening MOVE on the same goal shows the recorded state and sends no second contribution'],
   ['account-isolation', 'control -> B -> control: B (a non-member) carries nothing of the control in context, own history or pending MOVE; the control returns in fresh storage with the same identity and the same record'],
-  ['station-finish', 'station Finish leaves no previous visitor for the next one'],
+  ['station-finish', 'the turn ends with no second write (the phone leaves the line), and the station returns to Call next with nothing of the previous visitor for the next one'],
   ['organizer-ui-approval', 'the Champion approves the kiosk code through the Manage community UI'],
   ['unverified-account', 'a genuinely unverified account joins and contributes'],
   ['cleanup-tracking', 'every product-written document (membership, contribution) is in the cleanup manifest before cleanup'],
 ].map(([id, expected]) => Object.freeze({ id, expected })));
-const STATION_BLOCK = 'the station backend (#587) is served on staging and the served build sends its expectedTurn binding, but this proof has no station driver yet; an older station path is never driven';
 export const FIXED_BLOCKED = Object.freeze({
-  'queue-place': STATION_BLOCK, call: STATION_BLOCK, 'phone-ready': STATION_BLOCK, 'expected-turn-start': STATION_BLOCK,
-  'round-60s': STATION_BLOCK, review: STATION_BLOCK, 'station-finish': STATION_BLOCK,
   'unverified-account': 'the existing fixture kit creates verified accounts only (#396 6043231980); verification is never faked',
   'organizer-ui-approval': 'the station is approved through the kit\'s Champion callable as fixture preparation (tracked for cleanup); a UI approval would create a station record the kit cannot track',
 });
@@ -745,7 +744,11 @@ export function callableLog(page, onResult = () => {}) {
     try { onResult(e); } catch { /* tracking failures surface through the cleanup-tracking row */ }
   });
   const of = (name, goalId) => all.filter((x) => x.name === name && (goalId === undefined || x.data?.goalId === goalId));
-  return { of, last: (name, goalId) => of(name, goalId).filter((x) => x.result !== undefined).at(-1) ?? null, sent: (name, goalId) => of(name, goalId).length };
+  return {
+    of, last: (name, goalId) => of(name, goalId).filter((x) => x.result !== undefined).at(-1) ?? null, sent: (name, goalId) => of(name, goalId).length,
+    /** Where the log stands now, and every request sent after such a mark (the station turn's windows). */
+    mark: () => all.length, since: (n) => all.slice(n),
+  };
 }
 
 /** The product-written documents this run must clean up, added to the kit's manifest after its last write. Run-tagged paths only. */
@@ -790,6 +793,137 @@ export function qrJoinProblem(raw, ev) {
   if (typeof ev?.joinCode !== 'string' || !ev.joinCode) return 'the kit returned no join code for its public event';
   if (code !== ev.joinCode) return 'the QR\'s join code is not this community\'s (neither code is printed)';
   return null;
+}
+
+// ---- the station turn (LOVABLE-KIOSK-STATION-DRIVER-1) ------------------------------------------------------------
+// The served build's own copy and contracts, read at db3fd2f2: src/wsf/kiosk/station-turn-panel.tsx (the panel, its
+// phases and headings), station-turn.ts (ROUND_SECONDS, COUNTDOWN_SECONDS, REVIEW_PHONE_NOTE, phoneEnd), station-port.ts
+// (TURN_REF, the callables), connected-join.tsx (Use the kiosk, the line card, I'm here, Leave line); and the served
+// backend ec162d17 (wsfJoinTurnLine, wsfCallNext, wsfTurnReady, wsfStartTurn, wsfLeaveTurnLine, readTurnState).
+export const STATION_ROWS = Object.freeze(['queue-place', 'call', 'phone-ready', 'expected-turn-start', 'round-60s', 'review', 'station-finish']);
+/** A station turn binding (station-port.ts TURN_REF). Bindings are compared, never printed. */
+export const TURN_REF = /^tr_[A-Za-z0-9_-]{16,64}$/;
+/** The line's short code: three characters of the pairing alphabet (ec162d17 TURN_CODE_ALPHABET, TURN_CODE_LENGTH). */
+const TURN_CODE = /^[A-HJ-NP-Z2-9]{3}$/;
+/** The name the control chooses for the kiosk: a nickname, never an email (connected-join.tsx, cleanCalledName). */
+export const LINE_ALIAS = 'Fixture Control';
+export const REVIEW_PHONE_NOTE = 'If the visitor\'s phone shows Recorded, do not tap Contribute.';
+/** A round shorter than this (60 one-second ticks, read by polling) did not run its 60 seconds. */
+export const ROUND_MIN_MS = 58_000;
+/** Every callable that writes, from the station or the phone: both Completes, MOVE's contribute and every line change. */
+export const TURN_WRITES = Object.freeze(['wsfContribute', 'wsfCompleteTurn', 'wsfCompleteMyTurn', 'wsfCancelTurn', 'wsfLeaveTurnLine', 'wsfStartTurn', 'wsfCallNext', 'wsfTurnReady', 'wsfJoinTurnLine', 'wsfJoinCommunity']);
+const said = (t) => (t ? `"${String(t).replace(/\s+/g, ' ').trim().slice(0, 60)}"` : 'nothing');
+const verdict = (bad, pass) => ({ ok: bad.length === 0, seen: bad.length ? `${CONTROL}: ${bad.join('; ')}` : `${CONTROL}: ${pass}` });
+
+/** queue-place: one line join for this goal under the chosen name, a waiting place with a code, shown on the phone, counted by the station, tracked. */
+export function queuePlaceVerdict({ qrJoin, joins, goalId, phoneLine, phoneText, stationWaiting, trackedEntry }) {
+  const bad = [];
+  if (qrJoin?.result?.alreadyMember !== true) bad.push(`the kiosk QR's Join answered ${qrJoin?.error ?? `alreadyMember=${qrJoin?.result?.alreadyMember}`} for the kit's member`);
+  const j = joins.at(-1) ?? null;
+  const r = j?.result ?? null;
+  if (joins.length !== 1) bad.push(`${joins.length} line join request(s)`);
+  if (j && (j.data?.goalId !== goalId || j.data?.calledName !== LINE_ALIAS)) bad.push('the line join names another goal or another name');
+  if (typeof r?.entryId !== 'string' || !r.entryId) bad.push(`no place in the answer${j?.error ? ` (${j.error})` : ''}`);
+  else {
+    if (r.status !== 'waiting' || r.alreadyInLine !== false || r.goalId !== goalId) bad.push(`the answer is status ${r.status}, alreadyInLine=${r.alreadyInLine}${r.goalId === goalId ? '' : ', for another goal'}`);
+    if (!TURN_CODE.test(String(r.code ?? ''))) bad.push('the answer carries no line code');
+    if (trackedEntry !== r.entryId) bad.push('the place is not tracked for cleanup');
+  }
+  if (phoneLine !== 'waiting' || !(TURN_CODE.test(String(r?.code ?? '')) && String(phoneText ?? '').includes(`Code ${r.code}.`))) bad.push(`the phone's line shows ${phoneLine ?? 'nothing'}${phoneLine === 'waiting' ? ' without its code' : ''}`);
+  if (stationWaiting !== 1) bad.push(`the station counts ${stationWaiting ?? 'no'} waiting`);
+  return verdict(bad, 'the kiosk QR (already a member, nothing joined), Use the kiosk, then exactly one place in this goal\'s line under the chosen name (waiting, not already in line); the phone shows its code; the station counts 1 waiting; the place is tracked for cleanup');
+}
+
+/** call: one Call next; its answer assigns this place (name, code, state assigned, a binding); the station and the phone say so. */
+export function callVerdict({ calls, place, heading, phoneLine, phoneText }) {
+  const bad = [];
+  const c = calls.at(-1) ?? null;
+  const a = c?.result?.assigned ?? null;
+  if (calls.length !== 1) bad.push(`${calls.length} Call next request(s)`);
+  if (c?.result?.called !== true) bad.push(`the call answered ${c?.error ?? `called=${c?.result?.called}`}`);
+  else if (!a || a.calledName !== LINE_ALIAS || a.code !== place?.code || a.state !== 'assigned' || !TURN_REF.test(String(a.turnRef ?? ''))) {
+    bad.push(`the called turn is not this place (${[!a && 'nobody assigned', a && a.calledName !== LINE_ALIAS && 'another name', a && a.code !== place?.code && 'another code', a && a.state !== 'assigned' && `state ${a.state}`, a && !TURN_REF.test(String(a.turnRef ?? '')) && 'no turn binding'].filter(Boolean).join(', ')})`);
+  }
+  if (heading !== `Calling ${LINE_ALIAS}`) bad.push(`the station shows ${said(heading)}`);
+  if (phoneLine !== 'assigned' || !String(phoneText ?? '').includes(`is calling ${LINE_ALIAS}.`)) bad.push(`the phone's line shows ${phoneLine ?? 'nothing'}`);
+  return verdict(bad, 'one Call next; its answer assigns this place (the chosen name, its code, state assigned, with a turn binding); the station shows Calling and the chosen name; the phone shows it is called');
+}
+
+/** phone-ready: one I'm here for this entry, answered ready; the station's own hall then shows THIS turn ready, with Start. */
+export function readyVerdict({ readies, place, turnRef, hall, heading, startShown }) {
+  const bad = [];
+  const x = readies.at(-1) ?? null;
+  if (readies.length !== 1) bad.push(`${readies.length} I'm here request(s)`);
+  if (x && x.data?.entryId !== place?.entryId) bad.push('I\'m here names another place');
+  if (x?.result?.status !== 'ready') bad.push(`I'm here answered ${x?.error ?? `status ${x?.result?.status}`}`);
+  const a = hall?.assigned ?? null;
+  if (!a || a.state !== 'ready' || a.turnRef !== turnRef) bad.push(`the station's line shows ${a ? `state ${a.state}${a.turnRef === turnRef ? '' : ' for another turn'}` : 'nobody'}`);
+  if (heading !== `${LINE_ALIAS} is here` || !startShown) bad.push(`the station shows ${said(heading)}${startShown ? '' : ' and no Start'}`);
+  return verdict(bad, 'one I\'m here for its own place, answered ready; the station\'s line shows the called turn ready, and the station shows the chosen name is here, with Start');
+}
+
+/** expected-turn-start: ONE Start; its request carries expectedTurn === the called turn's turnRef; its answer shows that turn active. */
+export function startVerdict({ starts, turnRef, phase }) {
+  const bad = [];
+  const s = starts.at(-1) ?? null;
+  const d = s?.data ?? null;
+  if (starts.length !== 1) bad.push(`${starts.length} Start request(s)`);
+  if (s) {
+    if (!d || !Object.hasOwn(d, 'expectedTurn')) bad.push('the Start request carries no expectedTurn (an older station path)');
+    else if (!TURN_REF.test(String(d.expectedTurn ?? ''))) bad.push('the Start request\'s expectedTurn is not a turn binding');
+    else if (d.expectedTurn !== turnRef) bad.push('the Start request\'s expectedTurn is not the called turn\'s turnRef');
+    const a = s.result?.assigned ?? null;
+    if (s.result?.started !== true || !a || a.turnRef !== d?.expectedTurn || a.state !== 'active') bad.push(`the Start answer ${s.error ? `is ${s.error}` : 'does not show that turn active'}`);
+  }
+  if (phase !== 'countdown' && phase !== 'active') bad.push(`the station shows the ${phase ?? 'missing'} phase`);
+  return verdict(bad, 'one Start; its request carries expectedTurn equal to the called turn\'s turnRef (compared, never printed); its answer shows that turn active; the station counts down');
+}
+
+/** round-60s: the timer opens at 60s, the review comes no sooner than the round, and nothing is written during it or at its end. */
+export function roundVerdict({ firstTimer, elapsedMs, phase, writes }) {
+  const bad = [];
+  if (firstTimer !== `${60}s`) bad.push(`the timer opened at ${said(firstTimer)}`);
+  if (phase !== 'review') bad.push(`the round ended in the ${phase ?? 'missing'} phase`);
+  else if (!(elapsedMs >= ROUND_MIN_MS)) bad.push(`the review came after ${Math.round((elapsedMs ?? 0) / 1000)} s`);
+  if (writes.length) bad.push(`${writes.length} write(s) during the round or at its end (${[...new Set(writes)].join(', ')})`);
+  return verdict(bad, `the timer opened at 60s and ran down; the review came after ${Math.round((elapsedMs ?? 0) / 1000)} s; nothing was written, during the round or at its end`);
+}
+
+/** review: the station's review of THIS round (not a recovered start): the count, Contribute and the phone note. */
+export function reviewVerdict({ phase, heading, countShown, contributeShown, note }) {
+  const bad = [];
+  if (phase !== 'review') bad.push(`the station shows the ${phase ?? 'missing'} phase`);
+  if (heading !== 'Review the count') bad.push(`the review heading is ${said(heading)}`);
+  if (!countShown || !contributeShown) bad.push(`the review has ${countShown ? '' : 'no count'}${!countShown && !contributeShown ? ' and ' : ''}${contributeShown ? '' : 'no Contribute'}`);
+  if (note !== REVIEW_PHONE_NOTE) bad.push(`the phone note is ${said(note)}`);
+  return verdict(bad, 'the station shows Review the count, with the count and Contribute (never pressed) and the phone note');
+}
+
+/**
+ * station-finish: the phone leaves (one leave for its own place, not a switch), the station shows Turn ended (not a
+ * recording), then Call next with nothing of the previous visitor on screen or in its line; and the run's only
+ * contribution is still the phone's contribution-7 (no station or phone Complete anywhere).
+ */
+export function finishVerdict({ leaves, place, end, endText, phase, callNextShown, stationText, hall, turnContributions }) {
+  const bad = [];
+  const l = leaves.at(-1) ?? null;
+  if (leaves.length !== 1) bad.push(`${leaves.length} leave request(s)`);
+  if (l && (l.data?.entryId !== place?.entryId || l.data?.switchingToPhone === true)) bad.push('the leave names another place or switches to the phone');
+  if (l && l.result?.status !== 'left') bad.push(`the leave answered ${l.error ?? `status ${l.result?.status}`}`);
+  if (end !== 'ended' || endText !== 'Turn ended') bad.push(`the station showed ${end === 'recorded' ? 'a recording from the phone' : said(endText)}`);
+  if (phase !== 'idle' || !callNextShown) bad.push(`the station then shows the ${phase ?? 'missing'} phase${callNextShown ? '' : ' without Call next'}`);
+  const text = String(stationText ?? '');
+  if (text.includes(LINE_ALIAS) || (TURN_CODE.test(String(place?.code ?? '')) && new RegExp(`\\b${place.code}\\b`).test(text))) bad.push('the station still shows the previous visitor');
+  if (hall?.assigned !== null || hall?.result !== null) bad.push(`the station's line still holds ${hall?.assigned ? 'a turn' : hall?.result ? 'a result' : 'an unread state'}`);
+  if (turnContributions.length) bad.push(`${turnContributions.length} contribution request(s) since the turn began (${[...new Set(turnContributions)].join(', ')})`);
+  return verdict(bad, 'the phone left the line (no contribution); the station showed Turn ended, then Call next with nothing of the previous visitor on screen or in its line; no contribution of any kind since the turn began (no contribute, station or phone Complete), so contribution-7 stays the only one');
+}
+
+/** The callables that record a contribution: MOVE's, the station's own Complete and the phone's own Complete. */
+export const CONTRIBUTION_WRITES = Object.freeze(['wsfContribute', 'wsfCompleteTurn', 'wsfCompleteMyTurn']);
+/** The rows the station turn has not measured yet, failed by name (never BLOCKED: nothing external stops them). */
+function notReached(set, rows, from, why) {
+  for (const id of STATION_ROWS.slice(STATION_ROWS.indexOf(from))) if (!rows[id]) set(id, false, `not reached: ${why}`);
 }
 
 /** The signed-in Firebase uid of this page: IndexedDB persistence first (the SDK default), then localStorage. */
@@ -855,12 +989,127 @@ async function toCountStep(page) {
   }
 }
 
+/** Poll `test` every `step` ms on the page until it holds or `ms` of waits have passed; returns its last value. */
+async function until(page, test, ms, step) {
+  let v = await test();
+  for (let waited = 0; !v && waited < ms; waited += step) { await page.waitForTimeout(step); v = await test(); }
+  return v;
+}
+
+/**
+ * The station turn, through the served UI only (LOVABLE-KIOSK-STATION-DRIVER-1). `kiosk` is the bound station (its
+ * requests in `logK`); `phone` is the control signed in on its own phone (its requests in `logP`). Each row is read from
+ * the requests and the screens; a row the turn cannot reach FAILs by name. The station credential and every binding,
+ * entry id and code stay in memory: no verdict prints them.
+ */
+async function driveStationTurn({ kiosk, logK, phone, logP, joinUrl, ev, m, fixtures, guard, rows, set, now }) {
+  const wait = (page, test, ms, step = 1000) => until(page, test, ms, step);
+  const panel = kiosk.locator('[data-testid="station-turn"]');
+  const phaseOf = async () => ((await visible(panel)) ? panel.first().getAttribute('data-station-phase') : null);
+  const heading = async () => { const h = panel.locator('h2'); return (await visible(h)) ? (await h.first().innerText()).replace(/\s+/g, ' ').trim() : null; };
+  const hall = () => logK.last('wsfTurnState')?.result ?? null;
+  const line = phone.getByTestId('connected-turn-line');
+  const lineState = async () => ((await visible(line)) ? line.first().getAttribute('data-line') : null);
+  const lineText = async () => ((await visible(line)) ? (await line.first().innerText()).replace(/\s+/g, ' ') : '');
+  const textOf = async (loc) => ((await visible(loc)) ? (await loc.first().innerText()).replace(/\s+/g, ' ').trim() : null);
+  if (!joinUrl) { notReached(set, rows, 'queue-place', 'the kiosk showed no QR join link for this goal (see qr-join), so no phone can reach its line'); return; }
+  if (!(await visible(panel))) { notReached(set, rows, 'queue-place', 'the bound kiosk shows no station turn panel; an older station path is never driven'); return; }
+  const turnBegan = { k: logK.mark(), p: logP.mark() };
+
+  // queue-place: the kiosk QR on the control's phone (already a member), Use the kiosk, the chosen name, ONE join.
+  await phone.goto(joinUrl);
+  guard.check(); // nothing is typed into a page that loaded anything unreviewed
+  const join = phone.locator('[data-connected-join]').getByRole('button', { name: 'Join', exact: true });
+  if (!(await visible(join))) { notReached(set, rows, 'queue-place', 'the kiosk QR link shows the control no Join'); return; }
+  await join.click();
+  const useKiosk = phone.getByTestId('join-use-kiosk');
+  await wait(phone, () => visible(useKiosk), 20_000);
+  const qrJoin = logP.last('wsfJoinCommunity');
+  if (!(await visible(useKiosk))) { notReached(set, rows, 'queue-place', `the phone offered no Use the kiosk (the QR's Join answered ${qrJoin?.error ?? `alreadyMember=${qrJoin?.result?.alreadyMember}`})`); return; }
+  await useKiosk.click();
+  await phone.getByLabel('Name to show on the kiosk').fill(LINE_ALIAS);
+  const beforeJoin = logK.mark();
+  await phone.getByRole('button', { name: 'Join the kiosk line', exact: true }).click();
+  await wait(phone, async () => logP.last('wsfJoinTurnLine') !== null, 20_000);
+  const place = logP.last('wsfJoinTurnLine')?.result ?? null;
+  let trackedEntry = null;
+  if (typeof place?.entryId === 'string' && place.entryId) {
+    try { trackedEntry = await fixtures.trackPlace(ev, m); } catch { trackedEntry = null; } // the line's documents, for cleanup
+  }
+  await wait(phone, async () => (await lineState()) === 'waiting', 15_000);
+  await wait(kiosk, async () => logK.since(beforeJoin).some((x) => x.name === 'wsfTurnState' && x.result?.waitingCount >= 1), 20_000);
+  const qp = queuePlaceVerdict({ qrJoin, joins: logP.of('wsfJoinTurnLine'), goalId: ev.goalId, phoneLine: await lineState(), phoneText: await lineText(), stationWaiting: hall()?.waitingCount ?? null, trackedEntry });
+  set('queue-place', qp.ok, qp.seen);
+  if (!place?.entryId) { notReached(set, rows, 'call', 'the control holds no place in the line'); return; }
+
+  // call: the station's Call next; the station and the phone both show the call.
+  const callNext = kiosk.getByRole('button', { name: 'Call next', exact: true });
+  await callNext.first().click();
+  await wait(kiosk, async () => logK.last('wsfCallNext') !== null, 15_000);
+  await wait(kiosk, async () => (await heading()) === `Calling ${LINE_ALIAS}`, 15_000);
+  await wait(phone, async () => (await lineState()) === 'assigned', 15_000);
+  const calledRef = logK.last('wsfCallNext')?.result?.assigned?.turnRef;
+  const turnRef = TURN_REF.test(String(calledRef ?? '')) ? calledRef : null;
+  const cv = callVerdict({ calls: logK.of('wsfCallNext'), place, heading: await heading(), phoneLine: await lineState(), phoneText: await lineText() });
+  set('call', cv.ok, cv.seen);
+  if (!turnRef || (await lineState()) !== 'assigned') { notReached(set, rows, 'phone-ready', 'the control\'s place was not called'); return; }
+
+  // phone-ready: I'm here on the phone (inside the 45-second lease); the station's own line shows THIS turn ready.
+  await phone.getByRole('button', { name: 'I’m here', exact: true }).click();
+  const startButton = kiosk.getByTestId('station-start');
+  await wait(kiosk, async () => hall()?.assigned?.state === 'ready' && (await heading()) === `${LINE_ALIAS} is here` && visible(startButton), 20_000);
+  const rv = readyVerdict({ readies: logP.of('wsfTurnReady'), place, turnRef, hall: hall(), heading: await heading(), startShown: await visible(startButton) });
+  set('phone-ready', rv.ok, rv.seen);
+  if (!(await visible(startButton))) { notReached(set, rows, 'expected-turn-start', 'the station offers no Start'); return; }
+
+  // expected-turn-start: Start, asserted from the request itself.
+  await startButton.first().click();
+  await wait(kiosk, async () => logK.last('wsfStartTurn') !== null, 15_000, 250);
+  const roundFrom = { k: logK.mark(), p: logP.mark() };
+  const sv = startVerdict({ starts: logK.of('wsfStartTurn'), turnRef, phase: await phaseOf() });
+  set('expected-turn-start', sv.ok, sv.seen);
+  try { await fixtures.trackStationTurn(ev, m, place.entryId); } catch { /* no attempt was minted: a turn that never started writes nothing */ }
+  let phase = await phaseOf();
+  if (phase !== 'countdown' && phase !== 'active') { notReached(set, rows, 'round-60s', `the station shows the ${phase ?? 'missing'} phase after Start`); return; }
+
+  // round-60s: the station's own 3-2-1 and 60-second round; nothing may be written during it or at its end.
+  const timer = kiosk.getByTestId('station-timer');
+  let firstTimer = null;
+  let activeAt = null;
+  for (let waited = 0; (phase === 'countdown' || phase === 'active') && waited < 100_000; waited += 250) {
+    if (phase === 'active' && activeAt === null) { activeAt = now(); firstTimer = await textOf(timer); }
+    await kiosk.waitForTimeout(250);
+    phase = await phaseOf();
+  }
+  const elapsedMs = activeAt === null ? null : now() - activeAt;
+  await kiosk.waitForTimeout(3000); // what a timer end would send has been sent
+  const roundWrites = [...logK.since(roundFrom.k), ...logP.since(roundFrom.p)].filter((x) => TURN_WRITES.includes(x.name)).map((x) => x.name);
+  const ro = roundVerdict({ firstTimer, elapsedMs, phase, writes: roundWrites });
+  set('round-60s', ro.ok, ro.seen);
+
+  // review: the station's review of this round; Contribute is never pressed.
+  const rw = reviewVerdict({ phase: await phaseOf(), heading: await heading(), countShown: await visible(kiosk.getByLabel('Count', { exact: true })), contributeShown: await visible(kiosk.getByTestId('station-contribute')), note: await textOf(kiosk.getByTestId('station-phone-note')) });
+  set('review', rw.ok, rw.seen);
+
+  // station-finish: the phone leaves the line; the station ends the turn and returns to Call next with no trace.
+  await phone.getByRole('button', { name: 'Leave line', exact: true }).click();
+  const ended = kiosk.getByTestId('station-phone-ended');
+  await wait(kiosk, () => visible(ended), 20_000, 500);
+  const end = (await visible(ended)) ? await ended.first().getAttribute('data-end') : null;
+  const endText = await textOf(ended);
+  await wait(kiosk, async () => (await phaseOf()) === 'idle' && hall()?.assigned === null && (await visible(callNext)), 20_000);
+  await kiosk.waitForTimeout(3000); // one more line read once the screen has settled
+  const turnContributions = [...logK.since(turnBegan.k), ...logP.since(turnBegan.p)].filter((x) => CONTRIBUTION_WRITES.includes(x.name)).map((x) => x.name);
+  const fv = finishVerdict({ leaves: logP.of('wsfLeaveTurnLine'), place, end, endText, phase: await phaseOf(), callNextShown: await visible(callNext), stationText: await textOf(kiosk.locator('main.kiosk-root')), hall: hall(), turnContributions });
+  set('station-finish', fv.ok, fv.seen);
+}
+
 /**
  * The journey. `fixtures` is the existing kit; every row it reaches is recorded; product writes are tracked from
  * their REQUESTS as they are sent, so a later failed assertion never leaves an untracked document. Every browser
  * context it opens is closed in `finally`, on every return.
  */
-export async function runJourney({ browser, fixtures, base, amount = 7, reviewed = REVIEWED_BUILD }) {
+export async function runJourney({ browser, fixtures, base, amount = 7, reviewed = REVIEWED_BUILD, now = () => Date.now() }) {
   const rows = {};
   const set = (id, ok, seen, status) => { rows[id] = { status: status ?? (ok ? 'PASS' : 'FAIL'), seen }; };
   const productDocs = [];
@@ -895,6 +1144,7 @@ export async function runJourney({ browser, fixtures, base, amount = 7, reviewed
     //    public event's station shows the newcomer QR, and visitor A joins through it. A QR with any other code, host,
     //    path or goal, or no QR at all, FAILs qr-join by name. The QR join never gates the phone control below.
     const kiosk = await (await ctx({ width: 1280, height: 800 })).newPage();
+    const logK = callableLog(kiosk); // the station's own requests, for the station turn (step 4)
     await kiosk.goto(`${base}/kiosk/${ev.groupId}/${ev.goalId}`);
     guard.check();
     let joinUrl = null;
@@ -1017,8 +1267,13 @@ export async function runJourney({ browser, fixtures, base, amount = 7, reviewed
     const row2 = await progressRow(pageM2);
     set('account-isolation', bClean && back === m.uid && own2 === ownAfter && row2 === row,
       `${CONTROL} -> B (non-member) -> ${CONTROL}: B ${uidB === b.uid ? 'signed in' : 'not signed in'}, pending join keys ${pendingJoin}, test-goal reads ${bReads}, Progress row ${bRow === null ? 'absent' : 'present'}; the control back as ${idHash(back) === idHash(m.uid) ? 'the same identity' : 'another identity'}, own ${own2} vs ${ownAfter}, row ${row2 === row ? 'the same' : 'different'}`);
+
+    // 4. The station turn (LOVABLE-KIOSK-STATION-DRIVER-1): the control, back on its phone, takes a place in the bound
+    //    kiosk's line through the kiosk QR; the kiosk calls, starts the expected turn, runs the round and shows the review;
+    //    the phone leaves, and the kiosk is left with nothing of the control.
+    await driveStationTurn({ kiosk, logK, phone: pageM2, logP: logM2, joinUrl, ev, m, fixtures, guard, rows, set, now });
   } catch (e) {
-    for (const id of ['fixture-provenance', 'qr-join', 'contribution-7', 'operation-receipt', 'own-history-shared', 'reopen-static', 'account-isolation']) rows[id] ??= { status: 'FAIL', seen: `stopped: ${short(e)}` };
+    for (const id of ['fixture-provenance', 'qr-join', 'contribution-7', 'operation-receipt', 'own-history-shared', 'reopen-static', 'account-isolation', ...STATION_ROWS]) rows[id] ??= { status: 'FAIL', seen: `stopped: ${short(e)}` };
   } finally {
     await Promise.all(contexts.map((c) => c.close().catch(() => {})));
   }
@@ -1050,7 +1305,7 @@ async function launchChromium() {
  * before the job authenticates) only through a non-zero `--bind`, and `--run` must refuse a non-PASS bind before it
  * imports the kit or launches a browser. Exported with injectable edges (#589 W4 F2) so both are tested.
  */
-export async function cli(mode, env, { fetchImpl = fetch, reviewed = REVIEWED_BUILD, importKit = () => import('./journeys/fixture-kit.mjs'), launch = launchChromium, say = (l) => console.log(l) } = {}) {
+export async function cli(mode, env, { fetchImpl = fetch, reviewed = REVIEWED_BUILD, importKit = () => import('./journeys/fixture-kit.mjs'), launch = launchChromium, say = (l) => console.log(l), now = () => Date.now() } = {}) {
   if (mode === '--require') {
     let doc = null;
     try { doc = JSON.parse(fs.readFileSync(path.join(env.WSF_RESULT_DIR, 'lovable-kiosk', 'results.json'), 'utf8')); } catch { /* no results */ }
@@ -1082,7 +1337,7 @@ export async function cli(mode, env, { fetchImpl = fetch, reviewed = REVIEWED_BU
     const fixtures = createFixtureKit({ projectId: PROJECT_ID, apiKey: sdk.apiKey, token: env.WSF_GOOGLE_ACCESS_TOKEN, runTag, cleanupManifest: env.WSF_CLEANUP_MANIFEST });
     say(`LOVABLE_RUN_TAG=${runTag}`);
     browser = await launch();
-    journey = await runJourney({ browser, fixtures, base: b.base, reviewed });
+    journey = await runJourney({ browser, fixtures, base: b.base, reviewed, now });
   } catch (e) {
     rows['fixture-provenance'] ??= { status: 'FAIL', seen: `stopped before the journey: ${short(e)}` };
   } finally {

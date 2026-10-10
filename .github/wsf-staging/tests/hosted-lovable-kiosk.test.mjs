@@ -13,6 +13,8 @@ import {
   API_ORIGINS, BIND_PROBES, EVIDENCE_SCAN_RULES, FIXED_BLOCKED, LOVABLE_URL, ROUTE_TEMPLATES, SEEN_MAX, assetTypeProblem, callableLog, canonicalDocument, cli, REVIEWED_BUILD, ROWS, allPassed, bindBuild,
   bindLines, browserEnv, checkBase, classifyRequest, codeGuard, logSafe, productDocsSeen, qrJoinProblem, documentTypeProblem, hostBuildRow, idHash, matchTemplate, mergeIntoManifest, ownCreditOf, receiptVerdict,
   requireVerdict, results, runJourney, runResults, seenLine, servedManifest, sharedOf, showsNumber,
+  CONTRIBUTION_WRITES, LINE_ALIAS, REVIEW_PHONE_NOTE, ROUND_MIN_MS, STATION_ROWS, TURN_REF, TURN_WRITES,
+  callVerdict, finishVerdict, queuePlaceVerdict, readyVerdict, reviewVerdict, roundVerdict, startVerdict,
 } from '../hosted-lovable-kiosk.mjs';
 
 let passed = 0;
@@ -539,15 +541,17 @@ test('showsNumber: the exact whole number, en-US grouped or plain, never a fragm
   for (const [t, n] of [['11,107', 1107], ['1,1070', 1107], ['1107.5', 1107], ['107', 1107], ['x', 1.5]]) assert.equal(showsNumber(t, n), false, t);
 });
 
-test('results: every row in order; the station rows and the unverified account are BLOCKED by name unless measured', () => {
+test('results: every row in order; the unverified account and the UI approval are BLOCKED by name; the station rows have no fixed reason (LOVABLE-KIOSK-STATION-DRIVER-1)', () => {
   const doc = results({ 'host-build': { status: 'PASS', seen: 'x' } });
   assert.deepEqual(doc.rows.map((r) => r.id), ROWS.map((r) => r.id));
+  assert.deepEqual(Object.keys(FIXED_BLOCKED).sort(), ['organizer-ui-approval', 'unverified-account']);
   for (const id of Object.keys(FIXED_BLOCKED)) assert.equal(doc.rows.find((r) => r.id === id).status, 'BLOCKED', id);
-  assert.match(doc.rows.find((r) => r.id === 'round-60s').seen, /#587/);
-  // LOVABLE-MATRIX-ALIGN-1 item 5: #587 is served on staging; what is missing is this proof's station driver.
-  assert.match(doc.rows.find((r) => r.id === 'round-60s').seen, /is served on staging .*expectedTurn binding, but this proof has no station driver yet/);
-  assert.doesNotMatch(doc.rows.find((r) => r.id === 'round-60s').seen, /not served/);
-  assert.ok(doc.rows.find((r) => r.id === 'round-60s').seen.length <= 200, 'the reason fits short()');
+  // The station rows are measured by the journey now: unmeasured (a journey that never ran), they are only "not reached".
+  assert.deepEqual(STATION_ROWS, ROWS.map((r) => r.id).filter((id) => STATION_ROWS.includes(id)), 'in the order the rows are listed');
+  assert.equal(STATION_ROWS.length, 7);
+  for (const id of STATION_ROWS) assert.equal(doc.rows.find((r) => r.id === id).seen, 'not reached', id);
+  assert.match(ROWS.find((r) => r.id === 'expected-turn-start').expected, /expectedTurn equal to the called turn's turnRef/);
+  assert.match(ROWS.find((r) => r.id === 'station-finish').expected, /no second write/);
   assert.equal(doc.rows.find((r) => r.id === 'qr-join').seen, 'not reached');
   assert.equal(allPassed(doc), false);
   assert.equal(allPassed(results(Object.fromEntries(ROWS.map((r) => [r.id, { status: 'PASS', seen: '' }])))), true);
@@ -591,14 +595,41 @@ const FLOCK_SCRIPT = `${LOVABLE_URL}/~flock.js`;
 
 /** The kit's verified member of the event community (the phone control), and the member's other goal, read alongside. */
 const CONTROL_UID = 'uid-lk-a0';
+/** How every control row's seen text starts. */
+const CONTROL_SEEN = 'control (the kit\'s verified member)';
 /** The join code the fake kit wrote for its public event; the kiosk's QR carries it unless a defect says otherwise. */
 const KIT_JOIN_CODE = 'JOINCODE0123456789';
 const OTHER_GOAL = 'e5cgoal-other-community';
+/** The station turn's fake values (LOVABLE-KIOSK-STATION-DRIVER-1): the station credential, the place, its code and the called turn's binding. None may ever be printed. */
+const STATION_SECRET = 'station-secret-s1-0123456789';
+const ENTRY_ID = 'te-entry-0123456789';
+const TURN_CODE = 'K7P';
+const TURN_REF_A = 'tr_AAAAAAAAAAAAAAAAAAAAAAAA';
+const TURN_REF_B = 'tr_BBBBBBBBBBBBBBBBBBBBBBBB';
 
 function lovable(bug = {}) {
   const goalId = 'e5cgoal-e5c-t-1-lk';
   const groupId = 'e5cgrp-e5c-t-1-lk';
-  const server = { shared: 100, own: {}, members: new Set(), contributions: 0, approved: false, requests: [], contextOpts: [], routed: 0, docs: 0, loads: [], passwordFills: 0, refused: 0, fillsAfterRefusal: 0 };
+  const server = { shared: 100, own: {}, members: new Set(), contributions: 0, approved: false, requests: [], contextOpts: [], routed: 0, docs: 0, loads: [], passwordFills: 0, refused: 0, fillsAfterRefusal: 0, clock: 0 };
+  /**
+   * The station turn, as station-turn-panel.tsx, connected-join.tsx and ec162d17's turn callables run it: one place, the
+   * call, I'm here, Start, the 3-2-1 and the 60-second round on the station's own clock (the shared fake clock, moved
+   * by every page wait), the review, and Turn ended for 5 s once the phone leaves. `bug` switches on one defect at a time.
+   */
+  const T = { entry: null, assigned: null, phase: 'idle', startedAt: null, endedAt: null, wrote: false };
+  const stationPhase = () => {
+    if (T.phase === 'ended') return server.clock - T.endedAt < 5000 ? 'ended' : 'idle';
+    if (T.phase !== 'started') return 'idle';
+    const t = server.clock - T.startedAt;
+    return t < 3000 ? 'countdown' : t < 3000 + (bug.earlyReview ? 20_000 : 60_000) ? 'active' : 'review';
+  };
+  const hall = () => ({ stationId: 's1', stationLabel: 'Station 1', assigned: T.assigned ? { ...T.assigned } : null, result: null, waitingCount: T.entry?.status === 'waiting' ? (bug.stationCountsTwo ? 2 : 1) : 0 });
+  const stationHeading = () => {
+    const ph = stationPhase();
+    if (ph === 'review') return bug.recoveredReview ? 'Your turn has started.' : 'Review the count';
+    if (ph !== 'idle' || !T.assigned) return null;
+    return T.assigned.state === 'ready' ? `${T.assigned.calledName} is here` : T.assigned.state === 'active' ? `${T.assigned.calledName}’s turn` : `Calling ${T.assigned.calledName}`;
+  };
   const accounts = {};
   let ctxCount = 0;
   /** What the host answers for one URL. Drift, a different deep link, a redirect and a changed chunk are switchable. */
@@ -644,6 +675,8 @@ function lovable(bug = {}) {
     if (new URL(url).pathname.startsWith('/kiosk/')) subs.push([`${LOVABLE_URL}/assets/kiosk-BBB.js`, 'script']);
     if (bug.foreignScript) subs.push(['https://cdn.example.test/x.js', 'script']);
     if (bug.foreignOnJoin && new URL(url).searchParams.has('join')) subs.push(['https://cdn.example.test/join.js', 'script']);
+    if (new URL(url).searchParams.has('join')) server.joinLoads = (server.joinLoads ?? 0) + 1;
+    if (bug.foreignOnControlJoin && new URL(url).searchParams.has('join') && server.joinLoads === 2) subs.push(['https://cdn.example.test/line.js', 'script']);
     if (bug.foreignOnHome && new URL(url).pathname === '/' && !new URL(url).searchParams.has('join')) subs.push(['https://cdn.example.test/home.js', 'script']);
     if (bug.extraChunk) subs.push([`${LOVABLE_URL}/assets/extra-ZZZ.js`, 'script']);
     for (const [s, t] of subs) await load(context, s, t, false);
@@ -673,6 +706,7 @@ function lovable(bug = {}) {
     let typed = 0;
     let email = '';
     let lastReceipt = null;
+    let lineAlias = '';
     const listeners = { request: [], response: [] };
     const uid = () => store.idbUid;
     const send = (name, data) => {
@@ -710,6 +744,7 @@ function lovable(bug = {}) {
         first() { return self; },
         filter() { return self; },
         getByRole: (_, o) => el(`role:${o.name instanceof RegExp ? 'community' : o.name}`, key),
+        locator: (css) => el(`css:${css}`, key),
         async waitFor() { if (!(await self.count())) throw new Error(`${key} never appeared`); },
         async count() {
           switch (key) {
@@ -726,6 +761,22 @@ function lovable(bug = {}) {
             case 'role:Count by hand instead': return move === 'camera' ? 1 : 0;
             case 'role:Enter reps manually': case 'role:I’m done — enter my count': return 0;
             case 'nav:Your communities': return uid() && !store.local[`wsf.currentCommunity.${uid()}`] ? 1 : 0;
+            // The bound kiosk's station turn panel (gate open on db3fd2f2; `noStationPanel` fakes an older station).
+            case 'css:[data-testid="station-turn"]': return view === 'kiosk' && server.approved && !bug.noStationPanel ? 1 : 0;
+            case 'css:h2': return view === 'kiosk' && scope === 'css:[data-testid="station-turn"]' && stationHeading() !== null ? 1 : 0;
+            case 'role:Call next': return view === 'kiosk' && server.approved && stationPhase() === 'idle' && !T.assigned ? 1 : 0;
+            case 'testid:station-start': return view === 'kiosk' && stationPhase() === 'idle' && T.assigned?.state === 'ready' ? 1 : 0;
+            case 'testid:station-timer': return view === 'kiosk' && stationPhase() === 'active' ? 1 : 0;
+            case 'label:Count': return view === 'kiosk' && stationPhase() === 'review' && !bug.noCountInput ? 1 : 0;
+            case 'testid:station-contribute': case 'testid:station-phone-note': return view === 'kiosk' && stationPhase() === 'review' ? 1 : 0;
+            case 'testid:station-phone-ended': return view === 'kiosk' && stationPhase() === 'ended' && !bug.noEndedNotice ? 1 : 0;
+            case 'css:main.kiosk-root': return view === 'kiosk' ? 1 : 0;
+            // The phone's line (connected-join.tsx): Use the kiosk, the name, the line card, I'm here, Leave line.
+            case 'testid:join-use-kiosk': return view === 'choose' ? 1 : 0;
+            case 'label:Name to show on the kiosk': case 'testid:connected-turn-line': return view === 'line' ? 1 : 0;
+            case 'role:Join the kiosk line': return view === 'line' && !T.entry ? 1 : 0;
+            case 'role:I’m here': return view === 'line' && T.entry?.status === 'assigned' ? 1 : 0;
+            case 'role:Leave line': return view === 'line' && T.entry && T.entry.status !== 'left' ? 1 : 0;
             default: return 1;
           }
         },
@@ -733,16 +784,36 @@ function lovable(bug = {}) {
           if (key === 'testid:kiosk-pair-code') return 'ABC234';
           if (key === 'css:section.together-receipt') return lastReceipt;
           if (key === 'css:ul.goal-history li') return progressText();
+          if (key === 'css:h2') return stationHeading() ?? '';
+          if (key === 'testid:station-timer') return `${(bug.timer30 ? 30 : 60) - Math.floor((server.clock - T.startedAt - 3000) / 1000)}s`;
+          if (key === 'testid:station-phone-note') return bug.noPhoneNote ? 'Tap Contribute when you are done.' : 'If the visitor\'s phone shows Recorded, do not tap Contribute.';
+          if (key === 'testid:station-phone-ended') return bug.phoneCompletes ? 'Recorded from the phone: 7 squats' : 'Turn ended';
+          if (key === 'css:main.kiosk-root') {
+            const waiting = hall().waitingCount;
+            return `Fixture Expo Community · Station 1 · connected Fixture Expo Squats ${stationHeading() ?? ''} ${stationPhase() === 'idle' && !T.assigned ? `${waiting} waiting Call next` : ''} Line: ${waiting} waiting${bug.traceLeft ? ` Calling ${T.entry?.calledName ?? ''}` : ''}`;
+          }
+          if (key === 'testid:connected-turn-line') {
+            const st = T.entry?.status;
+            if (st === 'waiting') return `You’re next in line. Code ${bug.noCodeOnPhone ? '' : T.entry.code}.`;
+            if (st === 'assigned') return `Station 1 is calling ${T.entry.calledName}. 45s to confirm.`;
+            if (st === 'ready') return 'Go to Station 1. The station starts your turn; you’ll record on this phone when it opens.';
+            if (st === 'active') return 'How many squats? Review, then tap Contribute. Nothing counts before that.';
+            return 'When it’s your turn, a station calls you here.';
+          }
           return '';
         },
         async getAttribute(name) {
           if (name === 'data-join-url') return `${bug.qrOrigin ?? LOVABLE_URL}/?join=${bug.qrJoin ?? KIT_JOIN_CODE}&goal=${bug.qrGoal ?? goalId}`;
           if (name === 'data-attempt') return bug.otherAttempt ? 'attempt-other0000' : attempt;
+          if (name === 'data-station-phase') return stationPhase();
+          if (name === 'data-end') return bug.phoneCompletes ? 'recorded' : 'ended';
+          if (name === 'data-line') return !T.entry ? 'alias' : T.entry.status === 'left' ? 'terminal' : bug.phoneLineStale ? 'checking' : T.entry.status;
           return null;
         },
         async fill(v) {
           if (key === 'label:Email') email = v;
           else if (key === 'label:Password') { server.passwordFills += 1; if (server.refused) server.fillsAfterRefusal += 1; if (accounts[email]?.password !== v) throw new Error('wrong password'); }
+          else if (key === 'label:Name to show on the kiosk') lineAlias = v;
           else typed = Number(v);
         },
         async click() {
@@ -757,7 +828,7 @@ function lovable(bug = {}) {
           else if (key === 'role:Join') {
             const already = server.members.has(uid());
             server.members.add(uid());
-            call('wsfJoinCommunity', { joinCode: store.session['wsf.pendingJoinCode'] }, { groupId: bug.otherGroup ? 'other-group' : groupId, alreadyMember: bug.alreadyMember ?? already });
+            call('wsfJoinCommunity', { joinCode: store.session['wsf.pendingJoinCode'] }, { groupId: bug.otherGroup ? 'other-group' : groupId, alreadyMember: bug.controlJoinsAnew && uid() === CONTROL_UID ? false : bug.alreadyMember ?? already });
             view = 'choose';
           } else if (key === 'testid:join-move-phone') {
             store.local[`wsf.pinnedDestination.${uid()}`] = groupId; delete store.session['wsf.pendingJoinCode']; delete store.session['wsf.pendingJoinGoal'];
@@ -783,6 +854,42 @@ function lovable(bug = {}) {
           } else if (key === 'role:Open menu') { /* opens the sheet */ }
           else if (key === 'role:/^Sign out/' || key === 'role:Sign out') { store.idbUid = null; }
           else if (key === 'role:community' && scope === 'nav:Your communities') { store.local[`wsf.currentCommunity.${uid()}`] = groupId; hydrate(); }
+          // The phone's line.
+          else if (key === 'testid:join-use-kiosk') { delete store.session['wsf.pendingJoinCode']; delete store.session['wsf.pendingJoinGoal']; view = 'line'; }
+          else if (key === 'role:Join the kiosk line') {
+            T.entry = { entryId: ENTRY_ID, code: TURN_CODE, calledName: lineAlias, status: 'waiting' };
+            const req = { goalId: bug.lineOtherGoal ? 'e5cgoal-other' : goalId, calledName: bug.lineOtherName ? 'Someone Else' : lineAlias };
+            call('wsfJoinTurnLine', req, { entryId: ENTRY_ID, code: TURN_CODE, calledName: lineAlias, status: 'waiting', goalId, alreadyInLine: !!bug.alreadyInLine });
+            if (bug.joinTwice) call('wsfJoinTurnLine', req, { entryId: ENTRY_ID, code: TURN_CODE, calledName: lineAlias, status: 'waiting', goalId, alreadyInLine: true });
+          } else if (key === 'role:I’m here') {
+            call('wsfTurnReady', { entryId: bug.readyOtherEntry ? 'te-entry-other' : T.entry.entryId }, { entryId: T.entry.entryId, status: bug.readyNotReady ? 'assigned' : 'ready', stationLabel: 'Station 1' });
+            if (!bug.readyNotReady) { T.entry.status = 'ready'; T.assigned = { ...T.assigned, state: bug.stationNotReady ? 'assigned' : 'ready', readySecondsLeft: null }; }
+          } else if (key === 'role:Leave line') {
+            if (bug.phoneCompletes) call('wsfCompleteMyTurn', { entryId: T.entry.entryId, count: 7 }, { status: 'done', receipt: { addedCount: 7, unit: 'squats', alreadyRecorded: false } });
+            call('wsfLeaveTurnLine', bug.leaveSwitch ? { entryId: T.entry.entryId, switchingToPhone: true } : { entryId: T.entry.entryId }, { entryId: T.entry.entryId, status: 'left' });
+            const was = stationPhase();
+            T.entry.status = 'left';
+            if (!bug.hallKeepsTurn) { T.assigned = null; if (was === 'countdown' || was === 'active' || was === 'review') { T.phase = 'ended'; T.endedAt = server.clock; } else T.phase = 'idle'; }
+          }
+          // The bound kiosk's station turn panel.
+          else if (key === 'role:Call next') {
+            if (T.entry?.status === 'waiting') {
+              T.entry.status = 'assigned';
+              T.assigned = { code: bug.callOtherCode ? 'ZZZ' : T.entry.code, calledName: bug.callOtherName ? 'Someone Else' : T.entry.calledName, state: 'assigned', readySecondsLeft: 45, activityUnit: 'squats', activityTitle: 'Fixture Expo Squats', turnRef: bug.noTurnRef ? null : TURN_REF_A };
+            }
+            const res = { ...hall(), called: !!T.assigned, blocked: null, blockedMessage: null };
+            call('wsfCallNext', { stationId: 's1', secret: STATION_SECRET }, res);
+            if (bug.callTwice) call('wsfCallNext', { stationId: 's1', secret: STATION_SECRET }, { ...res, called: false });
+          } else if (key === 'testid:station-start' && bug.startRefused) {
+            const req = send('wsfStartTurn', { stationId: 's1', secret: STATION_SECRET, expectedTurn: T.assigned.turnRef });
+            for (const f of listeners.response) f({ request: () => req, json: async () => ({ error: { status: 'FAILED_PRECONDITION' } }) });
+          } else if (key === 'testid:station-start') {
+            const data = bug.noExpectedTurn ? { stationId: 's1', secret: STATION_SECRET } : { stationId: 's1', secret: STATION_SECRET, expectedTurn: bug.staleTurnRef ? TURN_REF_B : T.assigned.turnRef };
+            T.phase = 'started'; T.startedAt = server.clock; T.entry.status = 'active';
+            T.assigned = { ...T.assigned, state: bug.startNotActive ? 'ready' : 'active', readySecondsLeft: null };
+            call('wsfStartTurn', data, { ...hall(), started: true, activity: { goalId, title: 'Fixture Expo Squats', unit: 'squats' } });
+            if (bug.startTwice) call('wsfStartTurn', data, { ...hall(), started: true, activity: { goalId, title: 'Fixture Expo Squats', unit: 'squats' } });
+          }
         },
       };
       return self;
@@ -798,7 +905,13 @@ function lovable(bug = {}) {
         view = 'home'; move = null; hydrate();
       },
       async reload() { await pageLoad(context, current); move = null; hydrate(); },
-      async waitForTimeout() {},
+      /** Every wait moves the shared clock; the bound kiosk polls its line (wsfTurnState) as poller.ts does. */
+      async waitForTimeout(ms) {
+        server.clock += ms;
+        if (view !== 'kiosk' || !server.approved) return;
+        if (bug.timerWrites && stationPhase() === 'review' && server.clock - (T.startedAt + 63_000) >= 1000 && !T.wrote) { T.wrote = true; call('wsfCompleteTurn', { stationId: 's1', secret: STATION_SECRET, expectedTurn: T.assigned?.turnRef, count: 0 }, { recorded: { amount: 0, unit: 'squats', alreadyRecorded: false } }); }
+        call('wsfTurnState', { stationId: 's1', secret: STATION_SECRET }, bug.hallUnread ? null : hall());
+      },
       async evaluate(fn, arg) {
         const src = String(fn);
         if (src.includes('firebaseLocalStorageDb')) return uid();
@@ -814,7 +927,7 @@ function lovable(bug = {}) {
       locator: (css) => el(`css:${css}`),
     };
   }
-  const tracked = { contributions: [], approvals: 0 };
+  const tracked = { contributions: [], approvals: 0, places: [], turns: [] };
   const fixtures = {
     async expoEvent(label, opts) {
       assert.deepEqual(opts, { attendees: 1, target: 1000, seeded: 100, joinPolicy: 'public' }, 'the kit\'s public event, with one verified member for the control');
@@ -826,17 +939,27 @@ function lovable(bug = {}) {
     async memberInTwoCommunities(label) { const m = { uid: `uid-${label}`, email: `wsf-e5c-t-1-${label}@example.com`, password: `pw-${label}` }; accounts[m.email] = m; return { member: m }; },
     async approveStation(ev, code, slot) { assert.equal(code, 'ABC234'); assert.equal(slot, 1); server.approved = !bug.approvalLost; tracked.approvals += 1; return { stationId: 's1', slot }; },
     trackContribution(ev, member, attemptId) { tracked.contributions.push([member.uid, attemptId]); },
+    /** As the kit: the member's live place, read by wsfMyTurn as that member, tracked; its entry id returned. */
+    async trackPlace(ev, member) {
+      tracked.places.push(member.uid);
+      if (!T.entry || T.entry.status === 'left') throw new Error('the server has no place in the line for this member');
+      return bug.placeUntracked ? 'te-entry-other' : T.entry.entryId;
+    },
+    async trackStationTurn(ev, member, entryId) {
+      tracked.turns.push([member.uid, entryId]);
+      if (T.phase !== 'started') throw new Error('the started turn carries no attempt yet');
+    },
   };
-  return { browser, fixtures, server, tracked, opened: () => ctxCount };
+  return { browser, fixtures, server, tracked, opened: () => ctxCount, now: () => server.clock, turn: T };
 }
 const statusOf = (rows, id) => rows[id]?.status;
 /** The rows the existing kit can reach: the phone rows are the verified-member control's. */
 const PHONE_ROWS = ['contribution-7', 'operation-receipt', 'own-history-shared', 'reopen-static', 'account-isolation'];
 const PASSING = ['fixture-provenance', ...PHONE_ROWS];
 
-test('journey with the kit\'s real shape (#589 W4 F1, LOVABLE-KIOSK-QR-JOIN-1): A joins the public event through the QR carrying its own join code; the verified-member control records 7 once, re-reads, reopens static, and control -> B -> control stays isolated', async () => {
+test('journey with the kit\'s real shape (#589 W4 F1, LOVABLE-KIOSK-QR-JOIN-1, LOVABLE-KIOSK-STATION-DRIVER-1): A joins the public event through the QR carrying its own join code; the verified-member control records 7 once, re-reads, reopens static, control -> B -> control stays isolated, and the control\'s station turn runs end to end with no second write', async () => {
   const L = lovable();
-  const { rows, productDocs, served } = await runJourney({ browser: L.browser, fixtures: L.fixtures, base: LOVABLE_URL, reviewed: FAKE_REVIEWED });
+  const { rows, productDocs, served } = await runJourney({ browser: L.browser, fixtures: L.fixtures, base: LOVABLE_URL, reviewed: FAKE_REVIEWED, now: L.now });
   assert.deepEqual(served.violations, [], 'the browser loaded only the reviewed build');
   assert.equal(hostBuildRow({ status: 'PASS', reason: 'bind' }, served).status, 'PASS');
   assert.equal(served.verified, L.server.loads.length);
@@ -863,6 +986,26 @@ test('journey with the kit\'s real shape (#589 W4 F1, LOVABLE-KIOSK-QR-JOIN-1): 
   assert.equal(L.browser.closed, L.opened(), 'every context is closed');
   for (const id of Object.keys(FIXED_BLOCKED)) assert.equal(rows[id], undefined, `${id} is never measured by the journey`);
   assert.doesNotMatch(JSON.stringify(results(rows)), /pw-lk|@example\.com|uid-lk|JOINCODE/, 'no password, email, raw uid or join code in the results');
+  // The station turn (LOVABLE-KIOSK-STATION-DRIVER-1): every row PASS, each saying what it measured.
+  for (const id of STATION_ROWS) assert.equal(statusOf(rows, id), 'PASS', `${id}: ${rows[id]?.seen}`);
+  assert.equal(rows['queue-place'].seen, `${CONTROL_SEEN}: the kiosk QR (already a member, nothing joined), Use the kiosk, then exactly one place in this goal's line under the chosen name (waiting, not already in line); the phone shows its code; the station counts 1 waiting; the place is tracked for cleanup`);
+  assert.equal(rows['expected-turn-start'].seen, `${CONTROL_SEEN}: one Start; its request carries expectedTurn equal to the called turn's turnRef (compared, never printed); its answer shows that turn active; the station counts down`);
+  assert.match(rows['round-60s'].seen, /^control \(the kit's verified member\): the timer opened at 60s and ran down; the review came after 6[0-9] s; nothing was written, during the round or at its end$/);
+  assert.match(rows['station-finish'].seen, /Turn ended, then Call next with nothing of the previous visitor .* contribution-7 stays the only one$/);
+  // From the requests themselves: the start's binding is the called turn's; the control's only contribution is contribution-7.
+  const sent = (name) => L.server.requests.filter((x) => x.name === name);
+  assert.equal(sent('wsfStartTurn').length, 1);
+  assert.equal(sent('wsfStartTurn')[0].data.expectedTurn, TURN_REF_A);
+  assert.equal(sent('wsfCallNext')[0].data.secret, STATION_SECRET, 'the station sends its own credential');
+  assert.deepEqual(sent('wsfJoinTurnLine').map((x) => x.data), [{ goalId: 'e5cgoal-e5c-t-1-lk', calledName: LINE_ALIAS }]);
+  assert.deepEqual(sent('wsfLeaveTurnLine').map((x) => x.data), [{ entryId: ENTRY_ID }]);
+  assert.equal(sent('wsfContribute').length, 1);
+  for (const name of ['wsfCompleteTurn', 'wsfCompleteMyTurn', 'wsfCancelTurn']) assert.equal(sent(name).length, 0, name);
+  assert.ok(sent('wsfTurnState').length > 60, 'the station polled its line through the round');
+  assert.deepEqual(L.tracked.places, [CONTROL_UID], 'the place is tracked for cleanup, through the kit');
+  assert.deepEqual(L.tracked.turns, [[CONTROL_UID, ENTRY_ID]], 'and the started turn\'s attempt');
+  assert.equal(L.turn.phase, 'ended');
+  assert.doesNotMatch(JSON.stringify(results(rows)), new RegExp([STATION_SECRET, ENTRY_ID, TURN_REF_A, `\\b${TURN_CODE}\\b`].join('|')), 'no station credential, entry id, turn binding or line code in the results');
 });
 
 test('cli --run with the public event (LOVABLE-KIOSK-QR-JOIN-1): A\'s QR-join membership reaches the cleanup manifest, and cleanup-tracking names it', async () => {
@@ -881,10 +1024,11 @@ test('cli --run with the public event (LOVABLE-KIOSK-QR-JOIN-1): A\'s QR-join me
     importKit: async () => ({ createFixtureKit: () => L.fixtures }),
     launch: async () => ({ newContext: (o) => L.browser.newContext(o), close: async () => { closed += 1; } }),
     say: (l) => lines.push(l),
+    now: L.now,
   });
   assert.equal(lines[0].startsWith('LOVABLE_BUILD=PASS'), true, lines[0]);
   const rows = Object.fromEntries(JSON.parse(fs.readFileSync(path.join(dir, 'lovable-kiosk', 'results.json'), 'utf8')).rows.map((r) => [r.id, r]));
-  for (const id of ['host-build', 'qr-join', ...PASSING]) assert.equal(rows[id].status, 'PASS', `${id}: ${rows[id].seen}`);
+  for (const id of ['host-build', 'qr-join', ...PASSING, ...STATION_ROWS]) assert.equal(rows[id].status, 'PASS', `${id}: ${rows[id].seen}`);
   assert.deepEqual(JSON.parse(fs.readFileSync(manifest, 'utf8')).docs, ['wsfGoals/e5cgoal-e5c-t-1-lk', 'wsfMemberships/e5cgrp-e5c-t-1-lk_uid-lka'], 'A\'s membership is added to the cleanup manifest');
   const named = '1 product-written document(s) added (visitor A\'s membership of the event community, from the QR join); 2 in the manifest';
   assert.deepEqual([rows['cleanup-tracking'].status, rows['cleanup-tracking'].seen], ['PASS', named]);
@@ -893,7 +1037,10 @@ test('cli --run with the public event (LOVABLE-KIOSK-QR-JOIN-1): A\'s QR-join me
   assert.deepEqual(L.tracked.contributions, [[CONTROL_UID, 'attempt-1abcdefgh']]);
   assert.equal(L.browser.closed, L.opened(), 'every context is closed');
   assert.equal(closed, 1, 'and the browser');
-  assert.doesNotMatch(lines.join('\n'), /uid-lka|e5cgrp|JOINCODE|fake-token|fake-api-key/, 'no id, join code or credential is printed');
+  assert.doesNotMatch(lines.join('\n'), /uid-lka|e5cgrp|JOINCODE|fake-token|fake-api-key|station-secret|te-entry|tr_A/, 'no id, join code, credential, station secret, entry id or turn binding is printed');
+  // Every station row's status line is followed by its seen line (the job log alone says why).
+  for (const id of STATION_ROWS) assert.ok(lines[lines.indexOf(`LOVABLE_ROW ${id}=PASS`) + 1].startsWith(`LOVABLE_SEEN ${id} control `), id);
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 test('journey negatives: each defect fails exactly the row that measures it; a failed QR join never erases the phone control', async () => {
@@ -958,6 +1105,230 @@ test('qrJoinProblem (LOVABLE-KIOSK-QR-JOIN-1): the QR must carry exactly this co
   assert.doesNotMatch(productDocsSeen(['wsfMemberships/e5cgrp-e5c-t-1-lk_uid-lka'], 1), /uid-lka|e5cgrp/);
   // Anything else (not a top-level membership document) is named only as a product-written document.
   assert.equal(productDocsSeen(['wsfContributions/e5c-t-1-x', 'wsfMemberships/e5cgrp-e5c-t-1-lk_uid-lka/sub/e5c-t-1'], 3), '2 product-written document(s) added (a product-written document; a product-written document); 3 in the manifest');
+});
+
+// ---- the station turn (LOVABLE-KIOSK-STATION-DRIVER-1) ------------------------------------------------------------
+test('station verdicts (LOVABLE-KIOSK-STATION-DRIVER-1): each row PASS on the served shapes; each defect FAILs by name; no credential, entry id, binding or code is printed', () => {
+  const goalId = 'e5cgoal-e5c-t-1-lk';
+  const ex = (data, result, error = null) => ({ data, result, error });
+  const place = { entryId: ENTRY_ID, code: TURN_CODE, calledName: LINE_ALIAS, status: 'waiting', goalId, alreadyInLine: false };
+  const assigned = { code: TURN_CODE, calledName: LINE_ALIAS, state: 'assigned', readySecondsLeft: 45, activityUnit: 'squats', activityTitle: 'Fixture Expo Squats', turnRef: TURN_REF_A };
+  const seen = [];
+  const table = (fn, good, cases) => {
+    const v = fn(good);
+    assert.equal(v.ok, true, `${fn.name}: ${v.seen}`);
+    assert.ok(v.seen.startsWith(`${CONTROL_SEEN}: `), fn.name);
+    seen.push(v.seen);
+    for (const [why, over, re] of cases) {
+      const x = fn({ ...good, ...over });
+      assert.equal(x.ok, false, `${fn.name}: ${why}`);
+      assert.match(x.seen, re, `${fn.name}: ${why}`);
+      seen.push(x.seen);
+    }
+  };
+  // queue-place
+  const join = ex({ goalId, calledName: LINE_ALIAS }, place);
+  table(queuePlaceVerdict, { qrJoin: ex({ joinCode: 'x' }, { groupId: 'g', alreadyMember: true }), joins: [join], goalId, phoneLine: 'waiting', phoneText: `You’re next in line. Code ${TURN_CODE}.`, stationWaiting: 1, trackedEntry: ENTRY_ID }, [
+    ['the QR joined the control anew', { qrJoin: ex({}, { groupId: 'g', alreadyMember: false }) }, /the kiosk QR's Join answered alreadyMember=false for the kit's member/],
+    ['the QR join was refused', { qrJoin: ex({}, null, 'NOT_FOUND') }, /answered NOT_FOUND/],
+    ['no QR join seen', { qrJoin: null }, /answered alreadyMember=undefined/],
+    ['two line joins', { joins: [join, join] }, /^control \(the kit's verified member\): 2 line join request\(s\)$/],
+    ['no line join', { joins: [] }, /0 line join request\(s\); no place in the answer/],
+    ['another goal asked', { joins: [ex({ goalId: 'other', calledName: LINE_ALIAS }, place)] }, /the line join names another goal or another name/],
+    ['another name asked', { joins: [ex({ goalId, calledName: 'someone' }, place)] }, /the line join names another goal or another name/],
+    ['a refused line join', { joins: [ex({ goalId, calledName: LINE_ALIAS }, null, 'FAILED_PRECONDITION')], phoneLine: 'alias' }, /no place in the answer \(FAILED_PRECONDITION\)/],
+    ['an empty place', { joins: [ex(join.data, { ...place, entryId: '' })] }, /no place in the answer$|no place in the answer;/],
+    ['already in line', { joins: [ex(join.data, { ...place, alreadyInLine: true })] }, /status waiting, alreadyInLine=true/],
+    ['not waiting', { joins: [ex(join.data, { ...place, status: 'assigned' })] }, /status assigned, alreadyInLine=false/],
+    ['an answer for another goal', { joins: [ex(join.data, { ...place, goalId: 'other' })] }, /alreadyInLine=false, for another goal/],
+    ['no line code', { joins: [ex(join.data, { ...place, code: 'k7p' })], phoneText: 'You’re next in line. Code k7p.' }, /the answer carries no line code/],
+    ['untracked', { trackedEntry: null }, /the place is not tracked for cleanup/],
+    ['another place tracked', { trackedEntry: 'te-other' }, /the place is not tracked for cleanup/],
+    ['the phone shows no line', { phoneLine: null }, /the phone's line shows nothing/],
+    ['the phone is still checking', { phoneLine: 'checking' }, /the phone's line shows checking/],
+    ['the phone shows no code', { phoneText: 'You’re next in line. Code .' }, /the phone's line shows waiting without its code/],
+    ['the station counts nobody', { stationWaiting: 0 }, /the station counts 0 waiting/],
+    ['the station counts two', { stationWaiting: 2 }, /the station counts 2 waiting/],
+    ['the station line unread', { stationWaiting: null }, /the station counts no waiting/],
+  ]);
+  // call
+  const call = ex({ stationId: 's1', secret: STATION_SECRET }, { called: true, assigned, waitingCount: 0 });
+  table(callVerdict, { calls: [call], place, heading: `Calling ${LINE_ALIAS}`, phoneLine: 'assigned', phoneText: `Station 1 is calling ${LINE_ALIAS}. 45s to confirm.` }, [
+    ['two calls', { calls: [call, call] }, /2 Call next request\(s\)/],
+    ['no call', { calls: [] }, /0 Call next request\(s\); the call answered called=undefined/],
+    ['nobody called', { calls: [ex(call.data, { called: false, assigned: null })] }, /the call answered called=false/],
+    ['a refused call', { calls: [ex(call.data, null, 'PERMISSION_DENIED')] }, /the call answered PERMISSION_DENIED/],
+    ['nobody assigned', { calls: [ex(call.data, { called: true, assigned: null })] }, /the called turn is not this place \(nobody assigned\)/],
+    ['another name', { calls: [ex(call.data, { called: true, assigned: { ...assigned, calledName: 'Someone' } })] }, /not this place \(another name\)/],
+    ['another code', { calls: [ex(call.data, { called: true, assigned: { ...assigned, code: 'ZZZ' } })] }, /not this place \(another code\)/],
+    ['already ready', { calls: [ex(call.data, { called: true, assigned: { ...assigned, state: 'ready' } })] }, /not this place \(state ready\)/],
+    ['no binding', { calls: [ex(call.data, { called: true, assigned: { ...assigned, turnRef: null } })] }, /not this place \(no turn binding\)/],
+    ['a short binding', { calls: [ex(call.data, { called: true, assigned: { ...assigned, turnRef: 'tr_short' } })] }, /not this place \(no turn binding\)/],
+    ['the station shows another heading', { heading: 'Calling Someone' }, /the station shows "Calling Someone"/],
+    ['the station shows nothing', { heading: null }, /the station shows nothing/],
+    ['the phone is not called', { phoneLine: 'waiting' }, /the phone's line shows waiting/],
+    ['the phone names another', { phoneText: 'Station 1 is calling Someone.' }, /the phone's line shows assigned/],
+  ]);
+  // phone-ready
+  const ready = ex({ entryId: ENTRY_ID }, { entryId: ENTRY_ID, status: 'ready', stationLabel: 'Station 1' });
+  table(readyVerdict, { readies: [ready], place, turnRef: TURN_REF_A, hall: { assigned: { ...assigned, state: 'ready', readySecondsLeft: null } }, heading: `${LINE_ALIAS} is here`, startShown: true }, [
+    ['no I\'m here', { readies: [] }, /0 I'm here request\(s\); I'm here answered status undefined/],
+    ['two', { readies: [ready, ready] }, /2 I'm here request\(s\)/],
+    ['another place', { readies: [ex({ entryId: 'te-other' }, ready.result)] }, /I'm here names another place/],
+    ['not ready', { readies: [ex(ready.data, { ...ready.result, status: 'assigned' })] }, /I'm here answered status assigned/],
+    ['refused', { readies: [ex(ready.data, null, 'FAILED_PRECONDITION')] }, /I'm here answered FAILED_PRECONDITION/],
+    ['the station still calling', { hall: { assigned } }, /the station's line shows state assigned/],
+    ['another turn ready', { hall: { assigned: { ...assigned, state: 'ready', turnRef: TURN_REF_B } } }, /shows state ready for another turn/],
+    ['nobody at the station', { hall: { assigned: null } }, /the station's line shows nobody/],
+    ['no hall', { hall: null }, /the station's line shows nobody/],
+    ['another heading', { heading: `Calling ${LINE_ALIAS}` }, /the station shows "Calling Fixture Control"/],
+    ['no Start', { startShown: false }, /the station shows "Fixture Control is here" and no Start/],
+  ]);
+  // expected-turn-start
+  const start = ex({ stationId: 's1', secret: STATION_SECRET, expectedTurn: TURN_REF_A }, { started: true, assigned: { ...assigned, state: 'active', readySecondsLeft: null } });
+  assert.equal(startVerdict({ starts: [start], turnRef: TURN_REF_A, phase: 'active' }).ok, true, 'a first read in the round itself');
+  table(startVerdict, { starts: [start], turnRef: TURN_REF_A, phase: 'countdown' }, [
+    ['an older station path', { starts: [ex({ stationId: 's1', secret: STATION_SECRET }, start.result)] }, /the Start request carries no expectedTurn \(an older station path\)/],
+    ['no request data', { starts: [ex(null, start.result)] }, /carries no expectedTurn/],
+    ['a null binding', { starts: [ex({ ...start.data, expectedTurn: null }, start.result)] }, /expectedTurn is not a turn binding/],
+    ['a malformed binding', { starts: [ex({ ...start.data, expectedTurn: 'tr_short' }, start.result)] }, /expectedTurn is not a turn binding/],
+    ['another turn\'s binding', { starts: [ex({ ...start.data, expectedTurn: TURN_REF_B }, { ...start.result, assigned: { ...start.result.assigned, turnRef: TURN_REF_B } })] }, /^control \(the kit's verified member\): the Start request's expectedTurn is not the called turn's turnRef$/],
+    ['no Start', { starts: [] }, /0 Start request\(s\)/],
+    ['two Starts', { starts: [start, start] }, /2 Start request\(s\)/],
+    ['not started', { starts: [ex(start.data, { ...start.result, started: false })] }, /the Start answer does not show that turn active/],
+    ['still ready', { starts: [ex(start.data, { ...start.result, assigned: { ...start.result.assigned, state: 'ready' } })] }, /does not show that turn active/],
+    ['another turn active', { starts: [ex(start.data, { ...start.result, assigned: { ...start.result.assigned, turnRef: TURN_REF_B } })] }, /does not show that turn active/],
+    ['refused', { starts: [ex(start.data, null, 'FAILED_PRECONDITION')] }, /the Start answer is FAILED_PRECONDITION/],
+    ['the station stays idle', { phase: 'idle' }, /the station shows the idle phase/],
+    ['the station jumps to review', { phase: 'review' }, /the station shows the review phase/],
+    ['no panel', { phase: null }, /the station shows the missing phase/],
+  ]);
+  // round-60s
+  assert.equal(ROUND_MIN_MS, 58_000);
+  assert.equal(roundVerdict({ firstTimer: '60s', elapsedMs: ROUND_MIN_MS, phase: 'review', writes: [] }).ok, true, 'the boundary itself');
+  table(roundVerdict, { firstTimer: '60s', elapsedMs: 61_200, phase: 'review', writes: [] }, [
+    ['a short round', { elapsedMs: ROUND_MIN_MS - 1 }, /the review came after 58 s/],
+    ['an early review', { elapsedMs: 20_000 }, /the review came after 20 s/],
+    ['never active', { elapsedMs: null }, /the review came after 0 s/],
+    ['the timer opens elsewhere', { firstTimer: '30s' }, /the timer opened at "30s"/],
+    ['no timer', { firstTimer: null }, /the timer opened at nothing/],
+    ['still running', { phase: 'active' }, /the round ended in the active phase/],
+    ['the panel gone', { phase: null }, /the round ended in the missing phase/],
+    ['a timer-end Complete', { writes: ['wsfCompleteTurn'] }, /1 write\(s\) during the round or at its end \(wsfCompleteTurn\)/],
+    ['a phone Complete', { writes: ['wsfCompleteMyTurn'] }, /\(wsfCompleteMyTurn\)/],
+    ['two of one kind', { writes: ['wsfContribute', 'wsfContribute'] }, /2 write\(s\) during the round or at its end \(wsfContribute\)$/],
+  ]);
+  assert.match(roundVerdict({ firstTimer: '60s', elapsedMs: 61_200, phase: 'review', writes: [] }).seen, /the review came after 61 s; nothing was written, during the round or at its end$/);
+  assert.deepEqual([...TURN_WRITES].sort(), ['wsfCallNext', 'wsfCancelTurn', 'wsfCompleteMyTurn', 'wsfCompleteTurn', 'wsfContribute', 'wsfJoinCommunity', 'wsfJoinTurnLine', 'wsfLeaveTurnLine', 'wsfStartTurn', 'wsfTurnReady']);
+  assert.deepEqual([...CONTRIBUTION_WRITES].sort(), ['wsfCompleteMyTurn', 'wsfCompleteTurn', 'wsfContribute']);
+  // review
+  table(reviewVerdict, { phase: 'review', heading: 'Review the count', countShown: true, contributeShown: true, note: REVIEW_PHONE_NOTE }, [
+    ['not in review', { phase: 'active' }, /the station shows the active phase/],
+    ['a recovered start', { heading: 'Your turn has started.' }, /the review heading is "Your turn has started."/],
+    ['no count', { countShown: false }, /the review has no count$/],
+    ['no Contribute', { contributeShown: false }, /the review has no Contribute$/],
+    ['neither', { countShown: false, contributeShown: false }, /the review has no count and no Contribute$/],
+    ['another note', { note: 'Tap Contribute.' }, /the phone note is "Tap Contribute."/],
+    ['no note', { note: null }, /the phone note is nothing/],
+  ]);
+  assert.equal(REVIEW_PHONE_NOTE, 'If the visitor\'s phone shows Recorded, do not tap Contribute.');
+  // station-finish
+  const leave = ex({ entryId: ENTRY_ID }, { entryId: ENTRY_ID, status: 'left' });
+  table(finishVerdict, { leaves: [leave], place, end: 'ended', endText: 'Turn ended', phase: 'idle', callNextShown: true, stationText: 'Fixture Expo Community · Station 1 · connected 0 waiting Call next Line: 0 waiting', hall: { assigned: null, result: null }, turnContributions: [] }, [
+    ['no leave', { leaves: [] }, /0 leave request\(s\)/],
+    ['two leaves', { leaves: [leave, leave] }, /2 leave request\(s\)/],
+    ['another place left', { leaves: [ex({ entryId: 'te-other' }, leave.result)] }, /the leave names another place or switches to the phone/],
+    ['a switch to the phone', { leaves: [ex({ entryId: ENTRY_ID, switchingToPhone: true }, leave.result)] }, /switches to the phone/],
+    ['a refused leave', { leaves: [ex(leave.data, null, 'NOT_FOUND')] }, /the leave answered NOT_FOUND/],
+    ['a recording', { end: 'recorded', endText: 'Recorded from the phone: 7 squats' }, /the station showed a recording from the phone/],
+    ['a recording under the ended text', { end: 'recorded' }, /the station showed a recording from the phone/],
+    ['no end shown', { end: null, endText: null }, /the station showed nothing/],
+    ['another end text', { endText: 'Done' }, /the station showed "Done"/],
+    ['still in review', { phase: 'review', callNextShown: false }, /the station then shows the review phase without Call next/],
+    ['no Call next', { callNextShown: false }, /the station then shows the idle phase without Call next/],
+    ['still showing the end', { phase: 'ended' }, /the station then shows the ended phase$|the station then shows the ended phase;/],
+    ['the name left on screen', { stationText: `Calling ${LINE_ALIAS}` }, /the station still shows the previous visitor/],
+    ['the code left on screen', { stationText: `Code ${TURN_CODE}.` }, /the station still shows the previous visitor/],
+    ['the line still holds the turn', { hall: { assigned, result: null } }, /the station's line still holds a turn/],
+    ['the line still holds a result', { hall: { assigned: null, result: { code: TURN_CODE, amount: 7, unit: 'squats', secondsLeft: 9 } } }, /still holds a result/],
+    ['the line unread', { hall: null }, /still holds an unread state/],
+    ['a station Complete', { turnContributions: ['wsfCompleteTurn'] }, /1 contribution request\(s\) since the turn began \(wsfCompleteTurn\)/],
+    ['a phone Complete and a contribute', { turnContributions: ['wsfCompleteMyTurn', 'wsfContribute'] }, /2 contribution request\(s\) since the turn began \(wsfCompleteMyTurn, wsfContribute\)/],
+  ]);
+  assert.equal(finishVerdict({ leaves: [leave], place, end: 'ended', endText: 'Turn ended', phase: 'idle', callNextShown: true, stationText: `Station 1 · ${TURN_CODE}X · AK7P`, hall: { assigned: null, result: null }, turnContributions: [] }).ok, true, 'the code inside another word is not the code');
+  assert.equal(TURN_REF.test(TURN_REF_A), true);
+  for (const bad of ['tr_short', 'TR_AAAAAAAAAAAAAAAAAAAAAAAA', `tr_${'A'.repeat(65)}`, `x${TURN_REF_A}`]) assert.equal(TURN_REF.test(bad), false, bad);
+  // Nothing the station or the line carries is ever printed.
+  for (const t of seen) assert.doesNotMatch(t, new RegExp([STATION_SECRET, ENTRY_ID, TURN_REF_A, TURN_REF_B, `\\b${TURN_CODE}\\b`, 'te-other'].join('|')), t);
+});
+
+test('journey negatives for the station turn (LOVABLE-KIOSK-STATION-DRIVER-1): each defect fails its row by name; the rows before it and the phone rows stand; a turn that cannot go on fails what follows as not reached', async () => {
+  const cases = [
+    // [bug, the row that fails, what it says, whether the turn stops there]
+    [{ controlJoinsAnew: true }, 'queue-place', /the kiosk QR's Join answered alreadyMember=false for the kit's member/],
+    [{ joinTwice: true }, 'queue-place', /2 line join request\(s\)/],
+    [{ lineOtherName: true }, 'queue-place', /the line join names another goal or another name/],
+    [{ lineOtherGoal: true }, 'queue-place', /the line join names another goal or another name/],
+    [{ alreadyInLine: true }, 'queue-place', /alreadyInLine=true/],
+    [{ placeUntracked: true }, 'queue-place', /the place is not tracked for cleanup/],
+    [{ noCodeOnPhone: true }, 'queue-place', /the phone's line shows waiting without its code/],
+    [{ stationCountsTwo: true }, 'queue-place', /the station counts 2 waiting/],
+    [{ callTwice: true }, 'call', /2 Call next request\(s\)/],
+    [{ callOtherCode: true }, 'call', /the called turn is not this place \(another code\)/],
+    [{ callOtherName: true }, 'call', /another name/],
+    [{ noTurnRef: true }, 'call', /no turn binding/, 'stops'],
+    [{ readyOtherEntry: true }, 'phone-ready', /I'm here names another place/],
+    [{ readyNotReady: true }, 'phone-ready', /I'm here answered status assigned/, 'stops'],
+    [{ stationNotReady: true }, 'phone-ready', /the station's line shows state assigned/, 'stops'],
+    [{ noExpectedTurn: true }, 'expected-turn-start', /the Start request carries no expectedTurn \(an older station path\)/],
+    [{ staleTurnRef: true }, 'expected-turn-start', /the Start request's expectedTurn is not the called turn's turnRef/],
+    [{ startNotActive: true }, 'expected-turn-start', /the Start answer does not show that turn active/],
+    [{ startTwice: true }, 'expected-turn-start', /2 Start request\(s\)/],
+    [{ startRefused: true }, 'expected-turn-start', /the Start answer is FAILED_PRECONDITION; the station shows the idle phase/, 'stops'],
+    [{ earlyReview: true }, 'round-60s', /the review came after 2[0-9] s/],
+    [{ timer30: true }, 'round-60s', /the timer opened at "30s"/],
+    [{ timerWrites: true }, 'round-60s', /1 write\(s\) during the round or at its end \(wsfCompleteTurn\)/],
+    [{ recoveredReview: true }, 'review', /the review heading is "Your turn has started."/],
+    [{ noPhoneNote: true }, 'review', /the phone note is "Tap Contribute when you are done."/],
+    [{ noCountInput: true }, 'review', /the review has no count/],
+    [{ phoneCompletes: true }, 'station-finish', /the station showed a recording from the phone; .*1 contribution request\(s\) since the turn began \(wsfCompleteMyTurn\)/],
+    [{ leaveSwitch: true }, 'station-finish', /the leave names another place or switches to the phone/],
+    [{ traceLeft: true }, 'station-finish', /the station still shows the previous visitor/],
+    [{ hallKeepsTurn: true }, 'station-finish', /the station showed nothing; the station then shows the review phase without Call next; .*the station's line still holds a turn/],
+    [{ noEndedNotice: true }, 'station-finish', /the station showed nothing/],
+    [{ noStationPanel: true }, 'queue-place', /^not reached: the bound kiosk shows no station turn panel; an older station path is never driven$/, 'stops'],
+    [{ noQr: true }, 'queue-place', /^not reached: the kiosk showed no QR join link for this goal \(see qr-join\), so no phone can reach its line$/, 'stops'],
+  ];
+  for (const [bug, row, said, stops] of cases) {
+    const L = lovable(bug);
+    const { rows } = await runJourney({ browser: L.browser, fixtures: L.fixtures, base: LOVABLE_URL, reviewed: FAKE_REVIEWED, now: L.now });
+    const name = JSON.stringify(bug);
+    assert.equal(statusOf(rows, row), 'FAIL', `${name} must fail ${row}: ${rows[row]?.seen}`);
+    assert.match(rows[row].seen, said, `${name}: ${rows[row].seen}`);
+    const at = STATION_ROWS.indexOf(row);
+    for (const id of STATION_ROWS.slice(0, at)) assert.equal(statusOf(rows, id), 'PASS', `${name}: ${id} before ${row} stands: ${rows[id]?.seen}`);
+    if (stops) for (const id of STATION_ROWS.slice(at + 1)) assert.match(`${statusOf(rows, id)} ${rows[id]?.seen}`, /^FAIL not reached: /, `${name}: ${id} after ${row}`);
+    else for (const id of STATION_ROWS.slice(at + 1)) assert.notEqual(rows[id], undefined, `${name}: ${id} is still measured`);
+    for (const id of PHONE_ROWS) assert.equal(statusOf(rows, id), 'PASS', `${name}: the control's ${id} still stands`);
+    for (const id of STATION_ROWS) assert.notEqual(statusOf(rows, id), 'BLOCKED', `${name}: ${id} is never BLOCKED`);
+    assert.doesNotMatch(JSON.stringify(results(rows)), new RegExp([STATION_SECRET, ENTRY_ID, TURN_REF_A, TURN_REF_B].join('|')), `${name}: nothing of the station or the line is printed`);
+    assert.equal(L.browser.closed, L.opened(), `${name}: every context is closed`);
+  }
+  // An unreviewed script on the control's own join page: refused, host-build FAILs, and nothing is pressed on that page.
+  {
+    const G = lovable({ foreignOnControlJoin: true });
+    const r = await runJourney({ browser: G.browser, fixtures: G.fixtures, base: LOVABLE_URL, reviewed: FAKE_REVIEWED, now: G.now });
+    assert.equal(hostBuildRow({ status: 'PASS', reason: 'bind' }, r.served).status, 'FAIL');
+    assert.ok(r.served.violations.some((v) => /cdn\.example\.test\/line\.js/.test(v)), r.served.violations.join('; '));
+    for (const id of STATION_ROWS) assert.match(`${statusOf(r.rows, id)} ${r.rows[id]?.seen}`, /^FAIL stopped: .*outside the reviewed build/, id);
+    const after = G.server.requests.filter((x) => x.uid === CONTROL_UID && ['wsfJoinCommunity', 'wsfJoinTurnLine'].includes(x.name));
+    assert.deepEqual(after, [], 'the control presses nothing on a page that loaded unreviewed code');
+    for (const id of PHONE_ROWS) assert.equal(statusOf(r.rows, id), 'PASS', `the control's ${id} still stands`);
+  }
+  // A journey that stops before the station turn fails the station rows by name, never BLOCKED.
+  const L = lovable({ controlSignInFails: true });
+  const { rows } = await runJourney({ browser: L.browser, fixtures: L.fixtures, base: LOVABLE_URL, reviewed: FAKE_REVIEWED, now: L.now });
+  for (const id of STATION_ROWS) assert.match(`${statusOf(rows, id)} ${rows[id]?.seen}`, /^FAIL stopped: the control member's sign-in did not complete/, id);
 });
 
 test('journey: a contribution whose assertions fail is still tracked for cleanup; a lost approval fails qr-join but not the control', async () => {

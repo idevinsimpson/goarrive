@@ -10,6 +10,8 @@ Rework after Director finding #365 `6045688233` and security detail #589 `604571
 
 **Updated by LOVABLE-KIOSK-QR-JOIN-1** (queue #365 `6096965194`, release `6096965662`; W4, inbox #394). The kit's expo event is now public (KIT-PUBLIC-EXPO-EVENT-1, PR #616), so `qr-join` is measured. The QR must carry exactly the kit's join code, and a public event whose kiosk shows no QR FAILs by name; the private-kit BLOCKED reason is retired. See "What the kit's public event reaches" and the `qr-join` row, below. The same packet carries W7's PN-1, PN-2 and PN-4 from #614 (tests and a doc comment here; PN-4 is in the device matrix's note).
 
+**Updated by LOVABLE-KIOSK-STATION-DRIVER-1** (queue #365 `6099633658`, release `6099634479`; W4, inbox #394). The proof now drives the station turn through the served UI. Each of the seven station rows is PASS or FAIL by name, never BLOCKED. See "The station turn" and the station rows, below.
+
 ## What it adds
 
 There is one new mode in the existing trusted staging workflow, `mode=lovable-kiosk`. It is proof only: it builds nothing, deploys nothing, and changes no rules, indexes, IAM or providers.
@@ -242,7 +244,44 @@ So:
 - **The phone rows still use a control.** `contribution-7`, `operation-receipt`, `own-history-shared`, `reopen-static` and `account-isolation` are measured by the kit's **verified member** of the event community. The kit makes that member (`attendees: 1`), like the Champion, as fixture preparation. The member signs in through the product UI, and each of these rows names the control in its `seen` text. The QR join never gates them: a failed QR join never erases the control's rows.
 - **Cleanup.** A's product-written membership is tracked from the join request (`track(pageA, a, { join: true })`), before any reply, and merged into the run-tagged manifest. `cleanup-tracking` names it by kind, never by id.
 
-So an authorized credentialed run can reach every row except the station turn, the organizer UI approval and the unverified account: `host-build`, `fixture-provenance`, `qr-join`, the five phone rows, and `cleanup-tracking`.
+So an authorized credentialed run can reach every row except the organizer UI approval and the unverified account. That is `host-build`, `fixture-provenance`, `qr-join`, the five phone rows, the seven station rows (since LOVABLE-KIOSK-STATION-DRIVER-1) and `cleanup-tracking`.
+
+## The station turn (LOVABLE-KIOSK-STATION-DRIVER-1)
+
+SOURCE INSPECTED: the served build `db3fd2f2` (read-only, on the Lovable mirror) and the served backend `ec162d17` (`functions-westayfit/src/index.ts`).
+- **Station panel:** `src/wsf/kiosk/station-turn-panel.tsx` covers the phases, the headings, Call next, Start, the 3-2-1, the 60-second round, the review and "Turn ended". `station-turn.ts` holds `ROUND_SECONDS`, `REVIEW_PHONE_NOTE` and `phoneEnd`.
+- **Callables:** `station-port.ts` holds `TURN_REF` and the callables. The backend side is `wsfJoinTurnLine`, `wsfCallNext`, `wsfTurnReady`, `wsfStartTurn`, `wsfLeaveTurnLine` and `readTurnState`.
+- **Phone line:** `src/wsf/kiosk/connected-join.tsx` has Use the kiosk, the line card, I'm here and Leave line. It is reachable only through a scanned join link, a pending entry.
+
+The turn runs last, after `account-isolation`. The control is back in fresh storage on its own phone, and the kiosk is the station bound in step 1. Every row is read from the requests and from the screens. The station credential and every binding, entry id and line code stay in memory, and no verdict prints them.
+
+1. **queue-place.** The control opens the kiosk QR's join link.
+   - It is already a member, so `wsfJoinCommunity` answers `alreadyMember: true` and writes nothing (`ec162d17` `admitByLinkTx`).
+   - It taps **Use the kiosk**, enters the chosen name "Fixture Control" and taps **Join the kiosk line**.
+   - PASS needs:
+     - exactly one `wsfJoinTurnLine` for this goal and that name;
+     - an answer that is `waiting`, not `alreadyInLine`, for this goal, with a three-character code;
+     - the phone's line card waiting, with that code;
+     - the station's own line counting 1 waiting;
+     - the place tracked for cleanup through the kit's `trackPlace`.
+2. **call.** The station's **Call next** sends exactly one `wsfCallNext`. Its answer must assign this place: the chosen name, its code, state `assigned` and a `turnRef` binding. The station must show "Calling Fixture Control", and the phone must show that it is called.
+3. **phone-ready.** The phone taps **I’m here** inside the 45-second lease. That sends exactly one `wsfTurnReady` for its own entry, answered `ready`. The station's own line must then show the called turn ready, with "Fixture Control is here" and **Start**.
+4. **expected-turn-start.** The station's **Start** sends exactly one `wsfStartTurn`. That request's `expectedTurn` must equal the called turn's `turnRef`. This is read from the request itself and compared, never printed.
+   - A Start request with no `expectedTurn` FAILs as an older station path. A bound kiosk with no station panel fails every station row as not reached, and the turn is never driven.
+   - The answer must show that turn active, and the station must count down.
+   - The started turn's attempt is tracked for cleanup through the kit's `trackStationTurn`, so anything a defect writes is cleaned up.
+5. **round-60s.** The station runs its 3-2-1 and its 60-second round on its own clock. The timer must open at 60s, and the review must come no sooner than 58 s after the round began, read by polling every 250 ms.
+   - **Nothing may be written during the round or at its end.** That covers both Completes, MOVE's contribute and every line change, from the station or the phone, counted through a 3-second settle after the review.
+6. **review.** The station must show "Review the count", the count, **Contribute** and the phone note "If the visitor's phone shows Recorded, do not tap Contribute.". The proof never presses Contribute.
+7. **station-finish.** The phone taps **Leave line**: exactly one `wsfLeaveTurnLine` for its own entry, not a switch to the phone, answered `left`. PASS needs:
+   - the station showing **Turn ended** (`data-end="ended"`), not a recording from the phone;
+   - the station then back on **Call next**, with neither the chosen name nor the code on screen;
+   - the station's own line holding no turn and no result;
+   - no contribution of any kind since the turn began: no `wsfContribute`, no station `wsfCompleteTurn` and no phone `wsfCompleteMyTurn`. The phone's `contribution-7` stays the run's only contribution.
+
+**Why the turn ends from the phone.** The station's own Finish button exists only on the receipt after a station Complete (`wsfCompleteTurn`). That would be a second write, which the queue forbids. So the turn ends the way the served product ends a turn with nothing recorded: the visitor leaves, and the station shows "Turn ended" before returning to Call next (FINDING-A-SOURCE-1, `phoneEnd`).
+
+A journey that stops before or during the turn fails the rows it did not reach as `not reached: <why>` or `stopped: <why>`, never BLOCKED.
 
 ## Rows
 
@@ -257,7 +296,13 @@ So an authorized credentialed run can reach every row except the station turn, t
 | reopen-static | MOVE reopened: no replayed receipt, no pending-contribution key, still exactly one contribution request | measured (control) |
 | account-isolation | the control signs out and B (a non-member) signs in, in the same storage. B has no pending join keys, no test-goal reads and no Progress row. The control then signs in, in a fresh context, with the community chosen explicitly: same identity, same own total, same row | measured (control) |
 | cleanup-tracking | the control's contribution and A's QR-join membership are tracked **from their requests**, so they are tracked even when a later assertion fails, and are merged into the manifest before cleanup; the seen text names each product-written document by kind ("visitor A's membership of the event community, from the QR join"), never by id | measured; FAIL if the merge fails |
-| queue-place, call, phone-ready, expected-turn-start, round-60s, review, station-finish | — | **BLOCKED**: this proof has no station driver yet; it never operates the kiosk's station turn panel. The safe station backend (#587) **is** served on staging: its merge `934f24f0` is an ancestor of the deployed candidate `ec162d17` (deployment receipt #365 `6078582786`). The served build `db3fd2f2` sends its `expectedTurn` binding (`src/wsf/kiosk/expected-turn.ts`, where `EXPECTED_TURN_GATE` is open). The driver belongs with the KME-WIRE-1 re-pin. An older station path is never driven. (Corrected in LOVABLE-MATRIX-ALIGN-1, item 5.) |
+| queue-place | the control opens the kiosk QR link on its phone (already a member: nothing joined), Use the kiosk, the chosen name: exactly one `wsfJoinTurnLine` for this goal, answered waiting with a code; the phone shows it; the station counts 1 waiting; the place is tracked | measured (control; LOVABLE-KIOSK-STATION-DRIVER-1) |
+| call | one `wsfCallNext`, answered with this place assigned (name, code, `assigned`, a `turnRef`); the station shows Calling and the name; the phone shows it is called | measured (control) |
+| phone-ready | one `wsfTurnReady` for its own entry, answered ready; the station's own line shows the called turn ready, with Start | measured (control) |
+| expected-turn-start | one `wsfStartTurn` whose `expectedTurn` equals the called turn's `turnRef` (from the request; never printed); the answer shows that turn active; no `expectedTurn` is an older station path and FAILs | measured (control) |
+| round-60s | the timer opens at 60s; the review comes no sooner than 58 s after the round began; no write of any kind during the round or at its end, from the station or the phone | measured (control) |
+| review | Review the count, the count, Contribute (never pressed) and the phone note | measured (control) |
+| station-finish | one `wsfLeaveTurnLine` for its own entry (not a switch); the station shows Turn ended, then Call next with nothing of the previous visitor on screen or in its line; no contribution of any kind since the turn began | measured (control) |
 | organizer-ui-approval | — | **BLOCKED**: the station is approved through the kit's Champion callable as fixture preparation, tracked for cleanup. A UI approval would create a station record the kit cannot track. |
 | unverified-account | — | **BLOCKED**: the kit makes verified accounts only (#396 `6043231980`); verification is never faked |
 
@@ -266,6 +311,9 @@ Every browser context is closed in `finally`, including on an early stop.
 ### Honest limits
 
 - **Champion approval.** It goes through the kit's callable, not through the Champion UI; see `organizer-ui-approval`. The control's and the visitors' sign-ins do go through the product UI.
+- **The station turn ends from the phone.** The station's own Contribute and Finish are never pressed, because they follow only a station Complete, which is a second write. See "Why the turn ends from the phone", above.
+- **Real time.** The round runs its real 60 seconds, plus polling, so the hosted run takes about two minutes longer. The phone must tap I'm here inside the served 45-second ready lease, and the driver taps it as soon as the phone shows the call.
+- **What the station turn cannot see.** The Firestore documents themselves. What the turn wrote is read from the requests the two pages sent, and the kit tracks the line's documents for cleanup.
 - **The control is a kit member, not a QR newcomer.** Its membership is fixture preparation, exactly like the Champion's; it is named as the control in every phone row, and nothing claims it joined by QR.
 - **Before spending a credentialed dispatch** (W4's residual): check against the donor source that the app does not load the Firebase `authDomain` `/__/auth/iframe` or a Google API script on page load. If it does, the guard refuses it by name and `host-build` FAILs, failing closed.
 - **Secrets.** Passwords stay in memory in the kit. Identities appear only as sha256 prefixes, and the results scrub emails and query values. No stored password, organizer storage or repository secret is used.
@@ -352,6 +400,43 @@ Every browser context is closed in `finally`, including on an early stop.
 - **W7's notes from #614.** PN-1: `seenLine` keeps 299 and 300 code points whole and turns 301 into 299 plus the ellipsis, for `b` and for U+1F600. PN-2: the doc comment is back above `seenLine`. PN-4: in the device matrix (its note).
 - **Mutants: 28 of 28 killed** for this packet: each branch of `qrJoinProblem` (10), the public event option, a QR problem ignored, no QR counted as PASS, BLOCKED, unnamed or with other copy, the cleanup naming (5, including the cli keeping the old text), the cap (5), and the matrix's visibility check (2: reading hidden leaves, or the first match's visibility instead of the nth's). The earlier sets show no regression: REVIEWED-BUILD-2 134 of 136 (the same two survivors as before), GUARD-PING-1 30 of 30, MATRIX-ALIGN-1 22 of 22 and its O-items 20 of 20. MATRIX-ALIGN-1's two `exactText` mutants (reading innerText; ignoring the index) were re-based onto its new body, and both are killed. One more mutant, the count bound off by one, survives as equivalent: `isVisible()` is false for an element that does not exist.
 
+**LOVABLE-KIOSK-STATION-DRIVER-1** (Node 20.20.2 and Node 22.22.2): kiosk **33 passed**, matrix **21 passed**, `workflow-contract` 103 passed, staging and control `run-all` all suites passed. `REVIEWED_BUILD` is byte-identical (its block's sha256 is still `b5dfc0de…`), and so is every pinned vector. The guard gains no origin and no type, and there is no product or kit change.
+- **The fake runs the served turn.** The fake app now has the bound kiosk's station panel, with its phases on a shared clock that every page wait moves, and the station polls `wsfTurnState` as `poller.ts` does. It also has the phone's line card, and the kit's `trackPlace` and `trackStationTurn`.
+- **Real shape.** The real-shape journey passes all seven rows, and so does the cli `--run` test, where each status line is followed by its seen line. From the requests themselves:
+  - the Start's `expectedTurn` is the called turn's binding;
+  - exactly one contribute is sent, and no Complete or cancel;
+  - the place and the started turn are tracked through the kit;
+  - no station credential, entry id, binding or line code reaches the results or the log.
+- **Unit tables.** The seven verdict functions have 96 single-defect cases between them, plus each passing shape and the boundaries (58 s, the code inside another word, the binding's length), and a check that no case prints anything of the station or the line.
+- **33 journey negatives.** Each one fails its own row by name, while the rows before it and the control's phone rows still stand. A turn that cannot go on fails what follows as `not reached`. Examples by row:
+  - queue-place: a second line join, another name or goal, `alreadyInLine`, an untracked place, the station counting 2;
+  - call: another code, no binding;
+  - phone-ready: I'm here for another place, a station that never shows ready;
+  - expected-turn-start: no `expectedTurn` (an older path), another turn's binding, a refused Start;
+  - round-60s: an early review, a timer opening at 30s, a station Complete sent one second into the review;
+  - review: a recovered start, another phone note;
+  - station-finish: a phone Complete, a switch to the phone, a trace left on screen, a line still holding the turn;
+  - no station panel at all, and no QR.
+- **Guard on the join page.** An unreviewed script on the control's own join page is refused, and nothing is pressed on that page.
+- **Mutants: 82 of 82 killed** for this packet. Between them they cover every branch of the seven verdicts, the binding and code patterns, the round boundary and minimum, both write lists, and the driver's wiring. The wiring mutants cover:
+  - the guard check on the join page;
+  - tracking through the kit;
+  - the awaited station count and ready state;
+  - the round's window, clock and 3-second settle;
+  - the turn's window;
+  - Leave line;
+  - each stop;
+  - the station rows in the stop list;
+  - the cli clock.
+
+  Three survivors of the first run were test gaps, now closed: a `recorded` end under "Turn ended" text, an ended phase still showing Call next, and a refused Start.
+- **Earlier sets, re-run on this tree:**
+  - QR-JOIN-1: 28 of 28.
+  - GUARD-PING-1: 29 of 29. Its ST1 mutated the station rows' fixed BLOCKED reason, which this packet removes; the station rows are now measured, and their mutants are above.
+  - MATRIX-ALIGN-1: 22 of 22, two of them re-based onto `exactText`'s current body. The one equivalent mutant is unchanged: `exactText`'s count bound off by one, because `isVisible()` is false for a missing element.
+  - The O-items: 20 of 20.
+  - REVIEWED-BUILD-2: 134 of 136, the same two documented survivors as on every base since `614836b8` (M32 and C25).
+
 **LOVABLE-KIOSK-HOSTED-PROOF-1** (the original packet; its single entry-page digest is superseded above):
 - **`tests/hosted-lovable-kiosk.test.mjs`: 21 passed.**
   - It covers the exact host and the same-origin bounded walk; a cross-origin `/assets/` path is ignored.
@@ -406,4 +491,11 @@ Every browser context is closed in `finally`, including on an early stop.
 1. Ops-source review, security review, and Director acceptance of the exact head.
 2. Done in LOVABLE-REVIEWED-BUILD-1: the route-aware binds (runs `38006215259`, `38007704034` and `38007859514`) and the pin commit, which copied run `38007859514`'s `LOVABLE_OBSERVED_BUILD` exactly. Done in LOVABLE-REVIEWED-BUILD-2: the re-pin to Lovable `db3fd2f2`, first in step B's form (run `38018743683`), then in step C's form, exactly the `LOVABLE_OBSERVED_BUILD` shared by gate samples `38023220481` and `38025003360`.
 3. After L0 merges it, one kiosk `--run` and one device-matrix `--run`. Each must PASS host-build against the pin; a later Lovable publish needs a new bind and a new value.
-4. The authorized proof run. It can reach `host-build`, `fixture-provenance`, `qr-join` (on the kit's public event, since LOVABLE-KIOSK-QR-JOIN-1), the control's five phone rows and `cleanup-tracking`. The rows that remain BLOCKED fail it by name: the station turn, the organizer UI approval, and the unverified account.
+4. The authorized proof run. It can reach:
+   - `host-build` and `fixture-provenance`;
+   - `qr-join`, on the kit's public event, since LOVABLE-KIOSK-QR-JOIN-1;
+   - the control's five phone rows;
+   - the seven station rows, since LOVABLE-KIOSK-STATION-DRIVER-1;
+   - `cleanup-tracking`.
+
+   The rows that remain BLOCKED fail it by name: the organizer UI approval and the unverified account.
