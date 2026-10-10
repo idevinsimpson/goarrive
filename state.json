@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "7ac2ebabad08627ab6d30c8bf26fedc824d6cb631213f57a1138fb220ea9c3da",
-  "eventCount": 1158,
+  "ledgerHead": "0baa30de88a621c5f1179d01de7461bb8d40bf39ea35542194677c279e8e5daa",
+  "eventCount": 1163,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -20,7 +20,7 @@
   "canonical": {
     "developmentBranch": "claude/wsf-app-shell",
     "developmentSha": "8a067b29420563408e16cff5d91cc77b2ad0fbd8",
-    "operationalMain": "614836b8cb5d04fc8266a32ca299beea3db0e615"
+    "operationalMain": "591f7487e886ca0ae83ff000164d03a2f1ad13ae"
   },
   "staging": {
     "servedSha": "ec162d17a0540e936741027f9b8f90dd372cfaf4",
@@ -2674,7 +2674,7 @@
       },
       "label": "Code guard: allow Playwright resource type ping only to the exact API_ORIGINS as non-navigation data (the Firestore Listen beacon that stopped main runs 38030033477/38030045509), with tests",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 394,
@@ -2688,7 +2688,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         ".github/wsf-staging/hosted-lovable-kiosk.mjs",
@@ -2711,7 +2711,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6094618925
+          "id": 6094755927
         }
       },
       "review": {
@@ -4249,7 +4249,7 @@
       },
       "label": "Owner operator access: map the WSF authorization model, gaps vs the owner's event-operator ask, an owner-run read-only account audit (email typed locally, never stored)",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -4261,7 +4261,7 @@
         "subjectSha": "9ad22642c50d25dbed727071f194813ed8daaf97",
         "prHeadSha": "9ad22642c50d25dbed727071f194813ed8daaf97",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "591f7487e886ca0ae83ff000164d03a2f1ad13ae"
       },
       "proof": null,
       "served": null,
@@ -4285,10 +4285,13 @@
           "kind": "comment",
           "id": 6093847482
         },
-        "accepted": null,
-        "lastTransition": {
+        "accepted": {
           "kind": "comment",
-          "id": 6094612797
+          "id": 6094735444
+        },
+        "lastTransition": {
+          "kind": "pull_request",
+          "id": 612
         }
       },
       "review": {
@@ -6844,11 +6847,14 @@
       "packet": "LOVABLE-GUARD-PING-1",
       "worker": "W4",
       "reason": "release",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6094729570
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6094755927
+      }
     }
   },
   "fastpath": {
