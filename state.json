@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "0baa30de88a621c5f1179d01de7461bb8d40bf39ea35542194677c279e8e5daa",
-  "eventCount": 1163,
+  "ledgerHead": "65bd929c7791bb16938c678fe3a42aed01e815699ace70b120bb5a13dc05dcd1",
+  "eventCount": 1166,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2674,15 +2674,17 @@
       },
       "label": "Code guard: allow Playwright resource type ping only to the exact API_ORIGINS as non-navigation data (the Firestore Listen beacon that stopped main runs 38030033477/38030045509), with tests",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 394,
-      "pr": null,
-      "reviewers": [],
+      "pr": 613,
+      "reviewers": [
+        "W3"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "c0882743556b69ef0b32abc95a8c7b6e1b560b7c",
+        "prHeadSha": "c0882743556b69ef0b32abc95a8c7b6e1b560b7c",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -2711,7 +2713,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6094755927
+          "id": 6095670440
         }
       },
       "review": {
@@ -2724,7 +2726,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "LOVABLE-KIOSK-HOSTED-PROOF-1": {
@@ -6854,7 +6856,16 @@
       "ack": {
         "kind": "comment",
         "id": 6094755927
-      }
+      },
+      "superseded": true
+    },
+    "c8edae10fcc2e44bd1b444e8a065bf30dbf6a2374a4c89e0db41eb9694fba6d2": {
+      "packet": "LOVABLE-GUARD-PING-1",
+      "worker": "W3",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
