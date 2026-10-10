@@ -35,11 +35,13 @@
  *  - the genuinely unverified account: the existing kit creates verified accounts only (#396 6043231980), and no
  *    verification is faked;
  *  - the Champion's approval is the kit's Champion callable (tracked for cleanup), not the Champion UI.
- *  - the QR join with the existing kit: its communities are private, so the served kiosk shows no join code; qr-join is
- *    BLOCKED by name and never gates the phone rows.
  * The phone rows are measured by a CONTROL: the kit's verified member of the event community (made, like the Champion,
- * as fixture preparation), signed in through the product UI. Visitor A (not a member) joins through the real QR link
- * whenever the community is link-joinable; visitor B (not a member) is the isolation check.
+ * as fixture preparation), signed in through the product UI. The event is the kit's link-joinable (public) event
+ * (KIT-PUBLIC-EXPO-EVENT-1, #616), so its approved station shows the newcomer QR: visitor A (not a member) joins through
+ * that real QR link, whose join code must be exactly the one the kit wrote, and a public event whose kiosk shows no QR
+ * FAILs qr-join by name (LOVABLE-KIOSK-QR-JOIN-1). The QR join never gates the phone rows. Visitor B (not a member) is the
+ * isolation check: the served goal reads are membership-gated whatever the join policy (ec162d17 wsfListGoals :4981,
+ * wsfMyContribution :4633; wsfGoalPulse reads display authorization only), and B never holds the join code.
  *
  * Secrets: account passwords exist only in memory (the kit's), never in a result, log line or file. Identities are
  * recorded as a short sha256 of the uid. Nothing here writes to the Lovable project.
@@ -244,18 +246,18 @@ export const EVIDENCE_SCAN_RULES = Object.freeze([
 /** The most characters of a row's seen text that one job-log line carries. */
 export const SEEN_MAX = 300;
 /**
+ * A printed line with the runner's legacy workflow-command opener `##[` broken up (`## [`). The runner acts on it
+ * anywhere in a line (actions/runner ActionCommand.TryParse: IndexOf("##[")), so host or app text never carries it into
+ * the log: no add-mask, forged annotation or stop-commands (W3 O1 on #613, 6095994302).
+ */
+export const logSafe = (line) => String(line).replace(/##\[/g, '## [');
+/**
  * A row's seen text as one additive job-log line, `<prefix> <row> <text>`, so a failure reads from the log alone (the
  * results file is in the evidence artifact). One line: control characters and any white space (line and paragraph
  * separators included) become single spaces. A query value or an email-shaped string is replaced, as short() does. At
  * most SEEN_MAX characters. The whole text is withheld when any evidence-scan rule matches it, before or after those
  * replacements, so the log never carries what the scan would refuse to upload. The line passes logSafe.
  */
-/**
- * A printed line with the runner's legacy workflow-command opener `##[` broken up (`## [`). The runner acts on it
- * anywhere in a line (actions/runner ActionCommand.TryParse: IndexOf("##[")), so host or app text never carries it into
- * the log: no add-mask, forged annotation or stop-commands (W3 O1 on #613, 6095994302).
- */
-export const logSafe = (line) => String(line).replace(/##\[/g, '## [');
 export function seenLine(prefix, id, seen) {
   const raw = String(seen ?? '').replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ');
   let t = raw.replace(/[?&][A-Za-z]+=[^&\s"']+/g, '?…').replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, '<email>').replace(/\s+/g, ' ').trim();
@@ -765,8 +767,30 @@ const COMMUNITY = 'Fixture Expo Community';
 const UNIT = 'squats';
 /** How the phone rows name who measured them: the kit's verified member, made as fixture preparation. */
 const CONTROL = 'control (the kit\'s verified member)';
-/** qr-join with the existing kit: its communities are private, and the served backend gives a private community no join code. */
-const QR_KIT_BLOCK = 'the kiosk shows no join code: the existing kit makes only private communities (joinPolicy private), and the served backend gives a private community no newcomer QR; a link-joinable fixture needs a kit change outside this packet';
+/**
+ * What cleanup-tracking says it added: each product-written document by what it is, never by its ids. The journey
+ * tracks one kind, the membership visitor A's QR join writes (from the join request, before any reply).
+ */
+export function productDocsSeen(docs, total) {
+  const what = docs.map((p) => (/^wsfMemberships\/[^/]+$/.test(p) ? 'visitor A\'s membership of the event community, from the QR join' : 'a product-written document'));
+  return `${docs.length} product-written document(s) added (${what.join('; ')}); ${total} in the manifest`;
+}
+/** What a public event's kiosk shows when the served station returns no join code (src/wsf/kiosk/connected-kiosk.tsx). */
+const NO_JOIN_CODE = 'This goal has no join code to show.';
+/**
+ * Why a kiosk QR's join link is not this event's, or null (LOVABLE-KIOSK-QR-JOIN-1): exactly the Lovable host, path `/`,
+ * `goal` this goal, and `join` exactly the join code the kit wrote for this community. No code is ever printed.
+ */
+export function qrJoinProblem(raw, ev) {
+  let u;
+  try { u = new URL(String(raw ?? '')); } catch { return 'the QR carries no join link'; }
+  if (u.origin !== LOVABLE_URL || u.pathname !== '/' || u.searchParams.get('goal') !== ev?.goalId) return 'the QR carries no same-host join link for this goal';
+  const code = u.searchParams.get('join') ?? '';
+  if (!/^[A-Za-z0-9_-]{16,128}$/.test(code)) return 'the QR\'s join value is not a join code (not printed)';
+  if (typeof ev?.joinCode !== 'string' || !ev.joinCode) return 'the kit returned no join code for its public event';
+  if (code !== ev.joinCode) return 'the QR\'s join code is not this community\'s (neither code is printed)';
+  return null;
+}
 
 /** The signed-in Firebase uid of this page: IndexedDB persistence first (the SDK default), then localStorage. */
 async function uidOf(page) {
@@ -849,8 +873,9 @@ export async function runJourney({ browser, fixtures, base, amount = 7, reviewed
     return c;
   };
   try {
-    // The kit's own event: a Champion and ONE verified member of its (private) community, made as fixture preparation.
-    const ev = await fixtures.expoEvent('lk', { attendees: 1, target: 1000, seeded: 100 });
+    // The kit's own event, link-joinable (public): a Champion and ONE verified member, made as fixture preparation. The
+    // kit returns the join code it wrote, which the kiosk's QR must carry exactly.
+    const ev = await fixtures.expoEvent('lk', { attendees: 1, target: 1000, seeded: 100, joinPolicy: 'public' });
     const m = ev.attendees?.[0];
     if (typeof m?.uid !== 'string' || !m.uid) throw new Error('the kit made no verified member for the phone control');
     const a = (await fixtures.memberInTwoCommunities('lka')).member;
@@ -866,9 +891,9 @@ export async function runJourney({ browser, fixtures, base, amount = 7, reviewed
       });
     };
 
-    // 1. The kiosk shows its code; the Champion's approval is fixture preparation (the kit's tracked callable). Visitor A
-    //    joins through the QR only when the community is link-joinable; the kit's community is private, so the kiosk
-    //    shows no join code and qr-join is BLOCKED by name. The QR join never gates the phone control below.
+    // 1. The kiosk shows its code; the Champion's approval is fixture preparation (the kit's tracked callable). The
+    //    public event's station shows the newcomer QR, and visitor A joins through it. A QR with any other code, host,
+    //    path or goal, or no QR at all, FAILs qr-join by name. The QR join never gates the phone control below.
     const kiosk = await (await ctx({ width: 1280, height: 800 })).newPage();
     await kiosk.goto(`${base}/kiosk/${ev.groupId}/${ev.goalId}`);
     guard.check();
@@ -883,14 +908,14 @@ export async function runJourney({ browser, fixtures, base, amount = 7, reviewed
         const qr = kiosk.locator('svg[data-testid="kiosk-qr"]');
         await qr.waitFor({ timeout: 40_000 });
         const raw = await qr.getAttribute('data-join-url');
-        const u = raw ? new URL(raw) : null;
-        joinUrl = u && u.origin === LOVABLE_URL && u.pathname === '/' && /^[A-Za-z0-9_-]{16,128}$/.test(u.searchParams.get('join') ?? '') && u.searchParams.get('goal') === ev.goalId ? u.href : null;
-        if (!joinUrl) set('qr-join', false, 'the QR carries no same-host join link for this goal');
+        const problem = qrJoinProblem(raw, ev);
+        if (problem) set('qr-join', false, problem);
+        else joinUrl = new URL(raw).href;
       }
     } catch (e) {
       guard.check();
-      const noCode = await visible(kiosk.getByText('This goal has no join code to show.'));
-      set('qr-join', false, noCode ? QR_KIT_BLOCK : `the kiosk did not reach a QR join link: ${short(e)}`, noCode ? 'BLOCKED' : 'FAIL');
+      const noCode = await visible(kiosk.getByText(NO_JOIN_CODE));
+      set('qr-join', false, noCode ? `the kiosk of this public (link-joinable) event shows "${NO_JOIN_CODE}"` : `the kiosk did not reach a QR join link: ${short(e)}`);
     }
     if (joinUrl) {
       // Visitor A: the real QR link, the product sign-in, the deliberate Join; the phone choice must follow.
@@ -1066,7 +1091,7 @@ export async function cli(mode, env, { fetchImpl = fetch, reviewed = REVIEWED_BU
       try {
         if (!env.WSF_CLEANUP_MANIFEST) throw new Error('no cleanup manifest');
         const total = mergeIntoManifest(env.WSF_CLEANUP_MANIFEST, journey.productDocs);
-        rows['cleanup-tracking'] = { status: 'PASS', seen: `${journey.productDocs.length} product-written document(s) added; ${total} in the manifest` };
+        rows['cleanup-tracking'] = { status: 'PASS', seen: productDocsSeen(journey.productDocs, total) };
       } catch (e) { rows['cleanup-tracking'] = { status: 'FAIL', seen: `the product-written documents could not be added to the cleanup manifest: ${short(e)}` }; }
     } else if (journey.rows['fixture-provenance']) rows['cleanup-tracking'] = { status: 'PASS', seen: 'nothing product-written to add' };
     doc = runResults(verdict, journey, rows);

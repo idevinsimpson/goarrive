@@ -223,13 +223,19 @@ async function textOf(page, sel) {
   try { return (await l.count()) ? clean(await l.first().innerText()) : ''; } catch { return ''; }
 }
 /**
- * A leaf element's exact copy: its text content with white space collapsed, or '' at once when it is absent. Unlike
- * innerText it ignores CSS text-transform (the served `.eyebrow` is uppercase, so innerText reads "STEP 2 OF 2").
- * Only for an element compared to exact copy: a container's text content runs its block children together.
+ * A leaf element's exact copy: its text content with white space collapsed, or '' at once when it is absent or not
+ * visible. Unlike innerText it ignores CSS text-transform (the served `.eyebrow` is uppercase, so innerText reads
+ * "STEP 2 OF 2"); text content also reads hidden text, so a leaf the visitor cannot see (`visibility: hidden`,
+ * `display: none`) reads as absent (W7 PN-4 on #614). Only for an element compared to exact copy: a container's text
+ * content runs its block children together.
  */
 async function exactText(page, sel, index = 0) {
   const l = page.locator(sel);
-  try { return (await l.count()) > index ? clean(await l.nth(index).textContent()) : ''; } catch { return ''; }
+  try {
+    if ((await l.count()) <= index) return '';
+    const leaf = l.nth(index);
+    return (await leaf.isVisible()) ? clean(await leaf.textContent()) : '';
+  } catch { return ''; }
 }
 async function attrOf(page, sel, name) {
   const l = page.locator(sel);

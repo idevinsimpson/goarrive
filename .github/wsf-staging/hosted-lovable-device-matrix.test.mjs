@@ -301,8 +301,9 @@ function twin(bug = {}) {
         // The step eyebrow as db3fd2f2 serves it: its text is "Step 2 of 2", and `.eyebrow { text-transform: uppercase }`
         // makes innerText "STEP 2 OF 2" (`content` is textContent, `text` is innerText).
         const stepCopy = bug.wrongStep ? 'Step 3 of 3' : bug.upperStep ? 'STEP 2 OF 2' : COPY.stepUnverified;
-        add({ sels: [SEL.profileSetup], text: `${stepCopy.toUpperCase()} What should your community call you?` });
-        add({ sels: [SEL.profileStep], content: stepCopy, text: stepCopy.toUpperCase(), attrs: { 'aria-label': stepCopy } });
+        // `hiddenStep`: the eyebrow is in the DOM with its copy but `visibility: hidden` (no innerText, still textContent).
+        add({ sels: [SEL.profileSetup], text: `${bug.hiddenStep ? '' : `${stepCopy.toUpperCase()} `}What should your community call you?` });
+        add({ sels: [SEL.profileStep], content: stepCopy, text: bug.hiddenStep ? '' : stepCopy.toUpperCase(), visible: !bug.hiddenStep, attrs: { 'aria-label': stepCopy } });
         if (notice) add({ sels: [SEL.verifySendNotice], text: `${bug.wrongNoticeText ? 'Email sent' : COPY.sendFailed} (Could not send the verification email. Try again shortly.). Some communities need a verified email before you can continue.` });
         add({ label: COPY.nameLabel, onFill: (v) => { name = v; } });
         add({ role: 'button', name: COPY.nameSubmit, onClick: () => {
@@ -323,13 +324,16 @@ function twin(bug = {}) {
           const name = server.groups[g.groupId].name;
           const of = bug.oldTotal ? `/ ${g.target} confirmed` : `of ${n(g.target)} squats`;
           const fresh = [bug.freshOther ? 'Live · confirmed totals (beta)' : COPY.live, 'updated 3 s ago'];
-          if (!bug.noCommunity) add({ sels: [SEL.displayCommunity], text: name });
+          // `hiddenCommunity`: the community line is in the DOM with its name but `visibility: hidden`.
+          if (!bug.noCommunity) add({ sels: [SEL.displayCommunity], text: bug.hiddenCommunity ? '' : name, content: name, visible: !bug.hiddenCommunity });
           add({ sels: [SEL.displayTitle], text: g.title });
-          add({ sels: ['main.public-display'], text: `${bug.noCommunity ? '' : `${name} `}${g.title} ${n(g.seeded)} ${of} ${fresh.join(' ')} To join: ask a helper or scan the kiosk’s code` });
+          // `hiddenUpdated`: the second freshness line is in the DOM with its copy but `visibility: hidden`.
+          const seenFresh = bug.hiddenUpdated ? fresh.slice(0, 1) : fresh;
+          add({ sels: ['main.public-display'], text: `${bug.noCommunity || bug.hiddenCommunity ? '' : `${name} `}${g.title} ${n(g.seeded)} ${of} ${seenFresh.join(' ')} To join: ask a helper or scan the kiosk’s code` });
           add({ sels: [SEL.displayTotalNumber], text: n(g.seeded) });
           add({ sels: [SEL.displayTotalOf], text: of });
-          add({ sels: [SEL.displayFreshness], text: fresh.join(' ') });
-          for (const f of fresh) add({ sels: [SEL.displayFreshLines], text: f });
+          add({ sels: [SEL.displayFreshness], text: seenFresh.join(' ') });
+          fresh.forEach((f, i) => add({ sels: [SEL.displayFreshLines], text: i && bug.hiddenUpdated ? '' : f, content: f, visible: !(i && bug.hiddenUpdated) }));
         }
       }
       if (view === 'shell') {
@@ -547,6 +551,8 @@ test('journey negatives: each defect fails exactly the cell that measures it, at
     [{ bothCurrent: true }, 'memberships'], [{ dupList: true }, 'memberships'], [{ homeStale: true }, 'memberships'], [{ readShort: true }, 'memberships'],
     // LOVABLE-MATRIX-ALIGN-1: the expectations of the served build db3fd2f2.
     [{ oldTotal: true }, 'display'], [{ freshOther: true }, 'display'], [{ noCommunity: true }, 'display'], [{ upperStep: true }, 'signup'],
+    // W7 PN-4 on #614: an exact-copy leaf the visitor cannot see (`visibility: hidden`) reads as absent.
+    [{ hiddenCommunity: true }, 'display'], [{ hiddenStep: true }, 'signup'], [{ hiddenUpdated: true }, 'display'],
   ]) {
     const { out } = await run(bug);
     assert.deepEqual(cellsAt(out.rows, cell), ['FAIL', 'FAIL', 'FAIL', 'FAIL'], `${JSON.stringify(bug)} fails ${cell}`);
@@ -563,6 +569,9 @@ test('journey negatives: each defect fails exactly the cell that measures it, at
   // The seen text names what was read where it differs.
   assert.match((await run({ oldTotal: true })).out.rows['display@v360'].seen, /total the seeded 120 "\/ 500 confirmed"/);
   assert.match((await run({ noCommunity: true })).out.rows['display@v360'].seen, /community absent/);
+  assert.match((await run({ hiddenCommunity: true })).out.rows['display@v360'].seen, /community absent/);
+  assert.match((await run({ hiddenStep: true })).out.rows['signup@v390'].seen, /name step step count absent$/);
+  assert.match((await run({ hiddenUpdated: true })).out.rows['display@v360'].seen, /freshness "Live · confirmed totals" \/ absent/);
   assert.match((await run({ freshOther: true })).out.rows['display@v360'].seen, /freshness "Live · confirmed totals \(beta\)" \/ "updated 3 s ago"/);
   assert.match((await run({ upperStep: true })).out.rows['signup@v390'].seen, /name step step count "STEP 2 OF 2"/);
   assert.match((await run({ doubleJoin: true })).out.rows['invite-join@v360'].seen, /join requests before the tap 0, after 2/);
