@@ -29,9 +29,9 @@ The viewports are small phone **360×640**, phone **390×844**, tablet **820×11
 | Cell | What PASS means |
 |---|---|
 | `landing` | Signed out, `/` is the product sign-in ("Welcome back") with "New here? Create an account", and no sample data. |
-| `display` | Signed out, `/display/<fixture goal>` is `data-display="live"`, with the fixture community, the goal title, the seeded total "120 / 500 confirmed" and "Live · confirmed totals". |
+| `display` | Signed out, `/display/<fixture goal>` is `data-display="live"`, with the goal title and the seeded total in the page. It must also show the fixture community as its community line, a total of "120" over exactly "of 500 squats", and exactly two freshness lines: "Live · confirmed totals", then "updated N s ago". Numbers are formatted the way the product formats them. |
 | `invite-link` | Signed out, `/?join=<code>&goal=<goal>` opens the sign-in, the code is gone from the address bar, and the join is held in this tab's sessionStorage. |
-| `signup` | "Create account" through the product form reaches the name step ("Step 2 of 2"). The verification send state is honest: the "We couldn’t send your verification email yet…" notice shows exactly when `wsfSendVerificationEmail` did not answer `{sent:true}`. |
+| `signup` | "Create account" through the product form reaches the name step, whose step count reads exactly "Step 2 of 2" as text. The verification send state is honest: the "We couldn’t send your verification email yet…" notice shows exactly when `wsfSendVerificationEmail` did not answer `{sent:true}`. |
 | `unverified-participation` | Still unverified, "Your name" → "Continue": `wsfSaveProfile` answers without error and the member app opens. If the server refuses it with `FAILED_PRECONDITION`, the cell and the cells after it are **BLOCKED (backend)**. |
 | `invite-join` | The held invite previews "Join Fixture Open Community?". **No join request before the tap, exactly one after it**, and that request's own answer is into this community with `alreadyMember:false`. Then the phone choice appears. |
 | `camera-fallback` | "Move on my phone" opens the squat camera screen with **"Camera estimate on this device · nothing is recorded or sent"**. With no camera, "Camera isn’t available" → "Enter reps manually" opens the manual sheet, and Escape closes MOVE. **Zero `wsfContribute`** requests. |
@@ -45,6 +45,19 @@ The run rows are `host-build` (the bind and every document and asset the browser
 - The **verify screen is skipped**: `verificationDeferred` is always true for a signed-in uid, so the reminder lives on You.
 - You's memberships list renders **only with more than one membership**, hence the `memberships` cell.
 - Opening MOVE from the phone choice goes straight to the camera.
+
+**Re-read from the served build `db3fd2f2` (LOVABLE-MATRIX-ALIGN-1, #365 `6096204665`).** The first clean main run, `38041023558`, failed `display` and `signup` at all four viewports. In both cases the harness's expectation was stale, not the app:
+- **The display** (`src/wsf/display/public-display-view.tsx:40-52`):
+  - The community is `p.public-display-community`, not a `p.eyebrow`.
+  - The total is `[data-testid="display-total"]`, made of a `strong` and a `span` "of {target} {unit}". It is not "/ 500 confirmed".
+  - Numbers are Intl `en-GB` with at most 3 fraction digits (`public-display.ts:44`).
+  - The freshness block holds two lines.
+- **The name step** (`member-entry-screen.tsx:83-88`):
+  - It renders `<p class="eyebrow" aria-label="Step 2 of 2">Step 2 of 2</p>`.
+  - `src/styles.css:56` sets `.eyebrow` to `text-transform: uppercase`, and Chromium's `innerText` applies it, so it read "STEP 2 OF 2".
+  - The matrix now reads exact copy as text content (`exactText`), which ignores `text-transform`. It does so for every leaf element it compares exactly: the sign-in heading, the display lines, the step count, the camera note, Progress's empty state, You's community and the initials.
+  - Container checks, which only test that some copy is included, still read `innerText`, because text content runs block children together.
+- **What was read:** when one of these checks fails, its seen text quotes the scrubbed text that was read, instead of "other".
 
 A pinned build whose screens moved fails its cells by name.
 

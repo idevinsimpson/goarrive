@@ -11,8 +11,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  CELLS, COPY, LOVABLE_URL, PROJECT_ID, REVIEWED_BUILD, ROWS, SEL, VIEWPORTS, VISITOR_INITIALS, VISITOR_NAME, accountLookup, allPassed, cli, matrixLines, mergeExtras,
-  requireVerdict, results, runMatrix, visitorEmail,
+  CELLS, COPY, FIXTURE_UNIT, FRESH_UPDATED_RE, LOVABLE_URL, PROJECT_ID, REVIEWED_BUILD, ROWS, SEL, VIEWPORTS, VISITOR_INITIALS, VISITOR_NAME, accountLookup, allPassed, cli,
+  displayNumber, displayVerdict, matrixLines, mergeExtras, requireVerdict, results, runMatrix, stepVerdict, visitorEmail,
 } from './hosted-lovable-device-matrix.mjs';
 import * as kiosk from './hosted-lovable-kiosk.mjs';
 
@@ -298,7 +298,11 @@ function twin(bug = {}) {
         } });
       }
       if (view === 'profile') {
-        add({ sels: [SEL.profileSetup], text: `${bug.wrongStep ? 'Step 3 of 3' : COPY.stepUnverified} What should your community call you?` });
+        // The step eyebrow as db3fd2f2 serves it: its text is "Step 2 of 2", and `.eyebrow { text-transform: uppercase }`
+        // makes innerText "STEP 2 OF 2" (`content` is textContent, `text` is innerText).
+        const stepCopy = bug.wrongStep ? 'Step 3 of 3' : bug.upperStep ? 'STEP 2 OF 2' : COPY.stepUnverified;
+        add({ sels: [SEL.profileSetup], text: `${stepCopy.toUpperCase()} What should your community call you?` });
+        add({ sels: [SEL.profileStep], content: stepCopy, text: stepCopy.toUpperCase(), attrs: { 'aria-label': stepCopy } });
         if (notice) add({ sels: [SEL.verifySendNotice], text: `${bug.wrongNoticeText ? 'Email sent' : COPY.sendFailed} (Could not send the verification email. Try again shortly.). Some communities need a verified email before you can continue.` });
         add({ label: COPY.nameLabel, onFill: (v) => { name = v; } });
         add({ role: 'button', name: COPY.nameSubmit, onClick: () => {
@@ -314,10 +318,18 @@ function twin(bug = {}) {
         const state = g?.display ? 'live' : 'notAuthorized';
         add({ sels: [SEL.display], attrs: { 'data-display': state } });
         if (state === 'live') {
-          add({ sels: [SEL.displayEyebrow], text: server.groups[g.groupId].name });
+          // The markup of db3fd2f2's public-display-view.tsx: community line, h1, total (`strong` + `span`), two freshness lines.
+          const n = (x) => new Intl.NumberFormat('en-GB', { maximumFractionDigits: 3 }).format(x);
+          const name = server.groups[g.groupId].name;
+          const of = bug.oldTotal ? `/ ${g.target} confirmed` : `of ${n(g.target)} squats`;
+          const fresh = [bug.freshOther ? 'Live · confirmed totals (beta)' : COPY.live, 'updated 3 s ago'];
+          if (!bug.noCommunity) add({ sels: [SEL.displayCommunity], text: name });
           add({ sels: [SEL.displayTitle], text: g.title });
-          add({ sels: ['main.public-display'], text: `${server.groups[g.groupId].name} ${g.title} ${g.seeded} / ${g.target} confirmed ${COPY.live}` });
-          add({ sels: [SEL.displayFreshness], text: COPY.live });
+          add({ sels: ['main.public-display'], text: `${bug.noCommunity ? '' : `${name} `}${g.title} ${n(g.seeded)} ${of} ${fresh.join(' ')} To join: ask a helper or scan the kiosk’s code` });
+          add({ sels: [SEL.displayTotalNumber], text: n(g.seeded) });
+          add({ sels: [SEL.displayTotalOf], text: of });
+          add({ sels: [SEL.displayFreshness], text: fresh.join(' ') });
+          for (const f of fresh) add({ sels: [SEL.displayFreshLines], text: f });
         }
       }
       if (view === 'shell') {
@@ -385,6 +397,7 @@ function twin(bug = {}) {
         count: async () => all().length,
         isVisible: async () => all().some((e) => e.visible),
         innerText: async () => one().text ?? '',
+        textContent: async () => one().content ?? one().text ?? '',
         getAttribute: async (n) => one().attrs?.[n] ?? null,
         click: async () => { const e = one(); if (e.onClick) e.onClick(); },
         fill: async (v) => { const e = one(); if (e.onFill) e.onFill(v); },
@@ -470,6 +483,57 @@ test('journey: every cell PASSES at all four viewports; each visitor is tracked 
   assert.ok(out.served.blocked.length >= VIEWPORTS.length * 8 && out.served.blocked.every((w) => w === `script ${EVENTS_SCRIPT}` || w === `script ${FLOCK_SCRIPT}`), 'the host\'s own scripts are blocked on every page load, never run');
 });
 
+test('display and name step (LOVABLE-MATRIX-ALIGN-1): the served db3fd2f2 markup passes; the old copy, an uppercase step, another freshness line or a missing community fails', () => {
+  const fx = { communityName: 'Fixture Open Community', goalTitle: 'Fixture Open Squats', target: 500, seeded: 120 };
+  // What db3fd2f2's public-display-view.tsx renders for that goal while live (the page text is innerText).
+  const served = {
+    state: 'live', title: fx.goalTitle, community: fx.communityName, total: '120', of: 'of 500 squats', fresh: ['Live · confirmed totals', 'updated 0 s ago'],
+    page: 'Fixture Open Community Fixture Open Squats 120 of 500 squats Live · confirmed totals updated 0 s ago To join: ask a helper or scan the kiosk’s code',
+  };
+  const ok = displayVerdict(served, fx);
+  assert.equal(ok.ok, true, ok.seen);
+  assert.equal(ok.seen, 'display state live; title the fixture goal; community the fixture community; total the seeded 120 of 500 squats; freshness "Live · confirmed totals" / "updated 0 s ago"');
+  // Numbers as the product formats them: Intl en-GB, at most 3 fraction digits.
+  assert.equal(displayNumber(12345), '12,345');
+  assert.equal(displayNumber(1234.56789), '1,234.568');
+  const big = { ...fx, target: 100000, seeded: 12345 };
+  assert.equal(displayVerdict({ ...served, total: '12,345', of: 'of 100,000 squats', page: 'x 12,345 of 100,000 squats' }, big).ok, true);
+  for (const [why, change, seenRe] of [
+    ['the old "/ 500 confirmed" text', { of: '/ 500 confirmed', page: served.page.replace('of 500 squats', '/ 500 confirmed') }, /total the seeded 120 "\/ 500 confirmed"/],
+    ['a target not formatted as the product does', { ...{ total: '12345', of: 'of 100000 squats', page: 'x 12345 of 100000 squats' }, big: true }, /"12345" "of 100000 squats"/],
+    ['another unit', { of: 'of 500 reps' }, /"of 500 reps"/],
+    ['a missing community element', { community: '' }, /community absent/],
+    ['another community', { community: 'Fixture Closed Community' }, /community "Fixture Closed Community"/],
+    ['a freshness first line with any other text', { fresh: ['Live · confirmed totals (beta)', 'updated 0 s ago'] }, /freshness "Live · confirmed totals \(beta\)"/],
+    ['a stale first line', { fresh: ['Last known progress — not live right now.', 'Last update 10:00:00 · 40 s ago'] }, /Last known progress/],
+    ['a second line in another form', { fresh: ['Live · confirmed totals', 'updated just now'] }, /"updated just now"/],
+    ['one freshness line', { fresh: ['Live · confirmed totals'] }, /freshness "Live · confirmed totals"$/],
+    ['a third freshness line', { fresh: ['Live · confirmed totals', 'updated 0 s ago', 'extra'] }, /"extra"/],
+    ['no freshness lines', { fresh: [] }, /freshness absent/],
+    ['another state', { state: 'stale' }, /display state stale/],
+    ['another title', { title: 'Other Goal' }, /title "Other Goal"/],
+    ['a seeded total missing from the page text', { page: 'Fixture Open Community Fixture Open Squats of 500 squats' }, /\(not in the page text\)/],
+    ['a total that is not the seeded one', { total: '121' }, /total "121"/],
+  ]) {
+    const { big: useBig, ...read } = change;
+    const v = displayVerdict({ ...served, ...read }, useBig ? big : fx);
+    assert.equal(v.ok, false, why);
+    assert.match(v.seen, seenRe, why);
+  }
+  assert.ok(FRESH_UPDATED_RE.test('updated 12 s ago') && !FRESH_UPDATED_RE.test('updated 12 s ago.') && !FRESH_UPDATED_RE.test('xupdated 1 s ago'));
+  // A long read is quoted shortly, never in full.
+  assert.match(displayVerdict({ ...served, community: 'c'.repeat(300) }, fx).seen, new RegExp(`community "${'c'.repeat(39)}…"`));
+  // The name step: exactly "Step 2 of 2", as text. innerText of the served `.eyebrow` reads "STEP 2 OF 2".
+  assert.equal(stepVerdict('Step 2 of 2'), true);
+  for (const t of ['STEP 2 OF 2', 'Step 3 of 3', 'Step 2 of 3', '', 'step 2 of 2', 'Step 2 of 2 ']) assert.equal(stepVerdict(t), false, JSON.stringify(t));
+  assert.equal(SEL.profileStep, '[data-entry-step="profileSetup"] p.eyebrow');
+  assert.equal(SEL.displayCommunity, 'main.public-display p.public-display-community');
+  // The unit the display names is the one the kit's joinableEvent goals carry.
+  const kit = fs.readFileSync(new URL('./journeys/fixture-kit.mjs', import.meta.url), 'utf8');
+  const body = kit.slice(kit.indexOf('async function joinableEvent'), kit.indexOf('\n  }\n', kit.indexOf('async function joinableEvent')));
+  assert.match(body, new RegExp(`unit: '${FIXTURE_UNIT}'`));
+});
+
 test('journey negatives: each defect fails exactly the cell that measures it, at every viewport', async () => {
   const run = async (bug) => {
     const t = twin(bug);
@@ -481,6 +545,8 @@ test('journey negatives: each defect fails exactly the cell that measures it, at
     [{ noReminder: true }, 'progress-you'], [{ noList: true }, 'memberships'], [{ noEmpty: true }, 'progress-you'],
     [{ sendOk: true, sendOkNotice: true }, 'signup'], [{ wrongNoticeText: true }, 'signup'],
     [{ bothCurrent: true }, 'memberships'], [{ dupList: true }, 'memberships'], [{ homeStale: true }, 'memberships'], [{ readShort: true }, 'memberships'],
+    // LOVABLE-MATRIX-ALIGN-1: the expectations of the served build db3fd2f2.
+    [{ oldTotal: true }, 'display'], [{ freshOther: true }, 'display'], [{ noCommunity: true }, 'display'], [{ upperStep: true }, 'signup'],
   ]) {
     const { out } = await run(bug);
     assert.deepEqual(cellsAt(out.rows, cell), ['FAIL', 'FAIL', 'FAIL', 'FAIL'], `${JSON.stringify(bug)} fails ${cell}`);
@@ -494,6 +560,11 @@ test('journey negatives: each defect fails exactly the cell that measures it, at
     for (const cell of ['landing', 'display', 'invite-link', 'signup', 'unverified-participation', 'camera-fallback', 'progress-you']) assert.deepEqual(cellsAt(out.rows, cell), ['PASS', 'PASS', 'PASS', 'PASS'], `${JSON.stringify(bug)} leaves ${cell}`);
   }
   assert.match((await run({ autoJoin: true })).out.rows['invite-join@v360'].seen, /join requests before the tap 1/);
+  // The seen text names what was read where it differs.
+  assert.match((await run({ oldTotal: true })).out.rows['display@v360'].seen, /total the seeded 120 "\/ 500 confirmed"/);
+  assert.match((await run({ noCommunity: true })).out.rows['display@v360'].seen, /community absent/);
+  assert.match((await run({ freshOther: true })).out.rows['display@v360'].seen, /freshness "Live · confirmed totals \(beta\)" \/ "updated 3 s ago"/);
+  assert.match((await run({ upperStep: true })).out.rows['signup@v390'].seen, /name step step count "STEP 2 OF 2"/);
   assert.match((await run({ doubleJoin: true })).out.rows['invite-join@v360'].seen, /join requests before the tap 0, after 2/);
   // A manifest that refuses the linked claim for a foreign join is a tracking failure, not a silent stop.
   const lost = await run({ joinOther: true, manifestLostOnJoin: true });

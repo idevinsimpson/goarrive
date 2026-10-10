@@ -27,8 +27,11 @@
  *
  * WHAT IS NOT CLAIMED (rows stay BLOCKED, named):
  *  - the station turn rows (queue place, call, phone-ready, expected-turn start, 60-second round, review, station
- *    Finish): the safe station backend (#587, integrated in source) is not served on staging and this proof has no
- *    station driver yet, and an older station path is never driven;
+ *    Finish): the safe station backend (#587) IS served on staging (its merge 934f24f0 is an ancestor of the deployed
+ *    candidate ec162d17, deployment receipt #365 6078582786), and the served build db3fd2f2 sends its expectedTurn
+ *    binding (src/wsf/kiosk/expected-turn.ts, EXPECTED_TURN_GATE open; station-port.ts). What is missing is a station
+ *    driver: this proof never operates the kiosk's station turn panel (that belongs with the KME-WIRE-1 re-pin), and
+ *    an older station path is never driven (LOVABLE-MATRIX-ALIGN-1 item 5);
  *  - the genuinely unverified account: the existing kit creates verified accounts only (#396 6043231980), and no
  *    verification is faked;
  *  - the Champion's approval is the kit's Champion callable (tracked for cleanup), not the Champion UI.
@@ -53,9 +56,10 @@ export const PROJECT_ID = 'westayfit-staging';
  * The reviewed served build (LOVABLE-REVIEWED-BUILD-1, queue #365 6090733639), shared by the lovable-kiosk and
  * lovable-device-matrix proofs:
  *  - documents: for each route template the journeys load, the sha256 of its canonical document (canonicalDocument:
- *    its inline scripts, the references it loads and every other byte, with only the two per-request values
- *    normalized and the URL's own params in their slots), the number of `u:` timestamps its stream part carries, and
- *    the number of NUL characters it carries (Director ruling #394 6091249662: kept as bytes, counted strictly);
+ *    its inline scripts, the references it loads and every other byte, with only the two per-request values and the
+ *    hosting's preview-image file name normalized, and the URL's own params in their slots), the number of `u:`
+ *    timestamps its stream part carries, the number of NUL characters it carries (Director ruling #394 6091249662: kept
+ *    as bytes, counted strictly), and the number of preview-image links (`img`, LOVABLE-REVIEWED-BUILD-2 step C);
  *  - assets: asset name -> sha256 of its bytes, exact.
  * Pinned to exactly the manifest a credential-free `--bind` run of this code printed (below). An empty value stops
  * every run in the credential-free gate; a served build that differs in any document, timestamp or NUL count, or asset
@@ -211,7 +215,7 @@ export const ROWS = Object.freeze([
   ['unverified-account', 'a genuinely unverified account joins and contributes'],
   ['cleanup-tracking', 'every product-written document (membership, contribution) is in the cleanup manifest before cleanup'],
 ].map(([id, expected]) => Object.freeze({ id, expected })));
-const STATION_BLOCK = 'the safe station backend (#587, integrated in source) is not served on staging and this proof has no station driver yet; an older station path is never driven';
+const STATION_BLOCK = 'the station backend (#587) is served on staging and the served build sends its expectedTurn binding, but this proof has no station driver yet; an older station path is never driven';
 export const FIXED_BLOCKED = Object.freeze({
   'queue-place': STATION_BLOCK, call: STATION_BLOCK, 'phone-ready': STATION_BLOCK, 'expected-turn-start': STATION_BLOCK,
   'round-60s': STATION_BLOCK, review: STATION_BLOCK, 'station-finish': STATION_BLOCK,
@@ -244,14 +248,20 @@ export const SEEN_MAX = 300;
  * results file is in the evidence artifact). One line: control characters and any white space (line and paragraph
  * separators included) become single spaces. A query value or an email-shaped string is replaced, as short() does. At
  * most SEEN_MAX characters. The whole text is withheld when any evidence-scan rule matches it, before or after those
- * replacements, so the log never carries what the scan would refuse to upload.
+ * replacements, so the log never carries what the scan would refuse to upload. The line passes logSafe.
  */
+/**
+ * A printed line with the runner's legacy workflow-command opener `##[` broken up (`## [`). The runner acts on it
+ * anywhere in a line (actions/runner ActionCommand.TryParse: IndexOf("##[")), so host or app text never carries it into
+ * the log: no add-mask, forged annotation or stop-commands (W3 O1 on #613, 6095994302).
+ */
+export const logSafe = (line) => String(line).replace(/##\[/g, '## [');
 export function seenLine(prefix, id, seen) {
   const raw = String(seen ?? '').replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ');
   let t = raw.replace(/[?&][A-Za-z]+=[^&\s"']+/g, '?…').replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, '<email>').replace(/\s+/g, ' ').trim();
   if (EVIDENCE_SCAN_RULES.some((re) => re.test(raw) || re.test(t))) t = '(withheld: the text matches an evidence-scan rule)';
   else if (Array.from(t).length > SEEN_MAX) t = `${Array.from(t).slice(0, SEEN_MAX - 1).join('')}…`;
-  return `${prefix} ${id} ${t || '(none)'}`;
+  return logSafe(`${prefix} ${id} ${t || '(none)'}`);
 }
 export const idHash = (uid) => (typeof uid === 'string' && uid ? sha256(uid).slice(0, 16) : null);
 
@@ -289,8 +299,10 @@ const STREAM_U_RE = /(?<![A-Za-z0-9_$])u:(\d{13}(?!\d))?/g;
  * The hosting's page-preview screenshot link (LOVABLE-REVIEWED-BUILD-2 step C; Lovable DEEPLINK-DRIFT-DIAG-1 and
  * CONFIRM-1, #394 6093458108 and 6093468966). Lovable's hosting adds it, as the og:image and twitter:image elements, to
  * a page that sets no preview image, and renames the file on each screenshot regeneration. Only the file name is a slot:
- * 32 lower-case hex digits, `_`, 13 digits, inside exactly this attribute (an attribute name of its own, the bucket host
- * and the `lovp_` segment literal). The file-name shape anywhere else is refused.
+ * 32 lower-case hex digits, `_`, 13 digits, inside exactly this attribute (`content` after white space, the bucket host
+ * and the `lovp_` segment literal). JS `\s` also admits U+00A0, which HTML does not treat as an attribute separator; it
+ * has no effect, since any such byte is literal text inside the pinned digest and the pinned documents use a space. The
+ * file-name shape anywhere else is refused.
  */
 const PREVIEW_IMAGE_RE = /(?<=\s)content="https:\/\/pub-bb2e103a32db4e198524a2e9ed8f35b4\.r2\.dev\/lovp_372ahwppkw9debd61922xf2ayz\/([0-9a-f]{32}_[0-9]{13})\.png"/g;
 const PREVIEW_NAME_RE = /[0-9a-f]{32}_[0-9]{13}/g;
@@ -532,7 +544,7 @@ const PREVIEW_NAME = /^[0-9a-f]{32}_[0-9]{13}$/;
 const previewNames = (d) => { const n = (d.previewImages ?? []).filter((x) => PREVIEW_NAME.test(x)); return n.length ? ` preview-image=${n.join(',')}` : ''; };
 export function bindLines(observed, verdict) {
   const lines = [`LOVABLE_BUILD=${verdict.status} (${verdict.reason})`];
-  if (!observed) return lines;
+  if (!observed) return lines.map(logSafe);
   for (const t of ROUTE_TEMPLATES) {
     const d = observed.documents?.[t];
     lines.push(d?.sha256 ? `LOVABLE_OBSERVED_DOCUMENT ${t} ${d.sha256} u=${d.streamU} nul=${d.nul}${nulWhere(d.nulClasses)} img=${d.img}${bomFlag(d)}${previewNames(d)}` : `LOVABLE_OBSERVED_DOCUMENT ${t} UNBOUND (${d?.reason ?? 'not loaded'})`);
@@ -547,7 +559,7 @@ export function bindLines(observed, verdict) {
   if (ROUTE_TEMPLATES.every((t) => pinnedDocument(observed.documents?.[t]))) {
     lines.push(`LOVABLE_OBSERVED_BUILD ${JSON.stringify({ documents: Object.fromEntries(ROUTE_TEMPLATES.map((t) => [t, { sha256: observed.documents[t].sha256, streamU: observed.documents[t].streamU, nul: observed.documents[t].nul, img: observed.documents[t].img }])), assets: observed.assets })}`);
   }
-  return lines;
+  return lines.map(logSafe); // a host's refusal reasons carry its own text (a declared charset, a reference)
 }
 
 const PASSIVE_TYPES = new Set(['image', 'font', 'media', 'manifest', 'texttrack', 'xhr', 'fetch', 'eventsource']);

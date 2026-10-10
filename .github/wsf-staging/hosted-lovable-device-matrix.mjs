@@ -150,15 +150,22 @@ export function mergeExtras(file, { users = [], docs = [], linked = [] }) {
 // 397c3b600ee57b9074fc45b61a77286da14de08a (src/wsf/member-entry-screen.tsx, kiosk/connected-context.tsx,
 // kiosk/connected-join.tsx, display/public-display-view.tsx, demo/move.tsx, camera-count.tsx, camera-flow.ts,
 // screens/progress.tsx, screens/you.tsx, verify-notice-view.tsx, demo/shell.tsx, demo/tour.tsx). The served build is
-// whatever REVIEWED_BUILD pins; a pinned build whose screens moved fails its cells by name.
+// whatever REVIEWED_BUILD pins; a pinned build whose screens moved fails its cells by name. The display and the name
+// step were re-read from the served build db3fd2f2 (LOVABLE-MATRIX-ALIGN-1, #365 6096204665):
+// src/wsf/display/public-display-view.tsx:40-52, public-display.ts:42-50 (en-GB numbers), member-entry-screen.tsx:83-88,
+// and src/styles.css:56, which sets `.eyebrow` to text-transform: uppercase.
 export const SEL = Object.freeze({
   signIn: '[data-entry-step="signIn"]',
   profileSetup: '[data-entry-step="profileSetup"]',
   verifySendNotice: '[data-testid="profile-verify-notice"]',
   display: 'main.public-display[data-display]',
-  displayEyebrow: 'main.public-display p.eyebrow',
+  displayCommunity: 'main.public-display p.public-display-community',
   displayTitle: 'main.public-display h1',
+  displayTotalNumber: '[data-testid="display-total"] strong',
+  displayTotalOf: '[data-testid="display-total"] span',
   displayFreshness: '[data-testid="display-freshness"]',
+  displayFreshLines: '[data-testid="display-freshness"] p',
+  profileStep: '[data-entry-step="profileSetup"] p.eyebrow',
   joinCard: '[data-connected-join]',
   movePhone: '[data-testid="join-move-phone"]',
   camScreen: '.cam-screen[aria-label="Squat camera counter"]',
@@ -194,6 +201,12 @@ export const COPY = Object.freeze({
   verifyReminder: 'Verify your email',
   member: 'Member',
 });
+/** The display's second freshness line while live: "updated N s ago" (public-display-view.tsx:49). */
+export const FRESH_UPDATED_RE = /^updated \d+ s ago$/;
+/** The unit the kit's joinableEvent goals carry (journeys/fixture-kit.mjs, held by a test). */
+export const FIXTURE_UNIT = 'squats';
+/** A number as the display formats it: Intl en-GB, at most 3 fraction digits (public-display.ts:44). */
+export const displayNumber = (n) => new Intl.NumberFormat('en-GB', { maximumFractionDigits: 3 }).format(n);
 /** The visitor's display name, and the initials the product derives from it (first letter of the first and last word). */
 export const VISITOR_NAME = 'Device Visitor';
 export const VISITOR_INITIALS = 'DV';
@@ -208,6 +221,15 @@ async function shown(page, sel) {
 async function textOf(page, sel) {
   const l = page.locator(sel);
   try { return (await l.count()) ? clean(await l.first().innerText()) : ''; } catch { return ''; }
+}
+/**
+ * A leaf element's exact copy: its text content with white space collapsed, or '' at once when it is absent. Unlike
+ * innerText it ignores CSS text-transform (the served `.eyebrow` is uppercase, so innerText reads "STEP 2 OF 2").
+ * Only for an element compared to exact copy: a container's text content runs its block children together.
+ */
+async function exactText(page, sel, index = 0) {
+  const l = page.locator(sel);
+  try { return (await l.count()) > index ? clean(await l.nth(index).textContent()) : ''; } catch { return ''; }
 }
 async function attrOf(page, sel, name) {
   const l = page.locator(sel);
@@ -245,6 +267,32 @@ async function nth(page, log, name, index, ms = T.settle) {
   return null;
 }
 const SIGNUP_PATH = '/v1/accounts:signUp';
+const quoted = (t) => (t ? `"${t.length > 40 ? `${t.slice(0, 39)}…` : t}"` : 'absent');
+
+/**
+ * The signed-out display's verdict against the served build db3fd2f2, from what was read: the state, the title and
+ * the seeded number in the page text (as before), the community line, the total as the product formats it (`strong`
+ * the seeded total, `span` exactly "of {target} {unit}"), and exactly two freshness lines, "Live · confirmed totals"
+ * then "updated N s ago". The seen text names what was read wherever it differs.
+ */
+export function displayVerdict(read, fx) {
+  const want = { total: displayNumber(fx.seeded), of: `of ${displayNumber(fx.target)} ${FIXTURE_UNIT}` };
+  const fresh = Array.isArray(read.fresh) ? read.fresh : [];
+  const freshOk = fresh.length === 2 && fresh[0] === COPY.live && FRESH_UPDATED_RE.test(fresh[1]);
+  const ok = read.state === 'live' && read.title === fx.goalTitle && showsNumber(read.page, fx.seeded)
+    && read.community === fx.communityName && read.total === want.total && read.of === want.of && freshOk;
+  const seen = [
+    `display state ${read.state}`,
+    `title ${read.title === fx.goalTitle ? 'the fixture goal' : quoted(read.title)}`,
+    `community ${read.community === fx.communityName ? 'the fixture community' : quoted(read.community)}`,
+    `total ${read.total === want.total ? `the seeded ${want.total}` : quoted(read.total)} ${read.of === want.of ? want.of : quoted(read.of)}${showsNumber(read.page, fx.seeded) ? '' : ' (not in the page text)'}`,
+    `freshness ${fresh.length ? fresh.map((f) => quoted(f)).join(' / ') : 'absent'}`,
+  ].join('; ');
+  return { ok, seen };
+}
+
+/** The name step's count, read as text (never innerText): exactly "Step 2 of 2" for an unverified visitor. */
+export const stepVerdict = (text) => text === COPY.stepUnverified;
 
 /**
  * The matrix. `fixtures` is the existing kit; two joinable fixture communities are made first (the kit writes nothing
@@ -307,8 +355,9 @@ export async function runMatrix({ browser, fixtures, runTag, base, reviewed = RE
         await waitShown(page, SEL.signIn, T.boot);
         const landingText = await textOf(page, 'body');
         const toSignUp = await shown(page, `button:has-text("${COPY.toSignUp}")`);
-        const landingOk = (await textOf(page, `${SEL.signIn} h1`)) === COPY.welcome && toSignUp && !/sample data/i.test(landingText);
-        cell('landing', landingOk ? 'PASS' : 'FAIL', `sign-in heading ${(await textOf(page, `${SEL.signIn} h1`)) || 'absent'}; create-account entry ${toSignUp ? 'shown' : 'absent'}; sample data ${/sample data/i.test(landingText) ? 'SHOWN' : 'absent'}`, await shoot(page, 'landing'));
+        const heading = await exactText(page, `${SEL.signIn} h1`);
+        const landingOk = heading === COPY.welcome && toSignUp && !/sample data/i.test(landingText);
+        cell('landing', landingOk ? 'PASS' : 'FAIL', `sign-in heading ${heading || 'absent'}; create-account entry ${toSignUp ? 'shown' : 'absent'}; sample data ${/sample data/i.test(landingText) ? 'SHOWN' : 'absent'}`, await shoot(page, 'landing'));
 
         // 2. The signed-out display of the first fixture goal.
         reached = 'display';
@@ -318,11 +367,14 @@ export async function runMatrix({ browser, fixtures, runTag, base, reviewed = RE
           if (['live', 'stale', 'notAuthorized', 'notConnected'].includes(await attrOf(page, SEL.display, 'data-display'))) break;
           await page.waitForTimeout(1000);
         }
-        const state = await attrOf(page, SEL.display, 'data-display');
-        const numbers = await textOf(page, 'main.public-display');
-        const dispOk = state === 'live' && (await textOf(page, SEL.displayTitle)) === one.goalTitle && (await textOf(page, SEL.displayEyebrow)) === one.communityName
-          && showsNumber(numbers, one.seeded) && numbers.includes(`/ ${one.target.toLocaleString('en-US')} confirmed`) && (await textOf(page, SEL.displayFreshness)) === COPY.live;
-        cell('display', dispOk ? 'PASS' : 'FAIL', `display state ${state}; title ${(await textOf(page, SEL.displayTitle)) === one.goalTitle ? 'the fixture goal' : 'other'}; community ${(await textOf(page, SEL.displayEyebrow)) === one.communityName ? 'the fixture community' : 'other'}; total ${showsNumber(numbers, one.seeded) ? `the seeded ${one.seeded}` : 'not the seeded total'} of ${one.target}; freshness ${(await textOf(page, SEL.displayFreshness)) || 'absent'}`, await shoot(page, 'display'));
+        const freshCount = await page.locator(SEL.displayFreshLines).count().catch(() => 0);
+        const fresh = [];
+        for (let i = 0; i < freshCount; i += 1) fresh.push(await exactText(page, SEL.displayFreshLines, i));
+        const disp = displayVerdict({
+          state: await attrOf(page, SEL.display, 'data-display'), page: await textOf(page, 'main.public-display'), title: await exactText(page, SEL.displayTitle),
+          community: await exactText(page, SEL.displayCommunity), total: await exactText(page, SEL.displayTotalNumber), of: await exactText(page, SEL.displayTotalOf), fresh,
+        }, one);
+        cell('display', disp.ok ? 'PASS' : 'FAIL', disp.seen, await shoot(page, 'display'));
 
         // 3. The invite link, signed out: the code leaves the address bar and is held for this tab only.
         reached = 'invite-link';
@@ -367,10 +419,10 @@ export async function runMatrix({ browser, fixtures, runTag, base, reviewed = RE
         let notice = await shown(page, SEL.verifySendNotice);
         for (let waited = 0; !sentOk && !notice && waited < T.settle; waited += 500) { await page.waitForTimeout(500); notice = await shown(page, SEL.verifySendNotice); }
         const noticeText = notice ? await textOf(page, SEL.verifySendNotice) : '';
-        const step = await textOf(page, SEL.profileSetup);
+        const step = await exactText(page, SEL.profileStep);
         const honest = send !== null && (sentOk ? !notice : notice && noticeText.startsWith(COPY.sendFailed));
-        cell('signup', honest && step.includes(COPY.stepUnverified) ? 'PASS' : 'FAIL',
-          `account ${idHash(uid)} created and tracked${byLookup ? ' (by lookup: the sign-up answer was not seen)' : ''}; verification send ${send === null ? 'not seen' : sentOk ? 'sent' : `refused (${send.error ?? 'no result'})`}; notice ${notice ? 'shown' : 'absent'}; name step ${step.includes(COPY.stepUnverified) ? COPY.stepUnverified : 'without the unverified step count'}`, await shoot(page, 'signup'));
+        cell('signup', honest && stepVerdict(step) ? 'PASS' : 'FAIL',
+          `account ${idHash(uid)} created and tracked${byLookup ? ' (by lookup: the sign-up answer was not seen)' : ''}; verification send ${send === null ? 'not seen' : sentOk ? 'sent' : `refused (${send.error ?? 'no result'})`}; notice ${notice ? 'shown' : 'absent'}; name step ${stepVerdict(step) ? COPY.stepUnverified : `step count ${quoted(step)}`}`, await shoot(page, 'signup'));
 
         // 5. Still unverified: the profile save, then the member app.
         reached = 'unverified-participation';
@@ -408,7 +460,7 @@ export async function runMatrix({ browser, fixtures, runTag, base, reviewed = RE
         await dismissTour(page);
         await page.locator(SEL.movePhone).first().click();
         await waitShown(page, SEL.camScreen, T.step);
-        const note = await textOf(page, SEL.camNote);
+        const note = await exactText(page, SEL.camNote);
         const fallback = await page.locator(SEL.camPanel).first().waitFor({ state: 'visible', timeout: T.settle }).then(() => true, () => false);
         const panel = fallback ? await textOf(page, SEL.camPanel) : '';
         const camShot = await shoot(page, 'camera-fallback');
@@ -428,15 +480,15 @@ export async function runMatrix({ browser, fixtures, runTag, base, reviewed = RE
         await dismissTour(page);
         await page.locator(SEL.tab('progress')).first().click();
         const empty = await page.locator(SEL.progressEmpty).first().waitFor({ state: 'visible', timeout: T.step }).then(() => true, () => false);
-        const emptyText = empty ? await textOf(page, `${SEL.progressEmpty} h2`) : '';
+        const emptyText = empty ? await exactText(page, `${SEL.progressEmpty} h2`) : '';
         const progressShot = await shoot(page, 'progress');
         await dismissTour(page);
         await page.locator(SEL.tab('you')).first().click();
         await waitShown(page, SEL.panel('You'), T.step);
         const reminder = await shown(page, SEL.verifyNotice) && (await textOf(page, SEL.verifyNotice)).includes(COPY.verifyReminder);
-        const community = await textOf(page, SEL.belongingTitle);
+        const community = await exactText(page, SEL.belongingTitle);
         const role = (await textOf(page, SEL.belongingBand)).includes(COPY.member);
-        const initials = await textOf(page, SEL.portraitInitials);
+        const initials = await exactText(page, SEL.portraitInitials);
         const youShot = await shoot(page, 'you');
         cell('progress-you', emptyText === COPY.progressEmpty && reminder && community === one.communityName && role && initials === VISITOR_INITIALS ? 'PASS' : 'FAIL',
           `Progress ${emptyText === COPY.progressEmpty ? 'shows the first-contribution empty state' : 'without the empty state'}; You: verify reminder ${reminder ? 'shown' : 'absent'}, community ${community === one.communityName ? 'the fixture community' : 'other'}${role ? ' as Member' : ''}, initials ${initials === VISITOR_INITIALS ? 'derived from the name' : 'other'}`, progressShot, youShot);
