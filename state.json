@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "d755986aa4fe1a803ea4aa4b50210a2beca8201685b235b5a322cee80d4186ef",
-  "eventCount": 1149,
+  "ledgerHead": "276b54b0299557b3f7690669f46bcb8ebcf90651b2722c92cea43584fa6a291f",
+  "eventCount": 1152,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -20,7 +20,7 @@
   "canonical": {
     "developmentBranch": "claude/wsf-app-shell",
     "developmentSha": "8a067b29420563408e16cff5d91cc77b2ad0fbd8",
-    "operationalMain": "6e8acc3169358ed540d78a961c3008878d2d6672"
+    "operationalMain": "614836b8cb5d04fc8266a32ca299beea3db0e615"
   },
   "staging": {
     "servedSha": "ec162d17a0540e936741027f9b8f90dd372cfaf4",
@@ -2818,7 +2818,7 @@
       },
       "label": "Re-pin REVIEWED_BUILD to the next Lovable publish (db3fd2f2) and close LOVABLE-REVIEWED-BUILD-1's carried items: UTF-8 asset fulfilment, CHARSET-name and token-length negatives, QA-note corrections",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 394,
@@ -2830,7 +2830,7 @@
         "subjectSha": "6fcaa93c3aff889cfd2e0a6c401de649817d6089",
         "prHeadSha": "6fcaa93c3aff889cfd2e0a6c401de649817d6089",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "614836b8cb5d04fc8266a32ca299beea3db0e615"
       },
       "proof": null,
       "served": null,
@@ -2856,10 +2856,13 @@
           "kind": "comment",
           "id": 6092692777
         },
-        "accepted": null,
-        "lastTransition": {
+        "accepted": {
           "kind": "comment",
-          "id": 6094467050
+          "id": 6094514362
+        },
+        "lastTransition": {
+          "kind": "pull_request",
+          "id": 610
         }
       },
       "review": {
