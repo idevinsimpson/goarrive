@@ -6819,3 +6819,67 @@ L0's relay for this wake listed five focus items. It reached this session after 
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0 (re-run before push).
 
 **Status:** **PASS at `bab7e980` with zero unresolved findings.** PN-1 to PN-5 are non-blocking (PN-4 and PN-5 were found while answering L0's relay, after the verdict). W7 made no product edit, merge, dispatch, deploy, live-data change, credential or permission change, and did not touch any state ref or comment other than its own GitHub replies.
+
+## §86. Check 86: #617 LOVABLE-KIOSK-QR-JOIN-1 at `127e91a7`
+
+**Assignment:** router wake `ea23eec8b0d157aca1fef11c767ccd16ce318491962237d33c74a4b31f12d3fb` (#434 `6099608319`), under the owner's standing approval to ACK and perform valid W7 router reviews. I refreshed `wsf-control-state-2` first: `check` passed (1217 events), `worker-view W7` showed `WATCH=on` and `REVIEWING=LOVABLE-KIOSK-QR-JOIN-1 phase=UNDER_REVIEW pr=#617 subject=127e91a7…`, W7 was the sole reviewer, and the wake was `delivered`. The PR head was still the subject, and nothing newer sat on #434 or the PR. ACK: #434 `6099630847`.
+
+**Subject:** #617 (draft, owner W4) at exactly `127e91a73f2837aecfb977aed298b3e91387ce46`: one commit on `main` `9b2e89e8`, 6 files, +217/−72, all inside the six reserved paths (the two Lovable harnesses, their two tests and two QA notes). No kit, product, backend, workflow, rules or tool file changed. I verified it in detached worktrees and pushed nothing from them. **I used no hosted system, no staging project, no Lovable project and no credential.** The real-system run below is on the **local emulators** only.
+
+### Reproduced
+
+| Check | Result |
+|---|---|
+| `hosted-lovable-kiosk.test.mjs` | **31 / 31** on Node 20.20.2 **and** 22.22.2 (the PR says 31) |
+| `hosted-lovable-device-matrix.test.mjs` | **21 / 21** on both (the PR says 21) |
+| `tests/workflow-contract.test.mjs` | **103 / 103** on both |
+| `.github/wsf-staging/tests/run-all.mjs` and `tools/wsf-control/run-all.mjs` | **all suites passed**, each on both Node versions |
+| Journey negatives / `qrJoinProblem` table | **26** negatives and **16** cases, as the PR says |
+| `REVIEWED_BUILD` | the block is **byte-identical** base to head (9,068 bytes by my own slice; I did not reproduce the PR's `b5dfc0de…` value, whose delimiters are the PR's), and **no diff hunk lies inside it** |
+| Scope | six paths; the guard gains no origin or type; the kit is not edited |
+| CI | the PR head shows **0** check runs (a draft; I cannot tell whether none were requested) |
+
+### What I measured that the PR's hermetic fakes cannot
+
+**1. The real kit and the real served backend, on the emulators (22 / 22; instrument 1).** The PR's fakes model the kit and the backend; I ran the PR head's **real `fixture-kit.mjs`** against the **served candidate `ec162d17`** (built and run on the Auth, Firestore and Functions emulators, `demo-wsf-local`; the kit's two hosted URLs rewritten to the emulators).
+- **The kit.** `expoEvent('lk', {attendees:1, target:1000, seeded:100, joinPolicy:'public'})` returns a `joinCode` that equals the community document's stored code, and the community is `joinPolicy: 'public'`. The omitted option still makes a private community and returns **no** code. `inviteOnly` throws before anything is created. The group and goal ids carry the run tag, so the manifest's run-tag rule accepts paths built from them.
+- **The station.** Through the real callables (`wsfStationRequestPairing`, the kit's `approveStation`, `wsfStationClaimPairing`, `wsfStationState`): the **public** event's approved station state carries a join code **equal to the kit's**; the **private** event's carries `null`. That is the packet's source claim (`LINK_JOINABLE`, `wsfStationState` `:6386-6398`), reproduced as behaviour; I also confirmed the line citations (`:63`, `:6327`, `:6386-6398`, `:4475`, `:4633`, `:4981`).
+- **The join.** Visitor A (a verified non-member) is refused `wsfListGoals` for the public event (`NOT_FOUND`), joins with the code taken from a QR-shaped URL (`alreadyMember: false`, this community), and the join adds **exactly one document, `wsfMemberships/<groupId>_<A uid>`, which is the path the harness tracks**. It modifies nothing that existed (no counter or profile write). A second join answers `alreadyMember: true`, so the harness's FAIL case is real. After the join A can list the goals.
+- **The manifest.** The PR's real `mergeIntoManifest` merges that path into the kit's real run-tagged manifest (the uid is in `manifest.users`), and the real `productDocsSeen` names it by kind without the uid or the group id.
+- **Isolation, public against private.** Visitor B (a non-member) gets the **same** answers on the public and the private event: `wsfListGoals` and `wsfMyContribution` both `NOT_FOUND`, and `wsfGoalPulse` the same status and the same nine fields (display authorization only). A guess at a code from `wsfPreviewCommunity` yields no community. So making the community public changed nothing B can read; this is the PR's isolation claim, measured.
+
+**2. `qrJoinProblem` against the predicate it replaced (instrument 2).** 5,748 URL cases (host, scheme, port, userinfo, trailing dot, path, query order, duplicate and mis-cased parameters, encodings, fragments), plus non-URL inputs and seven kit-code variants. The new verdict **accepts nothing the old predicate refused** (330 accepted against 525), **equals an oracle I wrote from the packet's wording** on every case, and no problem text carries the code or the goal id, on Node 20 and 22. Every truncation of the kit's code from 1 to 21 characters is refused with the right named reason (instrument 3).
+
+**3. My own mutants (instruments 4 to 6): 32 of 37 killed, plus the guard set.** I did not reuse the PR's catalogue (it is not in the PR); these are mine, aimed at the packet's claims.
+- **Killed:** all of `qrJoinProblem`'s origin, path, goal, length, equality (first-8, case, QR-longer), kit-code and unparsable branches; the public option dropped; a QR problem ignored; no-QR as BLOCKED or unnamed; the membership tracking dropped; a wrong community accepted; the problem text printing both codes; the four cleanup-naming mutants (the path printed, the manifest total used, the cli keeping the old text, any `wsf*` path named as a membership); five cap mutants (the boundary at 299, 300 and 301, and code points against UTF-16 units) and `logSafe` skipped; and the matrix's visibility check read five ways.
+- **Guard contract (instrument 6).** Removing the `guard.check()` before A's sign-in, before the control's, or after the kiosk's `goto` is **killed** (3 / 4). The fourth, before **B's** sign-in, survives, and **it survives identically on the base**, so it is not this PR's.
+- **Five survivors**, analysed below as PN-1 (three missing pins) and as equivalents (two).
+
+**4. `exactText` against real Chromium (instruments 7 and 8).** The PR's `exactText`, extracted verbatim from the head, on 12 variants: `visibility: hidden`, `display: none`, the `hidden` attribute, a hidden ancestor and a zero-size box all read **empty**; `text-transform: uppercase` still reads the source copy; `nth` is correct for the first, a hidden second and an absent third match. This closes my PN-4 on #614 for the cases the PR names. (See PN-5 for what it does not close.)
+
+**5. The evidence scan (instrument 9).** The new texts (the QR problems, the cleanup text, the no-QR text, the join row) hit none of `EVIDENCE_SCAN_RULES`, are not withheld by `seenLine`, and `scan-evidence.mjs` over them reads `EVIDENCE_SCAN=clean`.
+
+### The W7 notes from #614
+
+- **PN-1 closed.** The cap's boundary is tested at 299, 300 and 301 code points for `b` and for U+1F600. My cap mutants (301 let through, 298 kept, `>=`, UTF-16 units, 300 kept) are **all killed**; the survivor I reported on #614 is gone.
+- **PN-2 closed.** `seenLine`'s doc comment is directly above `seenLine`; `logSafe` and its own doc come first. `logSafe` is used at call time, so the order is safe.
+- **PN-4 closed** for `visibility: hidden` and `display: none` (item 4 above, and three new fake defects in the matrix test, each failing its cell at all four viewports). `count() <= index` against `<` is **equivalent**: `isVisible()` on an absent match is `false` and does not throw (instrument 8).
+
+### Precision notes (non-blocking)
+
+- **PN-1 (three missing pins; the code is right).** Three of my mutants survive: (Q5) a QR code that is a proper prefix of the kit's code, 16 to 21 characters, is accepted; (J6) a join response with no `alreadyMember` field passes `!== true` where the code requires `=== false`; (J8) dropping the "phone choice appears" requirement from the `qr-join` PASS. The production code is correct in each case: I drove Q5's inputs against the real function (every truncation is refused), and the packet's note states J6 and J8 as requirements. What is missing is a test that would fail if the check were loosened. The journey negatives have no "joined, but no phone choice" defect at all, because the fake always shows the choice after Join.
+- **PN-2 (a pinned count that comes from the fake, not from the system).** The new guard test pins `passwordFills === 1` for `foreignOnHome`, explained as "A's one sign-in happens on a page that loaded only reviewed code, before home's refusal". In the fake, `home.js` is injected only on a bare `/` **without** `?join=`. In the real harness the two are the **same route template**: `ROUTE_TEMPLATES` is `/`, `/display/$goalId` and `/kiosk/…`, and a template has one reviewed canonical document, so an unreviewed script on `/` would be on A's join page too, and `guard.check()` would refuse before A types. The `1` is therefore an artifact of the fake's split. It does not weaken the contract: the assertion that carries it is `fillsAfterRefusal === 0` with `refused > 0`, and my mutants show it kills the guard removals (item 3). A comment saying the `1` is the fake's would stop a reader taking it for a measured value.
+- **PN-3 (what the verdict still accepts, unchanged by this PR).** `qrJoinProblem` accepts a link with **userinfo** (`https://u:p@host/…`), a **fragment**, extra parameters, and a **duplicate** `join` or `goal` (it reads the first). The old predicate accepted exactly the same shapes, so this is not new, and the QR comes from the pinned reviewed build. `checkBase` (`:274`) already rejects userinfo, query and fragment for the base URL; the same two conditions plus `getAll('join').length === 1` would make "exactly" literal for the QR. Optional.
+- **PN-4 (the kiosk's `visible()` is existence).** `visible = async (loc) => (await loc.count()) > 0` (`:819`). PN-4 on #614 gave the matrix's exact-copy leaves a real visibility check; the kiosk harness's helper still only tests that the element exists. It now decides a measured PASS: "phone choice shown" (`join-move-phone`) and the no-QR text. A present-but-hidden phone choice would pass. The `Join` button is clicked, so Playwright's actionability check covers it; the phone choice is not. The helper is old (it predates this packet), and the packet does not claim to change it.
+- **PN-5 (what `isVisible()` does not close).** In Chromium `opacity: 0`, an off-screen element, a 1-pixel clipped element and text coloured as its background are all **read as visible copy** (instrument 7). The packet states the definition accurately ("a non-empty box and no `visibility: hidden`"), and the doc note names `visibility: hidden` and `display: none`, so it does not over-claim.
+
+### Limits, stated plainly (not findings)
+
+- **I did not read the Lovable source or fetch the live site**, and I did not use the Lovable connector. The QR's URL shape (`/?join=<code>&goal=<id>` on the Lovable host) is what the harness and the matrix already expect; I could not check that the served kiosk draws it that way, and the verdict's accept path rests on that. The packet's own limit says the same.
+- **The backend I ran is `ec162d17`, the served candidate the packet cites**, built in its own detached worktree. This PR's tree does not carry that backend (its `functions-westayfit/src/index.ts` has no `wsfJoinCommunity`), so there is no backend change in this packet to review, and nothing here says the *hosted* staging project behaves as `ec162d17` does on the emulators. A cleanup run of `cleanup-synthetic.mjs` needs a hosted project, so I checked its provenance rule against the manifest (a run-tagged `wsfMemberships/…_<uid>` path, uid in `manifest.users`) and did not run it.
+- **Nothing here is a hosted proof.** As the PR says, no `qr-join` PASS on staging and no matrix re-run exist; L0 runs both proofs on `main` after a merge, and nothing is dispatched from this branch.
+- `/reg-d6d4.log` is still at the filesystem root (from Check 80); I could not delete it.
+
+- **Gates:** `ts:check` 0; `check-evidence-intact` 0 (re-run before push).
+
+**Status:** **PASS at `127e91a7` with zero unresolved findings.** PN-1 to PN-5 are non-blocking. W7 made no product edit, merge, dispatch, deploy, live-data change, credential or permission change, and did not touch any state ref or comment other than its own GitHub replies.
