@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "7721d845fb1d4edb68fdb9ebe908a3a8819de09e1751cc99c7686b286c66d6c1",
-  "eventCount": 1233,
+  "ledgerHead": "074e5b8274647fdfd7e2347b2ad0c48ab96d417ddd65da16c4c0474d9dea56d5",
+  "eventCount": 1234,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2972,7 +2972,9 @@
       "proof": null,
       "served": null,
       "releasedQueueIndex": null,
-      "reviewedBy": [],
+      "reviewedBy": [
+        "W7"
+      ],
       "subjectPaths": [
         ".github/wsf-staging/hosted-lovable-kiosk.mjs",
         ".github/wsf-staging/tests/hosted-lovable-kiosk.test.mjs",
@@ -2992,7 +2994,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6100681031
+          "id": 6101088493
         }
       },
       "review": {
@@ -7268,7 +7270,8 @@
       "ack": {
         "kind": "comment",
         "id": 6100919847
-      }
+      },
+      "superseded": true
     }
   },
   "fastpath": {
