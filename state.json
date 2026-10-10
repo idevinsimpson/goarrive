@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "b35e0864a213186730cbece476fb0b05354156225b1f572bc3cd2a6ea1ebe8c8",
-  "eventCount": 1169,
+  "ledgerHead": "fadb53137fbb796ad65f36c603036214d14f6d1956c66e035cb480027b7c972c",
+  "eventCount": 1172,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -20,7 +20,7 @@
   "canonical": {
     "developmentBranch": "claude/wsf-app-shell",
     "developmentSha": "8a067b29420563408e16cff5d91cc77b2ad0fbd8",
-    "operationalMain": "591f7487e886ca0ae83ff000164d03a2f1ad13ae"
+    "operationalMain": "e96cd9474e1ef824605582a5fb95ecd44e34c83d"
   },
   "staging": {
     "servedSha": "ec162d17a0540e936741027f9b8f90dd372cfaf4",
@@ -2674,7 +2674,7 @@
       },
       "label": "Code guard: allow Playwright resource type ping only to the exact API_ORIGINS as non-navigation data (the Firestore Listen beacon that stopped main runs 38030033477/38030045509), with tests",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 394,
@@ -2686,7 +2686,7 @@
         "subjectSha": "c0882743556b69ef0b32abc95a8c7b6e1b560b7c",
         "prHeadSha": "c0882743556b69ef0b32abc95a8c7b6e1b560b7c",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "e96cd9474e1ef824605582a5fb95ecd44e34c83d"
       },
       "proof": null,
       "served": null,
@@ -2712,10 +2712,13 @@
           "kind": "comment",
           "id": 6094618925
         },
-        "accepted": null,
-        "lastTransition": {
+        "accepted": {
           "kind": "comment",
-          "id": 6095995787
+          "id": 6096054536
+        },
+        "lastTransition": {
+          "kind": "pull_request",
+          "id": 613
         }
       },
       "review": {
