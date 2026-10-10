@@ -247,10 +247,19 @@ test('the served manifest: every bind probe reduced per template, same-origin as
 });
 
 test('binding: empty or partial reviewed build BLOCKED; exact PASS; a changed document, timestamp count or asset, or a refused reference FAIL', () => {
-  assert.deepEqual(REVIEWED_BUILD, { documents: {}, assets: {} }, 'nothing is reviewed yet, so every run stops in the gate');
+  // The shipped pin: a canonical document for every template and every asset, frozen; it binds to itself exactly.
   assert.ok(Object.isFrozen(REVIEWED_BUILD) && Object.isFrozen(REVIEWED_BUILD.documents) && Object.isFrozen(REVIEWED_BUILD.assets));
+  assert.deepEqual(Object.keys(REVIEWED_BUILD.documents), ROUTE_TEMPLATES);
+  for (const t of ROUTE_TEMPLATES) {
+    const d = REVIEWED_BUILD.documents[t];
+    assert.ok(Object.isFrozen(d) && /^[0-9a-f]{64}$/.test(d.sha256) && d.streamU === 2 && Number.isInteger(d.nul) && d.nul >= 0, `${t} is pinned`);
+    assert.deepEqual(Object.keys(d), ['sha256', 'streamU', 'nul']);
+  }
+  assert.ok(Object.keys(REVIEWED_BUILD.assets).length > 0 && Object.entries(REVIEWED_BUILD.assets).every(([n, d]) => /^[A-Za-z0-9_.-]+\.(js|css)$/.test(n) && /^[0-9a-f]{64}$/.test(d)));
+  assert.equal(bindBuild({ documents: REVIEWED_BUILD.documents, assets: REVIEWED_BUILD.assets, refusals: [] }).status, 'PASS', 'the shipped pin is a whole reviewed build');
+  assert.equal(bindBuild({ documents: DOCS, assets: OBSERVED, refusals: [] }).status, 'FAIL', 'and another build fails it');
   const seen = { documents: { ...DOCS }, assets: { ...OBSERVED }, refusals: [] };
-  assert.equal(bindBuild(seen).status, 'BLOCKED');
+  assert.equal(bindBuild(seen, { documents: {}, assets: {} }).status, 'BLOCKED', 'an empty pin stops every run in the gate');
   assert.equal(bindBuild(seen, { documents: DOCS, assets: {} }).status, 'BLOCKED', 'documents without assets are not a reviewed build');
   assert.equal(bindBuild(seen, { documents: {}, assets: OBSERVED }).status, 'BLOCKED', 'assets without documents are not a reviewed build');
   for (const t of ROUTE_TEMPLATES) {
@@ -281,7 +290,7 @@ test('bind lines: verdict, documents, probes, refused references, assets and the
   const token = 'tokSECRETvalue.abcDEF123';
   const m = await servedManifest(site({ ...SITE, doc: (p) => servedDoc(p, { token }) }).fetchImpl);
   const lines = bindLines(m, bindBuild(m));
-  assert.match(lines[0], /^LOVABLE_BUILD=BLOCKED/);
+  assert.match(lines[0], /^LOVABLE_BUILD=FAIL \(the served \/, \/display\/\$goalId, \/kiosk\/\$communityId\/\$goalId documents differ/, 'the fake host is not the pinned build');
   assert.deepEqual(lines.slice(1, 4), ROUTE_TEMPLATES.map((t) => `LOVABLE_OBSERVED_DOCUMENT ${t} ${DOCS[t].sha256} u=2 nul=2 (stream part 1, other inline script 0, markup 1)`), 'counts and classes of NULs, never bytes');
   assert.equal(lines.filter((l) => l.startsWith('LOVABLE_DOCUMENT_PROBE ')).length, BIND_PROBES.length);
   assert.ok(lines.includes(`LOVABLE_DOCUMENT_PROBE /display/Zq9wsfBindProbeGoal2 /display/$goalId ${DOCS['/display/$goalId'].sha256} u=2 nul=2 (stream part 1, other inline script 0, markup 1) params={"goalId":2}`));
@@ -722,7 +731,7 @@ test('cli (#589 W4 F2): --bind exits non-zero before any credential unless the s
   assert.equal(r.code, 0, 'an exact match exits zero');
   assert.match(r.lines[0], /^LOVABLE_BUILD=PASS/);
   for (const [name, files, reviewed, e, fetches] of [
-    ['the shipped empty REVIEWED_BUILD', SITE, undefined, env, true],
+    ['the shipped REVIEWED_BUILD (the real pin) against the fake host', SITE, undefined, env, true],
     ['a drifted entry page', { ...SITE, doc: (p) => servedDoc(p, p === '/' ? { body: '<!-- republished -->' } : {}) }, exact, env, true],
     ['a drifted kiosk deep link', { ...SITE, doc: (p) => servedDoc(p, p.startsWith('/kiosk/') ? { status: 'pending' } : {}) }, exact, env, true],
     ['a deep link carrying route data beyond its params', { ...SITE, doc: (p) => servedDoc(p, p.startsWith('/display/') ? { body: `<p>${p.length}</p>` } : {}) }, exact, env, true],
@@ -747,7 +756,7 @@ test('cli (#589 W4 F2): --bind exits non-zero before any credential unless the s
   let launched = 0;
   const importKit = async () => { imported += 1; return { createFixtureKit: () => { throw new Error('no fixture inputs in this test'); } }; };
   const launch = async () => { launched += 1; throw new Error('no browser in this test'); };
-  for (const [name, files, reviewed] of [['the shipped empty REVIEWED_BUILD', SITE, undefined], ['a drifted entry page', { ...SITE, doc: (p) => `${servedDoc(p)} ` }, exact]]) {
+  for (const [name, files, reviewed] of [['the shipped REVIEWED_BUILD (the real pin) against the fake host', SITE, undefined], ['a drifted entry page', { ...SITE, doc: (p) => `${servedDoc(p)} ` }, exact]]) {
     r = await run('--run', { ...env, WSF_RESULT_DIR: dir }, { fetchImpl: site(files).fetchImpl, ...(reviewed ? { reviewed } : {}), importKit, launch });
     assert.equal(r.code, 1, name);
     assert.equal(imported, 0, `${name}: the kit is never imported`);
@@ -795,10 +804,10 @@ test('guard negatives: drift after bind, a deep link with other bytes, a redirec
   assert.match(hostBuildRow({ status: 'PASS' }, r.served).seen, /script https:\/\/cdn\.example\.test\/late\.js is outside/);
   assert.equal(hostBuildRow({ status: 'PASS' }, r.served).status, 'FAIL');
   assert.ok(!late.server.loads.some((x) => x.url.includes('cdn.example.test')), 'the foreign script was never fulfilled');
-  // The production default is REVIEWED_BUILD (empty here): the browser is refused the very first document.
+  // The production default is the shipped REVIEWED_BUILD (the real pin): the fake host's very first document is refused.
   const empty = lovable();
   const e = await runJourney({ browser: empty.browser, fixtures: empty.fixtures, base: LOVABLE_URL });
-  assert.match(hostBuildRow({ status: 'PASS' }, e.served).seen, /no reviewed \/kiosk\/\$communityId\/\$goalId document is pinned/);
+  assert.match(hostBuildRow({ status: 'PASS' }, e.served).seen, /\/kiosk\/e5cgrp-e5c-t-1-lk\/e5cgoal-e5c-t-1-lk (carries \d+ NUL character\(s\), not the reviewed \d+|differs from the reviewed \/kiosk\/\$communityId\/\$goalId document)/);
   assert.equal(empty.server.passwordFills, 0);
 });
 
@@ -828,7 +837,7 @@ test('classifyRequest: the reviewed host verifies documents and /assets/ code; A
     assert.equal(v.action, 'abort', `${type} ${url}`);
     assert.doesNotMatch(v.reason, /key=|\?/, 'never a query');
   }
-  assert.equal(classifyRequest({ url: `${L}/`, type: 'document', navigation: true }).want, null, 'the production default (empty) pins no document');
+  assert.equal(classifyRequest({ url: `${L}/`, type: 'document', navigation: true }).want, REVIEWED_BUILD.documents['/'], 'the production default is the shipped pin');
   assert.equal(c('https://cdn.example.test/__l5e/events.Q1w2E3r4.js', 'script').action, 'abort', 'the block is the Lovable host\'s own path only');
 });
 

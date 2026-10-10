@@ -22,10 +22,10 @@ const test = (name, fn) => pending.push([name, fn]);
 const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 
 // ---- the pin, the host and the rows --------------------------------------------------------------
-test('one pin for both proofs: REVIEWED_BUILD is the kiosk harness\'s, and nothing is reviewed yet, so every run stops in the credential-free gate', () => {
+test('one pin for both proofs: REVIEWED_BUILD is the kiosk harness\'s shipped pin, and another build fails it', () => {
   assert.equal(REVIEWED_BUILD, kiosk.REVIEWED_BUILD, 'the same object, not a copy');
-  assert.deepEqual(REVIEWED_BUILD, { documents: {}, assets: {} });
-  assert.equal(kiosk.bindBuild({ documents: FAKE_REVIEWED.documents, assets: { 'a.js': sha('a') }, refusals: [] }, REVIEWED_BUILD).status, 'BLOCKED');
+  assert.equal(kiosk.bindBuild({ documents: REVIEWED_BUILD.documents, assets: REVIEWED_BUILD.assets, refusals: [] }, REVIEWED_BUILD).status, 'PASS');
+  assert.equal(kiosk.bindBuild({ documents: FAKE_REVIEWED.documents, assets: { 'a.js': sha('a') }, refusals: [] }, REVIEWED_BUILD).status, 'FAIL');
   for (const p of ['/', '/?join=x&goal=y', '/display/e5cgoal-e5c-t-1-dm1']) assert.ok(kiosk.matchTemplate(new URL(`${LOVABLE_URL}${p}`).pathname), `the matrix loads ${p}, a reviewed route template`);
   assert.equal(LOVABLE_URL, 'https://we-stay-fit-foundation-trial.lovable.app');
   assert.equal(PROJECT_ID, 'westayfit-staging');
@@ -598,8 +598,8 @@ function host(files = FAKE_ASSETS, doc = (p) => servedDoc(p)) {
 test('cli: --bind exits non-zero before any credential unless the served build is exactly the reviewed one; --run refuses a non-PASS bind before the kit or a browser', async () => {
   const env = { WSF_LOVABLE_URL: LOVABLE_URL, WSF_PROJECT: PROJECT_ID };
   const lines = [];
-  assert.equal(await cli('--bind', env, { fetchImpl: host(), say: (l) => lines.push(l) }), 1, 'the shipped REVIEWED_BUILD is empty, so the gate stops');
-  assert.match(lines[0], /^LOVABLE_BUILD=BLOCKED/);
+  assert.equal(await cli('--bind', env, { fetchImpl: host(), say: (l) => lines.push(l) }), 1, 'the fake host is not the shipped pin, so the gate stops');
+  assert.match(lines[0], /^LOVABLE_BUILD=FAIL/);
   assert.deepEqual(lines.filter((l) => l.startsWith('LOVABLE_OBSERVED_DOCUMENT ')), Object.entries(FAKE_REVIEWED.documents).map(([t, d]) => `LOVABLE_OBSERVED_DOCUMENT ${t} ${d.sha256} u=2 nul=2 (stream part 1, other inline script 0, markup 1)`), 'the kiosk harness\'s route-aware bind, one canonical document per template');
   assert.equal(lines.filter((l) => l.startsWith('LOVABLE_DOCUMENT_PROBE ')).length, kiosk.BIND_PROBES.length);
   assert.ok(lines.every((l) => !/join=|\?/.test(l)), 'probe lines name the page, never its query');
@@ -618,7 +618,7 @@ test('cli: --bind exits non-zero before any credential unless the served build i
   assert.equal(code, 1);
   assert.deepEqual([imported, launched], [0, 0], 'no kit and no browser behind a refused bind');
   const doc = JSON.parse(fs.readFileSync(path.join(dir, 'lovable-device-matrix', 'results.json'), 'utf8'));
-  assert.equal(doc.rows[0].status, 'BLOCKED');
+  assert.equal(doc.rows[0].status, 'FAIL', 'host-build: the fake host is not the shipped pin');
   assert.equal(doc.rows.length, ROWS.length);
 });
 

@@ -115,14 +115,33 @@ Also tested:
 - a literal NUL+`wsf:token`+NUL is text, never a slot;
 - literal text that spells a slot, where another document has the id, never reduces to the same document.
 
-**The pin's status in this change:** see the PR for the current head. It is empty until a bind **of this code** prints the manifest, because the per-template canonical digests are computed by this code from the served documents. W4's session cannot reach the Lovable host (CONNECT 403), so the bind runs where the host is reachable: the gate job of a dispatch on this branch, which is credential-free and stops at the bind by design.
+**The pin: `REVIEWED_BUILD` is pinned to Lovable `9b9eade5`** on the trial host. It is exactly the `LOVABLE_OBSERVED_BUILD` line of run `38007859514` (gate only, this harness at `b3f389c6`):
+
+| Template | Canonical sha256 | `u:` | NUL (all in the stream part) |
+|---|---|---|---|
+| `/` | `a94e8672951be540e6d0ba1b852a2eae2581faf5667a3f78d93fba9d74c30d79` | 2 | 3 |
+| `/display/$goalId` | `139787e43781b8f67e9b26eb330ee80686a9d8e9b2725985f2af045272a11f72` | 2 | 5 |
+| `/kiosk/$communityId/$goalId` | `cf10eb5d658a28ede555b6a6c21e48d45f7450d5789cf505ef8369839873b81b` | 2 | 7 |
+
+- **What the bind showed:**
+  - the three loads of `/` agree, and so do the two ids of each param template;
+  - each id appears once;
+  - no reference is refused;
+  - it blocks exactly `/~flock.js` and `/__l5e/events.1718a1eacac7ff3a.js`;
+  - the assets are the same 79.
+- **Cross-checks.** The pin was written by a generator that refuses unless both of these hold:
+  - the three digests equal those of run `38007704034` (the head before, whose digest path is identical);
+  - the 79 assets equal the list transcribed from run `38006215259`, which in turn diffed identical to a separate transcription of run `38002199884`.
+- **How the bind ran.** W4's session cannot reach the Lovable host (CONNECT 403), so each bind ran as the gate job of an L0 dispatch on this branch. That job is credential-free and stops at the bind by design; `config` and every credentialed job were skipped.
 - **Runs `38002199884` and `38002201983`** (build `9b9eade5`, 23:00Z, `main`'s code) printed the asset digests and the old single-digest probe: all three documents DIFFERENT. They cannot supply canonical digests.
 - **Run `38006215259`** (23:48Z, this branch at `88ccde75`, gate only) was the first bind of this code. It found three things:
   - every document carries NUL characters, which that head refused;
   - the documents reference `/~flock.js`, which that head refused;
   - the 79 asset digests are the same set run `38002199884` printed.
 
-  The next commits take the NULs as literal bytes, pin their count, and block `/~flock.js` exactly, as the Director's ruling #394 `6091249662` asks. They need a second bind.
+  The next commits take the NULs as literal bytes, pin their count, and block `/~flock.js` exactly, as the Director's ruling #394 `6091249662` asks.
+- **Run `38007704034`** (00:08Z, at `fff29518`) bound all three templates with no refused reference, before the NUL count was part of the pin.
+- **Run `38007859514`** (00:10Z, at `b3f389c6`) bound them again with the NUL counts. The pin above is its manifest.
 
 **Superseded elsewhere.** `docs/westayfit/qa/lovable-device-qa-1.md` (outside this packet's paths) describes the device matrix's old raw-bytes document probe. That probe is removed: the device matrix now uses this route-aware bind.
 
@@ -249,6 +268,6 @@ Every browser context is closed in `finally`, including on an early stop.
 ## Before an authenticated run
 
 1. Ops-source review, security review, and Director acceptance of the exact head.
-2. One dispatch of the route-aware code. It stops at the gate and prints `LOVABLE_OBSERVED_BUILD`: every template's canonical document and every asset.
-3. A reviewed commit that pins `REVIEWED_BUILD` to exactly that line (LOVABLE-REVIEWED-BUILD-1). After L0 merges it, one kiosk `--run` and one device-matrix `--run`.
+2. Done in LOVABLE-REVIEWED-BUILD-1: the route-aware binds (runs `38006215259`, `38007704034` and `38007859514`) and the pin commit, which copies run `38007859514`'s `LOVABLE_OBSERVED_BUILD` exactly.
+3. After L0 merges it, one kiosk `--run` and one device-matrix `--run`. Each must PASS host-build against the pin; a later Lovable publish needs a new bind and a new value.
 4. The authorized proof run. It can reach `host-build`, `fixture-provenance`, the control's five phone rows and `cleanup-tracking`. The rows that remain BLOCKED fail it by name: `qr-join` (the kit's private community), the station turn, the organizer UI approval, and the unverified account.
