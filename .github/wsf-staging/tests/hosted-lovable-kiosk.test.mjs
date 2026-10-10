@@ -544,6 +544,10 @@ test('results: every row in order; the station rows and the unverified account a
   assert.deepEqual(doc.rows.map((r) => r.id), ROWS.map((r) => r.id));
   for (const id of Object.keys(FIXED_BLOCKED)) assert.equal(doc.rows.find((r) => r.id === id).status, 'BLOCKED', id);
   assert.match(doc.rows.find((r) => r.id === 'round-60s').seen, /#587/);
+  // LOVABLE-MATRIX-ALIGN-1 item 5: #587 is served on staging; what is missing is this proof's station driver.
+  assert.match(doc.rows.find((r) => r.id === 'round-60s').seen, /is served on staging .*expectedTurn binding, but this proof has no station driver yet/);
+  assert.doesNotMatch(doc.rows.find((r) => r.id === 'round-60s').seen, /not served/);
+  assert.ok(doc.rows.find((r) => r.id === 'round-60s').seen.length <= 200, 'the reason fits short()');
   assert.equal(doc.rows.find((r) => r.id === 'qr-join').seen, 'not reached');
   assert.equal(allPassed(doc), false);
   assert.equal(allPassed(results(Object.fromEntries(ROWS.map((r) => [r.id, { status: 'PASS', seen: '' }])))), true);
