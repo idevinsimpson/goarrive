@@ -6,6 +6,8 @@ Rework after Director finding #365 `6045688233` and security detail #589 `604571
 
 **Updated by LOVABLE-REVIEWED-BUILD-1** (queue #365 `6090733639`, release `6090734914`; W4, inbox #394). The bind and the guard are now route-aware, because the Web Twin is server-rendered and no single entry-page digest can bind it. That section is below: "The route-aware reviewed build". Sections that describe the single entry-page digest are corrected where they stood.
 
+**Updated by LOVABLE-REVIEWED-BUILD-2** (queue #365 `6092691424`, release `6092692777`; W4, inbox #394). Step A closes the items carried from LOVABLE-REVIEWED-BUILD-1's acceptance (#365 `6092671171`): a reviewed asset's declared charset, two negative tests, and two corrections to this note. Step B pins the next Lovable publish (`db3fd2f2`). Step C normalizes the one value that then still drifted on the deep links, the hosting's preview screenshot file name, and the pin is re-taken from two gate samples of step C's code (see "Step C", below).
+
 ## What it adds
 
 There is one new mode in the existing trusted staging workflow, `mode=lovable-kiosk`. It is proof only: it builds nothing, deploys nothing, and changes no rules, indexes, IAM or providers.
@@ -40,9 +42,9 @@ The bind alone checks a separate, earlier fetch. The Lovable host is mutable, so
   - Any other path is refused.
 - **The host's own scripts are blocked:** the injected `/__l5e/events.<id>.js` (the tag that carries the context token) and `/~flock.js`.
   - Each is never fetched, fulfilled or run, and is counted apart from refusals.
-  - Only those exact, anchored paths on the Lovable host are blocked, and only as scripts whose URL is exactly origin plus path.
+  - Only those exact, anchored paths on the Lovable host are blocked, and only as scripts whose URL is exactly origin plus path: no query, no fragment, no userinfo. The events id must be exactly 16 lower-case hex digits, the real id's shape.
   - Details are in "The route-aware reviewed build", below.
-- **Scripts and stylesheets** from the Lovable host must be a reviewed `/assets/<name>`, carry that asset's reviewed digest, and are fulfilled with exactly the hashed bytes.
+- **Scripts and stylesheets** from the Lovable host must be a reviewed `/assets/<name>`, declared with no charset or UTF-8, and carry that asset's reviewed digest. They are fulfilled with exactly the hashed bytes and the host's own headers (LOVABLE-REVIEWED-BUILD-2; see "Asset charset" below).
 - **Passive same-origin types** (images, fonts, the manifest) and **data requests** (`fetch`, `xhr`, `eventsource`) to the four API origins pass: Identity Toolkit, Secure Token, Firestore, and the staging callables host.
 - **Everything else that reaches the route is refused:** a redirect, an error status, other bytes, an unreviewed or foreign script, any document or script from an API origin, and any other origin's request. The refusal is recorded with no query string.
 - **A refusal stops the journey.** The journey checks after each navigation, so a refusal stops it before the next step:
@@ -57,6 +59,7 @@ The bind alone checks a separate, earlier fetch. The Lovable host is mutable, so
 
 **Why a single digest cannot bind this build.** The Web Twin is TanStack Start and server-rendered (HTML-VARIANCE-1, #365 `6089082668`; the backend lane's measurements, #365 `6089534129`).
 - **Per request**, exactly two values change: the value of the host's `data-context-token` attribute on the `/__l5e/events.*.js` script tag, and each `u:<epoch ms>` inside the `data-tsr-stream-part` script.
+- **Per screenshot regeneration** (step C), one more value changes, on the param templates only: the file name of the preview screenshot the hosting adds as the `og:image` and `twitter:image` links of a page that sets no preview image. See "Step C", below.
 - **Per route**, a deep link's document also differs from `/`, and two ids give two documents. The route source at Lovable `9b9eade5` shows why. `/display/$goalId` and `/kiosk/$communityId/$goalId` have no loaders; they render from their params only, so their ids appear in the document. The real bind (run `38007859514`) counts each id exactly once per document.
 - **The query string** never reaches the document.
 
@@ -83,20 +86,23 @@ The bind alone checks a separate, earlier fetch. The Lovable host is mutable, so
 - **What it loads.** It loads `BIND_PROBES`: `/` twice, `/` with an invite query, and each param template under two fixed probe ids. The two ids differ in their first and last characters, their case and their length.
 - **Binding a template.** A template is bound only when all of its loads reduce to one canonical document. Route data beyond the URL's own params, or a per-request value outside the two normalized ones, leaves it **UNBOUND**, and the bind fails before any credential.
 - **Assets.** It walks the assets referenced by every probed document (including a route chunk that only a deep link preloads) and their imports.
-- **Declared type.** A probed document served with a charset other than UTF-8, or not as `text/html`, is refused by name, and its template stays unbound (L0 R7).
+- **Declared type.** A probed document served with a charset other than UTF-8, or not as `text/html`, is refused by name, and its template stays unbound (L0 R7). An asset declared in a charset other than UTF-8 is a refused reference: the bind fails by name, and the asset's digest is still printed.
 - **References.** It classifies every `<script src>` and stylesheet or modulepreload link the documents make exactly as the browser guard would. Any reference the guard would refuse fails the bind, even when every digest matches.
-- **What it prints.** It prints each template's canonical digest and timestamp count, and each probe load (path without query, template, digest, timestamp count and param counts). It also prints any refused reference, each asset, and, when every template is bound, one `LOVABLE_OBSERVED_BUILD {…}` JSON line: the exact manifest to pin. It never prints a document's bytes or the token's value.
+- **What it prints.** It prints each template's canonical digest, timestamp count and preview-image count (`img=`), and each probe load (path without query, template, digest, counts and param counts). Each template's line also names the preview screenshot files its loads carried, printed only in the checked shape and never in the line to pin, so two samples show a regeneration being absorbed (step C). Each of these lines also says `bom=yes` or `bom=no`, for whether the document starts with a BOM; the digest already binds it, and the flag tells a changed digest apart from a BOM (LOVABLE-REVIEWED-BUILD-2). It also prints any refused reference, each asset, and, when every template is bound, one `LOVABLE_OBSERVED_BUILD {…}` JSON line: the exact manifest to pin. It never prints a document's bytes or the token's value.
 - **Its verdict.** It is BLOCKED while the pin lacks a document for any template, a timestamp count, or the assets. It is PASS only when every document, every asset and the reference check match.
 
 **The browser guard.**
-- **Documents.** A document must be a reviewed template, valid UTF-8, and must reduce for its own URL to the reviewed canonical document with the reviewed timestamp count. It is fulfilled with exactly the bytes read.
+- **Documents.** A document must be a reviewed template, declared `text/html` with no charset or UTF-8, and valid UTF-8 (a leading BOM kept as a character). It must reduce, for its own URL, to the reviewed canonical document with the reviewed counts of stream-part timestamps, of NULs and of preview-image links. It is fulfilled with exactly the bytes read, as `text/html; charset=utf-8`, with its other headers kept (L0 R7).
+- **Assets.** A script or stylesheet must be a reviewed `/assets/<name>`, declared with no charset or UTF-8, and carry its reviewed digest. It is fulfilled with exactly those bytes and the host's own headers.
 - **The host's own scripts.** Two are **blocked**, never run, and counted apart from refusals (host-build names the count):
-  - the injected `/__l5e/events.<id>.js`;
+  - the injected `/__l5e/events.<id>.js`, where `<id>` is exactly 16 lower-case hex digits: the shape of the real id, `1718a1eacac7ff3a`, printed by bind runs `38007859514`, `38017456574` and `38018743683`;
   - `/~flock.js`, which the first real-host bind found referenced by the documents.
 
-  Only those exact paths on the Lovable host are blocked: no query, no fragment, and only as scripts. Anything else is refused, and the bind prints each script it would block:
+  Only those exact paths on the Lovable host are blocked: no query, no fragment, no userinfo, and only as scripts. Anything else is refused, and the bind prints each script it would block:
   - `/~flock.js?v=1`, `/~flock.js#a`, `/~flock2.js`, `/~flockX.js`, `/x/~flock.js` and `/~flock.mjs`;
   - any other `/__l5e/` script, and the events script with a query;
+  - an events id that is not 16 lower-case hex digits: `-`, `_`, empty, 5,000 characters, 15 or 17 digits, upper case, or carrying `.`, `%`, `~` or `g`; and `eventsX…`, `…Xjs` and `/~flockXjs`, so each dot is a literal dot;
+  - either path with userinfo (`https://user@…/~flock.js`, `https://u:p@…/__l5e/events.<id>.js`). The refusal says the URL "carries userinfo (not printed)", so it can't be mistaken for a regressed block, and it never prints the userinfo;
   - either path as a stylesheet or a document;
   - either path on another origin.
 
@@ -128,7 +134,34 @@ Also tested:
 - a literal NUL+`wsf:token`+NUL is text, never a slot;
 - literal text that spells a slot, where another document has the id, never reduces to the same document.
 
-**The pin: `REVIEWED_BUILD` is pinned to Lovable `9b9eade5`** on the trial host. It is exactly the `LOVABLE_OBSERVED_BUILD` line of run `38007859514` (gate only, this harness at `b3f389c6`):
+**The pin: `REVIEWED_BUILD` is pinned to Lovable `db3fd2f2` in step C's canonical form** (LOVABLE-REVIEWED-BUILD-2). It is exactly the `LOVABLE_OBSERVED_BUILD` line of L0's credential-free gate sample 2, run `38025003360` (job `114133873686`, 04:42Z), which equals sample 1, run `38023220481` (job `114128496599`, 04:12Z). Both ran this harness at `c551722b` on the branch, and both failed before `config` against the stale pin, as designed (#394 `6093295458`).
+
+| Template | Canonical sha256 (step C) | `u:` | NUL | `img` |
+|---|---|---|---|---|
+| `/` | `55f9d9a35c95aeea889644ef8c9408aae6617f32c22de187a134516892b93b03` | 2 | 3 | 0 |
+| `/display/$goalId` | `a2d77af0af3ed5ec1f2b49342ae87c02050d37c54b6fdbfee272be40b4da9133` | 2 | 5 | 2 |
+| `/kiosk/$communityId/$goalId` | `8a170c39292d99eba106fd42e45879d8891b60f4880d251756a53c80f949b732` | 2 | 7 | 2 |
+
+- **The normalization, proven on the real host** (L0's comparison #394 `6093893594`). Lovable's preview commit `fb58c21d` (04:19:41Z) regenerated the screenshot at 04:20:14Z, between the samples: sample 1's deep links named `d998c69be897a93a1f29e6410ab16c99_1791604878899` and sample 2's `adf6774a5e95b3320cf6314bba2be8a6_1791606014676`. The two `LOVABLE_OBSERVED_BUILD` lines are identical. Both parts of the file name changed, which L0 also saw in Lovable's screenshot source: the trigger is a Lovable commit, about 30 s before the new name's timestamp (#394 `6093608755`).
+- **What each sample showed:** every probe of each template agrees; nothing is refused or UNBOUND (the shape-anywhere rule found no stray file name); `bom=no` on every line; the blocked host scripts are exactly `/~flock.js` and `/__l5e/events.1718a1eacac7ff3a.js`; 79 assets, the same as the step B pin.
+- **How the pin was made.** This session cannot read job logs as files, so sample 1's document and asset lines and sample 2's JSON line were transcribed independently; a generator wrote `REVIEWED_BUILD` only because the two agree exactly, and the 79 assets also equal the step B pin's, a third transcription from another run.
+- **If a digest were mistyped**, the first gate bind after merge would FAIL before any credential and print the right line.
+
+**Before it (step B): Lovable `db3fd2f2` in step B's form.** For the record, step B pinned it from run `38018743683`; run `38020490774` then showed its deep links moving, for the reason above. It is exactly the `LOVABLE_OBSERVED_BUILD` line of the credential-free gate bind run `38018743683` (`main` `6e8acc31`, gate job `114114813301`, 02:56Z; L0 #394 `6093058625`):
+
+| Template | Canonical sha256 | `u:` | NUL (all in the stream part) |
+|---|---|---|---|
+| `/` | `55f9d9a35c95aeea889644ef8c9408aae6617f32c22de187a134516892b93b03` | 2 | 3 |
+| `/display/$goalId` | `b15d36a06b362063ab8b0817d8d35a8e51982dc5b80630420b473e6ec79db2ae` | 2 | 5 |
+| `/kiosk/$communityId/$goalId` | `f9a8996609e0e4e6168174263d4cba53e7a3868c67e10fc44cc194cb22934398` | 2 | 7 |
+
+- **What the bind showed:** the three loads of `/` agree, and so do the two ids of each param template; no reference is refused; it blocks exactly `/~flock.js` and `/__l5e/events.1718a1eacac7ff3a.js` (the same events id, so the 16-hex pattern holds); 79 assets, with the new entry `index-BwrWDHpN.js`.
+- **How the pin was made.** This session cannot read job logs as files, so the log was transcribed twice, once from its `LOVABLE_OBSERVED_DOCUMENT` and `LOVABLE_OBSERVED_ASSET` lines and once from its `LOVABLE_OBSERVED_BUILD` JSON. A generator wrote `REVIEWED_BUILD` only because the two agree exactly.
+- **Cross-checks.** The 56 asset names the `9b9eade5` pin also has carry the same digests there (content-hashed names, so the same bytes); the other 23 names are new in this build. The three document digests match the prefixes L0 posted. Lovable's byte diagnostic of this build (#394 `6093058625`) found no BOM, and two fetches 70 s apart identical once the two per-request values were blanked.
+- **If a digest were mistyped**, the first gate bind after merge would FAIL before any credential and print the right line, so a slip fails closed.
+- **Drift without a publish, observed.** Run `38017456574` (02:34Z, `main`) found the `9b9eade5` param-template digests changed since 00:10Z with no publish, and run `38020490774` (03:25Z) found `db3fd2f2`'s moved past this pin (`/display/$goalId` `57245f3e…`, `/kiosk/$communityId/$goalId` `ea821023…`), with `/` and the assets unchanged and no BOM. Lovable's DEEPLINK-DRIFT-DIAG-1 and CONFIRM-1 (#394 `6093458108`, `6093468966`) found the cause: the hosting's preview screenshot file name, renamed on each regeneration. Both times the bind failed before any credential, and the guard would have refused those documents; nothing ran. Step C normalizes it.
+
+**Previously (LOVABLE-REVIEWED-BUILD-1): pinned to Lovable `9b9eade5`.** It was exactly the `LOVABLE_OBSERVED_BUILD` line of run `38007859514` (gate only, this harness at `b3f389c6`):
 
 | Template | Canonical sha256 | `u:` | NUL (all in the stream part) |
 |---|---|---|---|
@@ -154,7 +187,7 @@ Also tested:
 
   The next commits take the NULs as literal bytes, pin their count, and block `/~flock.js` exactly, as the Director's ruling #394 `6091249662` asks.
 - **Run `38007704034`** (00:08Z, at `fff29518`) bound all three templates with no refused reference, before the NUL count was part of the pin.
-- **Run `38007859514`** (00:10Z, at `b3f389c6`) bound them again with the NUL counts. The pin above is its manifest.
+- **Run `38007859514`** (00:10Z, at `b3f389c6`) bound them again with the NUL counts. The `9b9eade5` pin was its manifest.
 
 **Superseded elsewhere.** `docs/westayfit/qa/lovable-device-qa-1.md` (outside this packet's paths) describes the device matrix's old raw-bytes document probe. That probe is removed: the device matrix now uses this route-aware bind.
 
@@ -234,13 +267,13 @@ Every browser context is closed in `finally`, including on an early stop.
 
     All of them are in the catalogue now, and all are killed by this round's tests. One of them, the events pattern matched case-insensitively, survived the first re-run and is killed by the upper-case look-alikes.
   - Earlier rounds: two survivors were real test gaps and are killed (assets walked only from `/`; the stream part read to the end of the document), and one defect from W4's own re-read was fixed (the stream part's end looked up in a lower-cased copy, `İ`).
-  - The survivor is equivalent: substituting params shortest first instead of longest first. The overlap check already refuses a param contained in another, and two ids cannot overlap in a document that separates them.
+  - The survivor substitutes params shortest first instead of longest first. It is **not** equivalent in every case (corrected in LOVABLE-REVIEWED-BUILD-2, L0 #394 `6092810294` item 9). When two ids partially overlap where they meet in a document (one's end is the other's start), the order decides which id becomes the slot, so the digest differs; the overlap check refuses only an id contained in another. It matters only when the partially overlapping ids differ in length, because the sort is stable and its comparator returns 0 for equal lengths (W3 N2). It has no security effect: splitting on one id and then the other is lossless in either order, so two documents for one URL that differ outside the normalized values (the token, the `u:` values and, on a param template, the screenshot file name, which share one form by design) never share a canonical form, and the bind and the guard run the same code. No probe or fixture id pair overlaps that way.
 
 **Review round** (W3's finding #396 `6092038757`, review #609 `6092037523`; the Director's delta #394 `6092160295`). All of it is in the same five paths.
 - **R1: a leading BOM is refused.** The decoder keeps it (`ignoreBOM: true`), so a BOM-prefixed reviewed document reduces to another digest. Both the guard and the bind refuse it: on every load it binds to another digest and the bind fails; on one load it leaves the template unbound.
 - **R2: the token-bearing events tag is bound.** Its `src` made a `data:` URL, its `src` made another `/assets/` name, an attribute added before the token, and an attribute changed before the token: each is refused by the guard and gives another digest at bind.
 - **R3: slot position and presence are bound.** The URL's param removed, inserted in the stream part, or moved is refused, and so are the kiosk params swapped (N1). A fixed vector pins the canonical JSON of a small document: its sha256 is `1d65a5a4…`.
-- **R4: slot boundaries are exact.** The fixtures' timestamps now differ in every digit between requests. The byte after a `u:` value changed, the byte after the token changed, a 12-digit `u:`, and a 7-character token are each refused.
+- **R4: slot boundaries are exact.** Each fixture request now draws one random 13-digit timestamp for both of its `u:` values, independent between requests. They are not built to differ in every digit: two requests can share a digit by chance (corrected in LOVABLE-REVIEWED-BUILD-2, and W3 N3). The byte after a `u:` value changed, the byte after the token changed, a 12-digit `u:`, and a 7-character token are each refused.
 - **R5: the host-script matches are anchored and exact.** Each of these is refused:
   - `/~flock.js/x`, `/~flock.json`, `/~flock.js.map` and `/~FLOCK.JS`;
   - `/__l5e/events.<id>.js/x`, `.jsonp`, `/x/__l5e/…`, `/__l5e/events.a/b.js`, `/__L5E/…` and `EVENTS…JS`;
@@ -250,6 +283,40 @@ Every browser context is closed in `finally`, including on an early stop.
   - A document is refused, at bind and in the guard, when it is not declared `text/html`, or when it names a charset other than UTF-8: `windows-1252`, `utf-16le`, two charsets, or an empty one.
   - Every verified document is fulfilled as `text/html; charset=utf-8`, with its other headers kept.
   - This has not yet been seen against the real host, because the earlier binds did not read the header. The next gate bind does, and it fails before any credential if the host declares anything else.
+
+**LOVABLE-REVIEWED-BUILD-2, step A** (queue #365 `6092691424`; the items carried from #365 `6092671171`). All of it is in the same five paths; `REVIEWED_BUILD` is unchanged in step A.
+- **Asset charset.** A reviewed `/assets/` script or stylesheet declared in a charset other than UTF-8 is **refused**, in the guard and at bind. A verified asset is fulfilled with the host's own headers. This covers `windows-1252`, `utf-16le`, two charsets, an empty one, and an upper-case `CHARSET` name.
+  - **Refused rather than relabelled.** The queue offered both: fulfil every asset as `text/javascript` or `text/css` with `charset=utf-8`, or refuse a non-UTF-8 declaration. Relabelling would make the run's browser decode an asset differently from a visitor's. A host-side charset change would then pass host-build while the product broke for the people using it. Refusing keeps the run's browser seeing what a visitor's sees, and the bind catches it before any credential.
+  - **What the browser decodes.** In every admitted case the encoding is fixed by reviewed input, never by an unverified header: UTF-8, unless the reviewed bytes (a BOM or `@charset`) or the reviewed document say otherwise; a module script is always UTF-8 (W3 N1: a reviewed `@charset "windows-1252"` or UTF-16 BOM does change the decoding, which is still reviewed input). The MIME type is left to the browser's own checks, which treat this run as they treat a visitor.
+  - **At bind**, the refusal reads `script <url> is served with charset windows-1252, not UTF-8` (or `stylesheet`), and the bind FAILs as for any reference the guard would refuse.
+  - **Not yet seen against the real host.** No bind has read an asset's declared type. The next gate bind does.
+- **The `CHARSET` parameter name.** A document declared `text/html; CHARSET=windows-1252` is refused, in the guard and by `documentTypeProblem`. Dropping the `i` flag from the charset pattern no longer survives.
+- **The token's upper bound.** A 4097-character context token is refused (`not 8-4096 characters`), and an 8- and a 4096-character token each reduce to the reviewed document. `{8,4097}`, `{8,}` and `{8,4095}` no longer survive.
+- **This note.** The guard's "Documents" bullet lists the declared-type check, the UTF-8 fulfilment and the NUL count, and the R4 sentence says the fixtures' timestamps are independent random digits.
+
+**L0's step A addendum** (#394 `6092810294`, from L0's mutation re-check of `d498cd6c`):
+- **Item 5, the events id.** The host-script pattern admits exactly 16 lower-case hex digits, the real id's shape (`1718a1eacac7ff3a`, read from the blocked-script lines of bind runs `38007859514` and `38017456574`, not from a fixture). The fixtures now use a 16-hex id too. Each of the look-alikes listed under "The browser guard" is refused, and each of L0's seven extra mutants is killed: `[^/]+`, an empty id, `.` in the id, `%` and `~` in the id, and an unescaped dot after `events`, before `js`, and in `~flock`.
+- **Items 6 and 7, userinfo.** A Lovable-host URL with userinfo is refused, not blocked, and the refusal reads `<type> <origin><path> carries userinfo (not printed), which no reviewed request has`. A check that refuses only `?` and `#` no longer survives.
+- **Item 8, a UTF-8 vector.** A second fixed vector carries `é`, `—`, an emoji, U+2028 and `ü`; its canonical JSON's sha256 is pinned (`edb801ca…`, recomputed independently outside Node). Hashing the canonical JSON as latin1 no longer survives.
+- **Item 9.** The note on the param-order survivor is corrected, above.
+- **Also, for run `38017456574`.** Its gate bind on `main` printed the pinned `/` and the same 79 assets, but other digests for both param templates, with the same counts (#394 `6092918005`). The canonicalization is unchanged since the pin's bind apart from R1's kept BOM, so either those documents start with a BOM or the host's render of them changed. Each document and probe line of the bind now says `bom=yes|no`, so the next bind tells which. The pin's shape doesn't change.
+
+**Proof, step A** (Node 20.20.2 and Node 22.22.2): `tests/hosted-lovable-kiosk.test.mjs` **27 passed** (one new test, the asset type table; the others extended); `hosted-lovable-device-matrix.test.mjs` **20 passed**; `tests/workflow-contract.test.mjs` 103 passed (no workflow change); staging `tests/run-all.mjs` and `tools/wsf-control/run-all.mjs` all suites passed. **Mutants: 104 of 105 killed.** That is the round-1 catalogue re-based on the bounded events pattern, plus 35 new ones: the asset charset at bind and in the guard (removed, joined wrongly, relabelled, headers dropped, stylesheets skipped, the stylesheet named a script), the charset parser (the `i` flag dropped, the value compared case-sensitively, an empty charset admitted), the token bounds (`{8,4097}`, `{8,}`, `{8,4095}`, `{9,4096}`, `{7,4096}`), L0's seven events-id mutants and five more (unbounded, 15–16 or 16–17 digits, upper case, any letter), userinfo (removed, username only, `?`/`#` only, unnamed), latin1 hashing, and the BOM flag (never set, not carried, inverted). The survivor is the param-order mutant, described above. No credentialed run, and no bind of this code against the host yet.
+
+**LOVABLE-REVIEWED-BUILD-2, step B.** `REVIEWED_BUILD` was re-pinned to Lovable `db3fd2f2`: exactly the `LOVABLE_OBSERVED_BUILD` line of gate bind run `38018743683`, since superseded by step C's pin (see "The pin", above). Only the pin's value and its provenance text change; the code is step A's. The suites pass against it, and the shipped pin binds to itself.
+
+**LOVABLE-REVIEWED-BUILD-2, step C** (W3's finding #396 `6093402257`, detail #610 `6093400242`; L0's step C input #394 `6093458108`, with DEEPLINK-DRIFT-CONFIRM-1's verbatim bytes `6093468966`). Same five paths; the matrix harness is unchanged.
+- **The field.** Lovable's hosting adds a page-preview screenshot link, as the `og:image` and `twitter:image` meta elements immediately before `</head>`, to a page that sets no preview image, and renames the file on each screenshot regeneration. `/display/…` and `/kiosk/…` set none, so they carry it; `/` sets its own `/og-share.jpg`. The bucket host and the `lovp_` segment stay the same; the file name is `<32 lower-case hex>_<13 digits>` (Unix milliseconds).
+- **When it changes.** On each screenshot regeneration, which follows a Lovable commit by about 30 s; both the 32-hex part and the 13 digits change (L0 #394 `6093608755`: `a74c72a1…_1791601764778`, then `f722a6b9…_1791604676866`, then `d998c69b…_1791604878899`). Thirty fresh fetches and a 10-minute series were identical, so it does not change per request or per server instance.
+- **The rule** (exactly that, nothing broader). On a param template only, the file name is a named slot (`preview-image`) inside exactly `content="https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/lovp_372ahwppkw9debd61922xf2ayz/` … `.png"`, where `content` is an attribute name of its own and everything else is literal. A param document must carry exactly 2 such links naming the same file, outside the stream part; `/` must carry none. The file-name shape anywhere else is refused.
+- **The counts.** The pin binds `img` per template like `u` and NUL (`img=2` on each param template, `img=0` on `/`), at bind and in the guard, and the bind lines print it with `bom=`.
+- **The names.** Each template's bind line names the files its loads carried (public: every visitor receives them), only after the shape check, never in `LOVABLE_OBSERVED_BUILD`.
+- **Negatives** (each refused in the guard, by name or by digest, and each giving another canonical form at bind): 33 or 31 hex, 14 or 12 digits, upper case; a `"`, `<` or space in the name; one link moved into `<body>` (by digest), into the stream part, or into another attribute (`data-src=`, `data-content=`); a third link, a missing link, two different files; another bucket host, a look-alike host (a dot replaced) or another `lovp_` segment; the shape outside the links; a link on `/`; the kiosk with one link. A regeneration between two loads binds, and the template line names both files.
+- **W3's F2–F7.** Asset charset negatives for a tab or two spaces after `;` and for duplicate Content-Type headers joined with `, `, at bind and in the guard; the 16-character `-` and `_` events-id look-alikes; a blocked events id with every hex digit; userinfo on an image and a `fetch`; an inner U+FEFF that is no leading BOM (`bom=no`).
+- **W3's N1–N3.** The asset decoding sentence, item 9's correction and R4's wording, above.
+- **The fixed vectors.** Both are display documents, so they now carry the two links; their pinned sha256 are `b7316f8e…` and `6aa341db…`, each recomputed independently in Python.
+
+**Proof, step C** (Node 20.20.2 and Node 22.22.2): kiosk **27 passed**, matrix **20 passed**, `workflow-contract` 103 passed, staging and control `run-all` all suites passed. **Mutants: 134 of 136 killed**: the catalogue so far plus 25 for step C (the count, `/`'s count, the shape elsewhere, the stream part, two files, the attribute boundary, the name's case, length and characters, the host and segment literals, the cut and its boundaries, `img` at bind, in the guard and in the pin, the names in the line to pin, unchecked or missing or first-load-only names) and W3's six. The survivors: the param-order mutant (item 9), and `img` left out of the per-template agreement, which is equivalent, because a load's `img` is the number of `preview-image` slots in its canonical JSON, so equal digests mean equal counts. L0's two gate samples on the branch then read step C's form on the real host and agreed across a regeneration; the pin is their manifest (see "The pin", above).
 
 **LOVABLE-KIOSK-HOSTED-PROOF-1** (the original packet; its single entry-page digest is superseded above):
 - **`tests/hosted-lovable-kiosk.test.mjs`: 21 passed.**
@@ -303,6 +370,6 @@ Every browser context is closed in `finally`, including on an early stop.
 ## Before an authenticated run
 
 1. Ops-source review, security review, and Director acceptance of the exact head.
-2. Done in LOVABLE-REVIEWED-BUILD-1: the route-aware binds (runs `38006215259`, `38007704034` and `38007859514`) and the pin commit, which copies run `38007859514`'s `LOVABLE_OBSERVED_BUILD` exactly.
+2. Done in LOVABLE-REVIEWED-BUILD-1: the route-aware binds (runs `38006215259`, `38007704034` and `38007859514`) and the pin commit, which copied run `38007859514`'s `LOVABLE_OBSERVED_BUILD` exactly. Done in LOVABLE-REVIEWED-BUILD-2: the re-pin to Lovable `db3fd2f2`, first in step B's form (run `38018743683`), then in step C's form, exactly the `LOVABLE_OBSERVED_BUILD` shared by gate samples `38023220481` and `38025003360`.
 3. After L0 merges it, one kiosk `--run` and one device-matrix `--run`. Each must PASS host-build against the pin; a later Lovable publish needs a new bind and a new value.
 4. The authorized proof run. It can reach `host-build`, `fixture-provenance`, the control's five phone rows and `cleanup-tracking`. The rows that remain BLOCKED fail it by name: `qr-join` (the kit's private community), the station turn, the organizer UI approval, and the unverified account.
