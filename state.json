@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "073e3e984fa73b3a67d86b0d17e9062186e2fc11c66519e1f6ac8c3c548bdb4e",
-  "eventCount": 1123,
+  "ledgerHead": "f6970cc12eb633c9714e950fb294cddce4efff0d52dd1272fb4bb34ebfb47c18",
+  "eventCount": 1126,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -4172,6 +4172,66 @@
       },
       "deliveries": 1,
       "pendingFinding": null
+    },
+    "WSF-OPERATOR-ACCESS-1": {
+      "owner": "W9",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Owner operator access: map the WSF authorization model, gaps vs the owner's event-operator ask, an owner-run read-only account audit (email typed locally, never stored)",
+      "origin": "ledger",
+      "phase": "RELEASED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": 497,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": 0,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "docs/westayfit/ops/operator-access/WSF_OPERATOR_ACCESS_1.md",
+        "docs/westayfit/ops/operator-access/audit-access.mjs",
+        "docs/westayfit/ops/operator-access/audit-access.test.mjs"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6093846231
+        },
+        "released": {
+          "kind": "comment",
+          "id": 6093847482
+        },
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6093847482
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
+      "pendingFinding": null
     }
   },
   "contracts": [
@@ -6637,6 +6697,14 @@
         "kind": "comment",
         "id": 6093480673
       }
+    },
+    "25ac1951a966439718eebe502d38ba89dddc66de5c5a22870f7e762593575edf": {
+      "packet": "WSF-OPERATOR-ACCESS-1",
+      "worker": "W9",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
