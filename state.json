@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "1c6e584f4f7a33daf1438afb3f83b3c6114eb4c6facbe91497f5882c54d2ad4a",
-  "eventCount": 1231,
+  "ledgerHead": "391dff2b00a4201d82cb918bd53d417c0aa25c23f3e44b131453a38e2757e777",
+  "eventCount": 1232,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -7261,8 +7261,10 @@
       "packet": "LOVABLE-KIOSK-STATION-DRIVER-1",
       "worker": "W7",
       "reason": "review",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        6100913899
+      ],
       "ack": null
     }
   },
