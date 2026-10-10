@@ -11,7 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   API_ORIGINS, BIND_PROBES, FIXED_BLOCKED, LOVABLE_URL, ROUTE_TEMPLATES, callableLog, canonicalDocument, cli, REVIEWED_BUILD, ROWS, allPassed, bindBuild,
-  bindLines, browserEnv, checkBase, classifyRequest, codeGuard, hostBuildRow, idHash, matchTemplate, mergeIntoManifest, ownCreditOf, receiptVerdict,
+  bindLines, browserEnv, checkBase, classifyRequest, codeGuard, documentTypeProblem, hostBuildRow, idHash, matchTemplate, mergeIntoManifest, ownCreditOf, receiptVerdict,
   requireVerdict, results, runJourney, runResults, servedManifest, sharedOf, showsNumber,
 } from '../hosted-lovable-kiosk.mjs';
 
@@ -63,7 +63,8 @@ function site(files) {
     const p = new URL(url).pathname;
     const body = p.startsWith('/assets/') ? files.assets[p] : files.doc(p);
     if (body === undefined) return { ok: false, status: 404, arrayBuffer: async () => new ArrayBuffer(0) };
-    return { ok: true, status: 200, arrayBuffer: async () => Buffer.from(body) };
+    const type = p.startsWith('/assets/') ? 'text/javascript' : (files.docType?.(p) ?? 'text/html; charset=utf-8');
+    return { ok: true, status: 200, headers: { get: (k) => (k.toLowerCase() === 'content-type' ? type : null) }, arrayBuffer: async () => Buffer.from(body) };
   };
   return { fetchImpl, calls };
 }
@@ -201,15 +202,20 @@ test('negative mutations: each one is refused, by name or by digest, at bind and
     ['the byte after the token changed', '/', servedDoc('/').replace(/(data-context-token="[^"]*") defer/, '$1\ndefer'), /differs from the reviewed \/ document/],
     ['a 12-digit u:', '/', servedDoc('/', { u1: '176005000000' }), /not 13 digits/],
     ['a 7-character token', '/', servedDoc('/', { token: 'abcdefg' }), /data-context-token value is not one quoted token/],
+    // R7: the browser must decode the verified text: a document declared in another charset, or not as HTML, is refused
+    ['a reviewed document served as windows-1252', '/', servedDoc('/'), /served with charset windows-1252, not UTF-8/, 'text/html; charset=windows-1252'],
+    ['a reviewed document served as utf-16le', '/', servedDoc('/'), /served with charset utf-16le, not UTF-8/, 'text/html; charset=utf-16le'],
+    ['a reviewed document served as text/plain', '/', servedDoc('/'), /served as another content type, not text\/html/, 'text/plain; charset=utf-8'],
+    ['a reviewed document served with no content type', '/', servedDoc('/'), /served as no content type, not text\/html/, ''],
     ['a param the guard cannot bind', '/display/short', servedDoc('/display/short'), /a path param the guard cannot bind/],
     ['overlapping params', '/kiosk/abcdefghijkl/abcdefghijklmn', servedDoc('/kiosk/abcdefghijkl/abcdefghijklmn'), /two path params overlap/],
   ];
-  for (const [name, p, body, why] of mutants) {
+  for (const [name, p, body, why, type = 'text/html; charset=utf-8'] of mutants) {
     const g = codeGuard(EXACT);
     const out = {};
     await g.handle({
       request: () => ({ url: () => `${LOVABLE_URL}${p}`, resourceType: () => 'document', isNavigationRequest: () => true }),
-      async fetch() { return { status: () => 200, body: async () => Buffer.from(body) }; },
+      async fetch() { return { status: () => 200, headers: () => ({ 'content-type': type }), body: async () => Buffer.from(body) }; },
       async fulfill() { out.fulfilled = true; },
       async continue() { out.continued = true; },
       async abort(code) { out.aborted = code; },
@@ -218,7 +224,7 @@ test('negative mutations: each one is refused, by name or by digest, at bind and
     assert.equal(out.aborted, 'blockedbyclient', name);
     assert.match(g.summary().violations[0] ?? '', why, name);
     assert.throws(() => g.check(), /served code outside the reviewed build/, name);
-    if (matchTemplate(p) && PARAM_OK(p)) {
+    if (matchTemplate(p) && PARAM_OK(p) && type === 'text/html; charset=utf-8') {
       const c = canonicalDocument(body, `${LOVABLE_URL}${p}`);
       const t = matchTemplate(p).template;
       assert.ok(!c.sha256 || c.sha256 !== DOCS[t].sha256 || c.streamU !== DOCS[t].streamU, `${name}: the bind's canonical form differs too`);
@@ -228,7 +234,7 @@ test('negative mutations: each one is refused, by name or by digest, at bind and
   const g = codeGuard(EXACT);
   await g.handle({
     request: () => ({ url: () => `${LOVABLE_URL}/`, resourceType: () => 'document', isNavigationRequest: () => true }),
-    async fetch() { return { status: () => 200, body: async () => Buffer.concat([Buffer.from(servedDoc('/')), Buffer.from([0xff, 0xfe])]) }; },
+    async fetch() { return { status: () => 200, headers: () => ({ 'content-type': 'text/html; charset=utf-8' }), body: async () => Buffer.concat([Buffer.from(servedDoc('/')), Buffer.from([0xff, 0xfe])]) }; },
     async fulfill() { throw new Error('fulfilled'); }, async abort() {}, async continue() {},
   });
   assert.match(g.summary().violations[0], /is not valid UTF-8/);
@@ -268,6 +274,13 @@ test('the served manifest: every bind probe reduced per template, same-origin as
   let firstRoot = true;
   const oneBom = await servedManifest(site({ ...SITE, doc: (p) => (p === '/' && firstRoot ? ((firstRoot = false), `\uFEFF${servedDoc(p)}`) : servedDoc(p)) }).fetchImpl);
   assert.equal(oneBom.documents['/'].sha256, null);
+  // R7 at bind: a document declared in another charset, or not as HTML, is refused by name, and the template unbinds.
+  for (const [type, why] of [['text/html; charset=windows-1252', /served with charset windows-1252, not UTF-8/], ['text/html; charset=utf-16le', /served with charset utf-16le, not UTF-8/], ['application/octet-stream', /not text\/html/]]) {
+    const m2 = await servedManifest(site({ ...SITE, docType: (p) => (p === '/' ? type : undefined) }).fetchImpl);
+    assert.equal(m2.documents['/'].sha256, null, type);
+    assert.match(m2.documents['/'].reason, why, type);
+    assert.equal(bindBuild(m2, EXACT).status, 'FAIL', type);
+  }
   // R2 at bind: an events tag that loads data: code reduces to another digest, so the bind fails.
   const dataTag = await servedManifest(site({ ...SITE, doc: (p) => servedDoc(p, { eventsPre: '<script src="data:text/javascript,steal()" ' }) }).fetchImpl);
   assert.notEqual(dataTag.documents['/'].sha256, DOCS['/'].sha256);
@@ -281,6 +294,15 @@ test('the served manifest: every bind probe reduced per template, same-origin as
   assert.deepEqual(f.refusals, ['script https://cdn.example.test/tag.js is outside the reviewed build and the permitted API origins', 'stylesheet https://we-stay-fit-foundation-trial.lovable.app/other/x.css is not a reviewed asset']);
   assert.equal(bindBuild(f, { documents: f.documents, assets: f.assets }).status, 'FAIL');
   assert.match(bindBuild(f, { documents: f.documents, assets: f.assets }).reason, /2 reference\(s\) the code guard would refuse/);
+});
+
+test('document type (L0 R7): text/html with no charset or UTF-8 only; anything else names why', () => {
+  for (const ok of ['text/html', 'text/html; charset=utf-8', 'text/html;charset=UTF-8', 'text/html; charset="utf-8"', 'Text/HTML; charset=utf8']) assert.equal(documentTypeProblem(ok), null, ok);
+  for (const [bad, why] of [
+    ['text/html; charset=windows-1252', /charset windows-1252, not UTF-8/], ['text/html; charset=utf-16le', /charset utf-16le, not UTF-8/], ['text/html; charset=iso-8859-1', /iso-8859-1/],
+    ['text/html; charset=utf-8; charset=windows-1252', /charset utf-8, windows-1252, not UTF-8/], ['text/html; charset=', /charset , not UTF-8/],
+    ['text/plain', /another content type/], ['application/xhtml+xml', /another content type/], ['text/htmlx', /another content type/], ['', /no content type/], [null, /no content type/], [undefined, /no content type/],
+  ]) assert.match(documentTypeProblem(bad), why, String(bad));
 });
 
 test('binding: empty or partial reviewed build BLOCKED; exact PASS; a changed document, timestamp count or asset, or a refused reference FAIL', () => {
@@ -463,8 +485,13 @@ function lovable(bug = {}) {
     let outcome = 'unhandled';
     const route = {
       request: () => ({ url: () => url, resourceType: () => type, isNavigationRequest: () => navigation }),
-      async fetch(o) { assert.equal(o?.maxRedirects, 0, 'a verified response never follows a redirect'); const r = serve(url); return { status: () => r.status, body: async () => Buffer.from(r.body) }; },
-      async fulfill({ body }) { outcome = 'fulfilled'; server.loads.push({ url, type, body: String(body) }); },
+      async fetch(o) {
+        assert.equal(o?.maxRedirects, 0, 'a verified response never follows a redirect');
+        const r = serve(url);
+        const ct = new URL(url).pathname.startsWith('/assets/') ? 'text/javascript' : 'text/html; charset=utf-8';
+        return { status: () => r.status, headers: () => ({ 'content-type': ct, 'x-served': 'lovable' }), body: async () => Buffer.from(r.body) };
+      },
+      async fulfill({ body, headers }) { outcome = 'fulfilled'; server.loads.push({ url, type, body: String(body), contentType: headers?.['content-type'] ?? null, kept: headers?.['x-served'] ?? null }); },
       async continue() { outcome = 'continued'; },
       async abort() { outcome = 'aborted'; },
     };
@@ -682,6 +709,8 @@ test('journey with the kit\'s real shape (#589 W4 F1): qr-join BLOCKED by name f
   assert.ok(served.blocked.length > 0 && served.blocked.every((w) => w === `script ${EVENTS_SCRIPT}` || w === `script ${FLOCK_SCRIPT}`), 'the host\'s own scripts are blocked on every page, never run');
   assert.equal(served.blocked.filter((w) => w === `script ${FLOCK_SCRIPT}`).length, served.blocked.filter((w) => w === `script ${EVENTS_SCRIPT}`).length);
   assert.ok(!L.server.loads.some((x) => x.url === EVENTS_SCRIPT || x.url === FLOCK_SCRIPT), 'and never fulfilled');
+  assert.ok(L.server.loads.filter((x) => x.type === 'document').every((x) => x.contentType === 'text/html; charset=utf-8' && x.kept === 'lovable'), 'every document is fulfilled as UTF-8 HTML, its other headers kept');
+  assert.ok(L.server.loads.filter((x) => x.type !== 'document').every((x) => x.contentType === null), 'an asset keeps its own response headers');
   assert.ok(L.server.contextOpts.length === L.opened() && L.server.contextOpts.every((o) => o.serviceWorkers === 'block'), 'no service worker can answer around the guard');
   assert.equal(statusOf(rows, 'qr-join'), 'BLOCKED');
   assert.match(rows['qr-join'].seen, /only private communities \(joinPolicy private\).*no newcomer QR/);
@@ -887,8 +916,8 @@ test('codeGuard: fulfils exactly the hashed bytes once verified; refuses a redir
     const out = {};
     return { out, r: {
       request: () => ({ url: () => url, resourceType: () => type, isNavigationRequest: () => navigation }),
-      async fetch(o) { out.maxRedirects = o?.maxRedirects; if (answer instanceof Error) throw answer; return { status: () => answer.status, body: async () => Buffer.from(answer.body) }; },
-      async fulfill({ body }) { out.fulfilled = String(body); },
+      async fetch(o) { out.maxRedirects = o?.maxRedirects; if (answer instanceof Error) throw answer; return { status: () => answer.status, headers: () => ({ 'content-type': answer.type ?? (type === 'document' ? 'text/html; charset=utf-8' : 'text/javascript') }), body: async () => Buffer.from(answer.body) }; },
+      async fulfill({ body, headers }) { out.fulfilled = String(body); if (headers) out.contentType = headers['content-type']; },
       async continue() { out.continued = true; },
       async abort(code) { out.aborted = code; },
     } };
@@ -897,7 +926,14 @@ test('codeGuard: fulfils exactly the hashed bytes once verified; refuses a redir
   const kioskDoc = servedDoc('/kiosk/e5cgrp-e5c-t-1-lk/e5cgoal-e5c-t-1-lk');
   const ok = route(`${LOVABLE_URL}/kiosk/e5cgrp-e5c-t-1-lk/e5cgoal-e5c-t-1-lk`, 'document', true, { status: 200, body: kioskDoc });
   await g.handle(ok.r);
-  assert.deepEqual(ok.out, { maxRedirects: 0, fulfilled: kioskDoc }, 'the document is fulfilled with exactly the bytes read');
+  assert.deepEqual(ok.out, { maxRedirects: 0, fulfilled: kioskDoc, contentType: 'text/html; charset=utf-8' }, 'the document is fulfilled with exactly the bytes read, as UTF-8 HTML');
+  // R7: no charset, or UTF-8 spelled any way, is accepted, and the browser is told UTF-8 whatever the host said.
+  for (const type of ['text/html', 'text/html;charset="UTF-8"', 'TEXT/HTML; Charset=utf8']) {
+    const one = codeGuard(FAKE_REVIEWED);
+    const x = route(`${LOVABLE_URL}/kiosk/e5cgrp-e5c-t-1-lk/e5cgoal-e5c-t-1-lk`, 'document', true, { status: 200, body: kioskDoc, type });
+    await one.handle(x.r);
+    assert.deepEqual([x.out.fulfilled, x.out.contentType, one.summary().violations], [kioskDoc, 'text/html; charset=utf-8', []], type);
+  }
   const ev = route(EVENTS_SCRIPT, 'script', false, { status: 200, body: 'track()' });
   await g.handle(ev.r);
   assert.deepEqual(ev.out, { aborted: 'blockedbyclient' }, 'the host events script is never fetched or fulfilled');

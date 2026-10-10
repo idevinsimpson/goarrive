@@ -181,7 +181,7 @@ function twin(bug = {}) {
     let outcome = 'unhandled';
     const route = {
       request: () => ({ url: () => url, resourceType: () => type, isNavigationRequest: () => navigation }),
-      async fetch() { const r = serve(url); return { status: () => r.status, body: async () => Buffer.from(r.body) }; },
+      async fetch() { const r = serve(url); return { status: () => r.status, headers: () => ({ 'content-type': new URL(url).pathname.startsWith('/assets/') ? 'text/javascript' : 'text/html; charset=utf-8' }), body: async () => Buffer.from(r.body) }; },
       async fulfill() { outcome = 'fulfilled'; },
       async continue() { outcome = 'continued'; },
       async abort() { outcome = 'aborted'; },
@@ -591,7 +591,7 @@ function host(files = FAKE_ASSETS, doc = (p) => servedDoc(p)) {
     const p = u.pathname;
     const body = p.startsWith('/assets/') ? files[p] : doc(p);
     if (body === undefined) return { ok: false, status: 404, arrayBuffer: async () => new ArrayBuffer(0) };
-    return { ok: true, status: 200, arrayBuffer: async () => Buffer.from(body) };
+    return { ok: true, status: 200, headers: { get: (k) => (k.toLowerCase() === 'content-type' ? (p.startsWith('/assets/') ? 'text/javascript' : 'text/html; charset=utf-8') : null) }, arrayBuffer: async () => Buffer.from(body) };
   };
 }
 

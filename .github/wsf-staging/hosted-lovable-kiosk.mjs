@@ -333,6 +333,21 @@ export function canonicalDocument(text, url) {
   return { template: m.template, sha256: sha256(Buffer.from(JSON.stringify(parts), 'utf8')), streamU, nul, nulClasses, params: counts };
 }
 
+/**
+ * Why a document's declared type is refused, or null. It must be text/html, with no charset or with UTF-8 only, so the
+ * browser decodes exactly the text the guard canonicalized (L0 R7, #394 6092214109); the guard also fulfils every
+ * verified document with an explicit UTF-8 charset.
+ */
+export function documentTypeProblem(contentType) {
+  const t = String(contentType ?? '').trim();
+  if (!/^text\/html\s*(;|$)/i.test(t)) return `served as ${t ? 'another content type' : 'no content type'}, not text/html`;
+  const sets = [...t.matchAll(/;\s*charset\s*=\s*"?([^";\s]*)"?/gi)].map((x) => x[1].toLowerCase());
+  if (sets.length > 1 || (sets.length === 1 && !['utf-8', 'utf8'].includes(sets[0]))) return `served with charset ${sets.join(', ')}, not UTF-8`;
+  return null;
+}
+/** The content type every verified document is fulfilled with (L0 R7). */
+const DOCUMENT_TYPE = 'text/html; charset=utf-8';
+
 /** The script and stylesheet references a document itself makes (src of a script; href of a stylesheet or modulepreload link). */
 function tagRefs(html) {
   const out = [];
@@ -358,7 +373,7 @@ export async function servedManifest(fetchImpl, base = LOVABLE_URL) {
   const get = async (p) => {
     const res = await fetchImpl(`${base}${p}`, { redirect: 'error', headers: { 'user-agent': 'wsf-lovable-kiosk-bind' } });
     if (!res.ok) throw new Error(`${p.split('?')[0]} answered HTTP ${res.status}`);
-    return Buffer.from(await res.arrayBuffer());
+    return { body: Buffer.from(await res.arrayBuffer()), type: res.headers?.get?.('content-type') ?? null };
   };
   // Same-origin references only: `assets/x.js` or `/assets/x.js` right after a quote, parenthesis or space (never the
   // path inside another origin's URL), and, inside a chunk, Vite's sibling imports `./x.js` (which live in /assets/).
@@ -370,10 +385,11 @@ export async function servedManifest(fetchImpl, base = LOVABLE_URL) {
   const queue = [];
   const tags = [];
   for (const p of BIND_PROBES) {
-    const body = await get(p);
+    const { body, type } = await get(p);
+    const typeProblem = documentTypeProblem(type);
     let text = null;
     try { text = UTF8.decode(body); } catch { /* not UTF-8: refused below, never canonicalized */ }
-    probes.push({ path: p, ...(text === null ? { reason: 'the document is not valid UTF-8' } : canonicalDocument(text, `${base}${p}`)) });
+    probes.push({ path: p, ...(typeProblem ? { reason: `the document is ${typeProblem}` } : text === null ? { reason: 'the document is not valid UTF-8' } : canonicalDocument(text, `${base}${p}`)) });
     if (text === null) continue;
     for (const r of refs(text)) if (!queue.includes(r)) queue.push(r);
     for (const [ref, type] of tagRefs(text)) tags.push({ url: new URL(ref, `${base}${p}`).href, type });
@@ -392,7 +408,7 @@ export async function servedManifest(fetchImpl, base = LOVABLE_URL) {
     const name = p.slice('/assets/'.length);
     if (Object.hasOwn(assets, name)) continue;
     if (Object.keys(assets).length >= MAX_ASSETS) throw new Error(`more than ${MAX_ASSETS} assets; refusing a partial manifest`);
-    const body = await get(p);
+    const { body } = await get(p);
     assets[name] = sha256(body);
     if (p.endsWith('.js')) for (const r of refs(body.toString('utf8'), true)) if (!Object.hasOwn(assets, r.slice(8)) && !queue.includes(r)) queue.push(r);
   }
@@ -492,9 +508,11 @@ export function classifyRequest({ url, type, navigation }, reviewed = REVIEWED_B
  * The served-code guard, routed on EVERY browser context of the journey (service workers blocked, so none can answer
  * around it; Playwright routes every request but a WebSocket handshake and the redirect hops of a continued request,
  * which carry data, never code). A verified response is fetched once and fulfilled with exactly the bytes read: an asset
- * only when those bytes carry its reviewed digest, a document only when they are valid UTF-8 (a BOM kept) and reduce, for the URL requested, to its
+ * only when those bytes carry its reviewed digest, a document only when it is served as text/html with no charset or UTF-8,
+ * its bytes are valid UTF-8 (a BOM kept), and they reduce, for the URL requested, to its
  * template's reviewed canonical document with the reviewed numbers of stream-part timestamps and NULs. A redirect, an error
- * status, other bytes, an unreviewed or foreign script or document is aborted and recorded; a host script is
+ * status, other bytes, an unreviewed or foreign script or document is aborted and recorded; a document is fulfilled with
+ * an explicit UTF-8 charset, so the browser decodes the text that was verified; a host script is
  * aborted and counted as blocked. `check()` throws once anything was refused, so the journey stops before the next step
  * (a sign-in included).
  */
@@ -515,6 +533,8 @@ export function codeGuard(reviewed = REVIEWED_BUILD) {
     try { res = await route.fetch({ maxRedirects: 0 }); body = await res.body(); } catch (e) { await refuse(`${c.what} could not be read: ${short(e)}`); return; }
     if (res.status() !== 200) { await refuse(`${c.what} answered HTTP ${res.status()}, not the reviewed file`); return; }
     if (c.kind === 'document') {
+      const typeProblem = documentTypeProblem(res.headers()['content-type']);
+      if (typeProblem) { await refuse(`${c.what} is ${typeProblem}`); return; }
       let text;
       try { text = UTF8.decode(body); } catch { await refuse(`${c.what} is not valid UTF-8`); return; }
       const d = canonicalDocument(text, req.url());
@@ -524,7 +544,8 @@ export function codeGuard(reviewed = REVIEWED_BUILD) {
       if (d.sha256 !== c.want.sha256) { await refuse(`${c.what} differs from the reviewed ${c.template} document`); return; }
     } else if (sha256(body) !== c.want) { await refuse(`${c.what} differs from its reviewed digest`); return; }
     verified += 1;
-    try { await route.fulfill({ response: res, body }); } catch { /* the page may be gone */ }
+    const headers = c.kind === 'document' ? { ...res.headers(), 'content-type': DOCUMENT_TYPE } : undefined;
+    try { await route.fulfill({ response: res, body, ...(headers ? { headers } : {}) }); } catch { /* the page may be gone */ }
   }
   return {
     handle,

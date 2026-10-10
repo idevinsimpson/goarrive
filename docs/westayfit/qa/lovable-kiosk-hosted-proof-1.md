@@ -34,7 +34,10 @@ The bind alone checks a separate, earlier fetch. The Lovable host is mutable, so
     - a WebSocket handshake;
     - the redirect hops of a request the guard continued, which can only be a passive type or an API-origin data request.
   - Both carry data, never code (W3 and the Director's delta, R6).
-- **Documents** from the Lovable host (every navigation, deep links like `/kiosk/…` and `/?join=…` included) are fetched once with no redirect followed. Each must be a reviewed route template and valid UTF-8, and must reduce, for the URL requested, to that template's reviewed canonical document with its reviewed count of stream-part timestamps. A document is fulfilled with exactly the bytes read. Any other path is refused.
+- **Documents** from the Lovable host (every navigation, deep links like `/kiosk/…` and `/?join=…` included) are fetched once with no redirect followed. Each must be a reviewed route template, served as `text/html` with no charset or UTF-8, and valid UTF-8. It must also reduce, for the URL requested, to that template's reviewed canonical document with its reviewed counts of stream-part timestamps and NULs.
+  - A document is fulfilled with exactly the bytes read.
+  - It is fulfilled with an explicit `content-type: text/html; charset=utf-8` (its other headers kept), so the browser decodes the very text the guard verified (L0 R7).
+  - Any other path is refused.
 - **The host's own scripts are blocked:** the injected `/__l5e/events.<id>.js` (the tag that carries the context token) and `/~flock.js`.
   - Each is never fetched, fulfilled or run, and is counted apart from refusals.
   - Only those exact, anchored paths on the Lovable host are blocked, and only as scripts whose URL is exactly origin plus path.
@@ -80,6 +83,7 @@ The bind alone checks a separate, earlier fetch. The Lovable host is mutable, so
 - **What it loads.** It loads `BIND_PROBES`: `/` twice, `/` with an invite query, and each param template under two fixed probe ids. The two ids differ in their first and last characters, their case and their length.
 - **Binding a template.** A template is bound only when all of its loads reduce to one canonical document. Route data beyond the URL's own params, or a per-request value outside the two normalized ones, leaves it **UNBOUND**, and the bind fails before any credential.
 - **Assets.** It walks the assets referenced by every probed document (including a route chunk that only a deep link preloads) and their imports.
+- **Declared type.** A probed document served with a charset other than UTF-8, or not as `text/html`, is refused by name, and its template stays unbound (L0 R7).
 - **References.** It classifies every `<script src>` and stylesheet or modulepreload link the documents make exactly as the browser guard would. Any reference the guard would refuse fails the bind, even when every digest matches.
 - **What it prints.** It prints each template's canonical digest and timestamp count, and each probe load (path without query, template, digest, timestamp count and param counts). It also prints any refused reference, each asset, and, when every template is bound, one `LOVABLE_OBSERVED_BUILD {…}` JSON line: the exact manifest to pin. It never prints a document's bytes or the token's value.
 - **Its verdict.** It is BLOCKED while the pin lacks a document for any template, a timestamp count, or the assets. It is PASS only when every document, every asset and the reference check match.
@@ -212,12 +216,12 @@ Every browser context is closed in `finally`, including on an early stop.
 ## Proof (offline)
 
 **LOVABLE-REVIEWED-BUILD-1** (Node 20.20.2 and Node 22.22.2):
-- **`tests/hosted-lovable-kiosk.test.mjs`: 25 passed.**
-  - New: route templates; the canonical document (two requests and two ids reduce to one document; the query never reaches it; only a `u:` key counts; a `u:` outside the stream part stays exact; the token's value is never returned); the queue's negative mutations; the served manifest (all probes, a route chunk only a deep link loads, route data beyond the params, a per-request nonce, refused references); the binding table; the bind lines (the JSON line to pin, no document, no token, no query).
+- **`tests/hosted-lovable-kiosk.test.mjs`: 26 passed.**
+  - New: route templates; the document type (R7); the canonical document (two requests and two ids reduce to one document; the query never reaches it; only a `u:` key counts; a `u:` outside the stream part stays exact; the token's value is never returned); the queue's negative mutations; the served manifest (all probes, a route chunk only a deep link loads, route data beyond the params, a per-request nonce, refused references); the binding table; the bind lines (the JSON line to pin, no document, no token, no query).
   - Updated: the journey verifies both kiosk-proof templates and blocks the host's events script on every page; the guard negatives name the template; `classifyRequest` covers templates, the events script and its look-alikes.
 - **`hosted-lovable-device-matrix.test.mjs`: 20 passed.** The pin is the kiosk harness's object. Each document the matrix loads is a reviewed template. The CLI prints the route-aware bind, and a display deep link carrying route data now **fails** the gate instead of being reported. The harness restates no part of the bind.
 - **`tests/workflow-contract.test.mjs`: 103 passed** (unchanged; no workflow change). **`tests/run-all.mjs`** (staging) and **`tools/wsf-control/run-all.mjs`**: all suites passed.
-- **Mutants of the new code: 62 of 63 killed** (W4's catalogue, re-run at the review-round head).
+- **Mutants of the new code: 69 of 70 killed** (W4's catalogue, re-run at the review-round head, with the reviewers' mutants and seven for R7 added: either half of the type check removed, at bind or in the guard; documents fulfilled with the host's own type; other headers dropped; two charsets admitted).
   - They include all the token, stream-part and param checks; the template match; the host-script block (its paths, its type, its counting, its anchors, its case and its exact-URL check); the UTF-8 and BOM handling; the probe agreement; the reference check; the timestamp and NUL counts; the slot boundaries; the canonical JSON form; and the probe-line query.
   - **Corrected claim.** The earlier version of this note said every mutant added for the real-host findings and the ruling was killed. That was true of W4's own mutants, but not of the reviewers' (W3 #609 `6092037523`, the Director's delta #394 `6092160295`). Those were:
     - the slots hashed by a plain string join (slot position and presence unbound);
@@ -242,6 +246,10 @@ Every browser context is closed in `finally`, including on an early stop.
   - `/__l5e/events.<id>.js/x`, `.jsonp`, `/x/__l5e/…`, `/__l5e/events.a/b.js`, `/__L5E/…` and `EVENTS…JS`;
   - an empty `?` or `#` on either path. The URL must be exactly origin plus path, which is W3's N2.
 - **R6, N3, N4:** these sections now say what the route does not see, and the host-build row text and the stale lines are corrected. The quote class, which could never be named, is gone, and the text says why.
+- **R7 (L0's addendum #394 `6092214109`): documents are decoded the way the guard decoded them.**
+  - A document is refused, at bind and in the guard, when it is not declared `text/html`, or when it names a charset other than UTF-8: `windows-1252`, `utf-16le`, two charsets, or an empty one.
+  - Every verified document is fulfilled as `text/html; charset=utf-8`, with its other headers kept.
+  - This has not yet been seen against the real host, because the earlier binds did not read the header. The next gate bind does, and it fails before any credential if the host declares anything else.
 
 **LOVABLE-KIOSK-HOSTED-PROOF-1** (the original packet; its single entry-page digest is superseded above):
 - **`tests/hosted-lovable-kiosk.test.mjs`: 21 passed.**
