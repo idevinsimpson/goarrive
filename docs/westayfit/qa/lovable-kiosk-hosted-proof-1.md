@@ -23,6 +23,12 @@ It runs against exactly `https://we-stay-fit-foundation-trial.lovable.app` and t
 | 5. scan, upload | always | `scan-evidence.mjs` runs; the upload happens only if the scan passes. |
 | 6. verdict | always | `--require` gives PASS only when every row passed **and** cleanup succeeded **and** the scan succeeded. |
 
+**Why a row failed, from the job log alone (LOVABLE-GUARD-PING-1 item 7, #394 `6094793181`).**
+- `--run` and `--require` print each row's `seen` text right after its status line, as `LOVABLE_SEEN <row> <text>`. The device matrix prints `LOVABLE_DEVICE_SEEN`.
+- These lines are additive: every existing line is unchanged.
+- The text is one line of at most 300 characters. Query values and email-shaped strings are replaced. The whole text is withheld if any rule of `scan-evidence.mjs` matches it, and a test holds the harness's copy of those rules equal to the script's own.
+- Main run `38030045509` showed why this is needed: its `display` and `signup` cells failed, and the reason was only in the evidence artifact.
+
 **`REVIEWED_BUILD`** holds a canonical document per route template and every asset digest. Neither part alone binds: documents without assets, or assets without a document for every template, are BLOCKED. Its value and status are in "The route-aware reviewed build", below.
 
 The digests could not be computed from W3's session, nor from W4's for LOVABLE-REVIEWED-BUILD-1: both sessions' proxies refuse the Lovable host (CONNECT 403). Neither refusal was worked around.

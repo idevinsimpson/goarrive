@@ -10,9 +10,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  API_ORIGINS, BIND_PROBES, FIXED_BLOCKED, LOVABLE_URL, ROUTE_TEMPLATES, assetTypeProblem, callableLog, canonicalDocument, cli, REVIEWED_BUILD, ROWS, allPassed, bindBuild,
+  API_ORIGINS, BIND_PROBES, EVIDENCE_SCAN_RULES, FIXED_BLOCKED, LOVABLE_URL, ROUTE_TEMPLATES, SEEN_MAX, assetTypeProblem, callableLog, canonicalDocument, cli, REVIEWED_BUILD, ROWS, allPassed, bindBuild,
   bindLines, browserEnv, checkBase, classifyRequest, codeGuard, documentTypeProblem, hostBuildRow, idHash, matchTemplate, mergeIntoManifest, ownCreditOf, receiptVerdict,
-  requireVerdict, results, runJourney, runResults, servedManifest, sharedOf, showsNumber,
+  requireVerdict, results, runJourney, runResults, seenLine, servedManifest, sharedOf, showsNumber,
 } from '../hosted-lovable-kiosk.mjs';
 
 let passed = 0;
@@ -956,6 +956,14 @@ test('cli (#589 W4 F2): --bind exits non-zero before any credential unless the s
   assert.equal(imported, 1, 'reached only after an exact bind');
   assert.equal(launched, 0);
   assert.match(JSON.parse(fs.readFileSync(path.join(dir, 'lovable-kiosk', 'results.json'), 'utf8')).rows.find((x) => x.id === 'fixture-provenance').seen, /fixture inputs are missing/);
+  // LOVABLE-GUARD-PING-1 item 7: each status line is followed by that row's seen text, so the log alone says why.
+  const ran = JSON.parse(fs.readFileSync(path.join(dir, 'lovable-kiosk', 'results.json'), 'utf8')).rows;
+  for (const row of ran) {
+    const at = r.lines.indexOf(`LOVABLE_ROW ${row.id}=${row.status}`);
+    assert.ok(at >= 0, row.id);
+    assert.ok(r.lines[at + 1].startsWith(`LOVABLE_SEEN ${row.id} `), `${row.id}: ${r.lines[at + 1]}`);
+  }
+  assert.match(r.lines.find((l) => l.startsWith('LOVABLE_SEEN fixture-provenance ')), /fixture inputs are missing/);
 });
 
 // ---- the served-code guard (#589 W9 finding #497 6051520120): bind what the browser EXECUTES ----------------------
@@ -1088,6 +1096,48 @@ test('classifyRequest (LOVABLE-GUARD-PING-1): a ping is data to the exact API or
   assert.deepEqual(hostPing.out, { aborted: 'blockedbyclient' });
   assert.deepEqual(g.summary().violations, [`ping ${L}/ is not a permitted resource type`]);
   assert.throws(() => g.check());
+});
+
+test('seenLine (LOVABLE-GUARD-PING-1 item 7): each row\'s seen text as one additive log line: one line, capped, scrubbed, withheld on any evidence-scan rule', () => {
+  // The copy of the scan's rules is exactly scan-evidence.mjs RULES, in order.
+  const scanSrc = fs.readFileSync(new URL('../scan-evidence.mjs', import.meta.url), 'utf8');
+  const theirs = [...scanSrc.matchAll(/\bre: \/(.+)\/([a-z]*) \},?$/gm)].map((m) => [m[1], m[2]]);
+  assert.equal(theirs.length, 10);
+  assert.deepEqual(EVIDENCE_SCAN_RULES.map((re) => [re.source, re.flags]), theirs);
+  // A real cell's text is printed exactly.
+  const cellText = 'display state notConnected; title the fixture goal; community the fixture community; total not the seeded total of 500; freshness absent';
+  assert.equal(seenLine('LOVABLE_DEVICE_SEEN', 'display@v360', cellText), `LOVABLE_DEVICE_SEEN display@v360 ${cellText}`);
+  // One line, whatever the text carries.
+  assert.equal(seenLine('LOVABLE_SEEN', 'qr-join', 'a\nb\r\nc\u2028d\u2029e\tf\u0000g\u0085h'), 'LOVABLE_SEEN qr-join a b c d e f g h');
+  assert.equal(seenLine('LOVABLE_SEEN', 'x', ''), 'LOVABLE_SEEN x (none)');
+  assert.equal(seenLine('LOVABLE_SEEN', 'x', undefined), 'LOVABLE_SEEN x (none)');
+  // Capped at SEEN_MAX characters, never splitting a character.
+  for (const ch of ['a', 'é', '\u{1F600}']) {
+    const text = seenLine('LOVABLE_SEEN', 'x', ch.repeat(1000)).slice('LOVABLE_SEEN x '.length);
+    assert.equal(Array.from(text).length, SEEN_MAX, ch);
+    assert.ok(text.endsWith('…'));
+    assert.doesNotMatch(text, /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/, 'no lone surrogate');
+  }
+  assert.equal(seenLine('LOVABLE_SEEN', 'x', 'b'.repeat(SEEN_MAX)), `LOVABLE_SEEN x ${'b'.repeat(SEEN_MAX)}`, 'exactly SEEN_MAX is kept whole');
+  // A query value (a join code) or an email-shaped string never reaches the log.
+  const scrubbed = seenLine('LOVABLE_SEEN', 'x', 'stopped: page.goto https://h.test/?join=SECRETCODE&goal=g1 for a.b+c@example.com');
+  assert.doesNotMatch(scrubbed, /SECRETCODE|example\.com|goal=g1/);
+  assert.match(scrubbed, /<email>/);
+  // Anything an evidence-scan rule matches is withheld whole, split across lines or not.
+  const withheld = 'LOVABLE_SEEN x (withheld: the text matches an evidence-scan rule)';
+  const samples = [`AIza${'A'.repeat(30)}`, '-----BEGIN PRIVATE KEY-----', '{"private_key": "k"}', `ya29.${'a'.repeat(20)}`, `1//${'a'.repeat(25)}`, 'gha-creds-0a1b2c.json',
+    'https://h.test/x?oobCode=abc', `eyJ${'a'.repeat(12)}.${'b'.repeat(12)}.${'c'.repeat(12)}`, 'authorization: Bearer abc', `bu_${'a'.repeat(25)}`, 'Authorization:\nBearer abc'];
+  assert.equal(samples.length, EVIDENCE_SCAN_RULES.length + 1);
+  for (const x of samples) {
+    const line = seenLine('LOVABLE_SEEN', 'x', `before ${x} after`);
+    assert.equal(line, withheld, x);
+  }
+  // The verdict keeps every existing line and adds each row's seen line right after its status line.
+  const doc = results({ 'host-build': { status: 'FAIL', seen: 'bind matched, but the browser was served 1 unreviewed request(s): ping https://firestore.googleapis.com/x is outside' } });
+  const { lines } = requireVerdict(doc, { cleanup: 'success', scan: 'success' });
+  assert.deepEqual(lines.filter((l) => !l.startsWith('LOVABLE_SEEN ')), [...doc.rows.map((r) => `LOVABLE_ROW ${r.id}=${r.status}`), `LOVABLE_ROWS=0 PASS, 1 FAIL, ${doc.rows.length - 1} BLOCKED`, 'LOVABLE_CLEANUP=success', 'LOVABLE_EVIDENCE_SCAN=success', 'LOVABLE_KIOSK_PROOF=FAIL']);
+  doc.rows.forEach((r, i) => assert.equal(lines[2 * i + 1], seenLine('LOVABLE_SEEN', r.id, r.seen), r.id));
+  assert.equal(lines[1], `LOVABLE_SEEN host-build ${doc.rows[0].seen}`);
 });
 
 test('codeGuard: fulfils exactly the hashed bytes once verified; refuses a redirect, an error, other bytes or an unreadable answer; check() throws after any refusal', async () => {

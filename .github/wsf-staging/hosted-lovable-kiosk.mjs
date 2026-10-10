@@ -221,6 +221,38 @@ export const FIXED_BLOCKED = Object.freeze({
 
 const short = (e) => String(e?.message || e).split('\n')[0].replace(/[?&][A-Za-z]+=[^&\s"']+/g, '?…').replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, '<email>').slice(0, 200);
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
+/**
+ * The evidence scan's rules, exactly `RULES` in scan-evidence.mjs, copied because that script runs on import. A test
+ * holds the copy equal to the script's own list (LOVABLE-GUARD-PING-1 item 7, #394 6094793181).
+ */
+export const EVIDENCE_SCAN_RULES = Object.freeze([
+  /AIza[0-9A-Za-z_-]{20,}/,
+  /BEGIN (?:RSA |EC |OPENSSH |PGP )?PRIVATE KEY/,
+  /\\?"private_key(?:_id)?\\?"\s*:/,
+  /\bya29\.[0-9A-Za-z_-]{10,}/,
+  /\b1\/\/[0-9A-Za-z_-]{20,}/,
+  /gha-creds-[0-9a-f]+\.json/,
+  /[?&](?:oobCode|token|idToken|refreshToken)=[^&\s"']+/,
+  /\beyJ[0-9A-Za-z_-]{10,}\.[0-9A-Za-z_-]{10,}\.[0-9A-Za-z_-]{10,}/,
+  /authorization"?\s*[:=]\s*"?Bearer\s+\S+/i,
+  /\bbu_[A-Za-z0-9_-]{20,}/,
+]);
+/** The most characters of a row's seen text that one job-log line carries. */
+export const SEEN_MAX = 300;
+/**
+ * A row's seen text as one additive job-log line, `<prefix> <row> <text>`, so a failure reads from the log alone (the
+ * results file is in the evidence artifact). One line: control characters and any white space (line and paragraph
+ * separators included) become single spaces. A query value or an email-shaped string is replaced, as short() does. At
+ * most SEEN_MAX characters. The whole text is withheld when any evidence-scan rule matches it, before or after those
+ * replacements, so the log never carries what the scan would refuse to upload.
+ */
+export function seenLine(prefix, id, seen) {
+  const raw = String(seen ?? '').replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ');
+  let t = raw.replace(/[?&][A-Za-z]+=[^&\s"']+/g, '?…').replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, '<email>').replace(/\s+/g, ' ').trim();
+  if (EVIDENCE_SCAN_RULES.some((re) => re.test(raw) || re.test(t))) t = '(withheld: the text matches an evidence-scan rule)';
+  else if (Array.from(t).length > SEEN_MAX) t = `${Array.from(t).slice(0, SEEN_MAX - 1).join('')}…`;
+  return `${prefix} ${id} ${t || '(none)'}`;
+}
 export const idHash = (uid) => (typeof uid === 'string' && uid ? sha256(uid).slice(0, 16) : null);
 
 /** The base URL, refused unless it is exactly the one allowed host. */
@@ -960,7 +992,7 @@ export async function runJourney({ browser, fixtures, base, amount = 7, reviewed
 export function requireVerdict(doc, { cleanup, scan }) {
   const lines = [];
   const rows = Array.isArray(doc?.rows) ? doc.rows : [];
-  for (const r of rows) lines.push(`LOVABLE_ROW ${r.id}=${r.status}`);
+  for (const r of rows) lines.push(`LOVABLE_ROW ${r.id}=${r.status}`, seenLine('LOVABLE_SEEN', r.id, r.seen));
   const n = (s) => rows.filter((r) => r.status === s).length;
   lines.push(`LOVABLE_ROWS=${n('PASS')} PASS, ${n('FAIL')} FAIL, ${n('BLOCKED')} BLOCKED`);
   lines.push(`LOVABLE_CLEANUP=${cleanup || 'unknown'}`, `LOVABLE_EVIDENCE_SCAN=${scan || 'unknown'}`);
@@ -1027,7 +1059,7 @@ export async function cli(mode, env, { fetchImpl = fetch, reviewed = REVIEWED_BU
     } else if (journey.rows['fixture-provenance']) rows['cleanup-tracking'] = { status: 'PASS', seen: 'nothing product-written to add' };
     doc = runResults(verdict, journey, rows);
     fs.writeFileSync(path.join(dir, 'results.json'), `${JSON.stringify(doc, null, 2)}\n`);
-    for (const r of doc.rows) say(`LOVABLE_ROW ${r.id}=${r.status}`);
+    for (const r of doc.rows) { say(`LOVABLE_ROW ${r.id}=${r.status}`); say(seenLine('LOVABLE_SEEN', r.id, r.seen)); }
   }
   return allPassed(doc) ? 0 : 1;
 }
