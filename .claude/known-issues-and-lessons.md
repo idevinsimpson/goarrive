@@ -1,6 +1,6 @@
 # GoArrive Known Issues & Lessons Learned
 
-_Last refreshed: 2026-08-14._
+_Last refreshed: 2026-10-10 (12:20 ET)._
 
 ## Resolved Issues (Reference for Future Work)
 The following issues were encountered and resolved during development. They are documented here as institutional knowledge to prevent regression and inform future decisions.
@@ -185,6 +185,114 @@ takeover position, not repeatedly assigning `currentTime`. Seeking on a timer de
 buffering it is meant to produce. Verify warmth by reading `buffered`, never by inferring
 it from the absence of a symptom.
 
+
+### WSF Staging Proof Sequence Must Be Derivable on Any Writer Run, Not Only at Deploy Time (PR #557)
+A fast-path staging deploy (run 60) succeeded and served the exact target, but the proof sequence — begin-proof, R-STAGE, proof-pass — was never derived automatically. Three separate gaps blocked derivation: begin-proof had no deriver at all; the R-STAGE rule read `snap.staging`, which is populated only by the full-path writer, never by the fast-path target flow; and proof-pass was only suggested to L0 rather than derived. The result was four proof lines that had to be recorded by hand, leaving the control-state ledger in a half-committed state until manual intervention.
+
+The fix (`shadow.mjs` `stagingProofLines`) derives the proof sequence on any writer run — scheduled fallback, comment, PR event, or `workflow_run` — by reading the ledger's staging target, the newest concluded-success deploy-mode run whose title names that target, and the hosted `/health` marker. It derives only the lines the packet still lacks and sources each on the `workflow_run`. `set-staging` is intentionally not derived: moving the full-path staging pointer to a fast-path target would make every subsequent fast-path candidate `FULL_PATH_REQUIRED`, which is reported as a separate consequence.
+
+A W4 test-fixture finding (commit `cc180898`) surfaced a related gap: the wrong-marker test used an unrelated SHA as the "bad" marker case, but the realistic wrong-marker situation after a successful run is staging still serving the previous build — the ledger's `staging.servedSha` or `staging.rollbackSha`. A mutant that accepted the broader freshnessFacts served set passed unnoticed until the fixture was corrected to use those realistic markers.
+
+Lesson: a proof sequence that requires manual recording after every automated deploy is a broken proof sequence. Every step needs a deriver that fires from observable state — here a deploy run ID and a hosted marker — rather than waiting for a human gesture or a future L0 suggestion. When adding a new proof step, verify at write time that all inputs to derive it are readable from the writer's event payload, not from ledger fields that only get populated on a different code path.
+### WSF Staging Pin Generator Must Derive Baseline from Ledger, Not from a Computed Add Count
+The staging pin generator (STAGING-PIN-FASTPATH-SERVED-BASELINE-1, PR #565) was computing the served baseline as a derived value (e.g. current served plus items the PR adds) rather than reading what the ledger actually records as the live baseline. This caused fast-path preflight comparisons to check against an inflated baseline — as if items being introduced by the PR were already present on the live site — making genuine fast-path candidates appear to exceed the baseline and triggering unnecessary full-path deploy fallbacks.
+
+The fix reads the baseline directly from the ledger's authoritative served record. Lesson: a pin generator that computes what *will* be served after a successful deploy is predicting a future state, not describing a current one. Any metric that gates a fast-path preflight must be read from the ledger's recorded state, not derived from the pending delta. This is the same root class as the STAGING-FASTPATH-INVENTORY-BASELINE-FIX (#555) that corrected the preflight itself — both bugs let a predicted post-merge count masquerade as the actual live baseline.
+
+
+### WSF Staging Pin: Superseded Never-Served Approvals Must Be Recorded Truthfully (PR #570)
+The pin generator was not handling the case where an approval was generated and accepted but then superseded by a newer candidate before it was ever deployed to staging. The old approval remained visible in the ledger as if it were still active, conflicting with the newer approval and creating ambiguity about which candidate the ledger actually endorsed.
+
+The fix (commit `c70edcb5`) explicitly records superseded never-served approvals as such when the generator advances to a newer candidate. It does not overwrite the superseded entry — it annotates it so the ledger history remains truthful and downstream preflight checks are not confused by two live-looking approvals.
+
+Lesson: a staging approval captures intent at a point in time. When a later candidate supersedes it before any deploy occurs, that fact must be written to the ledger — not silently overwritten, and not left as an open approval. Two open approvals pointing at different candidates will cause preflight and proof-sequence checks to fail on the wrong target. The invariant to enforce: at most one approval per staging slot can be in a non-terminal state at any time; when a new approval advances, all prior approvals for the same slot must be closed with a superseded-never-served annotation if they were never served.
+
+### WSF Staged Journey Suites Need Wording-Variant Seeded Defects, Not Just Behavior-Boolean Ones (PR #573)
+The EXPO-LATEST-FULL-STAGING-PIN-1 suite (PR #573) added closed-goal journey drivers that proved all five queue-gate refusals emulator-side. Nine seeded defects initially covered gate-skip and post-advance-refusal cases. A W4 mutant audit (#394) then found that dropping the sentence-level text checks for each refusal message left the full suite green — meaning mutants that refused in wrong words, or that let a Start refusal end the turn instead of holding it, passed without detection.
+
+The root cause: boolean coverage (refused / did not refuse) proves the gate exists; it does not prove the gate says the right thing. A user who hits a refusal that says "No seats available" when the event is closed, or whose turn ends instead of being held at a Start refusal, sees a broken product even if the gate fired. Five additional wording-variant defects (one per gate: start, ready, call, join, closedStartEndsPlace) corrected this — each fails exactly its own row, and W4 mutants D1, D3, D4, D7, and D11 are now killed.
+
+Lesson: when seeding defects for any gate that produces user-visible copy, always include at least one wording-variant defect alongside the boolean skip. The two failure modes — gate absent vs. gate present but wrong copy — are independent, and a suite that only kills one is half-verified. This applies to any error, refusal, or confirmation message the suite reads from the screen rather than from Firestore directly.
+
+### WSF Control Writer: Ascending-Page Probe Copies Are Unsafe for Window-Building Under Concurrent Arrivals and Deletions
+The GitHub `recentComments` reader (`tools/wsf-control/github.mjs`) builds a bounded window of the N newest comments for a conversation. The original approach probed pages in ascending order starting from the estimated last page, keeping each page's response as the window was filled backward. A W9 finding (#497, comment 6019310772) identified a correctness gap: if a new comment arrives after the initial count read (rolling onto a further page that the ascending probe then reads), and an older comment is deleted between two probe page requests, the newest comment can shift onto a page already consumed by the probe — silently absent from the window with no error or signal.
+
+The fix (PR #579, CONTROL-RECENT-COMMENTS-SAFE-READ-1) separates the end-finding step from the window-building step. The forward ascending probe runs only to find the actual last page and its result copies are immediately discarded. The window is then built from a fresh descending read starting at that end page, walking toward older pages. Reading newest-to-oldest means a mid-read deletion can only shift a held comment onto an earlier page (caught by dedup on comment id) — the newest comment is always on an already-read page and cannot be skipped. The regression test for W9's exact case fails on the prior commit and passes on the fix; a mutant that trusts the probe copies again is killed by that test alone.
+
+Lesson: when reading a paginated API feed with an estimated starting page, the ascending probe is safe for end-detection but not for content collection — probe copies can be stale relative to later pages by the time the window is assembled. Separate end-finding (forward probe, disposable results) from window-building (fresh descending read), so every page in the final window is read after every later page.
+
+**Transport hardening addendum (PR #581):** a follow-on W4 review found two remaining gaps. The GitHub API page size was left at the default (100), so a transient network failure on a single page fetch could lose up to 100 comments' worth of window — reducing the page size to 25 shrinks that blast radius without changing the correctness fix. A GET retry was also added, but only for explicit transport failures (network timeouts, connection resets); logical failures such as a wrong marker or a bad pagination state do not retry and fail closed immediately. Retrying on logical failures would loop a misconfigured caller against the API without producing a correct window. Rule: any retry in a paginated read must distinguish transport failures from logical ones — transport errors may succeed on retry; logical errors require a caller-level fix.
+
+### WSF Control Writer: A State-Mutating PATCH Must Not Retry on Transport Failure (PR #588)
+`editComment` (`tools/wsf-control/github.mjs`) was treating a PATCH 404 as success and had no defined behavior for transport failures. Run 37661819992 surfaced this when a `TypeError: fetch failed` at the shadow CURRENT PATCH left the control writer in an undefined state.
+
+The correct behavior for a state-mutating PATCH that fails at the transport layer is to **read back, not re-send**. Re-sending risks double-application: the write may have landed on the server even if the response never returned. The fix sends the PATCH exactly once, then on transport failure reads the comment back via GET to confirm whether the edit was applied. If the exact body is found, it returns 'confirmed-by-readback'; if not, it throws an unconfirmed error — never retransmitting.
+
+The fix also separately handles HTTP error statuses (404, 4xx, 5xx), which previously could be silently swallowed. A PATCH that returns 404 means the target resource does not exist; treating it as success hides the problem. Each failure class now has an explicit outcome: 2xx returns 'acknowledged' without parsing the body; non-2xx throws `GitHubError`; transport failure triggers one read-back attempt; programmer errors rethrow immediately.
+
+Lesson: a state-mutating API call (PATCH, PUT, POST, DELETE) is not safe to retry on transport failure — the write may have landed. The correct recovery is a read-back to confirm the current state, with the retry decision made from what was observed, not from the failure class. Distinguish transport failures (where a read-back makes sense) from HTTP error statuses (which are definitive answers) and programmer errors (which should propagate immediately). This is the same principle as idempotency keys for public write endpoints, applied to internal writer calls that cannot carry a client-supplied key.
+### WSF Lovable Kiosk Hosted Proof: A Bind Step Alone Does Not Bind What the Browser Executes (PR #589)
+The LOVABLE-KIOSK-HOSTED-PROOF-1 proof mode (PR #589) introduced a served-code guard after W9 finding #497 identified a gap in the original design. The `--bind` step hashes the entry page and every same-origin asset from a single HTTP fetch and compares the set to a pinned `REVIEWED_BUILD`. That check is sufficient to block a run if the host has drifted since review — but it checks a **fetch the proof script made**, not what the browser actually loads during the journey. The Lovable host is mutable: a new publish could land between the bind and the first page navigation; the entry page could inline a script that was not fetched during the walk; a lazily-loaded script from another origin could load after the initial walk was complete. Any of these would let unreviewed code execute in a browsing context that holds a live Firebase credential.
+
+The fix is a **served-code guard** on every browser context: Playwright routes every request through `codeGuard`, service workers are blocked so none can intercept around it, every document and `/assets/` script or stylesheet from the Lovable host must carry its reviewed digest and is fulfilled with exactly the hashed bytes, and anything else executable is refused. A refusal stops the journey before the next step — the kiosk is never approved and no password is typed into an unreviewed page. `host-build` is PASS only when the bind matched **and** the browser loaded at least one verified document **and** nothing was refused.
+
+A further precision (W4 finding #394, Director finding #365): exchanged callables must be paired by request identity — each exchange is the request the page sent paired with that specific request's own response, not a later response to a different request. The entry-page digest and the asset manifest must both be pinned together; assets without an entry digest are BLOCKED, so an inline-script change in `index.html` cannot pass even if every asset digest matches.
+
+**`REVIEWED_BUILD` is empty in the shipped change by design.** The first dispatch stops at the credential-free gate, prints the observed manifest, and a separately-reviewed commit pins it. This prevents the same commit that writes the proof from self-approving the build it will run against — an observed digest is evidence for review, never self-approval.
+
+Lesson: a hosted proof that audits a mutable third-party host must bind what the browser actually loads during the journey, not only what a pre-run HTTP walk observed. The two can diverge on any publish, lazy load, or cross-origin script. Implement the guard at the Playwright request-routing layer rather than as a pre-check, and route every browser context through it so no context can run unguarded. A refusal must stop the journey immediately — never record a result from a context that loaded unreviewed code.
+### WSF Production Firebase Inventory as Pre-Activation Gate (PR #599)
+Before activating staged WSF features in production, PR #599 (PRODUCTION-FIREBASE-INVENTORY-1) established a read-only production Firebase inventory pattern: owner readbacks confirm which service account owns each deployed Cloud Function revision; invoker truth records which callables carry the `allUsers run.invoker` binding; and deploy stoppers identify conditions — missing IAM grants, conflicting function names, version mismatches — that would prevent a safe deploy. Running this inventory against production before any WSF activation deploy provides a baseline that distinguishes expected state from unexpected drift.
+
+This is especially important for the single-project setup: `.firebaserc` declares a single `goarrive` project, so any Functions or Storage Rules deploy is live on production immediately. A callable that acquires `allUsers run.invoker` is publicly callable the moment it deploys; knowing the pre-deploy invoker state is the first line of defense against unintentionally making a new callable public.
+
+Lesson: for any staged feature that introduces new Cloud Functions or changes invoker bindings, run a read-only production inventory immediately before deploying and compare against the expected state. Fail the deploy if any invoker binding or function owner deviates from the plan.
+
+### WSF Staging Pin: Adversarial Review Must Land Corrections Before QA Record Is Finalized (PR #597)
+The EXPO-FULL-STAGING-RECOVERY-4 pin (PR #597) required an adversarial review pass that returned corrections before the QA record was finalized and the pin was accepted. The pin also proved a three-link never-served chain — a candidate that superseded two prior never-served approvals in sequence — making the approval lineage more complex than the normal single-link case.
+
+The pin generator must handle bounded inner-link chains correctly so the ledger records the full supersession history. A pin that arrives via adversarial review should not be assumed stable until the QA record commit is present; if the review catches issues requiring corrections, those corrections must land as separate commits before the pin is finalized.
+
+Lesson: do not co-author a pin commit and a corrections commit — keep them separate so the ledger's correction history is explicit. The adversarial review exists to catch problems the original author missed; collapsing corrections into the original commit defeats that audit trail.
+
+### WSF Control Writer: Non-Writer Workflow Runs Must Not Share the Control-Writer Concurrency Group (PR #603)
+The `wsf-control-writer` GitHub Actions concurrency group serializes writer runs to prevent concurrent state mutations on the ledger. If a non-writer workflow — a PR check, a scheduled job, or an unrelated workflow dispatch — uses the same concurrency group name, it can cancel a queued writer run the moment it starts. The writer's pending state mutation is silently dropped: no error, no retry, just a run that never executed.
+
+The fix (WRITER-CONCURRENCY-1) conditions the concurrency group assignment so only genuine writer runs enter the group. Non-writer runs receive a null or unique group name, which GitHub Actions treats as no concurrency constraint — they queue independently without competing for the writer slot.
+
+Lesson: a GitHub Actions concurrency group protects a resource by serializing access — but only among runs that actually need that resource. Any workflow that shares the group name becomes a contender, not just a bystander. When a new workflow is added to a repository that uses named concurrency groups for critical serialized writers, explicitly verify whether the new workflow should enter those groups. The failure mode (queued writer cancelled silently) is non-obvious because the cancelled run leaves no error in the context of the writer — it just disappears from the queue.
+
+### WSF Staging Drivers Must Be Kept in Sync with Their Feature Baseline (PR #604)
+STAGING-TURN-DRIVERS-1 (PR #604) surfaced that staging test drivers for the WSF kiosk turn lifecycle had not been updated when the underlying feature (KIOSK-EXPECTED-TURN-1, PR #587) shipped. The driver suite was testing behavior from a prior baseline, so run 61's failures were driver/feature mismatches rather than genuine regressions in the new feature.
+
+The fix brings the turn-row and expo drivers forward to the #587 baseline and documents run 61's root causes so the failure pattern is recoverable.
+
+Lesson: when a feature changes the observable contract of a kiosk journey step, the staging drivers for that step must update in the same PR or the immediately following one — not in a catch-up PR later. A stale driver does not merely fail to catch regressions; it actively produces false failures that cost investigation time on the new feature and erode trust in the suite. The discipline: for every PR that changes observable behavior at a journey step, name the driver rows that cover that step and confirm they are updated.
+
+### WSF Callables Must Refuse Anonymous-Provider Firebase Tokens (PR #601)
+Firebase allows anonymous sign-in, which creates a real UID with `providerData` empty or set to the anonymous provider. A callable that only checks `context.auth != null` will accept anonymous callers, letting unauthenticated visitors fabricate a token and call business-logic endpoints.
+
+ANON-GATE-1 (PR #601) adds an explicit anonymous-provider check at every WSF callable auth site. The check runs before any business logic and rejects the call immediately when the caller's token carries the anonymous Firebase provider.
+
+Lesson: for any WSF callable (or any GoArrive callable that should be member/coach-only), `context.auth` being present is not sufficient — verify the provider is not anonymous. This is especially critical for callables that write state or read private data, since anonymous Firebase sessions are trivial to create without real credentials.
+
+### WSF LOVABLE-REVIEWED-BUILD-1: Route-Aware Bind and Literal NUL Handling (PR #609)
+The `LOVABLE-KIOSK-HOSTED-PROOF-1` bind step (PR #589) was not route-aware: it bound the entry page as a single blob. If the Lovable host serves different HTML per route (e.g. `/` vs `/go/slug`), a new route added after review would have a different entry digest and could slip through the check unnoticed.
+
+PR #609 makes the bind route-aware — each route the proof exercises is bound individually, so a post-review route change is caught per-route rather than masked behind a shared entry hash.
+
+A second gap: the original guard treated NUL bytes (`\x00`) as whitespace or stripped them before hashing, so an asset with embedded NULs could produce a different digest on the serve than on the bind walk. The fix takes NUL bytes literally in both the bind and the guard so digests are byte-exact.
+
+The host's `~flock.js` was blocked explicitly because it is executable and was not present in the reviewed asset set.
+
+Lesson: a bind step that hashes a multi-route host must bind each route the journey visits, not only the root. Any byte normalisation (whitespace collapsing, NUL stripping) in a content-addressing step introduces a gap between what was reviewed and what is verified at runtime — use raw bytes throughout.
+### WSF Lovable Device Matrix: BLOCKED Rows Must Name the Reason and Unblocking Condition (PR #614)
+When LOVABLE-MATRIX-ALIGN-1 realigned the device matrix with served build `db3fd2f2`, a W3 open-item review found that several BLOCKED kiosk station rows lacked explanations — they were recorded as BLOCKED but gave no indication of why or what change would unblock them. An engineer picking up the work had no way to know from the matrix alone whether their change addressed the blocker.
+
+The fix (commit `bab7e980`, "say what the kiosk station rows actually lack") adds explicit gap descriptions to each BLOCKED row.
+
+Lesson: in any staging device matrix or proof-row table, a BLOCKED status without a reason is an incomplete record. Every BLOCKED row should state (a) what specific condition blocks it and (b) what feature, PR, or prerequisite is expected to unblock it. This applies both when the matrix is first written and during any realignment pass — updating passing cells without updating BLOCKED reasons leaves the matrix partially stale.
+
 ## Known Performance Risks
 
 ### GIF Memory Consumption at Scale
@@ -252,3 +360,33 @@ The v3 handoff has two music elements — a graph-wired `audible` one for the fo
 This bit us concretely: `ended` (which advances the playlist) lived only on the audible element. While backgrounded that element is paused, and **a paused media element never fires `ended`** — so the shadow played the current track to its end and then simply stopped, with nothing to advance it. Returning to the app resumed the audible at the shadow's position, which immediately hit the end, fired `ended`, and advanced — which is why the symptom presented as "music stops when the track switches" and recovered on re-entry. The track was never switching at all. Fixed in PR #287 by giving the shadow its own `ended`/`error` handlers, guarded by element identity and `inBackgroundRef`.
 
 Two design rules fall out. **When you add a second element that can own playback, audit every listener on the first one** and decide explicitly whether it needs a twin — the failure is silent and only appears at a boundary the tests never reach. And **a handler that can trigger a retry cascade needs a circuit breaker**: `error → advance → error` would have burned an entire playlist in seconds with the real first cause buried at the top of the log, so #287 caps consecutive failures and stops.
+
+### WSF Control Writer: A Pooled HTTP Connection Can Stall a State-Mutating PATCH for the Full Client Timeout (PR #591)
+`editComment` was issued through undici's pooled HTTP connection. Runs 37671900853 and 37672822242 each spent ~315 s waiting for a status line that never arrived — exactly undici's 300 s header timeout — before the ACK-1 read-back correctly refused success. The cost was a near-full-run delay on every affected invocation.
+
+The failure mode: a pooled connection can carry the request to the server but fail to return a status line if the underlying socket went half-closed after the pool acquired it. Undici waits until its own default timeout; there is no shorter per-request deadline by default.
+
+The fix (`sendOnce`, PR #591) sends the PATCH on its own fresh connection: `node:https` with `agent: false` (no pool), `Connection: close`, and a byte-exact `Content-Length`, settling on the first status line within `PATCH_TIMEOUT_MS` (30 s). The body is never read — only the status code matters. A transport failure, deadline expiry, or connection close before any status line rejects with a `TransportError` code; the ACK-1 read-back path then determines whether the edit landed. HTTP redirect answers (3xx) now fail closed rather than passing silently through the 2xx check. GET and POST paths are unchanged and continue to use the existing `fetchImpl`.
+
+Lesson: a state-mutating HTTP call that must not be retried also must not be allowed to hang indefinitely. A pooled client's connection-reuse behavior can produce a stall that produces no error and no response — the caller cannot distinguish a hung connection from a slow server without its own deadline. For one-shot PATCH calls, use a fresh connection and a short explicit deadline so the transport layer forces a decision within a bounded window. This is distinct from the retry question (PR #588): that entry covers *not retransmitting* on transport failure; this entry covers *bounding the wait* before a transport failure is even declared.
+
+### WSF LOVABLE-REVIEWED-BUILD-2: A Pin Advance Surfaces Test Coverage Gaps (PR #610)
+The initial LOVABLE-REVIEWED-BUILD-1 suite (PR #609) passed the bind and was accepted. When the next Lovable build (`db3fd2f2`) was pinned in PR #610, the test suite required corrections for coverage gaps that REVIEWED-BUILD-1 had not exercised: asset charset declarations were not asserted; events API response ID fields and userinfo endpoint fields were not checked; and BOM bytes (`\xEF\xBB\xBF`) in asset bodies were not handled literally, meaning a build that included BOM-prefixed assets could produce a different digest on the serve than on the bind walk. The hosting preview screenshot URL also embedded a non-normalized filename, causing the bind walk to produce a different asset key than the served path.
+
+Lesson: a proof suite that passes for build N can have undetected coverage gaps that only become visible when build N+1 differs in the uncovered dimension. When advancing a `REVIEWED_BUILD` pin, treat the new pin cycle as an opportunity to audit what the test suite does *not* assert: schema fields present in the new build but absent from test expectations, BOM or charset edge cases in new assets, and any URL normalization assumptions baked into the bind walk. A green suite on the old build does not guarantee the new build is equally covered.
+
+### WSF Operator Access Map Must Precede Any Production Activation (PR #612)
+Before any WSF production activation deploy, PR #612 (WSF-OPERATOR-ACCESS-1) produces a read-only operator access map and gap table documenting which GitHub, Firebase, and Lovable operator accounts have access to which WSF production resources. A read-only audit script (`docs/westayfit/ops/operator-access/audit-access.mjs`) captures the state at a named point in time with a pinned SHA. Nothing is granted, deployed, or changed; this is documentation and baseline capture only.
+
+The value is pre-activation clarity: the gap table records which permissions are missing relative to the expected deployment configuration *before* any changes are made. Any IAM grants or permission additions can then be verified against this baseline rather than inferred from memory. The script is reusable across activation runs so subsequent runs confirm the baseline is unchanged.
+
+Lesson: produce the operator access map before the first activation deploy, not after. A post-deploy gap table measures drift from an unknown starting state; a pre-deploy gap table confirms the deploy plan is coherent with actual permissions. The two are not equivalent documents. For any staged feature approaching production activation, treat the access map as a mandatory pre-deploy artifact alongside the production Firebase inventory.
+
+### WSF Served-Code Guard Must Allow Firestore Listen Pings to API Origins (PR #613)
+The served-code guard (`codeGuard`, added in PR #589) routes every browser request through a Playwright request handler and allows only requests whose bodies carry a reviewed digest. Firestore's real-time SDK maintains live listeners by sending periodic ping requests — resource type `ping` in Playwright's request API — to the Firestore API origins. These pings carry no code and are not navigation requests.
+
+When the guard treated pings the same as navigation and script requests, real-time Firestore listeners stalled mid-journey: the SDK could not send its keepalive, the listen connection degraded, and any journey step that relied on live Firestore data produced stale or missing results. The failure was not a hard error — it presented as stale data or a missed update, which could pass most assertions while the underlying listener connection was silently broken.
+
+The fix (PR #613) explicitly passes resource type `ping` through to the exact same-origin API origins as non-navigation data only — never executable content, never from the Lovable host. All other interception rules are unchanged. Each row's seen text is now printed in the job log so the effect of the guard on real traffic is observable.
+
+Lesson: a strict Playwright request guard for a third-party host must enumerate which resource types and origins are allowed for SDK keepalives, not just for navigation and scripts. For any Firestore-connected proof, resource type `ping` to Firestore API origins must be whitelisted as data. A guard that blocks SDK pings produces a journey that appears healthy but silently degrades any live-listener read after the first missed ping interval. The distinction axis is navigation/code vs. data — ping is unambiguously data, and the guard must encode that distinction explicitly.
