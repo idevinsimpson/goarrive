@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "074e5b8274647fdfd7e2347b2ad0c48ab96d417ddd65da16c4c0474d9dea56d5",
-  "eventCount": 1234,
+  "ledgerHead": "a15836e54addeef446272ea63ba930b4459ceb900f5c503755c5b9146b89b66e",
+  "eventCount": 1237,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -20,7 +20,7 @@
   "canonical": {
     "developmentBranch": "claude/wsf-app-shell",
     "developmentSha": "8a067b29420563408e16cff5d91cc77b2ad0fbd8",
-    "operationalMain": "2709d764e980971ceaf043067ace1e8acf331ef7"
+    "operationalMain": "4da578d7f00c221544a2b3d1e9891e06bc4f524e"
   },
   "staging": {
     "servedSha": "ec162d17a0540e936741027f9b8f90dd372cfaf4",
@@ -2955,7 +2955,7 @@
       },
       "label": "Kiosk proof: drive the station turn on the served build (queue place, call, phone ready, expectedTurn start, 60 s round, review, Finish) so the 7 station rows PASS or FAIL, not BLOCKED",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 394,
@@ -2967,7 +2967,7 @@
         "subjectSha": "a4768e02fc473696d26588493503501de08bcfa2",
         "prHeadSha": "a4768e02fc473696d26588493503501de08bcfa2",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "4da578d7f00c221544a2b3d1e9891e06bc4f524e"
       },
       "proof": null,
       "served": null,
@@ -2991,10 +2991,13 @@
           "kind": "comment",
           "id": 6099634479
         },
-        "accepted": null,
-        "lastTransition": {
+        "accepted": {
           "kind": "comment",
-          "id": 6101088493
+          "id": 6101229569
+        },
+        "lastTransition": {
+          "kind": "pull_request",
+          "id": 619
         }
       },
       "review": {
