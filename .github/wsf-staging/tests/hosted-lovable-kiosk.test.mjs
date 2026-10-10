@@ -37,6 +37,12 @@ test('only exactly the Lovable host is accepted', () => {
  * the route's own params in its markup and stream part. `o` switches in one defect at a time.
  */
 let served = 0;
+// The hosting's preview screenshot links (step C): DEEPLINK-DRIFT-CONFIRM-1's verbatim elements (#394 6093468966).
+const SHOT_A = 'a74c72a1c0451cab76648ebdb57437a9_1791601764778';
+const SHOT_B = '0f1e2d3c4b5a69788796a5b4c3d2e1f0_1791603000123';
+const SHOT_URL = 'https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/lovp_372ahwppkw9debd61922xf2ayz/';
+const shotTags = (a, b = a) => `<meta property="og:image" content="${SHOT_URL}${a}.png"><meta name="twitter:image" content="${SHOT_URL}${b}.png">`;
+const ROOT_OG = '<meta property="og:image" content="https://we-stay-fit-foundation-trial.lovable.app/og-share.jpg"/><meta name="twitter:image" content="https://we-stay-fit-foundation-trial.lovable.app/og-share.jpg"/>';
 function servedDoc(pathname, o = {}) {
   served += 1;
   const token = o.token ?? `ctx.${crypto.randomBytes(12).toString('base64url')}`;
@@ -47,12 +53,13 @@ function servedDoc(pathname, o = {}) {
   const matchId = ids.length ? `${route}/${segs[0]}/${ids.join('/')}` : '/';
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"${o.metaAttr ?? ''}><title>WE STAY FIT</title>`
     + `<link rel="stylesheet" href="/assets/index-CCC.css"><link rel="modulepreload" href="/assets/${o.shell ?? 'shell-AAA.js'}">`
-    + `${o.eventsPre ?? '<script src="/__l5e/events.a1b2c3d4e5f60718.js" '}data-context-token="${token}"${o.tokenTail ?? ''} defer></script><script src="/~flock.js" defer></script>${o.head ?? ''}</head>`
+    + `${o.eventsPre ?? '<script src="/__l5e/events.a1b2c3d4e5f60718.js" '}data-context-token="${token}"${o.tokenTail ?? ''} defer></script><script src="/~flock.js" defer></script>${o.head ?? ''}`
+    + `${o.shotTags ?? (route === '/' ? ROOT_OG : shotTags(o.shot ?? SHOT_A, o.shot2 ?? o.shot ?? SHOT_A))}</head>`
     + `<body><main data-route="${route}"${ids.map((v, i) => ` data-p${i}="${v}"`).join('')}>\u0000</main>`
     + `<script class="$tsr" data-tsr-stream-part="">$_TSR.router.matches=[{i:"__root__",u:${o.u1 ?? ts},s:"success",x:"\u0000"},{i:"${matchId}",u:${o.u2 ?? ts},s:"${o.status ?? 'success'}"}${o.streamMore ?? ''}]</script>`
     + `${o.body ?? ''}<script type="module" src="/assets/${o.shell ?? 'shell-AAA.js'}"></script></body></html>`;
 }
-const pin = (d) => ({ sha256: d.sha256, streamU: d.streamU, nul: d.nul });
+const pin = (d) => ({ sha256: d.sha256, streamU: d.streamU, nul: d.nul, img: d.img });
 const canonOf = (p, o) => canonicalDocument(servedDoc(p, o), `${LOVABLE_URL}${p}`);
 
 function site(files) {
@@ -103,6 +110,18 @@ test('canonical document: exactly the two per-request values are normalized, and
   assert.equal(a.streamU, 2, 'one u: per matched route');
   assert.equal(canonOf('/', { token: 'abcdefgh' }).sha256, a.sha256, 'an 8-character token is the token');
   assert.equal(canonOf('/', { token: 'A'.repeat(4096) }).sha256, a.sha256, 'and so is a 4096-character one');
+  // Step C: the hosting's preview screenshot file name is a slot on a param template, so a regeneration (another file
+  // name in both links) is the same document; `/` carries none.
+  for (const P of ['/display/ga1-wsf-bind-probe', '/kiosk/ca1-wsf-bind-probe/ga1-wsf-bind-probe']) {
+    const shotA = canonOf(P, { shot: SHOT_A });
+    const shotB = canonOf(P, { shot: SHOT_B });
+    assert.equal(shotA.sha256, shotB.sha256, `${P}: two screenshot file names reduce to one document`);
+    assert.deepEqual([shotA.img, shotA.previewImages, shotB.previewImages], [2, [SHOT_A], [SHOT_B]], `${P}: two links, and the name each load carried`);
+  }
+  assert.deepEqual([a.img, a.previewImages], [0, []], '`/` carries no screenshot link');
+  // F7 (W3): `bom` means a document STARTS with a BOM; one inside it is a byte like any other.
+  assert.equal(canonOf('/', { body: '\uFEFF' }).bom, false);
+  assert.equal(canonicalDocument(`\uFEFF${servedDoc('/')}`, `${LOVABLE_URL}/`).bom, true);
   assert.equal(canonicalDocument(servedDoc('/'), `${LOVABLE_URL}/?join=jn1-wsf-bind-probe&goal=ga1-wsf-bind-probe`).sha256, a.sha256, 'the query string never reaches the document');
   const d1 = canonOf('/display/ga1-wsf-bind-probe');
   const d2 = canonOf('/display/Zq9wsfBindProbeGoal2');
@@ -114,15 +133,16 @@ test('canonical document: exactly the two per-request values are normalized, and
   assert.deepEqual(k1.params, { communityId: 2, goalId: 2 });
   assert.notEqual(k1.sha256, d1.sha256);
   // A fixed vector (R3): the canonical form of a small document is exactly this JSON list of literal text and slots.
-  const vectorDoc = '<p data-context-token="tok12345">x</p><script data-tsr-stream-part="">a={u:1234567890123};b="\u0000"</script><i>abcdefghijkl0</i>';
-  const vectorJson = '["<p data-context-token=\\"",{"slot":"token"},"\\">x</p><script data-tsr-stream-part=\\"\\">a={u:",{"slot":"u"},"};b=\\"\\u0000\\"</script><i>",{"slot":"param:goalId"},"</i>"]';
+  // (A param template, so the vector carries the hosting's two preview links, step C.)
+  const vectorDoc = `<meta property="og:image" content="${SHOT_URL}${SHOT_A}.png"><meta name="twitter:image" content="${SHOT_URL}${SHOT_A}.png"><p data-context-token="tok12345">x</p><script data-tsr-stream-part="">a={u:1234567890123};b="\u0000"</script><i>abcdefghijkl0</i>`;
+  const vectorJson = `["<meta property=\\"og:image\\" content=\\"${SHOT_URL}",{"slot":"preview-image"},".png\\"><meta name=\\"twitter:image\\" content=\\"${SHOT_URL}",{"slot":"preview-image"},".png\\"><p data-context-token=\\"",{"slot":"token"},"\\">x</p><script data-tsr-stream-part=\\"\\">a={u:",{"slot":"u"},"};b=\\"\\u0000\\"</script><i>",{"slot":"param:goalId"},"</i>"]`;
   const vector = canonicalDocument(vectorDoc, `${LOVABLE_URL}/display/abcdefghijkl0`);
   assert.equal(vector.sha256, sha(vectorJson), 'the digest is the sha256 of exactly that JSON');
   assert.equal(vector.sha256, VECTOR_SHA256, 'and that JSON is pinned');
-  assert.deepEqual([vector.streamU, vector.nul, vector.params], [1, 1, { goalId: 1 }]);
+  assert.deepEqual([vector.streamU, vector.nul, vector.img, vector.previewImages, vector.params], [1, 1, 2, [SHOT_A], { goalId: 1 }]);
   // A second fixed vector with non-ASCII text (#394 6092810294 item 8): the canonical JSON is hashed as UTF-8.
-  const vector2Doc = '<p data-context-token="tok12345">é — 😀 \u2028 ü</p><script data-tsr-stream-part="">a={u:1234567890123}</script><i>abcdefghijkl0</i>';
-  const vector2Json = '["<p data-context-token=\\"",{"slot":"token"},"\\">é — 😀 \u2028 ü</p><script data-tsr-stream-part=\\"\\">a={u:",{"slot":"u"},"}</script><i>",{"slot":"param:goalId"},"</i>"]';
+  const vector2Doc = `<meta property="og:image" content="${SHOT_URL}${SHOT_A}.png"><meta name="twitter:image" content="${SHOT_URL}${SHOT_A}.png"><p data-context-token="tok12345">é — 😀 \u2028 ü</p><script data-tsr-stream-part="">a={u:1234567890123}</script><i>abcdefghijkl0</i>`;
+  const vector2Json = `["<meta property=\\"og:image\\" content=\\"${SHOT_URL}",{"slot":"preview-image"},".png\\"><meta name=\\"twitter:image\\" content=\\"${SHOT_URL}",{"slot":"preview-image"},".png\\"><p data-context-token=\\"",{"slot":"token"},"\\">é — 😀 \u2028 ü</p><script data-tsr-stream-part=\\"\\">a={u:",{"slot":"u"},"}</script><i>",{"slot":"param:goalId"},"</i>"]`;
   const vector2 = canonicalDocument(vector2Doc, `${LOVABLE_URL}/display/abcdefghijkl0`);
   assert.equal(vector2.sha256, crypto.createHash('sha256').update(Buffer.from(vector2Json, 'utf8')).digest('hex'), 'the digest is the sha256 of that JSON in UTF-8');
   assert.equal(vector2.sha256, VECTOR2_SHA256, 'and that JSON is pinned');
@@ -219,6 +239,29 @@ test('negative mutations: each one is refused, by name or by digest, at bind and
     ['a reviewed document served as windows-1252, the parameter in upper case', '/', servedDoc('/'), /served with charset windows-1252, not UTF-8/, 'text/html; CHARSET=windows-1252'],
     ['a reviewed document served as text/plain', '/', servedDoc('/'), /served as another content type, not text\/html/, 'text/plain; charset=utf-8'],
     ['a reviewed document served with no content type', '/', servedDoc('/'), /served as no content type, not text\/html/, ''],
+    // Step C (#394 6093458108): the preview screenshot link, exactly two on a param template, the same file in both,
+    // in exactly its attribute, and the file-name shape nowhere else; none on `/`
+    ['a 33-hex screenshot file name', G, servedDoc(G, { shot: `a${SHOT_A}` }), /0 hosting preview-image link\(s\), not exactly 2/],
+    ['a 31-hex screenshot file name', G, servedDoc(G, { shot: SHOT_A.slice(1) }), /0 hosting preview-image link\(s\), not exactly 2/],
+    ['a 14-digit screenshot timestamp', G, servedDoc(G, { shot: `${SHOT_A}0` }), /0 hosting preview-image link\(s\), not exactly 2/],
+    ['a 12-digit screenshot timestamp', G, servedDoc(G, { shot: SHOT_A.slice(0, -1) }), /0 hosting preview-image link\(s\), not exactly 2/],
+    ['an upper-case screenshot file name', G, servedDoc(G, { shot: SHOT_A.toUpperCase() }), /0 hosting preview-image link\(s\), not exactly 2/],
+    ['a quote inside the file name', G, servedDoc(G, { shot: `${SHOT_A.slice(0, 16)}"${SHOT_A.slice(17)}` }), /0 hosting preview-image link\(s\), not exactly 2/],
+    ['a < inside the file name', G, servedDoc(G, { shot: `${SHOT_A.slice(0, 16)}<${SHOT_A.slice(17)}` }), /0 hosting preview-image link\(s\), not exactly 2/],
+    ['a space inside the file name', G, servedDoc(G, { shot: `${SHOT_A.slice(0, 16)} ${SHOT_A.slice(17)}` }), /0 hosting preview-image link\(s\), not exactly 2/],
+    ['one screenshot link moved into <body>', G, servedDoc(G, { shotTags: shotTags(SHOT_A).split('><')[0] + '>', body: `<meta name="twitter:image" content="${SHOT_URL}${SHOT_A}.png">` }), /differs from the reviewed \/display\/\$goalId document/],
+    ['one screenshot link moved into the stream part', G, servedDoc(G, { shotTags: shotTags(SHOT_A).split('><')[0] + '>', streamMore: `,{x:'<meta name="twitter:image" content="${SHOT_URL}${SHOT_A}.png">'}` }), /a preview-image link is inside the stream part/],
+    ['one screenshot link moved into another attribute', G, servedDoc(G, { shotTags: shotTags(SHOT_A).replace('name="twitter:image" content=', 'name="twitter:image" data-src=') }), /1 hosting preview-image link\(s\), not exactly 2/],
+    ['one screenshot link in a data-content attribute', G, servedDoc(G, { shotTags: shotTags(SHOT_A).replace('name="twitter:image" content=', 'name="twitter:image" data-content=') }), /1 hosting preview-image link\(s\), not exactly 2/],
+    ['a third screenshot link', G, servedDoc(G, { shotTags: `${shotTags(SHOT_A)}<meta property="og:image:secure_url" content="${SHOT_URL}${SHOT_A}.png">` }), /3 hosting preview-image link\(s\), not exactly 2/],
+    ['a missing screenshot link', G, servedDoc(G, { shotTags: shotTags(SHOT_A).split('><')[0] + '>' }), /1 hosting preview-image link\(s\), not exactly 2/],
+    ['two screenshot links naming different files', G, servedDoc(G, { shot: SHOT_A, shot2: SHOT_B }), /the two preview-image links name different files/],
+    ['another bucket host', G, servedDoc(G, { shotTags: shotTags(SHOT_A).replaceAll('pub-bb2e103a32db4e198524a2e9ed8f35b4', 'pub-cc2e103a32db4e198524a2e9ed8f35b4') }), /0 hosting preview-image link\(s\), not exactly 2/],
+    ['a look-alike bucket host (a dot replaced)', G, servedDoc(G, { shotTags: shotTags(SHOT_A).replaceAll('b4.r2.dev', 'b4xr2.dev') }), /0 hosting preview-image link\(s\), not exactly 2/],
+    ['another lovp_ segment', G, servedDoc(G, { shotTags: shotTags(SHOT_A).replaceAll('lovp_372ahwppkw9debd61922xf2ayz', 'lovp_472ahwppkw9debd61922xf2ayz') }), /0 hosting preview-image link\(s\), not exactly 2/],
+    ['the file-name shape outside the links', G, servedDoc(G, { body: `<p>${SHOT_B}</p>` }), /the preview-image file-name shape appears 1 time\(s\) outside the preview-image links/],
+    ['a screenshot link on /', '/', servedDoc('/', { shotTags: shotTags(SHOT_A) }), /2 hosting preview-image link\(s\), not exactly 0/],
+    ['the kiosk with one screenshot link', K, servedDoc(K, { shotTags: shotTags(SHOT_A).split('><')[0] + '>' }), /1 hosting preview-image link\(s\), not exactly 2/],
     ['a param the guard cannot bind', '/display/short', servedDoc('/display/short'), /a path param the guard cannot bind/],
     ['overlapping params', '/kiosk/abcdefghijkl/abcdefghijklmn', servedDoc('/kiosk/abcdefghijkl/abcdefghijklmn'), /two path params overlap/],
   ];
@@ -242,6 +285,15 @@ test('negative mutations: each one is refused, by name or by digest, at bind and
       assert.ok(!c.sha256 || c.sha256 !== DOCS[t].sha256 || c.streamU !== DOCS[t].streamU, `${name}: the bind's canonical form differs too`);
     }
   }
+  // The guard compares the reviewed preview-image count too (step C): the same canonical bytes with another count refuse.
+  const gi = codeGuard({ documents: { ...DOCS, '/display/$goalId': { ...DOCS['/display/$goalId'], img: 1 } }, assets: OBSERVED });
+  const gio = {};
+  await gi.handle({
+    request: () => ({ url: () => `${LOVABLE_URL}${G}`, resourceType: () => 'document', isNavigationRequest: () => true }),
+    async fetch() { return { status: () => 200, headers: () => ({ 'content-type': 'text/html; charset=utf-8' }), body: async () => Buffer.from(servedDoc(G)) }; },
+    async fulfill() { gio.fulfilled = true; }, async abort(code) { gio.aborted = code; }, async continue() {},
+  });
+  assert.deepEqual([gio, gi.summary().violations], [{ aborted: 'blockedbyclient' }, [`document ${LOVABLE_URL}${G} carries 2 preview-image link(s), not the reviewed 1`]]);
   // Not valid UTF-8: refused before it is read as text.
   const g = codeGuard(EXACT);
   await g.handle({
@@ -251,8 +303,8 @@ test('negative mutations: each one is refused, by name or by digest, at bind and
   });
   assert.match(g.summary().violations[0], /is not valid UTF-8/);
 });
-const VECTOR_SHA256 = '1d65a5a400dac8908712c7b82029cc4164b825b70c8609da7d5696c9c97b9e70';
-const VECTOR2_SHA256 = 'edb801ca41b407e57a34361d0727a15bf675425c80added66aa3dfcc85ee72cc';
+const VECTOR_SHA256 = 'b7316f8eec218dba957cbc37a70d17ab0e6921f2e271dbcbb118249b9fff007f';
+const VECTOR2_SHA256 = '6aa341dba75482cdb2690e6822582fde8984e95190d3b1c672386283483ecf39';
 const PARAM_OK = (p) => Object.values(matchTemplate(p).params).every((v) => /^[A-Za-z0-9_-]{12,128}$/.test(v));
 
 test('the served manifest: every bind probe reduced per template, same-origin assets walked and hashed, references checked', async () => {
@@ -286,7 +338,7 @@ test('the served manifest: every bind probe reduced per template, same-origin as
   assert.equal(bindBuild(bom, EXACT).status, 'FAIL');
   const bomLines = bindLines(bom, bindBuild(bom, EXACT));
   assert.deepEqual(bomLines.filter((l) => / bom=/.test(l)).map((l) => / bom=(yes|no)/.exec(l)[1]), Array(ROUTE_TEMPLATES.length + BIND_PROBES.length).fill('yes'), 'and the bind says a BOM leads, for each template and each load');
-  assert.deepEqual(JSON.parse(bomLines.at(-1).slice('LOVABLE_OBSERVED_BUILD '.length)).documents['/'], { sha256: bom.documents['/'].sha256, streamU: 2, nul: 2 }, 'the line to pin keeps its shape');
+  assert.deepEqual(JSON.parse(bomLines.at(-1).slice('LOVABLE_OBSERVED_BUILD '.length)).documents['/'], { sha256: bom.documents['/'].sha256, streamU: 2, nul: 2, img: 0 }, 'the line to pin keeps its shape');
   let firstRoot = true;
   const oneBom = await servedManifest(site({ ...SITE, doc: (p) => (p === '/' && firstRoot ? ((firstRoot = false), `\uFEFF${servedDoc(p)}`) : servedDoc(p)) }).fetchImpl);
   assert.equal(oneBom.documents['/'].sha256, null);
@@ -299,7 +351,9 @@ test('the served manifest: every bind probe reduced per template, same-origin as
   }
   // Asset charset at bind (LOVABLE-REVIEWED-BUILD-2): an asset declared in another charset is a load the guard would
   // refuse, so the bind fails by name; its digest is still read, and an asset declared UTF-8 in any spelling passes.
-  for (const [p, type, kind] of [['/assets/connected-kiosk-BBB.js', 'text/javascript; charset=windows-1252', 'script'], ['/assets/index-CCC.css', 'text/css; CHARSET=windows-1252', 'stylesheet']]) {
+  for (const [p, type, kind] of [['/assets/connected-kiosk-BBB.js', 'text/javascript; charset=windows-1252', 'script'], ['/assets/index-CCC.css', 'text/css; CHARSET=windows-1252', 'stylesheet'],
+    ['/assets/connected-kiosk-BBB.js', 'text/javascript;\tcharset=windows-1252', 'script'], ['/assets/index-CCC.css', 'text/css;  charset=windows-1252', 'stylesheet'], // W3 F2
+    ['/assets/connected-kiosk-BBB.js', 'text/javascript, text/javascript; charset=windows-1252', 'script']]) { // W3 F3: duplicate headers joined
     const m3 = await servedManifest(site({ ...SITE, assetType: (q) => (q === p ? type : undefined) }).fetchImpl);
     assert.deepEqual(m3.refusals, [`${kind} ${LOVABLE_URL}${p} is served with charset windows-1252, not UTF-8`], type);
     assert.deepEqual(m3.assets, OBSERVED, `${type}: its digest is still read`);
@@ -309,6 +363,20 @@ test('the served manifest: every bind probe reduced per template, same-origin as
   const utf8Assets = await servedManifest(site({ ...SITE, assetType: (q) => (q.endsWith('.css') ? 'text/css; Charset="UTF-8"' : 'application/javascript; charset=utf-8') }).fetchImpl);
   assert.deepEqual(utf8Assets.refusals, []);
   assert.equal(bindBuild(utf8Assets, EXACT).status, 'PASS');
+  // Step C at bind: a screenshot regeneration between two loads of a param template is absorbed. The template line
+  // names both files; the line to pin names neither. One link on a param document unbinds its template by name.
+  let shotN = 0;
+  const regen = await servedManifest(site({ ...SITE, doc: (p) => servedDoc(p, p === '/' || p.startsWith('/?') ? {} : { shot: (shotN++ % 2) ? SHOT_B : SHOT_A }) }).fetchImpl);
+  assert.equal(regen.documents['/display/$goalId'].sha256, DOCS['/display/$goalId'].sha256);
+  assert.deepEqual([regen.documents['/display/$goalId'].previewImages, regen.documents['/display/$goalId'].img, regen.documents['/'].img], [[SHOT_A, SHOT_B], 2, 0]);
+  assert.equal(bindBuild(regen, EXACT).status, 'PASS', 'a regenerated screenshot still binds');
+  const regenLines = bindLines(regen, bindBuild(regen, EXACT));
+  assert.ok(regenLines.some((l) => l.startsWith('LOVABLE_OBSERVED_DOCUMENT /display/$goalId ') && l.endsWith(` img=2 bom=no preview-image=${SHOT_A},${SHOT_B}`)), 'the template line names both files');
+  assert.doesNotMatch(regenLines.at(-1), new RegExp(`${SHOT_A}|${SHOT_B}`), 'never the line to pin');
+  const oneShot = await servedManifest(site({ ...SITE, doc: (p) => servedDoc(p, p.startsWith('/display/') ? { shotTags: shotTags(SHOT_A).split('><')[0] + '>' } : {}) }).fetchImpl);
+  assert.equal(oneShot.documents['/display/$goalId'].sha256, null);
+  assert.match(oneShot.documents['/display/$goalId'].reason, /1 hosting preview-image link\(s\), not exactly 2/);
+  assert.equal(bindBuild(oneShot, EXACT).status, 'FAIL');
   // R2 at bind: an events tag that loads data: code reduces to another digest, so the bind fails.
   const dataTag = await servedManifest(site({ ...SITE, doc: (p) => servedDoc(p, { eventsPre: '<script src="data:text/javascript,steal()" ' }) }).fetchImpl);
   assert.notEqual(dataTag.documents['/'].sha256, DOCS['/'].sha256);
@@ -338,6 +406,8 @@ test('asset type (LOVABLE-REVIEWED-BUILD-2): no charset or UTF-8 only, in any ca
   for (const [bad, why] of [
     ['text/javascript; charset=windows-1252', /^served with charset windows-1252, not UTF-8$/], ['text/css; CHARSET=windows-1252', /charset windows-1252, not UTF-8/], ['text/javascript; Charset="utf-16le"', /charset utf-16le, not UTF-8/],
     ['text/css; charset=iso-8859-1', /iso-8859-1/], ['text/javascript; charset=utf-8; charset=windows-1252', /charset utf-8, windows-1252, not UTF-8/], ['text/javascript; charset=', /charset , not UTF-8/],
+    ['text/javascript;\tcharset=windows-1252', /charset windows-1252, not UTF-8/], ['text/css;  charset=windows-1252', /charset windows-1252, not UTF-8/], // W3 F2
+    ['text/javascript, text/javascript; charset=windows-1252', /charset windows-1252, not UTF-8/], // W3 F3: duplicate headers, joined
   ]) assert.match(assetTypeProblem(bad), why, bad);
 });
 
@@ -347,8 +417,8 @@ test('binding: empty or partial reviewed build BLOCKED; exact PASS; a changed do
   assert.deepEqual(Object.keys(REVIEWED_BUILD.documents), ROUTE_TEMPLATES);
   for (const t of ROUTE_TEMPLATES) {
     const d = REVIEWED_BUILD.documents[t];
-    assert.ok(Object.isFrozen(d) && /^[0-9a-f]{64}$/.test(d.sha256) && d.streamU === 2 && Number.isInteger(d.nul) && d.nul >= 0, `${t} is pinned`);
-    assert.deepEqual(Object.keys(d), ['sha256', 'streamU', 'nul']);
+    assert.ok(Object.isFrozen(d) && /^[0-9a-f]{64}$/.test(d.sha256) && d.streamU === 2 && Number.isInteger(d.nul) && d.nul >= 0 && Number.isInteger(d.img) && d.img >= 0, `${t} is pinned`);
+    assert.deepEqual(Object.keys(d), ['sha256', 'streamU', 'nul', 'img']);
   }
   assert.ok(Object.keys(REVIEWED_BUILD.assets).length > 0 && Object.entries(REVIEWED_BUILD.assets).every(([n, d]) => /^[A-Za-z0-9_.-]+\.(js|css)$/.test(n) && /^[0-9a-f]{64}$/.test(d)));
   assert.equal(bindBuild({ documents: REVIEWED_BUILD.documents, assets: REVIEWED_BUILD.assets, refusals: [] }).status, 'PASS', 'the shipped pin is a whole reviewed build');
@@ -360,9 +430,14 @@ test('binding: empty or partial reviewed build BLOCKED; exact PASS; a changed do
   for (const t of ROUTE_TEMPLATES) {
     const { [t]: _, ...partial } = DOCS;
     assert.equal(bindBuild(seen, { documents: partial, assets: OBSERVED }).status, 'BLOCKED', `no ${t} document`);
-    assert.equal(bindBuild(seen, { documents: { ...DOCS, [t]: { sha256: DOCS[t].sha256 } }, assets: OBSERVED }).status, 'BLOCKED', `${t} without its u: count`);
-    assert.equal(bindBuild(seen, { documents: { ...DOCS, [t]: { sha256: DOCS[t].sha256, streamU: 0, nul: 2 } }, assets: OBSERVED }).status, 'BLOCKED', `${t} with no u:`);
-    assert.equal(bindBuild(seen, { documents: { ...DOCS, [t]: { sha256: DOCS[t].sha256, streamU: 2 } }, assets: OBSERVED }).status, 'BLOCKED', `${t} without its NUL count`);
+    // Each partial pin lacks exactly one field and carries every other, so each check is load-bearing on its own.
+    const { img } = DOCS[t];
+    assert.equal(bindBuild(seen, { documents: { ...DOCS, [t]: { sha256: DOCS[t].sha256, nul: 2, img } }, assets: OBSERVED }).status, 'BLOCKED', `${t} without its u: count`);
+    assert.equal(bindBuild(seen, { documents: { ...DOCS, [t]: { sha256: DOCS[t].sha256, streamU: 0, nul: 2, img } }, assets: OBSERVED }).status, 'BLOCKED', `${t} with no u:`);
+    assert.equal(bindBuild(seen, { documents: { ...DOCS, [t]: { sha256: DOCS[t].sha256, streamU: 2, img } }, assets: OBSERVED }).status, 'BLOCKED', `${t} without its NUL count`);
+    assert.equal(bindBuild(seen, { documents: { ...DOCS, [t]: { sha256: DOCS[t].sha256, streamU: 2, nul: -1, img } }, assets: OBSERVED }).status, 'BLOCKED', `${t} with a negative NUL count`);
+    assert.equal(bindBuild(seen, { documents: { ...DOCS, [t]: { sha256: DOCS[t].sha256, streamU: 2, nul: 2 } }, assets: OBSERVED }).status, 'BLOCKED', `${t} without its preview-image count (step C)`);
+    assert.equal(bindBuild(seen, { documents: { ...DOCS, [t]: { ...DOCS[t], img: -1 } }, assets: OBSERVED }).status, 'BLOCKED', `${t} with a negative preview-image count`);
   }
   assert.equal(bindBuild(seen, EXACT).status, 'PASS');
   assert.match(bindBuild(seen, EXACT).reason, /3 reviewed route documents and 3 reviewed assets served exactly/);
@@ -370,6 +445,7 @@ test('binding: empty or partial reviewed build BLOCKED; exact PASS; a changed do
     assert.equal(bindBuild({ ...seen, documents: { ...DOCS, [t]: { ...DOCS[t], sha256: sha('other') } } }, EXACT).status, 'FAIL', `${t} changed`);
     assert.equal(bindBuild({ ...seen, documents: { ...DOCS, [t]: { ...DOCS[t], streamU: 3 } } }, EXACT).status, 'FAIL', `${t} with another u: count`);
     assert.equal(bindBuild({ ...seen, documents: { ...DOCS, [t]: { ...DOCS[t], nul: 3 } } }, EXACT).status, 'FAIL', `${t} with another NUL count`);
+    assert.equal(bindBuild({ ...seen, documents: { ...DOCS, [t]: { ...DOCS[t], img: DOCS[t].img + 1 } } }, EXACT).status, 'FAIL', `${t} with another preview-image count`);
     assert.equal(bindBuild({ ...seen, documents: { ...DOCS, [t]: { sha256: null, streamU: null, reason: 'x' } } }, EXACT).status, 'FAIL', `${t} unbound`);
   }
   assert.equal(bindBuild({ ...seen, assets: { ...OBSERVED, 'shell-AAA.js': sha('changed') } }, EXACT).status, 'FAIL');
@@ -386,18 +462,25 @@ test('bind lines: verdict, documents, probes, refused references, assets and the
   const m = await servedManifest(site({ ...SITE, doc: (p) => servedDoc(p, { token }) }).fetchImpl);
   const lines = bindLines(m, bindBuild(m));
   assert.match(lines[0], /^LOVABLE_BUILD=FAIL \(the served \/, \/display\/\$goalId, \/kiosk\/\$communityId\/\$goalId documents differ/, 'the fake host is not the pinned build');
-  assert.deepEqual(lines.slice(1, 4), ROUTE_TEMPLATES.map((t) => `LOVABLE_OBSERVED_DOCUMENT ${t} ${DOCS[t].sha256} u=2 nul=2 (stream part 1, other inline script 0, markup 1) bom=no`), 'counts and classes of NULs and whether a BOM leads, never bytes');
+  assert.deepEqual(lines.slice(1, 4), ROUTE_TEMPLATES.map((t) => `LOVABLE_OBSERVED_DOCUMENT ${t} ${DOCS[t].sha256} u=2 nul=2 (stream part 1, other inline script 0, markup 1) img=${t === '/' ? 0 : 2} bom=no${t === '/' ? '' : ` preview-image=${SHOT_A}`}`), 'counts and classes of NULs, preview images and whether a BOM leads, never bytes');
   assert.equal(lines.filter((l) => l.startsWith('LOVABLE_DOCUMENT_PROBE ')).length, BIND_PROBES.length);
-  assert.ok(lines.includes(`LOVABLE_DOCUMENT_PROBE /display/Zq9wsfBindProbeGoal2 /display/$goalId ${DOCS['/display/$goalId'].sha256} u=2 nul=2 (stream part 1, other inline script 0, markup 1) bom=no params={"goalId":2}`));
+  assert.ok(lines.includes(`LOVABLE_DOCUMENT_PROBE /display/Zq9wsfBindProbeGoal2 /display/$goalId ${DOCS['/display/$goalId'].sha256} u=2 nul=2 (stream part 1, other inline script 0, markup 1) img=2 bom=no params={"goalId":2}`));
   assert.deepEqual(lines.filter((l) => l.startsWith('LOVABLE_OBSERVED_ASSET ')), Object.entries(OBSERVED).map(([n, d]) => `LOVABLE_OBSERVED_ASSET ${n} ${d}`));
   const last = lines.at(-1);
   assert.ok(last.startsWith('LOVABLE_OBSERVED_BUILD '));
   assert.deepEqual(JSON.parse(last.slice('LOVABLE_OBSERVED_BUILD '.length)), { documents: DOCS, assets: OBSERVED }, 'the line to pin is exactly the observed build');
   assert.doesNotMatch(lines.join('\n'), /tokSECRET|<html|<script|\$_TSR/, 'names, counts and digests only');
-  assert.ok(lines.includes(`LOVABLE_DOCUMENT_PROBE / (with an invite query) / ${DOCS['/'].sha256} u=2 nul=2 (stream part 1, other inline script 0, markup 1) bom=no params={}`));
+  assert.ok(lines.includes(`LOVABLE_DOCUMENT_PROBE / (with an invite query) / ${DOCS['/'].sha256} u=2 nul=2 (stream part 1, other inline script 0, markup 1) img=0 bom=no params={}`));
   assert.doesNotMatch(lines.join('\n'), /\u0000/, 'no NUL byte is ever printed');
   assert.deepEqual(lines.filter((l) => l.startsWith('LOVABLE_DOCUMENT_BLOCKED_HOST_SCRIPT ')), [`LOVABLE_DOCUMENT_BLOCKED_HOST_SCRIPT script ${EVENTS_SCRIPT}`, `LOVABLE_DOCUMENT_BLOCKED_HOST_SCRIPT script ${FLOCK_SCRIPT}`], 'what the bind would block is printed, once each');
   assert.doesNotMatch(lines.join('\n'), /join=|\?/, 'a probe line names the page, never its query');
+  // Step C: a screenshot file name is printed only in its checked shape, so a hostile value can't inject a log line.
+  const forged = bindLines({ ...m, documents: { ...m.documents, '/display/$goalId': { ...m.documents['/display/$goalId'], previewImages: [SHOT_A, 'x\n::error::injected', `${SHOT_A}"`, SHOT_A.toUpperCase()] } } }, { status: 'FAIL', reason: 'x' });
+  assert.ok(forged.find((l) => l.startsWith('LOVABLE_OBSERVED_DOCUMENT /display/$goalId ')).endsWith(` preview-image=${SHOT_A}`));
+  assert.doesNotMatch(forged.join('\n'), /::error::|"\s|[A-F]{32}_/, 'nothing else is printed');
+  // F7 (W3): a BOM inside a document is no leading BOM.
+  const inner = await servedManifest(site({ ...SITE, doc: (p) => servedDoc(p, { body: '\uFEFF' }) }).fetchImpl);
+  assert.ok(bindLines(inner, bindBuild(inner)).filter((l) => / bom=/.test(l)).every((l) => / bom=no( |$)/.test(l)));
   const unbound = bindLines({ ...m, documents: { ...m.documents, '/': { sha256: null, streamU: null, reason: 'r' } } }, { status: 'FAIL', reason: 'x' });
   assert.ok(!unbound.some((l) => l.startsWith('LOVABLE_OBSERVED_BUILD ')), 'no manifest to pin while a template is unbound');
   assert.deepEqual(bindLines(null, { status: 'FAIL', reason: 'unreadable' }), ['LOVABLE_BUILD=FAIL (unreadable)']);
@@ -925,17 +1008,20 @@ test('classifyRequest: the reviewed host verifies documents and /assets/ code; A
   assert.equal(c(`${L}/__l5e/events.1718a1eacac7ff3a.js`, 'script').action, 'block', 'the real events id (bind runs 38007859514, 38017456574 and 38018743683) is blocked');
   // The events id is exactly 16 lower-case hex digits, and the dots are literal (#394 6092810294 item 5): each of these
   // is refused, never blocked.
-  for (const id of ['-', '_', 'a'.repeat(5000), '', 'a1b2c3d4.5f60718', 'a1b2c3d4e5f6%718', 'a1b2c3d4e5f6~718', 'a1b2c3d4e5f6071', 'a1b2c3d4e5f607189', 'A1B2C3D4E5F60718', 'a1b2c3d4e5f6071g']) {
+  assert.equal(c(`${L}/__l5e/events.0123456789abcdef.js`, 'script').action, 'block', 'an id with every hex digit is blocked (W3 F5)');
+  for (const id of ['-', '_', 'a1b2c3d4e5f6-718', 'a1b2c3d4e5f6_718', 'a'.repeat(5000), '', 'a1b2c3d4.5f60718', 'a1b2c3d4e5f6%718', 'a1b2c3d4e5f6~718', 'a1b2c3d4e5f6071', 'a1b2c3d4e5f607189', 'A1B2C3D4E5F60718', 'a1b2c3d4e5f6071g']) {
     const v = c(`${L}/__l5e/events.${id}.js`, 'script');
     assert.equal(v.action, 'abort', `events id ${id.slice(0, 20)}`);
     assert.match(v.reason, /is not a reviewed asset$/);
   }
   for (const p of ['/__l5e/eventsXa1b2c3d4e5f60718.js', '/__l5e/events.a1b2c3d4e5f60718Xjs', '/~flockXjs']) assert.equal(c(`${L}${p}`, 'script').action, 'abort', `${p}: a dot is a dot`);
   // Userinfo (N2's other half, #394 6092810294 items 6 and 7): refused, not blocked, and named without being printed.
-  for (const url of ['https://user@we-stay-fit-foundation-trial.lovable.app/~flock.js', 'https://u:p@we-stay-fit-foundation-trial.lovable.app/__l5e/events.a1b2c3d4e5f60718.js', 'https://user@we-stay-fit-foundation-trial.lovable.app/assets/shell-AAA.js', 'https://u:p@we-stay-fit-foundation-trial.lovable.app/', 'https://:p@we-stay-fit-foundation-trial.lovable.app/~flock.js']) {
-    const v = c(url, url.endsWith('/') ? 'document' : 'script', url.endsWith('/'));
+  for (const [url, type, nav] of [['https://user@we-stay-fit-foundation-trial.lovable.app/~flock.js', 'script'], ['https://u:p@we-stay-fit-foundation-trial.lovable.app/__l5e/events.a1b2c3d4e5f60718.js', 'script'],
+    ['https://user@we-stay-fit-foundation-trial.lovable.app/assets/shell-AAA.js', 'script'], ['https://u:p@we-stay-fit-foundation-trial.lovable.app/', 'document', true], ['https://:p@we-stay-fit-foundation-trial.lovable.app/~flock.js', 'script'],
+    ['https://user@we-stay-fit-foundation-trial.lovable.app/favicon.ico', 'image'], ['https://u:p@we-stay-fit-foundation-trial.lovable.app/data.json', 'fetch']]) { // images and data too (W3 F6)
+    const v = c(url, type, nav);
     assert.equal(v.action, 'abort', url);
-    assert.match(v.reason, /^(script|document) https:\/\/we-stay-fit-foundation-trial\.lovable\.app\/\S* carries userinfo \(not printed\), which no reviewed request has$/, url);
+    assert.match(v.reason, /^(script|document|image|fetch) https:\/\/we-stay-fit-foundation-trial\.lovable\.app\/\S* carries userinfo \(not printed\), which no reviewed request has$/, url);
     assert.doesNotMatch(v.reason, /user@|u:p|:p@/, 'the userinfo itself is never printed');
   }
   assert.equal(c(`${L}/assets/shell-AAA.js`, 'script').want, R.assets['shell-AAA.js']);
@@ -1018,7 +1104,8 @@ test('codeGuard: fulfils exactly the hashed bytes once verified; refuses a redir
       async abort(code) { out.aborted = code; },
     } };
   };
-  for (const type of ['text/javascript; charset=windows-1252', 'text/javascript; CHARSET=windows-1252', 'application/javascript; charset="utf-16le"', 'text/javascript; charset=utf-8; charset=windows-1252']) {
+  for (const type of ['text/javascript; charset=windows-1252', 'text/javascript; CHARSET=windows-1252', 'application/javascript; charset="utf-16le"', 'text/javascript; charset=utf-8; charset=windows-1252',
+    'text/javascript;\tcharset=windows-1252', 'text/javascript;  charset=windows-1252', 'text/javascript, text/javascript; charset=windows-1252']) { // W3 F2, F3
     const one = codeGuard(FAKE_REVIEWED);
     const x = assetRoute(type);
     await one.handle(x.r);

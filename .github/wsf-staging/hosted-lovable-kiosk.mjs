@@ -65,10 +65,13 @@ export const PROJECT_ID = 'westayfit-staging';
 export const REVIEWED_BUILD = Object.freeze({
   // Lovable db3fd2f2 on the trial host: exactly the LOVABLE_OBSERVED_BUILD line of the credential-free gate bind run
   // 38018743683 (main 6e8acc31, gate job 114114813301, 02:56Z; L0 #394 6093058625), from two transcriptions of its log.
+  // STALE under step C: those digests are step B's canonical form, so the two param templates cannot match until the
+  // re-pin from L0's step C gate samples (#394 6093295458). Step C adds only the img counts its shape requires (0 on `/`,
+  // 2 on each param template, as DEEPLINK-DRIFT-CONFIRM-1 shows, #394 6093468966); `/`'s digest is unchanged by step C.
   documents: Object.freeze({
-    '/': Object.freeze({ sha256: '55f9d9a35c95aeea889644ef8c9408aae6617f32c22de187a134516892b93b03', streamU: 2, nul: 3 }),
-    '/display/$goalId': Object.freeze({ sha256: 'b15d36a06b362063ab8b0817d8d35a8e51982dc5b80630420b473e6ec79db2ae', streamU: 2, nul: 5 }),
-    '/kiosk/$communityId/$goalId': Object.freeze({ sha256: 'f9a8996609e0e4e6168174263d4cba53e7a3868c67e10fc44cc194cb22934398', streamU: 2, nul: 7 }),
+    '/': Object.freeze({ sha256: '55f9d9a35c95aeea889644ef8c9408aae6617f32c22de187a134516892b93b03', streamU: 2, nul: 3, img: 0 }),
+    '/display/$goalId': Object.freeze({ sha256: 'b15d36a06b362063ab8b0817d8d35a8e51982dc5b80630420b473e6ec79db2ae', streamU: 2, nul: 5, img: 2 }),
+    '/kiosk/$communityId/$goalId': Object.freeze({ sha256: 'f9a8996609e0e4e6168174263d4cba53e7a3868c67e10fc44cc194cb22934398', streamU: 2, nul: 7, img: 2 }),
   }),
   assets: Object.freeze({
     'auth-gate-DazlXpxN.js': 'cc598cd6a7f593cc1a983eb248b1d19833ce028232d3cfd8b3d8eac575245ba9',
@@ -248,6 +251,15 @@ const TOKEN_RE = /data-context-token="([A-Za-z0-9._~:+/=-]{8,4096})"(?=[\s/>])/g
 const STREAM_OPEN_RE = /<script\b[^>]*?\sdata-tsr-stream-part(?=[\s=/>])[^>]*>/gi;
 /** A `u:` key in the stream part (never the tail of another name such as `menu:`), with its value if that is 13 digits. */
 const STREAM_U_RE = /(?<![A-Za-z0-9_$])u:(\d{13}(?!\d))?/g;
+/**
+ * The hosting's page-preview screenshot link (LOVABLE-REVIEWED-BUILD-2 step C; Lovable DEEPLINK-DRIFT-DIAG-1 and
+ * CONFIRM-1, #394 6093458108 and 6093468966). Lovable's hosting adds it, as the og:image and twitter:image elements, to
+ * a page that sets no preview image, and renames the file on each screenshot regeneration. Only the file name is a slot:
+ * 32 lower-case hex digits, `_`, 13 digits, inside exactly this attribute (an attribute name of its own, the bucket host
+ * and the `lovp_` segment literal). The file-name shape anywhere else is refused.
+ */
+const PREVIEW_IMAGE_RE = /(?<=\s)content="https:\/\/pub-bb2e103a32db4e198524a2e9ed8f35b4\.r2\.dev\/lovp_372ahwppkw9debd61922xf2ayz\/([0-9a-f]{32}_[0-9]{13})\.png"/g;
+const PREVIEW_NAME_RE = /[0-9a-f]{32}_[0-9]{13}/g;
 /** Valid UTF-8 only, and a leading BOM kept as a character, so it is a byte difference like any other (W3 R1). */
 const UTF8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 /**
@@ -260,7 +272,9 @@ const outside = (v) => [[/[<>]/, 'angle bracket'], [/\s/, 'whitespace'], [/&/, '
  * The canonical form of one served document for the URL it was served at, and its sha256, or why there is none
  * (HTML-VARIANCE-1, #365 6089082668 and 6089534129). Exactly two per-request values are normalized, each with a strict
  * count: the value of the host's one `data-context-token` attribute, and each `u:<13 digits>` inside the one
- * `data-tsr-stream-part` script. Then each of the URL's own path params is put back into its template slot. Every
+ * `data-tsr-stream-part` script. On a param template the hosting's preview screenshot file name is normalized too, in
+ * exactly two links naming the same file (none on `/`; step C). Then each of the URL's own path params is put back into
+ * its template slot. Every
  * other byte is kept, so any other difference (a script, an attribute, route data, a per-request value elsewhere)
  * changes the digest. The form is a list of literal text and slots, hashed as JSON, so no byte of a document (a NUL
  * included) can stand for a slot. Nothing returned carries the token's value.
@@ -304,6 +318,17 @@ export function canonicalDocument(text, url) {
   }
   if (nonDigit) return fail(`${nonDigit} of the ${streamU} u: values in the stream part are not 13 digits`);
   if (!streamU) return fail('the stream part carries no u: value');
+  // 3. The hosting's preview screenshot (step C): exactly two links on a param template, none on `/`, outside the stream
+  //    part, both naming the same file; the file-name shape nowhere else. Only the file name is cut.
+  const shots = [...doc.matchAll(PREVIEW_IMAGE_RE)];
+  const wantShots = params.length ? 2 : 0;
+  if (shots.length !== wantShots) return fail(`${shots.length} hosting preview-image link(s), not exactly ${wantShots}`);
+  const shapes = doc.match(PREVIEW_NAME_RE)?.length ?? 0;
+  if (shapes !== shots.length) return fail(`the preview-image file-name shape appears ${shapes - shots.length} time(s) outside the preview-image links`);
+  if (shots.some((x) => x.index >= start && x.index < end)) return fail('a preview-image link is inside the stream part');
+  const previewImages = [...new Set(shots.map((x) => x[1]))];
+  if (previewImages.length > 1) return fail('the two preview-image links name different files');
+  for (const x of shots) { const at = x.index + x[0].length - '.png"'.length - x[1].length; cuts.push([at, at + x[1].length, 'preview-image']); }
   // NUL characters are document bytes (the real host's documents carry them): kept, counted, and classed by context.
   const nulIn = (a, b) => doc.slice(a, b).split('\u0000').length - 1;
   const nul = nulIn(0, doc.length);
@@ -317,7 +342,7 @@ export function canonicalDocument(text, url) {
   }
   const nulClasses = { stream: nulIn(start, end), script: inScript, markup: 0 };
   nulClasses.markup = nul - nulClasses.stream - nulClasses.script;
-  // 3. Literal text between the cuts, then the URL's own params, longest first, as slots in the literal text only.
+  // 4. Literal text between the cuts, then the URL's own params, longest first, as slots in the literal text only.
   let parts = [];
   let from = 0;
   for (const [a, b, slot] of cuts.sort((x, y) => x[0] - y[0])) { parts.push(doc.slice(from, a), { slot }); from = b; }
@@ -332,7 +357,7 @@ export function canonicalDocument(text, url) {
       return pieces.flatMap((q, i) => (i ? [{ slot: `param:${name}` }, q] : [q]));
     });
   }
-  return { template: m.template, sha256: sha256(Buffer.from(JSON.stringify(parts), 'utf8')), streamU, nul, nulClasses, params: counts, bom: doc.charCodeAt(0) === 0xfeff };
+  return { template: m.template, sha256: sha256(Buffer.from(JSON.stringify(parts), 'utf8')), streamU, nul, nulClasses, img: shots.length, previewImages, params: counts, bom: doc.charCodeAt(0) === 0xfeff };
 }
 
 /**
@@ -356,10 +381,9 @@ function charsetProblem(t) {
  * or stylesheet declared in a charset other than UTF-8 is refused, at bind and in the guard, and a verified asset keeps
  * the host's own headers. Refused rather than relabelled: relabelling would make the run's browser decode the asset
  * differently from a visitor's, so a host-side charset change would pass host-build while the product broke for the
- * people using it. In every admitted case the browser decodes the reviewed bytes as UTF-8: a module script always, and
- * a classic script or stylesheet with no declared charset by its BOM or @charset (inside the reviewed bytes), by what
- * the reviewed document says, or by the document's encoding, which the guard fixes as UTF-8. The MIME type is left to
- * the browser's own checks, which treat this run as they treat a visitor.
+ * people using it. In every admitted case the encoding is fixed by reviewed input, never by an unverified header: UTF-8
+ * unless the reviewed bytes (a BOM or @charset) or the reviewed document say otherwise (a module script is always
+ * UTF-8; W3 N1). The MIME type is left to the browser's own checks, which treat this run as they treat a visitor.
  */
 export const assetTypeProblem = (contentType) => charsetProblem(String(contentType ?? '').trim());
 /** The content type every verified document is fulfilled with (L0 R7). */
@@ -415,9 +439,9 @@ export async function servedManifest(fetchImpl, base = LOVABLE_URL) {
   const documents = {};
   for (const t of ROUTE_TEMPLATES) {
     const of = probes.filter((x) => matchTemplate(new URL(`${base}${x.path}`).pathname)?.template === t);
-    const forms = new Set(of.map((x) => (x.sha256 ? `${x.sha256} ${x.streamU} ${x.nul}` : null)));
+    const forms = new Set(of.map((x) => (x.sha256 ? `${x.sha256} ${x.streamU} ${x.nul} ${x.img}` : null)));
     documents[t] = of.length && of.every((x) => x.sha256) && forms.size === 1
-      ? { sha256: of[0].sha256, streamU: of[0].streamU, nul: of[0].nul, nulClasses: of[0].nulClasses, bom: of[0].bom }
+      ? { sha256: of[0].sha256, streamU: of[0].streamU, nul: of[0].nul, img: of[0].img, nulClasses: of[0].nulClasses, bom: of[0].bom, previewImages: [...new Set(of.flatMap((x) => x.previewImages))] }
       : { sha256: null, streamU: null, nul: null, reason: of.find((x) => !x.sha256)?.reason ?? `its ${of.length} loads reduce to ${forms.size} different canonical documents (route data beyond the URL's own params, or a per-request value outside the two normalized ones)` };
   }
   const assets = {};
@@ -439,13 +463,13 @@ export async function servedManifest(fetchImpl, base = LOVABLE_URL) {
   return { documents, assets: Object.fromEntries(Object.entries(assets).sort(([a], [b]) => (a < b ? -1 : 1))), probes, refusals, blocked };
 }
 
-const pinnedDocument = (d) => /^[0-9a-f]{64}$/.test(String(d?.sha256)) && Number.isInteger(d?.streamU) && d.streamU > 0 && Number.isInteger(d?.nul) && d.nul >= 0;
+const pinnedDocument = (d) => /^[0-9a-f]{64}$/.test(String(d?.sha256)) && Number.isInteger(d?.streamU) && d.streamU > 0 && Number.isInteger(d?.nul) && d.nul >= 0 && Number.isInteger(d?.img) && d.img >= 0;
 /** The observed build against the reviewed one: PASS only on the same canonical documents, the same asset names with the same digests, and no document reference the guard would refuse. */
 export function bindBuild(observed, reviewed = REVIEWED_BUILD) {
   const want = reviewed?.assets ?? {};
   const docs = reviewed?.documents ?? {};
-  if (!Object.keys(want).length || !ROUTE_TEMPLATES.every((t) => pinnedDocument(docs[t]))) return { status: 'BLOCKED', reason: 'no reviewed build is pinned yet (REVIEWED_BUILD needs a canonical document for every route template and every asset)' };
-  const changedDocs = ROUTE_TEMPLATES.filter((t) => observed?.documents?.[t]?.sha256 !== docs[t].sha256 || observed.documents[t].streamU !== docs[t].streamU || observed.documents[t].nul !== docs[t].nul);
+  if (!Object.keys(want).length || !ROUTE_TEMPLATES.every((t) => pinnedDocument(docs[t]))) return { status: 'BLOCKED', reason: 'no reviewed build is pinned yet (REVIEWED_BUILD needs a canonical document, with its u:, NUL and preview-image counts, for every route template, and every asset)' };
+  const changedDocs = ROUTE_TEMPLATES.filter((t) => observed?.documents?.[t]?.sha256 !== docs[t].sha256 || observed.documents[t].streamU !== docs[t].streamU || observed.documents[t].nul !== docs[t].nul || observed.documents[t].img !== docs[t].img);
   if (changedDocs.length) return { status: 'FAIL', reason: `the served ${changedDocs.join(', ')} document${changedDocs.length > 1 ? 's differ' : ' differs'} from the reviewed one (inline or loaded executable content, route data or a per-request value changed)` };
   const got = observed?.assets ?? {};
   const missing = Object.keys(want).filter((n) => !Object.hasOwn(got, n));
@@ -464,26 +488,30 @@ export function bindBuild(observed, reviewed = REVIEWED_BUILD) {
  * one JSON line to pin. Templates,
  * fixed probe paths, names, counts, digests and whether a document starts with a BOM (`bom=yes|no`, which the digest
  * already binds; printed so a changed digest can be told apart from a BOM, run 38017456574) only: never a document's
- * bytes or the token's value.
+ * bytes or the token's value. Each template's line also names the preview screenshot files its loads carried (public,
+ * printed only in the checked shape, never in the line to pin), so two samples show a regeneration being absorbed.
  */
 const nulWhere = (c) => (c && (c.stream || c.script || c.markup) ? ` (stream part ${c.stream}, other inline script ${c.script}, markup ${c.markup})` : '');
 const bomFlag = (d) => ` bom=${d.bom ? 'yes' : 'no'}`;
+/** The observed preview screenshot file names (public: every visitor gets them), printed only in the checked shape. */
+const PREVIEW_NAME = /^[0-9a-f]{32}_[0-9]{13}$/;
+const previewNames = (d) => { const n = (d.previewImages ?? []).filter((x) => PREVIEW_NAME.test(x)); return n.length ? ` preview-image=${n.join(',')}` : ''; };
 export function bindLines(observed, verdict) {
   const lines = [`LOVABLE_BUILD=${verdict.status} (${verdict.reason})`];
   if (!observed) return lines;
   for (const t of ROUTE_TEMPLATES) {
     const d = observed.documents?.[t];
-    lines.push(d?.sha256 ? `LOVABLE_OBSERVED_DOCUMENT ${t} ${d.sha256} u=${d.streamU} nul=${d.nul}${nulWhere(d.nulClasses)}${bomFlag(d)}` : `LOVABLE_OBSERVED_DOCUMENT ${t} UNBOUND (${d?.reason ?? 'not loaded'})`);
+    lines.push(d?.sha256 ? `LOVABLE_OBSERVED_DOCUMENT ${t} ${d.sha256} u=${d.streamU} nul=${d.nul}${nulWhere(d.nulClasses)} img=${d.img}${bomFlag(d)}${previewNames(d)}` : `LOVABLE_OBSERVED_DOCUMENT ${t} UNBOUND (${d?.reason ?? 'not loaded'})`);
   }
   for (const p of observed.probes ?? []) {
     const where = `${String(p.path).split('?')[0]}${String(p.path).includes('?') ? ' (with an invite query)' : ''}`;
-    lines.push(`LOVABLE_DOCUMENT_PROBE ${where} ${p.sha256 ? `${p.template} ${p.sha256} u=${p.streamU} nul=${p.nul}${nulWhere(p.nulClasses)}${bomFlag(p)} params=${JSON.stringify(p.params)}` : `refused (${p.reason})`}`);
+    lines.push(`LOVABLE_DOCUMENT_PROBE ${where} ${p.sha256 ? `${p.template} ${p.sha256} u=${p.streamU} nul=${p.nul}${nulWhere(p.nulClasses)} img=${p.img}${bomFlag(p)} params=${JSON.stringify(p.params)}` : `refused (${p.reason})`}`);
   }
   for (const r of observed.refusals ?? []) lines.push(`LOVABLE_DOCUMENT_REFUSED_REFERENCE ${r}`);
   for (const w of observed.blocked ?? []) lines.push(`LOVABLE_DOCUMENT_BLOCKED_HOST_SCRIPT ${w}`);
   for (const [n, d] of Object.entries(observed.assets ?? {})) lines.push(`LOVABLE_OBSERVED_ASSET ${n} ${d}`);
   if (ROUTE_TEMPLATES.every((t) => pinnedDocument(observed.documents?.[t]))) {
-    lines.push(`LOVABLE_OBSERVED_BUILD ${JSON.stringify({ documents: Object.fromEntries(ROUTE_TEMPLATES.map((t) => [t, { sha256: observed.documents[t].sha256, streamU: observed.documents[t].streamU, nul: observed.documents[t].nul }])), assets: observed.assets })}`);
+    lines.push(`LOVABLE_OBSERVED_BUILD ${JSON.stringify({ documents: Object.fromEntries(ROUTE_TEMPLATES.map((t) => [t, { sha256: observed.documents[t].sha256, streamU: observed.documents[t].streamU, nul: observed.documents[t].nul, img: observed.documents[t].img }])), assets: observed.assets })}`);
   }
   return lines;
 }
@@ -537,8 +565,8 @@ export function classifyRequest({ url, type, navigation }, reviewed = REVIEWED_B
  * which carry data, never code). A verified response is fetched once and fulfilled with exactly the bytes read: an asset
  * only when it is declared with no charset or UTF-8 and those bytes carry its reviewed digest (it keeps the host's own
  * headers), a document only when it is served as text/html with no charset or UTF-8,
- * its bytes are valid UTF-8 (a BOM kept), and they reduce, for the URL requested, to its
- * template's reviewed canonical document with the reviewed numbers of stream-part timestamps and NULs. A redirect, an error
+ * its bytes are valid UTF-8 (a BOM kept), and they reduce, for the URL requested, to its template's reviewed canonical
+ * document with the reviewed numbers of stream-part timestamps, NULs and preview-image links. A redirect, an error
  * status, other bytes, an unreviewed or foreign script or document is aborted and recorded; a document is fulfilled with
  * an explicit UTF-8 charset, so the browser decodes the text that was verified; a host script is
  * aborted and counted as blocked. `check()` throws once anything was refused, so the journey stops before the next step
@@ -569,6 +597,7 @@ export function codeGuard(reviewed = REVIEWED_BUILD) {
       if (!d.sha256) { await refuse(`${c.what}: ${d.reason}`); return; }
       if (d.template !== c.template || d.streamU !== c.want.streamU) { await refuse(`${c.what} carries ${d.streamU} stream-part u: value(s), not the reviewed ${c.want.streamU}`); return; }
       if (d.nul !== c.want.nul) { await refuse(`${c.what} carries ${d.nul} NUL character(s), not the reviewed ${c.want.nul}`); return; }
+      if (d.img !== c.want.img) { await refuse(`${c.what} carries ${d.img} preview-image link(s), not the reviewed ${c.want.img}`); return; }
       if (d.sha256 !== c.want.sha256) { await refuse(`${c.what} differs from the reviewed ${c.template} document`); return; }
     } else {
       const typeProblem = assetTypeProblem(res.headers()['content-type']);
