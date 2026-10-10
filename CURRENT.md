@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=276b54b0299557b3f7690669f46bcb8ebcf90651b2722c92cea43584fa6a291f events=1152 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=268f4799de26f190f017f3054379ecad9dd8f52b76c45f9dad71fc8799f6c3d9 events=1157 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `276b54b0299557b3f7690669f46bcb8ebcf90651b2722c92cea43584fa6a291f` (1152 events)
+- Ledger head: `268f4799de26f190f017f3054379ecad9dd8f52b76c45f9dad71fc8799f6c3d9` (1157 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -29,8 +29,8 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 
 | Worker | Inbox | Active now | Reviewing | Waiting on review | Blocked | Next | Queue | WATCH |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| W3 | #396 | — | WSF-OPERATOR-ACCESS-1 | WORKER-EXECUTION-PROFILES-1 | NORTHSTAR-MIRROR-INTAKE-1 | — | — | on |
-| W4 | #394 | — | — | — | — | — | — | off |
+| W3 | #396 | — | — | WORKER-EXECUTION-PROFILES-1 | NORTHSTAR-MIRROR-INTAKE-1 | — | — | off |
+| W4 | #394 | LOVABLE-GUARD-PING-1 | — | — | — | — | — | on |
 | W5 | #395 | — | — | — | — | — | — | off |
 | W7 | #434 | — | — | — | — | — | — | off |
 | W9 | #497 | — | — | WSF-OPERATOR-ACCESS-1 | EVENT-LIFECYCLE-BACKEND-RECOVERY-1, MEMBER-TRUTH-BACKEND-1 | — | — | off |
@@ -77,6 +77,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | KIOSK-UNVERIFIED-STAGING-RECOVERY-2 | W3 | work | INTEGRATED (source-only) | ledger | WITHDRAWN | — | — | — | — | — | — | — | comment:6074824513 | comment:6075036000 | — | Finish the consented staging pin with verified approval ancestry, the registered unverified hosted driver and tracked synthetic fixtures | 1×ops-source then director | — |
 | LOVABLE-DEVICE-QA-1 | W4 | work | INTEGRATED (source-only) | ledger | WITHDRAWN | — | — | — | — | — | — | — | comment:6079513029 | comment:6081289315 | — | Proof-only lovable-device-matrix mode in the staging workflow: four viewports over the accepted Web Twin journeys on the trial host, PASS/FAIL/BLOCKED per row with screenshots; L0-dispatched | 1×ops-source then director | — |
 | LOVABLE-DEVICE-QA-2 | W4 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #605 | 4bf7f8b5 | 4bf7f8b5 | — | 3c2ef6b9 | — | W3 | comment:6081291520 | pull_request:605 | — | Proof-only lovable-device-matrix mode in the staging workflow: four viewports over the accepted Web Twin journeys on the trial host, PASS/FAIL/BLOCKED rows with screenshots; L0-dispatched; + mode pins | 1×ops-source then director | — |
+| LOVABLE-GUARD-PING-1 | W4 | work | INTEGRATED (source-only) | ledger | RELEASED | — | — | — | — | — | — | — | comment:6094618925 | comment:6094618925 | — | Code guard: allow Playwright resource type ping only to the exact API_ORIGINS as non-navigation data (the Firestore Listen beacon that stopped main runs 38030033477/38030045509), with tests | 1×ops-source then director | — |
 | LOVABLE-KIOSK-HOSTED-PROOF-1 | W3 | work | VERIFIED (hosted) | ledger | INTEGRATED | #589 | 8c9093c0 | 8c9093c0 | — | 41bff6c6 | — | W4, W9 | comment:6044894488 | pull_request:589 | — | Run the pinned Lovable kiosk journey with bounded real staging fixtures and cleanup inside the existing trusted runner | 1×ops-source+1×security then director | — |
 | LOVABLE-REVIEWED-BUILD-1 | W4 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #609 | d498cd6c | d498cd6c | — | 6e8acc31 | — | W3 | comment:6090734914 | pull_request:609 | — | Route-aware reviewed-build pin for Lovable expo build 9b9eade5: normalize only the two per-request values, bind documents per route template, keep asset digests exact, negative mutation tests | 1×ops-source then director | — |
 | LOVABLE-REVIEWED-BUILD-2 | W4 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #610 | 6fcaa93c | 6fcaa93c | — | 614836b8 | — | W3 | comment:6092692777 | pull_request:610 | — | Re-pin REVIEWED_BUILD to the next Lovable publish (db3fd2f2) and close LOVABLE-REVIEWED-BUILD-1's carried items: UTF-8 asset fulfilment, CHARSET-name and token-length negatives, QA-note corrections | 1×ops-source then director | — |
@@ -99,7 +100,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | TOGETHER-COMPLETION-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #567 | e4e32ed6 | e4e32ed6 | — | 22766935 | — | W4 | comment:5964984624 | pull_request:567 | — | Port the owner-selected Together completion from the frozen Lovable reference to the confirmed member receipt with truthful totals, one-time motion and reduced-motion parity | 1×journey-qa then director | — |
 | WORKER-EXECUTION-PROFILES-1 | W3 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #562 | 0790876b | 0790876b | — | — | — | W4, W9 | comment:5962925247 | comment:5963579258 | — | Finish existing PR 562 credential-mode safety and pilot readiness without activating or replacing live workers | 1×ops-source+1×security then director | — |
 | WRITER-CONCURRENCY-1 | W4 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #603 | 75f77d30 | 75f77d30 | — | 7cd5aad3 | — | W7 | comment:6078863846 | pull_request:603 | — | Writer gap fix: keep non-qualifying issue_comment runs out of the wsf-control-writer concurrency group so they never cancel a queued qualifying run; update the workflow test pin and note | 1×ops-source then director | — |
-| WSF-OPERATOR-ACCESS-1 | W9 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #612 | 9ad22642 | 9ad22642 | — | — | — | W3 | comment:6093847482 | comment:6094482426 | — | Owner operator access: map the WSF authorization model, gaps vs the owner's event-operator ask, an owner-run read-only account audit (email typed locally, never stored) | 1×ops-source then director | — |
+| WSF-OPERATOR-ACCESS-1 | W9 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #612 | 9ad22642 | 9ad22642 | — | — | — | W3 | comment:6093847482 | comment:6094612797 | — | Owner operator access: map the WSF authorization model, gaps vs the owner's event-operator ask, an owner-run read-only account audit (email typed locally, never stored) | 1×ops-source then director | — |
 
 ## Wakes
 
@@ -282,5 +283,6 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | d477ee8ee348 | W3 | LOVABLE-REVIEWED-BUILD-2 | review | acked | 6094062052 | comment:6094089993 |
 | f14cd0deb511 | W4 | WSF-OPERATOR-ACCESS-1 | review | acked | 6094254162 | comment:6094304154 |
 | abb6469c0b12 | W9 | WSF-OPERATOR-ACCESS-1 | handback | acked | 6094436449 | comment:6094458967 |
-| 94cca828ff42 | W3 | WSF-OPERATOR-ACCESS-1 | review | delivered | 6094509878 | — |
+| 94cca828ff42 | W3 | WSF-OPERATOR-ACCESS-1 | review | acked | 6094509878 | comment:6094612797 |
+| 00888f9dc4a6 | W4 | LOVABLE-GUARD-PING-1 | release | requested | — | — |
 
