@@ -6751,3 +6751,58 @@ L0's one-shot relay for this wake asked for six checks and an evidence table. It
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0 (re-run before push).
 
 **Status:** **PASS at `7f42ba1c` with zero unresolved findings.** PN-1 to PN-5 are non-blocking. This is independent journey QA of the harness source: it is not acceptance, a deployment, or a hosted proof. W7 made no product edit, merge, dispatch, deploy, live-data change, credential or permission change, and did not touch any state ref or comment other than its own GitHub replies.
+
+## §85. Check 85: #614 LOVABLE-MATRIX-ALIGN-1 at `bab7e980`
+
+**Assignment:** router wake `1827500dc865864ff360b64b0b27a40cdc0f6a959fefc3ac2aeac3c62f7438bb` (#434 `6096577933`), under the owner's standing approval to ACK and perform valid W7 router reviews. I refreshed `wsf-control-state-2` first: `check` passed (1188 events), `worker-view W7` showed `WATCH=on` and `REVIEWING=LOVABLE-MATRIX-ALIGN-1 phase=UNDER_REVIEW pr=#614 subject=bab7e980…`, W7 was the sole reviewer (class `ops-source`), and the wake was `delivered`. The PR head was still the subject, and nothing newer sat on #434 or the PR. ACK: #434 `6096591120`.
+
+**Subject:** #614 (draft, owner W4) at exactly `bab7e9800072e10df6ad4cc269e6f7794baf2c81`: three commits on `main` `e96cd947`, 6 files, +240/−42, all inside the ledger's `subjectPaths`. I verified it in detached worktrees and pushed nothing from them. **I used no hosted system, no staging project, no Lovable project and no credential.** The packet is two hosted-proof harnesses and their tests, so every run below is the PR's own hermetic suite.
+
+### Reproduced
+
+| Check | Result |
+|---|---|
+| `hosted-lovable-kiosk.test.mjs` | **30 / 30** on Node 20.20.2 **and** 22.22.2 (the PR says 30) |
+| `hosted-lovable-device-matrix.test.mjs` | **21 / 21** on both (the PR says 21) |
+| `tests/workflow-contract.test.mjs` | **103 / 103** on both |
+| `.github/wsf-staging/tests/run-all.mjs` and `tools/wsf-control/run-all.mjs` | **all suites passed**, each on both Node versions |
+| `REVIEWED_BUILD` | the block is **byte-identical** to `e96cd947`'s (9022 bytes, sha256 `50b17e5f…`); **no vector or hash line changed** in either test; `VECTOR_SHA256` is `b7316f8e…`, as the QA note says |
+| Scope against the queue (#365 `6096204665`) | no product file; every change is one of the six reserved paths; items 1 to 7 each answered (below) |
+| W7 mutants of the two harnesses (33) | the PR's own tests kill **32 / 33** |
+
+### Items
+
+1. **The display and sign-up cells (queue items 1 to 3, 6).**
+   - The community, the total (`strong`) and its target (`span`, `of 500 squats`), and exactly two freshness lines ("Live · confirmed totals", then `^updated \d+ s ago$`) are each compared, and the state, title and seeded number stay. The step count is read as text content and must be exactly "Step 2 of 2".
+   - **All four failures the queue required are tested**, at unit level and at every viewport: the old `/ 500 confirmed` text, an uppercase-only step, another freshness first line, and a missing community element.
+   - A failed check now quotes the scrubbed text it read (at most 40 characters), not "other".
+   - I mutated the new branches below, and **all were killed**: the community, total, target, state, title and seeded-number comparisons; all three freshness conditions; the updated-line pattern; the step verdict; the sign-up cell's use of it; and `exactText` reverting to `innerText`. (Not mutated: `displayNumber`'s `en-GB` formatting, which agrees with `en-US` for the integers the fixtures use, and the 40-character quote cap.)
+2. **W3's #613 items.**
+   - **O1 (required), closed everywhere.** Both harnesses print only through `say()`. The lines that can carry host or app text are exactly `seenLine` and `bindLines`, and both now return `logSafe`-mapped lines; every other `say()` prints fixed text, a harness-chosen id with an enum status, a workflow-env value or the run tag. I drove the sanitiser with hostile text: no printed line keeps `##[`, and a single pass is enough (the replacement never recreates the opener). Six mutants of it (identity, first occurrence only, line start only, each of the three call sites skipping it) are **all killed**.
+   - **O2:** `other` and `prefetch` added to `DATA_TYPES` are **both killed**.
+   - **O3:** "withheld only on the raw text" and "only on the scrubbed text" are **both killed**.
+   - **O4:** the scrub gaps are written down as known limits, and I confirmed each by driving `seenLine`: `?api_key=` and `?x1=` are not replaced, a `#fragment=` is not replaced, and `a@x.co-op.test` becomes `<email>-op.test`. The note is true and says no current seen source carries one.
+   - **O5:** a scan rule written as `new RegExp(…)` breaks the parity test whether it is added to the harness or to `scan-evidence.mjs`: **both killed**.
+3. **W3's #610 items.** O1 (the file-name shape inside a longer hex or digit run) is killed; O2's frame elements (five mutated: `http`/`https`, `Content`/`content`, the slash before `lovp_`, the unescaped `.png` dot, `png`/`jpg`) are **all killed**; O3 (the printed-name anchor) is killed; O4 (the stale `REVIEWED_BUILD` comment and the R3 vector note) and O5 (the "attribute name of its own" wording) are corrected in the diff and read correctly.
+4. **The station-row reason (queue item 5) is supported.**
+   - #587's merge `934f24f0` ("Merge PR #587: KIOSK-EXPECTED-TURN-1") **is an ancestor of `ec162d17`**, by git.
+   - The deployment receipt (#365 `6078582786`) says all 49 existing callables were updated to `ec162d17` and reads `INVENTORY_AFTER=59 … VERIFY=pass`.
+   - In Check 84 I reproduced on the emulator that the #587 server at `ec162d17` refuses an unbound station Start with `INVALID_ARGUMENT`, and run 61's hosted authorization step failed on staging (job level), which fits staging serving that contract.
+   - The rows stay BLOCKED, the reason is now true, and a test pins it (reverting it is **killed**).
+5. **The Actions facts hold at job level.** Kiosk run `38041007797` and matrix run `38041023558` are both `workflow_dispatch` on main `e96cd947`; each proof step failed and each `config` and `gate` passed, as the queue says. The row counts and seen texts live in logs and artifacts this environment cannot download.
+
+### Precision notes (non-blocking)
+
+- **PN-1 (one test-pin gap).** The cap boundary: a mutant that lets a 301-character seen text through survives the PR's tests. The cap works (a 301-character text is cut to 300), so this is a missing boundary test, not a defect.
+- **PN-2 (cosmetic).** `hosted-lovable-kiosk.mjs:247-253` is `seenLine`'s doc comment, and it now sits above `logSafe`'s own block, so `seenLine` has no doc comment of its own. The sentence "The line passes logSafe" is in the detached block.
+- **PN-3 (Node 20 and 22).** The PR measures both; I reproduced both, as above.
+
+### Limits, stated plainly (not findings)
+
+- **I did not read the Lovable source.** The selectors and structure at the served build `db3fd2f2` (the display markup, `.eyebrow` and its `text-transform`, `EXPECTED_TURN_GATE`, `station-port.ts`) are outside this repository, and I did not use the Lovable connector or fetch the live site. They rest on L0's source inspection (queue `6096204665`) and W4's re-read. What I checked is that the harness reads exactly what they say, that its tests fail each way they say, and that the fake markup is held to that description.
+- **Nothing here is a hosted proof.** As the PR says, L0 re-runs both proofs on `main` after a merge, and nothing is dispatched from this branch.
+- `/reg-d6d4.log` is still at the filesystem root (from Check 80); I could not delete it.
+
+- **Gates:** `ts:check` 0; `check-evidence-intact` 0 (re-run before push).
+
+**Status:** **PASS at `bab7e980` with zero unresolved findings.** PN-1 to PN-3 are non-blocking. W7 made no product edit, merge, dispatch, deploy, live-data change, credential or permission change, and did not touch any state ref or comment other than its own GitHub replies.
