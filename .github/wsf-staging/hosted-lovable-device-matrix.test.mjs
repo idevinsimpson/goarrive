@@ -133,7 +133,7 @@ function servedDoc(pathname, extra = '') {
   const route = pathname === '/' ? '/' : segs[0] === 'display' ? '/display/$goalId' : '/kiosk/$communityId/$goalId';
   const ids = segs.slice(1);
   return `<!DOCTYPE html><html><head><link rel="stylesheet" href="/assets/index-CCC.css">`
-    + `<script src="/__l5e/events.Q1w2E3r4.js" data-context-token="ctx.${crypto.randomBytes(12).toString('base64url')}" defer></script><script src="/~flock.js" defer></script></head>`
+    + `<script src="/__l5e/events.a1b2c3d4e5f60718.js" data-context-token="ctx.${crypto.randomBytes(12).toString('base64url')}" defer></script><script src="/~flock.js" defer></script></head>`
     + `<body><main data-route="${route}"${ids.map((v, i) => ` data-p${i}="${v}"`).join('')}>\u0000</main>${extra}`
     + `<script data-tsr-stream-part="">$_TSR.router.matches=[{i:"__root__",u:${ts},x:"\u0000"},{i:"${route}${ids.length ? pathname : ''}",u:${ts}}]</script>`
     + `<script type="module" src="/assets/shell-AAA.js"></script></body></html>`;
@@ -144,7 +144,7 @@ const FAKE_REVIEWED = Object.freeze({
   documents: Object.freeze({ '/': canonOf('/'), '/display/$goalId': canonOf('/display/ga1-wsf-bind-probe'), '/kiosk/$communityId/$goalId': canonOf('/kiosk/ca1-wsf-bind-probe/ga1-wsf-bind-probe') }),
   assets: Object.freeze(Object.fromEntries(Object.entries(FAKE_ASSETS).map(([p, b]) => [p.slice(8), sha(b)]))),
 });
-const EVENTS_SCRIPT = `${LOVABLE_URL}/__l5e/events.Q1w2E3r4.js`;
+const EVENTS_SCRIPT = `${LOVABLE_URL}/__l5e/events.a1b2c3d4e5f60718.js`;
 const FLOCK_SCRIPT = `${LOVABLE_URL}/~flock.js`;
 const TAG = 'e5c-mx1abc-0a1b2c';
 
@@ -600,7 +600,7 @@ test('cli: --bind exits non-zero before any credential unless the served build i
   const lines = [];
   assert.equal(await cli('--bind', env, { fetchImpl: host(), say: (l) => lines.push(l) }), 1, 'the fake host is not the shipped pin, so the gate stops');
   assert.match(lines[0], /^LOVABLE_BUILD=FAIL/);
-  assert.deepEqual(lines.filter((l) => l.startsWith('LOVABLE_OBSERVED_DOCUMENT ')), Object.entries(FAKE_REVIEWED.documents).map(([t, d]) => `LOVABLE_OBSERVED_DOCUMENT ${t} ${d.sha256} u=2 nul=2 (stream part 1, other inline script 0, markup 1)`), 'the kiosk harness\'s route-aware bind, one canonical document per template');
+  assert.deepEqual(lines.filter((l) => l.startsWith('LOVABLE_OBSERVED_DOCUMENT ')), Object.entries(FAKE_REVIEWED.documents).map(([t, d]) => `LOVABLE_OBSERVED_DOCUMENT ${t} ${d.sha256} u=2 nul=2 (stream part 1, other inline script 0, markup 1) bom=no`), 'the kiosk harness\'s route-aware bind, one canonical document per template');
   assert.equal(lines.filter((l) => l.startsWith('LOVABLE_DOCUMENT_PROBE ')).length, kiosk.BIND_PROBES.length);
   assert.ok(lines.every((l) => !/join=|\?/.test(l)), 'probe lines name the page, never its query');
   assert.equal(await cli('--bind', env, { fetchImpl: host(), reviewed: FAKE_REVIEWED, say: () => {} }), 0);

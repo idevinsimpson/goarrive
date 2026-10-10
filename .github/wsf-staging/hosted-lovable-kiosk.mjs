@@ -7,8 +7,9 @@
  *   --bind     credential-free (the gate job): load the documents of every route template the journeys use (BIND_PROBES),
  *              reduce each to its canonical form (canonicalDocument), read the served assets, hash every one, and
  *              compare all of it to REVIEWED_BUILD below. Exit 0 only on an exact match. An empty REVIEWED_BUILD
- *              (nothing reviewed yet), a changed document, a missing, extra or changed asset, a document reference the
- *              code guard would refuse, or an unreadable host refuses BEFORE any credential exists, and prints the
+ *              (nothing reviewed yet), a changed document, a missing, extra or changed asset, an asset declared in a
+ *              charset other than UTF-8, a document reference the code guard would refuse, or an unreadable host
+ *              refuses BEFORE any credential exists, and prints the
  *              observed manifest (templates, names and sha256 only) so a reviewed commit can pin it.
  *   --run      credentialed (the lovable-kiosk job): bind again (drift since the gate refuses), then seed run-tagged
  *              fixtures with the EXISTING kit (journeys/fixture-kit.mjs) and drive the real Lovable UI. Every browser
@@ -16,7 +17,8 @@
  *              handshake and the redirect hops of a request the guard continued; those carry data, never code, as
  *              before this packet): each document the browser loads must reduce to its
  *              template's reviewed canonical document, and each /assets/ script or stylesheet must carry its reviewed
- *              digest (both fulfilled with exactly the bytes read); the host's own injected scripts are blocked, and
+ *              digest (both fulfilled with exactly the bytes read; a document or asset declared in a charset other than
+ *              UTF-8 is refused); the host's own injected scripts are blocked, and
  *              nothing else executable is loaded; a refusal fails host-build and stops the journey before the next
  *              step. The browser runs with no cloud or workflow credential in its environment. Every row is PASS,
  *              FAIL or BLOCKED; results are written in `finally`; exit 0 only when every row passed.
@@ -330,7 +332,7 @@ export function canonicalDocument(text, url) {
       return pieces.flatMap((q, i) => (i ? [{ slot: `param:${name}` }, q] : [q]));
     });
   }
-  return { template: m.template, sha256: sha256(Buffer.from(JSON.stringify(parts), 'utf8')), streamU, nul, nulClasses, params: counts };
+  return { template: m.template, sha256: sha256(Buffer.from(JSON.stringify(parts), 'utf8')), streamU, nul, nulClasses, params: counts, bom: doc.charCodeAt(0) === 0xfeff };
 }
 
 /**
@@ -341,10 +343,25 @@ export function canonicalDocument(text, url) {
 export function documentTypeProblem(contentType) {
   const t = String(contentType ?? '').trim();
   if (!/^text\/html\s*(;|$)/i.test(t)) return `served as ${t ? 'another content type' : 'no content type'}, not text/html`;
+  return charsetProblem(t);
+}
+/** Why a declared charset is refused, or null: none, or exactly one charset parameter (any case) that is UTF-8. */
+function charsetProblem(t) {
   const sets = [...t.matchAll(/;\s*charset\s*=\s*"?([^";\s]*)"?/gi)].map((x) => x[1].toLowerCase());
   if (sets.length > 1 || (sets.length === 1 && !['utf-8', 'utf8'].includes(sets[0]))) return `served with charset ${sets.join(', ')}, not UTF-8`;
   return null;
 }
+/**
+ * Why a reviewed asset's declared type is refused, or null (LOVABLE-REVIEWED-BUILD-2, queue #365 6092691424): a script
+ * or stylesheet declared in a charset other than UTF-8 is refused, at bind and in the guard, and a verified asset keeps
+ * the host's own headers. Refused rather than relabelled: relabelling would make the run's browser decode the asset
+ * differently from a visitor's, so a host-side charset change would pass host-build while the product broke for the
+ * people using it. In every admitted case the browser decodes the reviewed bytes as UTF-8: a module script always, and
+ * a classic script or stylesheet with no declared charset by its BOM or @charset (inside the reviewed bytes), by what
+ * the reviewed document says, or by the document's encoding, which the guard fixes as UTF-8. The MIME type is left to
+ * the browser's own checks, which treat this run as they treat a visitor.
+ */
+export const assetTypeProblem = (contentType) => charsetProblem(String(contentType ?? '').trim());
 /** The content type every verified document is fulfilled with (L0 R7). */
 const DOCUMENT_TYPE = 'text/html; charset=utf-8';
 
@@ -384,6 +401,7 @@ export async function servedManifest(fetchImpl, base = LOVABLE_URL) {
   const probes = [];
   const queue = [];
   const tags = [];
+  const assetRefusals = [];
   for (const p of BIND_PROBES) {
     const { body, type } = await get(p);
     const typeProblem = documentTypeProblem(type);
@@ -399,7 +417,7 @@ export async function servedManifest(fetchImpl, base = LOVABLE_URL) {
     const of = probes.filter((x) => matchTemplate(new URL(`${base}${x.path}`).pathname)?.template === t);
     const forms = new Set(of.map((x) => (x.sha256 ? `${x.sha256} ${x.streamU} ${x.nul}` : null)));
     documents[t] = of.length && of.every((x) => x.sha256) && forms.size === 1
-      ? { sha256: of[0].sha256, streamU: of[0].streamU, nul: of[0].nul, nulClasses: of[0].nulClasses }
+      ? { sha256: of[0].sha256, streamU: of[0].streamU, nul: of[0].nul, nulClasses: of[0].nulClasses, bom: of[0].bom }
       : { sha256: null, streamU: null, nul: null, reason: of.find((x) => !x.sha256)?.reason ?? `its ${of.length} loads reduce to ${forms.size} different canonical documents (route data beyond the URL's own params, or a per-request value outside the two normalized ones)` };
   }
   const assets = {};
@@ -408,13 +426,15 @@ export async function servedManifest(fetchImpl, base = LOVABLE_URL) {
     const name = p.slice('/assets/'.length);
     if (Object.hasOwn(assets, name)) continue;
     if (Object.keys(assets).length >= MAX_ASSETS) throw new Error(`more than ${MAX_ASSETS} assets; refusing a partial manifest`);
-    const { body } = await get(p);
+    const { body, type } = await get(p);
     assets[name] = sha256(body);
+    const typeProblem = assetTypeProblem(type);
+    if (typeProblem) assetRefusals.push(`${p.endsWith('.css') ? 'stylesheet' : 'script'} ${base}${p} is ${typeProblem}`);
     if (p.endsWith('.js')) for (const r of refs(body.toString('utf8'), true)) if (!Object.hasOwn(assets, r.slice(8)) && !queue.includes(r)) queue.push(r);
   }
   if (!Object.keys(assets).length) throw new Error('the served documents name no asset');
   const classified = tags.map((x) => classifyRequest({ ...x, navigation: false }, { documents: {}, assets }));
-  const refusals = [...new Set(classified.filter((c) => c.action === 'abort').map((c) => c.reason))];
+  const refusals = [...new Set([...classified.filter((c) => c.action === 'abort').map((c) => c.reason), ...assetRefusals])];
   const blocked = [...new Set(classified.filter((c) => c.action === 'block').map((c) => c.what))];
   return { documents, assets: Object.fromEntries(Object.entries(assets).sort(([a], [b]) => (a < b ? -1 : 1))), probes, refusals, blocked };
 }
@@ -442,19 +462,22 @@ export function bindBuild(observed, reviewed = REVIEWED_BUILD) {
  * The lines a bind prints: the verdict, each template's canonical document, each probe load, any reference the guard
  * would refuse, each host script it would block, each asset, and, when every template is bound, the whole manifest as
  * one JSON line to pin. Templates,
- * fixed probe paths, names, counts and digests only: never a document's bytes or the token's value.
+ * fixed probe paths, names, counts, digests and whether a document starts with a BOM (`bom=yes|no`, which the digest
+ * already binds; printed so a changed digest can be told apart from a BOM, run 38017456574) only: never a document's
+ * bytes or the token's value.
  */
 const nulWhere = (c) => (c && (c.stream || c.script || c.markup) ? ` (stream part ${c.stream}, other inline script ${c.script}, markup ${c.markup})` : '');
+const bomFlag = (d) => ` bom=${d.bom ? 'yes' : 'no'}`;
 export function bindLines(observed, verdict) {
   const lines = [`LOVABLE_BUILD=${verdict.status} (${verdict.reason})`];
   if (!observed) return lines;
   for (const t of ROUTE_TEMPLATES) {
     const d = observed.documents?.[t];
-    lines.push(d?.sha256 ? `LOVABLE_OBSERVED_DOCUMENT ${t} ${d.sha256} u=${d.streamU} nul=${d.nul}${nulWhere(d.nulClasses)}` : `LOVABLE_OBSERVED_DOCUMENT ${t} UNBOUND (${d?.reason ?? 'not loaded'})`);
+    lines.push(d?.sha256 ? `LOVABLE_OBSERVED_DOCUMENT ${t} ${d.sha256} u=${d.streamU} nul=${d.nul}${nulWhere(d.nulClasses)}${bomFlag(d)}` : `LOVABLE_OBSERVED_DOCUMENT ${t} UNBOUND (${d?.reason ?? 'not loaded'})`);
   }
   for (const p of observed.probes ?? []) {
     const where = `${String(p.path).split('?')[0]}${String(p.path).includes('?') ? ' (with an invite query)' : ''}`;
-    lines.push(`LOVABLE_DOCUMENT_PROBE ${where} ${p.sha256 ? `${p.template} ${p.sha256} u=${p.streamU} nul=${p.nul}${nulWhere(p.nulClasses)} params=${JSON.stringify(p.params)}` : `refused (${p.reason})`}`);
+    lines.push(`LOVABLE_DOCUMENT_PROBE ${where} ${p.sha256 ? `${p.template} ${p.sha256} u=${p.streamU} nul=${p.nul}${nulWhere(p.nulClasses)}${bomFlag(p)} params=${JSON.stringify(p.params)}` : `refused (${p.reason})`}`);
   }
   for (const r of observed.refusals ?? []) lines.push(`LOVABLE_DOCUMENT_REFUSED_REFERENCE ${r}`);
   for (const w of observed.blocked ?? []) lines.push(`LOVABLE_DOCUMENT_BLOCKED_HOST_SCRIPT ${w}`);
@@ -472,9 +495,11 @@ const DATA_TYPES = new Set(['xhr', 'fetch', 'eventsource']);
  * `/~flock.js` (seen in the documents by the bind of run 38006215259). The app reaches them only through optional calls
  * (`window.__lovableEvents?.…`), so they are blocked: never fetched or run, and never a refusal (Director ruling #394
  * 6091249662). Exact, anchored paths on the Lovable host, with no query or fragment, not even an empty one (the URL is
- * exactly origin + path), scripts only; anything else is refused.
+ * exactly origin + path), and no userinfo, scripts only; anything else is refused. The events id is exactly the real
+ * one's shape, 16 lower-case hex digits (`/__l5e/events.1718a1eacac7ff3a.js` in bind runs 38007859514 and 38017456574;
+ * LOVABLE-REVIEWED-BUILD-2, #394 6092810294), so no other name in that directory is blocked.
  */
-const HOST_SCRIPTS = Object.freeze([/^\/__l5e\/events\.[A-Za-z0-9_-]+\.js$/, /^\/~flock\.js$/]);
+const HOST_SCRIPTS = Object.freeze([/^\/__l5e\/events\.[0-9a-f]{16}\.js$/, /^\/~flock\.js$/]);
 /**
  * What the browser may load (#589 W9 finding #497 6051520120: the digest must bind what EXECUTES, not a neighbouring
  * fetch). On the Lovable host: every document (each navigation, deep links included) must be a reviewed route template
@@ -489,6 +514,8 @@ export function classifyRequest({ url, type, navigation }, reviewed = REVIEWED_B
   try { u = new URL(url); } catch { return { action: 'abort', reason: `${type} with an unreadable URL` }; }
   const what = `${type} ${u.origin}${u.pathname}`;
   if (u.origin === LOVABLE_URL) {
+    // A URL with userinfo is never a reviewed request; `what` never carries the userinfo itself (#394 6092810294 item 7).
+    if (u.username || u.password) return { action: 'abort', reason: `${what} carries userinfo (not printed), which no reviewed request has` };
     if (navigation || type === 'document') {
       const m = matchTemplate(u.pathname);
       return m ? { action: 'verify', kind: 'document', template: m.template, want: reviewed?.documents?.[m.template] ?? null, what } : { action: 'abort', reason: `${what} is not a reviewed route template` };
@@ -508,7 +535,8 @@ export function classifyRequest({ url, type, navigation }, reviewed = REVIEWED_B
  * The served-code guard, routed on EVERY browser context of the journey (service workers blocked, so none can answer
  * around it; Playwright routes every request but a WebSocket handshake and the redirect hops of a continued request,
  * which carry data, never code). A verified response is fetched once and fulfilled with exactly the bytes read: an asset
- * only when those bytes carry its reviewed digest, a document only when it is served as text/html with no charset or UTF-8,
+ * only when it is declared with no charset or UTF-8 and those bytes carry its reviewed digest (it keeps the host's own
+ * headers), a document only when it is served as text/html with no charset or UTF-8,
  * its bytes are valid UTF-8 (a BOM kept), and they reduce, for the URL requested, to its
  * template's reviewed canonical document with the reviewed numbers of stream-part timestamps and NULs. A redirect, an error
  * status, other bytes, an unreviewed or foreign script or document is aborted and recorded; a document is fulfilled with
@@ -542,7 +570,11 @@ export function codeGuard(reviewed = REVIEWED_BUILD) {
       if (d.template !== c.template || d.streamU !== c.want.streamU) { await refuse(`${c.what} carries ${d.streamU} stream-part u: value(s), not the reviewed ${c.want.streamU}`); return; }
       if (d.nul !== c.want.nul) { await refuse(`${c.what} carries ${d.nul} NUL character(s), not the reviewed ${c.want.nul}`); return; }
       if (d.sha256 !== c.want.sha256) { await refuse(`${c.what} differs from the reviewed ${c.template} document`); return; }
-    } else if (sha256(body) !== c.want) { await refuse(`${c.what} differs from its reviewed digest`); return; }
+    } else {
+      const typeProblem = assetTypeProblem(res.headers()['content-type']);
+      if (typeProblem) { await refuse(`${c.what} is ${typeProblem}`); return; }
+      if (sha256(body) !== c.want) { await refuse(`${c.what} differs from its reviewed digest`); return; }
+    }
     verified += 1;
     const headers = c.kind === 'document' ? { ...res.headers(), 'content-type': DOCUMENT_TYPE } : undefined;
     try { await route.fulfill({ response: res, body, ...(headers ? { headers } : {}) }); } catch { /* the page may be gone */ }

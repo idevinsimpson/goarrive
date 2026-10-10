@@ -6,6 +6,8 @@ Rework after Director finding #365 `6045688233` and security detail #589 `604571
 
 **Updated by LOVABLE-REVIEWED-BUILD-1** (queue #365 `6090733639`, release `6090734914`; W4, inbox #394). The bind and the guard are now route-aware, because the Web Twin is server-rendered and no single entry-page digest can bind it. That section is below: "The route-aware reviewed build". Sections that describe the single entry-page digest are corrected where they stood.
 
+**Updated by LOVABLE-REVIEWED-BUILD-2** (queue #365 `6092691424`, release `6092692777`; W4, inbox #394). Step A closes the items carried from LOVABLE-REVIEWED-BUILD-1's acceptance (#365 `6092671171`): a reviewed asset's declared charset, two negative tests, and two corrections to this note. Step B, the pin for the next Lovable publish, follows L0's post-publish bind.
+
 ## What it adds
 
 There is one new mode in the existing trusted staging workflow, `mode=lovable-kiosk`. It is proof only: it builds nothing, deploys nothing, and changes no rules, indexes, IAM or providers.
@@ -40,9 +42,9 @@ The bind alone checks a separate, earlier fetch. The Lovable host is mutable, so
   - Any other path is refused.
 - **The host's own scripts are blocked:** the injected `/__l5e/events.<id>.js` (the tag that carries the context token) and `/~flock.js`.
   - Each is never fetched, fulfilled or run, and is counted apart from refusals.
-  - Only those exact, anchored paths on the Lovable host are blocked, and only as scripts whose URL is exactly origin plus path.
+  - Only those exact, anchored paths on the Lovable host are blocked, and only as scripts whose URL is exactly origin plus path: no query, no fragment, no userinfo. The events id must be exactly 16 lower-case hex digits, the real id's shape.
   - Details are in "The route-aware reviewed build", below.
-- **Scripts and stylesheets** from the Lovable host must be a reviewed `/assets/<name>`, carry that asset's reviewed digest, and are fulfilled with exactly the hashed bytes.
+- **Scripts and stylesheets** from the Lovable host must be a reviewed `/assets/<name>`, declared with no charset or UTF-8, and carry that asset's reviewed digest. They are fulfilled with exactly the hashed bytes and the host's own headers (LOVABLE-REVIEWED-BUILD-2; see "Asset charset" below).
 - **Passive same-origin types** (images, fonts, the manifest) and **data requests** (`fetch`, `xhr`, `eventsource`) to the four API origins pass: Identity Toolkit, Secure Token, Firestore, and the staging callables host.
 - **Everything else that reaches the route is refused:** a redirect, an error status, other bytes, an unreviewed or foreign script, any document or script from an API origin, and any other origin's request. The refusal is recorded with no query string.
 - **A refusal stops the journey.** The journey checks after each navigation, so a refusal stops it before the next step:
@@ -83,20 +85,23 @@ The bind alone checks a separate, earlier fetch. The Lovable host is mutable, so
 - **What it loads.** It loads `BIND_PROBES`: `/` twice, `/` with an invite query, and each param template under two fixed probe ids. The two ids differ in their first and last characters, their case and their length.
 - **Binding a template.** A template is bound only when all of its loads reduce to one canonical document. Route data beyond the URL's own params, or a per-request value outside the two normalized ones, leaves it **UNBOUND**, and the bind fails before any credential.
 - **Assets.** It walks the assets referenced by every probed document (including a route chunk that only a deep link preloads) and their imports.
-- **Declared type.** A probed document served with a charset other than UTF-8, or not as `text/html`, is refused by name, and its template stays unbound (L0 R7).
+- **Declared type.** A probed document served with a charset other than UTF-8, or not as `text/html`, is refused by name, and its template stays unbound (L0 R7). An asset declared in a charset other than UTF-8 is a refused reference: the bind fails by name, and the asset's digest is still printed.
 - **References.** It classifies every `<script src>` and stylesheet or modulepreload link the documents make exactly as the browser guard would. Any reference the guard would refuse fails the bind, even when every digest matches.
-- **What it prints.** It prints each template's canonical digest and timestamp count, and each probe load (path without query, template, digest, timestamp count and param counts). It also prints any refused reference, each asset, and, when every template is bound, one `LOVABLE_OBSERVED_BUILD {…}` JSON line: the exact manifest to pin. It never prints a document's bytes or the token's value.
+- **What it prints.** It prints each template's canonical digest and timestamp count, and each probe load (path without query, template, digest, timestamp count and param counts). Each of these lines also says `bom=yes` or `bom=no`, for whether the document starts with a BOM; the digest already binds it, and the flag tells a changed digest apart from a BOM (LOVABLE-REVIEWED-BUILD-2). It also prints any refused reference, each asset, and, when every template is bound, one `LOVABLE_OBSERVED_BUILD {…}` JSON line: the exact manifest to pin. It never prints a document's bytes or the token's value.
 - **Its verdict.** It is BLOCKED while the pin lacks a document for any template, a timestamp count, or the assets. It is PASS only when every document, every asset and the reference check match.
 
 **The browser guard.**
-- **Documents.** A document must be a reviewed template, valid UTF-8, and must reduce for its own URL to the reviewed canonical document with the reviewed timestamp count. It is fulfilled with exactly the bytes read.
+- **Documents.** A document must be a reviewed template, declared `text/html` with no charset or UTF-8, and valid UTF-8 (a leading BOM kept as a character). It must reduce, for its own URL, to the reviewed canonical document with the reviewed counts of stream-part timestamps and of NULs. It is fulfilled with exactly the bytes read, as `text/html; charset=utf-8`, with its other headers kept (L0 R7).
+- **Assets.** A script or stylesheet must be a reviewed `/assets/<name>`, declared with no charset or UTF-8, and carry its reviewed digest. It is fulfilled with exactly those bytes and the host's own headers.
 - **The host's own scripts.** Two are **blocked**, never run, and counted apart from refusals (host-build names the count):
-  - the injected `/__l5e/events.<id>.js`;
+  - the injected `/__l5e/events.<id>.js`, where `<id>` is exactly 16 lower-case hex digits: the shape of the real id, `1718a1eacac7ff3a`, printed by bind runs `38007859514` and `38017456574`;
   - `/~flock.js`, which the first real-host bind found referenced by the documents.
 
-  Only those exact paths on the Lovable host are blocked: no query, no fragment, and only as scripts. Anything else is refused, and the bind prints each script it would block:
+  Only those exact paths on the Lovable host are blocked: no query, no fragment, no userinfo, and only as scripts. Anything else is refused, and the bind prints each script it would block:
   - `/~flock.js?v=1`, `/~flock.js#a`, `/~flock2.js`, `/~flockX.js`, `/x/~flock.js` and `/~flock.mjs`;
   - any other `/__l5e/` script, and the events script with a query;
+  - an events id that is not 16 lower-case hex digits: `-`, `_`, empty, 5,000 characters, 15 or 17 digits, upper case, or carrying `.`, `%`, `~` or `g`; and `eventsX…`, `…Xjs` and `/~flockXjs`, so each dot is a literal dot;
+  - either path with userinfo (`https://user@…/~flock.js`, `https://u:p@…/__l5e/events.<id>.js`). The refusal says the URL "carries userinfo (not printed)", so it can't be mistaken for a regressed block, and it never prints the userinfo;
   - either path as a stylesheet or a document;
   - either path on another origin.
 
@@ -234,13 +239,13 @@ Every browser context is closed in `finally`, including on an early stop.
 
     All of them are in the catalogue now, and all are killed by this round's tests. One of them, the events pattern matched case-insensitively, survived the first re-run and is killed by the upper-case look-alikes.
   - Earlier rounds: two survivors were real test gaps and are killed (assets walked only from `/`; the stream part read to the end of the document), and one defect from W4's own re-read was fixed (the stream part's end looked up in a lower-cased copy, `İ`).
-  - The survivor is equivalent: substituting params shortest first instead of longest first. The overlap check already refuses a param contained in another, and two ids cannot overlap in a document that separates them.
+  - The survivor substitutes params shortest first instead of longest first. It is **not** equivalent in every case (corrected in LOVABLE-REVIEWED-BUILD-2, L0 #394 `6092810294` item 9). When two ids partially overlap where they meet in a document (one's end is the other's start), the order decides which id becomes the slot, so the digest differs; the overlap check refuses only an id contained in another. It has no security effect: splitting on one id and then the other is lossless in either order, so two different documents for one URL never share a canonical form, and the bind and the guard run the same code. No probe or fixture id pair overlaps that way.
 
 **Review round** (W3's finding #396 `6092038757`, review #609 `6092037523`; the Director's delta #394 `6092160295`). All of it is in the same five paths.
 - **R1: a leading BOM is refused.** The decoder keeps it (`ignoreBOM: true`), so a BOM-prefixed reviewed document reduces to another digest. Both the guard and the bind refuse it: on every load it binds to another digest and the bind fails; on one load it leaves the template unbound.
 - **R2: the token-bearing events tag is bound.** Its `src` made a `data:` URL, its `src` made another `/assets/` name, an attribute added before the token, and an attribute changed before the token: each is refused by the guard and gives another digest at bind.
 - **R3: slot position and presence are bound.** The URL's param removed, inserted in the stream part, or moved is refused, and so are the kiosk params swapped (N1). A fixed vector pins the canonical JSON of a small document: its sha256 is `1d65a5a4…`.
-- **R4: slot boundaries are exact.** The fixtures' timestamps now differ in every digit between requests. The byte after a `u:` value changed, the byte after the token changed, a 12-digit `u:`, and a 7-character token are each refused.
+- **R4: slot boundaries are exact.** Each fixture request now draws its timestamps as independent random 13-digit values. They are not built to differ in every digit: two requests can share a digit by chance (corrected in LOVABLE-REVIEWED-BUILD-2). The byte after a `u:` value changed, the byte after the token changed, a 12-digit `u:`, and a 7-character token are each refused.
 - **R5: the host-script matches are anchored and exact.** Each of these is refused:
   - `/~flock.js/x`, `/~flock.json`, `/~flock.js.map` and `/~FLOCK.JS`;
   - `/__l5e/events.<id>.js/x`, `.jsonp`, `/x/__l5e/…`, `/__l5e/events.a/b.js`, `/__L5E/…` and `EVENTS…JS`;
@@ -250,6 +255,25 @@ Every browser context is closed in `finally`, including on an early stop.
   - A document is refused, at bind and in the guard, when it is not declared `text/html`, or when it names a charset other than UTF-8: `windows-1252`, `utf-16le`, two charsets, or an empty one.
   - Every verified document is fulfilled as `text/html; charset=utf-8`, with its other headers kept.
   - This has not yet been seen against the real host, because the earlier binds did not read the header. The next gate bind does, and it fails before any credential if the host declares anything else.
+
+**LOVABLE-REVIEWED-BUILD-2, step A** (queue #365 `6092691424`; the items carried from #365 `6092671171`). All of it is in the same five paths; `REVIEWED_BUILD` is unchanged in step A.
+- **Asset charset.** A reviewed `/assets/` script or stylesheet declared in a charset other than UTF-8 is **refused**, in the guard and at bind. A verified asset is fulfilled with the host's own headers. This covers `windows-1252`, `utf-16le`, two charsets, an empty one, and an upper-case `CHARSET` name.
+  - **Refused rather than relabelled.** The queue offered both: fulfil every asset as `text/javascript` or `text/css` with `charset=utf-8`, or refuse a non-UTF-8 declaration. Relabelling would make the run's browser decode an asset differently from a visitor's. A host-side charset change would then pass host-build while the product broke for the people using it. Refusing keeps the run's browser seeing what a visitor's sees, and the bind catches it before any credential.
+  - **What the browser decodes.** In every admitted case the browser decodes the reviewed bytes as UTF-8: a module script always, and a classic script or stylesheet with no declared charset by its BOM or `@charset` (inside the reviewed bytes), by what the reviewed document says, or by the document's encoding, which the guard fixes as UTF-8. The MIME type is left to the browser's own checks, which treat this run as they treat a visitor.
+  - **At bind**, the refusal reads `script <url> is served with charset windows-1252, not UTF-8` (or `stylesheet`), and the bind FAILs as for any reference the guard would refuse.
+  - **Not yet seen against the real host.** No bind has read an asset's declared type. The next gate bind does.
+- **The `CHARSET` parameter name.** A document declared `text/html; CHARSET=windows-1252` is refused, in the guard and by `documentTypeProblem`. Dropping the `i` flag from the charset pattern no longer survives.
+- **The token's upper bound.** A 4097-character context token is refused (`not 8-4096 characters`), and an 8- and a 4096-character token each reduce to the reviewed document. `{8,4097}`, `{8,}` and `{8,4095}` no longer survive.
+- **This note.** The guard's "Documents" bullet lists the declared-type check, the UTF-8 fulfilment and the NUL count, and the R4 sentence says the fixtures' timestamps are independent random digits.
+
+**L0's step A addendum** (#394 `6092810294`, from L0's mutation re-check of `d498cd6c`):
+- **Item 5, the events id.** The host-script pattern admits exactly 16 lower-case hex digits, the real id's shape (`1718a1eacac7ff3a`, read from the blocked-script lines of bind runs `38007859514` and `38017456574`, not from a fixture). The fixtures now use a 16-hex id too. Each of the look-alikes listed under "The browser guard" is refused, and each of L0's seven extra mutants is killed: `[^/]+`, an empty id, `.` in the id, `%` and `~` in the id, and an unescaped dot after `events`, before `js`, and in `~flock`.
+- **Items 6 and 7, userinfo.** A Lovable-host URL with userinfo is refused, not blocked, and the refusal reads `<type> <origin><path> carries userinfo (not printed), which no reviewed request has`. A check that refuses only `?` and `#` no longer survives.
+- **Item 8, a UTF-8 vector.** A second fixed vector carries `é`, `—`, an emoji, U+2028 and `ü`; its canonical JSON's sha256 is pinned (`edb801ca…`, recomputed independently outside Node). Hashing the canonical JSON as latin1 no longer survives.
+- **Item 9.** The note on the param-order survivor is corrected, above.
+- **Also, for run `38017456574`.** Its gate bind on `main` printed the pinned `/` and the same 79 assets, but other digests for both param templates, with the same counts (#394 `6092918005`). The canonicalization is unchanged since the pin's bind apart from R1's kept BOM, so either those documents start with a BOM or the host's render of them changed. Each document and probe line of the bind now says `bom=yes|no`, so the next bind tells which. The pin's shape doesn't change.
+
+**Proof, step A** (Node 20.20.2 and Node 22.22.2): `tests/hosted-lovable-kiosk.test.mjs` **27 passed** (one new test, the asset type table; the others extended); `hosted-lovable-device-matrix.test.mjs` **20 passed**; `tests/workflow-contract.test.mjs` 103 passed (no workflow change); staging `tests/run-all.mjs` and `tools/wsf-control/run-all.mjs` all suites passed. **Mutants: 104 of 105 killed.** That is the round-1 catalogue re-based on the bounded events pattern, plus 35 new ones: the asset charset at bind and in the guard (removed, joined wrongly, relabelled, headers dropped, stylesheets skipped, the stylesheet named a script), the charset parser (the `i` flag dropped, the value compared case-sensitively, an empty charset admitted), the token bounds (`{8,4097}`, `{8,}`, `{8,4095}`, `{9,4096}`, `{7,4096}`), L0's seven events-id mutants and five more (unbounded, 15–16 or 16–17 digits, upper case, any letter), userinfo (removed, username only, `?`/`#` only, unnamed), latin1 hashing, and the BOM flag (never set, not carried, inverted). The survivor is the param-order mutant, described above. No credentialed run, and no bind of this code against the host yet.
 
 **LOVABLE-KIOSK-HOSTED-PROOF-1** (the original packet; its single entry-page digest is superseded above):
 - **`tests/hosted-lovable-kiosk.test.mjs`: 21 passed.**
