@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "a15836e54addeef446272ea63ba930b4459ceb900f5c503755c5b9146b89b66e",
-  "eventCount": 1237,
+  "ledgerHead": "51e6b63912e0eb1baa01ff9733ff6834b4093db9601157585b12ad2a104dd326",
+  "eventCount": 1240,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -3011,6 +3011,66 @@
         "after": "director"
       },
       "deliveries": 1,
+      "pendingFinding": null
+    },
+    "LOVABLE-KIOSK-STATION-DRIVER-2": {
+      "owner": "W4",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Fix the hosted regression on main 4da578d7 (run 38079242076): qr-join polls for the choice; the station turn starts from the served member or newcomer path, not a literal Join",
+      "origin": "ledger",
+      "phase": "RELEASED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": 394,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": 0,
+      "reviewedBy": [],
+      "subjectPaths": [
+        ".github/wsf-staging/hosted-lovable-kiosk.mjs",
+        ".github/wsf-staging/tests/hosted-lovable-kiosk.test.mjs",
+        "docs/westayfit/qa/lovable-kiosk-hosted-proof-1.md"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6101323170
+        },
+        "released": {
+          "kind": "comment",
+          "id": 6101324338
+        },
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6101324338
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "journey-qa",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
       "pendingFinding": null
     },
     "LOVABLE-MATRIX-ALIGN-1": {
@@ -7275,6 +7335,14 @@
         "id": 6100919847
       },
       "superseded": true
+    },
+    "19d4aa214a46bd75e6d54ab752b9eab95b6f4558adac833da1331c718b882a46": {
+      "packet": "LOVABLE-KIOSK-STATION-DRIVER-2",
+      "worker": "W4",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
