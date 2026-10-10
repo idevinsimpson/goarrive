@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "75ce26fcf32c75b3f42b811b18ac10bd619cd87395f1c69c436af8fa8068168b",
-  "eventCount": 1098,
+  "ledgerHead": "61cbab2493d93d385ad96f948792936564cf852fab62bda06d4e4d72664f9bd8",
+  "eventCount": 1104,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -20,7 +20,7 @@
   "canonical": {
     "developmentBranch": "claude/wsf-app-shell",
     "developmentSha": "8a067b29420563408e16cff5d91cc77b2ad0fbd8",
-    "operationalMain": "e703614827bc1bfe28035c1105f827dbc98b3193"
+    "operationalMain": "6e8acc3169358ed540d78a961c3008878d2d6672"
   },
   "staging": {
     "servedSha": "ec162d17a0540e936741027f9b8f90dd372cfaf4",
@@ -2749,7 +2749,7 @@
       },
       "label": "Route-aware reviewed-build pin for Lovable expo build 9b9eade5: normalize only the two per-request values, bind documents per route template, keep asset digests exact, negative mutation tests",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 394,
@@ -2761,7 +2761,7 @@
         "subjectSha": "d498cd6c75f57d7093ef5ac6b1026bb1b6e6185d",
         "prHeadSha": "d498cd6c75f57d7093ef5ac6b1026bb1b6e6185d",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "6e8acc3169358ed540d78a961c3008878d2d6672"
       },
       "proof": null,
       "served": null,
@@ -2787,10 +2787,13 @@
           "kind": "comment",
           "id": 6090734914
         },
-        "accepted": null,
-        "lastTransition": {
+        "accepted": {
           "kind": "comment",
-          "id": 6092545071
+          "id": 6092671171
+        },
+        "lastTransition": {
+          "kind": "pull_request",
+          "id": 609
         }
       },
       "review": {
@@ -2804,6 +2807,68 @@
         "after": "director"
       },
       "deliveries": 2,
+      "pendingFinding": null
+    },
+    "LOVABLE-REVIEWED-BUILD-2": {
+      "owner": "W4",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Re-pin REVIEWED_BUILD to the next Lovable publish (db3fd2f2) and close LOVABLE-REVIEWED-BUILD-1's carried items: UTF-8 asset fulfilment, CHARSET-name and token-length negatives, QA-note corrections",
+      "origin": "ledger",
+      "phase": "RELEASED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": 394,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": 0,
+      "reviewedBy": [],
+      "subjectPaths": [
+        ".github/wsf-staging/hosted-lovable-kiosk.mjs",
+        ".github/wsf-staging/hosted-lovable-device-matrix.mjs",
+        ".github/wsf-staging/tests/hosted-lovable-kiosk.test.mjs",
+        ".github/wsf-staging/hosted-lovable-device-matrix.test.mjs",
+        "docs/westayfit/qa/lovable-kiosk-hosted-proof-1.md"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6092691424
+        },
+        "released": {
+          "kind": "comment",
+          "id": 6092692777
+        },
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6092692777
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
       "pendingFinding": null
     },
     "MEMBER-PREVIEW-LABEL-1": {
@@ -6515,6 +6580,14 @@
         "id": 6092529126
       },
       "superseded": true
+    },
+    "eff412be833e24db83e7b47ce1d5f49a8eded6d9ca8a7d6b9d65bab761b3a9c4": {
+      "packet": "LOVABLE-REVIEWED-BUILD-2",
+      "worker": "W4",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
