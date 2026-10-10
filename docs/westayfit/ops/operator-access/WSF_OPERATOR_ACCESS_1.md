@@ -252,15 +252,17 @@ Both are correct in the source. Neither is proven by a test.
 - print, log or store the address;
 - print more than the first 6 characters of the uid.
 
-**Run it in Cloud Shell, once per project:**
+**Run it in Cloud Shell, once per project.**
+- These steps work only once #612 is on `main`. Before that, the URL answers 404 and `curl -f` stops.
+- Each run is gated on the sha256 of the reviewed script, so the owner runs exactly the file that was reviewed, never whatever `main` holds on the day. A mismatch stops before `node` runs. A link pinned to a commit would be a later follow-up, because a commit cannot name its own SHA.
 
 ```sh
 mkdir -p ~/wsf-operator-audit && cd ~/wsf-operator-audit
 npm init -y >/dev/null
 npm install firebase-admin@12.7.0
 curl -fsSLO https://raw.githubusercontent.com/idevinsimpson/goarrive/main/docs/westayfit/ops/operator-access/audit-access.mjs
-node audit-access.mjs westayfit-staging
-node audit-access.mjs goarrive
+echo "a98454759bddaf083f50cf0cd0729deb976fb42afdd5a15d7953bc4e35498910  audit-access.mjs" | sha256sum -c - && node audit-access.mjs westayfit-staging
+echo "a98454759bddaf083f50cf0cd0729deb976fb42afdd5a15d7953bc4e35498910  audit-access.mjs" | sha256sum -c - && node audit-access.mjs goarrive
 ```
 
 - **The address:** the script asks for it at a prompt and **does not echo it**.
@@ -268,6 +270,8 @@ node audit-access.mjs goarrive
   - A piped stdin is refused.
   - It is used for one Auth lookup.
   - Every output line also passes through a redaction step, as a second guard.
+  - Type it only after the prompt appears; anything typed earlier echoes normally.
+  - Esc and the arrow keys become part of the address. The result is then an honest "not found", so run the script again.
 - **The project:** exactly `westayfit-staging` or `goarrive`. Anything else is refused before any read.
 - **Credentials:** the Cloud Shell account's own.
   - If the Admin SDK reports that default credentials cannot be found, run `gcloud auth application-default login` and run the script again.
@@ -307,8 +311,8 @@ A dormant Champion row (removed or departed, role kept) is printed and explained
 | Tier | What | Result |
 |---|---|---|
 | Source | Every `file:line` above, read at `ec162d17` and `8a067b29` | cited |
-| Unit, no network | `node --test docs/westayfit/ops/operator-access/audit-access.test.mjs` | **23/23** |
-| Mutants | 35 behaviour mutants and 9 write or leak injections, each run against a scratch copy | **44/44 killed** |
+| Unit, no network | `node --test docs/westayfit/ops/operator-access/audit-access.test.mjs`, on Node 20.20.2 and 22.22.2 | **24/24** on each |
+| Mutants | 35 behaviour mutants, 9 write or leak injections and 4 on `redact`, each run against a scratch copy | **48/48 killed** |
 | Real Admin SDK, emulators only | firebase-admin 12.7.0 against the Auth and Firestore emulators, project `demo-wsf-local`, synthetic labelled fixtures. Three cases: a Champion, a missing account, and a member with no backend. | expected output in all three; emulator documents and users **unchanged** before and after; no address or full uid in any output |
 | Real terminal | the CLI driven through a pseudo-terminal, typing a synthetic address. Run twice: without the SDK, and with firebase-admin 12.7.0 pointed only at an unreachable local host, with no credential. | without the SDK, it stops before the prompt. With the SDK: a hidden prompt, then `UNKNOWN` by error code (exit 3). Neither transcript holds the address. |
 | Auth and permission tests | the cited callable suites on the emulators (4.2) | **229/229** served, **246/246** development |
@@ -317,7 +321,7 @@ A dormant Champion row (removed or departed, role kept) is printed and explained
 The unit tests prove that:
 - no Firestore or Auth write method is ever called. The fake's write methods throw and are recorded.
 - the source has no write call, file write, environment read or non-GET request;
-- the address never reaches stdout or stderr, even when an error message, a community name or a goal title carries it;
+- the address never reaches stdout or stderr, even when an error message, a community name or a goal title carries it, and even when lower-casing changes the line's length (W4 F1);
 - only the 6-character uid prefix is printed;
 - roles and statuses print exactly;
 - only an active `foundingChampion` is operable;

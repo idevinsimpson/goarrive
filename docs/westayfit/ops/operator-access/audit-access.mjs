@@ -59,16 +59,10 @@ export function errorCode(error) {
 export function redact(text, email) {
   const s = String(text);
   if (!email) return s;
-  const needle = email.toLowerCase();
-  let out = '';
-  let i = 0;
-  const lower = s.toLowerCase();
-  for (;;) {
-    const at = lower.indexOf(needle, i);
-    if (at < 0) return out + s.slice(i);
-    out += s.slice(i, at) + '[redacted]';
-    i = at + needle.length;
-  }
+  // Match on the original string. Lower-casing the text first can change its
+  // length (U+0130 becomes two code units), which shifts every index after it.
+  const pattern = email.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return s.replace(new RegExp(pattern, 'gi'), '[redacted]');
 }
 
 /** A stored value, printed exactly when it is a string and as JSON otherwise. */

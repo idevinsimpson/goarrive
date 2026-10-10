@@ -489,3 +489,10 @@ test('a community or goal named with the address itself is printed redacted', as
   assert.ok(r.stdout.split('\n').includes('      goal synthetic-goal-x "[redacted] squats" status=active'));
   assertNoAddress(`${r.stdout}\n${r.stderr}`);
 });
+
+test('redact keeps its place when lower-casing changes the text length', () => {
+  const dotted = 'İ'.repeat(30);
+  assert.equal(redact(`goal "${dotted} ${EMAIL}"`, EMAIL), `goal "${dotted} [redacted]"`);
+  assert.equal(redact(`goal "İ ${EMAIL.toUpperCase()}" x`, EMAIL), 'goal "İ [redacted]" x');
+  assert.equal(redact('a+b@x.test ab@x.test', 'a+b@x.test'), '[redacted] ab@x.test');
+});
