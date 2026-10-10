@@ -6797,6 +6797,19 @@ L0's one-shot relay for this wake asked for six checks and an evidence table. It
 - **PN-2 (cosmetic).** `hosted-lovable-kiosk.mjs:247-253` is `seenLine`'s doc comment, and it now sits above `logSafe`'s own block, so `seenLine` has no doc comment of its own. The sentence "The line passes logSafe" is in the detached block.
 - **PN-3 (Node 20 and 22).** The PR measures both; I reproduced both, as above.
 
+- **PN-4 (a narrow new blind spot, with a one-line mitigation).** `exactText` reads `textContent` without checking that the leaf is visible. I measured the difference in the Chromium the matrix drives (instrument 6): for a leaf that is **`visibility: hidden`**, `textContent` keeps the copy and `innerText` reads empty, so a hidden leaf carrying the right copy now passes where it used to fail. `display: none`, `opacity: 0`, `font-size: 0` and an off-screen leaf read the same either way, so the old read was equally blind to those. The other two ways the reads differ (`<br>`, a hidden child) can only cause a false FAIL, and L0 has checked that the leaves are plain text. The queue asked for `textContent`, so this is not a defect; adding `isVisible()` to `exactText` would close it.
+- **PN-5 (the freshness pattern, an unknown I could not close).** The second freshness line must match `^updated \d+ s ago$`. If the product switched to minutes after 60 seconds, a display read late would be a false FAIL. L0 saw "updated 0 s ago", the cell reads soon after load, and the product source is outside this repository.
+
+### Addendum: L0's relay focus items (relay `trig_012gJzi5jLtLn6NNQDTeKx21`, read after the verdict)
+
+L0's relay for this wake listed five focus items. It reached this session after my verdict was posted. Items (c), (d) and (e) were already in the verdict; I did (a) and (b) explicitly **before** answering, so that a gap would have meant withdrawing the PASS.
+
+- **(a) False PASS or FAIL.** `displayVerdict` against an independent oracle written from the queue's wording: **256 renders, 0 false FAIL and 0 false PASS** on Node 20 and 22, across fixtures from 120/500 to 1,000,000/2,000,000 and every way the two freshness lines can be wrong (none, one, three, swapped, another first line, a capital, no space, minutes, a trailing dot, no number, a non-breaking space). `stepVerdict` is exact (11 inputs, 0 wrong). `en-GB` equals `en-US` on integers, and `displayNumber` equals the product's formatter as the queue describes it; `FIXTURE_UNIT` is `squats` at all three of the kit's goal sites and a test pins it. The one residual is PN-5.
+- **(b) The `exactText` and `innerText` split.** Measured in real Chromium (PN-4): the reads differ for `text-transform` (intended), a `visibility: hidden` leaf (the narrow new blind spot), a `<br>` and a hidden child (both false-FAIL directions only).
+- **(c) `logSafe` on every printed line:** done, in item 2.
+- **(d) #613 O2, O3, O5 and #610 O1 to O5:** done, in items 2 and 3.
+- **(e) Any change beyond the six paths:** none.
+
 ### Limits, stated plainly (not findings)
 
 - **I did not read the Lovable source.** The selectors and structure at the served build `db3fd2f2` (the display markup, `.eyebrow` and its `text-transform`, `EXPECTED_TURN_GATE`, `station-port.ts`) are outside this repository, and I did not use the Lovable connector or fetch the live site. They rest on L0's source inspection (queue `6096204665`) and W4's re-read. What I checked is that the harness reads exactly what they say, that its tests fail each way they say, and that the fake markup is held to that description.
@@ -6805,4 +6818,4 @@ L0's one-shot relay for this wake asked for six checks and an evidence table. It
 
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0 (re-run before push).
 
-**Status:** **PASS at `bab7e980` with zero unresolved findings.** PN-1 to PN-3 are non-blocking. W7 made no product edit, merge, dispatch, deploy, live-data change, credential or permission change, and did not touch any state ref or comment other than its own GitHub replies.
+**Status:** **PASS at `bab7e980` with zero unresolved findings.** PN-1 to PN-5 are non-blocking (PN-4 and PN-5 were found while answering L0's relay, after the verdict). W7 made no product edit, merge, dispatch, deploy, live-data change, credential or permission change, and did not touch any state ref or comment other than its own GitHub replies.
