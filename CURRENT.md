@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=6399733551bfbd84cda1415373fd7f28e7edc760e650a3552cbcd7f1c6d786ce events=1135 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=e7a83ca9bd558f825fe95ed495f6843870b4864eb9c3a6b385e258d863f1e459 events=1138 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `6399733551bfbd84cda1415373fd7f28e7edc760e650a3552cbcd7f1c6d786ce` (1135 events)
+- Ledger head: `e7a83ca9bd558f825fe95ed495f6843870b4864eb9c3a6b385e258d863f1e459` (1138 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -30,10 +30,10 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | Worker | Inbox | Active now | Reviewing | Waiting on review | Blocked | Next | Queue | WATCH |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | W3 | #396 | — | LOVABLE-REVIEWED-BUILD-2 | WORKER-EXECUTION-PROFILES-1 | NORTHSTAR-MIRROR-INTAKE-1 | — | — | on |
-| W4 | #394 | — | — | LOVABLE-REVIEWED-BUILD-2 | — | — | — | off |
+| W4 | #394 | — | WSF-OPERATOR-ACCESS-1 | LOVABLE-REVIEWED-BUILD-2 | — | — | — | on |
 | W5 | #395 | — | — | — | — | — | — | off |
 | W7 | #434 | — | — | — | — | — | — | off |
-| W9 | #497 | WSF-OPERATOR-ACCESS-1 | — | — | EVENT-LIFECYCLE-BACKEND-RECOVERY-1, MEMBER-TRUTH-BACKEND-1 | — | — | on |
+| W9 | #497 | — | — | WSF-OPERATOR-ACCESS-1 | EVENT-LIFECYCLE-BACKEND-RECOVERY-1, MEMBER-TRUTH-BACKEND-1 | — | — | off |
 
 ## Packets
 
@@ -99,7 +99,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | TOGETHER-COMPLETION-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #567 | e4e32ed6 | e4e32ed6 | — | 22766935 | — | W4 | comment:5964984624 | pull_request:567 | — | Port the owner-selected Together completion from the frozen Lovable reference to the confirmed member receipt with truthful totals, one-time motion and reduced-motion parity | 1×journey-qa then director | — |
 | WORKER-EXECUTION-PROFILES-1 | W3 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #562 | 0790876b | 0790876b | — | — | — | W4, W9 | comment:5962925247 | comment:5963579258 | — | Finish existing PR 562 credential-mode safety and pilot readiness without activating or replacing live workers | 1×ops-source+1×security then director | — |
 | WRITER-CONCURRENCY-1 | W4 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #603 | 75f77d30 | 75f77d30 | — | 7cd5aad3 | — | W7 | comment:6078863846 | pull_request:603 | — | Writer gap fix: keep non-qualifying issue_comment runs out of the wsf-control-writer concurrency group so they never cancel a queued qualifying run; update the workflow test pin and note | 1×ops-source then director | — |
-| WSF-OPERATOR-ACCESS-1 | W9 | work | INTEGRATED (source-only) | ledger | ACKED | — | — | — | — | — | — | — | comment:6093847482 | comment:6094009666 | — | Owner operator access: map the WSF authorization model, gaps vs the owner's event-operator ask, an owner-run read-only account audit (email typed locally, never stored) | 1×ops-source then director | — |
+| WSF-OPERATOR-ACCESS-1 | W9 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #612 | 4a19fb34 | 4a19fb34 | — | — | — | W4 | comment:6093847482 | comment:6094177125 | — | Owner operator access: map the WSF authorization model, gaps vs the owner's event-operator ask, an owner-run read-only account audit (email typed locally, never stored) | 1×ops-source then director | — |
 
 ## Wakes
 
@@ -280,4 +280,5 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | 5746692f83d2 | W4 | LOVABLE-REVIEWED-BUILD-2 | handback | acked | 6093473803 | comment:6093480673 |
 | 25ac1951a966 | W9 | WSF-OPERATOR-ACCESS-1 | release | acked | 6093976688 | comment:6094009666 |
 | d477ee8ee348 | W3 | LOVABLE-REVIEWED-BUILD-2 | review | acked | 6094062052 | comment:6094089993 |
+| f14cd0deb511 | W4 | WSF-OPERATOR-ACCESS-1 | review | requested | — | — |
 

@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "6399733551bfbd84cda1415373fd7f28e7edc760e650a3552cbcd7f1c6d786ce",
-  "eventCount": 1135,
+  "ledgerHead": "e7a83ca9bd558f825fe95ed495f6843870b4864eb9c3a6b385e258d863f1e459",
+  "eventCount": 1138,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -4182,15 +4182,17 @@
       },
       "label": "Owner operator access: map the WSF authorization model, gaps vs the owner's event-operator ask, an owner-run read-only account audit (email typed locally, never stored)",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
-      "pr": null,
-      "reviewers": [],
+      "pr": 612,
+      "reviewers": [
+        "W4"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "4a19fb34f11021a37cc01fbf5d91a95a55d5a5d7",
+        "prHeadSha": "4a19fb34f11021a37cc01fbf5d91a95a55d5a5d7",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -4217,7 +4219,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6094009666
+          "id": 6094177125
         }
       },
       "review": {
@@ -4230,7 +4232,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     }
   },
@@ -6710,7 +6712,8 @@
       "ack": {
         "kind": "comment",
         "id": 6094009666
-      }
+      },
+      "superseded": true
     },
     "d477ee8ee348c0c8309dec28a06409dc29ca3ed810a94d968b17d20c760e4a42": {
       "packet": "LOVABLE-REVIEWED-BUILD-2",
@@ -6724,6 +6727,14 @@
         "kind": "comment",
         "id": 6094089993
       }
+    },
+    "f14cd0deb511f3e4394484947123926e290ec4c8796f4b798b5254493e262ac5": {
+      "packet": "WSF-OPERATOR-ACCESS-1",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
