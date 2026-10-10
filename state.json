@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "340605eb75d7b1707dd1a5f864bdbbf5b21bf35065fb383cc25270af84e211ae",
-  "eventCount": 1082,
+  "ledgerHead": "1863cf898ca509266af19225943417835259e5cc39a9cd9901c423906d20ddde",
+  "eventCount": 1085,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2749,15 +2749,17 @@
       },
       "label": "Route-aware reviewed-build pin for Lovable expo build 9b9eade5: normalize only the two per-request values, bind documents per route template, keep asset digests exact, negative mutation tests",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 394,
-      "pr": null,
-      "reviewers": [],
+      "pr": 609,
+      "reviewers": [
+        "W3"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "cd1923436d237c05a191908d4d2b60bb6fb6c029",
+        "prHeadSha": "cd1923436d237c05a191908d4d2b60bb6fb6c029",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -2786,7 +2788,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6090889862
+          "id": 6091520531
         }
       },
       "review": {
@@ -2799,7 +2801,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "MEMBER-PREVIEW-LABEL-1": {
@@ -6467,7 +6469,16 @@
       "ack": {
         "kind": "comment",
         "id": 6090889862
-      }
+      },
+      "superseded": true
+    },
+    "20565318ce08e06c5a6fc387cb7666ab1b0416dc5b7f01ca5538b10191bc5993": {
+      "packet": "LOVABLE-REVIEWED-BUILD-1",
+      "worker": "W3",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
