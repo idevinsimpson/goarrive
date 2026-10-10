@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=eed5f140e441b552c1bd388e38d843989ea31bc21bf4d311d3c93f4e06390d8e events=1217 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=51b8a889c5c20bca545ff8a9b29906757573d8ac695152219b35d8597cc846da events=1221 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `eed5f140e441b552c1bd388e38d843989ea31bc21bf4d311d3c93f4e06390d8e` (1217 events)
+- Ledger head: `51b8a889c5c20bca545ff8a9b29906757573d8ac695152219b35d8597cc846da` (1221 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -30,7 +30,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | Worker | Inbox | Active now | Reviewing | Waiting on review | Blocked | Next | Queue | WATCH |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | W3 | #396 | — | — | WORKER-EXECUTION-PROFILES-1 | NORTHSTAR-MIRROR-INTAKE-1 | — | — | off |
-| W4 | #394 | — | — | LOVABLE-KIOSK-QR-JOIN-1 | — | — | — | off |
+| W4 | #394 | LOVABLE-KIOSK-STATION-DRIVER-1 | — | LOVABLE-KIOSK-QR-JOIN-1 | — | — | — | on |
 | W5 | #395 | — | — | — | — | — | — | off |
 | W7 | #434 | — | LOVABLE-KIOSK-QR-JOIN-1 | — | — | — | — | on |
 | W9 | #497 | — | — | — | EVENT-LIFECYCLE-BACKEND-RECOVERY-1, MEMBER-TRUTH-BACKEND-1 | — | — | off |
@@ -81,6 +81,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | LOVABLE-GUARD-PING-1 | W4 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #613 | c0882743 | c0882743 | — | e96cd947 | — | W3 | comment:6094618925 | pull_request:613 | — | Code guard: allow Playwright resource type ping only to the exact API_ORIGINS as non-navigation data (the Firestore Listen beacon that stopped main runs 38030033477/38030045509), with tests | 1×ops-source then director | — |
 | LOVABLE-KIOSK-HOSTED-PROOF-1 | W3 | work | VERIFIED (hosted) | ledger | INTEGRATED | #589 | 8c9093c0 | 8c9093c0 | — | 41bff6c6 | — | W4, W9 | comment:6044894488 | pull_request:589 | — | Run the pinned Lovable kiosk journey with bounded real staging fixtures and cleanup inside the existing trusted runner | 1×ops-source+1×security then director | — |
 | LOVABLE-KIOSK-QR-JOIN-1 | W4 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #617 | 127e91a7 | 127e91a7 | — | — | — | W7 | comment:6096965662 | comment:6099456544 | — | Kiosk proof: run qr-join on the kit's public expo event (PR #616), require the QR to carry this community's join code, retire QR_KIT_BLOCK, plus W7's PN-1/2/4 from #614 | 1×ops-source then director | — |
+| LOVABLE-KIOSK-STATION-DRIVER-1 | W4 | work | INTEGRATED (source-only) | ledger | RELEASED | — | — | — | — | — | — | — | comment:6099634479 | comment:6099634479 | — | Kiosk proof: drive the station turn on the served build (queue place, call, phone ready, expectedTurn start, 60 s round, review, Finish) so the 7 station rows PASS or FAIL, not BLOCKED | 1×journey-qa then director | — |
 | LOVABLE-MATRIX-ALIGN-1 | W4 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #614 | bab7e980 | bab7e980 | — | 70e5d8c9 | — | W7 | comment:6096205153 | pull_request:614 | — | Device matrix: align the display and sign-up cells with served build db3fd2f2 (selector, total and freshness copy; step count read as text), plus W3's carried O-items; REVIEWED_BUILD unchanged | 1×ops-source then director | — |
 | LOVABLE-REVIEWED-BUILD-1 | W4 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #609 | d498cd6c | d498cd6c | — | 6e8acc31 | — | W3 | comment:6090734914 | pull_request:609 | — | Route-aware reviewed-build pin for Lovable expo build 9b9eade5: normalize only the two per-request values, bind documents per route template, keep asset digests exact, negative mutation tests | 1×ops-source then director | — |
 | LOVABLE-REVIEWED-BUILD-2 | W4 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #610 | 6fcaa93c | 6fcaa93c | — | 614836b8 | — | W3 | comment:6092692777 | pull_request:610 | — | Re-pin REVIEWED_BUILD to the next Lovable publish (db3fd2f2) and close LOVABLE-REVIEWED-BUILD-1's carried items: UTF-8 asset fulfilment, CHARSET-name and token-length negatives, QA-note corrections | 1×ops-source then director | — |
@@ -295,5 +296,6 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | ea4b9af559c6 | W4 | KIT-PUBLIC-EXPO-EVENT-1 | review | acked | 6096715426 | comment:6096741050 |
 | 0da1cb76cfde | W4 | LOVABLE-KIOSK-QR-JOIN-1 | release | acked | 6097066081 | comment:6097093910 |
 | d5aebb66f39a | W3 | LOVABLE-KIOSK-QR-JOIN-1 | review | timed-out (wake-undelivered) | 6097482658, 6098056049 | — |
-| ea23eec8b0d1 | W7 | LOVABLE-KIOSK-QR-JOIN-1 | review | delivered | 6099608319 | — |
+| ea23eec8b0d1 | W7 | LOVABLE-KIOSK-QR-JOIN-1 | review | acked | 6099608319 | comment:6099630847 |
+| 3ad3fecbfd1f | W4 | LOVABLE-KIOSK-STATION-DRIVER-1 | release | requested | — | — |
 

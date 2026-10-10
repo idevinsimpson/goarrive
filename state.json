@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "eed5f140e441b552c1bd388e38d843989ea31bc21bf4d311d3c93f4e06390d8e",
-  "eventCount": 1217,
+  "ledgerHead": "51b8a889c5c20bca545ff8a9b29906757573d8ac695152219b35d8597cc846da",
+  "eventCount": 1221,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2939,6 +2939,66 @@
         "after": "director"
       },
       "deliveries": 1,
+      "pendingFinding": null
+    },
+    "LOVABLE-KIOSK-STATION-DRIVER-1": {
+      "owner": "W4",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Kiosk proof: drive the station turn on the served build (queue place, call, phone ready, expectedTurn start, 60 s round, review, Finish) so the 7 station rows PASS or FAIL, not BLOCKED",
+      "origin": "ledger",
+      "phase": "RELEASED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": 394,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": 0,
+      "reviewedBy": [],
+      "subjectPaths": [
+        ".github/wsf-staging/hosted-lovable-kiosk.mjs",
+        ".github/wsf-staging/tests/hosted-lovable-kiosk.test.mjs",
+        "docs/westayfit/qa/lovable-kiosk-hosted-proof-1.md"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6099633658
+        },
+        "released": {
+          "kind": "comment",
+          "id": 6099634479
+        },
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6099634479
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "journey-qa",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
       "pendingFinding": null
     },
     "LOVABLE-MATRIX-ALIGN-1": {
@@ -7166,10 +7226,21 @@
       "packet": "LOVABLE-KIOSK-QR-JOIN-1",
       "worker": "W7",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6099608319
       ],
+      "ack": {
+        "kind": "comment",
+        "id": 6099630847
+      }
+    },
+    "3ad3fecbfd1f145107ecf90e0695c941dc7ea09a173cbe2d0229e4a2d8df1862": {
+      "packet": "LOVABLE-KIOSK-STATION-DRIVER-1",
+      "worker": "W4",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
