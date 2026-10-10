@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "8aa85e0769d14b70f4bb98ca52b49543161bb436b022ef7f05a29e09c3afa72a",
-  "eventCount": 1225,
+  "ledgerHead": "98ed2f73c4fe14b3d3aa215d4241218d6746fff202aaedc405d548d6e91b63b8",
+  "eventCount": 1228,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -20,7 +20,7 @@
   "canonical": {
     "developmentBranch": "claude/wsf-app-shell",
     "developmentSha": "8a067b29420563408e16cff5d91cc77b2ad0fbd8",
-    "operationalMain": "9b2e89e83a3c88dbca66f76b325579e699906769"
+    "operationalMain": "2709d764e980971ceaf043067ace1e8acf331ef7"
   },
   "staging": {
     "servedSha": "ec162d17a0540e936741027f9b8f90dd372cfaf4",
@@ -2885,7 +2885,7 @@
       },
       "label": "Kiosk proof: run qr-join on the kit's public expo event (PR #616), require the QR to carry this community's join code, retire QR_KIT_BLOCK, plus W7's PN-1/2/4 from #614",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 394,
@@ -2897,7 +2897,7 @@
         "subjectSha": "127e91a73f2837aecfb977aed298b3e91387ce46",
         "prHeadSha": "127e91a73f2837aecfb977aed298b3e91387ce46",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "2709d764e980971ceaf043067ace1e8acf331ef7"
       },
       "proof": null,
       "served": null,
@@ -2924,10 +2924,13 @@
           "kind": "comment",
           "id": 6096965662
         },
-        "accepted": null,
-        "lastTransition": {
+        "accepted": {
           "kind": "comment",
-          "id": 6099832134
+          "id": 6099948448
+        },
+        "lastTransition": {
+          "kind": "pull_request",
+          "id": 617
         }
       },
       "review": {
