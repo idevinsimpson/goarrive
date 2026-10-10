@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "f901f0b6588c63aaa280dc1e7bb0147f5043d833a1658eabe9ebc82eb82bb3d2",
-  "eventCount": 1188,
+  "ledgerHead": "3fe0b687fba9ff2c257dc6bb242a8b2b75ce08a24ee39ea97370270bedb17fe2",
+  "eventCount": 1192,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2544,15 +2544,17 @@
       },
       "label": "Fixture kit: expoEvent can make a link-joinable (public) event community with its real verified Champion, so the kiosk proof's qr-join row can run; default stays private; tests",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
-      "pr": null,
-      "reviewers": [],
+      "pr": 616,
+      "reviewers": [
+        "W4"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "693c04ae2f3d2557444875d78b8adf537eaeebae",
+        "prHeadSha": "693c04ae2f3d2557444875d78b8adf537eaeebae",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -2579,7 +2581,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6096465361
+          "id": 6096602354
         }
       },
       "review": {
@@ -2592,7 +2594,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "LOVABLE-DEVICE-QA-1": {
@@ -7028,16 +7030,28 @@
       "ack": {
         "kind": "comment",
         "id": 6096465361
-      }
+      },
+      "superseded": true
     },
     "1827500dc865864ff360b64b0b27a40cdc0f6a959fefc3ac2aeac3c62f7438bb": {
       "packet": "LOVABLE-MATRIX-ALIGN-1",
       "worker": "W7",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6096577933
       ],
+      "ack": {
+        "kind": "comment",
+        "id": 6096591120
+      }
+    },
+    "ea4b9af559c6db00705046a4c5bcc4756d0329b71e8bc1a2d8737d111406abd9": {
+      "packet": "KIT-PUBLIC-EXPO-EVENT-1",
+      "worker": "W4",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
