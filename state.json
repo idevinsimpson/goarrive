@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "fadb53137fbb796ad65f36c603036214d14f6d1956c66e035cb480027b7c972c",
-  "eventCount": 1172,
+  "ledgerHead": "971ad3dac9f33ccc926acd1dafe49561ace148077938722fad984eef34824736",
+  "eventCount": 1175,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2807,6 +2807,69 @@
         "after": "director"
       },
       "deliveries": 4,
+      "pendingFinding": null
+    },
+    "LOVABLE-MATRIX-ALIGN-1": {
+      "owner": "W4",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Device matrix: align the display and sign-up cells with served build db3fd2f2 (selector, total and freshness copy; step count read as text), plus W3's carried O-items; REVIEWED_BUILD unchanged",
+      "origin": "ledger",
+      "phase": "RELEASED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": 394,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": 0,
+      "reviewedBy": [],
+      "subjectPaths": [
+        ".github/wsf-staging/hosted-lovable-device-matrix.mjs",
+        ".github/wsf-staging/hosted-lovable-device-matrix.test.mjs",
+        ".github/wsf-staging/hosted-lovable-kiosk.mjs",
+        ".github/wsf-staging/tests/hosted-lovable-kiosk.test.mjs",
+        "docs/westayfit/qa/lovable-device-qa-1.md",
+        "docs/westayfit/qa/lovable-kiosk-hosted-proof-1.md"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6096204665
+        },
+        "released": {
+          "kind": "comment",
+          "id": 6096205153
+        },
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6096205153
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
       "pendingFinding": null
     },
     "LOVABLE-REVIEWED-BUILD-1": {
@@ -6877,6 +6940,14 @@
         "id": 6095995787
       },
       "superseded": true
+    },
+    "54d6e80c5c34f6d4cc5cf9b664491d5f3aa1008102b3f1f90cf853033f954ac2": {
+      "packet": "LOVABLE-MATRIX-ALIGN-1",
+      "worker": "W4",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
