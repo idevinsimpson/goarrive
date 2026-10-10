@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "fad76bcbb0c1e38e431daf3f97c0f6c8b8c173a43b42ab1f0f00304c5c977ce0",
-  "eventCount": 1142,
+  "ledgerHead": "de01c329196322ca8359b9129200e6f55eac517006ffb6d239ee3eb81c17848c",
+  "eventCount": 1143,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -6746,8 +6746,10 @@
       "packet": "WSF-OPERATOR-ACCESS-1",
       "worker": "W9",
       "reason": "handback",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        6094436449
+      ],
       "ack": null
     }
   },
