@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "e7730803b0f60ed9ecdde0506d749edcbaa2c72de9fba654ca6afe8f0bea78bc",
-  "eventCount": 1122,
+  "ledgerHead": "073e3e984fa73b3a67d86b0d17e9062186e2fc11c66519e1f6ac8c3c548bdb4e",
+  "eventCount": 1123,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2828,7 +2828,7 @@
       ],
       "artifact": {
         "subjectSha": "705256bb40063333572f3d4208d5427a56ca36fd",
-        "prHeadSha": "705256bb40063333572f3d4208d5427a56ca36fd",
+        "prHeadSha": "c551722bea932d25a2ceee6855bc9cf9c535045a",
         "evidenceSha": null,
         "mergeSha": null
       },
