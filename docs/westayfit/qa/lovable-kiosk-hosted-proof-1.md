@@ -45,7 +45,12 @@ The bind alone checks a separate, earlier fetch. The Lovable host is mutable, so
   - Only those exact, anchored paths on the Lovable host are blocked, and only as scripts whose URL is exactly origin plus path: no query, no fragment, no userinfo. The events id must be exactly 16 lower-case hex digits, the real id's shape.
   - Details are in "The route-aware reviewed build", below.
 - **Scripts and stylesheets** from the Lovable host must be a reviewed `/assets/<name>`, declared with no charset or UTF-8, and carry that asset's reviewed digest. They are fulfilled with exactly the hashed bytes and the host's own headers (LOVABLE-REVIEWED-BUILD-2; see "Asset charset" below).
-- **Passive same-origin types** (images, fonts, the manifest) and **data requests** (`fetch`, `xhr`, `eventsource`) to the four API origins pass: Identity Toolkit, Secure Token, Firestore, and the staging callables host.
+- **Passive same-origin types** (images, fonts, the manifest) and **data requests** (`fetch`, `xhr`, `eventsource`, `ping`) to the four API origins pass: Identity Toolkit, Secure Token, Firestore, and the staging callables host.
+  - **`ping` (LOVABLE-GUARD-PING-1):** a beacon, sent with `navigator.sendBeacon`.
+    - Firestore's WebChannel closes a Listen channel with one, to `https://firestore.googleapis.com/google.firestore.v1.Firestore/Listen/channel`. Playwright reports it as resource type `ping`.
+    - Before this packet, the guard refused it. That stopped the kiosk journey of main run `38030033477` (`host-build` and `account-isolation` FAIL, 10 rows BLOCKED; #365 `6094589482`).
+    - A beacon carries data out, and its answer is never run.
+    - It passes only to the exact four API origins and never as a navigation. A `ping` to the Lovable host is still refused, because it is not a passive type there.
 - **Everything else that reaches the route is refused:** a redirect, an error status, other bytes, an unreviewed or foreign script, any document or script from an API origin, and any other origin's request. The refusal is recorded with no query string.
 - **A refusal stops the journey.** The journey checks after each navigation, so a refusal stops it before the next step:
   - the kiosk is never approved, so the station secret never reaches an unreviewed kiosk;

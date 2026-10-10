@@ -178,8 +178,11 @@ export const BIND_PROBES = Object.freeze([
 /** At most this many assets are read when walking the served build. */
 export const MAX_ASSETS = 150;
 /**
- * The only other origins the journey's pages may reach, and only for data (xhr, fetch, eventsource), never for a
- * document or a script: Firebase Auth, Firestore and the staging callables.
+ * The only other origins the journey's pages may reach, and only for data (xhr, fetch, eventsource, ping), never for a
+ * document or a script: Firebase Auth, Firestore and the staging callables. `ping` is a beacon (navigator.sendBeacon):
+ * Firestore's WebChannel closes a Listen channel with one to /google.firestore.v1.Firestore/Listen/channel, and
+ * Playwright reports it as resource type ping; refusing it stopped the kiosk journey of main run 38030033477
+ * (LOVABLE-GUARD-PING-1). A beacon's answer is never run. On the Lovable host a ping stays refused.
  */
 export const API_ORIGINS = Object.freeze([
   'https://identitytoolkit.googleapis.com',
@@ -516,7 +519,8 @@ export function bindLines(observed, verdict) {
 }
 
 const PASSIVE_TYPES = new Set(['image', 'font', 'media', 'manifest', 'texttrack', 'xhr', 'fetch', 'eventsource']);
-const DATA_TYPES = new Set(['xhr', 'fetch', 'eventsource']);
+// Data only, and only to API_ORIGINS. `ping` is here and not in PASSIVE_TYPES, so the Lovable host never gets one.
+const DATA_TYPES = new Set(['xhr', 'fetch', 'eventsource', 'ping']);
 /**
  * The Lovable host's own injected scripts, never the app's: the events script whose tag carries the context token, and
  * `/~flock.js` (seen in the documents by the bind of run 38006215259). The app reaches them only through optional calls
