@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "e56afc4fbf6451074021ca5be6dee0a5eb14fec909f41631430688575b7ea96f",
-  "eventCount": 1140,
+  "ledgerHead": "fad76bcbb0c1e38e431daf3f97c0f6c8b8c173a43b42ab1f0f00304c5c977ce0",
+  "eventCount": 1142,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -4182,7 +4182,7 @@
       },
       "label": "Owner operator access: map the WSF authorization model, gaps vs the owner's event-operator ask, an owner-run read-only account audit (email typed locally, never stored)",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "CHANGES_REQUESTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -4219,7 +4219,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6094177125
+          "id": 6094365057
         }
       },
       "review": {
@@ -6739,7 +6739,16 @@
       "ack": {
         "kind": "comment",
         "id": 6094304154
-      }
+      },
+      "superseded": true
+    },
+    "abb6469c0b12d786409e18e317eef0dfec8c1f7a167e7bea525026b1506cb48c": {
+      "packet": "WSF-OPERATOR-ACCESS-1",
+      "worker": "W9",
+      "reason": "handback",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
