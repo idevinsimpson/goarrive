@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "e925bbd0745e00790501b138d3160b732126070613e6774994e7ca8d8981aba4",
-  "eventCount": 1182,
+  "ledgerHead": "84c9d64f8356850a0c41316ec85405459ea7beb125ff14b909a03a26fc84a5a1",
+  "eventCount": 1187,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2544,7 +2544,7 @@
       },
       "label": "Fixture kit: expoEvent can make a link-joinable (public) event community with its real verified Champion, so the kiosk proof's qr-join row can run; default stays private; tests",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -2558,7 +2558,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         ".github/wsf-staging/journeys/fixture-kit.mjs",
@@ -2579,7 +2579,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6096266730
+          "id": 6096465361
         }
       },
       "review": {
@@ -2878,15 +2878,17 @@
       },
       "label": "Device matrix: align the display and sign-up cells with served build db3fd2f2 (selector, total and freshness copy; step count read as text), plus W3's carried O-items; REVIEWED_BUILD unchanged",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 394,
-      "pr": null,
-      "reviewers": [],
+      "pr": 614,
+      "reviewers": [
+        "W7"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "bab7e9800072e10df6ad4cc269e6f7794baf2c81",
+        "prHeadSha": "bab7e9800072e10df6ad4cc269e6f7794baf2c81",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -2916,7 +2918,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6096332312
+          "id": 6096503774
         }
       },
       "review": {
@@ -2929,7 +2931,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "LOVABLE-REVIEWED-BUILD-1": {
@@ -7012,16 +7014,28 @@
       "ack": {
         "kind": "comment",
         "id": 6096332312
-      }
+      },
+      "superseded": true
     },
     "4477f13f01b47f512826d2f715602cb888b646080d632b9fe6f809fb53164bae": {
       "packet": "KIT-PUBLIC-EXPO-EVENT-1",
       "worker": "W3",
       "reason": "release",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6096439088
       ],
+      "ack": {
+        "kind": "comment",
+        "id": 6096465361
+      }
+    },
+    "1827500dc865864ff360b64b0b27a40cdc0f6a959fefc3ac2aeac3c62f7438bb": {
+      "packet": "LOVABLE-MATRIX-ALIGN-1",
+      "worker": "W7",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
