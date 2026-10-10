@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "b37aaf1cebe6c916e61c8fb2c5743eea3bd287228d5268ec6fdd588e3087032f",
-  "eventCount": 1181,
+  "ledgerHead": "e925bbd0745e00790501b138d3160b732126070613e6774994e7ca8d8981aba4",
+  "eventCount": 1182,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -7018,8 +7018,10 @@
       "packet": "KIT-PUBLIC-EXPO-EVENT-1",
       "worker": "W3",
       "reason": "release",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        6096439088
+      ],
       "ack": null
     }
   },
