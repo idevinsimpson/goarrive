@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "e7550041b4a2a80a363b4c5491428779713eb582bb85f6ad09ec5956b63b8434",
-  "eventCount": 1201,
+  "ledgerHead": "71bc25f7ff0dc5b7e997235f9a686ec413c071b367d513556dd590faf7545c99",
+  "eventCount": 1204,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2874,6 +2874,69 @@
         "after": "director"
       },
       "deliveries": 4,
+      "pendingFinding": null
+    },
+    "LOVABLE-KIOSK-QR-JOIN-1": {
+      "owner": "W4",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Kiosk proof: run qr-join on the kit's public expo event (PR #616), require the QR to carry this community's join code, retire QR_KIT_BLOCK, plus W7's PN-1/2/4 from #614",
+      "origin": "ledger",
+      "phase": "RELEASED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": 394,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": 0,
+      "reviewedBy": [],
+      "subjectPaths": [
+        ".github/wsf-staging/hosted-lovable-kiosk.mjs",
+        ".github/wsf-staging/tests/hosted-lovable-kiosk.test.mjs",
+        ".github/wsf-staging/hosted-lovable-device-matrix.mjs",
+        ".github/wsf-staging/hosted-lovable-device-matrix.test.mjs",
+        "docs/westayfit/qa/lovable-kiosk-hosted-proof-1.md",
+        "docs/westayfit/qa/lovable-device-qa-1.md"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6096965194
+        },
+        "released": {
+          "kind": "comment",
+          "id": 6096965662
+        },
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6096965662
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
       "pendingFinding": null
     },
     "LOVABLE-MATRIX-ALIGN-1": {
@@ -7070,6 +7133,14 @@
         "id": 6096741050
       },
       "superseded": true
+    },
+    "0da1cb76cfde2c30c5fca1e621ebc04e91204ad87cad6ed10129973d872f4387": {
+      "packet": "LOVABLE-KIOSK-QR-JOIN-1",
+      "worker": "W4",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
