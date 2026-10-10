@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "4b6dbb80f331de4e73ffa085c497aab593794f2236482388a1f12a03f9b2936a",
-  "eventCount": 1091,
+  "ledgerHead": "30a1dc86715be4f1d963ea4356d4101ca5ee6de04978a0932ca4a3f7c6e88f3e",
+  "eventCount": 1095,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2749,7 +2749,7 @@
       },
       "label": "Route-aware reviewed-build pin for Lovable expo build 9b9eade5: normalize only the two per-request values, bind documents per route template, keep asset digests exact, negative mutation tests",
       "origin": "ledger",
-      "phase": "CHANGES_REQUESTED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 394,
@@ -2758,8 +2758,8 @@
         "W3"
       ],
       "artifact": {
-        "subjectSha": "cd1923436d237c05a191908d4d2b60bb6fb6c029",
-        "prHeadSha": "cd1923436d237c05a191908d4d2b60bb6fb6c029",
+        "subjectSha": "d498cd6c75f57d7093ef5ac6b1026bb1b6e6185d",
+        "prHeadSha": "d498cd6c75f57d7093ef5ac6b1026bb1b6e6185d",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -2788,7 +2788,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6092038757
+          "id": 6092354751
         }
       },
       "review": {
@@ -2801,7 +2801,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 1,
+      "deliveries": 2,
       "pendingFinding": null
     },
     "MEMBER-PREVIEW-LABEL-1": {
@@ -6497,7 +6497,16 @@
       "ack": {
         "kind": "comment",
         "id": 6092192827
-      }
+      },
+      "superseded": true
+    },
+    "6fe3eb08dc9cfcc891979e1e055400aaf56c4d24e411f7779faa70d5c3af26ec": {
+      "packet": "LOVABLE-REVIEWED-BUILD-1",
+      "worker": "W3",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
