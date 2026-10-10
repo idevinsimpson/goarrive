@@ -6941,3 +6941,58 @@ L0's relay for this wake listed five focus items. It reached this session after 
 - **Gates:** `ts:check` 0; `check-evidence-intact` 0 (re-run before push).
 
 **Status:** **PASS at `a4768e02` with zero unresolved findings.** PN-1 to PN-5 are non-blocking. W7 made no product edit, merge, dispatch, deploy, live-data change, credential or permission change, and did not touch any state ref or comment other than its own GitHub replies.
+
+## §88. Check 88: #620 LOVABLE-KIOSK-STATION-DRIVER-2 at `ba103116`
+
+**Assignment:** router wake `cb1a2348ceffdc033f050227fb9dc41272ff54ce139f01135b7e0a0a609db640` (#434 `6102078783`), under the owner's standing approval to ACK and perform valid W7 router reviews. I refreshed `wsf-control-state-2` first: `check` passed (1247 events), `worker-view W7` showed `WATCH=on` and `REVIEWING=LOVABLE-KIOSK-STATION-DRIVER-2 phase=UNDER_REVIEW pr=#620 subject=ba103116…`, W7 was the sole reviewer, and the wake was `delivered`. The PR head was still the subject, and nothing newer sat on #434 or the PR. ACK: #434 `6102084069`.
+
+**Subject:** #620 (draft, owner W4) at exactly `ba103116ffb48fc4d83cc138e3ff000a024b9fd4`: one commit, a direct child of `main` `4da578d7` (the merge of #619), 3 files, +371/−37: `hosted-lovable-kiosk.mjs`, its test and its QA note. No kit, product, backend, workflow, rules or tool file changed. I verified it in detached worktrees and pushed nothing from them. **I used no hosted system, no staging project, no Lovable project and no credential.** Everything below is the PR's own hermetic suite, local Chromium on a crafted page, or GitHub's job-level API.
+
+**Why this packet exists, and my own earlier verdict.** The hosted proof of #619's harness failed (8 PASS / 8 FAIL / 2 BLOCKED in W4's account). My §87 PASS said, under Limits, that the headings, test ids, timings and the phone's flow rested on W4's reading of the served build and that I had not verified the UI. This is where that reading failed. Nothing in §87's findings is contradicted: the server contract, the leave of an active turn and the cleanup coverage I measured are untouched, and the failures were the harness's polling.
+
+### Reproduced
+
+| Check | Result |
+|---|---|
+| `hosted-lovable-kiosk.test.mjs` | **35 / 35** on Node 20.20.2 **and** 22.22.2 (the PR says 35) |
+| `hosted-lovable-device-matrix.test.mjs` | **21 / 21** on both |
+| `tests/workflow-contract.test.mjs` | **103 / 103** on both |
+| `.github/wsf-staging/tests/run-all.mjs` and `tools/wsf-control/run-all.mjs` | **all suites passed**, each on both Node versions |
+| `REVIEWED_BUILD` and the guard | the block is **byte-identical** base to head (9,068 bytes by my slice); the guard gains no origin or type; the changed files are the three reserved paths |
+| Cited hosted runs, **job level only** | both kiosk runs (`38079242076`, `38079772880`) are `workflow_dispatch` on `main` `4da578d7`, and in each the `lovable-kiosk` job failed at the proof step and its require step, with `gate` and `config` passing. **I could not read their rows or logs** (the log host is not reachable from here), so "8 / 8 / 2" and "the same re-run passed `qr-join`" are W4's, not mine. |
+| Hosted device matrix, **job level** | the `lovable-device-matrix` job **succeeded** at `9b2e89e8`, `2709d764` and `4da578d7`. That harness waits for `[data-connected-join="preview"]` and reads `data-entry-step` values on the served build, so the attribute-carries-the-stage reading the new code depends on is corroborated for `preview` and the entry steps by a harness that passes hosted. `validating`, `choose`, `refused` and `unknown` rest on W4's reading. |
+| CI | the PR head shows **0** check runs (a draft; I cannot tell whether none were requested) |
+
+### What I measured that the PR's own tests do not show
+
+**1. The diagnosis explains the hosted rows (instrument 1).** I ran the PR's own fake app, with its served timing (the flow mounts 4 s after a load; the choice comes 7 s after Join), against the **DRIVER-1 harness from `main`** (inert shims for the names the new test imports). The rows are exactly the hosted shape: `qr-join` FAIL "join into this community, alreadyMember=false; phone choice absent", all seven station rows FAIL "not reached: the kiosk QR link shows the control no Join", and the five phone rows PASS. With `host-build` and `cleanup-tracking` PASS on the hosted run, that is 8 PASS, 8 FAIL, 2 BLOCKED. So the 5-second single sample and the immediate look for Join are sufficient to produce what was seen. (The fake's timings are the packet's, chosen to reproduce it; they are not a measurement of staging, and the PR says so.)
+
+**2. The new in-page reader in real Chromium (instrument 2).** I extracted the PR's `phoneScene` verbatim and ran it on crafted pages: it reads the join flow's stage and the boot and entry screens; names an icon button by `aria-label`; collapses white space; lists a repeated name once; and **omits `display:none`, `visibility:hidden` and zero-size buttons**. A closed page does not throw; it returns an unreadable scene that `sceneText` names. `sceneText` caps the list at 8 names of 40 characters each and says how many more. (`opacity:0` and off-screen buttons are still listed, and a button styled uppercase is read as uppercase because `innerText` applies `text-transform`; both only affect a diagnostic.)
+
+**3. PN-1 of #619 is closed, and exactly (instruments 3 and 4).** `seenText` against an oracle I wrote (first line, scrub, cap at `SEEN_MAX` code points with an ellipsis): **6,000 inputs, 0 differences**, on Node 20 and 22. For 1,107 plain stored texts the `LOVABLE_SEEN` line is exactly the stored text. Measured against the real verdict functions, **all seven PASS texts now fit whole** (the longest, `station-finish`, is 297 characters; `queue-place` is 286), where four were cut at 200 before.
+
+**4. My own mutants (instrument 5): 49 of 57 killed.** I did not reuse the PR's catalogue (it is not in the PR). All 57 parse, so each kill is a real test failure.
+- **Killed:** the seen cap (stored text back to 200, one character too many, `>=`, UTF-16 units, no scrub, `short` ignoring its max); every branch of `qrJoinVerdict` I mutated (kiosk or phone button not required, stage not required, another community, `alreadyMember: true`, a refusal reported as a timeout, the 30 s wait at 5 s and at 90 s); `sceneText` and `phoneScene` (nine buttons, 41 or uncapped names, the "and N more" count, the absent stage, boot, entry and unreadable parts, zero-size and hidden buttons listed, `aria-label` ignored, repeats and white space kept); the poll (step, no bound, `refused` or `unknown` missing from the end set); the control's entry (a single sample as in DRIVER-1, the choice sampled once after Join, the scene dropped from the not-reached text, the Join answer dropped from it, a Join that joined something passing, a missing Join failing as in DRIVER-1, the PASS text fixed); visitor A's path (the choice sampled once, the kiosk or phone button not read, the flow polled once, the scene dropped from the no-Join text); PN-2 (the poll removed, its window cut to 1 s); and PN-3 (the line code admitting `I` and `O`, 2 to 4 characters, lower case, `0` and `1`).
+- **Eight survivors, none a defect:**
+  - **Equivalent in the fake (3).** A Join pressed on a visible Join without checking the stage, A's entry on a visible Join alone, and the control's Join read from the whole log: in the fake the Join is visible exactly at the preview stage, and the log is fresh.
+  - **They change only wall time (3).** The poll stopping one step early (a 29 to 30 s validation), and the entry set not stopping at once on `choose`, or on `refused` and `unknown`: the end state is the same, reached after the full 30 s instead of at once. The fake's clock is not asserted on.
+  - **Missing pins (2).** A Join step that needs a `preview` stage with no Join button (it would time out in the click), and PN-2's poll placed before the writes mark, so a write inside the render-lag window would not be counted.
+
+### Precision notes (non-blocking)
+
+- **PN-1 (eight survivors; one boundary and two pins are worth a test).** The 29 to 30 s validation boundary; a test that the control's entry stops at once on `choose` (elapsed time on the fake clock); a `preview` stage with no Join button; and a write inside the render-lag window before the round's mark. None is a defect in the code.
+- **PN-2 (the kiosk's `visible()` is still existence, and now disagrees with the diagnostic).** `qrJoinVerdict` takes its two button inputs from `visible()` (`count() > 0`, `:968` at this head), while `phoneScene` lists only buttons with a box and no `visibility: hidden`. A "Move on my phone" present in the DOM but hidden would pass the verdict and be missing from its own diagnostic. This is my #617 PN-4, unchanged by this packet; the stage check (`choose`) narrows it, since the buttons are now required inside that stage.
+- **PN-3 (a diagnostic can be cut at 300).** A typical stage-and-buttons phrase is 148 to 164 characters and fits. Twelve long button names make 553, stored as 300, so the tail of the list is lost. Cosmetic.
+- **PN-4 (the Join step now depends on an attribute's value).** #619's harness found A's Join by the button alone; this packet requires `data-connected-join="preview"` as well. The hosted matrix corroborates `preview` (above). If the attribute's value ever differed, A's step would stop with "no Join for a visitor who is not a member" plus the scene, rather than reaching the Join the old harness found. The diagnostic would say so.
+- **PN-5 (an aside, not a defect).** The stored text and the log line differ only for control characters and runs of white space (the line normalises them), which no verdict text contains.
+
+### Limits, stated plainly (not findings)
+
+- **I did not read the Lovable source or fetch the live site**, and I did not use the Lovable connector. The flow's stages (`preview`, `joining`, `validating`, `choose`, `line`, `refused`, `unknown`), the boot screens, the claim that a signed-in member gets the same flow, and the absence of a `/join/<code>` route rest on W4's reading of `db3fd2f2`. I corroborated `preview` and the entry steps from the hosted matrix's job result; the rest I could not.
+- **The join flow's timing is modelled, not measured.** The fake reproduces the hosted failures; it does not show how long staging takes. The new waits are bounded by 30 s, the same as the matrix harness's `T.step`, and the matrix's 45 s `T.boot` passes hosted.
+- **Nothing here is a hosted proof.** As the PR says, no run of this code exists; L0's `lovable-kiosk` run on `main` after a merge supplies it. If the served build gives an existing member no route to **Use the kiosk**, or the flow never mounts, the rows will fail by name with what the phone showed.
+- `/reg-d6d4.log` is still at the filesystem root (from Check 80); I could not delete it.
+
+- **Gates:** `ts:check` 0; `check-evidence-intact` 0 (re-run before push).
+
+**Status:** **PASS at `ba103116` with zero unresolved findings.** PN-1 to PN-5 are non-blocking. W7 made no product edit, merge, dispatch, deploy, live-data change, credential or permission change, and did not touch any state ref or comment other than its own GitHub replies.
