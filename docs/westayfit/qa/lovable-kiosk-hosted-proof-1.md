@@ -12,6 +12,12 @@ Rework after Director finding #365 `6045688233` and security detail #589 `604571
 
 **Updated by LOVABLE-KIOSK-STATION-DRIVER-1** (queue #365 `6099633658`, release `6099634479`; W4, inbox #394). The proof now drives the station turn through the served UI. Each of the seven station rows is PASS or FAIL by name, never BLOCKED. See "The station turn" and the station rows, below.
 
+**Updated by LOVABLE-KIOSK-STATION-DRIVER-2** (queue #365 `6101323170`, release `6101324338`; W4, inbox #394). This fixes the hosted regression on main `4da578d7`. Run `38079242076` gave 8 PASS / 8 FAIL / 2 BLOCKED, and both failures were the harness's:
+- `qr-join` sampled the phone once after a fixed 5 s wait;
+- the station turn's entry looked for **Join** at once, while the member's shell was still loading.
+
+Both phones now poll the join flow, and a FAIL or `not reached` says what the phone showed. See "The phone's join flow", below.
+
 ## What it adds
 
 There is one new mode in the existing trusted staging workflow, `mode=lovable-kiosk`. It is proof only: it builds nothing, deploys nothing, and changes no rules, indexes, IAM or providers.
@@ -246,6 +252,43 @@ So:
 
 So an authorized credentialed run can reach every row except the organizer UI approval and the unverified account. That is `host-build`, `fixture-provenance`, `qr-join`, the five phone rows, the seven station rows (since LOVABLE-KIOSK-STATION-DRIVER-1) and `cleanup-tracking`.
 
+## The phone's join flow (LOVABLE-KIOSK-STATION-DRIVER-2)
+
+SOURCE INSPECTED, read-only at `db3fd2f2`:
+- **`src/routes/index.tsx`** wraps the shell in `FirebaseRuntimeBoundary` (`src/wsf/firebase-runtime-boundary.tsx`).
+- **On mount, `FirebaseRuntimeBoundary`** captures `?join=&goal=` into sessionStorage (`kiosk/connected-context.tsx` `capturePendingEntry`) and strips them from the address bar.
+- **Before `ConnectedJoinFlow` (`kiosk/connected-join.tsx`) mounts at all,** three things happen in order:
+  - the runtime boots ("Loading…", "Connecting…");
+  - `MemberEntry` restores the session ("Checking your profile…");
+  - `Bootstrapped` runs the first hydrate ("Loading your community…").
+- **The flow's stages:** `preview` (**Join**, Not now) → `joining` → `validating` (a `wsfListGoals` read) → `choose` (**Move on my phone**, **Use the kiosk**) → `line`, or `refused` / `unknown`.
+- **A signed-in member gets the same flow.** The build has no `/join/<code>` route chunk: its routes are `/`, `c/…/g/…`, `display`, `go/<marker>`, `kiosk`, `review.*`, `try` and the policy pages. `auth-gate.ts`'s route model is not a route the build serves.
+
+**Why both rows failed on staging.** The member's flow appears seconds after the page's load event.
+- The DRIVER-1 driver looked for **Join** at once, which is deterministic: run `38079772880` failed the same way.
+- `qr-join` read the choice once, 5 s after Join, which depends on timing: the same re-run passed it.
+
+**Reproduced offline first.** The fake app now has the served timing: the flow mounts 4 s after a load or a sign-in, and the choice comes 7 s after Join. Against it, the DRIVER-1 harness gives exactly the hosted rows:
+- `qr-join` FAIL "phone choice absent";
+- all seven station rows FAIL as "not reached: the kiosk QR link shows the control no Join";
+- the phone rows PASS.
+
+**The fix.**
+- **Both phones poll the flow every second, for up to 30 s (`JOIN_WAIT_MS`):**
+  - A, after its sign-in: the flow at `preview`, then **Join**, then the choice;
+  - the control, after opening the QR link: the flow at `preview`, then **Join**, then the choice; or the choice directly. In that case no Join is sent, and `queue-place` says "no Join shown".
+- **`qr-join`** (`qrJoinVerdict`) needs:
+  - A's own Join into this community, with `alreadyMember === false`;
+  - then `choose` with both **Move on my phone** and **Use the kiosk**.
+
+  It FAILs on `refused`, `unknown`, a choice missing either button, or no choice within 30 s, and names which.
+- **Diagnostics.** Each FAIL or `not reached` ends with what the phone showed: the flow's stage, any boot or entry screen in front of it (`data-boot`, `data-entry-step`), and up to 8 visible button names. They are read in the page by `phoneScene` and written by `sceneText`, for example: `the phone's join flow is validating; buttons "Open menu"`. Buttons carry product copy only, and no code or id is read.
+- **No visitor-A fallback.** The queue asked to drive the turn with A only if the served build gives an existing member no route to **Use the kiosk**. By the source above it does, so the control still takes the turn. If a hosted run ever disagrees, the `not reached` line names the stage and buttons the control saw.
+- **W7's notes on #619:**
+  - PN-1: `results()` keeps up to `SEEN_MAX` (300) characters, the cap of its `LOVABLE_SEEN` line, and `station-finish`'s PASS sentence is shortened to fit.
+  - PN-2: after Start, the station phase is polled for up to 5 s.
+  - PN-3: the line code is pinned to exactly three characters of the pairing alphabet.
+
 ## The station turn (LOVABLE-KIOSK-STATION-DRIVER-1)
 
 SOURCE INSPECTED: the served build `db3fd2f2` (read-only, on the Lovable mirror) and the served backend `ec162d17` (`functions-westayfit/src/index.ts`).
@@ -255,8 +298,8 @@ SOURCE INSPECTED: the served build `db3fd2f2` (read-only, on the Lovable mirror)
 
 The turn runs last, after `account-isolation`. The control is back in fresh storage on its own phone, and the kiosk is the station bound in step 1. Every row is read from the requests and from the screens. The station credential and every binding, entry id and line code stay in memory, and no verdict prints them.
 
-1. **queue-place.** The control opens the kiosk QR's join link.
-   - It is already a member, so `wsfJoinCommunity` answers `alreadyMember: true` and writes nothing (`ec162d17` `admitByLinkTx`).
+1. **queue-place.** The control opens the kiosk QR's join link, and its join flow is polled for (see "The phone's join flow").
+   - It is already a member, so its **Join** gets `alreadyMember: true` from `wsfJoinCommunity` and writes nothing (`ec162d17` `admitByLinkTx`). If its flow opens at the choice instead, no Join is sent.
    - It taps **Use the kiosk**, enters the chosen name "Fixture Control" and taps **Join the kiosk line**.
    - PASS needs:
      - exactly one `wsfJoinTurnLine` for this goal and that name;
@@ -289,14 +332,14 @@ A journey that stops before or during the turn fails the rows it did not reach a
 |---|---|---|
 | host-build | every route template's reviewed canonical document and every reviewed asset digest, exactly, at bind **and** for every document, script and stylesheet the browser loads; the host's own scripts blocked; nothing else executable is loaded | pinned to Lovable `9b9eade5` (bind run `38007859514`); PASS needs a `--run` after merge |
 | fixture-provenance | kit `expoEvent` (Champion, one verified member, community, goal) plus two `memberInTwoCommunities` accounts that are **not** members of the event community | measured |
-| qr-join | on the kit's public event: the kiosk's `data-join-url` must be exactly the Lovable host, path `/`, `goal` this goal, and `join` exactly the kit's `ev.joinCode`; A signs in through the product UI (identity checked) and presses **Join**; `wsfJoinCommunity` must answer this community with `alreadyMember === false`; then the phone choice appears | measured. FAIL on another code, host, path or goal, `alreadyMember === true`, a missing Join, or no QR on the public event (named, never BLOCKED). No code is printed. (LOVABLE-KIOSK-QR-JOIN-1) |
+| qr-join | on the kit's public event: the kiosk's `data-join-url` must be exactly the Lovable host, path `/`, `goal` this goal, and `join` exactly the kit's `ev.joinCode`; A signs in through the product UI (identity checked) and presses **Join** once its flow shows it; `wsfJoinCommunity` must answer this community with `alreadyMember === false`; then the choice, with both buttons, polled for up to 30 s | measured. FAIL on another code, host, path or goal, `alreadyMember === true`, no Join, `refused`, `unknown`, a choice missing a button, no choice within 30 s, or no QR on the public event, each named, with what the phone showed (never BLOCKED). No code is printed. (LOVABLE-KIOSK-QR-JOIN-1; polled in LOVABLE-KIOSK-STATION-DRIVER-2) |
 | contribution-7 | the **control** sends exactly one `wsfContribute` request, and the receipt's `data-attempt` equals that request's `attemptId` | measured (control) |
 | operation-receipt | request: this goal, `count === 7`, an attempt. Response: `addedCount === 7`, `alreadyRecorded === false`, whole-number `ownCredit` and `sharedTotal`, the goal's unit. Screen: exactly that shared total (en-US) and the unit | measured (control) |
 | own-history-shared | after a reload: `wsfMyContribution` for this goal = before + 7 = the receipt's `ownCredit`; `wsfGoalPulse` = the receipt's `sharedTotal`; the Progress row shows both exactly. Each read is paired with its own request, even when other goals' reads are answered around it. | measured (control; BLOCKED if a selected-goal read is absent) |
 | reopen-static | MOVE reopened: no replayed receipt, no pending-contribution key, still exactly one contribution request | measured (control) |
 | account-isolation | the control signs out and B (a non-member) signs in, in the same storage. B has no pending join keys, no test-goal reads and no Progress row. The control then signs in, in a fresh context, with the community chosen explicitly: same identity, same own total, same row | measured (control) |
 | cleanup-tracking | the control's contribution and A's QR-join membership are tracked **from their requests**, so they are tracked even when a later assertion fails, and are merged into the manifest before cleanup; the seen text names each product-written document by kind ("visitor A's membership of the event community, from the QR join"), never by id | measured; FAIL if the merge fails |
-| queue-place | the control opens the kiosk QR link on its phone (already a member: nothing joined), Use the kiosk, the chosen name: exactly one `wsfJoinTurnLine` for this goal, answered waiting with a code; the phone shows it; the station counts 1 waiting; the place is tracked | measured (control; LOVABLE-KIOSK-STATION-DRIVER-1) |
+| queue-place | the control opens the kiosk QR link on its phone and its join flow is polled for (already a member: its Join joins nothing, or no Join is shown), Use the kiosk, the chosen name: exactly one `wsfJoinTurnLine` for this goal, answered waiting with a code; the phone shows it; the station counts 1 waiting; the place is tracked | measured (control; LOVABLE-KIOSK-STATION-DRIVER-1) |
 | call | one `wsfCallNext`, answered with this place assigned (name, code, `assigned`, a `turnRef`); the station shows Calling and the name; the phone shows it is called | measured (control) |
 | phone-ready | one `wsfTurnReady` for its own entry, answered ready; the station's own line shows the called turn ready, with Start | measured (control) |
 | expected-turn-start | one `wsfStartTurn` whose `expectedTurn` equals the called turn's `turnRef` (from the request; never printed); the answer shows that turn active; no `expectedTurn` is an older station path and FAILs | measured (control) |
@@ -313,6 +356,7 @@ Every browser context is closed in `finally`, including on an early stop.
 - **Champion approval.** It goes through the kit's callable, not through the Champion UI; see `organizer-ui-approval`. The control's and the visitors' sign-ins do go through the product UI.
 - **The station turn ends from the phone.** The station's own Contribute and Finish are never pressed, because they follow only a station Complete, which is a second write. See "Why the turn ends from the phone", above.
 - **Real time.** The round runs its real 60 seconds, plus polling, so the hosted run takes about two minutes longer. The phone must tap I'm here inside the served 45-second ready lease, and the driver taps it as soon as the phone shows the call.
+- **The join flow's timing is modelled, not measured.** The fake's 4 s mount and 7 s choice reproduce both hosted failures. The real waits on staging are only bounded by the 30 s poll, and a hosted run reports what the phone showed when it stops.
 - **What the station turn cannot see.** The Firestore documents themselves. What the turn wrote is read from the requests the two pages sent, and the kit tracks the line's documents for cleanup.
 - **The control is a kit member, not a QR newcomer.** Its membership is fixture preparation, exactly like the Champion's; it is named as the control in every phone row, and nothing claims it joined by QR.
 - **Before spending a credentialed dispatch** (W4's residual): check against the donor source that the app does not load the Firebase `authDomain` `/__/auth/iframe` or a Google API script on page load. If it does, the guard refuses it by name and `host-build` FAILs, failing closed.
@@ -399,6 +443,31 @@ Every browser context is closed in `finally`, including on an early stop.
 - **The guard's contract under a QR join.** A now signs in on the reviewed join page before home's refusal, so the `foreignOnHome` defect sees one password fill where it used to see none. The guard test now counts fills after the first refusal, which must be 0, in every defect, and pins each defect's exact fill count and product-written documents. The check is no weaker.
 - **W7's notes from #614.** PN-1: `seenLine` keeps 299 and 300 code points whole and turns 301 into 299 plus the ellipsis, for `b` and for U+1F600. PN-2: the doc comment is back above `seenLine`. PN-4: in the device matrix (its note).
 - **Mutants: 28 of 28 killed** for this packet: each branch of `qrJoinProblem` (10), the public event option, a QR problem ignored, no QR counted as PASS, BLOCKED, unnamed or with other copy, the cleanup naming (5, including the cli keeping the old text), the cap (5), and the matrix's visibility check (2: reading hidden leaves, or the first match's visibility instead of the nth's). The earlier sets show no regression: REVIEWED-BUILD-2 134 of 136 (the same two survivors as before), GUARD-PING-1 30 of 30, MATRIX-ALIGN-1 22 of 22 and its O-items 20 of 20. MATRIX-ALIGN-1's two `exactText` mutants (reading innerText; ignoring the index) were re-based onto its new body, and both are killed. One more mutant, the count bound off by one, survives as equivalent: `isVisible()` is false for an element that does not exist.
+
+**LOVABLE-KIOSK-STATION-DRIVER-2** (Node 20.20.2 and Node 22.22.2): kiosk **35 passed**, matrix **21 passed**, `workflow-contract` 103 passed, and staging and control `run-all` all suites passed. `REVIEWED_BUILD` is byte-identical (its block's sha256 is still `b5dfc0de…`), and so is every pinned vector. The guard gains no origin and no type. There is no product or kit change.
+- **Reproduced first:** against the fake with the served timing, the DRIVER-1 harness gives exactly run `38079242076`'s rows (see "The phone's join flow").
+- **The real shape now passes every row.** `qr-join` reads "phone choice shown after 7 s". The control's single Join joins nothing, and every station row's whole sentence reaches the results file.
+- **New journey cases (`journey (LOVABLE-KIOSK-STATION-DRIVER-2)`):**
+  - a 20 s shell with a 25 s validation passes everything;
+  - a member flow that opens at the choice passes, with no Join sent;
+  - a 1.5 s render lag after Start passes (PN-2);
+  - a choice with no Move on my phone fails `qr-join` alone.
+
+  Each of these fails by name, with the phone's stage and buttons, while the control's phone rows stand and no line place is taken:
+  - a 40 s validation, `refused` and `unknown`;
+  - a control flow that never comes;
+  - a 40 s shell;
+  - a choice with no Use the kiosk.
+- **Unit tables:** `qrJoinVerdict` (11 cases), `sceneText` (7), the results cap at 201, 300 and 301 characters and in astral characters (PN-1), and the line code with `I`, `O`, `0`, `1`, lower case and 2 or 4 characters (PN-3).
+- **`phoneScene`'s own in-page function runs in the fake** against a small DOM that holds a zero-size button, a `visibility: hidden` button, a repeated name, white space and an icon button named by `aria-label`. What it returns is what the harness reads.
+- **Mutants: 52 of 53 killed** for this packet. The one survivor is equivalent: the control's Join is read as the window's last or first, and the harness sends at most one.
+- **Earlier sets, re-run on this tree:**
+  - DRIVER-1: 81 of 81 applicable; its P1 was re-based as P1 and P2 above.
+  - QR-JOIN-1: 27 of 27, plus Q24 re-based onto `seenLine` and onto `seenText`, both killed.
+  - GUARD-PING-1: 29 of 29.
+  - MATRIX-ALIGN-1: 22 of 22, plus the same equivalent.
+  - The O-items: 20 of 20.
+  - REVIEWED-BUILD-2: 134 of 136, the same two documented survivors (M32, C25) as on every base since `614836b8`.
 
 **LOVABLE-KIOSK-STATION-DRIVER-1** (Node 20.20.2 and Node 22.22.2): kiosk **33 passed**, matrix **21 passed**, `workflow-contract` 103 passed, staging and control `run-all` all suites passed. `REVIEWED_BUILD` is byte-identical (its block's sha256 is still `b5dfc0de…`), and so is every pinned vector. The guard gains no origin and no type, and there is no product or kit change.
 - **The fake runs the served turn.** The fake app now has the bound kiosk's station panel, with its phases on a shared clock that every page wait moves, and the station polls `wsfTurnState` as `poller.ts` does. It also has the phone's line card, and the kit's `trackPlace` and `trackStationTurn`.
