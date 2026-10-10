@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "4191191bc2956159fc31ed61513e808cd999c24baa106df40e435a32b5756a51",
-  "eventCount": 1112,
+  "ledgerHead": "2c2966db13072abeea13482ef52dc77c533ff66b803c75440ff37111c67d03f5",
+  "eventCount": 1116,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2827,8 +2827,8 @@
         "W3"
       ],
       "artifact": {
-        "subjectSha": "b63e45f09d83fec706a592597483b9288e2290b0",
-        "prHeadSha": "b63e45f09d83fec706a592597483b9288e2290b0",
+        "subjectSha": "705256bb40063333572f3d4208d5427a56ca36fd",
+        "prHeadSha": "705256bb40063333572f3d4208d5427a56ca36fd",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -2857,7 +2857,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6093016498
+          "id": 6093263172
         }
       },
       "review": {
@@ -2870,7 +2870,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 1,
+      "deliveries": 2,
       "pendingFinding": null
     },
     "MEMBER-PREVIEW-LABEL-1": {
@@ -6608,7 +6608,16 @@
       "ack": {
         "kind": "comment",
         "id": 6093129119
-      }
+      },
+      "superseded": true
+    },
+    "f4f162a9b065a6fd0f4556b428eead634d982477e2dfc393b1a1c34e4db050d0": {
+      "packet": "LOVABLE-REVIEWED-BUILD-2",
+      "worker": "W3",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
