@@ -44,6 +44,9 @@
  * station shows the review; then the phone leaves the line, so the turn ends with no second write (the station's own
  * Contribute and Finish follow only a station Complete, which this proof never sends) and the station returns to Call
  * next with nothing of the previous visitor. The phone's contribution-7 stays the run's only contribution.
+ * On both phones the scanned-join flow is polled for, never sampled once (LOVABLE-KIOSK-STATION-DRIVER-2): it mounts only
+ * after the shell boots, restores the session and hydrates, and its choice follows joining and validating. A FAIL or a
+ * not-reached row says what the phone showed: the flow's stage, any boot or entry screen, and its button names.
  *
  * Secrets: account passwords exist only in memory (the kit's), never in a result, log line or file. Identities are
  * recorded as a short sha256 of the uid. Nothing here writes to the Lovable project.
@@ -224,7 +227,7 @@ export const FIXED_BLOCKED = Object.freeze({
   'organizer-ui-approval': 'the station is approved through the kit\'s Champion callable as fixture preparation (tracked for cleanup); a UI approval would create a station record the kit cannot track',
 });
 
-const short = (e) => String(e?.message || e).split('\n')[0].replace(/[?&][A-Za-z]+=[^&\s"']+/g, '?…').replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, '<email>').slice(0, 200);
+const short = (e, max = 200) => String(e?.message || e).split('\n')[0].replace(/[?&][A-Za-z]+=[^&\s"']+/g, '?…').replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, '<email>').slice(0, max);
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 /**
  * The evidence scan's rules, exactly `RULES` in scan-evidence.mjs, copied because that script runs on import. A test
@@ -263,6 +266,14 @@ export function seenLine(prefix, id, seen) {
   if (EVIDENCE_SCAN_RULES.some((re) => re.test(raw) || re.test(t))) t = '(withheld: the text matches an evidence-scan rule)';
   else if (Array.from(t).length > SEEN_MAX) t = `${Array.from(t).slice(0, SEEN_MAX - 1).join('')}…`;
   return logSafe(`${prefix} ${id} ${t || '(none)'}`);
+}
+/**
+ * A row's stored seen text: scrubbed as short() scrubs it, and kept up to SEEN_MAX characters, the cap of its
+ * LOVABLE_SEEN line, so the results file and the log carry the same whole sentence (W7 PN-1 on #619).
+ */
+export function seenText(seen) {
+  const t = Array.from(short(seen ?? '', Infinity));
+  return t.length > SEEN_MAX ? `${t.slice(0, SEEN_MAX - 1).join('')}…` : t.join('');
 }
 export const idHash = (uid) => (typeof uid === 'string' && uid ? sha256(uid).slice(0, 16) : null);
 
@@ -685,7 +696,7 @@ export function browserEnv(env) {
 export function results(rows, extra = {}) {
   const out = ROWS.map(({ id, expected }) => {
     const r = rows[id] ?? (FIXED_BLOCKED[id] ? { status: 'BLOCKED', seen: FIXED_BLOCKED[id] } : { status: 'BLOCKED', seen: 'not reached' });
-    return { id, expected, status: r.status, seen: short(r.seen ?? '') };
+    return { id, expected, status: r.status, seen: seenText(r.seen) };
   });
   return { schemaVersion: 1, host: LOVABLE_URL, project: PROJECT_ID, rows: out, ...extra };
 }
@@ -815,10 +826,14 @@ export const TURN_WRITES = Object.freeze(['wsfContribute', 'wsfCompleteTurn', 'w
 const said = (t) => (t ? `"${String(t).replace(/\s+/g, ' ').trim().slice(0, 60)}"` : 'nothing');
 const verdict = (bad, pass) => ({ ok: bad.length === 0, seen: bad.length ? `${CONTROL}: ${bad.join('; ')}` : `${CONTROL}: ${pass}` });
 
-/** queue-place: one line join for this goal under the chosen name, a waiting place with a code, shown on the phone, counted by the station, tracked. */
+/**
+ * queue-place: one line join for this goal under the chosen name, a waiting place with a code, shown on the phone,
+ * counted by the station, tracked. `qrJoin` is the control's own Join on the kiosk QR link, or null when its join flow
+ * opened at the choice and no Join was sent (LOVABLE-KIOSK-STATION-DRIVER-2); a Join sent must join nothing.
+ */
 export function queuePlaceVerdict({ qrJoin, joins, goalId, phoneLine, phoneText, stationWaiting, trackedEntry }) {
   const bad = [];
-  if (qrJoin?.result?.alreadyMember !== true) bad.push(`the kiosk QR's Join answered ${qrJoin?.error ?? `alreadyMember=${qrJoin?.result?.alreadyMember}`} for the kit's member`);
+  if (qrJoin && qrJoin.result?.alreadyMember !== true) bad.push(`the kiosk QR's Join answered ${qrJoin.error ?? `alreadyMember=${qrJoin.result?.alreadyMember}`} for the kit's member`);
   const j = joins.at(-1) ?? null;
   const r = j?.result ?? null;
   if (joins.length !== 1) bad.push(`${joins.length} line join request(s)`);
@@ -831,7 +846,7 @@ export function queuePlaceVerdict({ qrJoin, joins, goalId, phoneLine, phoneText,
   }
   if (phoneLine !== 'waiting' || !(TURN_CODE.test(String(r?.code ?? '')) && String(phoneText ?? '').includes(`Code ${r.code}.`))) bad.push(`the phone's line shows ${phoneLine ?? 'nothing'}${phoneLine === 'waiting' ? ' without its code' : ''}`);
   if (stationWaiting !== 1) bad.push(`the station counts ${stationWaiting ?? 'no'} waiting`);
-  return verdict(bad, 'the kiosk QR (already a member, nothing joined), Use the kiosk, then exactly one place in this goal\'s line under the chosen name (waiting, not already in line); the phone shows its code; the station counts 1 waiting; the place is tracked for cleanup');
+  return verdict(bad, `the kiosk QR (already a member, ${qrJoin ? 'nothing joined' : 'no Join shown'}), Use the kiosk, then exactly one place in this goal's line under the chosen name (waiting, not already in line); the phone shows its code; the station counts 1 waiting; the place is tracked for cleanup`);
 }
 
 /** call: one Call next; its answer assigns this place (name, code, state assigned, a binding); the station and the phone say so. */
@@ -916,7 +931,7 @@ export function finishVerdict({ leaves, place, end, endText, phase, callNextShow
   if (text.includes(LINE_ALIAS) || (TURN_CODE.test(String(place?.code ?? '')) && new RegExp(`\\b${place.code}\\b`).test(text))) bad.push('the station still shows the previous visitor');
   if (hall?.assigned !== null || hall?.result !== null) bad.push(`the station's line still holds ${hall?.assigned ? 'a turn' : hall?.result ? 'a result' : 'an unread state'}`);
   if (turnContributions.length) bad.push(`${turnContributions.length} contribution request(s) since the turn began (${[...new Set(turnContributions)].join(', ')})`);
-  return verdict(bad, 'the phone left the line (no contribution); the station showed Turn ended, then Call next with nothing of the previous visitor on screen or in its line; no contribution of any kind since the turn began (no contribute, station or phone Complete), so contribution-7 stays the only one');
+  return verdict(bad, 'the phone left the line; the station showed Turn ended, then Call next with nothing of the previous visitor on screen or in its line; no contribution of any kind (contribute, station or phone Complete) since the turn began, so contribution-7 stays the only one');
 }
 
 /** The callables that record a contribution: MOVE's, the station's own Complete and the phone's own Complete. */
@@ -989,6 +1004,69 @@ async function toCountStep(page) {
   }
 }
 
+// ---- the phone's scanned-join flow (LOVABLE-KIOSK-STATION-DRIVER-2) -----------------------------------------------
+// Read at db3fd2f2: src/routes/index.tsx mounts FirebaseRuntimeBoundary around the shell. It captures ?join=&goal= into
+// sessionStorage (connected-context.tsx capturePendingEntry), then boots the runtime, restores the session
+// (member-entry-screen.tsx) and runs the first hydrate (Bootstrapped) before connected-join.tsx mounts at all. Its
+// stages are preview (Join) -> joining -> validating (wsfListGoals) -> choose (Move on my phone, Use the kiosk) -> line,
+// or refused / unknown. A signed-in member gets the same flow (the build has no /join/<code> route), seconds after load.
+/** How long the phone's join flow may take to reach a stage the proof acts on. */
+export const JOIN_WAIT_MS = 30_000;
+/** The stages the flow can be entered from: its preview (Join) or its choice, or the two refusals. */
+const ENTRY_STAGES = new Set(['preview', 'choose', 'refused', 'unknown']);
+/** The stages a Join ends at. */
+const CHOICE_END = new Set(['choose', 'refused', 'unknown']);
+/** The most button names one description carries. */
+const SCENE_BUTTONS = 8;
+
+/**
+ * What the phone shows, read in the page: the join flow's stage, any boot or entry screen in front of it, and the
+ * visible button names. Buttons carry product copy only; no code or id is read.
+ */
+async function phoneScene(page) {
+  try {
+    return await page.evaluate(() => {
+      const attr = (sel, name) => document.querySelector(sel)?.getAttribute(name) ?? null;
+      const shown = (b) => { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(b).visibility !== 'hidden'; };
+      const names = [...document.querySelectorAll('button')].filter(shown).map((b) => (b.getAttribute('aria-label') || b.innerText || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+      return { stage: attr('[data-connected-join]', 'data-connected-join'), boot: attr('[data-boot]', 'data-boot'), entry: attr('[data-entry-step]', 'data-entry-step'), buttons: [...new Set(names)] };
+    });
+  } catch (e) {
+    return { stage: null, boot: null, entry: null, buttons: [], error: short(e, 80) };
+  }
+}
+
+/** One phrase of what the phone showed, for a FAIL or a not-reached row (the next hosted run explains itself). */
+export function sceneText(s) {
+  const all = Array.isArray(s?.buttons) ? s.buttons : [];
+  const names = all.slice(0, SCENE_BUTTONS).map((b) => `"${String(b).slice(0, 40)}"`);
+  const more = all.length > SCENE_BUTTONS ? ` and ${all.length - SCENE_BUTTONS} more` : '';
+  return `the phone's join flow is ${s?.stage ?? 'absent'}${s?.boot ? `, boot ${s.boot}` : ''}${s?.entry ? `, entry step ${s.entry}` : ''}; buttons ${names.length ? `${names.join(', ')}${more}` : 'none'}${s?.error ? `; unreadable (${s.error})` : ''}`;
+}
+
+/** Read the phone every second, up to `ms`, until `done(scene)` holds; the last scene, with the milliseconds waited. */
+async function untilScene(page, done, ms = JOIN_WAIT_MS) {
+  let scene = await phoneScene(page);
+  let waited = 0;
+  for (; !done(scene) && waited < ms; waited += 1000) { await page.waitForTimeout(1000); scene = await phoneScene(page); }
+  return { ...scene, waited };
+}
+
+/**
+ * qr-join: visitor A's own Join into this community as a newcomer, then the phone's choice (both buttons), polled for:
+ * it follows joining and validating in connected-join.tsx. FAIL on refused, unknown or no choice in JOIN_WAIT_MS,
+ * naming what the phone showed. No code is ever printed.
+ */
+export function qrJoinVerdict({ joined, groupId, scene, phoneChoice, kioskChoice }) {
+  const r = joined?.result ?? null;
+  const into = r?.groupId === groupId;
+  const head = `join ${into ? 'into this community' : joined?.error ? `answered ${joined.error}` : 'not into this community'}, alreadyMember=${r?.alreadyMember}`;
+  const choice = scene?.stage === 'choose' && phoneChoice === true && kioskChoice === true;
+  if (choice) return { ok: into && r.alreadyMember === false, seen: `${head}; phone choice shown after ${Math.round((scene.waited ?? 0) / 1000)} s` };
+  const why = CHOICE_END.has(scene?.stage) ? `the join flow ended at ${scene.stage}` : `no choice within ${JOIN_WAIT_MS / 1000} s`;
+  return { ok: false, seen: `${head}; phone choice absent (${why}): ${sceneText(scene)}` };
+}
+
 /** Poll `test` every `step` ms on the page until it holds or `ms` of waits have passed; returns its last value. */
 async function until(page, test, ms, step) {
   let v = await test();
@@ -1016,16 +1094,23 @@ async function driveStationTurn({ kiosk, logK, phone, logP, joinUrl, ev, m, fixt
   if (!(await visible(panel))) { notReached(set, rows, 'queue-place', 'the bound kiosk shows no station turn panel; an older station path is never driven'); return; }
   const turnBegan = { k: logK.mark(), p: logP.mark() };
 
-  // queue-place: the kiosk QR on the control's phone (already a member), Use the kiosk, the chosen name, ONE join.
+  // queue-place: the kiosk QR on the control's phone (already a member), Use the kiosk, the chosen name, ONE join. The
+  // member's join flow mounts only after the shell boots and hydrates, so it is polled for (LOVABLE-KIOSK-STATION-DRIVER-2):
+  // its preview, then Join and the choice; or the choice directly.
   await phone.goto(joinUrl);
   guard.check(); // nothing is typed into a page that loaded anything unreviewed
+  let scene = await untilScene(phone, (s) => ENTRY_STAGES.has(s.stage));
   const join = phone.locator('[data-connected-join]').getByRole('button', { name: 'Join', exact: true });
-  if (!(await visible(join))) { notReached(set, rows, 'queue-place', 'the kiosk QR link shows the control no Join'); return; }
-  await join.click();
+  if (scene.stage === 'preview' && (await visible(join))) {
+    await join.click();
+    scene = await untilScene(phone, (s) => CHOICE_END.has(s.stage));
+  }
   const useKiosk = phone.getByTestId('join-use-kiosk');
-  await wait(phone, () => visible(useKiosk), 20_000);
-  const qrJoin = logP.last('wsfJoinCommunity');
-  if (!(await visible(useKiosk))) { notReached(set, rows, 'queue-place', `the phone offered no Use the kiosk (the QR's Join answered ${qrJoin?.error ?? `alreadyMember=${qrJoin?.result?.alreadyMember}`})`); return; }
+  const qrJoin = logP.since(turnBegan.p).filter((x) => x.name === 'wsfJoinCommunity').at(-1) ?? null;
+  if (scene.stage !== 'choose' || !(await visible(useKiosk))) {
+    notReached(set, rows, 'queue-place', `the kiosk QR link offered the control no Use the kiosk${qrJoin ? ` (its Join answered ${qrJoin.error ?? `alreadyMember=${qrJoin.result?.alreadyMember}`})` : ''}: ${sceneText(scene)}`);
+    return;
+  }
   await useKiosk.click();
   await phone.getByLabel('Name to show on the kiosk').fill(LINE_ALIAS);
   const beforeJoin = logK.mark();
@@ -1066,6 +1151,7 @@ async function driveStationTurn({ kiosk, logK, phone, logP, joinUrl, ev, m, fixt
   await startButton.first().click();
   await wait(kiosk, async () => logK.last('wsfStartTurn') !== null, 15_000, 250);
   const roundFrom = { k: logK.mark(), p: logP.mark() };
+  await wait(kiosk, async () => ['countdown', 'active'].includes(await phaseOf()), 5000, 250); // the panel renders the start (W7 PN-2 on #619)
   const sv = startVerdict({ starts: logK.of('wsfStartTurn'), turnRef, phase: await phaseOf() });
   set('expected-turn-start', sv.ok, sv.seen);
   try { await fixtures.trackStationTurn(ev, m, place.entryId); } catch { /* no attempt was minted: a turn that never started writes nothing */ }
@@ -1177,14 +1263,16 @@ export async function runJourney({ browser, fixtures, base, amount = 7, reviewed
       await signIn(pageA, a);
       const join = pageA.locator('[data-connected-join]').getByRole('button', { name: 'Join', exact: true });
       if ((await uidOf(pageA)) !== a.uid) set('qr-join', false, 'the sign-in did not complete as visitor A');
-      else if (!(await visible(join))) set('qr-join', false, 'no Join for a visitor who is not a member');
       else {
-        await join.click();
-        await pageA.waitForTimeout(5000);
-        const joined = logA.last('wsfJoinCommunity');
-        const phone = await visible(pageA.getByTestId('join-move-phone'));
-        set('qr-join', joined?.result?.groupId === ev.groupId && joined.result.alreadyMember === false && phone,
-          `join ${joined?.result?.groupId === ev.groupId ? 'into this community' : 'not into this community'}, alreadyMember=${joined?.result?.alreadyMember}; phone choice ${phone ? 'shown' : 'absent'}`);
+        // The flow, its Join and then its choice are polled for, never sampled once (LOVABLE-KIOSK-STATION-DRIVER-2).
+        const entry = await untilScene(pageA, (s) => ENTRY_STAGES.has(s.stage));
+        if (entry.stage !== 'preview' || !(await visible(join))) set('qr-join', false, `no Join for a visitor who is not a member: ${sceneText(entry)}`);
+        else {
+          await join.click();
+          const after = await untilScene(pageA, (s) => CHOICE_END.has(s.stage));
+          const v = qrJoinVerdict({ joined: logA.last('wsfJoinCommunity'), groupId: ev.groupId, scene: after, phoneChoice: await visible(pageA.getByTestId('join-move-phone')), kioskChoice: await visible(pageA.getByTestId('join-use-kiosk')) });
+          set('qr-join', v.ok, v.seen);
+        }
       }
     }
 

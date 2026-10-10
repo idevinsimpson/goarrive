@@ -15,6 +15,7 @@ import {
   requireVerdict, results, runJourney, runResults, seenLine, servedManifest, sharedOf, showsNumber,
   CONTRIBUTION_WRITES, LINE_ALIAS, REVIEW_PHONE_NOTE, ROUND_MIN_MS, STATION_ROWS, TURN_REF, TURN_WRITES,
   callVerdict, finishVerdict, queuePlaceVerdict, readyVerdict, reviewVerdict, roundVerdict, startVerdict,
+  JOIN_WAIT_MS, qrJoinVerdict, sceneText, seenText,
 } from '../hosted-lovable-kiosk.mjs';
 
 let passed = 0;
@@ -556,6 +557,15 @@ test('results: every row in order; the unverified account and the UI approval ar
   assert.equal(allPassed(doc), false);
   assert.equal(allPassed(results(Object.fromEntries(ROWS.map((r) => [r.id, { status: 'PASS', seen: '' }])))), true);
   assert.doesNotMatch(JSON.stringify(results({ 'qr-join': { status: 'FAIL', seen: 'sign in as wsf-e5c-x-lka-ab12@example.com?token=abc' } })), /@example\.com|token=abc/, 'emails and query values are scrubbed');
+  // W7 PN-1 on #619: a row keeps up to SEEN_MAX characters, the cap of its LOVABLE_SEEN line, not 200.
+  const kept = (n, ch = 'b') => results({ review: { status: 'FAIL', seen: ch.repeat(n) } }).rows.find((r) => r.id === 'review').seen;
+  assert.equal(kept(201), 'b'.repeat(201), 'past the old 200');
+  assert.equal(kept(SEEN_MAX), 'b'.repeat(SEEN_MAX), 'exactly SEEN_MAX is whole');
+  assert.equal(kept(SEEN_MAX + 1), `${'b'.repeat(SEEN_MAX - 1)}…`, 'one more is cut to SEEN_MAX with an ellipsis');
+  assert.equal(Array.from(kept(SEEN_MAX + 1, '\u{1F600}')).length, SEEN_MAX, 'counted in characters, never splitting one');
+  assert.equal(seenText(`${'b'.repeat(250)} wsf-e5c-x@example.com`), `${'b'.repeat(250)} <email>`, 'scrubbed as before, then capped');
+  assert.equal(seenText(undefined), '');
+  assert.equal(seenLine('LOVABLE_SEEN', 'review', kept(SEEN_MAX)), `LOVABLE_SEEN review ${'b'.repeat(SEEN_MAX)}`, 'the log line carries the stored text unchanged');
 });
 
 test('require: PASS only on every row PASS, cleanup success and scan success; BLOCKED and FAIL are named', () => {
@@ -617,12 +627,22 @@ function lovable(bug = {}) {
    * by every page wait), the review, and Turn ended for 5 s once the phone leaves. `bug` switches on one defect at a time.
    */
   const T = { entry: null, assigned: null, phase: 'idle', startedAt: null, endedAt: null, wrote: false };
+  /** When the panel shows the start: `startLag` fakes render lag after the Start answer (W7 PN-2 on #619). */
+  const roundStart = () => T.startedAt + (bug.startLag ?? 0);
   const stationPhase = () => {
     if (T.phase === 'ended') return server.clock - T.endedAt < 5000 ? 'ended' : 'idle';
     if (T.phase !== 'started') return 'idle';
-    const t = server.clock - T.startedAt;
-    return t < 3000 ? 'countdown' : t < 3000 + (bug.earlyReview ? 20_000 : 60_000) ? 'active' : 'review';
+    const t = server.clock - roundStart();
+    return t < 0 ? 'pending' : t < 3000 ? 'countdown' : t < 3000 + (bug.earlyReview ? 20_000 : 60_000) ? 'active' : 'review';
   };
+  /**
+   * The served member shell's timing (LOVABLE-KIOSK-STATION-DRIVER-2, firebase-runtime-boundary.tsx and
+   * connected-join.tsx at db3fd2f2): after a page load or a sign-in, the runtime boots, the session restores and the first
+   * hydrate runs before the join flow mounts (`bootMs`); after Join, joining and validating (wsfListGoals) come before the
+   * choice (`chooseMs`, longer than the old fixed 5 s sample, as staging run 38079242076 showed).
+   */
+  const BOOT_MS = bug.bootMs ?? 4000;
+  const CHOOSE_MS = bug.chooseMs ?? 7000;
   const hall = () => ({ stationId: 's1', stationLabel: 'Station 1', assigned: T.assigned ? { ...T.assigned } : null, result: null, waitingCount: T.entry?.status === 'waiting' ? (bug.stationCountsTwo ? 2 : 1) : 0 });
   const stationHeading = () => {
     const ph = stationPhase();
@@ -707,8 +727,53 @@ function lovable(bug = {}) {
     let email = '';
     let lastReceipt = null;
     let lineAlias = '';
+    let joinStage = null; // null | 'preview' | 'joining' | 'choose' | 'line', as connected-join.tsx renders it
+    let joinAt = 0;
+    let readyAt = 0;
     const listeners = { request: [], response: [] };
     const uid = () => store.idbUid;
+    /** The join flow's stage now, or null while it is not mounted (signed out, still booting, or no pending entry). */
+    const flowStage = () => {
+      if (!uid() || server.clock < readyAt || bug.noJoinButton || (bug.controlNoJoinFlow && uid() === CONTROL_UID)) return null;
+      if (joinStage === 'joining') {
+        if (server.clock - joinAt < 500) return 'joining';
+        if (server.clock - joinAt < CHOOSE_MS) return 'validating';
+        return bug.joinRefused ? 'refused' : bug.joinUnknown ? 'unknown' : 'choose';
+      }
+      if (joinStage === 'preview' && bug.memberOpensAtChoice && uid() === CONTROL_UID) return 'choose';
+      return joinStage;
+    };
+    /** The visible button names the page shows, as phoneScene reads them in the page. */
+    const sceneButtons = () => {
+      if (!uid()) return ['Sign in', 'New here? Create an account'];
+      if (server.clock < readyAt) return [];
+      const flow = { preview: ['Join', 'Not now'], joining: ['Joining…', 'Not now'], validating: [], choose: [...(bug.noPhoneChoice ? [] : ['Move on my phone']), ...(bug.noKioskChoice ? [] : ['Use the kiosk'])], refused: ['OK'], unknown: ['OK'], line: ['Join the kiosk line', 'Cancel'] }[flowStage()] ?? [];
+      return [...flow, 'Open menu'];
+    };
+    /**
+     * phoneScene's own in-page function, run against a small DOM of this page: the stage, boot and entry attributes, and
+     * the buttons as the browser has them, with a zero-size one, a visibility:hidden one, a repeated name, white space
+     * and the menu as an icon button named by aria-label. What it returns is what the harness reads.
+     */
+    const runScene = (fn) => {
+      const el = (attrs) => (attrs ? { getAttribute: (n) => attrs[n] ?? null } : null);
+      const btn = (innerText, o = {}) => ({ innerText, getAttribute: (n) => (n === 'aria-label' ? o.label ?? null : null), getBoundingClientRect: () => ({ width: o.w ?? 120, height: 40 }), vis: o.vis ?? 'visible' });
+      const names = sceneButtons();
+      const buttons = [
+        btn('Hidden step', { w: 0 }), btn('Invisible', { vis: 'hidden' }),
+        ...names.map((n) => (n === 'Open menu' ? btn('', { label: n }) : btn(n === 'Move on my phone' ? '  Move on\n  my phone ' : n))),
+        ...names.slice(0, 1).map((n) => (n === 'Open menu' ? btn('', { label: n }) : btn(n))),
+      ];
+      const stage = flowStage();
+      const boot = uid() && server.clock < readyAt ? 'hydrate' : null;
+      const doc = {
+        querySelector: (sel) => ({ '[data-connected-join]': stage === null ? null : el({ 'data-connected-join': stage }), '[data-boot]': el(boot && { 'data-boot': boot }), '[data-entry-step]': el(!uid() && { 'data-entry-step': 'signIn' }) })[sel] ?? null,
+        querySelectorAll: (sel) => (sel === 'button' ? buttons : []),
+      };
+      const saved = { document: globalThis.document, getComputedStyle: globalThis.getComputedStyle };
+      globalThis.document = doc; globalThis.getComputedStyle = (b) => ({ visibility: b.vis });
+      try { return fn(); } finally { globalThis.document = saved.document; globalThis.getComputedStyle = saved.getComputedStyle; }
+    };
     const send = (name, data) => {
       const req = { url: () => `https://us-central1-westayfit-staging.cloudfunctions.net/${name}`, method: () => 'POST', postData: () => JSON.stringify({ data }) };
       server.requests.push({ name, data, uid: uid() });
@@ -753,8 +818,9 @@ function lovable(bug = {}) {
             // that returns no join code all the same.
             case 'css:svg[data-testid="kiosk-qr"]': return view === 'kiosk' && server.approved && !bug.noQr ? 1 : 0;
             case 'text:This goal has no join code to show.': return view === 'kiosk' && server.approved && bug.noQr ? 1 : 0;
-            case 'css:[data-connected-join]': case 'role:Join': return uid() && store.session['wsf.pendingJoinCode'] && !bug.noJoinButton ? 1 : 0;
-            case 'testid:join-move-phone': return view === 'choose' ? 1 : 0;
+            case 'css:[data-connected-join]': return flowStage() !== null ? 1 : 0;
+            case 'role:Join': return flowStage() === 'preview' ? 1 : 0;
+            case 'testid:join-move-phone': return flowStage() === 'choose' && !bug.noPhoneChoice ? 1 : 0;
             case 'css:section.together-receipt': return move === 'receipt' ? 1 : 0;
             case 'css:ul.goal-history li': return progressText() ? 1 : 0;
             case 'role:Skip tour': return 0;
@@ -772,7 +838,7 @@ function lovable(bug = {}) {
             case 'testid:station-phone-ended': return view === 'kiosk' && stationPhase() === 'ended' && !bug.noEndedNotice ? 1 : 0;
             case 'css:main.kiosk-root': return view === 'kiosk' ? 1 : 0;
             // The phone's line (connected-join.tsx): Use the kiosk, the name, the line card, I'm here, Leave line.
-            case 'testid:join-use-kiosk': return view === 'choose' ? 1 : 0;
+            case 'testid:join-use-kiosk': return flowStage() === 'choose' && !bug.noKioskChoice ? 1 : 0;
             case 'label:Name to show on the kiosk': case 'testid:connected-turn-line': return view === 'line' ? 1 : 0;
             case 'role:Join the kiosk line': return view === 'line' && !T.entry ? 1 : 0;
             case 'role:I’m here': return view === 'line' && T.entry?.status === 'assigned' ? 1 : 0;
@@ -785,7 +851,7 @@ function lovable(bug = {}) {
           if (key === 'css:section.together-receipt') return lastReceipt;
           if (key === 'css:ul.goal-history li') return progressText();
           if (key === 'css:h2') return stationHeading() ?? '';
-          if (key === 'testid:station-timer') return `${(bug.timer30 ? 30 : 60) - Math.floor((server.clock - T.startedAt - 3000) / 1000)}s`;
+          if (key === 'testid:station-timer') return `${(bug.timer30 ? 30 : 60) - Math.floor((server.clock - roundStart() - 3000) / 1000)}s`;
           if (key === 'testid:station-phone-note') return bug.noPhoneNote ? 'Tap Contribute when you are done.' : 'If the visitor\'s phone shows Recorded, do not tap Contribute.';
           if (key === 'testid:station-phone-ended') return bug.phoneCompletes ? 'Recorded from the phone: 7 squats' : 'Turn ended';
           if (key === 'css:main.kiosk-root') {
@@ -806,6 +872,7 @@ function lovable(bug = {}) {
           if (name === 'data-join-url') return `${bug.qrOrigin ?? LOVABLE_URL}/?join=${bug.qrJoin ?? KIT_JOIN_CODE}&goal=${bug.qrGoal ?? goalId}`;
           if (name === 'data-attempt') return bug.otherAttempt ? 'attempt-other0000' : attempt;
           if (name === 'data-station-phase') return stationPhase();
+          if (name === 'data-connected-join') return flowStage();
           if (name === 'data-end') return bug.phoneCompletes ? 'recorded' : 'ended';
           if (name === 'data-line') return !T.entry ? 'alias' : T.entry.status === 'left' ? 'terminal' : bug.phoneLineStale ? 'checking' : T.entry.status;
           return null;
@@ -823,16 +890,18 @@ function lovable(bug = {}) {
             if (bug.controlSignInFails && control) store.idbUid = null; // the sign-in silently did not complete
             if (control) { server.signedA = true; server.aSignIns = (server.aSignIns ?? 0) + 1; }
             if (store.idbUid === bug.aReturnsAs) { server.own[bug.aReturnsAs] = server.own[CONTROL_UID]; server.members.add(bug.aReturnsAs); }
+            readyAt = server.clock + BOOT_MS;
             hydrate();
           }
           else if (key === 'role:Join') {
+            if (flowStage() !== 'preview') throw new Error('locator.click: Timeout 30000ms exceeded (no Join)');
             const already = server.members.has(uid());
             server.members.add(uid());
             call('wsfJoinCommunity', { joinCode: store.session['wsf.pendingJoinCode'] }, { groupId: bug.otherGroup ? 'other-group' : groupId, alreadyMember: bug.controlJoinsAnew && uid() === CONTROL_UID ? false : bug.alreadyMember ?? already });
-            view = 'choose';
+            joinStage = 'joining'; joinAt = server.clock;
           } else if (key === 'testid:join-move-phone') {
             store.local[`wsf.pinnedDestination.${uid()}`] = groupId; delete store.session['wsf.pendingJoinCode']; delete store.session['wsf.pendingJoinGoal'];
-            view = 'home'; hydrate(); move = 'camera'; attempt = `attempt-${server.contributions + 1}abcdefgh`;
+            joinStage = null; view = 'home'; hydrate(); move = 'camera'; attempt = `attempt-${server.contributions + 1}abcdefgh`;
           } else if (key === 'role:Count by hand instead') move = 'count';
           else if (key === 'role:Review') move = 'review';
           else if (key === 'testid:confirm') {
@@ -855,7 +924,7 @@ function lovable(bug = {}) {
           else if (key === 'role:/^Sign out/' || key === 'role:Sign out') { store.idbUid = null; }
           else if (key === 'role:community' && scope === 'nav:Your communities') { store.local[`wsf.currentCommunity.${uid()}`] = groupId; hydrate(); }
           // The phone's line.
-          else if (key === 'testid:join-use-kiosk') { delete store.session['wsf.pendingJoinCode']; delete store.session['wsf.pendingJoinGoal']; view = 'line'; }
+          else if (key === 'testid:join-use-kiosk') { delete store.session['wsf.pendingJoinCode']; delete store.session['wsf.pendingJoinGoal']; joinStage = 'line'; view = 'line'; }
           else if (key === 'role:Join the kiosk line') {
             T.entry = { entryId: ENTRY_ID, code: TURN_CODE, calledName: lineAlias, status: 'waiting' };
             const req = { goalId: bug.lineOtherGoal ? 'e5cgoal-other' : goalId, calledName: bug.lineOtherName ? 'Someone Else' : lineAlias };
@@ -902,19 +971,22 @@ function lovable(bug = {}) {
         current = url.href;
         if (url.pathname.startsWith('/kiosk/')) { view = 'kiosk'; return; }
         if (url.searchParams.get('join')) { store.session['wsf.pendingJoinCode'] = url.searchParams.get('join'); store.session['wsf.pendingJoinGoal'] = url.searchParams.get('goal'); }
+        joinStage = store.session['wsf.pendingJoinCode'] ? 'preview' : null;
+        readyAt = server.clock + BOOT_MS;
         view = 'home'; move = null; hydrate();
       },
-      async reload() { await pageLoad(context, current); move = null; hydrate(); },
+      async reload() { await pageLoad(context, current); readyAt = server.clock + BOOT_MS; move = null; hydrate(); },
       /** Every wait moves the shared clock; the bound kiosk polls its line (wsfTurnState) as poller.ts does. */
       async waitForTimeout(ms) {
         server.clock += ms;
         if (view !== 'kiosk' || !server.approved) return;
-        if (bug.timerWrites && stationPhase() === 'review' && server.clock - (T.startedAt + 63_000) >= 1000 && !T.wrote) { T.wrote = true; call('wsfCompleteTurn', { stationId: 's1', secret: STATION_SECRET, expectedTurn: T.assigned?.turnRef, count: 0 }, { recorded: { amount: 0, unit: 'squats', alreadyRecorded: false } }); }
+        if (bug.timerWrites && stationPhase() === 'review' && server.clock - (roundStart() + 63_000) >= 1000 && !T.wrote) { T.wrote = true; call('wsfCompleteTurn', { stationId: 's1', secret: STATION_SECRET, expectedTurn: T.assigned?.turnRef, count: 0 }, { recorded: { amount: 0, unit: 'squats', alreadyRecorded: false } }); }
         call('wsfTurnState', { stationId: 's1', secret: STATION_SECRET }, bug.hallUnread ? null : hall());
       },
       async evaluate(fn, arg) {
         const src = String(fn);
         if (src.includes('firebaseLocalStorageDb')) return uid();
+        if (src.includes('data-connected-join')) return runScene(fn);
         if (src.includes('sessionStorage')) return ['wsf.pendingJoinCode', 'wsf.pendingJoinGoal'].filter((k) => store.session[k] !== undefined).length;
         if (src.includes('localStorage.getItem')) return store.local[arg] ?? null;
         throw new Error('unexpected evaluate');
@@ -975,7 +1047,7 @@ test('journey with the kit\'s real shape (#589 W4 F1, LOVABLE-KIOSK-QR-JOIN-1, L
   assert.ok(L.server.loads.filter((x) => x.type !== 'document').every((x) => x.contentType === null), 'an asset keeps its own response headers');
   assert.ok(L.server.contextOpts.length === L.opened() && L.server.contextOpts.every((o) => o.serviceWorkers === 'block'), 'no service worker can answer around the guard');
   for (const id of ['qr-join', ...PASSING]) assert.equal(statusOf(rows, id), 'PASS', `${id}: ${rows[id]?.seen}`);
-  assert.match(rows['qr-join'].seen, /^join into this community, alreadyMember=false; phone choice shown$/);
+  assert.equal(rows['qr-join'].seen, 'join into this community, alreadyMember=false; phone choice shown after 7 s', 'the choice is polled for, past the old fixed 5 s sample (staging run 38079242076)');
   assert.match(rows['fixture-provenance'].seen, /one synthetic public community/);
   for (const id of PHONE_ROWS) assert.match(rows[id].seen, /^control \(the kit's verified member\)/, `${id} names who measured it`);
   assert.equal(L.tracked.approvals, 1, 'the kiosk is approved as fixture preparation');
@@ -1005,6 +1077,15 @@ test('journey with the kit\'s real shape (#589 W4 F1, LOVABLE-KIOSK-QR-JOIN-1, L
   assert.deepEqual(L.tracked.places, [CONTROL_UID], 'the place is tracked for cleanup, through the kit');
   assert.deepEqual(L.tracked.turns, [[CONTROL_UID, ENTRY_ID]], 'and the started turn\'s attempt');
   assert.equal(L.turn.phase, 'ended');
+  // LOVABLE-KIOSK-STATION-DRIVER-2: the control's member path is the served one: its join flow mounts seconds after the
+  // load, shows Join, and its Join joins nothing.
+  assert.deepEqual(L.server.requests.filter((x) => x.name === 'wsfJoinCommunity').map((x) => x.uid), ['uid-lka', CONTROL_UID], 'one Join each: A, then the control');
+  // W7 PN-1 on #619: every station row's whole sentence reaches the results file.
+  const stored = Object.fromEntries(results(rows).rows.map((r) => [r.id, r.seen]));
+  for (const id of ['qr-join', ...STATION_ROWS]) {
+    assert.ok(Array.from(rows[id].seen).length <= SEEN_MAX, `${id} fits one log line: ${Array.from(rows[id].seen).length}`);
+    assert.equal(stored[id], rows[id].seen, `${id} is stored whole`);
+  }
   assert.doesNotMatch(JSON.stringify(results(rows)), new RegExp([STATION_SECRET, ENTRY_ID, TURN_REF_A, `\\b${TURN_CODE}\\b`].join('|')), 'no station credential, entry id, turn binding or line code in the results');
 });
 
@@ -1065,7 +1146,7 @@ test('journey negatives: each defect fails exactly the row that measures it; a f
     if (bug.noQr) assert.equal(rows['qr-join'].seen, 'the kiosk of this public (link-joinable) event shows "This goal has no join code to show."', 'a FAIL that names what was seen, never BLOCKED');
     if (bug.kitNoJoinCode) assert.equal(rows['qr-join'].seen, 'the kit returned no join code for its public event');
     if (bug.alreadyMember) assert.match(rows['qr-join'].seen, /alreadyMember=true/);
-    if (bug.noJoinButton) assert.equal(rows['qr-join'].seen, 'no Join for a visitor who is not a member');
+    if (bug.noJoinButton) assert.equal(rows['qr-join'].seen, 'no Join for a visitor who is not a member: the phone\'s join flow is absent; buttons "Open menu"');
     if (row === 'qr-join') assert.doesNotMatch(JSON.stringify(results(rows)), /JOINCODE|OTHERCODE/, 'no join code is ever printed');
     if (bug.controlSignInFails) for (const id of PHONE_ROWS) assert.match(rows[id].seen, /the control member's sign-in did not complete/, `${id}: nothing is measured as an unknown identity`);
     if (row === 'qr-join') for (const id of PHONE_ROWS) assert.equal(statusOf(rows, id), 'PASS', `${JSON.stringify(bug)}: the control's ${id} still stands`);
@@ -1107,6 +1188,40 @@ test('qrJoinProblem (LOVABLE-KIOSK-QR-JOIN-1): the QR must carry exactly this co
   assert.equal(productDocsSeen(['wsfContributions/e5c-t-1-x', 'wsfMemberships/e5cgrp-e5c-t-1-lk_uid-lka/sub/e5c-t-1'], 3), '2 product-written document(s) added (a product-written document; a product-written document); 3 in the manifest');
 });
 
+test('qrJoinVerdict and sceneText (LOVABLE-KIOSK-STATION-DRIVER-2): A\'s Join, then the choice polled for; a FAIL names the end stage or the wait, and what the phone showed; never a code', () => {
+  const groupId = 'e5cgrp-e5c-t-1-lk';
+  const joined = { data: { joinCode: KIT_JOIN_CODE }, result: { groupId, alreadyMember: false }, error: null };
+  const choose = { stage: 'choose', boot: null, entry: null, buttons: ['Move on my phone', 'Use the kiosk', 'Open menu'], waited: 12_000 };
+  const good = { joined, groupId, scene: choose, phoneChoice: true, kioskChoice: true };
+  assert.deepEqual(qrJoinVerdict(good), { ok: true, seen: 'join into this community, alreadyMember=false; phone choice shown after 12 s' });
+  for (const [why, over, want] of [
+    ['another community', { joined: { ...joined, result: { groupId: 'other', alreadyMember: false } } }, 'join not into this community, alreadyMember=false; phone choice shown after 12 s'],
+    ['already a member', { joined: { ...joined, result: { groupId, alreadyMember: true } } }, 'join into this community, alreadyMember=true; phone choice shown after 12 s'],
+    ['the Join refused', { joined: { ...joined, result: undefined, error: 'NOT_FOUND' }, scene: { stage: 'refused', buttons: ['OK'], waited: 2000 } }, 'join answered NOT_FOUND, alreadyMember=undefined; phone choice absent (the join flow ended at refused): the phone\'s join flow is refused; buttons "OK"'],
+    ['no Join sent', { joined: null }, 'join not into this community, alreadyMember=undefined; phone choice shown after 12 s'],
+    ['the flow ends unknown', { scene: { stage: 'unknown', buttons: ['OK'], waited: 9000 } }, 'join into this community, alreadyMember=false; phone choice absent (the join flow ended at unknown): the phone\'s join flow is unknown; buttons "OK"'],
+    ['still validating at the end of the wait', { scene: { stage: 'validating', buttons: [], waited: JOIN_WAIT_MS } }, 'join into this community, alreadyMember=false; phone choice absent (no choice within 30 s): the phone\'s join flow is validating; buttons none'],
+    ['the choice with no Use the kiosk', { kioskChoice: false }, 'join into this community, alreadyMember=false; phone choice absent (the join flow ended at choose): the phone\'s join flow is choose; buttons "Move on my phone", "Use the kiosk", "Open menu"'],
+    ['the choice with no Move on my phone', { phoneChoice: false }, /phone choice absent \(the join flow ended at choose\)/],
+    ['the goal note instead of the choice', { scene: { stage: 'choose', buttons: ['OK'], waited: 8000 }, phoneChoice: false, kioskChoice: false }, /phone choice absent \(the join flow ended at choose\): the phone's join flow is choose; buttons "OK"$/],
+    ['no scene at all', { scene: null }, 'join into this community, alreadyMember=false; phone choice absent (no choice within 30 s): the phone\'s join flow is absent; buttons none'],
+  ]) {
+    const v = qrJoinVerdict({ ...good, ...over });
+    assert.equal(v.ok, false, why);
+    if (want instanceof RegExp) assert.match(v.seen, want, why); else assert.equal(v.seen, want, why);
+    assert.doesNotMatch(v.seen, /JOINCODE/, `${why}: no code is printed`);
+  }
+  assert.equal(JOIN_WAIT_MS, 30_000);
+  // sceneText: the stage, a boot or entry screen in front of it, up to 8 button names of at most 40 characters each.
+  assert.equal(sceneText({ stage: null, boot: 'hydrate', entry: null, buttons: [] }), 'the phone\'s join flow is absent, boot hydrate; buttons none');
+  assert.equal(sceneText({ stage: null, boot: null, entry: 'signIn', buttons: ['Sign in'] }), 'the phone\'s join flow is absent, entry step signIn; buttons "Sign in"');
+  assert.equal(sceneText({ stage: 'preview', buttons: ['Join', 'Not now'] }), 'the phone\'s join flow is preview; buttons "Join", "Not now"');
+  assert.equal(sceneText({ stage: 'preview', buttons: Array.from({ length: 10 }, (_, i) => `b${i}`) }), `the phone's join flow is preview; buttons ${Array.from({ length: 8 }, (_, i) => `"b${i}"`).join(', ')} and 2 more`);
+  assert.equal(sceneText({ stage: 'choose', buttons: ['x'.repeat(50)] }), `the phone's join flow is choose; buttons "${'x'.repeat(40)}"`);
+  assert.equal(sceneText({ stage: null, buttons: [], error: 'page closed' }), 'the phone\'s join flow is absent; buttons none; unreadable (page closed)');
+  assert.equal(sceneText(undefined), 'the phone\'s join flow is absent; buttons none');
+});
+
 // ---- the station turn (LOVABLE-KIOSK-STATION-DRIVER-1) ------------------------------------------------------------
 test('station verdicts (LOVABLE-KIOSK-STATION-DRIVER-1): each row PASS on the served shapes; each defect FAILs by name; no credential, entry id, binding or code is printed', () => {
   const goalId = 'e5cgoal-e5c-t-1-lk';
@@ -1131,7 +1246,9 @@ test('station verdicts (LOVABLE-KIOSK-STATION-DRIVER-1): each row PASS on the se
   table(queuePlaceVerdict, { qrJoin: ex({ joinCode: 'x' }, { groupId: 'g', alreadyMember: true }), joins: [join], goalId, phoneLine: 'waiting', phoneText: `You’re next in line. Code ${TURN_CODE}.`, stationWaiting: 1, trackedEntry: ENTRY_ID }, [
     ['the QR joined the control anew', { qrJoin: ex({}, { groupId: 'g', alreadyMember: false }) }, /the kiosk QR's Join answered alreadyMember=false for the kit's member/],
     ['the QR join was refused', { qrJoin: ex({}, null, 'NOT_FOUND') }, /answered NOT_FOUND/],
-    ['no QR join seen', { qrJoin: null }, /answered alreadyMember=undefined/],
+    ['a Join with no answer', { qrJoin: ex({ joinCode: 'x' }, undefined) }, /answered alreadyMember=undefined/],
+    // W7 PN-3 on #619: the line code is exactly three characters of the pairing alphabet (no I, O, 0 or 1).
+    ...['K7I', 'K7O', 'K70', 'K71', 'k7p', 'K7', 'K7PQ', ''].map((code) => [`the line code ${JSON.stringify(code)}`, { joins: [ex({ goalId, calledName: LINE_ALIAS }, { ...place, code })], phoneText: `You’re next in line. Code ${code}.` }, /the answer carries no line code/]),
     ['two line joins', { joins: [join, join] }, /^control \(the kit's verified member\): 2 line join request\(s\)$/],
     ['no line join', { joins: [] }, /0 line join request\(s\); no place in the answer/],
     ['another goal asked', { joins: [ex({ goalId: 'other', calledName: LINE_ALIAS }, place)] }, /the line join names another goal or another name/],
@@ -1256,6 +1373,10 @@ test('station verdicts (LOVABLE-KIOSK-STATION-DRIVER-1): each row PASS on the se
     ['a phone Complete and a contribute', { turnContributions: ['wsfCompleteMyTurn', 'wsfContribute'] }, /2 contribution request\(s\) since the turn began \(wsfCompleteMyTurn, wsfContribute\)/],
   ]);
   assert.equal(finishVerdict({ leaves: [leave], place, end: 'ended', endText: 'Turn ended', phase: 'idle', callNextShown: true, stationText: `Station 1 · ${TURN_CODE}X · AK7P`, hall: { assigned: null, result: null }, turnContributions: [] }).ok, true, 'the code inside another word is not the code');
+  // LOVABLE-KIOSK-STATION-DRIVER-2: a member's join flow that opens at its choice sends no Join, and queue-place says so.
+  const noJoin = queuePlaceVerdict({ qrJoin: null, joins: [join], goalId, phoneLine: 'waiting', phoneText: `You’re next in line. Code ${TURN_CODE}.`, stationWaiting: 1, trackedEntry: ENTRY_ID });
+  assert.equal(noJoin.ok, true, noJoin.seen);
+  assert.match(noJoin.seen, /^control \(the kit's verified member\): the kiosk QR \(already a member, no Join shown\), Use the kiosk, /);
   assert.equal(TURN_REF.test(TURN_REF_A), true);
   for (const bad of ['tr_short', 'TR_AAAAAAAAAAAAAAAAAAAAAAAA', `tr_${'A'.repeat(65)}`, `x${TURN_REF_A}`]) assert.equal(TURN_REF.test(bad), false, bad);
   // Nothing the station or the line carries is ever printed.
@@ -1329,6 +1450,62 @@ test('journey negatives for the station turn (LOVABLE-KIOSK-STATION-DRIVER-1): e
   const L = lovable({ controlSignInFails: true });
   const { rows } = await runJourney({ browser: L.browser, fixtures: L.fixtures, base: LOVABLE_URL, reviewed: FAKE_REVIEWED, now: L.now });
   for (const id of STATION_ROWS) assert.match(`${statusOf(rows, id)} ${rows[id]?.seen}`, /^FAIL stopped: the control member's sign-in did not complete/, id);
+});
+
+test('journey (LOVABLE-KIOSK-STATION-DRIVER-2): the join flow is polled for on both phones; a slow shell still passes; a refusal, an unknown or a flow that never comes fails by name with what the phone showed', async () => {
+  const run = async (bug) => { const L = lovable(bug); return { L, ...(await runJourney({ browser: L.browser, fixtures: L.fixtures, base: LOVABLE_URL, reviewed: FAKE_REVIEWED, now: L.now })) }; };
+  const controlJoins = (L) => L.server.requests.filter((x) => x.uid === CONTROL_UID && x.name === 'wsfJoinCommunity');
+  // A slow shell and a slow validation, inside the wait: everything passes, and the waits are said.
+  {
+    const { L, rows } = await run({ bootMs: 20_000, chooseMs: 25_000 });
+    for (const id of ['qr-join', ...PASSING, ...STATION_ROWS]) assert.equal(statusOf(rows, id), 'PASS', `${id}: ${rows[id]?.seen}`);
+    assert.equal(rows['qr-join'].seen, 'join into this community, alreadyMember=false; phone choice shown after 25 s');
+    assert.equal(controlJoins(L).length, 1, 'the control pressed Join once its flow showed it');
+  }
+  // The member's flow opens at its choice: no Join is sent, and queue-place says so.
+  {
+    const { L, rows } = await run({ memberOpensAtChoice: true });
+    for (const id of STATION_ROWS) assert.equal(statusOf(rows, id), 'PASS', `${id}: ${rows[id]?.seen}`);
+    assert.match(rows['queue-place'].seen, /the kiosk QR \(already a member, no Join shown\), Use the kiosk, /);
+    assert.deepEqual(controlJoins(L), []);
+  }
+  // A choice with no Move on my phone fails qr-join alone: the control's turn goes through Use the kiosk.
+  {
+    const { rows } = await run({ noPhoneChoice: true });
+    assert.equal(statusOf(rows, 'qr-join'), 'FAIL');
+    assert.match(rows['qr-join'].seen, /phone choice absent \(the join flow ended at choose\): the phone's join flow is choose; buttons "Use the kiosk", "Open menu"$/);
+    for (const id of [...PASSING, ...STATION_ROWS]) assert.equal(statusOf(rows, id), 'PASS', `${id}: ${rows[id]?.seen}`);
+  }
+  // W7 PN-2 on #619: the panel renders the start 1.5 s after the Start answer; the phase is polled, not read once.
+  {
+    const { rows } = await run({ startLag: 1500 });
+    for (const id of STATION_ROWS) assert.equal(statusOf(rows, id), 'PASS', `${id}: ${rows[id]?.seen}`);
+  }
+  // Each failure names the stage or the wait, and what the phone showed; the control's phone rows still stand.
+  const stops = [
+    [{ chooseMs: 40_000 }, 'phone choice absent (no choice within 30 s): the phone\'s join flow is validating; buttons "Open menu"',
+      'not reached: the kiosk QR link offered the control no Use the kiosk (its Join answered alreadyMember=true): the phone\'s join flow is validating; buttons "Open menu"'],
+    [{ joinRefused: true }, 'phone choice absent (the join flow ended at refused): the phone\'s join flow is refused; buttons "OK", "Open menu"',
+      'not reached: the kiosk QR link offered the control no Use the kiosk (its Join answered alreadyMember=true): the phone\'s join flow is refused; buttons "OK", "Open menu"'],
+    [{ joinUnknown: true }, 'phone choice absent (the join flow ended at unknown): the phone\'s join flow is unknown; buttons "OK", "Open menu"',
+      'not reached: the kiosk QR link offered the control no Use the kiosk (its Join answered alreadyMember=true): the phone\'s join flow is unknown; buttons "OK", "Open menu"'],
+    [{ controlNoJoinFlow: true }, null, 'not reached: the kiosk QR link offered the control no Use the kiosk: the phone\'s join flow is absent; buttons "Open menu"'],
+    [{ noKioskChoice: true }, 'phone choice absent (the join flow ended at choose): the phone\'s join flow is choose; buttons "Move on my phone", "Open menu"',
+      'not reached: the kiosk QR link offered the control no Use the kiosk (its Join answered alreadyMember=true): the phone\'s join flow is choose; buttons "Move on my phone", "Open menu"'],
+    [{ bootMs: 40_000 }, 'no Join for a visitor who is not a member: the phone\'s join flow is absent, boot hydrate; buttons none',
+      'not reached: the kiosk QR link offered the control no Use the kiosk: the phone\'s join flow is absent, boot hydrate; buttons none'],
+  ];
+  for (const [bug, qr, station] of stops) {
+    const { L, rows } = await run(bug);
+    const name = JSON.stringify(bug);
+    if (qr) assert.deepEqual([statusOf(rows, 'qr-join'), rows['qr-join'].seen.replace(/^join into this community, alreadyMember=false; /, '')], ['FAIL', qr], name);
+    else assert.equal(statusOf(rows, 'qr-join'), 'PASS', `${name}: ${rows['qr-join']?.seen}`);
+    for (const id of STATION_ROWS) assert.deepEqual([statusOf(rows, id), rows[id]?.seen], ['FAIL', station], `${name}: ${id}`);
+    for (const id of PHONE_ROWS) assert.equal(statusOf(rows, id), 'PASS', `${name}: the control's ${id} still stands`);
+    assert.equal(L.server.requests.filter((x) => x.uid === CONTROL_UID && x.name === 'wsfJoinTurnLine').length, 0, `${name}: no line place without the choice`);
+    assert.doesNotMatch(JSON.stringify(results(rows)), /JOINCODE|uid-lk|@example\.com/, `${name}: no code, uid or email is printed`);
+    assert.equal(L.browser.closed, L.opened(), `${name}: every context is closed`);
+  }
 });
 
 test('journey: a contribution whose assertions fail is still tracked for cleanup; a lost approval fails qr-join but not the control', async () => {
