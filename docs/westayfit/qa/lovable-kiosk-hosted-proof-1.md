@@ -52,14 +52,19 @@ The bind alone checks a separate, earlier fetch. The Lovable host is mutable, so
 
 **The canonical document** (`canonicalDocument(text, url)`) is what both the bind and the browser guard hash:
 1. **The URL must be a reviewed route template.** The templates are `ROUTE_TEMPLATES`: `/`, `/display/$goalId` and `/kiosk/$communityId/$goalId`. Those are every document the two proofs load (`/` also with an invite query). Each path param must be 12–128 characters of `A-Z a-z 0-9 _ -`, and no param may contain another. Fixture ids are `e5cgrp-…` and `e5cgoal-…`, about 30 characters.
-2. **Every byte is literal, NUL included.** The first bind on the real host (run `38006215259`) found NUL characters in every document. The guard requires valid UTF-8.
+2. **Every byte is literal, NUL included.** The first bind on the real host (run `38006215259`) found NUL characters in every document, and they passed the fatal UTF-8 decode, so they really are in the bytes. Following the Director's ruling (#394 `6091249662`):
+   - each NUL is kept, not refused;
+   - the number of NULs is pinned per template and compared strictly, like the `u:` count;
+   - the bind prints that count and the class of each NUL's context: the stream part, another inline script, or markup. It prints counts and classes only, never bytes.
+
+   Nothing is escaped, because no literal text can become a slot (step 6). That is the ruling's aim: a NUL followed by `wsf:` can never be a slot. The guard also requires valid UTF-8.
 3. **The context token.** There must be exactly one `data-context-token=` in the document. Its value must be one quoted token of 8–4096 characters of `A-Z a-z 0-9 . _ ~ : + / = -`, and the attribute must close right after it. That value, and nothing else, is replaced by a fixed slot. A refusal names the kind of character found (quote, angle bracket, whitespace and so on), never the value.
 4. **The stream part.** There must be exactly one `<script … data-tsr-stream-part …>`. Inside it, every `u:` key (never the tail of another name such as `menu:`) must carry exactly 13 digits. Each is replaced by a fixed slot and counted. A `u:` anywhere else stays exact.
 5. **The URL's own params** go back into their template slots, longest first, and their occurrences are counted.
-6. **The digest** is the sha256 of the result. The result is a list of literal text and slots, serialized as JSON, so no byte of a document can stand for a slot. Every other byte is kept, so any other change alters it: a script, an attribute, route data, or a per-request value anywhere else.
+6. **The digest** is the sha256 of the result. The result is a list of literal text and slots, serialized as JSON. A slot is an object; literal text is a JSON string, with every character escaped as JSON escapes it. So no byte of a document can stand for a slot, and the mapping is injective. Every other byte is kept, so any other change alters it: a script, an attribute, route data, or a per-request value anywhere else.
 
 **`REVIEWED_BUILD`** (shared: the device matrix re-exports the kiosk harness's, so both proofs use one pin, and a later publish needs one new value):
-- **`documents`:** template → `{ sha256, streamU }`, the canonical digest and the reviewed number of stream-part timestamps;
+- **`documents`:** template → `{ sha256, streamU, nul }`, the canonical digest and the reviewed numbers of stream-part timestamps and of NULs;
 - **`assets`:** name → sha256 of the exact bytes, with no normalization.
 
 **The bind** (`servedManifest`, credential-free):
@@ -76,7 +81,13 @@ The bind alone checks a separate, earlier fetch. The Lovable host is mutable, so
   - the injected `/__l5e/events.<id>.js`;
   - `/~flock.js`, which the first real-host bind found referenced by the documents.
 
-  Only those exact path shapes on the Lovable host are blocked, and only as scripts. Any other `/__l5e/` script, `/~flockX.js`, `/a/~flock.js`, either path as a stylesheet or a document, or either path on another origin is refused. The bind prints each one it would block.
+  Only those exact paths on the Lovable host are blocked: no query, no fragment, and only as scripts. Anything else is refused, and the bind prints each script it would block:
+  - `/~flock.js?v=1`, `/~flock.js#a`, `/~flock2.js`, `/~flockX.js`, `/x/~flock.js` and `/~flock.mjs`;
+  - any other `/__l5e/` script, and the events script with a query;
+  - either path as a stylesheet or a document;
+  - either path on another origin.
+
+  The tags stay in the canonical document, so a second flock tag changes the digest.
 - **Why they are blocked.** They are Lovable's injected scripts, not the app's. The app reaches them only through optional calls (`window.__lovableEvents?.…`, `src/lib/lovable-error-reporting.ts` at `9b9eade5`), so blocking them changes no app behaviour. The document digest already binds their tags. Running them would execute host bytes outside the reviewed build, and could send events to an origin the guard refuses.
 
 **The negative mutations of the queue**, each refused by the guard with its reason, and each also giving a different canonical form at bind:
@@ -94,7 +105,15 @@ The bind alone checks a separate, earlier fetch. The Lovable host is mutable, so
 - a param that is not the URL's (display, and kiosk with another community);
 - an unknown template (`/c/…/g/…`).
 
-Further refusals tested: a second token, no token, the only token inside the stream part, an added NUL (other bytes, so another digest), a param too short to bind, overlapping params, and a document that is not UTF-8. Also tested: literal text that spells a slot where another document has the id never reduces to the same document.
+Further refusals tested:
+- a second token, no token, and the only token inside the stream part;
+- an added or a removed NUL (each refused by the strict NUL count), and a moved NUL (refused by the digest);
+- a second `/~flock.js` tag;
+- a param too short to bind, overlapping params, and a document that is not UTF-8.
+
+Also tested:
+- a literal NUL+`wsf:token`+NUL is text, never a slot;
+- literal text that spells a slot, where another document has the id, never reduces to the same document.
 
 **The pin's status in this change:** see the PR for the current head. It is empty until a bind **of this code** prints the manifest, because the per-template canonical digests are computed by this code from the served documents. W4's session cannot reach the Lovable host (CONNECT 403), so the bind runs where the host is reachable: the gate job of a dispatch on this branch, which is credential-free and stops at the bind by design.
 - **Runs `38002199884` and `38002201983`** (build `9b9eade5`, 23:00Z, `main`'s code) printed the asset digests and the old single-digest probe: all three documents DIFFERENT. They cannot supply canonical digests.
@@ -103,7 +122,7 @@ Further refusals tested: a second token, no token, the only token inside the str
   - the documents reference `/~flock.js`, which that head refused;
   - the 79 asset digests are the same set run `38002199884` printed.
 
-  The next commit takes the NULs as literal bytes and blocks `/~flock.js`. It needs a second bind.
+  The next commits take the NULs as literal bytes, pin their count, and block `/~flock.js` exactly, as the Director's ruling #394 `6091249662` asks. They need a second bind.
 
 **Superseded elsewhere.** `docs/westayfit/qa/lovable-device-qa-1.md` (outside this packet's paths) describes the device matrix's old raw-bytes document probe. That probe is removed: the device matrix now uses this route-aware bind.
 
@@ -170,11 +189,12 @@ Every browser context is closed in `finally`, including on an early stop.
   - Updated: the journey verifies both kiosk-proof templates and blocks the host's events script on every page; the guard negatives name the template; `classifyRequest` covers templates, the events script and its look-alikes.
 - **`hosted-lovable-device-matrix.test.mjs`: 20 passed.** The pin is the kiosk harness's object. Each document the matrix loads is a reviewed template. The CLI prints the route-aware bind, and a display deep link carrying route data now **fails** the gate instead of being reported. The harness restates no part of the bind.
 - **`tests/workflow-contract.test.mjs`: 103 passed** (unchanged; no workflow change). **`tests/run-all.mjs`** (staging) and **`tools/wsf-control/run-all.mjs`**: all suites passed.
-- **Mutants of the new code: 39 of 40 killed.**
+- **Mutants of the new code: 45 of 46 killed.**
   - They include all the token, stream-part and param checks; the template match; the events-script block (its path shape, its type, and its counting); the UTF-8 check; the probe agreement; the reference check; the timestamp-count pin; and the probe-line query.
   - Two survivors of the first pass were real test gaps, and both are now killed: assets walked only from `/`, and the stream part read to the end of the document.
   - One defect was found in W4's own re-read and fixed: the stream part's end was looked up in a lower-cased copy of the document, whose length can differ (`İ`). Its mutant is killed.
   - The mutants added for the real-host findings are all killed: slots back in-band (NUL markers), `/~flock.js` no longer blocked or its block broadened, the token or a `u:` cut one character short, a token inside the stream part admitted, and blocked host scripts not printed.
+  - The mutants added for the Director's ruling are all killed: a host script with a query or fragment blocked; the NUL count not compared in the guard, not compared at bind, or not required in the pin; and NULs in another inline script or in the stream part classed wrongly.
   - The survivor is equivalent: substituting params shortest first instead of longest first. The overlap check already refuses a param contained in another, and two ids cannot overlap in a document that separates them.
 
 **LOVABLE-KIOSK-HOSTED-PROOF-1** (the original packet; its single entry-page digest is superseded above):

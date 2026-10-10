@@ -139,7 +139,7 @@ function servedDoc(pathname, extra = '') {
     + `<script type="module" src="/assets/shell-AAA.js"></script></body></html>`;
 }
 const FAKE_ASSETS = { '/assets/shell-AAA.js': 'export const shell=1;', '/assets/index-CCC.css': 'body{}' };
-const canonOf = (p) => { const d = kiosk.canonicalDocument(servedDoc(p), `${LOVABLE_URL}${p}`); return { sha256: d.sha256, streamU: d.streamU }; };
+const canonOf = (p) => { const d = kiosk.canonicalDocument(servedDoc(p), `${LOVABLE_URL}${p}`); return { sha256: d.sha256, streamU: d.streamU, nul: d.nul }; };
 const FAKE_REVIEWED = Object.freeze({
   documents: Object.freeze({ '/': canonOf('/'), '/display/$goalId': canonOf('/display/ga1-wsf-bind-probe'), '/kiosk/$communityId/$goalId': canonOf('/kiosk/ca1-wsf-bind-probe/ga1-wsf-bind-probe') }),
   assets: Object.freeze(Object.fromEntries(Object.entries(FAKE_ASSETS).map(([p, b]) => [p.slice(8), sha(b)]))),
@@ -600,7 +600,7 @@ test('cli: --bind exits non-zero before any credential unless the served build i
   const lines = [];
   assert.equal(await cli('--bind', env, { fetchImpl: host(), say: (l) => lines.push(l) }), 1, 'the shipped REVIEWED_BUILD is empty, so the gate stops');
   assert.match(lines[0], /^LOVABLE_BUILD=BLOCKED/);
-  assert.deepEqual(lines.filter((l) => l.startsWith('LOVABLE_OBSERVED_DOCUMENT ')), Object.entries(FAKE_REVIEWED.documents).map(([t, d]) => `LOVABLE_OBSERVED_DOCUMENT ${t} ${d.sha256} u=2`), 'the kiosk harness\'s route-aware bind, one canonical document per template');
+  assert.deepEqual(lines.filter((l) => l.startsWith('LOVABLE_OBSERVED_DOCUMENT ')), Object.entries(FAKE_REVIEWED.documents).map(([t, d]) => `LOVABLE_OBSERVED_DOCUMENT ${t} ${d.sha256} u=2 nul=2 (stream part 1, other inline script 0, markup 1)`), 'the kiosk harness\'s route-aware bind, one canonical document per template');
   assert.equal(lines.filter((l) => l.startsWith('LOVABLE_DOCUMENT_PROBE ')).length, kiosk.BIND_PROBES.length);
   assert.ok(lines.every((l) => !/join=|\?/.test(l)), 'probe lines name the page, never its query');
   assert.equal(await cli('--bind', env, { fetchImpl: host(), reviewed: FAKE_REVIEWED, say: () => {} }), 0);

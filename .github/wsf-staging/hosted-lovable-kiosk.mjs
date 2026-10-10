@@ -50,7 +50,8 @@ export const PROJECT_ID = 'westayfit-staging';
  * lovable-device-matrix proofs:
  *  - documents: for each route template the journeys load, the sha256 of its canonical document (canonicalDocument:
  *    its inline scripts, the references it loads and every other byte, with only the two per-request values
- *    normalized and the URL's own params in their slots) and the number of `u:` timestamps its stream part carries;
+ *    normalized and the URL's own params in their slots), the number of `u:` timestamps its stream part carries, and
+ *    the number of NUL characters it carries (Director ruling #394 6091249662: kept as bytes, counted strictly);
  *  - assets: asset name -> sha256 of its bytes, exact.
  * EMPTY until a reviewed commit pins the manifest a `--bind` run of this code printed; while empty, every run stops in
  * the credential-free gate. An observed digest is evidence for review, never self-approval. A later Lovable publish
@@ -205,6 +206,19 @@ export function canonicalDocument(text, url) {
   }
   if (nonDigit) return fail(`${nonDigit} of the ${streamU} u: values in the stream part are not 13 digits`);
   if (!streamU) return fail('the stream part carries no u: value');
+  // NUL characters are document bytes (the real host's documents carry them): kept, counted, and classed by context.
+  const nulIn = (a, b) => doc.slice(a, b).split('\u0000').length - 1;
+  const nul = nulIn(0, doc.length);
+  let inScript = 0;
+  for (const x of doc.matchAll(/<script\b[^>]*>/gi)) {
+    if (/\ssrc=/i.test(x[0]) || x.index === opens[0].index) continue;
+    const from = x.index + x[0].length;
+    const shut = /<\/script/gi;
+    shut.lastIndex = from;
+    inScript += nulIn(from, shut.exec(doc)?.index ?? doc.length);
+  }
+  const nulClasses = { stream: nulIn(start, end), script: inScript, markup: 0 };
+  nulClasses.markup = nul - nulClasses.stream - nulClasses.script;
   // 3. Literal text between the cuts, then the URL's own params, longest first, as slots in the literal text only.
   let parts = [];
   let from = 0;
@@ -220,7 +234,7 @@ export function canonicalDocument(text, url) {
       return pieces.flatMap((q, i) => (i ? [{ slot: `param:${name}` }, q] : [q]));
     });
   }
-  return { template: m.template, sha256: sha256(Buffer.from(JSON.stringify(parts), 'utf8')), streamU, params: counts };
+  return { template: m.template, sha256: sha256(Buffer.from(JSON.stringify(parts), 'utf8')), streamU, nul, nulClasses, params: counts };
 }
 
 /** The script and stylesheet references a document itself makes (src of a script; href of a stylesheet or modulepreload link). */
@@ -271,10 +285,10 @@ export async function servedManifest(fetchImpl, base = LOVABLE_URL) {
   const documents = {};
   for (const t of ROUTE_TEMPLATES) {
     const of = probes.filter((x) => matchTemplate(new URL(`${base}${x.path}`).pathname)?.template === t);
-    const forms = new Set(of.map((x) => (x.sha256 ? `${x.sha256} ${x.streamU}` : null)));
+    const forms = new Set(of.map((x) => (x.sha256 ? `${x.sha256} ${x.streamU} ${x.nul}` : null)));
     documents[t] = of.length && of.every((x) => x.sha256) && forms.size === 1
-      ? { sha256: of[0].sha256, streamU: of[0].streamU }
-      : { sha256: null, streamU: null, reason: of.find((x) => !x.sha256)?.reason ?? `its ${of.length} loads reduce to ${forms.size} different canonical documents (route data beyond the URL's own params, or a per-request value outside the two normalized ones)` };
+      ? { sha256: of[0].sha256, streamU: of[0].streamU, nul: of[0].nul, nulClasses: of[0].nulClasses }
+      : { sha256: null, streamU: null, nul: null, reason: of.find((x) => !x.sha256)?.reason ?? `its ${of.length} loads reduce to ${forms.size} different canonical documents (route data beyond the URL's own params, or a per-request value outside the two normalized ones)` };
   }
   const assets = {};
   while (queue.length) {
@@ -293,13 +307,13 @@ export async function servedManifest(fetchImpl, base = LOVABLE_URL) {
   return { documents, assets: Object.fromEntries(Object.entries(assets).sort(([a], [b]) => (a < b ? -1 : 1))), probes, refusals, blocked };
 }
 
-const pinnedDocument = (d) => /^[0-9a-f]{64}$/.test(String(d?.sha256)) && Number.isInteger(d?.streamU) && d.streamU > 0;
+const pinnedDocument = (d) => /^[0-9a-f]{64}$/.test(String(d?.sha256)) && Number.isInteger(d?.streamU) && d.streamU > 0 && Number.isInteger(d?.nul) && d.nul >= 0;
 /** The observed build against the reviewed one: PASS only on the same canonical documents, the same asset names with the same digests, and no document reference the guard would refuse. */
 export function bindBuild(observed, reviewed = REVIEWED_BUILD) {
   const want = reviewed?.assets ?? {};
   const docs = reviewed?.documents ?? {};
   if (!Object.keys(want).length || !ROUTE_TEMPLATES.every((t) => pinnedDocument(docs[t]))) return { status: 'BLOCKED', reason: 'no reviewed build is pinned yet (REVIEWED_BUILD needs a canonical document for every route template and every asset)' };
-  const changedDocs = ROUTE_TEMPLATES.filter((t) => observed?.documents?.[t]?.sha256 !== docs[t].sha256 || observed.documents[t].streamU !== docs[t].streamU);
+  const changedDocs = ROUTE_TEMPLATES.filter((t) => observed?.documents?.[t]?.sha256 !== docs[t].sha256 || observed.documents[t].streamU !== docs[t].streamU || observed.documents[t].nul !== docs[t].nul);
   if (changedDocs.length) return { status: 'FAIL', reason: `the served ${changedDocs.join(', ')} document${changedDocs.length > 1 ? 's differ' : ' differs'} from the reviewed one (inline or loaded executable content, route data or a per-request value changed)` };
   const got = observed?.assets ?? {};
   const missing = Object.keys(want).filter((n) => !Object.hasOwn(got, n));
@@ -318,22 +332,23 @@ export function bindBuild(observed, reviewed = REVIEWED_BUILD) {
  * one JSON line to pin. Templates,
  * fixed probe paths, names, counts and digests only: never a document's bytes or the token's value.
  */
+const nulWhere = (c) => (c && (c.stream || c.script || c.markup) ? ` (stream part ${c.stream}, other inline script ${c.script}, markup ${c.markup})` : '');
 export function bindLines(observed, verdict) {
   const lines = [`LOVABLE_BUILD=${verdict.status} (${verdict.reason})`];
   if (!observed) return lines;
   for (const t of ROUTE_TEMPLATES) {
     const d = observed.documents?.[t];
-    lines.push(d?.sha256 ? `LOVABLE_OBSERVED_DOCUMENT ${t} ${d.sha256} u=${d.streamU}` : `LOVABLE_OBSERVED_DOCUMENT ${t} UNBOUND (${d?.reason ?? 'not loaded'})`);
+    lines.push(d?.sha256 ? `LOVABLE_OBSERVED_DOCUMENT ${t} ${d.sha256} u=${d.streamU} nul=${d.nul}${nulWhere(d.nulClasses)}` : `LOVABLE_OBSERVED_DOCUMENT ${t} UNBOUND (${d?.reason ?? 'not loaded'})`);
   }
   for (const p of observed.probes ?? []) {
     const where = `${String(p.path).split('?')[0]}${String(p.path).includes('?') ? ' (with an invite query)' : ''}`;
-    lines.push(`LOVABLE_DOCUMENT_PROBE ${where} ${p.sha256 ? `${p.template} ${p.sha256} u=${p.streamU} params=${JSON.stringify(p.params)}` : `refused (${p.reason})`}`);
+    lines.push(`LOVABLE_DOCUMENT_PROBE ${where} ${p.sha256 ? `${p.template} ${p.sha256} u=${p.streamU} nul=${p.nul}${nulWhere(p.nulClasses)} params=${JSON.stringify(p.params)}` : `refused (${p.reason})`}`);
   }
   for (const r of observed.refusals ?? []) lines.push(`LOVABLE_DOCUMENT_REFUSED_REFERENCE ${r}`);
   for (const w of observed.blocked ?? []) lines.push(`LOVABLE_DOCUMENT_BLOCKED_HOST_SCRIPT ${w}`);
   for (const [n, d] of Object.entries(observed.assets ?? {})) lines.push(`LOVABLE_OBSERVED_ASSET ${n} ${d}`);
   if (ROUTE_TEMPLATES.every((t) => pinnedDocument(observed.documents?.[t]))) {
-    lines.push(`LOVABLE_OBSERVED_BUILD ${JSON.stringify({ documents: Object.fromEntries(ROUTE_TEMPLATES.map((t) => [t, { sha256: observed.documents[t].sha256, streamU: observed.documents[t].streamU }])), assets: observed.assets })}`);
+    lines.push(`LOVABLE_OBSERVED_BUILD ${JSON.stringify({ documents: Object.fromEntries(ROUTE_TEMPLATES.map((t) => [t, { sha256: observed.documents[t].sha256, streamU: observed.documents[t].streamU, nul: observed.documents[t].nul }])), assets: observed.assets })}`);
   }
   return lines;
 }
@@ -343,7 +358,8 @@ const DATA_TYPES = new Set(['xhr', 'fetch', 'eventsource']);
 /**
  * The Lovable host's own injected scripts, never the app's: the events script whose tag carries the context token, and
  * `/~flock.js` (seen in the documents by the bind of run 38006215259). The app reaches them only through optional calls
- * (`window.__lovableEvents?.…`), so they are blocked: never fetched or run, and never a refusal. Exact paths, scripts only.
+ * (`window.__lovableEvents?.…`), so they are blocked: never fetched or run, and never a refusal (Director ruling #394
+ * 6091249662). Exact paths on the Lovable host, with no query or fragment, scripts only; anything else is refused.
  */
 const HOST_SCRIPTS = Object.freeze([/^\/__l5e\/events\.[A-Za-z0-9_-]+\.js$/, /^\/~flock\.js$/]);
 /**
@@ -364,7 +380,7 @@ export function classifyRequest({ url, type, navigation }, reviewed = REVIEWED_B
       return m ? { action: 'verify', kind: 'document', template: m.template, want: reviewed?.documents?.[m.template] ?? null, what } : { action: 'abort', reason: `${what} is not a reviewed route template` };
     }
     if (type === 'script' || type === 'stylesheet') {
-      if (type === 'script' && HOST_SCRIPTS.some((re) => re.test(u.pathname))) return { action: 'block', what };
+      if (type === 'script' && !u.search && !u.hash && HOST_SCRIPTS.some((re) => re.test(u.pathname))) return { action: 'block', what };
       const name = /^\/assets\/([A-Za-z0-9_.-]+)$/.exec(u.pathname)?.[1];
       return name && Object.hasOwn(reviewed?.assets ?? {}, name) ? { action: 'verify', kind: 'asset', want: reviewed.assets[name], what } : { action: 'abort', reason: `${what} is not a reviewed asset` };
     }
@@ -378,7 +394,7 @@ export function classifyRequest({ url, type, navigation }, reviewed = REVIEWED_B
  * The served-code guard, routed on EVERY browser context of the journey (service workers blocked, so none can answer
  * around it). A verified response is fetched once and fulfilled with exactly the bytes read: an asset only when those
  * bytes carry its reviewed digest, a document only when they are valid UTF-8 and reduce, for the URL requested, to its
- * template's reviewed canonical document with the reviewed number of stream-part timestamps. A redirect, an error
+ * template's reviewed canonical document with the reviewed numbers of stream-part timestamps and NULs. A redirect, an error
  * status, other bytes, an unreviewed or foreign script or document is aborted and recorded; a host script is
  * aborted and counted as blocked. `check()` throws once anything was refused, so the journey stops before the next step
  * (a sign-in included).
@@ -405,6 +421,7 @@ export function codeGuard(reviewed = REVIEWED_BUILD) {
       const d = canonicalDocument(text, req.url());
       if (!d.sha256) { await refuse(`${c.what}: ${d.reason}`); return; }
       if (d.template !== c.template || d.streamU !== c.want.streamU) { await refuse(`${c.what} carries ${d.streamU} stream-part u: value(s), not the reviewed ${c.want.streamU}`); return; }
+      if (d.nul !== c.want.nul) { await refuse(`${c.what} carries ${d.nul} NUL character(s), not the reviewed ${c.want.nul}`); return; }
       if (d.sha256 !== c.want.sha256) { await refuse(`${c.what} differs from the reviewed ${c.template} document`); return; }
     } else if (sha256(body) !== c.want) { await refuse(`${c.what} differs from its reviewed digest`); return; }
     verified += 1;

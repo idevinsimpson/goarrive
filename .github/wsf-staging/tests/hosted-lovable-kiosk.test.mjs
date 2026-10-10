@@ -52,7 +52,7 @@ function servedDoc(pathname, o = {}) {
     + `<script class="$tsr" data-tsr-stream-part="">$_TSR.router.matches=[{i:"__root__",u:${o.u1 ?? ts},s:"success",x:"\u0000"},{i:"${matchId}",u:${o.u2 ?? ts},s:"${o.status ?? 'success'}"}${o.streamMore ?? ''}]</script>`
     + `${o.body ?? ''}<script type="module" src="/assets/${o.shell ?? 'shell-AAA.js'}"></script></body></html>`;
 }
-const pin = (d) => ({ sha256: d.sha256, streamU: d.streamU });
+const pin = (d) => ({ sha256: d.sha256, streamU: d.streamU, nul: d.nul });
 const canonOf = (p, o) => canonicalDocument(servedDoc(p, o), `${LOVABLE_URL}${p}`);
 
 function site(files) {
@@ -126,6 +126,17 @@ test('canonical document: exactly the two per-request values are normalized, and
   assert.match(canonicalDocument(servedDoc('/').replace(/(data-tsr-stream-part="">[^<]*)<\/script>[^]*$/, '$1'), `${LOVABLE_URL}/`).reason, /stream-part script is not closed/);
   // NUL characters are document bytes like any other (the real host's documents carry them): kept, never a slot.
   assert.ok(servedDoc('/').includes('\u0000'), 'the fake documents carry NULs, as the real ones do');
+  assert.equal(a.nul, 2, 'every NUL is counted');
+  assert.deepEqual(a.nulClasses, { stream: 1, script: 0, markup: 1 }, 'and classed by where it stands');
+  assert.deepEqual(canonOf('/', { body: '<script>x="\u0000\u0000"</script>' }).nulClasses, { stream: 1, script: 2, markup: 1 }, 'another inline script is its own class');
+  const fewer = canonicalDocument(servedDoc('/').replace('\u0000</main>', '</main>'), `${LOVABLE_URL}/`);
+  assert.equal(fewer.nul, 1);
+  assert.notEqual(fewer.sha256, a.sha256, 'removing one NUL changes the digest');
+  // A literal NUL + wsf:token + NUL (the in-band spelling of a slot) is text like any other: never a slot.
+  const tokenSpelled = canonOf('/', { body: '<p>\u0000wsf:token\u0000</p>' });
+  assert.match(tokenSpelled.sha256, /^[0-9a-f]{64}$/);
+  assert.notEqual(tokenSpelled.sha256, canonOf('/', { body: '<p></p>' }).sha256);
+  assert.equal(tokenSpelled.nul, 4);
   assert.equal(canonOf('/', { body: '\u0000\u0000' }).sha256, canonOf('/', { body: '\u0000\u0000' }).sha256);
   assert.notEqual(canonOf('/', { body: '\u0000\u0000' }).sha256, canonOf('/', { body: '\u0000 \u0000' }).sha256);
   // Literal text never stands for a slot: a document that spells a slot (in-band, as a NUL-delimited marker) where the
@@ -161,7 +172,10 @@ test('negative mutations: each one is refused, by name or by digest, at bind and
     ['a second context token', '/', servedDoc('/', { head: '<script src="/__l5e/events.Q1w2E3r4.js" data-context-token="abcdefgh1234"></script>' }), /2 data-context-token attributes, not exactly 1/],
     ['no context token', '/', servedDoc('/').replace(/ data-context-token="[^"]*"/, ''), /0 data-context-token attributes/],
     ['the only context token inside the stream part', '/', servedDoc('/').replace(/ data-context-token="[^"]*"/, '').replace('$_TSR.router', 'x=\'<a data-context-token="abcdefgh1234">\';$_TSR.router'), /data-context-token attribute is inside the stream part/],
-    ['an added NUL character', '/', servedDoc('/', { body: '\u0000' }), /differs from the reviewed \/ document/],
+    ['an added NUL character', '/', servedDoc('/', { body: '\u0000' }), /carries 3 NUL character\(s\), not the reviewed 2/],
+    ['a removed NUL character', '/', servedDoc('/').replace('\u0000</main>', '</main>'), /carries 1 NUL character\(s\), not the reviewed 2/],
+    ['a moved NUL character', '/', servedDoc('/').replace('\u0000</main>', '</main>').replace('<title>', '<title>\u0000'), /differs from the reviewed \/ document/],
+    ['a second ~flock.js tag', '/', servedDoc('/', { head: '<script src="/~flock.js" defer></script>' }), /differs from the reviewed \/ document/],
     ['a param the guard cannot bind', '/display/short', servedDoc('/display/short'), /a path param the guard cannot bind/],
     ['overlapping params', '/kiosk/abcdefghijkl/abcdefghijklmn', servedDoc('/kiosk/abcdefghijkl/abcdefghijklmn'), /two path params overlap/],
   ];
@@ -199,7 +213,8 @@ const PARAM_OK = (p) => Object.values(matchTemplate(p).params).every((v) => /^[A
 test('the served manifest: every bind probe reduced per template, same-origin assets walked and hashed, references checked', async () => {
   const s = site(SITE);
   const m = await servedManifest(s.fetchImpl);
-  assert.deepEqual(m.documents, DOCS, 'one canonical document per template, from all of its loads');
+  assert.deepEqual(Object.fromEntries(Object.entries(m.documents).map(([t, d]) => [t, pin(d)])), DOCS, 'one canonical document per template, from all of its loads');
+  assert.ok(ROUTE_TEMPLATES.every((t) => JSON.stringify(m.documents[t].nulClasses) === JSON.stringify({ stream: 1, script: 0, markup: 1 })), 'with the class of each NUL, for the bind lines');
   assert.deepEqual(m.assets, OBSERVED);
   assert.deepEqual(m.refusals, [], 'the documents load nothing the guard would refuse (the host events script is blocked, not refused)');
   assert.deepEqual(m.probes.map((x) => x.path), [...BIND_PROBES]);
@@ -242,13 +257,15 @@ test('binding: empty or partial reviewed build BLOCKED; exact PASS; a changed do
     const { [t]: _, ...partial } = DOCS;
     assert.equal(bindBuild(seen, { documents: partial, assets: OBSERVED }).status, 'BLOCKED', `no ${t} document`);
     assert.equal(bindBuild(seen, { documents: { ...DOCS, [t]: { sha256: DOCS[t].sha256 } }, assets: OBSERVED }).status, 'BLOCKED', `${t} without its u: count`);
-    assert.equal(bindBuild(seen, { documents: { ...DOCS, [t]: { sha256: DOCS[t].sha256, streamU: 0 } }, assets: OBSERVED }).status, 'BLOCKED', `${t} with no u:`);
+    assert.equal(bindBuild(seen, { documents: { ...DOCS, [t]: { sha256: DOCS[t].sha256, streamU: 0, nul: 2 } }, assets: OBSERVED }).status, 'BLOCKED', `${t} with no u:`);
+    assert.equal(bindBuild(seen, { documents: { ...DOCS, [t]: { sha256: DOCS[t].sha256, streamU: 2 } }, assets: OBSERVED }).status, 'BLOCKED', `${t} without its NUL count`);
   }
   assert.equal(bindBuild(seen, EXACT).status, 'PASS');
   assert.match(bindBuild(seen, EXACT).reason, /3 reviewed route documents and 3 reviewed assets served exactly/);
   for (const t of ROUTE_TEMPLATES) {
     assert.equal(bindBuild({ ...seen, documents: { ...DOCS, [t]: { ...DOCS[t], sha256: sha('other') } } }, EXACT).status, 'FAIL', `${t} changed`);
     assert.equal(bindBuild({ ...seen, documents: { ...DOCS, [t]: { ...DOCS[t], streamU: 3 } } }, EXACT).status, 'FAIL', `${t} with another u: count`);
+    assert.equal(bindBuild({ ...seen, documents: { ...DOCS, [t]: { ...DOCS[t], nul: 3 } } }, EXACT).status, 'FAIL', `${t} with another NUL count`);
     assert.equal(bindBuild({ ...seen, documents: { ...DOCS, [t]: { sha256: null, streamU: null, reason: 'x' } } }, EXACT).status, 'FAIL', `${t} unbound`);
   }
   assert.equal(bindBuild({ ...seen, assets: { ...OBSERVED, 'shell-AAA.js': sha('changed') } }, EXACT).status, 'FAIL');
@@ -265,15 +282,16 @@ test('bind lines: verdict, documents, probes, refused references, assets and the
   const m = await servedManifest(site({ ...SITE, doc: (p) => servedDoc(p, { token }) }).fetchImpl);
   const lines = bindLines(m, bindBuild(m));
   assert.match(lines[0], /^LOVABLE_BUILD=BLOCKED/);
-  assert.deepEqual(lines.slice(1, 4), ROUTE_TEMPLATES.map((t) => `LOVABLE_OBSERVED_DOCUMENT ${t} ${DOCS[t].sha256} u=2`));
+  assert.deepEqual(lines.slice(1, 4), ROUTE_TEMPLATES.map((t) => `LOVABLE_OBSERVED_DOCUMENT ${t} ${DOCS[t].sha256} u=2 nul=2 (stream part 1, other inline script 0, markup 1)`), 'counts and classes of NULs, never bytes');
   assert.equal(lines.filter((l) => l.startsWith('LOVABLE_DOCUMENT_PROBE ')).length, BIND_PROBES.length);
-  assert.ok(lines.includes(`LOVABLE_DOCUMENT_PROBE /display/Zq9wsfBindProbeGoal2 /display/$goalId ${DOCS['/display/$goalId'].sha256} u=2 params={"goalId":2}`));
+  assert.ok(lines.includes(`LOVABLE_DOCUMENT_PROBE /display/Zq9wsfBindProbeGoal2 /display/$goalId ${DOCS['/display/$goalId'].sha256} u=2 nul=2 (stream part 1, other inline script 0, markup 1) params={"goalId":2}`));
   assert.deepEqual(lines.filter((l) => l.startsWith('LOVABLE_OBSERVED_ASSET ')), Object.entries(OBSERVED).map(([n, d]) => `LOVABLE_OBSERVED_ASSET ${n} ${d}`));
   const last = lines.at(-1);
   assert.ok(last.startsWith('LOVABLE_OBSERVED_BUILD '));
   assert.deepEqual(JSON.parse(last.slice('LOVABLE_OBSERVED_BUILD '.length)), { documents: DOCS, assets: OBSERVED }, 'the line to pin is exactly the observed build');
   assert.doesNotMatch(lines.join('\n'), /tokSECRET|<html|<script|\$_TSR/, 'names, counts and digests only');
-  assert.ok(lines.includes(`LOVABLE_DOCUMENT_PROBE / (with an invite query) / ${DOCS['/'].sha256} u=2 params={}`));
+  assert.ok(lines.includes(`LOVABLE_DOCUMENT_PROBE / (with an invite query) / ${DOCS['/'].sha256} u=2 nul=2 (stream part 1, other inline script 0, markup 1) params={}`));
+  assert.doesNotMatch(lines.join('\n'), /\u0000/, 'no NUL byte is ever printed');
   assert.deepEqual(lines.filter((l) => l.startsWith('LOVABLE_DOCUMENT_BLOCKED_HOST_SCRIPT ')), [`LOVABLE_DOCUMENT_BLOCKED_HOST_SCRIPT script ${EVENTS_SCRIPT}`, `LOVABLE_DOCUMENT_BLOCKED_HOST_SCRIPT script ${FLOCK_SCRIPT}`], 'what the bind would block is printed, once each');
   assert.doesNotMatch(lines.join('\n'), /join=|\?/, 'a probe line names the page, never its query');
   const unbound = bindLines({ ...m, documents: { ...m.documents, '/': { sha256: null, streamU: null, reason: 'r' } } }, { status: 'FAIL', reason: 'x' });
@@ -800,7 +818,8 @@ test('classifyRequest: the reviewed host verifies documents and /assets/ code; A
   for (const [url, type, nav] of [
     [`${L}/assets/other-ZZZ.js`, 'script'], [`${L}/sw.js`, 'script'], [`${L}/c/e5cgrp-e5c-t-1-lk/g/e5cgoal-e5c-t-1-lk`, 'document', true], [`${L}/try`, 'document', true],
     [EVENTS_SCRIPT, 'stylesheet'], [`${L}/__l5e/other.js`, 'script'], [`${L}/__l5e/events.x.js/../evil.js`, 'script'], [`${L}/__l5e/events.Q1w2E3r4.js`, 'document', true],
-    [FLOCK_SCRIPT, 'stylesheet'], [`${L}/~flock.js`, 'document', true], [`${L}/~flockX.js`, 'script'], [`${L}/a/~flock.js`, 'script'], [`${L}/~flock.mjs`, 'script'], ['https://cdn.example.test/~flock.js', 'script'], [`${L}/elsewhere/shell-AAA.js`, 'script'], [`${L}/assets/sub/shell-AAA.js`, 'script'], [`${L}/assets/shell-AAA.js/../x.js`, 'script'], [`${L}/x`, 'websocket'],
+    [FLOCK_SCRIPT, 'stylesheet'], [`${L}/~flock.js`, 'document', true], [`${L}/~flockX.js`, 'script'], [`${L}/a/~flock.js`, 'script'], [`${L}/~flock.mjs`, 'script'], ['https://cdn.example.test/~flock.js', 'script'],
+    [`${L}/~flock.js?v=1`, 'script'], [`${L}/~flock2.js`, 'script'], [`${L}/x/~flock.js`, 'script'], [`${L}/~flock.js#a`, 'script'], [`${EVENTS_SCRIPT}?v=1`, 'script'], [`${L}/elsewhere/shell-AAA.js`, 'script'], [`${L}/assets/sub/shell-AAA.js`, 'script'], [`${L}/assets/shell-AAA.js/../x.js`, 'script'], [`${L}/x`, 'websocket'],
     ['https://identitytoolkit.googleapis.com/x.js', 'script'], ['https://firestore.googleapis.com/', 'document', true], ['https://us-central1-westayfit-staging.cloudfunctions.net/x', 'image'],
     ['https://cdn.example.test/x.js', 'script'], ['https://fonts.googleapis.com/css', 'stylesheet'], ['https://evil.example.test/api', 'fetch'],
     ['https://we-stay-fit-foundation-trial.lovable.app.evil.test/', 'document', true], ['http://we-stay-fit-foundation-trial.lovable.app/', 'document', true], ['not a url', 'script'],
