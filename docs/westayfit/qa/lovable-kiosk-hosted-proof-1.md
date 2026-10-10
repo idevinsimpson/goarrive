@@ -23,6 +23,12 @@ It runs against exactly `https://we-stay-fit-foundation-trial.lovable.app` and t
 | 5. scan, upload | always | `scan-evidence.mjs` runs; the upload happens only if the scan passes. |
 | 6. verdict | always | `--require` gives PASS only when every row passed **and** cleanup succeeded **and** the scan succeeded. |
 
+**Why a row failed, from the job log alone (LOVABLE-GUARD-PING-1 item 7, #394 `6094793181`).**
+- `--run` and `--require` print each row's `seen` text right after its status line, as `LOVABLE_SEEN <row> <text>`. The device matrix prints `LOVABLE_DEVICE_SEEN`.
+- These lines are additive: every existing line is unchanged.
+- The text is one line of at most 300 characters. Query values and email-shaped strings are replaced. The whole text is withheld if any rule of `scan-evidence.mjs` matches it, and a test holds the harness's copy of those rules equal to the script's own.
+- Main run `38030045509` showed why this is needed: its `display` and `signup` cells failed, and the reason was only in the evidence artifact.
+
 **`REVIEWED_BUILD`** holds a canonical document per route template and every asset digest. Neither part alone binds: documents without assets, or assets without a document for every template, are BLOCKED. Its value and status are in "The route-aware reviewed build", below.
 
 The digests could not be computed from W3's session, nor from W4's for LOVABLE-REVIEWED-BUILD-1: both sessions' proxies refuse the Lovable host (CONNECT 403). Neither refusal was worked around.
@@ -45,7 +51,12 @@ The bind alone checks a separate, earlier fetch. The Lovable host is mutable, so
   - Only those exact, anchored paths on the Lovable host are blocked, and only as scripts whose URL is exactly origin plus path: no query, no fragment, no userinfo. The events id must be exactly 16 lower-case hex digits, the real id's shape.
   - Details are in "The route-aware reviewed build", below.
 - **Scripts and stylesheets** from the Lovable host must be a reviewed `/assets/<name>`, declared with no charset or UTF-8, and carry that asset's reviewed digest. They are fulfilled with exactly the hashed bytes and the host's own headers (LOVABLE-REVIEWED-BUILD-2; see "Asset charset" below).
-- **Passive same-origin types** (images, fonts, the manifest) and **data requests** (`fetch`, `xhr`, `eventsource`) to the four API origins pass: Identity Toolkit, Secure Token, Firestore, and the staging callables host.
+- **Passive same-origin types** (images, fonts, the manifest) and **data requests** (`fetch`, `xhr`, `eventsource`, `ping`) to the four API origins pass: Identity Toolkit, Secure Token, Firestore, and the staging callables host.
+  - **`ping` (LOVABLE-GUARD-PING-1):** a beacon, sent with `navigator.sendBeacon`.
+    - Firestore's WebChannel closes a Listen channel with one, to `https://firestore.googleapis.com/google.firestore.v1.Firestore/Listen/channel`. Playwright reports it as resource type `ping`.
+    - Before this packet, the guard refused it. That stopped the kiosk journey of main run `38030033477` (`host-build` and `account-isolation` FAIL, 10 rows BLOCKED; #365 `6094589482`).
+    - A beacon carries data out, and its answer is never run.
+    - It passes only to the exact four API origins and never as a navigation. A `ping` to the Lovable host is still refused, because it is not a passive type there.
 - **Everything else that reaches the route is refused:** a redirect, an error status, other bytes, an unreviewed or foreign script, any document or script from an API origin, and any other origin's request. The refusal is recorded with no query string.
 - **A refusal stops the journey.** The journey checks after each navigation, so a refusal stops it before the next step:
   - the kiosk is never approved, so the station secret never reaches an unreviewed kiosk;

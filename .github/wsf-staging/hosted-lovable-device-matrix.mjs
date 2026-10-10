@@ -45,7 +45,7 @@ import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 
 import {
-  LOVABLE_URL, PROJECT_ID, REVIEWED_BUILD, bindBuild, bindLines, browserEnv, callableLog, checkBase, codeGuard, hostBuildRow, idHash, servedManifest, showsNumber,
+  LOVABLE_URL, PROJECT_ID, REVIEWED_BUILD, bindBuild, bindLines, browserEnv, callableLog, checkBase, codeGuard, hostBuildRow, idHash, seenLine, servedManifest, showsNumber,
 } from './hosted-lovable-kiosk.mjs';
 
 /**
@@ -107,7 +107,7 @@ export function matrixLines(doc) {
 export function requireVerdict(doc, { cleanup, scan }) {
   const lines = [];
   const rows = Array.isArray(doc?.rows) ? doc.rows : [];
-  for (const r of rows) lines.push(`LOVABLE_DEVICE_ROW ${r.id}=${r.status}`);
+  for (const r of rows) lines.push(`LOVABLE_DEVICE_ROW ${r.id}=${r.status}`, seenLine('LOVABLE_DEVICE_SEEN', r.id, r.seen));
   lines.push(...matrixLines(doc));
   const n = (s) => rows.filter((r) => r.status === s).length;
   lines.push(`LOVABLE_DEVICE_ROWS=${n('PASS')} PASS, ${n('FAIL')} FAIL, ${n('BLOCKED')} BLOCKED`);
@@ -583,7 +583,7 @@ export async function cli(mode, env, { fetchImpl = fetch, lookupFetch = fetch, r
     doc = results({ ...run.rows, ...rows, 'host-build': hostBuildRow(verdict, run.served) });
     fs.writeFileSync(path.join(dir, 'results.json'), `${JSON.stringify(doc, null, 2)}\n`);
     for (const l of matrixLines(doc)) say(l);
-    for (const r of doc.rows) say(`LOVABLE_DEVICE_ROW ${r.id}=${r.status}`);
+    for (const r of doc.rows) { say(`LOVABLE_DEVICE_ROW ${r.id}=${r.status}`); say(seenLine('LOVABLE_DEVICE_SEEN', r.id, r.seen)); }
   }
   return allPassed(doc) ? 0 : 1;
 }

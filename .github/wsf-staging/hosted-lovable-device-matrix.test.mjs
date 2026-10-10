@@ -642,9 +642,18 @@ test('cli: a full --run with the fake kit and browser writes the matrix, tracks 
   assert.equal(doc.rows.find((r) => r.id === 'host-build').status, 'PASS');
   assert.equal(code, 0, lines.filter((l) => !/=PASS$/.test(l)).join(' | '));
   assert.ok(lines.includes(`LOVABLE_DEVICE_CELL landing: ${VIEWPORTS.map((v) => `${v.id}=PASS`).join(' ')}`));
+  // LOVABLE-GUARD-PING-1 item 7: each status line, unchanged, is followed by that row's seen text, in --run and --require.
+  const seenAfter = (out) => doc.rows.forEach((r) => {
+    const at = out.indexOf(`LOVABLE_DEVICE_ROW ${r.id}=${r.status}`);
+    assert.ok(at >= 0, r.id);
+    assert.equal(out[at + 1], kiosk.seenLine('LOVABLE_DEVICE_SEEN', r.id, r.seen), r.id);
+  });
+  seenAfter(lines);
+  assert.match(lines[lines.indexOf('LOVABLE_DEVICE_ROW display@v360=PASS') + 1], /^LOVABLE_DEVICE_SEEN display@v360 display state live; /);
   const req = [];
   assert.equal(await cli('--require', { WSF_RESULT_DIR: t.dir, WSF_CLEANUP_OUTCOME: 'success', WSF_SCAN_OUTCOME: 'success' }, { say: (l) => req.push(l) }), 0);
   assert.ok(req.includes('LOVABLE_DEVICE_MATRIX=PASS'));
+  seenAfter(req);
   assert.equal(await cli('--require', { WSF_RESULT_DIR: t.dir, WSF_CLEANUP_OUTCOME: 'failure', WSF_SCAN_OUTCOME: 'success' }, { say: () => {} }), 1);
   assert.equal(await cli('--require', { WSF_RESULT_DIR: path.join(t.dir, 'nothing-here'), WSF_CLEANUP_OUTCOME: 'success', WSF_SCAN_OUTCOME: 'success' }, { say: () => {} }), 1);
 });
