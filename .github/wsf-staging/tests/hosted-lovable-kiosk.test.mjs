@@ -922,7 +922,7 @@ test('classifyRequest: the reviewed host verifies documents and /assets/ code; A
   assert.equal(c(`${L}/display/e5cgoal-e5c-t-1-dm1`, 'document', true).want, R.documents['/display/$goalId']);
   assert.deepEqual(c(EVENTS_SCRIPT, 'script'), { action: 'block', what: `script ${EVENTS_SCRIPT}` }, 'the host events script is blocked');
   assert.deepEqual(c(FLOCK_SCRIPT, 'script'), { action: 'block', what: `script ${FLOCK_SCRIPT}` }, 'and the host\'s ~flock.js');
-  assert.equal(c(`${L}/__l5e/events.1718a1eacac7ff3a.js`, 'script').action, 'block', 'the real events id (bind runs 38007859514 and 38017456574) is blocked');
+  assert.equal(c(`${L}/__l5e/events.1718a1eacac7ff3a.js`, 'script').action, 'block', 'the real events id (bind runs 38007859514, 38017456574 and 38018743683) is blocked');
   // The events id is exactly 16 lower-case hex digits, and the dots are literal (#394 6092810294 item 5): each of these
   // is refused, never blocked.
   for (const id of ['-', '_', 'a'.repeat(5000), '', 'a1b2c3d4.5f60718', 'a1b2c3d4e5f6%718', 'a1b2c3d4e5f6~718', 'a1b2c3d4e5f6071', 'a1b2c3d4e5f607189', 'A1B2C3D4E5F60718', 'a1b2c3d4e5f6071g']) {

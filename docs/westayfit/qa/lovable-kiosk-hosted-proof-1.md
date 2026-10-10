@@ -94,7 +94,7 @@ The bind alone checks a separate, earlier fetch. The Lovable host is mutable, so
 - **Documents.** A document must be a reviewed template, declared `text/html` with no charset or UTF-8, and valid UTF-8 (a leading BOM kept as a character). It must reduce, for its own URL, to the reviewed canonical document with the reviewed counts of stream-part timestamps and of NULs. It is fulfilled with exactly the bytes read, as `text/html; charset=utf-8`, with its other headers kept (L0 R7).
 - **Assets.** A script or stylesheet must be a reviewed `/assets/<name>`, declared with no charset or UTF-8, and carry its reviewed digest. It is fulfilled with exactly those bytes and the host's own headers.
 - **The host's own scripts.** Two are **blocked**, never run, and counted apart from refusals (host-build names the count):
-  - the injected `/__l5e/events.<id>.js`, where `<id>` is exactly 16 lower-case hex digits: the shape of the real id, `1718a1eacac7ff3a`, printed by bind runs `38007859514` and `38017456574`;
+  - the injected `/__l5e/events.<id>.js`, where `<id>` is exactly 16 lower-case hex digits: the shape of the real id, `1718a1eacac7ff3a`, printed by bind runs `38007859514`, `38017456574` and `38018743683`;
   - `/~flock.js`, which the first real-host bind found referenced by the documents.
 
   Only those exact paths on the Lovable host are blocked: no query, no fragment, no userinfo, and only as scripts. Anything else is refused, and the bind prints each script it would block:
@@ -133,7 +133,21 @@ Also tested:
 - a literal NUL+`wsf:token`+NUL is text, never a slot;
 - literal text that spells a slot, where another document has the id, never reduces to the same document.
 
-**The pin: `REVIEWED_BUILD` is pinned to Lovable `9b9eade5`** on the trial host. It is exactly the `LOVABLE_OBSERVED_BUILD` line of run `38007859514` (gate only, this harness at `b3f389c6`):
+**The pin: `REVIEWED_BUILD` is pinned to Lovable `db3fd2f2`** on the trial host (LOVABLE-REVIEWED-BUILD-2, step B). It is exactly the `LOVABLE_OBSERVED_BUILD` line of the credential-free gate bind run `38018743683` (`main` `6e8acc31`, gate job `114114813301`, 02:56Z; L0 #394 `6093058625`):
+
+| Template | Canonical sha256 | `u:` | NUL (all in the stream part) |
+|---|---|---|---|
+| `/` | `55f9d9a35c95aeea889644ef8c9408aae6617f32c22de187a134516892b93b03` | 2 | 3 |
+| `/display/$goalId` | `b15d36a06b362063ab8b0817d8d35a8e51982dc5b80630420b473e6ec79db2ae` | 2 | 5 |
+| `/kiosk/$communityId/$goalId` | `f9a8996609e0e4e6168174263d4cba53e7a3868c67e10fc44cc194cb22934398` | 2 | 7 |
+
+- **What the bind showed:** the three loads of `/` agree, and so do the two ids of each param template; no reference is refused; it blocks exactly `/~flock.js` and `/__l5e/events.1718a1eacac7ff3a.js` (the same events id, so the 16-hex pattern holds); 79 assets, with the new entry `index-BwrWDHpN.js`.
+- **How the pin was made.** This session cannot read job logs as files, so the log was transcribed twice, once from its `LOVABLE_OBSERVED_DOCUMENT` and `LOVABLE_OBSERVED_ASSET` lines and once from its `LOVABLE_OBSERVED_BUILD` JSON. A generator wrote `REVIEWED_BUILD` only because the two agree exactly.
+- **Cross-checks.** The 56 asset names the `9b9eade5` pin also has carry the same digests there (content-hashed names, so the same bytes); the other 23 names are new in this build. The three document digests match the prefixes L0 posted. Lovable's byte diagnostic of this build (#394 `6093058625`) found no BOM, and two fetches 70 s apart identical once the two per-request values were blanked.
+- **If a digest were mistyped**, the first gate bind after merge would FAIL before any credential and print the right line, so a slip fails closed.
+- **Drift without a publish.** Run `38017456574` (02:34Z, `main`) found the `9b9eade5` param-template digests changed since 00:10Z with no publish, `/` and the assets unchanged; Lovable's diagnostic rules out a BOM. If the host's render of the deep links moves again, the bind fails before any credential and the guard refuses the documents in the browser; it never runs them. L0 is taking a second gate sample of `db3fd2f2` to check.
+
+**Previously (LOVABLE-REVIEWED-BUILD-1): pinned to Lovable `9b9eade5`.** It was exactly the `LOVABLE_OBSERVED_BUILD` line of run `38007859514` (gate only, this harness at `b3f389c6`):
 
 | Template | Canonical sha256 | `u:` | NUL (all in the stream part) |
 |---|---|---|---|
@@ -159,7 +173,7 @@ Also tested:
 
   The next commits take the NULs as literal bytes, pin their count, and block `/~flock.js` exactly, as the Director's ruling #394 `6091249662` asks.
 - **Run `38007704034`** (00:08Z, at `fff29518`) bound all three templates with no refused reference, before the NUL count was part of the pin.
-- **Run `38007859514`** (00:10Z, at `b3f389c6`) bound them again with the NUL counts. The pin above is its manifest.
+- **Run `38007859514`** (00:10Z, at `b3f389c6`) bound them again with the NUL counts. The `9b9eade5` pin was its manifest.
 
 **Superseded elsewhere.** `docs/westayfit/qa/lovable-device-qa-1.md` (outside this packet's paths) describes the device matrix's old raw-bytes document probe. That probe is removed: the device matrix now uses this route-aware bind.
 
@@ -275,6 +289,8 @@ Every browser context is closed in `finally`, including on an early stop.
 
 **Proof, step A** (Node 20.20.2 and Node 22.22.2): `tests/hosted-lovable-kiosk.test.mjs` **27 passed** (one new test, the asset type table; the others extended); `hosted-lovable-device-matrix.test.mjs` **20 passed**; `tests/workflow-contract.test.mjs` 103 passed (no workflow change); staging `tests/run-all.mjs` and `tools/wsf-control/run-all.mjs` all suites passed. **Mutants: 104 of 105 killed.** That is the round-1 catalogue re-based on the bounded events pattern, plus 35 new ones: the asset charset at bind and in the guard (removed, joined wrongly, relabelled, headers dropped, stylesheets skipped, the stylesheet named a script), the charset parser (the `i` flag dropped, the value compared case-sensitively, an empty charset admitted), the token bounds (`{8,4097}`, `{8,}`, `{8,4095}`, `{9,4096}`, `{7,4096}`), L0's seven events-id mutants and five more (unbounded, 15–16 or 16–17 digits, upper case, any letter), userinfo (removed, username only, `?`/`#` only, unnamed), latin1 hashing, and the BOM flag (never set, not carried, inverted). The survivor is the param-order mutant, described above. No credentialed run, and no bind of this code against the host yet.
 
+**LOVABLE-REVIEWED-BUILD-2, step B.** `REVIEWED_BUILD` is re-pinned to Lovable `db3fd2f2`: exactly the `LOVABLE_OBSERVED_BUILD` line of gate bind run `38018743683` (see "The pin", above). Only the pin's value and its provenance text change; the code is step A's. The suites pass against it, and the shipped pin binds to itself.
+
 **LOVABLE-KIOSK-HOSTED-PROOF-1** (the original packet; its single entry-page digest is superseded above):
 - **`tests/hosted-lovable-kiosk.test.mjs`: 21 passed.**
   - It covers the exact host and the same-origin bounded walk; a cross-origin `/assets/` path is ignored.
@@ -327,6 +343,6 @@ Every browser context is closed in `finally`, including on an early stop.
 ## Before an authenticated run
 
 1. Ops-source review, security review, and Director acceptance of the exact head.
-2. Done in LOVABLE-REVIEWED-BUILD-1: the route-aware binds (runs `38006215259`, `38007704034` and `38007859514`) and the pin commit, which copies run `38007859514`'s `LOVABLE_OBSERVED_BUILD` exactly.
+2. Done in LOVABLE-REVIEWED-BUILD-1: the route-aware binds (runs `38006215259`, `38007704034` and `38007859514`) and the pin commit, which copied run `38007859514`'s `LOVABLE_OBSERVED_BUILD` exactly. Done in LOVABLE-REVIEWED-BUILD-2: the re-pin to Lovable `db3fd2f2`, exactly run `38018743683`'s `LOVABLE_OBSERVED_BUILD`.
 3. After L0 merges it, one kiosk `--run` and one device-matrix `--run`. Each must PASS host-build against the pin; a later Lovable publish needs a new bind and a new value.
 4. The authorized proof run. It can reach `host-build`, `fixture-provenance`, the control's five phone rows and `cleanup-tracking`. The rows that remain BLOCKED fail it by name: `qr-join` (the kit's private community), the station turn, the organizer UI approval, and the unverified account.
