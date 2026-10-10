@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "56a122fb79603528f38afcd4cc33af0914d35798cf27f9c9829c4b78f74998da",
-  "eventCount": 1222,
+  "ledgerHead": "8aa85e0769d14b70f4bb98ca52b49543161bb436b022ef7f05a29e09c3afa72a",
+  "eventCount": 1225,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2902,7 +2902,9 @@
       "proof": null,
       "served": null,
       "releasedQueueIndex": null,
-      "reviewedBy": [],
+      "reviewedBy": [
+        "W7"
+      ],
       "subjectPaths": [
         ".github/wsf-staging/hosted-lovable-kiosk.mjs",
         ".github/wsf-staging/tests/hosted-lovable-kiosk.test.mjs",
@@ -2925,7 +2927,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6099456544
+          "id": 6099832134
         }
       },
       "review": {
@@ -2950,7 +2952,7 @@
       },
       "label": "Kiosk proof: drive the station turn on the served build (queue place, call, phone ready, expectedTurn start, 60 s round, review, Finish) so the 7 station rows PASS or FAIL, not BLOCKED",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 394,
@@ -2964,7 +2966,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         ".github/wsf-staging/hosted-lovable-kiosk.mjs",
@@ -2985,7 +2987,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6099634479
+          "id": 6099798595
         }
       },
       "review": {
@@ -7233,17 +7235,21 @@
       "ack": {
         "kind": "comment",
         "id": 6099630847
-      }
+      },
+      "superseded": true
     },
     "3ad3fecbfd1f145107ecf90e0695c941dc7ea09a173cbe2d0229e4a2d8df1862": {
       "packet": "LOVABLE-KIOSK-STATION-DRIVER-1",
       "worker": "W4",
       "reason": "release",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6099766134
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6099798595
+      }
     }
   },
   "fastpath": {
