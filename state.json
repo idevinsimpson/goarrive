@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "98ed2f73c4fe14b3d3aa215d4241218d6746fff202aaedc405d548d6e91b63b8",
-  "eventCount": 1228,
+  "ledgerHead": "1c6e584f4f7a33daf1438afb3f83b3c6114eb4c6facbe91497f5882c54d2ad4a",
+  "eventCount": 1231,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2955,15 +2955,17 @@
       },
       "label": "Kiosk proof: drive the station turn on the served build (queue place, call, phone ready, expectedTurn start, 60 s round, review, Finish) so the 7 station rows PASS or FAIL, not BLOCKED",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 394,
-      "pr": null,
-      "reviewers": [],
+      "pr": 619,
+      "reviewers": [
+        "W7"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "a4768e02fc473696d26588493503501de08bcfa2",
+        "prHeadSha": "a4768e02fc473696d26588493503501de08bcfa2",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -2990,7 +2992,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6099798595
+          "id": 6100681031
         }
       },
       "review": {
@@ -3003,7 +3005,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "LOVABLE-MATRIX-ALIGN-1": {
@@ -7252,7 +7254,16 @@
       "ack": {
         "kind": "comment",
         "id": 6099798595
-      }
+      },
+      "superseded": true
+    },
+    "b2cb510a18e7648abcfd5e4305c8e5a8cc472e4b636a723ee2a677dcc324373e": {
+      "packet": "LOVABLE-KIOSK-STATION-DRIVER-1",
+      "worker": "W7",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
