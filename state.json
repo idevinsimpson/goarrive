@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "a5d11bd9ce5c6c7d01e8de102104333760dfffb90474479300572734e6b1966a",
-  "eventCount": 1214,
+  "ledgerHead": "de0bfceb43dbddde4ed2d440fd940c286cce8e461fdbe533a8cbec41b37c40f2",
+  "eventCount": 1216,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2891,7 +2891,7 @@
       "inbox": 394,
       "pr": 617,
       "reviewers": [
-        "W3"
+        "W7"
       ],
       "artifact": {
         "subjectSha": "127e91a73f2837aecfb977aed298b3e91387ce46",
@@ -2925,7 +2925,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6097341607
+          "id": 6099456544
         }
       },
       "review": {
@@ -7159,6 +7159,15 @@
         6097482658,
         6098056049
       ],
+      "ack": null,
+      "superseded": true
+    },
+    "ea23eec8b0d157aca1fef11c767ccd16ce318491962237d33c74a4b31f12d3fb": {
+      "packet": "LOVABLE-KIOSK-QR-JOIN-1",
+      "worker": "W7",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
