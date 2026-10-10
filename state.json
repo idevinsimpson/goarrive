@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "65bd929c7791bb16938c678fe3a42aed01e815699ace70b120bb5a13dc05dcd1",
-  "eventCount": 1166,
+  "ledgerHead": "52859ca822051d21b9dd1e834771b4d3b77984cf3309fc6d52b2e7efa1c09c0b",
+  "eventCount": 1167,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -6863,8 +6863,10 @@
       "packet": "LOVABLE-GUARD-PING-1",
       "worker": "W3",
       "reason": "review",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        6095842294
+      ],
       "ack": null
     }
   },
