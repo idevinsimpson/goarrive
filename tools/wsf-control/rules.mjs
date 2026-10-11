@@ -37,6 +37,11 @@ export const RULES = Object.freeze({
   'R-WAKE-DELIVERED': { class: 'derived', events: ['wake-delivered'], step: 6, what: 'the App posted the wake comment carrying the wakeId in the worker\'s inbox' },
   'R-WAKE-RETRY': { class: 'derived', events: ['wake-retry'], step: 6, what: 'no ACK 15 minutes after the wake comment, and the ball is still the worker\'s: one re-post' },
   'R-WAKE-TIMEOUT': { class: 'derived', events: ['wake-timeout'], step: 6, what: 'no ACK 15 minutes after the re-post: CONTROL_EXCEPTION wake-undelivered' },
+  // The North Star mirror receiver (NORTHSTAR-MIRROR-INTAKE-1; Director queue #365 6035531184). The #578 feed is data:
+  // a delta only sets the desired revision; the queue and release follow from the ledger, never from feed text.
+  'R-NORTHSTAR-DELTA': { class: 'derived', events: ['northstar-desired'], step: 6, what: 'an owner-authored, unedited v1 #578 delta, mirrored and native-relevant, whose exact SHA is on North Star main and ahead of the desired one' },
+  'R-NORTHSTAR-QUEUE': { class: 'derived', events: ['queue'], step: 6, what: 'the desired North Star revision is not mirrored, no mirror packet is live, and the mirror owner holds no ball and no NEXT' },
+  'R-NORTHSTAR-RELEASE': { class: 'derived', events: ['release'], step: 6, what: 'the mirror packet R-NORTHSTAR-QUEUE just queued goes to its owner, who still holds no ball' },
   // Worker facts: recorded from the worker's canonical inbox, author not proven (accepted residual (a)).
   'A-ACK': { class: 'attested', events: ['ack'], step: 6, what: 'the owner ACKed in its canonical inbox' },
   'A-DELIVER': { class: 'attested', events: ['deliver'], step: 6, what: 'the owner delivered a named SHA in its canonical inbox' },

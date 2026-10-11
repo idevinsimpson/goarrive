@@ -25,14 +25,15 @@
  *                 reported as CONTROL_EXCEPTION wake-undelivered until the ball moves on. The ledger
  *                 stores no clock.
  */
-import { applyEvent, emptyState } from './transitions.mjs';
-import { ledgerLines } from './reduce.mjs';
+import { emptyState } from './transitions.mjs';
+import { applyLine, ledgerLines } from './reduce.mjs';
 import { DEFAULT_REVIEW, LATEST_SCHEMA, RE, WRITER_APP, canon, holders, sha256 } from './schema.mjs';
 import { RULES } from './rules.mjs';
 import { neededTransitions, workerWatch } from './derive.mjs';
+import { mirrorPlan } from './northstar.mjs';
 
 /** The rules the Step-6 writer derives or records by itself. Everything else still needs a recorded decision. */
-export const ROUTER_RULES = Object.freeze(['R-FASTPATH', 'R-INTEGRATE', 'R-ROUTE-REVIEW', 'R-FINDING-HANDBACK', 'R-WAKE', 'R-WAKE-DELIVERED', 'R-WAKE-RETRY', 'R-WAKE-TIMEOUT', 'A-ACK', 'A-DELIVER', 'A-PASS', 'A-FINDING', 'A-WAKE-ACK']);
+export const ROUTER_RULES = Object.freeze(['R-FASTPATH', 'R-INTEGRATE', 'R-ROUTE-REVIEW', 'R-FINDING-HANDBACK', 'R-WAKE', 'R-WAKE-DELIVERED', 'R-WAKE-RETRY', 'R-WAKE-TIMEOUT', 'A-ACK', 'A-DELIVER', 'A-PASS', 'A-FINDING', 'A-WAKE-ACK', 'R-NORTHSTAR-DELTA', 'R-NORTHSTAR-QUEUE', 'R-NORTHSTAR-RELEASE']);
 /** Minutes without an ACK before the one retry, and again before the timeout (memo §6.2). */
 export const WAKE_ACK_MINUTES = 15;
 
@@ -61,7 +62,7 @@ export function ballHistory(eventsText) {
     const e = JSON.parse(text);
     // Every packet is compared, not only the one a line names: a bootstrap imports balls without naming a packet.
     const before = Object.fromEntries(Object.entries(s.packets).map(([id, p]) => [id, holders(p)]));
-    s = applyEvent(s, e);
+    s = applyLine(s, e);
     s.ledgerHead = sha256(text);
     for (const [id, p] of Object.entries(s.packets)) {
       const now = holders(p);
@@ -168,6 +169,32 @@ export function integrateLines(state, merges) {
       [pr, { kind: 'commit', id: m.mergeSha }, { kind: 'comment', id: p.authority.accepted.id }]));
   }
   return { lines, unverified };
+}
+
+/**
+ * NORTHSTAR-MIRROR-INTAKE-1. R-NORTHSTAR-DELTA: the desired-revision line for one verified #578 delta
+ * (northstar.mjs parseDelta, then the writer's own read-only reachability reads). It rests on the feed comment.
+ */
+export function desiredLine(state, delta) {
+  const src = { kind: 'comment', id: delta.commentId };
+  return line(state.repository, 'northstar-desired', { sha: delta.sha, routes: [...delta.routes] }, src, 'R-NORTHSTAR-DELTA', [src]);
+}
+
+/**
+ * R-NORTHSTAR-QUEUE then R-NORTHSTAR-RELEASE: the one mirror packet for the desired revision, queued and released to its
+ * owner in the same run, when no mirror packet is live and the owner holds no ball and no NEXT. The R-WAKE that follows
+ * wakes it. Returns { lines, plan }; nothing when the plan waits.
+ */
+export function mirrorLines(state) {
+  const plan = mirrorPlan(state);
+  if (!plan.queue) return { lines: [], plan };
+  return {
+    plan,
+    lines: [
+      line(state.repository, 'queue', plan.queue, plan.source, 'R-NORTHSTAR-QUEUE', [plan.source]),
+      line(state.repository, 'release', plan.release, plan.source, 'R-NORTHSTAR-RELEASE', [plan.source]),
+    ],
+  };
 }
 
 /** Packets waiting on a reviewer this run could not assign, for program-view and the report. */

@@ -12,9 +12,19 @@
 import fs from 'node:fs';
 import { GENESIS, eventId, sha256, validateEvent } from './schema.mjs';
 import { applyEvent, emptyState } from './transitions.mjs';
+import { afterEvent, applyDesired } from './northstar.mjs';
 
 export { sha256 };
 export class LedgerError extends Error {}
+
+/**
+ * One (schema-valid) ledger line onto a state: the transitions, plus the North Star receiver
+ * (NORTHSTAR-MIRROR-INTAKE-1): its own `northstar-desired` line, and its hooks on queue, release and
+ * integrate (northstar.mjs). Every replay of the ledger goes through here, so the reducer and the router agree.
+ */
+export function applyLine(state, e) {
+  return e.type === 'northstar-desired' ? applyDesired(state, e) : afterEvent(applyEvent(state, e), e);
+}
 
 /** Split a ledger file into lines; a trailing newline is required and blank lines are not allowed. */
 export function ledgerLines(text) {
@@ -43,7 +53,7 @@ export function reduce(text) {
     if (e.id !== eventId(e)) throw new LedgerError(`ledger line ${i + 1}: id is not the event's identity`);
     if (ids.has(e.id)) throw new LedgerError(`ledger line ${i + 1}: the same event identity is recorded twice`);
     ids.add(e.id);
-    try { state = applyEvent(state, e); } catch (err) { throw new LedgerError(`ledger line ${i + 1} (${e.type}): ${err.message}`); }
+    try { state = applyLine(state, e); } catch (err) { throw new LedgerError(`ledger line ${i + 1} (${e.type}): ${err.message}`); }
     prev = sha256(line);
     state.ledgerHead = prev;
   }
