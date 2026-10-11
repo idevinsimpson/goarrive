@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "b5884583ab50d815821d1d9c2c0892ceea4d654e19c2a99fab08b9f69a500beb",
-  "eventCount": 1313,
+  "ledgerHead": "76352c8cf593a678aa1b08adda2dba6ede28a36eb5beb5e295ae7502201faf59",
+  "eventCount": 1314,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -7937,8 +7937,10 @@
       "packet": "KIOSK-GUEST-MOVE-1",
       "worker": "W9",
       "reason": "release",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        6111833254
+      ],
       "ack": null
     }
   },
