@@ -21,8 +21,9 @@
  *   - A candidate that is operational main, or that is not its record's
  *     reviewed commit: exactly ec162d17 (A); exactly e65bfee9 (G, the
  *     ANON-GATE-1 merge #601), which must descend from A and change exactly
- *     its four paths; or a descendant of A that changes only consent values
- *     (B). Main has ONE WSF export, so a functions:westayfit deploy from it
+ *     its four paths; exactly ANCHOR_L (L, KIOSK-LIVE-POSE-2 integrated, #622),
+ *     which must descend from G and change exactly its fifteen paths; or a
+ *     descendant of A that changes only consent values (B). Main has ONE WSF export, so a functions:westayfit deploy from it
  *     would prune every other `westayfit` function. The anchors are fixed
  *     here; the CLI cannot replace them.
  *   - A candidate or main missing a file the checks read: refused as a check,
@@ -49,8 +50,8 @@
  *     exist unreviewed); a deploy that would not run from that worktree; and
  *     an env file that does not set WSF_APP_URL to https://app.westay.fit and
  *     a westay.fit sender, sets WSF_AUTH_ACTION_HANDLER to anything but the
- *     production default, or reads differently through firebase-tools' own
- *     parser.
+ *     production default, sets WSF_LIVE_POSE to anything but a bare 1, or
+ *     reads differently through firebase-tools' own parser.
  *   - A deploy command with --force, any Hosting or Storage target,
  *     `firestore:indexes` (the runbook creates the two WSF indexes with
  *     gcloud), a bare `functions` target, GoArrive's `default` codebase, a
@@ -86,6 +87,38 @@ export const CANDIDATE_G_DELTA_PATHS = Object.freeze([
   'functions-westayfit/src/index.ts',
   'functions-westayfit/tests/callable/wsf-anon-gate.test.ts',
 ]);
+/**
+ * Record L (KIOSK-LIVE-POSE-PROD-1, #365 6109578489 item b): KIOSK-LIVE-POSE-2
+ * integrated, the `claude/wsf-app-shell` merge of #622. It must be exactly
+ * this commit, descend from G, and change exactly CANDIDATE_L_DELTA_PATHS over
+ * G: KIOSK-TURN-LIFECYCLE-1 (#606) and KIOSK-LIVE-POSE-2 (#622). Its exports,
+ * public invokers, Firestore rules, indexes and consent constants are A's.
+ */
+export const ANCHOR_L = '@ANCHOR_L@';
+export const CANDIDATE_L_DELTA_PATHS = Object.freeze([
+  'database.westayfit.rules.json',
+  'docs/westayfit/ops/security/KIOSK-TURN-LIFECYCLE-1.md',
+  'firebase.westayfit.emulators.json',
+  'functions-westayfit/src/index.ts',
+  'functions-westayfit/src/live-pose.ts',
+  'functions-westayfit/tests/callable/wsf-kiosk-expected-turn.test.ts',
+  'functions-westayfit/tests/callable/wsf-station-turn-lifecycle.test.ts',
+  'functions-westayfit/tests/callable/wsf-turn.test.ts',
+  'functions-westayfit/tests/deploy-config/live-pose-config.test.ts',
+  'functions-westayfit/tests/emulator-isolation.setup.ts',
+  'functions-westayfit/tests/live-pose/harness.ts',
+  'functions-westayfit/tests/live-pose/jest.config.cjs',
+  'functions-westayfit/tests/live-pose/live-pose-callables.test.ts',
+  'functions-westayfit/tests/live-pose/live-pose-isolation.setup.ts',
+  'functions-westayfit/tests/live-pose/live-pose-rules.test.ts',
+]);
+/**
+ * KIOSK-LIVE-POSE-2's switch (KIOSK-LIVE-POSE-PROD-1, #365 6109578489 item a,
+ * under D3' 6109490508; owner approval 6109245392): a production
+ * env file may turn live pose on with exactly `WSF_LIVE_POSE=1`, or leave the
+ * key out (off). Any other value, quoted ones included, is refused.
+ */
+export const LIVE_POSE_SWITCH = 'WSF_LIVE_POSE';
 /** The only action handler a production env file may name: the callables' own default. */
 export const PRODUCTION_ACTION_HANDLER = 'https://goarrive.firebaseapp.com/__/auth/action';
 export const PRODUCTION_PROJECT = 'goarrive';
@@ -428,6 +461,7 @@ export function firebaseToolsEnvParse(data) {
  */
 export function checkEnvFile(text) {
   const env = {};
+  const rawValue = {};
   const bad = [];
   for (const raw of String(text ?? '').split(/\r?\n/)) {
     const line = raw.trim();
@@ -438,6 +472,7 @@ export function checkEnvFile(text) {
       continue;
     }
     if (m[1] in env) bad.push(`${m[1]} is set more than once`);
+    rawValue[m[1]] = m[2];
     let v = m[2].trim();
     const q = /^(["'])(.*)\1$/.exec(v);
     if (q) v = q[2];
@@ -448,7 +483,7 @@ export function checkEnvFile(text) {
   const sameRead = ft.errors.length === 0 && JSON.stringify(Object.entries(ft.envs).sort()) === JSON.stringify(Object.entries(env).sort());
   if (!sameRead) bad.push('firebase-tools 15.30.1 reads this file differently (a multi-line, escaped or commented value): write one plain KEY=value per line');
   const keys = Object.keys(env);
-  const allowed = new Set(['WSF_EMAIL_FROM', 'WSF_APP_URL', 'WSF_AUTH_ACTION_HANDLER']);
+  const allowed = new Set(['WSF_EMAIL_FROM', 'WSF_APP_URL', 'WSF_AUTH_ACTION_HANDLER', LIVE_POSE_SWITCH]);
   const extra = keys.filter((k) => !allowed.has(k));
   const problems = [...bad];
   if (extra.length) problems.push(`unexpected keys ${extra.join(',')} (no secret belongs in the env file)`);
@@ -457,6 +492,11 @@ export function checkEnvFile(text) {
     problems.push(`WSF_AUTH_ACTION_HANDLER, when set, must be ${PRODUCTION_ACTION_HANDLER}: the oobCode links go to it`);
   }
   if (!/@westay\.fit>?$/.test(env.WSF_EMAIL_FROM ?? '')) problems.push('WSF_EMAIL_FROM must be set to a westay.fit sender');
+  // The functions read the switch as the exact string '1'. Only the bare
+  // line WSF_LIVE_POSE=1 turns it on here; absent means off.
+  if (LIVE_POSE_SWITCH in env && rawValue[LIVE_POSE_SWITCH] !== '1') {
+    problems.push(`${LIVE_POSE_SWITCH}, when set, must be exactly ${LIVE_POSE_SWITCH}=1, unquoted (KIOSK-LIVE-POSE-2)`);
+  }
   return [check('worktree.env-file', problems.length === 0, problems.length ? problems.join('; ') : `${ENV_FILE} sets ${keys.sort().join(', ')}; WSF_APP_URL=${WSF_APP_URL}`)];
 }
 
@@ -518,10 +558,12 @@ const MAIN_FILES = ['firestore.rules', 'firestore.indexes.json', PRODUCTION_CONF
  * names exactly what was compared. `anchor` exists for synthetic tests; the
  * CLI never accepts it.
  */
-export function runPreflight({ repo = '.', record, candidate, main, anchor = ANCHOR_A, anchorG = ANCHOR_G, config, command, interactiveReason, liveRules, worktree, envFile, cwd, manifest = CANDIDATE_A_EXPORTS, publicManifest = CANDIDATE_A_PUBLIC }) {
+export function runPreflight({ repo = '.', record, candidate, main, anchor = ANCHOR_A, anchorG = ANCHOR_G, anchorL = ANCHOR_L, config, command, interactiveReason, liveRules, worktree, envFile, cwd, manifest = CANDIDATE_A_EXPORTS, publicManifest = CANDIDATE_A_PUBLIC }) {
   const checks = [];
-  if (record !== 'A' && record !== 'B' && record !== 'G') return { ok: false, usage: 'record must be A, B or G' };
-  const shas = [['candidate', candidate], ['main', main], ['anchor', anchor], ...(record === 'G' ? [['gated anchor', anchorG]] : [])];
+  if (record !== 'A' && record !== 'B' && record !== 'G' && record !== 'L') return { ok: false, usage: 'record must be A, B, G or L' };
+  const shas = [['candidate', candidate], ['main', main], ['anchor', anchor],
+    ...(record === 'G' || record === 'L' ? [['gated anchor', anchorG]] : []),
+    ...(record === 'L' ? [['live-pose anchor', anchorL]] : [])];
   for (const [name, sha] of shas) {
     if (!SHA40.test(sha ?? '')) return { ok: false, usage: `${name} must be a full 40-character SHA` };
     if (!gitOk(repo, ['cat-file', '-e', `${sha}^{commit}`])) return { ok: false, usage: `${name} ${sha} is not a commit in this clone (fetch it first; this guard never fetches)` };
@@ -546,6 +588,15 @@ export function runPreflight({ repo = '.', record, candidate, main, anchor = ANC
       exact ? `G descends from ${anchor} and changes exactly ${CANDIDATE_G_DELTA_PATHS.join(', ')}`
         : descends ? `G must change exactly ${CANDIDATE_G_DELTA_PATHS.join(', ')} over ${anchor}; it changes ${changed.join(',') || 'nothing'}`
           : `G must descend from ${anchor}`));
+  } else if (record === 'L') {
+    checks.push(check('candidate.is-anchor-L', candidate === anchorL, candidate === anchorL ? `L is exactly ${anchorL}` : `L must be exactly ${anchorL}`));
+    const descends = candidate !== anchorG && gitOk(repo, ['merge-base', '--is-ancestor', anchorG, candidate]);
+    const changed = descends ? git(repo, ['diff', '--name-only', anchorG, candidate]).split('\n').filter(Boolean).sort() : [];
+    const exact = descends && JSON.stringify(changed) === JSON.stringify([...CANDIDATE_L_DELTA_PATHS].sort());
+    checks.push(check('candidate.L-is-live-pose-over-G', exact,
+      exact ? `L descends from ${anchorG} and changes exactly the ${CANDIDATE_L_DELTA_PATHS.length} reviewed paths`
+        : descends ? `L must change exactly ${CANDIDATE_L_DELTA_PATHS.join(', ')} over ${anchorG}; it changes ${changed.join(',') || 'nothing'}`
+          : `L must descend from ${anchorG}`));
   } else {
     const descends = candidate !== anchor && gitOk(repo, ['merge-base', '--is-ancestor', anchor, candidate]);
     checks.push(check('candidate.B-descends-from-A', descends, descends ? `B descends from ${anchor}` : `B must be a descendant of ${anchor}, not ${anchor} itself`));
@@ -635,6 +686,7 @@ export function runPreflight({ repo = '.', record, candidate, main, anchor = ANC
     main,
     anchor,
     ...(record === 'G' ? { anchorG } : {}),
+    ...(record === 'L' ? { anchorG, anchorL } : {}),
     project: PRODUCTION_PROJECT,
     ...(interactiveReason !== undefined ? { interactiveReason } : {}),
     rulesHashes,
@@ -662,19 +714,19 @@ export function parseArgs(argv) {
   return out;
 }
 
-const USAGE = 'usage: node .github/wsf-production/preflight.mjs --record A|B|G --candidate <sha40> --main <sha40> --config firebase.westayfit.production.json [--command "firebase deploy ..."] [--interactive-reason minimum-bill] [--worktree <dir>] [--live-rules <file>] [--repo <dir>]';
+const USAGE = 'usage: node .github/wsf-production/preflight.mjs --record A|B|G|L --candidate <sha40> --main <sha40> --config firebase.westayfit.production.json [--command "firebase deploy ..."] [--interactive-reason minimum-bill] [--worktree <dir>] [--live-rules <file>] [--repo <dir>]';
 
 /** The CLI as a function: argv in, { code, verdict } out. The anchors are for synthetic tests only and are never read from argv. */
-export function cli(argv, { anchor = ANCHOR_A, anchorG = ANCHOR_G, cwd = process.cwd() } = {}) {
+export function cli(argv, { anchor = ANCHOR_A, anchorG = ANCHOR_G, anchorL = ANCHOR_L, cwd = process.cwd() } = {}) {
   try {
-    return cliUnsafe(argv, { anchor, anchorG, cwd });
+    return cliUnsafe(argv, { anchor, anchorG, anchorL, cwd });
   } catch (e) {
     // Fails closed AND says so: a malformed file or a git error still prints a verdict.
     return { code: 2, verdict: { ok: false, usage: `unusable input: ${String(e?.message ?? e).split('\n')[0].slice(0, 300)}` } };
   }
 }
 
-function cliUnsafe(argv, { anchor, anchorG, cwd }) {
+function cliUnsafe(argv, { anchor, anchorG, anchorL, cwd }) {
   const args = parseArgs(argv);
   const allowed = new Set(['record', 'candidate', 'main', 'config', 'command', 'interactive-reason', 'live-rules', 'repo', 'worktree']);
   const unknown = Object.keys(args).filter((k) => k !== 'error' && !allowed.has(k));
@@ -706,7 +758,7 @@ function cliUnsafe(argv, { anchor, anchorG, cwd }) {
     const e = read(path.join(args.worktree, ENV_FILE));
     envFile = e.text ?? '';
   }
-  const verdict = runPreflight({ repo: args.repo ?? '.', record: args.record, candidate: args.candidate, main: args.main, anchor, anchorG, config, command: args.command, interactiveReason: args['interactive-reason'], liveRules, worktree: args.worktree, envFile, cwd });
+  const verdict = runPreflight({ repo: args.repo ?? '.', record: args.record, candidate: args.candidate, main: args.main, anchor, anchorG, anchorL, config, command: args.command, interactiveReason: args['interactive-reason'], liveRules, worktree: args.worktree, envFile, cwd });
   return { code: verdict.usage ? 2 : verdict.ok ? 0 : 1, verdict };
 }
 

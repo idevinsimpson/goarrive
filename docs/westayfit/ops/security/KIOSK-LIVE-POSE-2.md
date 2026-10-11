@@ -4,6 +4,10 @@
 - queue #365 `6105637770` and release #365 `6105638191`;
 - the ACK, #497 `6105945912`;
 - L0's answer, #497 `6105996490`: two PRs delivered once, and Q1 = (b);
+- **production:**
+  - the owner's approval and L0's decisions D1 and D2, #365 `6109245392`;
+  - D3′, #365 `6109490508`;
+  - KIOSK-LIVE-POSE-PROD-1, release #365 `6109578489`;
 - the handback: W3's finding #622 `6106926401` (F1, F2, O1, O2), L0's order #497 `6107098164`, QA #365 `6107090207`.
 
 **What it does.** During a station turn, the member's phone counts reps with its camera, using the existing counter unchanged. The paired kiosk has no camera. It shows that member's stick figure live, with the same rep count and countdown. The frames travel through the Realtime Database under a per-turn capability key.
@@ -11,7 +15,7 @@
 **What this packet is not:**
 - There is no client code here. The phone that writes frames and the kiosk that draws them are later work.
 - It deploys nothing. Staging gets it when L0 deploys the repin that carries the code PR, together with the ops PR.
-- **Production ships dark.**
+- **Production ships dark from this packet alone:** KIOSK-LIVE-POSE-2 sets no production switch. KIOSK-LIVE-POSE-PROD-1 adds the production path (section 7).
 
 **Where the code is.** Line numbers are at the code PR head `87b48fa8`, on `claude/wsf-app-shell`. That PR holds:
 - `functions-westayfit/src/live-pose.ts`;
@@ -21,6 +25,10 @@
 - the tests.
 
 The ops PR holds the staging config, the deploy step, the env writer and this doc.
+
+KIOSK-LIVE-POSE-PROD-1's ops PR holds:
+- the production pre-flight's env check and its record L;
+- the production runbook's section "Live pose (production)".
 
 ## 1. Data inventory
 
@@ -143,7 +151,10 @@ Every delete runs after the commit. Each is best effort and logged, and none of 
 
 **Staging** sets `"1"` through `.github/wsf-staging/write-functions-env.mjs`. It is a constant there, not an input, and the writer configures `westayfit-staging` only.
 
-**Production ships dark.** Nothing on its path sets the switch.
+**Production** sets the switch only through the env line `WSF_LIVE_POSE=1`, in the production runbook's section "Live pose (production)" (KIOSK-LIVE-POSE-PROD-1).
+- The production pre-flight admits exactly that bare line, or no line at all, which means off.
+- It refuses a quoted `"1"`, `0`, `true`, an empty value and a second line.
+- The staging writer never configures production.
 
 **Switching off during a live turn:** the key stops being handed out at once. Its node stays, inert, until it expires, because no write happens while the switch is off.
 
@@ -151,7 +162,19 @@ Every delete runs after the commit. Each is best effort and logged, and none of 
 
 - **`firebase.westayfit.staging.json`:** adds `"database": { "rules": "database.westayfit.rules.json" }`. firebase-tools then targets `<project>-default-rtdb`, and the Admin SDK derives the same URL from the project id (`live-pose.ts:88`). There is no URL env var.
 - **`firebase.westayfit.emulators.json`** (code PR): adds the same entry, and the database emulator on `127.0.0.1:9000`.
-- **`firebase.westayfit.production.json`** and **`.github/wsf-production/preflight.mjs`** are **unchanged** (Q1 = b). **Production enablement requires the preflight to allow exactly `database: { rules: "database.westayfit.rules.json" }`.**
+- **Production follows D1, D2 and D3′**, which replace Q1 = (b).
+  - **D1** (#365 `6109245392`). **The instance is goarrive's default, `goarrive-default-rtdb`**, in us-central1, started in locked mode.
+    - GoArrive uses no Realtime Database, so in practice the instance is this feature's alone.
+    - The functions derive its URL from the project id (`live-pose.ts:88`), so no code or config changes.
+    - It exists, locked and empty (#365 `6109456026`).
+  - **D2** (same comment). **The production rules go in by hand**, in the Firebase console, after acceptance.
+    - They come from `database.westayfit.rules.json` at the accepted subject `87b48fa8`, with a sha256 readback.
+    - `firebase.westayfit.production.json` stays unchanged and declares no `database`.
+    - The production pre-flight still refuses a `database` deploy target.
+  - **D3′** (#365 `6109490508`). **The production pieces are KIOSK-LIVE-POSE-PROD-1:**
+    - the pre-flight admits `WSF_LIVE_POSE=1` and nothing else for that key;
+    - **record L**, pinned to this packet's integrated commit, exactly fifteen paths over G;
+    - the runbook's section "Live pose (production)": the precheck with the rules by sha256, the env line, the `functions:westayfit` deploy, the readback, and the emergency off.
 - **`wsf-staging-deploy.yml`:** a new step, **"Deploy the Realtime Database rules"**.
   - It sits in the deploy job, after the build job's GoArrive regression and before the functions deploy.
   - It refuses a candidate that lacks the rules file.
@@ -176,15 +199,23 @@ Storage is negligible, because a key's node goes when its turn ends. Latency is 
 
 1. **Create the default instance in `westayfit-staging`:** Firebase console → Realtime Database → Create, us-central1, locked mode.
    - **Done.** The operator's receipt is #365 `6106392944`, and L0 accepted it in #365 `6106397456`: `https://westayfit-staging-default-rtdb.firebaseio.com/`, us-central1, locked, empty. It returned `404` before creation and `401` after.
-   - Production: not now.
-2. **Check both identities' Realtime Database access** (L0's read-only precheck, #365 `6106702656` and `6107062136`). This packet grants no role, and the repository does not show either identity's roles.
+   - Production: done under D1. `goarrive-default-rtdb` is locked and empty (#365 `6109456026`).
+2. **Check both identities' Realtime Database access** (L0's read-only precheck, #365 `6106702656` and `6107062136`).
+   - **Done (W3 O3):**
+     - the readback found the access absent for both (#365 `6108850774`);
+     - the owner-approved change (`6108938220`) was then made and verified (`6109114167`), and both identities now pass;
+     - production's runtime account was verified in #365 `6109456026`.
+   - This packet itself grants nothing.
    - **The deploy identity**, `wsf-staging-deployer@westayfit-staging.iam.gserviceaccount.com`, must be able to update Realtime Database rules; `roles/firebasedatabase.admin` would. Without it, the new step fails at `firebase deploy --only database`.
    - **The runtime identity**, the service account the WSF functions run as on `westayfit-staging` (W3 O2), writes and deletes `meta` through the Admin SDK and needs Realtime Database data access; `roles/firebasedatabase.admin` would. Without it, every arm and delete is refused: no live pose for any turn, and each refusal logs an error code and `update at /wsfLivePose failed: permission_denied`, never a key.
    - Granting either is an owner decision.
 3. **Deploy.** L0 merges the code PR, repins, and merges the ops PR with the repin. The staging deploy then publishes the rules, and the env writer sets `WSF_LIVE_POSE=1`.
 4. **Publish.** The phone and kiosk clients come in a later packet.
 
-**The privacy gate.** Enabling this in production needs owner and counsel approval. It also needs the production preflight change named in section 7, reviewed with the production runbook.
+**The privacy gate.**
+- **Owner approval:** given, #365 `6109245392`.
+- **Counsel:** the owner waived counsel review in the same comment, for live pose only. Raffle wording, and anything else counsel holds, is unchanged.
+- **Production also needs** KIOSK-LIVE-POSE-PROD-1 integrated, and then its runbook section run by the operator.
 
 ## 10. Evidence
 
@@ -209,4 +240,4 @@ The W9 sandbox has such a proxy. Its runs used a scratch copy of the emulator co
   2. the same, for a key on a revoked station that no longer polls;
   3. a late `meta` whose queued delete never leaves the instance. The two writes go out in order on one connection, so this needs the connection to drop after `meta` was sent and before the delete was, and the instance to end before it reconnects.
 - **Holding the key is enough to watch** the stick figure, for at most two minutes, without signing in. The key travels only in the two answers in section 3.
-- **Both identities' Realtime Database access is unknown** (section 9, step 2).
+- **The identities' Realtime Database access is verified:** both staging identities (#365 `6109114167`), and the production runtime account (#365 `6109456026`).
