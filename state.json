@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "c48d716e18e1442e2307b8639bb68dd3d01a85f3a28f6f3470a0d1f321823d0b",
-  "eventCount": 1303,
+  "ledgerHead": "7f2d341246775438c9e695c41d7feba35d494bd3d1af8c3022e1fd325b1f841e",
+  "eventCount": 1305,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2198,7 +2198,7 @@
       },
       "label": "Live pose to production: preflight admits WSF_LIVE_POSE=1 and a reviewed record for the integrated candidate; runbook section (rules by hand + sha256, env, deploy, readback, emergency off); doc D1-D3",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -2212,7 +2212,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         ".github/wsf-production/",
@@ -2233,7 +2233,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6109578489
+          "id": 6110056797
         }
       },
       "review": {
@@ -7842,12 +7842,15 @@
       "packet": "KIOSK-LIVE-POSE-PROD-1",
       "worker": "W9",
       "reason": "release",
-      "status": "redelivered",
+      "status": "acked",
       "comments": [
         6109738072,
         6110103191
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6110056797
+      }
     },
     "2705d6e763b6957aa9210ea322661cf3f97e99baa17c199427b429e39deb9dd1": {
       "packet": "LIVE-POSE-STAGING-PIN-1",
