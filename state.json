@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "cb065b808324f423d87e0dfb55bd61472d85c0e2eb5b2b0cc05b01f4881c3a79",
-  "eventCount": 1263,
+  "ledgerHead": "0e55a5ad095ed229a1a3b31f1c8307539add4dc90706d9c919eafb132c8be300",
+  "eventCount": 1266,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2123,15 +2123,17 @@
       },
       "label": "Live pose over RTDB for station turns: per-turn capability key, phone writes / station reads, rules + staging deploy step, WSF_LIVE_POSE switch, never a contribution",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
-      "pr": null,
-      "reviewers": [],
+      "pr": 622,
+      "reviewers": [
+        "W3"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "2247f55c709e3d8ab9a25415b7809d08fb9d05b1",
+        "prHeadSha": "2247f55c709e3d8ab9a25415b7809d08fb9d05b1",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -2166,7 +2168,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6105945912
+          "id": 6106585040
         }
       },
       "review": {
@@ -2179,7 +2181,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "KIOSK-PAIRING-CLARITY-PROOF-1": {
@@ -7523,7 +7525,16 @@
       "ack": {
         "kind": "comment",
         "id": 6105945912
-      }
+      },
+      "superseded": true
+    },
+    "1a55ba6461044e961bd7b31b73474644fe6074b4f2673624d5c2eaca69108a75": {
+      "packet": "KIOSK-LIVE-POSE-2",
+      "worker": "W3",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
