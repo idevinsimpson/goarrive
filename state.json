@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "c63bc3f3a3e7b208e1f100a038df70b5baffb800e71fd873284c9a20864b78ba",
-  "eventCount": 1252,
+  "ledgerHead": "4bd8e7bab2b06863390dfa69c2698ef528d280e0bf6507f5b3b0a8b897cdf909",
+  "eventCount": 1255,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2050,6 +2050,68 @@
         "after": "director"
       },
       "deliveries": 1,
+      "pendingFinding": null
+    },
+    "KIOSK-LIVE-POSE-1": {
+      "owner": "W9",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Live pose relay for station turns: wsfTurnPosePush (phone) + wsfStationLivePose (station secret), WSF_LIVE_POSE kill switch, deleted on every turn exit, never a contribution",
+      "origin": "ledger",
+      "phase": "RELEASED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": 497,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": 0,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "functions-westayfit/src/index.ts",
+        "functions-westayfit/src/live-pose.ts",
+        "functions-westayfit/tests/callable/wsf-live-pose.test.ts",
+        "functions-westayfit/tests/",
+        "docs/westayfit/ops/security/KIOSK-LIVE-POSE-1.md"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6105503276
+        },
+        "released": {
+          "kind": "comment",
+          "id": 6105503842
+        },
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6105503842
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
       "pendingFinding": null
     },
     "KIOSK-PAIRING-CLARITY-PROOF-1": {
@@ -7370,6 +7432,14 @@
         "id": 6102084069
       },
       "superseded": true
+    },
+    "dc6d0bfd6e684c86f371d2f1d28d3f86aa5e05f3e6b19d29b3d8cff5ad28a14b": {
+      "packet": "KIOSK-LIVE-POSE-1",
+      "worker": "W9",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
