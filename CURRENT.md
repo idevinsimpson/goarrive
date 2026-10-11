@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=83a085c97bdfb7a68330f9c16036c70ea55827219e28486a8bc494964f25c002 events=1285 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=e464392b2d2ded41952e357f2f99782f339030ffd4f0a7b50f544686e91d4475 events=1290 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `83a085c97bdfb7a68330f9c16036c70ea55827219e28486a8bc494964f25c002` (1285 events)
+- Ledger head: `e464392b2d2ded41952e357f2f99782f339030ffd4f0a7b50f544686e91d4475` (1290 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -29,11 +29,11 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 
 | Worker | Inbox | Active now | Reviewing | Waiting on review | Blocked | Next | Queue | WATCH |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| W3 | #396 | — | — | WORKER-EXECUTION-PROFILES-1 | NORTHSTAR-MIRROR-INTAKE-1 | — | — | off |
+| W3 | #396 | — | KIOSK-LIVE-POSE-2 | WORKER-EXECUTION-PROFILES-1 | NORTHSTAR-MIRROR-INTAKE-1 | — | — | on |
 | W4 | #394 | — | — | — | — | — | — | off |
 | W5 | #395 | — | — | — | — | — | — | off |
 | W7 | #434 | — | — | — | — | — | — | off |
-| W9 | #497 | KIOSK-LIVE-POSE-2 | — | — | EVENT-LIFECYCLE-BACKEND-RECOVERY-1, KIOSK-PRESENCE-1, MEMBER-TRUTH-BACKEND-1 | MEMBER-ACTIVITY-1 | MEMBER-ACTIVITY-1 | on |
+| W9 | #497 | — | — | KIOSK-LIVE-POSE-2 | EVENT-LIFECYCLE-BACKEND-RECOVERY-1, KIOSK-PRESENCE-1, MEMBER-ACTIVITY-1, MEMBER-TRUTH-BACKEND-1 | KIOSK-LIVE-POSE-PROD-1 | KIOSK-LIVE-POSE-PROD-1 | off |
 
 ## Packets
 
@@ -69,7 +69,8 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | KIOSK-EXPECTED-TURN-NATIVE-CALLER-RECOVERY-1 | W3 | work | INTEGRATED (source-only) | ledger | WITHDRAWN | — | — | — | — | — | — | — | comment:6060048984 | comment:6060908197 | — | Recover native expected-turn caller after withdrawn unacknowledged W7 assignment | 1×journey-qa then director | — |
 | KIOSK-EXPECTED-TURN-NATIVE-CALLER-RECOVERY-2 | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #596 | 1cdbeff5 | 1cdbeff5 | — | ec162d17 | — | W7 | comment:6061210091 | pull_request:596 | — | Correct native expected-turn caller reservation to executable Vitest and Playwright paths | 1×journey-qa then director | — |
 | KIOSK-LIVE-POSE-1 | W9 | work | INTEGRATED (source-only) | ledger | WITHDRAWN | — | — | — | — | — | — | — | comment:6105503842 | comment:6105637354 | — | Live pose relay for station turns: wsfTurnPosePush (phone) + wsfStationLivePose (station secret), WSF_LIVE_POSE kill switch, deleted on every turn exit, never a contribution | 1×ops-source then director | — |
-| KIOSK-LIVE-POSE-2 | W9 | work | INTEGRATED (source-only) | ledger | CHANGES_REQUESTED | #622 | 2247f55c | 87b48fa8 | — | — | — | W3 | comment:6105638191 | comment:6106927991 | — | Live pose over RTDB for station turns: per-turn capability key, phone writes / station reads, rules + staging deploy step, WSF_LIVE_POSE switch, never a contribution | 1×ops-source then director | — |
+| KIOSK-LIVE-POSE-2 | W9 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #622 | 87b48fa8 | 87b48fa8 | — | — | — | W3 | comment:6105638191 | comment:6109378955 | — | Live pose over RTDB for station turns: per-turn capability key, phone writes / station reads, rules + staging deploy step, WSF_LIVE_POSE switch, never a contribution | 1×ops-source then director | — |
+| KIOSK-LIVE-POSE-PROD-1 | W9 | work | INTEGRATED (source-only) | ledger | QUEUED | — | — | — | — | — | — | — | — | comment:6109490645 | — | Live pose to production: preflight admits WSF_LIVE_POSE=1 and a reviewed record for the integrated candidate; runbook section (rules by hand + sha256, env, deploy, readback, emergency off); doc D1-D3 | 1×ops-source then director | — |
 | KIOSK-PAIRING-CLARITY-PROOF-1 | W9 | work | STAGED (hosted) | ledger | STAGED | #553 | 4537c26c | 4537c26c | — | ab77fbfc | hosted run 37025084843: PASS | W4 | comment:5945136749 | comment:5955903159 | — | Clarify venue-station pairing from the Champion's own phone and prove the existing flow end-to-end | 1×journey-qa then director | — |
 | KIOSK-PRESENCE-1 | W9 | work | INTEGRATED (source-only) | ledger | BLOCKED (from RELEASED) | — | — | — | — | — | — | — | comment:6106979422 | comment:6107569755 | KIOSK-LIVE-POSE-2≥ACCEPTED | Shared-screen presence: moved-today count + initials (opt-in photos on kiosk only) on wsfStationState/wsfGoalPulse, profile sharedScreenPresence setting, staging-on/production-dark | 1×ops-source then director | — |
 | KIOSK-REVOKE-ACTIVE-TURN-1 | W9 | work | INTEGRATED (source-only) | ledger | WITHDRAWN | — | — | — | — | — | — | — | — | comment:6079352515 | — | On wsfRevokeStation, end or requeue that station's assigned/ready/active line entry server-side and surface the new status via wsfMyTurn/wsfTurnState; callable tests; doc note | 1×ops-source then director | — |
@@ -89,7 +90,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | LOVABLE-MATRIX-ALIGN-1 | W4 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #614 | bab7e980 | bab7e980 | — | 70e5d8c9 | — | W7 | comment:6096205153 | pull_request:614 | — | Device matrix: align the display and sign-up cells with served build db3fd2f2 (selector, total and freshness copy; step count read as text), plus W3's carried O-items; REVIEWED_BUILD unchanged | 1×ops-source then director | — |
 | LOVABLE-REVIEWED-BUILD-1 | W4 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #609 | d498cd6c | d498cd6c | — | 6e8acc31 | — | W3 | comment:6090734914 | pull_request:609 | — | Route-aware reviewed-build pin for Lovable expo build 9b9eade5: normalize only the two per-request values, bind documents per route template, keep asset digests exact, negative mutation tests | 1×ops-source then director | — |
 | LOVABLE-REVIEWED-BUILD-2 | W4 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #610 | 6fcaa93c | 6fcaa93c | — | 614836b8 | — | W3 | comment:6092692777 | pull_request:610 | — | Re-pin REVIEWED_BUILD to the next Lovable publish (db3fd2f2) and close LOVABLE-REVIEWED-BUILD-1's carried items: UTF-8 asset fulfilment, CHARSET-name and token-length negatives, QA-note corrections | 1×ops-source then director | — |
-| MEMBER-ACTIVITY-1 | W9 | work | INTEGRATED (source-only) | ledger | QUEUED | — | — | — | — | — | — | — | — | comment:6107195195 | — | Members-only recent activity feed for the bell: wsfRecentActivity(communityId, limit<=20) honoring member visibility (hidden = 'A member'), never on public/display/kiosk | 1×ops-source then director | — |
+| MEMBER-ACTIVITY-1 | W9 | work | INTEGRATED (source-only) | ledger | BLOCKED (from QUEUED) | — | — | — | — | — | — | — | — | comment:6109490508 | KIOSK-LIVE-POSE-2≥ACCEPTED | Members-only recent activity feed for the bell: wsfRecentActivity(communityId, limit<=20) honoring member visibility (hidden = 'A member'), never on public/display/kiosk | 1×ops-source then director | — |
 | MEMBER-PREVIEW-LABEL-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #584 | 37529ea3 | 37529ea3 | — | 245c7717 | — | W4 | comment:6035517752 | pull_request:584 | — | Deliver the isolated privacy-safe public preview label without waiting for crossing attribution | 1×journey-qa then director | — |
 | MEMBER-TRUTH-BACKEND-1 | W9 | work | INTEGRATED (source-only) | ledger | BLOCKED (from ACKED) | — | — | — | — | — | — | — | comment:6029989725 | comment:6035507739 | TOGETHER-CROSSING-DESIGN-DECISION (Director and Owner) | Unblock real member Together crossing and privacy-safe public preview labels for the shared Firebase backend and Lovable Web Twin | 1×journey-qa then director | — |
 | MOVE-CAMERA-NATIVE-PORT-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #577 | d6d47879 | d6d47879 | — | 856e20e0 | — | W7 | comment:5997538756 | pull_request:577 | — | Port the owner-accepted camera-assisted squat MOVE North Star into the current Expo app without automatic contribution credit | 1×journey-qa then director | — |
@@ -311,4 +312,5 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | 1a55ba646104 | W3 | KIOSK-LIVE-POSE-2 | review | acked | 6106663073 | comment:6106687304 |
 | ba63f7e53779 | W9 | KIOSK-PRESENCE-1 | release | redelivered | 6107132843, 6107389693 | — |
 | 036c91eaa980 | W9 | KIOSK-LIVE-POSE-2 | handback | acked | 6107688704, 6108035871 | comment:6108927490 |
+| b7f7dc9edfd1 | W3 | KIOSK-LIVE-POSE-2 | review | requested | — | — |
 

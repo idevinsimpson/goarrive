@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "83a085c97bdfb7a68330f9c16036c70ea55827219e28486a8bc494964f25c002",
-  "eventCount": 1285,
+  "ledgerHead": "e464392b2d2ded41952e357f2f99782f339030ffd4f0a7b50f544686e91d4475",
+  "eventCount": 1290,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -67,7 +67,7 @@
     "W5": [],
     "W7": [],
     "W9": [
-      "MEMBER-ACTIVITY-1"
+      "KIOSK-LIVE-POSE-PROD-1"
     ]
   },
   "packets": {
@@ -2125,7 +2125,7 @@
       },
       "label": "Live pose over RTDB for station turns: per-turn capability key, phone writes / station reads, rules + staging deploy step, WSF_LIVE_POSE switch, never a contribution",
       "origin": "ledger",
-      "phase": "CHANGES_REQUESTED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -2134,7 +2134,7 @@
         "W3"
       ],
       "artifact": {
-        "subjectSha": "2247f55c709e3d8ab9a25415b7809d08fb9d05b1",
+        "subjectSha": "87b48fa852174311bef1b8c337e2be0f505ad280",
         "prHeadSha": "87b48fa852174311bef1b8c337e2be0f505ad280",
         "evidenceSha": null,
         "mergeSha": null
@@ -2170,7 +2170,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6106927991
+          "id": 6109378955
         }
       },
       "review": {
@@ -2183,7 +2183,64 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 1,
+      "deliveries": 2,
+      "pendingFinding": null
+    },
+    "KIOSK-LIVE-POSE-PROD-1": {
+      "owner": "W9",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Live pose to production: preflight admits WSF_LIVE_POSE=1 and a reviewed record for the integrated candidate; runbook section (rules by hand + sha256, env, deploy, readback, emergency off); doc D1-D3",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        ".github/wsf-production/",
+        "docs/westayfit/ops/production/RUNBOOK_WSF_PRODUCTION_DEPLOY_1.md",
+        "docs/westayfit/ops/security/KIOSK-LIVE-POSE-2.md"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6109490645
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6109490645
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
       "pendingFinding": null
     },
     "KIOSK-PAIRING-CLARITY-PROOF-1": {
@@ -3497,9 +3554,9 @@
       },
       "label": "Members-only recent activity feed for the bell: wsfRecentActivity(communityId, limit<=20) honoring member visibility (hidden = 'A member'), never on public/display/kiosk",
       "origin": "ledger",
-      "phase": "QUEUED",
-      "phaseBeforeBlock": null,
-      "queueIndexBeforeBlock": null,
+      "phase": "BLOCKED",
+      "phaseBeforeBlock": "QUEUED",
+      "queueIndexBeforeBlock": 0,
       "inbox": null,
       "pr": null,
       "reviewers": [],
@@ -3519,7 +3576,12 @@
         "functions-westayfit/tests/",
         "docs/westayfit/ops/security/MEMBER-ACTIVITY-1.md"
       ],
-      "blockedBy": [],
+      "blockedBy": [
+        {
+          "packet": "KIOSK-LIVE-POSE-2",
+          "until": "ACCEPTED"
+        }
+      ],
       "importRefs": [],
       "authority": {
         "queued": {
@@ -3530,7 +3592,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6107195195
+          "id": 6109490508
         }
       },
       "review": {
@@ -7692,7 +7754,16 @@
       "ack": {
         "kind": "comment",
         "id": 6108927490
-      }
+      },
+      "superseded": true
+    },
+    "b7f7dc9edfd158cd0a96adda2aa89c2f396a53461db76f01e8331b65b952eed8": {
+      "packet": "KIOSK-LIVE-POSE-2",
+      "worker": "W3",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
