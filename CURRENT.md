@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=98f6d882b82fd5340f03401a0eb04bf2c93bfd8ecae8a5dc7ee21d3b1d269bdf events=1273 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=80cf4e0498da12a0aa79d734c097c8d50836fb66d1c241e9c76f2f0cb7b8af3e events=1275 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `98f6d882b82fd5340f03401a0eb04bf2c93bfd8ecae8a5dc7ee21d3b1d269bdf` (1273 events)
+- Ledger head: `80cf4e0498da12a0aa79d734c097c8d50836fb66d1c241e9c76f2f0cb7b8af3e` (1275 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -33,7 +33,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | W4 | #394 | — | — | — | — | — | — | off |
 | W5 | #395 | — | — | — | — | — | — | off |
 | W7 | #434 | — | — | — | — | — | — | off |
-| W9 | #497 | KIOSK-PRESENCE-1 | — | KIOSK-LIVE-POSE-2 | EVENT-LIFECYCLE-BACKEND-RECOVERY-1, MEMBER-TRUTH-BACKEND-1 | — | — | on |
+| W9 | #497 | KIOSK-PRESENCE-1 | — | KIOSK-LIVE-POSE-2 | EVENT-LIFECYCLE-BACKEND-RECOVERY-1, MEMBER-TRUTH-BACKEND-1 | MEMBER-ACTIVITY-1 | MEMBER-ACTIVITY-1 | on |
 
 ## Packets
 
@@ -89,6 +89,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | LOVABLE-MATRIX-ALIGN-1 | W4 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #614 | bab7e980 | bab7e980 | — | 70e5d8c9 | — | W7 | comment:6096205153 | pull_request:614 | — | Device matrix: align the display and sign-up cells with served build db3fd2f2 (selector, total and freshness copy; step count read as text), plus W3's carried O-items; REVIEWED_BUILD unchanged | 1×ops-source then director | — |
 | LOVABLE-REVIEWED-BUILD-1 | W4 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #609 | d498cd6c | d498cd6c | — | 6e8acc31 | — | W3 | comment:6090734914 | pull_request:609 | — | Route-aware reviewed-build pin for Lovable expo build 9b9eade5: normalize only the two per-request values, bind documents per route template, keep asset digests exact, negative mutation tests | 1×ops-source then director | — |
 | LOVABLE-REVIEWED-BUILD-2 | W4 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #610 | 6fcaa93c | 6fcaa93c | — | 614836b8 | — | W3 | comment:6092692777 | pull_request:610 | — | Re-pin REVIEWED_BUILD to the next Lovable publish (db3fd2f2) and close LOVABLE-REVIEWED-BUILD-1's carried items: UTF-8 asset fulfilment, CHARSET-name and token-length negatives, QA-note corrections | 1×ops-source then director | — |
+| MEMBER-ACTIVITY-1 | W9 | work | INTEGRATED (source-only) | ledger | QUEUED | — | — | — | — | — | — | — | — | comment:6107195195 | — | Members-only recent activity feed for the bell: wsfRecentActivity(communityId, limit<=20) honoring member visibility (hidden = 'A member'), never on public/display/kiosk | 1×ops-source then director | — |
 | MEMBER-PREVIEW-LABEL-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #584 | 37529ea3 | 37529ea3 | — | 245c7717 | — | W4 | comment:6035517752 | pull_request:584 | — | Deliver the isolated privacy-safe public preview label without waiting for crossing attribution | 1×journey-qa then director | — |
 | MEMBER-TRUTH-BACKEND-1 | W9 | work | INTEGRATED (source-only) | ledger | BLOCKED (from ACKED) | — | — | — | — | — | — | — | comment:6029989725 | comment:6035507739 | TOGETHER-CROSSING-DESIGN-DECISION (Director and Owner) | Unblock real member Together crossing and privacy-safe public preview labels for the shared Firebase backend and Lovable Web Twin | 1×journey-qa then director | — |
 | MOVE-CAMERA-NATIVE-PORT-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #577 | d6d47879 | d6d47879 | — | 856e20e0 | — | W7 | comment:5997538756 | pull_request:577 | — | Port the owner-accepted camera-assisted squat MOVE North Star into the current Expo app without automatic contribution credit | 1×journey-qa then director | — |
@@ -308,5 +309,5 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | dc6d0bfd6e68 | W9 | KIOSK-LIVE-POSE-1 | release | delivered | 6105558843 | — |
 | 5c34f1ff7d4f | W9 | KIOSK-LIVE-POSE-2 | release | acked | 6105818924 | comment:6105945912 |
 | 1a55ba646104 | W3 | KIOSK-LIVE-POSE-2 | review | acked | 6106663073 | comment:6106687304 |
-| ba63f7e53779 | W9 | KIOSK-PRESENCE-1 | release | delivered | 6107132843 | — |
+| ba63f7e53779 | W9 | KIOSK-PRESENCE-1 | release | retried | 6107132843 | — |
 

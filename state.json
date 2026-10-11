@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "98f6d882b82fd5340f03401a0eb04bf2c93bfd8ecae8a5dc7ee21d3b1d269bdf",
-  "eventCount": 1273,
+  "ledgerHead": "80cf4e0498da12a0aa79d734c097c8d50836fb66d1c241e9c76f2f0cb7b8af3e",
+  "eventCount": 1275,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -66,7 +66,9 @@
     "W4": [],
     "W5": [],
     "W7": [],
-    "W9": []
+    "W9": [
+      "MEMBER-ACTIVITY-1"
+    ]
   },
   "packets": {
     "ANON-GATE-1": {
@@ -3482,6 +3484,64 @@
         "after": "director"
       },
       "deliveries": 3,
+      "pendingFinding": null
+    },
+    "MEMBER-ACTIVITY-1": {
+      "owner": "W9",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Members-only recent activity feed for the bell: wsfRecentActivity(communityId, limit<=20) honoring member visibility (hidden = 'A member'), never on public/display/kiosk",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "functions-westayfit/src/index.ts",
+        "functions-westayfit/src/activity.ts",
+        "functions-westayfit/tests/",
+        "docs/westayfit/ops/security/MEMBER-ACTIVITY-1.md"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6107195195
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6107195195
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
       "pendingFinding": null
     },
     "MEMBER-PREVIEW-LABEL-1": {
@@ -7610,7 +7670,7 @@
       "packet": "KIOSK-PRESENCE-1",
       "worker": "W9",
       "reason": "release",
-      "status": "delivered",
+      "status": "retried",
       "comments": [
         6107132843
       ],
