@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "9f03b5b5b360cc6f486236f89e3fd9f9f64c74736506cbc8ee8e4d587373739c",
-  "eventCount": 1268,
+  "ledgerHead": "94ed9f9e95be2d4e2ecdfe26c4a9a84876f996a4162fb8b5cc2561773529c7dc",
+  "eventCount": 1272,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2182,7 +2182,10 @@
         "after": "director"
       },
       "deliveries": 1,
-      "pendingFinding": null
+      "pendingFinding": {
+        "kind": "comment",
+        "id": 6106927991
+      }
     },
     "KIOSK-PAIRING-CLARITY-PROOF-1": {
       "owner": "W9",
@@ -2260,6 +2263,67 @@
         "after": "director"
       },
       "deliveries": 3,
+      "pendingFinding": null
+    },
+    "KIOSK-PRESENCE-1": {
+      "owner": "W9",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Shared-screen presence: moved-today count + initials (opt-in photos on kiosk only) on wsfStationState/wsfGoalPulse, profile sharedScreenPresence setting, staging-on/production-dark",
+      "origin": "ledger",
+      "phase": "RELEASED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": 497,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": 0,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "functions-westayfit/src/index.ts",
+        "functions-westayfit/src/presence.ts",
+        "functions-westayfit/tests/",
+        "docs/westayfit/ops/security/KIOSK-PRESENCE-1.md"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6106978909
+        },
+        "released": {
+          "kind": "comment",
+          "id": 6106979422
+        },
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6106979422
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
       "pendingFinding": null
     },
     "KIOSK-REVOKE-ACTIVE-TURN-1": {
@@ -7539,7 +7603,16 @@
       "ack": {
         "kind": "comment",
         "id": 6106687304
-      }
+      },
+      "superseded": true
+    },
+    "ba63f7e53779b45e81bd00c4191b5a70b0714cd2b9b76a705275c7f92d19743f": {
+      "packet": "KIOSK-PRESENCE-1",
+      "worker": "W9",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
