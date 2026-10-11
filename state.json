@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "b1d3dd3b2ce08c30fa9ec6f1d278c687e3efe1a6e73bfa4db16ab35976ea5883",
-  "eventCount": 1309,
+  "ledgerHead": "b5884583ab50d815821d1d9c2c0892ceea4d654e19c2a99fab08b9f69a500beb",
+  "eventCount": 1313,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2052,6 +2052,67 @@
       "deliveries": 1,
       "pendingFinding": null
     },
+    "KIOSK-GUEST-MOVE-1": {
+      "owner": "W9",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Guest kiosk squats: station-authenticated wsfStationGuestContribute, no uid/name, idempotent on attemptId, capped, refused while a turn is assigned, never a raffle ticket",
+      "origin": "ledger",
+      "phase": "RELEASED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": 497,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": 0,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "functions-westayfit/src/index.ts",
+        "functions-westayfit/src/guest-contribute.ts",
+        "functions-westayfit/tests/",
+        "docs/westayfit/ops/security/KIOSK-GUEST-MOVE-1.md"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6111692291
+        },
+        "released": {
+          "kind": "comment",
+          "id": 6111692815
+        },
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6111692815
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "security",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
+      "pendingFinding": null
+    },
     "KIOSK-LIVE-POSE-1": {
       "owner": "W9",
       "kind": "work",
@@ -2198,8 +2259,8 @@
       },
       "label": "Live pose to production: preflight admits WSF_LIVE_POSE=1 and a reviewed record for the integrated candidate; runbook section (rules by hand + sha256, env, deploy, readback, emergency off); doc D1-D3",
       "origin": "ledger",
-      "phase": "ACKED",
-      "phaseBeforeBlock": null,
+      "phase": "BLOCKED",
+      "phaseBeforeBlock": "ACKED",
       "queueIndexBeforeBlock": null,
       "inbox": 497,
       "pr": null,
@@ -2219,7 +2280,12 @@
         "docs/westayfit/ops/production/RUNBOOK_WSF_PRODUCTION_DEPLOY_1.md",
         "docs/westayfit/ops/security/KIOSK-LIVE-POSE-2.md"
       ],
-      "blockedBy": [],
+      "blockedBy": [
+        {
+          "packet": "KIOSK-GUEST-MOVE-1",
+          "until": "ACCEPTED"
+        }
+      ],
       "importRefs": [],
       "authority": {
         "queued": {
@@ -2233,7 +2299,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6110056797
+          "id": 6111692559
         }
       },
       "review": {
@@ -7850,7 +7916,8 @@
       "ack": {
         "kind": "comment",
         "id": 6110056797
-      }
+      },
+      "superseded": true
     },
     "2705d6e763b6957aa9210ea322661cf3f97e99baa17c199427b429e39deb9dd1": {
       "packet": "LIVE-POSE-STAGING-PIN-1",
@@ -7865,6 +7932,14 @@
         "kind": "comment",
         "id": 6110702704
       }
+    },
+    "ef7c846836e4ad9c293ba0358804ce476ab936658e0a6f5d3a48f5d128eb5882": {
+      "packet": "KIOSK-GUEST-MOVE-1",
+      "worker": "W9",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
