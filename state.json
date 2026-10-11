@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "e9cd6cf2721aeb5d1ec24f1d3d80637a1818addd0af532832310d8771e4f2d30",
-  "eventCount": 1322,
+  "ledgerHead": "dd8119f1e3a7da02381fa6f2391fde6af0596b37d6844e4496d332dd1b4309bf",
+  "eventCount": 1323,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2061,8 +2061,8 @@
       },
       "label": "Guest kiosk squats: station-authenticated wsfStationGuestContribute, no uid/name, idempotent on attemptId, capped, refused while a turn is assigned, never a raffle ticket",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
-      "phaseBeforeBlock": null,
+      "phase": "BLOCKED",
+      "phaseBeforeBlock": "UNDER_REVIEW",
       "queueIndexBeforeBlock": null,
       "inbox": 497,
       "pr": 625,
@@ -2085,7 +2085,14 @@
         "functions-westayfit/tests/",
         "docs/westayfit/ops/security/KIOSK-GUEST-MOVE-1.md"
       ],
-      "blockedBy": [],
+      "blockedBy": [
+        {
+          "external": "SECURITY-REVIEWER-CAPACITY",
+          "condition": "Required independent security review: wake 7a11a714 to W5 (WATCH off) unacknowledged since 2026-10-11T19:54:55Z; no registered security-class reviewer is active",
+          "owner": "Devin",
+          "unblockWhen": "W5 resumes or Devin authorizes another independent registered security reviewer"
+        }
+      ],
       "importRefs": [],
       "authority": {
         "queued": {
@@ -2099,7 +2106,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6112941066
+          "id": 6114578806
         }
       },
       "review": {
@@ -7958,7 +7965,8 @@
         6113079769,
         6114680608
       ],
-      "ack": null
+      "ack": null,
+      "superseded": true
     }
   },
   "fastpath": {
