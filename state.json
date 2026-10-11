@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "835c74f20579a6d797e25d464d6e5a3c477d77fed8a0878d2c534e43810d924d",
-  "eventCount": 1279,
+  "ledgerHead": "522944286e70341c2796a9efe395ab42fc9b2a2f3cf031e1f3f288d4ef4e7bc3",
+  "eventCount": 1280,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -7684,8 +7684,10 @@
       "packet": "KIOSK-LIVE-POSE-2",
       "worker": "W9",
       "reason": "handback",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        6107688704
+      ],
       "ack": null
     }
   },
