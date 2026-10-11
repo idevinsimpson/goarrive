@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "3ae96982574aca048e1678051bc3e4778075a9f5fc73c2bb100c95d49c99ba61",
-  "eventCount": 1296,
+  "ledgerHead": "6dc69d33ccb1802690064a63b03d8d8b6c02361732ba816b0009f024fed94e41",
+  "eventCount": 1301,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2123,7 +2123,7 @@
       },
       "label": "Live pose over RTDB for station turns: per-turn capability key, phone writes / station reads, rules + staging deploy step, WSF_LIVE_POSE switch, never a contribution",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "ACCEPTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -2167,10 +2167,13 @@
           "kind": "comment",
           "id": 6105638191
         },
-        "accepted": null,
+        "accepted": {
+          "kind": "comment",
+          "id": 6109907167
+        },
         "lastTransition": {
           "kind": "comment",
-          "id": 6109752639
+          "id": 6109907167
         }
       },
       "review": {
@@ -2860,6 +2863,67 @@
         "after": "director"
       },
       "deliveries": 1,
+      "pendingFinding": null
+    },
+    "LIVE-POSE-STAGING-PIN-1": {
+      "owner": "W3",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Pin the claude/wsf-app-shell merge carrying KIOSK-LIVE-POSE-2 through the reviewed full staging path (functions changed): pin-candidate.mjs output, reviewed label, inventory counts",
+      "origin": "ledger",
+      "phase": "RELEASED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": 396,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": 0,
+      "reviewedBy": [],
+      "subjectPaths": [
+        ".github/wsf-staging/approved-candidate.json",
+        ".github/wsf-staging/journeys/",
+        ".github/wsf-staging/tests/",
+        "docs/westayfit/qa/"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6109915226
+        },
+        "released": {
+          "kind": "comment",
+          "id": 6109965391
+        },
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6109965391
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
       "pendingFinding": null
     },
     "LOVABLE-DEVICE-QA-1": {
@@ -7778,10 +7842,18 @@
       "packet": "KIOSK-LIVE-POSE-PROD-1",
       "worker": "W9",
       "reason": "release",
-      "status": "delivered",
+      "status": "retried",
       "comments": [
         6109738072
       ],
+      "ack": null
+    },
+    "2705d6e763b6957aa9210ea322661cf3f97e99baa17c199427b429e39deb9dd1": {
+      "packet": "LIVE-POSE-STAGING-PIN-1",
+      "worker": "W3",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
