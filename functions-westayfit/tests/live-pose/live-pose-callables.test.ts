@@ -23,6 +23,7 @@ import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 
 import {
   KEY_SHAPE,
+  PROJECT,
   adminDb,
   anon,
   callAs,
@@ -57,7 +58,7 @@ import {
   wsfStationState,
   wsfTurnReady,
 } from '../../src/index';
-import { LIVE_POSE_TTL_MS } from '../../src/live-pose';
+import { LIVE_POSE_TTL_MS, livePoseDatabaseUrl } from '../../src/live-pose';
 
 let env: RulesTestEnvironment;
 
@@ -541,7 +542,7 @@ describe('a frame is never a contribution', () => {
     });
   }
 
-  test('no function reads the Realtime Database: the only calls are meta set and node remove', async () => {
+  test('no function reads the Realtime Database, and no write is made at a path that holds a key', async () => {
     const { readFileSync } = await import('fs');
     const path = await import('path');
     const src = (f: string) => readFileSync(path.resolve(__dirname, '../../src', f), 'utf8');
@@ -550,26 +551,33 @@ describe('a frame is never a contribution', () => {
     // index.ts never touches the Realtime Database directly.
     expect(index).not.toMatch(/firebase-admin\/database/);
     expect(index).not.toMatch(/getDatabase/);
-    // live-pose.ts reaches the Realtime Database only through poseRef, which
-    // loads the SDK on first use; the module imports nothing from it. Each of
-    // poseRef's two callers does one thing with the ref: a meta set, or a
-    // node remove. Nothing reads.
+    // live-pose.ts reaches the Realtime Database only through poseRoot, which
+    // loads the SDK on first use; the module imports nothing from it.
     expect(livePose).not.toMatch(/^import .*firebase-admin\/database/m);
     expect(livePose.match(/getDatabaseWithUrl\(/g)).toHaveLength(1);
     expect(livePose.match(/import\('firebase-admin\/database'\)/g)).toHaveLength(1);
-    const poseRefBody = livePose.slice(
-      livePose.indexOf('async function poseRef('),
-      livePose.indexOf('\n}\n', livePose.indexOf('async function poseRef('))
+    const poseRootBody = livePose.slice(
+      livePose.indexOf('async function poseRoot('),
+      livePose.indexOf('\n}\n', livePose.indexOf('async function poseRoot('))
     );
-    expect(poseRefBody).toContain("await import('firebase-admin/database')");
-    expect(poseRefBody).toContain('getDatabaseWithUrl(');
-    expect(livePose.match(/await poseRef\(/g)).toHaveLength(2);
-    const uses = [...livePose.matchAll(/await withinDeadline\(ref\.([^;]*)\);/g)].map((m) => m[1]);
-    expect(uses).toHaveLength(2);
-    expect(uses.filter((u) => u === 'remove()')).toHaveLength(1);
-    expect(uses.filter((u) => u.startsWith("child('meta').set({ writerUid: args.writerUid, expiresAt: args.expiresAt })"))).toHaveLength(1);
-    // Both go through the deadline, and nothing else touches `ref`.
-    expect(livePose.match(/\bref\./g)).toHaveLength(2);
+    expect(poseRootBody).toContain("await import('firebase-admin/database')");
+    // The only reference is `/wsfLivePose` itself: no path below it, so no
+    // path the SDK could print holds a key (W3 F1).
+    expect(livePose.match(/\.ref\(/g)).toHaveLength(1);
+    expect(poseRootBody).toContain('.ref(LIVE_POSE_ROOT)');
+    expect(livePose.match(/await poseRoot\(/g)).toHaveLength(2);
+    // Every call on it is an update, and there are exactly three: the meta
+    // write and the delete, both inside the deadline, and the delete queued
+    // behind a meta write that missed it. Nothing reads.
+    expect([...livePose.matchAll(/\broot\.(\w+)\(/g)].map((m) => m[1])).toEqual(['update', 'update', 'update']);
+    expect(livePose).toContain('await withinDeadline(root.update({ [k]: null }));');
+    expect(livePose).toContain(
+      'await withinDeadline(root.update({ [`${key}/meta`]: { writerUid: args.writerUid, expiresAt: args.expiresAt } }));'
+    );
+    expect(livePose).toContain("void root.update({ [key]: null }).catch((cleanup) => logFailure('cleanup', cleanup));");
+    // The SDK's debug log prints values; nothing turns it on.
+    expect(livePose).not.toMatch(/enableLogging\(/);
+    expect(index).not.toMatch(/enableLogging\(/);
   });
 });
 
@@ -654,20 +662,178 @@ describe('armPoseKey', () => {
     await expect(withinDeadline(Promise.reject(Object.assign(new Error('x'), { code: 'boom' })), 100)).rejects.toMatchObject({ code: 'boom' });
   });
 
-  test('a failed Realtime Database call is logged with no key and no uid, and fails nothing', async () => {
-    const { removePoseKey } = await import('../../src/live-pose');
+  test('a malformed key never reaches the SDK: it is logged with no key and no uid, and fails nothing', async () => {
+    const { armPoseKey, removePoseKey } = await import('../../src/live-pose');
     const uid = uniq('writer');
     const bad = `bad.key#${uid}`;
-    const spy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const error = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     try {
       expect(await removePoseKey(bad)).toBe(false);
-      expect(spy).toHaveBeenCalled();
-      const logged = JSON.stringify(spy.mock.calls);
+      await armPoseKey({
+        key: bad,
+        writerUid: uid,
+        expiresAt: Date.now() + 60_000,
+        earlierKey: null,
+        stationId: uniq('station'),
+        stillLive: async () => true,
+      });
+      expect(error.mock.calls).toEqual([
+        ['[wsfLivePose]', 'remove', 'failed', 'bad-key'],
+        ['[wsfLivePose]', 'arm', 'failed', 'bad-key'],
+      ]);
+      expect(warn).not.toHaveBeenCalled();
+      const logged = JSON.stringify([error.mock.calls, warn.mock.calls]);
       expect(logged).not.toContain(uid);
       expect(logged).not.toContain('bad.key');
-      expect(logged).toContain('[wsfLivePose]');
     } finally {
-      spy.mockRestore();
+      error.mockRestore();
+      warn.mockRestore();
+    }
+  });
+
+  test('a write the server refuses is logged without its key, by this module and by the SDK (W3 F1)', async () => {
+    const { mintPoseKey } = await import('../../src/live-pose');
+    const held = mintPoseKey();
+    const fresh = mintPoseKey();
+    const earlier = mintPoseKey();
+    const uid = uniq('writer');
+    // A node the refused delete cannot take down: `meta` written by the
+    // functions' own (admin) connection, as after a successful arm.
+    await setMeta(held, { writerUid: uid, expiresAt: Date.now() + 60_000 });
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const error = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      await jest.isolateModulesAsync(async () => {
+        // A second copy of the module and the Admin SDK, whose default app
+        // reaches the database emulator with no credentials at all. Under the
+        // reviewed rules every write it makes is refused by the server: a
+        // real refusal, through the module's own code, with nothing stubbed.
+        const { initializeApp } = await import('firebase-admin/app');
+        initializeApp({ projectId: PROJECT, databaseAuthVariableOverride: null });
+        const { getDatabaseWithUrl } = await import('firebase-admin/database');
+        const lp = await import('../../src/live-pose');
+        try {
+          expect(await lp.removePoseKey(held)).toBe(false);
+          await lp.armPoseKey({
+            key: fresh,
+            writerUid: uid,
+            expiresAt: Date.now() + 60_000,
+            earlierKey: earlier,
+            stationId: uniq('station'),
+            stillLive: async () => true,
+          });
+          // The delete queued behind the refused meta write is not awaited:
+          // wait for its own refusal.
+          await eventually(async () => warn.mock.calls.length >= 4);
+        } finally {
+          await getDatabaseWithUrl(livePoseDatabaseUrl(PROJECT)).goOffline();
+        }
+      });
+      // No line, the SDK's or this module's, carries a key or the uid.
+      const logged = JSON.stringify([warn.mock.calls, error.mock.calls]);
+      for (const k of [held, fresh, earlier]) expect(logged).not.toContain(k);
+      expect(logged).not.toContain(uid);
+      // The refusals were real: the held node is still there.
+      expect(await poseNode(held)).not.toBeNull();
+      expect(await poseNode(fresh)).toBeNull();
+      // The SDK logged each refusal, at `/wsfLivePose` only.
+      const warned = warn.mock.calls.map((c) => c.map(String).join(' '));
+      expect(warned).toHaveLength(4);
+      for (const line of warned) {
+        expect(line).toMatch(/FIREBASE WARNING: update at \/wsfLivePose failed: permission_denied\s*$/);
+      }
+      // This module logged an operation and a code: delete, earlier delete,
+      // arm, and the queued delete.
+      expect(error.mock.calls).toEqual([
+        ['[wsfLivePose]', 'remove', 'failed', 'PERMISSION_DENIED'],
+        ['[wsfLivePose]', 'remove', 'failed', 'PERMISSION_DENIED'],
+        ['[wsfLivePose]', 'arm', 'failed', 'PERMISSION_DENIED'],
+        ['[wsfLivePose]', 'cleanup', 'failed', 'PERMISSION_DENIED'],
+      ]);
+    } finally {
+      warn.mockRestore();
+      error.mockRestore();
+      await adminDb().ref('wsfLivePose').update({ [held]: null });
+    }
+  });
+
+  test('a meta write that misses its deadline and lands later leaves no node: the delete is queued behind it (W3 F2)', async () => {
+    const { armPoseKey, mintPoseKey, LIVE_POSE_DEADLINE_MS } = await import('../../src/live-pose');
+    // The functions' own connection: the module writes through this same
+    // Database instance. Offline, it queues writes and settles none, which is
+    // a database that does not answer within the deadline.
+    const db = adminDb();
+    // The server's view, from a separate connection.
+    const onServer = async (k: string): Promise<unknown> => {
+      let val: unknown;
+      await env.withSecurityRulesDisabled(async (ctx) => {
+        val = (await ctx.database().ref(`wsfLivePose/${k}`).once('value')).val();
+      });
+      return val;
+    };
+    const control = mintPoseKey();
+    const key = mintPoseKey();
+    const error = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      let tookMs = 0;
+      db.goOffline();
+      try {
+        // The control: the same late meta write with nothing queued behind it.
+        void db.ref('wsfLivePose').update({ [`${control}/meta`]: { writerUid: 'w', expiresAt: Date.now() + 60_000 } });
+        const startedAt = Date.now();
+        await armPoseKey({
+          key,
+          writerUid: uniq('writer'),
+          expiresAt: Date.now() + 60_000,
+          earlierKey: null,
+          stationId: uniq('station'),
+          stillLive: async () => true,
+        });
+        tookMs = Date.now() - startedAt;
+        expect(await onServer(control)).toBeNull();
+        expect(await onServer(key)).toBeNull();
+      } finally {
+        db.goOnline();
+      }
+      // The arm gave up at the deadline, and did not wait for the delete.
+      expect(tookMs).toBeGreaterThanOrEqual(LIVE_POSE_DEADLINE_MS - 50);
+      expect(tookMs).toBeLessThan(2 * LIVE_POSE_DEADLINE_MS);
+      expect(error.mock.calls).toEqual([['[wsfLivePose]', 'arm', 'failed', 'deadline-exceeded']]);
+      // A write on the same connection is answered only after every write
+      // queued before it, so once it settles the late writes have landed.
+      await db.ref('wsfLivePose').update({ [mintPoseKey()]: null });
+      // Without the delete, the late meta is the orphan F2 describes.
+      expect(await onServer(control)).toEqual({ meta: { writerUid: 'w', expiresAt: expect.any(Number) } });
+      // With it, nothing is left.
+      expect(await onServer(key)).toBeNull();
+      expect(await poseNode(key)).toBeNull();
+    } finally {
+      error.mockRestore();
+      await db.ref('wsfLivePose').update({ [control]: null });
+    }
+  });
+
+  test('a confirmation that cannot be read takes the node down', async () => {
+    const { armPoseKey, mintPoseKey } = await import('../../src/live-pose');
+    const key = mintPoseKey();
+    const stationId = uniq('station');
+    const error = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      await armPoseKey({
+        key,
+        writerUid: uniq('writer'),
+        expiresAt: Date.now() + 60_000,
+        earlierKey: null,
+        stationId,
+        stillLive: async () => {
+          throw Object.assign(new Error('synthetic read failure'), { code: 'unavailable' });
+        },
+      });
+      expect(await poseNode(key)).toBeNull();
+      expect(error.mock.calls).toEqual([['[wsfLivePose]', 'confirm', 'failed', 'unavailable']]);
+    } finally {
+      error.mockRestore();
     }
   });
 });
