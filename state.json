@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "ab243c7006e92deabf5dfa85a4be715ff3665f9e36de118df797504060294f9a",
-  "eventCount": 1256,
+  "ledgerHead": "589dbd86a9911cd08adb4342c3685024e7517dcfb84496c533838b92b21d1859",
+  "eventCount": 1260,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2061,7 +2061,7 @@
       },
       "label": "Live pose relay for station turns: wsfTurnPosePush (phone) + wsfStationLivePose (station secret), WSF_LIVE_POSE kill switch, deleted on every turn exit, never a contribution",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "WITHDRAWN",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -2098,7 +2098,75 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6105503842
+          "id": 6105637354
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
+      "pendingFinding": null
+    },
+    "KIOSK-LIVE-POSE-2": {
+      "owner": "W9",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Live pose over RTDB for station turns: per-turn capability key, phone writes / station reads, rules + staging deploy step, WSF_LIVE_POSE switch, never a contribution",
+      "origin": "ledger",
+      "phase": "RELEASED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": 497,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": 0,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "functions-westayfit/src/index.ts",
+        "functions-westayfit/src/live-pose.ts",
+        "functions-westayfit/tests/",
+        "database.westayfit.rules.json",
+        "firebase.westayfit.staging.json",
+        "firebase.westayfit.production.json",
+        "firebase.westayfit.emulators.json",
+        ".github/workflows/wsf-staging-deploy.yml",
+        ".github/wsf-staging/write-functions-env.mjs",
+        ".github/wsf-staging/tests/",
+        "docs/westayfit/ops/security/KIOSK-LIVE-POSE-2.md"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6105637770
+        },
+        "released": {
+          "kind": "comment",
+          "id": 6105638191
+        },
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6105638191
         }
       },
       "review": {
@@ -7441,6 +7509,15 @@
       "comments": [
         6105558843
       ],
+      "ack": null,
+      "superseded": true
+    },
+    "5c34f1ff7d4f4fc0193299f5ad6f614224aa42ac9d63d3ec7ce462691b12fe80": {
+      "packet": "KIOSK-LIVE-POSE-2",
+      "worker": "W9",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
