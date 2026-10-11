@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "76352c8cf593a678aa1b08adda2dba6ede28a36eb5beb5e295ae7502201faf59",
-  "eventCount": 1314,
+  "ledgerHead": "c2f7d3dfbb6b26135c13e49fc74131261d54edc852ae3d45221effeb0c6d7ecf",
+  "eventCount": 1316,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2061,7 +2061,7 @@
       },
       "label": "Guest kiosk squats: station-authenticated wsfStationGuestContribute, no uid/name, idempotent on attemptId, capped, refused while a turn is assigned, never a raffle ticket",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -2075,7 +2075,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         "functions-westayfit/src/index.ts",
@@ -2097,7 +2097,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6111692815
+          "id": 6111870196
         }
       },
       "review": {
@@ -7937,11 +7937,14 @@
       "packet": "KIOSK-GUEST-MOVE-1",
       "worker": "W9",
       "reason": "release",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6111833254
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6111870196
+      }
     }
   },
   "fastpath": {
