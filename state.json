@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "843a7b2b6375774c61e121c751628d65437c95e629252f28caf040d53e255c11",
-  "eventCount": 1295,
+  "ledgerHead": "3ae96982574aca048e1678051bc3e4778075a9f5fc73c2bb100c95d49c99ba61",
+  "eventCount": 1296,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2140,7 +2140,9 @@
       "proof": null,
       "served": null,
       "releasedQueueIndex": null,
-      "reviewedBy": [],
+      "reviewedBy": [
+        "W3"
+      ],
       "subjectPaths": [
         "functions-westayfit/src/index.ts",
         "functions-westayfit/src/live-pose.ts",
@@ -2168,7 +2170,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6109378955
+          "id": 6109752639
         }
       },
       "review": {
@@ -7769,7 +7771,8 @@
       "ack": {
         "kind": "comment",
         "id": 6109571288
-      }
+      },
+      "superseded": true
     },
     "ed689517e6174a31845aa6e10c7de1dee6735a2989d6e10609d699b430b7d701": {
       "packet": "KIOSK-LIVE-POSE-PROD-1",
