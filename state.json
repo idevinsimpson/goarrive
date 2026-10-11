@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "c2f7d3dfbb6b26135c13e49fc74131261d54edc852ae3d45221effeb0c6d7ecf",
-  "eventCount": 1316,
+  "ledgerHead": "cb540dabff0281c401b2a9088c09c46b9cc0cab20c0d8cd45b341f7dba5bf9ad",
+  "eventCount": 1319,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2061,15 +2061,17 @@
       },
       "label": "Guest kiosk squats: station-authenticated wsfStationGuestContribute, no uid/name, idempotent on attemptId, capped, refused while a turn is assigned, never a raffle ticket",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
-      "pr": null,
-      "reviewers": [],
+      "pr": 625,
+      "reviewers": [
+        "W5"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "627abf170c95c38f6182a88f0a0e354f6b59954f",
+        "prHeadSha": "627abf170c95c38f6182a88f0a0e354f6b59954f",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -2097,7 +2099,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6111870196
+          "id": 6112941066
         }
       },
       "review": {
@@ -2110,7 +2112,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "KIOSK-LIVE-POSE-1": {
@@ -7944,7 +7946,16 @@
       "ack": {
         "kind": "comment",
         "id": 6111870196
-      }
+      },
+      "superseded": true
+    },
+    "7a11a7148c229ae0bcb85e92584c63d48fb79ffd8bc2c6ab5aa79842f0476074": {
+      "packet": "KIOSK-GUEST-MOVE-1",
+      "worker": "W5",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
