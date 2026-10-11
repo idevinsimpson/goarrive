@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "498aa43f39831efd31865c5809abfbc26d7f6d3c3cce88aa646b507bbe8b9727",
-  "eventCount": 1291,
+  "ledgerHead": "b1eef6d9ee483f566f440ebf4d06c9c2f8007bf69908d8c0a334e0846f4b0d1e",
+  "eventCount": 1294,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -66,9 +66,7 @@
     "W4": [],
     "W5": [],
     "W7": [],
-    "W9": [
-      "KIOSK-LIVE-POSE-PROD-1"
-    ]
+    "W9": []
   },
   "packets": {
     "ANON-GATE-1": {
@@ -2195,10 +2193,10 @@
       },
       "label": "Live pose to production: preflight admits WSF_LIVE_POSE=1 and a reviewed record for the integrated candidate; runbook section (rules by hand + sha256, env, deploy, readback, emergency off); doc D1-D3",
       "origin": "ledger",
-      "phase": "QUEUED",
+      "phase": "RELEASED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
-      "inbox": null,
+      "inbox": 497,
       "pr": null,
       "reviewers": [],
       "artifact": {
@@ -2209,7 +2207,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": null,
+      "releasedQueueIndex": 0,
       "reviewedBy": [],
       "subjectPaths": [
         ".github/wsf-production/",
@@ -2223,11 +2221,14 @@
           "kind": "comment",
           "id": 6109490645
         },
-        "released": null,
+        "released": {
+          "kind": "comment",
+          "id": 6109578489
+        },
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6109490645
+          "id": 6109578489
         }
       },
       "review": {
@@ -7761,10 +7762,21 @@
       "packet": "KIOSK-LIVE-POSE-2",
       "worker": "W3",
       "reason": "review",
-      "status": "delivered",
+      "status": "acked",
       "comments": [
         6109568819
       ],
+      "ack": {
+        "kind": "comment",
+        "id": 6109571288
+      }
+    },
+    "ed689517e6174a31845aa6e10c7de1dee6735a2989d6e10609d699b430b7d701": {
+      "packet": "KIOSK-LIVE-POSE-PROD-1",
+      "worker": "W9",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },
