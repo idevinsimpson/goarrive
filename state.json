@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "f6c567034013193ac62f77346493e9c0ffaf0da9984d64428ef66da194a67cb5",
-  "eventCount": 1276,
+  "ledgerHead": "835c74f20579a6d797e25d464d6e5a3c477d77fed8a0878d2c534e43810d924d",
+  "eventCount": 1279,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2125,7 +2125,7 @@
       },
       "label": "Live pose over RTDB for station turns: per-turn capability key, phone writes / station reads, rules + staging deploy step, WSF_LIVE_POSE switch, never a contribution",
       "origin": "ledger",
-      "phase": "UNDER_REVIEW",
+      "phase": "CHANGES_REQUESTED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -2170,7 +2170,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6106585040
+          "id": 6106927991
         }
       },
       "review": {
@@ -2184,10 +2184,7 @@
         "after": "director"
       },
       "deliveries": 1,
-      "pendingFinding": {
-        "kind": "comment",
-        "id": 6106927991
-      }
+      "pendingFinding": null
     },
     "KIOSK-PAIRING-CLARITY-PROOF-1": {
       "owner": "W9",
@@ -2276,8 +2273,8 @@
       },
       "label": "Shared-screen presence: moved-today count + initials (opt-in photos on kiosk only) on wsfStationState/wsfGoalPulse, profile sharedScreenPresence setting, staging-on/production-dark",
       "origin": "ledger",
-      "phase": "RELEASED",
-      "phaseBeforeBlock": null,
+      "phase": "BLOCKED",
+      "phaseBeforeBlock": "RELEASED",
       "queueIndexBeforeBlock": null,
       "inbox": 497,
       "pr": null,
@@ -2298,7 +2295,12 @@
         "functions-westayfit/tests/",
         "docs/westayfit/ops/security/KIOSK-PRESENCE-1.md"
       ],
-      "blockedBy": [],
+      "blockedBy": [
+        {
+          "packet": "KIOSK-LIVE-POSE-2",
+          "until": "ACCEPTED"
+        }
+      ],
       "importRefs": [],
       "authority": {
         "queued": {
@@ -2312,7 +2314,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6106979422
+          "id": 6107569755
         }
       },
       "review": {
@@ -7675,6 +7677,15 @@
         6107132843,
         6107389693
       ],
+      "ack": null,
+      "superseded": true
+    },
+    "036c91eaa980eac0f61e556090ebfc6e42a90b857b113d6ee9df6889ec1858c0": {
+      "packet": "KIOSK-LIVE-POSE-2",
+      "worker": "W9",
+      "reason": "handback",
+      "status": "requested",
+      "comments": [],
       "ack": null
     }
   },

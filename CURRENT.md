@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=f6c567034013193ac62f77346493e9c0ffaf0da9984d64428ef66da194a67cb5 events=1276 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=835c74f20579a6d797e25d464d6e5a3c477d77fed8a0878d2c534e43810d924d events=1279 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `f6c567034013193ac62f77346493e9c0ffaf0da9984d64428ef66da194a67cb5` (1276 events)
+- Ledger head: `835c74f20579a6d797e25d464d6e5a3c477d77fed8a0878d2c534e43810d924d` (1279 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -33,7 +33,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | W4 | #394 | — | — | — | — | — | — | off |
 | W5 | #395 | — | — | — | — | — | — | off |
 | W7 | #434 | — | — | — | — | — | — | off |
-| W9 | #497 | KIOSK-PRESENCE-1 | — | KIOSK-LIVE-POSE-2 | EVENT-LIFECYCLE-BACKEND-RECOVERY-1, MEMBER-TRUTH-BACKEND-1 | MEMBER-ACTIVITY-1 | MEMBER-ACTIVITY-1 | on |
+| W9 | #497 | KIOSK-LIVE-POSE-2 | — | — | EVENT-LIFECYCLE-BACKEND-RECOVERY-1, KIOSK-PRESENCE-1, MEMBER-TRUTH-BACKEND-1 | MEMBER-ACTIVITY-1 | MEMBER-ACTIVITY-1 | on |
 
 ## Packets
 
@@ -69,9 +69,9 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | KIOSK-EXPECTED-TURN-NATIVE-CALLER-RECOVERY-1 | W3 | work | INTEGRATED (source-only) | ledger | WITHDRAWN | — | — | — | — | — | — | — | comment:6060048984 | comment:6060908197 | — | Recover native expected-turn caller after withdrawn unacknowledged W7 assignment | 1×journey-qa then director | — |
 | KIOSK-EXPECTED-TURN-NATIVE-CALLER-RECOVERY-2 | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #596 | 1cdbeff5 | 1cdbeff5 | — | ec162d17 | — | W7 | comment:6061210091 | pull_request:596 | — | Correct native expected-turn caller reservation to executable Vitest and Playwright paths | 1×journey-qa then director | — |
 | KIOSK-LIVE-POSE-1 | W9 | work | INTEGRATED (source-only) | ledger | WITHDRAWN | — | — | — | — | — | — | — | comment:6105503842 | comment:6105637354 | — | Live pose relay for station turns: wsfTurnPosePush (phone) + wsfStationLivePose (station secret), WSF_LIVE_POSE kill switch, deleted on every turn exit, never a contribution | 1×ops-source then director | — |
-| KIOSK-LIVE-POSE-2 | W9 | work | INTEGRATED (source-only) | ledger | UNDER_REVIEW | #622 | 2247f55c | 2247f55c | — | — | — | W3 | comment:6105638191 | comment:6106585040 | — | Live pose over RTDB for station turns: per-turn capability key, phone writes / station reads, rules + staging deploy step, WSF_LIVE_POSE switch, never a contribution | 1×ops-source then director | comment:6106927991 |
+| KIOSK-LIVE-POSE-2 | W9 | work | INTEGRATED (source-only) | ledger | CHANGES_REQUESTED | #622 | 2247f55c | 2247f55c | — | — | — | W3 | comment:6105638191 | comment:6106927991 | — | Live pose over RTDB for station turns: per-turn capability key, phone writes / station reads, rules + staging deploy step, WSF_LIVE_POSE switch, never a contribution | 1×ops-source then director | — |
 | KIOSK-PAIRING-CLARITY-PROOF-1 | W9 | work | STAGED (hosted) | ledger | STAGED | #553 | 4537c26c | 4537c26c | — | ab77fbfc | hosted run 37025084843: PASS | W4 | comment:5945136749 | comment:5955903159 | — | Clarify venue-station pairing from the Champion's own phone and prove the existing flow end-to-end | 1×journey-qa then director | — |
-| KIOSK-PRESENCE-1 | W9 | work | INTEGRATED (source-only) | ledger | RELEASED | — | — | — | — | — | — | — | comment:6106979422 | comment:6106979422 | — | Shared-screen presence: moved-today count + initials (opt-in photos on kiosk only) on wsfStationState/wsfGoalPulse, profile sharedScreenPresence setting, staging-on/production-dark | 1×ops-source then director | — |
+| KIOSK-PRESENCE-1 | W9 | work | INTEGRATED (source-only) | ledger | BLOCKED (from RELEASED) | — | — | — | — | — | — | — | comment:6106979422 | comment:6107569755 | KIOSK-LIVE-POSE-2≥ACCEPTED | Shared-screen presence: moved-today count + initials (opt-in photos on kiosk only) on wsfStationState/wsfGoalPulse, profile sharedScreenPresence setting, staging-on/production-dark | 1×ops-source then director | — |
 | KIOSK-REVOKE-ACTIVE-TURN-1 | W9 | work | INTEGRATED (source-only) | ledger | WITHDRAWN | — | — | — | — | — | — | — | — | comment:6079352515 | — | On wsfRevokeStation, end or requeue that station's assigned/ready/active line entry server-side and surface the new status via wsfMyTurn/wsfTurnState; callable tests; doc note | 1×ops-source then director | — |
 | KIOSK-TURN-LIFECYCLE-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #606 | 17a565dc | 17a565dc | — | 8a067b29 | — | W4 | comment:6082013157 | pull_request:606 | — | Revoke ends/requeues that station's assigned/ready/active line entry (seen via wsfMyTurn/wsfTurnState); wsfJoinTurnLine refuses an already-recorded member (one-contribution reason); tests; doc note | 1×ops-source then director | — |
 | KIOSK-UNVERIFIED-PARTICIPANT-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #586 | a17ee3e2 | a17ee3e2 | — | 819c26f0 | — | W4 | comment:6041849013 | pull_request:586 | — | Allow real authenticated unverified attendees to complete the ordinary WSF event participation backend journey | 1×journey-qa then director | — |
@@ -310,4 +310,5 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | 5c34f1ff7d4f | W9 | KIOSK-LIVE-POSE-2 | release | acked | 6105818924 | comment:6105945912 |
 | 1a55ba646104 | W3 | KIOSK-LIVE-POSE-2 | review | acked | 6106663073 | comment:6106687304 |
 | ba63f7e53779 | W9 | KIOSK-PRESENCE-1 | release | redelivered | 6107132843, 6107389693 | — |
+| 036c91eaa980 | W9 | KIOSK-LIVE-POSE-2 | handback | requested | — | — |
 
