@@ -26,6 +26,21 @@ import {
   type PhotoSource,
   type PortraitDecision,
 } from './profilePhotos';
+import {
+  GUEST_BUSY_MESSAGE,
+  GUEST_LIMITS_COLLECTION,
+  GUEST_MOVES_COLLECTION,
+  GUEST_NOT_PUBLIC_MESSAGE,
+  GUEST_ONCE_MESSAGE,
+  GUEST_RATE_MESSAGE,
+  GUEST_SOURCE,
+  guestLinkId,
+  guestMoveId,
+  guestReceipt,
+  nextGuestRateWindow,
+  type GuestContributeResponse,
+  type GuestMoveDoc,
+} from './guest-contribute';
 
 initializeApp();
 
@@ -2670,7 +2685,8 @@ type GoalDoc = {
    *
    * THE RULE, stated once (see wsfContribute and wsfAdjustGoal):
    *   • wsfContribute writes them only when `reachedAt` is absent AND the
-   *     total it is committing moves from below target to >= target.
+   *     total it is committing moves from below target to >= target. A guest
+   *     move (wsfStationGuestContribute) claims them by the same rule.
    *   • Nothing overwrites them: overshoot, later contributions, corrections,
    *     target changes and closure all leave them exactly as written.
    *   • Nothing in this package clears them, so a second event can never be
@@ -5754,6 +5770,10 @@ export const wsfAdjustGoal = onCall<AdjustGoalRequest>(
 // station-authorized path that writes them: `wsfCancelTurn` is station-
 // authorized and writes none of them, and `wsfCompleteMyTurn` reaches the same
 // helper but is the MEMBER'S own authenticated path, not a station capability.
+// KIOSK-GUEST-MOVE-1 adds a second station-authorized writer,
+// `wsfStationGuestContribute`: it moves the goal shard for an anonymous guest
+// and writes wsfKioskGuestMoves, never wsfContributions or
+// wsfGoalMemberTotals, and it names nobody.
 //
 // What keeps it narrow is that the station supplies NO IDENTITY. The uid comes
 // from the turn entry of the member who joined the line and started the turn,
@@ -11151,5 +11171,277 @@ export const wsfCommunityActivity = onCall<CommunityActivityRequest>(
     }
 
     return { entries, contributorsToday, nextCursor };
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// wsfStationGuestContribute — KIOSK-GUEST-MOVE-1 (#365 6111692291).
+//
+// A walk-up guest's squats at a paired kiosk, counted toward that station's
+// goal. AUTHORIZATION: the STATION'S credential, exactly as every station
+// callable (`authorizeStationForTurn`); the request's own `auth`, if any, is
+// never read, so a guest move names nobody whoever is signed in on the kiosk.
+//
+// WHAT IT WRITES, in one transaction, and only for a new attempt:
+//   - wsfKioskGuestMoves/{stationId}_{attemptId}: the guest move. No uid, no
+//     name, no device detail. NOT wsfContributions: that collection is the
+//     raffle's only movement source, the activity feed's scan and a member's
+//     history, and a guest is none of those (guest-contribute.ts);
+//   - one goal shard, and one recent-addition line named guestLinkId(...);
+//   - the combined parent's shard and credit (`source: 'kioskGuest'`, no uid)
+//     when the goal is a child of an active combined goal, by the same
+//     combinedCreditDecision a member's contribution uses;
+//   - the station's guest window (wsfStationGuestLimits/{stationId}).
+// After the commit, like a member's contribution: the pulse cache is dropped
+// and the target-crossing event is claimed.
+//
+// WHAT IT NEVER WRITES: wsfContributions, wsfGoalMemberTotals, a turn entry,
+// the line's lastResult, station.serving, or anything a raffle reads.
+//
+// THE ORDER. The station is re-checked inside the transaction, then a replay
+// returns its stored answer before any other gate (an attempt that was
+// recorded is never refused afterwards). A new attempt must then find the goal
+// open, inside its window, publicly displayed, not a once-per-member goal,
+// nobody waiting for the station's line, no live turn at this station, and
+// room in the station's guest window.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type StationGuestContributeRequest = {
+  stationId?: unknown;
+  secret?: unknown;
+  count?: unknown;
+  attemptId?: unknown;
+};
+
+type GuestOutcome =
+  | { fresh: false; amount: number; unit: string }
+  | {
+      fresh: true;
+      amount: number;
+      unit: string;
+      goalHadNoEvent: boolean;
+      goalTracked: boolean;
+      goalTarget: number;
+    };
+
+export const wsfStationGuestContribute = onCall<StationGuestContributeRequest>(
+  { region: 'us-central1', invoker: 'public' },
+  async (request): Promise<GuestContributeResponse> => {
+    const now = Date.now();
+    const authorized = await authorizeStationForTurn(request.data, request.rawRequest, now);
+
+    // The same two gates, in the same words, as every contribution.
+    const attemptId = normalizeAttemptId(request.data?.attemptId);
+    if (!attemptId) {
+      throw new HttpsError(
+        'invalid-argument',
+        'attemptId must be 8..128 chars of A-Z, a-z, 0-9, _ or -.'
+      );
+    }
+    const count = normalizeContributionCount(request.data?.count);
+    if (count === null) {
+      throw new HttpsError('invalid-argument', 'count must be a positive integer up to 100000.');
+    }
+
+    const { stationId, stationRef, goalId } = authorized;
+    const event = await resolveTurnEvent(goalId);
+    const lineId = event.lineId;
+    const db = getFirestore();
+    const goalRef = db.doc(`wsfGoals/${goalId}`);
+    const moveRef = db.doc(`${GUEST_MOVES_COLLECTION}/${guestMoveId(stationId, attemptId)}`);
+    const limitRef = db.doc(`${GUEST_LIMITS_COLLECTION}/${stationId}`);
+    const lineRef = db.doc(`wsfTurnLines/${lineId}`);
+    const linkId = guestLinkId(stationId, attemptId);
+
+    const outcome = await db.runTransaction(async (tx): Promise<GuestOutcome> => {
+      // ── every read first ──
+      const stationSnap = await tx.get(stationRef);
+      const station = stationSnap.exists ? (stationSnap.data() as StationDoc) : null;
+      // Re-checked here: a Champion may have revoked this screen since the
+      // credential check, and a revoked screen records nothing.
+      if (!station || station.status !== 'active' || normalizeStringId(station.goalId) !== goalId) {
+        throw new HttpsError('permission-denied', STATION_REJECTED_MESSAGE);
+      }
+
+      // Idempotency first: a recorded attempt answers with what it recorded,
+      // whatever has changed since (a closed goal, a line that filled up).
+      const moveSnap = await tx.get(moveRef);
+      if (moveSnap.exists) {
+        const prev = moveSnap.data() as Partial<GuestMoveDoc>;
+        if (
+          prev.source !== GUEST_SOURCE ||
+          prev.stationId !== stationId ||
+          prev.goalId !== goalId ||
+          prev.attemptId !== attemptId
+        ) {
+          throw new HttpsError('internal', 'Guest record mismatch.');
+        }
+        return {
+          fresh: false,
+          amount: typeof prev.count === 'number' ? prev.count : 0,
+          unit: typeof prev.unit === 'string' ? prev.unit : '',
+        };
+      }
+
+      const goalSnap = await tx.get(goalRef);
+      if (!goalSnap.exists) throw new HttpsError('not-found', 'Goal not found.');
+      const goal = goalSnap.data() as GoalDoc;
+      const groupId = normalizeStringId(goal.communityGroupId);
+      const groupSnap = groupId ? await tx.get(db.doc(`wsfCommunityGroups/${groupId}`)) : null;
+      const claimSnap = await tx.get(combinedClaimRef(goalId));
+      const limitSnap = await tx.get(limitRef);
+      // Puts the line document in this transaction's read set, so a join or a
+      // call that commits first makes this one retry and see it.
+      await tx.get(lineRef);
+
+      // A live turn at THIS station: the same test wsfCallNext refuses on.
+      let liveTurnHere = false;
+      const servingId = normalizeStringId(
+        (station.serving as { entryId?: unknown } | null | undefined)?.entryId
+      );
+      if (servingId) {
+        const servingSnap = await tx.get(db.doc(`wsfTurnEntries/${servingId}`));
+        if (servingSnap.exists) {
+          const entry = servingSnap.data() as TurnEntryDoc;
+          liveTurnHere =
+            entry.lineId === lineId &&
+            entry.assignedStationId === stationId &&
+            isTurnLive(effectiveTurnStatus(entry, now));
+        }
+      }
+
+      // Anyone waiting for this station's line, on an activity that is still
+      // open: exactly who wsfCallNext would call next.
+      const openGoalIds = new Set<string>();
+      for (const activity of event.activities) {
+        if (await turnGoalOpenIn(tx, activity.goalId)) openGoalIds.add(activity.goalId);
+      }
+      const waitingSnap = await tx.get(
+        db
+          .collection('wsfTurnEntries')
+          .where('lineStatusKey', '==', turnStatusKey(lineId, 'waiting'))
+          .limit(TURN_WAITING_LIMIT)
+      );
+      const anyoneWaiting = waitingSnap.docs.some((d) =>
+        openGoalIds.has((d.data() as TurnEntryDoc).goalId)
+      );
+
+      // ── the gates, in order ──
+      if (goal.status !== 'active') {
+        throw new HttpsError('failed-precondition', 'This goal is closed.');
+      }
+      const serverNow = Timestamp.now();
+      if (serverNow.toMillis() < goal.startsAt.toMillis()) {
+        throw new HttpsError('failed-precondition', 'Goal has not started yet.');
+      }
+      if (serverNow.toMillis() >= goal.endsAt.toMillis()) {
+        throw new HttpsError('failed-precondition', 'Goal window has ended.');
+      }
+      // A guest is the public, so the goal must be one the public may see:
+      // the same test as the display route (evaluateGoalAggregateAccess with
+      // no caller), read inside this transaction.
+      const group = groupSnap && groupSnap.exists ? (groupSnap.data() as { isSample?: boolean }) : null;
+      if (!isAggregateDisplayAuthorized(goal) || !group || group.isSample === true) {
+        throw new HttpsError('failed-precondition', GUEST_NOT_PUBLIC_MESSAGE);
+      }
+      // One contribution per member cannot be honoured for someone unnamed.
+      if (goalRepeatPolicy(goal) === 'once') {
+        throw new HttpsError('failed-precondition', GUEST_ONCE_MESSAGE);
+      }
+      if (anyoneWaiting || liveTurnHere) {
+        throw new HttpsError('failed-precondition', GUEST_BUSY_MESSAGE);
+      }
+      const window = nextGuestRateWindow(limitSnap.exists ? limitSnap.data() : null, now);
+      if (!window) throw new HttpsError('resource-exhausted', GUEST_RATE_MESSAGE);
+
+      // ── and only then the writes ──
+      const unit = typeof goal.unit === 'string' ? goal.unit : '';
+      const shardIndex = randomGoalShardIndex();
+      const move: GuestMoveDoc = {
+        source: GUEST_SOURCE,
+        stationId,
+        attemptId,
+        goalId,
+        communityGroupId: groupId as string,
+        unit,
+        count,
+        shardIndex,
+      };
+      tx.create(moveRef, { ...move, createdAt: FieldValue.serverTimestamp() });
+      tx.set(goalShardRef(goalId, shardIndex), { count: FieldValue.increment(count) }, { merge: true });
+      const addition: RecentAddition = { amount: count, at: isoMinute(serverNow.toMillis()) };
+      tx.set(recentAdditionsRef(goalId).doc(linkId), addition);
+
+      const credit = combinedCreditDecision({
+        claim: claimSnap.exists ? (claimSnap.data() as CombinedGoalClaimDoc) : null,
+        goalId,
+        communityGroupId: goal.communityGroupId,
+        atMillis: serverNow.toMillis(),
+      });
+      if (credit) {
+        const parentShardIndex = randomCombinedShardIndex();
+        tx.set(
+          combinedShardRef(credit.setupId, goalId, parentShardIndex),
+          { count: FieldValue.increment(count) },
+          { merge: true }
+        );
+        tx.create(combinedCreditRef(linkId), {
+          setupId: credit.setupId,
+          setupVersion: credit.setupVersion,
+          contributionRuleVersion: COMBINED_CONTRIBUTION_RULE_VERSION,
+          goalId,
+          attemptId,
+          source: GUEST_SOURCE,
+          stationId,
+          amount: count,
+          shardIndex: parentShardIndex,
+          communityGroupId: goal.communityGroupId,
+          createdAt: FieldValue.serverTimestamp(),
+        });
+      }
+
+      tx.set(limitRef, window);
+
+      return {
+        fresh: true,
+        amount: count,
+        unit,
+        goalHadNoEvent: goal.reachedAt == null,
+        goalTracked: goal.crossingTracked === true,
+        goalTarget: goal.target,
+      };
+    });
+
+    // After the commit, exactly as a member's contribution.
+    let observedSharedTotal: number | null = null;
+    if (outcome.fresh) {
+      goalPulseCacheInvalidate(goalId);
+      if (outcome.goalHadNoEvent && outcome.goalTarget > 0) {
+        observedSharedTotal = await sumGoalShards(goalId);
+        if (observedSharedTotal >= outcome.goalTarget) {
+          await recordTargetCrossing({
+            goalRef,
+            count: outcome.amount,
+            observedSharedTotal,
+            goalTracked: outcome.goalTracked,
+          });
+        }
+      }
+    }
+
+    // The shared fields only where the public may see them (the station's own
+    // display route, no caller).
+    const goalSnap = await goalRef.get();
+    const goal = goalSnap.exists ? (goalSnap.data() as GoalDoc) : null;
+    const displayAllowed = goal ? (await evaluateGoalAggregateAccess(goal, null)).allowed : false;
+    const shared =
+      goal && displayAllowed
+        ? {
+            total: observedSharedTotal ?? (await sumGoalShards(goalId)),
+            target: goal.target,
+            status: goal.status,
+          }
+        : null;
+    return guestReceipt({ fresh: outcome.fresh, amount: outcome.amount, unit: outcome.unit, shared });
   }
 );
