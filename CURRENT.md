@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=02ed746e56e52eb42208774323fef79d952ecad9e3278a177584efc3d0a216ee events=1284 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=83a085c97bdfb7a68330f9c16036c70ea55827219e28486a8bc494964f25c002 events=1285 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `02ed746e56e52eb42208774323fef79d952ecad9e3278a177584efc3d0a216ee` (1284 events)
+- Ledger head: `83a085c97bdfb7a68330f9c16036c70ea55827219e28486a8bc494964f25c002` (1285 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -69,7 +69,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | KIOSK-EXPECTED-TURN-NATIVE-CALLER-RECOVERY-1 | W3 | work | INTEGRATED (source-only) | ledger | WITHDRAWN | — | — | — | — | — | — | — | comment:6060048984 | comment:6060908197 | — | Recover native expected-turn caller after withdrawn unacknowledged W7 assignment | 1×journey-qa then director | — |
 | KIOSK-EXPECTED-TURN-NATIVE-CALLER-RECOVERY-2 | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #596 | 1cdbeff5 | 1cdbeff5 | — | ec162d17 | — | W7 | comment:6061210091 | pull_request:596 | — | Correct native expected-turn caller reservation to executable Vitest and Playwright paths | 1×journey-qa then director | — |
 | KIOSK-LIVE-POSE-1 | W9 | work | INTEGRATED (source-only) | ledger | WITHDRAWN | — | — | — | — | — | — | — | comment:6105503842 | comment:6105637354 | — | Live pose relay for station turns: wsfTurnPosePush (phone) + wsfStationLivePose (station secret), WSF_LIVE_POSE kill switch, deleted on every turn exit, never a contribution | 1×ops-source then director | — |
-| KIOSK-LIVE-POSE-2 | W9 | work | INTEGRATED (source-only) | ledger | CHANGES_REQUESTED | #622 | 2247f55c | 2247f55c | — | — | — | W3 | comment:6105638191 | comment:6106927991 | — | Live pose over RTDB for station turns: per-turn capability key, phone writes / station reads, rules + staging deploy step, WSF_LIVE_POSE switch, never a contribution | 1×ops-source then director | — |
+| KIOSK-LIVE-POSE-2 | W9 | work | INTEGRATED (source-only) | ledger | CHANGES_REQUESTED | #622 | 2247f55c | 87b48fa8 | — | — | — | W3 | comment:6105638191 | comment:6106927991 | — | Live pose over RTDB for station turns: per-turn capability key, phone writes / station reads, rules + staging deploy step, WSF_LIVE_POSE switch, never a contribution | 1×ops-source then director | — |
 | KIOSK-PAIRING-CLARITY-PROOF-1 | W9 | work | STAGED (hosted) | ledger | STAGED | #553 | 4537c26c | 4537c26c | — | ab77fbfc | hosted run 37025084843: PASS | W4 | comment:5945136749 | comment:5955903159 | — | Clarify venue-station pairing from the Champion's own phone and prove the existing flow end-to-end | 1×journey-qa then director | — |
 | KIOSK-PRESENCE-1 | W9 | work | INTEGRATED (source-only) | ledger | BLOCKED (from RELEASED) | — | — | — | — | — | — | — | comment:6106979422 | comment:6107569755 | KIOSK-LIVE-POSE-2≥ACCEPTED | Shared-screen presence: moved-today count + initials (opt-in photos on kiosk only) on wsfStationState/wsfGoalPulse, profile sharedScreenPresence setting, staging-on/production-dark | 1×ops-source then director | — |
 | KIOSK-REVOKE-ACTIVE-TURN-1 | W9 | work | INTEGRATED (source-only) | ledger | WITHDRAWN | — | — | — | — | — | — | — | — | comment:6079352515 | — | On wsfRevokeStation, end or requeue that station's assigned/ready/active line entry server-side and surface the new status via wsfMyTurn/wsfTurnState; callable tests; doc note | 1×ops-source then director | — |
