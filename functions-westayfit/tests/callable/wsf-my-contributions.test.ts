@@ -6,8 +6,9 @@
  * DRAFT from the Lovable Web Twin project. NOT RUN by Lovable (no emulator in
  * that sandbox). W9 runs it in goarrive against the local Firestore emulator:
  *   cd functions-westayfit
- *   firebase emulators:exec --only firestore --project demo-wsf-local "npm run test:callable"
- * Every uid and document here is synthetic.
+ *   WSF_TEST_DECLARE_NO_AUTH=1 firebase emulators:exec --only firestore --project demo-wsf-local "npm run test:callable"
+ * Firestore-only runs need WSF_TEST_DECLARE_NO_AUTH=1 (no Auth emulator);
+ * alternatively add `auth` to --only. Every uid and document here is synthetic.
  */
 
 process.env.METADATA_SERVER_DETECTION = process.env.METADATA_SERVER_DETECTION || 'none';
@@ -169,5 +170,27 @@ describe('wsfMyContributions after leaving', () => {
     const r = await call(former, PASSWORD_TOKEN);
     if (!r.ok) throw r.error;
     expect(r.value.items.map((x) => x.attemptId)).toEqual([id]);
+  });
+});
+
+describe('wsfMyContributions malformed rows at the cap', () => {
+  test('malformed newest rows inside the fetched window are dropped, not back-filled; truncated stays honest', async () => {
+    const c = `${RUN}Cap`;
+    for (let i = 0; i < 3; i++) await seed(c, i);
+    await seed(c, 3, { count: 0 });
+    await seed(c, 4, { unit: '' });
+    const r = await call(c, PASSWORD_TOKEN, { limit: 3 });
+    if (!r.ok) throw r.error;
+    expect(r.value.items.map((x) => x.attemptId)).toEqual([`${RUN}${c}A2`]);
+    expect(r.value.truncated).toBe(true);
+  });
+});
+
+describe('wsfMyContributions refuses a read failure without leaking it', () => {
+  test('the refusal is a fixed unavailable message', () => {
+    const src = require('node:fs').readFileSync(require('node:path').resolve(__dirname, '../../src/my-contributions.ts'), 'utf8') as string;
+    expect(src).toMatch(/console\.error\('wsfMyContributions\.read_failed', code\)/);
+    expect(src).toMatch(/new HttpsError\('unavailable', 'Your history could not be read\. Try again\.'\)/);
+    expect(src).not.toMatch(/console\.(log|error|warn)\([^)]*\b(uid|e)\b\s*\)/);
   });
 });

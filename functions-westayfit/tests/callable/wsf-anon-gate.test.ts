@@ -11,9 +11,9 @@
  *      returns `{ ok: true }` and touches no data, named untouched by the
  *      packet). No `request.auth?.uid` remains: the four optional-uid sites use
  *      optionalRealUid. The public callables carry neither.
- *   3. REFUSAL at every one of the 42 gated callables, with nothing written for
+ *   3. REFUSAL at every one of the 43 gated callables, with nothing written for
  *      the anonymous uid by the write roots;
- *   4. ACCEPTANCE at the same 42 for a `password` token and for a token with no
+ *   4. ACCEPTANCE at the same 43 for a `password` token and for a token with no
  *      `firebase` claim (the shape every existing fixture uses): whatever each
  *      callable answers, it is never the anonymous refusal;
  *   5. the OPTIONAL-UID behavior: an anonymous token carrying a member's uid
@@ -23,7 +23,7 @@
  * Runs against the local Firestore emulator (`demo-wsf-local`) via
  * `func.run(request)`. Every uid and document here is synthetic.
  *   cd functions-westayfit
- *   firebase emulators:exec --only firestore --project demo-wsf-local "npm run test:callable"
+ *   WSF_TEST_DECLARE_NO_AUTH=1 firebase emulators:exec --only firestore --project demo-wsf-local "npm run test:callable"
  */
 
 process.env.METADATA_SERVER_DETECTION = process.env.METADATA_SERVER_DETECTION || 'none';
@@ -47,7 +47,7 @@ const ANON_TOKEN: Token = { firebase: { sign_in_provider: 'anonymous' } };
 const PASSWORD_TOKEN: Token = { email_verified: true, email: 'synthetic@example.invalid', firebase: { sign_in_provider: 'password' } };
 const NO_CLAIM_TOKEN: Token = { email_verified: true, email: 'synthetic@example.invalid' };
 
-/** The 42 callables that check `request.auth` and must refuse an anonymous token. */
+/** The 43 callables that check `request.auth` and must refuse an anonymous token. */
 const GATED = [
   'wsfSaveProfile', 'wsfCreateCommunity', 'wsfSendVerificationEmail', 'wsfJoinCommunity', 'wsfJoinViaMarker',
   'wsfResetJoinCode', 'wsfRemoveMember', 'wsfLeaveCommunity', 'wsfReinstateMember', 'wsfDesignateChampion',
@@ -57,7 +57,7 @@ const GATED = [
   'wsfEventContext', 'wsfJoinTurnLine', 'wsfMyTurn', 'wsfTurnReady', 'wsfLeaveTurnLine', 'wsfCompleteMyTurn',
   'wsfSetCommunityVisibility', 'wsfCommunityMembers', 'wsfMyProfilePhoto', 'wsfSetProfilePhoto',
   'wsfRemoveProfilePhoto', 'wsfSetPortraitDecision', 'wsfSetCommunityPhotoVisibility', 'wsfCommunityFaces',
-  'wsfCommunityFacePhotos', 'wsfCommunityActivity',
+  'wsfCommunityFacePhotos', 'wsfCommunityActivity', 'wsfMyContributions',
 ] as const;
 
 /** The roots named by the packet, where an anonymous token could otherwise write. */
@@ -173,7 +173,7 @@ describe('every WSF callable auth site carries the gate', () => {
     }
     expect(missing).toEqual(['wsfHealth']);
     expect([...gated].sort()).toEqual([...GATED].sort());
-    expect(gated).toHaveLength(42);
+    expect(gated).toHaveLength(43);
   });
 
   test('no optional `request.auth?.` read remains; the four optional-uid sites use optionalRealUid', () => {
@@ -303,35 +303,3 @@ describe('an anonymous token counts as signed out where signing in is optional',
   });
 });
 
-// ── 6. re-exported callables ─────────────────────────────────────────────────
-
-/**
- * Callables defined in their own module and re-exported from index.ts. The
- * source scan in section 2 reads only index.ts, so each one is pinned here:
- * the re-export line, the gate in its own source, refusal and acceptance.
- */
-const REEXPORTED_GATED = [{ name: 'wsfMyContributions', file: 'my-contributions' }] as const;
-
-describe('re-exported WSF callables carry the gate', () => {
-  test.each(REEXPORTED_GATED.map((r) => [r.name, r.file]))('%s is re-exported from index.ts and gated in %s.ts', (name, file) => {
-    expect(INDEX).toMatch(new RegExp(`^export \\{ ${name} \\} from '\\./${file}';$`, 'm'));
-    const src = stripComments(readFileSync(path.resolve(__dirname, `../../src/${file}.ts`), 'utf8'));
-    const fns = exportedCallables(src).filter((f) => f.name === name);
-    expect(fns).toHaveLength(1);
-    expect([...fns[0].body.matchAll(/if \(!request\.auth\)/g)]).toHaveLength(1);
-    expect(fns[0].body).toMatch(/if \(!request\.auth\) throw new HttpsError\('unauthenticated', '[^']*'\);\s*requireRealIdentity\(request\);/);
-  });
-
-  test.each(REEXPORTED_GATED.map((r) => [r.name]))('%s refuses an anonymous token with failed-precondition', async (name) => {
-    const r = await attempt(callable(name).run(req(`${RUN}Anon${name}`, ANON_TOKEN)));
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect([name, r.error.code, r.error.message]).toEqual([name, 'failed-precondition', ANONYMOUS_REFUSAL]);
-  });
-
-  test.each(REEXPORTED_GATED.map((r) => [r.name]))('%s does not answer a real account with the anonymous refusal', async (name) => {
-    for (const token of [PASSWORD_TOKEN, NO_CLAIM_TOKEN]) {
-      const r = await attempt(callable(name).run(req(`${RUN}Real${name}`, token)));
-      if (!r.ok) expect([name, r.error.message]).not.toEqual([name, ANONYMOUS_REFUSAL]);
-    }
-  });
-});

@@ -1,6 +1,7 @@
 /**
  * PROGRESS-SELF-HISTORY-1 (#365 6128740540): the caller's own recorded
  * contributions, newest first, for personal self-comparison on Progress.
+ * The callable itself is defined in index.ts (see readMyContributions).
  *
  * DRAFT authored in the Lovable Web Twin project (backend-canonical/), written
  * against idevinsimpson/goarrive @ a6eaf0be95cb0a81de4f24bc6d7f30ac82ce922f.
@@ -17,10 +18,8 @@
  * createdAt, a positive finite count, or non-empty goalId/unit/communityGroupId
  * is skipped, never defaulted.
  */
-import { HttpsError, onCall } from 'firebase-functions/v2/https';
+import { HttpsError } from 'firebase-functions/v2/https';
 import { Timestamp, getFirestore } from 'firebase-admin/firestore';
-
-import { requireRealIdentity } from './anon-gate';
 
 export const MY_CONTRIBUTIONS_DEFAULT_LIMIT = 50;
 export const MY_CONTRIBUTIONS_MAX_LIMIT = 100;
@@ -52,11 +51,12 @@ export function toMyContributionItem(data: Record<string, unknown>): MyContribut
   return { attemptId, goalId, communityId: communityGroupId, amount: count, unit, at: createdAt.toDate().toISOString() };
 }
 
-export const wsfMyContributions = onCall<{ limit?: unknown }>({ region: 'us-central1' }, async (request) => {
-  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
-  requireRealIdentity(request);
-  const uid = request.auth.uid;
-  const limit = clampMyContributionsLimit(request.data?.limit);
+/**
+ * The read behind wsfMyContributions. index.ts defines the callable (auth
+ * check, then requireRealIdentity) and passes only the verified caller uid.
+ */
+export async function readMyContributions(uid: string, rawLimit: unknown): Promise<MyContributionsResponse> {
+  const limit = clampMyContributionsLimit(rawLimit);
 
   let snap;
   try {
@@ -84,4 +84,4 @@ export const wsfMyContributions = onCall<{ limit?: unknown }>({ region: 'us-cent
   }
   const response: MyContributionsResponse = { items, truncated };
   return response;
-});
+}
