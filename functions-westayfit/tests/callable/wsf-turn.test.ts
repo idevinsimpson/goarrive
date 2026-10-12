@@ -314,7 +314,9 @@ beforeAll(async () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('what a screen in a room is allowed to know', () => {
-  test('wsfTurnState returns five keys, no array at any depth, and no other person’s name', async () => {
+  // KIOSK-LIVE-POSE-2 adds a sixth key, `livePose`. With WSF_LIVE_POSE off
+  // (unset in this suite) it is null, and these assertions pin that too.
+  test('wsfTurnState returns six keys (livePose null while the switch is off), no array at any depth, and no other person’s name', async () => {
     const { groupId, goalId, station } = await scene();
     const a = await member(groupId, 'ann');
     const b = await member(groupId, 'ben');
@@ -326,11 +328,13 @@ describe('what a screen in a room is allowed to know', () => {
     const before = await state(station);
     expect(Object.keys(before).sort()).toEqual([
       'assigned',
+      'livePose',
       'result',
       'stationId',
       'stationLabel',
       'waitingCount',
     ]);
+    expect((before as unknown as { livePose: unknown }).livePose).toBeNull();
     expect(before.assigned).toBeNull();
     expect(before.waitingCount).toBe(3);
     // THE SHAPE, not the contents: there is no list in this response, so
@@ -345,11 +349,13 @@ describe('what a screen in a room is allowed to know', () => {
     const after = await state(station);
     expect(Object.keys(after).sort()).toEqual([
       'assigned',
+      'livePose',
       'result',
       'stationId',
       'stationLabel',
       'waitingCount',
     ]);
+    expect((after as unknown as { livePose: unknown }).livePose).toBeNull();
     expect(hasArrayAnywhere(after)).toBe(false);
     expect(Object.keys(after.assigned!).sort()).toEqual([
       'activityTitle',

@@ -64,6 +64,18 @@ if (!declaredNoAuth) {
   }
 }
 
+// KIOSK-LIVE-POSE-2: the Realtime Database. The fetch block below does not
+// cover the Admin SDK's websocket, so this is checked here. A database host,
+// when set, must be loopback; and a run that turns live pose on must name one,
+// or the Admin SDK would address the real `<project>-default-rtdb` instance.
+const database = process.env.FIREBASE_DATABASE_EMULATOR_HOST;
+if (database && !LOOPBACK.test(database)) {
+  refuse(`FIREBASE_DATABASE_EMULATOR_HOST "${database}" is not a loopback address.`);
+}
+if (process.env.WSF_LIVE_POSE === '1' && !database) {
+  refuse('WSF_LIVE_POSE is 1 but FIREBASE_DATABASE_EMULATOR_HOST is not set.');
+}
+
 // An unset email key is not proof that no external request is possible — it
 // is one variable. So the harness BLOCKS them: any fetch to a non-loopback
 // host throws. That covers the email sender, any SDK that falls back to HTTP,

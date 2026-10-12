@@ -715,7 +715,9 @@ describe('the completion receipt', () => {
     await complete(station, ref, 5);
 
     const hall = await state(station);
-    expect(Object.keys(hall).sort()).toEqual(['assigned', 'result', 'stationId', 'stationLabel', 'waitingCount']);
+    // KIOSK-LIVE-POSE-2's `livePose` is the one added key, null with the switch off.
+    expect(Object.keys(hall).sort()).toEqual(['assigned', 'livePose', 'result', 'stationId', 'stationLabel', 'waitingCount']);
+    expect((hall as unknown as { livePose: unknown }).livePose).toBeNull();
     expect(JSON.stringify(hall)).not.toContain(aEntry.entryId);
     expect(JSON.stringify(hall)).not.toContain('receipt');
     const two = await enrol(goalId, championUid, 2);

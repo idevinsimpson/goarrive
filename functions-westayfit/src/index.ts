@@ -7,6 +7,16 @@ import { defineSecret, projectID } from 'firebase-functions/params';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 
 import { optionalRealUid, requireRealIdentity } from './anon-gate';
+import {
+  LIVE_POSE_TTL_MS,
+  armPoseKey,
+  livePoseEnabled,
+  livePoseIfLive,
+  mintPoseKey,
+  normalizePoseKey,
+  retirePoseKey,
+  type LivePose,
+} from './live-pose';
 
 import {
   MAX_TOKENS_PER_FETCH,
@@ -5932,6 +5942,11 @@ type StationServing = {
   /** KIOSK-EXPECTED-TURN-1: the turn reference of the call this pointer
    * names. Absent on a pointer written before the reference existed. */
   turnRef?: string;
+  /** KIOSK-LIVE-POSE-2: the live-pose key of the turn this pointer names, and
+   * when it stops working (ms). Written by wsfStartTurn while WSF_LIVE_POSE is
+   * on; removed when the turn ends. */
+  poseKey?: string;
+  poseExpiresAt?: number;
 };
 
 /**
@@ -5971,6 +5986,13 @@ type StationDoc = {
   revokedAt?: FirebaseFirestore.Timestamp | null;
   revokedBy?: string | null;
   lastSeenAt?: FirebaseFirestore.Timestamp | null;
+  /**
+   * KIOSK-LIVE-POSE-2: the last live-pose key this screen's turns minted that
+   * may still exist in the Realtime Database. Unlike `serving`, which a call or
+   * a cancel replaces, it survives until the key's node is confirmed deleted,
+   * so a failed delete is retried by the next poll that sees it.
+   */
+  livePoseKey?: string | null;
 };
 
 type PairingDoc = {
@@ -6430,6 +6452,11 @@ export const wsfStationState = onCall<StationStateRequest>(
     const slot = normalizeStationSlot(station.slot);
     if (!slot) throw await stationRefusal();
 
+    // KIOSK-LIVE-POSE-2: the lazy delete of this screen's expired or orphaned
+    // live-pose key, before the display gate so a goal that refuses display
+    // still gets cleaned up. Nothing about it is in this response.
+    if (livePoseEnabled()) await sweepStationLivePose(stationId, station, now);
+
     // The display gate, unchanged and shared. This may throw the generic
     // not-found, and that is the intended outcome for an unauthorized goal:
     // the screen renders the kiosk's refusal, and is no more of an oracle than
@@ -6602,8 +6629,13 @@ export const wsfRevokeStation = onCall<RevokeStationRequest>(
 
     const db = getFirestore();
     const stationRef = db.doc(`wsfKioskStations/${stationId}`);
+    // KIOSK-LIVE-POSE-2: every key this screen may still have in the Realtime
+    // Database — its running turn's, and its recorded one — deleted after the
+    // commit. Reset on every attempt.
+    let retiringPoseKeys: string[] = [];
 
     await db.runTransaction(async (tx) => {
+      retiringPoseKeys = [];
       const stationSnap = await tx.get(stationRef);
       if (!stationSnap.exists) notFound();
       const station = stationSnap.data() as StationDoc;
@@ -6658,8 +6690,14 @@ export const wsfRevokeStation = onCall<RevokeStationRequest>(
             entry.status === 'active'
           ) {
             returnTurnToLine(tx, servingRef, entry);
+            const poseKey = normalizePoseKey(entry.poseKey);
+            if (poseKey) retiringPoseKeys.push(poseKey);
           }
         }
+      }
+      const recordedPoseKey = normalizePoseKey(station.livePoseKey);
+      if (recordedPoseKey && !retiringPoseKeys.includes(recordedPoseKey)) {
+        retiringPoseKeys.push(recordedPoseKey);
       }
 
       if (pairingRef && pairingSnap?.exists) {
@@ -6679,6 +6717,8 @@ export const wsfRevokeStation = onCall<RevokeStationRequest>(
         }
       }
     });
+
+    for (const key of retiringPoseKeys) await retirePoseKey(key, stationId);
 
     return { stationId, status: 'revoked' };
   }
@@ -8132,7 +8172,22 @@ type TurnEntryDoc = {
    * and why ('stationRevoked'). Not an ending: the entry is `waiting` again. */
   requeuedAt?: FirebaseFirestore.Timestamp | null;
   requeueReason?: string | null;
+  /** KIOSK-LIVE-POSE-2: this turn's live-pose key and when it stops working
+   * (ms). Minted when the turn becomes `active` while WSF_LIVE_POSE is on;
+   * removed on every path out of `active`. */
+  poseKey?: string | null;
+  poseExpiresAt?: number | null;
 };
+
+/**
+ * KIOSK-LIVE-POSE-2: the entry fields that remove a turn's live-pose key, or
+ * nothing when it has none. Spread into the update of every path out of
+ * `active`, so a turn without a key is written exactly as before.
+ */
+function clearedPoseFields(entry: TurnEntryDoc): Record<string, FirebaseFirestore.FieldValue> {
+  if (entry.poseKey === undefined && entry.poseExpiresAt === undefined) return {};
+  return { poseKey: FieldValue.delete(), poseExpiresAt: FieldValue.delete() };
+}
 
 /** wsfTurnLines/{lineId} — the event's line. */
 type TurnLineDoc = {
@@ -8590,12 +8645,26 @@ async function readTurnState(
   lineId: string,
   now: number
 ): Promise<TurnStateResponse> {
+  return (await readTurnStateDetail(authorized, lineId, now)).state;
+}
+
+/**
+ * readTurnState, plus the station document and the served entry it read, so
+ * wsfTurnState can answer KIOSK-LIVE-POSE-2's `livePose` without a second read.
+ * Neither leaves this file: only `state` is ever a response.
+ */
+async function readTurnStateDetail(
+  authorized: AuthorizedStation,
+  lineId: string,
+  now: number
+): Promise<{ state: TurnStateResponse; station: StationDoc; servedEntry: TurnEntryDoc | null }> {
   const db = getFirestore();
   const snap = await authorized.stationRef.get();
   const station = snap.exists ? (snap.data() as StationDoc) : authorized.station;
   const stationLabel = stationVisibleLabel(station);
 
   let assigned: TurnHallAssignment | null = null;
+  let servedEntry: TurnEntryDoc | null = null;
   const servingId = normalizeStringId(
     (station.serving as { entryId?: unknown } | null | undefined)?.entryId
   );
@@ -8605,6 +8674,7 @@ async function readTurnState(
       const entry = entrySnap.data() as TurnEntryDoc;
       if (entry.lineId === lineId && entry.assignedStationId === authorized.stationId) {
         assigned = hallAssignment(entry, now);
+        servedEntry = entry;
       }
     }
   }
@@ -8630,12 +8700,62 @@ async function readTurnState(
   }
 
   return {
-    stationId: authorized.stationId,
-    stationLabel,
-    assigned,
-    result,
-    waitingCount: await countTurnWaiting(lineId),
+    state: {
+      stationId: authorized.stationId,
+      stationLabel,
+      assigned,
+      result,
+      waitingCount: await countTurnWaiting(lineId),
+    },
+    station,
+    servedEntry,
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// KIOSK-LIVE-POSE-2 — who may hold a turn's live-pose key, and its cleanup.
+//
+// The key is a capability (see live-pose.ts). Two answers carry it and no
+// other: wsfMyTurn, to the member whose active turn it is, and wsfTurnState,
+// to the station serving that turn. Both answers are null while WSF_LIVE_POSE
+// is off, before the turn starts, after it ends and after the key expires.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The key the serving station may read, or null. */
+function stationLivePose(
+  stationId: string,
+  station: StationDoc,
+  entry: TurnEntryDoc | null,
+  now: number
+): LivePose | null {
+  if (!entry || effectiveTurnStatus(entry, now) !== 'active') return null;
+  if (entry.assignedStationId !== stationId || entry.attemptStationId !== stationId) return null;
+  const key = normalizePoseKey(entry.poseKey);
+  const serving = station.serving as StationServing | null | undefined;
+  if (!key || normalizePoseKey(serving?.poseKey) !== key) return null;
+  return livePoseIfLive(key, entry.poseExpiresAt, now);
+}
+
+/**
+ * The lazy delete. A station's recorded key is still in use only while its
+ * `serving` pointer names it and it has not expired. Anything else is an
+ * expired or orphaned key (its turn ended and the delete after that commit
+ * failed, or the screen moved on), so it is deleted now. Costs nothing on a
+ * poll with no recorded key, which is every poll between turns once cleanup
+ * has run.
+ */
+async function sweepStationLivePose(
+  stationId: string,
+  station: StationDoc,
+  now: number
+): Promise<void> {
+  const key = normalizePoseKey(station.livePoseKey);
+  if (!key) return;
+  const serving = station.serving as StationServing | null | undefined;
+  if (normalizePoseKey(serving?.poseKey) === key && livePoseIfLive(key, serving?.poseExpiresAt, now)) {
+    return;
+  }
+  await retirePoseKey(key, stationId);
 }
 
 /**
@@ -8706,6 +8826,9 @@ function returnTurnToLine(
     attemptStartedAt: null,
     requeuedAt: FieldValue.serverTimestamp(),
     requeueReason: 'stationRevoked',
+    // KIOSK-LIVE-POSE-2: the dropped attempt's key goes with it. The caller
+    // deletes its node after the commit; the next start mints a new one.
+    ...clearedPoseFields(entry),
   });
 }
 
@@ -9015,6 +9138,10 @@ type MyTurnResponse = {
    * answer matches it to THAT entry rather than to any entry on the goal; it is
    * null on a receipt stored before the field existed. */
   receipt: { amount: number; unit: string; goalId: string; entryId: string | null } | null;
+  /** KIOSK-LIVE-POSE-2: the key this phone writes its frames under, only for
+   * the caller's own ACTIVE turn and only until it expires. Null otherwise,
+   * and always null while WSF_LIVE_POSE is off. */
+  livePose: LivePose | null;
 };
 
 export const wsfMyTurn = onCall<MyTurnRequest>(
@@ -9051,16 +9178,16 @@ export const wsfMyTurn = onCall<MyTurnRequest>(
       .doc(`wsfTurnMembers/${turnMemberDocId(event.lineId, uid)}`)
       .get();
     const entryId = normalizeStringId((memberSnap.data() as TurnMemberDoc | undefined)?.entryId);
-    if (!entryId) return { turn: null, receipt };
+    if (!entryId) return { turn: null, receipt, livePose: null };
 
     const entrySnap = await db.doc(`wsfTurnEntries/${entryId}`).get();
-    if (!entrySnap.exists) return { turn: null, receipt };
+    if (!entrySnap.exists) return { turn: null, receipt, livePose: null };
     const entry = entrySnap.data() as TurnEntryDoc;
     // Somebody else's entry could only be here through a hand edit, and the
     // answer for it is the answer for no entry at all.
-    if (entry.uid !== uid || entry.lineId !== event.lineId) return { turn: null, receipt };
+    if (entry.uid !== uid || entry.lineId !== event.lineId) return { turn: null, receipt, livePose: null };
     const status = effectiveTurnStatus(entry, now);
-    if (!isTurnLive(status)) return { turn: null, receipt };
+    if (!isTurnLive(status)) return { turn: null, receipt, livePose: null };
 
     let ahead = 0;
     if (status === 'waiting') {
@@ -9096,6 +9223,10 @@ export const wsfMyTurn = onCall<MyTurnRequest>(
         attemptOpen: status === 'active' && typeof entry.attemptId === 'string',
       },
       receipt,
+      livePose:
+        livePoseEnabled() && status === 'active'
+          ? livePoseIfLive(entry.poseKey, entry.poseExpiresAt, now)
+          : null,
     };
   }
 );
@@ -9225,8 +9356,13 @@ export const wsfLeaveTurnLine = onCall<LeaveTurnLineRequest>(
 
     const db = getFirestore();
     const entryRef = db.doc(`wsfTurnEntries/${entryId}`);
+    // KIOSK-LIVE-POSE-2: the key of the turn this leave ends, deleted after
+    // the commit. Reset on every attempt, so a retried transaction never
+    // carries a key from an attempt that did not commit.
+    let retiring: { key: string; stationId: string | null } | null = null;
 
     await db.runTransaction(async (tx) => {
+      retiring = null;
       const snap = await tx.get(entryRef);
       if (!snap.exists) notFound();
       const entry = snap.data() as TurnEntryDoc;
@@ -9249,7 +9385,15 @@ export const wsfLeaveTurnLine = onCall<LeaveTurnLineRequest>(
           leftAt: FieldValue.serverTimestamp(),
           endedBy,
           readyLeaseExpiresAt: null,
+          ...clearedPoseFields(entry),
         });
+        const poseKey = normalizePoseKey(entry.poseKey);
+        if (poseKey) {
+          retiring = {
+            key: poseKey,
+            stationId: normalizeStringId(entry.attemptStationId) ?? stationId,
+          };
+        }
       }
       // The screen stops showing them on its very next read anyway — it
       // re-reads the entry — but the pointer is cleared so the station is not
@@ -9272,6 +9416,9 @@ export const wsfLeaveTurnLine = onCall<LeaveTurnLineRequest>(
       }
     });
 
+    const ended = retiring as { key: string; stationId: string | null } | null;
+    if (ended) await retirePoseKey(ended.key, ended.stationId);
+
     return { entryId, status: 'left' };
   }
 );
@@ -9286,17 +9433,31 @@ export const wsfLeaveTurnLine = onCall<LeaveTurnLineRequest>(
 // it contains, or anywhere in this file — and no uid, ever, for any caller.
 // The entryId is not in the response either: the hall has no use for it, and
 // the fewer handles a public screen holds the better.
+//
+// KIOSK-LIVE-POSE-2: `livePose` is the one addition, and it is this
+// callable's alone. The other station callables that answer with the turn
+// state (call, start, complete, cancel) do not carry it. It is the key of the
+// turn THIS station is running, while it runs and has not expired, and null
+// otherwise. It is also where an expired or orphaned key of this station is
+// deleted (sweepStationLivePose).
 // ─────────────────────────────────────────────────────────────────────────────
 
 type TurnStateRequest = { stationId?: unknown; secret?: unknown };
+type TurnStateWithPoseResponse = TurnStateResponse & { livePose: LivePose | null };
 
 export const wsfTurnState = onCall<TurnStateRequest>(
   { region: 'us-central1', invoker: 'public' },
-  async (request): Promise<TurnStateResponse> => {
+  async (request): Promise<TurnStateWithPoseResponse> => {
     const now = Date.now();
     const authorized = await authorizeStationForTurn(request.data, request.rawRequest, now);
     const event = await resolveTurnEvent(authorized.goalId);
-    return readTurnState(authorized, event.lineId, now);
+    const { state, station, servedEntry } = await readTurnStateDetail(authorized, event.lineId, now);
+    let livePose: LivePose | null = null;
+    if (livePoseEnabled()) {
+      livePose = stationLivePose(authorized.stationId, station, servedEntry, now);
+      await sweepStationLivePose(authorized.stationId, station, now);
+    }
+    return { ...state, livePose };
   }
 );
 
@@ -9548,12 +9709,22 @@ export const wsfStartTurn = onCall<StartTurnRequest>(
     // Minted OUTSIDE the transaction so a Firestore retry re-uses the same
     // value rather than minting a second one and writing whichever landed.
     const mintedAttemptId = mintTurnAttemptId();
+    // KIOSK-LIVE-POSE-2: the turn's live-pose key, minted the same way and
+    // only while the switch is on.
+    const mintedPoseKey = livePoseEnabled() ? mintPoseKey() : null;
 
     // Same discipline as wsfTurnReady: the verdict is decided inside the
     // transaction and raised outside it, so a refusal never throws away the
     // no-show recovery it just performed.
+    type StartedPose = {
+      key: string;
+      expiresAt: number;
+      writerUid: string;
+      earlierKey: string | null;
+      entryId: string;
+    };
     type StartOutcome =
-      | { kind: 'started'; goalId: string }
+      | { kind: 'started'; goalId: string; pose: StartedPose | null }
       | { kind: 'refused'; code: 'failed-precondition' | 'permission-denied'; message: string };
 
     const outcome = await db.runTransaction(async (tx): Promise<StartOutcome> => {
@@ -9592,8 +9763,9 @@ export const wsfStartTurn = onCall<StartTurnRequest>(
       if (entry.assignedStationId !== stationId) return nobody;
 
       if (entry.status === 'active' && normalizeStringId(entry.attemptId)) {
-        // Already started. The same attempt, and not a second one.
-        return { kind: 'started', goalId: entry.goalId };
+        // Already started. The same attempt, and not a second one — and the
+        // same live-pose key: a replay mints nothing.
+        return { kind: 'started', goalId: entry.goalId, pose: null };
       }
       // A CLOSED GOAL: no attempt is minted and nothing advances — the lapse
       // recovery below included. A turn started before the closure keeps its
@@ -9622,18 +9794,71 @@ export const wsfStartTurn = onCall<StartTurnRequest>(
         };
       }
 
+      // KIOSK-LIVE-POSE-2: the entry becomes `active` here, and only here,
+      // so this is where its key is minted. It is stored on the entry and on
+      // `serving`, and recorded as the station's key so the station's earlier
+      // key can be found and deleted. It expires two minutes after the turn
+      // started, whatever happens to the turn.
+      const uidForPose = normalizeStringId(entry.uid);
+      const pose =
+        mintedPoseKey && uidForPose
+          ? { key: mintedPoseKey, expiresAt: now + LIVE_POSE_TTL_MS }
+          : null;
       tx.update(entryRef, {
         status: 'active' satisfies TurnStatus,
         lineStatusKey: turnStatusKey(lineId, 'active'),
         attemptId: mintedAttemptId,
         attemptStationId: stationId,
         attemptStartedAt: Timestamp.fromMillis(now),
+        ...(pose ? { poseKey: pose.key, poseExpiresAt: pose.expiresAt } : {}),
       });
-      return { kind: 'started', goalId: entry.goalId };
+      if (pose) {
+        tx.update(stationRef, {
+          'serving.poseKey': pose.key,
+          'serving.poseExpiresAt': pose.expiresAt,
+          livePoseKey: pose.key,
+        });
+      }
+      return {
+        kind: 'started',
+        goalId: entry.goalId,
+        pose:
+          pose && uidForPose
+            ? {
+                ...pose,
+                writerUid: uidForPose,
+                earlierKey: normalizePoseKey(station.livePoseKey),
+                entryId: entryRef.id,
+              }
+            : null,
+      };
     });
 
     if (outcome.kind === 'refused') throw new HttpsError(outcome.code, outcome.message);
     const chosenGoalId: string | null = outcome.goalId;
+
+    // KIOSK-LIVE-POSE-2: after the commit, make the key work (live-pose.ts,
+    // armPoseKey): the station's earlier key is deleted, then `meta` is
+    // written, then the turn is confirmed still running with this key.
+    const started = outcome.pose;
+    if (started) {
+      await armPoseKey({
+        key: started.key,
+        writerUid: started.writerUid,
+        expiresAt: started.expiresAt,
+        earlierKey: started.earlierKey,
+        stationId,
+        stillLive: async () => {
+          const snap = await db.doc(`wsfTurnEntries/${started.entryId}`).get();
+          const current = snap.exists ? (snap.data() as TurnEntryDoc) : null;
+          return (
+            current !== null &&
+            current.status === 'active' &&
+            normalizePoseKey(current.poseKey) === started.key
+          );
+        },
+      });
+    }
 
     const activity =
       event.activities.find((a) => a.goalId === chosenGoalId) ??
@@ -9686,9 +9911,13 @@ async function completeTurnEntry(args: {
   // What the transaction read, carried from `read` to `write`.
   let current: TurnEntryDoc | null = null;
   let stationSnap: FirebaseFirestore.DocumentSnapshot | null = null;
+  // KIOSK-LIVE-POSE-2: the key of the turn this commit ends, deleted after it.
+  // Reset by every `read`, so a retried transaction carries only its own.
+  let retiringPoseKey: string | null = null;
 
   const hook: TurnCompletionHook = {
     async read(tx, contributionExists) {
+      retiringPoseKey = null;
       const [snap, sSnap] = await Promise.all([
         tx.get(entryRef),
         stationRef ? tx.get(stationRef) : Promise.resolve(null),
@@ -9736,7 +9965,12 @@ async function completeTurnEntry(args: {
         readyLeaseExpiresAt: null,
         resultAmount: outcome.amount,
         resultUnit: outcome.unit,
+        ...clearedPoseFields(live),
       });
+      // The count recorded above is the Record's, through the contribution's
+      // own transaction. The key is only collected here for deletion; nothing
+      // under it is read.
+      retiringPoseKey = normalizePoseKey(live.poseKey);
       // THE PLACE COMES BACK. A finished turn frees the account's one place at
       // the event, so they may get back in line — at the BACK of it.
       const uid = normalizeStringId(live.uid);
@@ -9760,7 +9994,18 @@ async function completeTurnEntry(args: {
         const servingId = normalizeStringId(
           (station.serving as { entryId?: unknown } | null | undefined)?.entryId
         );
-        if (servingId === entryRef.id) tx.update(stationRef, { 'serving.calledName': '' });
+        if (servingId === entryRef.id) {
+          tx.update(
+            stationRef,
+            retiringPoseKey
+              ? {
+                  'serving.calledName': '',
+                  'serving.poseKey': FieldValue.delete(),
+                  'serving.poseExpiresAt': FieldValue.delete(),
+                }
+              : { 'serving.calledName': '' }
+          );
+        }
       }
       if (attemptStationId) {
         tx.set(
@@ -9780,13 +10025,16 @@ async function completeTurnEntry(args: {
     },
   };
 
-  return performContribution({
+  const result = await performContribution({
     uid: entry.uid,
     goalId: entry.goalId,
     attemptId,
     count: args.count,
     turn: hook,
   });
+  const endedKey = retiringPoseKey as string | null;
+  if (endedKey) await retirePoseKey(endedKey, attemptStationId);
+  return result;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -10004,8 +10252,12 @@ export const wsfCancelTurn = onCall<CancelTurnRequest>(
     const db = getFirestore();
     const lineId = event.lineId;
     const { stationId, stationRef } = authorized;
+    // KIOSK-LIVE-POSE-2: the key of the turn this cancel ends, deleted after
+    // the commit. Reset on every attempt.
+    let retiringPoseKey: string | null = null;
 
     const cancelled = await db.runTransaction(async (tx): Promise<'done' | 'stale'> => {
+      retiringPoseKey = null;
       const stationSnap = await tx.get(stationRef);
       if (!stationSnap.exists) return 'stale';
       const station = stationSnap.data() as StationDoc;
@@ -10031,7 +10283,9 @@ export const wsfCancelTurn = onCall<CancelTurnRequest>(
             leftAt: FieldValue.serverTimestamp(),
             endedBy: 'station',
             readyLeaseExpiresAt: null,
+            ...clearedPoseFields(entry),
           });
+          retiringPoseKey = normalizePoseKey(entry.poseKey);
           const uid = normalizeStringId(entry.uid);
           if (uid) tx.delete(db.doc(`wsfTurnMembers/${turnMemberDocId(lineId, uid)}`));
         }
@@ -10040,6 +10294,8 @@ export const wsfCancelTurn = onCall<CancelTurnRequest>(
       return 'done';
     });
     if (cancelled === 'stale') throw new HttpsError('failed-precondition', TURN_STALE_MESSAGE);
+    const endedKey = retiringPoseKey as string | null;
+    if (endedKey) await retirePoseKey(endedKey, stationId);
 
     return readTurnState(authorized, lineId, Date.now());
   }
