@@ -1,0 +1,67 @@
+
+Running 7 tests using 1 worker
+
+[1/7] [chromium] › tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:288:9 › W7 Check 43 · PRIVACY-TOGGLE (head) › U1 fail-first: a failed save (refused) — is the error still shown once the switch rests on the stored value?
+[chromium] › tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:288:9 › W7 Check 43 · PRIVACY-TOGGLE (head) › U1 fail-first: a failed save (refused) — is the error still shown once the switch rests on the stored value?
+MEASURE U1 refused (head): {"mode":"refused","injectedHits":1,"setterAnswers":["403 {\"error\":{\"status\":\"PERMISSION_DENIED\",\"message\":\"You are not an active member of this community.\"}}"],"storedBefore":{"name":null,"activity":null},"storedAfter":{"name":null,"activity":null},"switchBefore":"on","switchAtSettle":"absent","switchEqualsStored":"row gone","errorVisibleAtSettle":true,"errorSpans":["+75..still shown \"You’re no longer a member of W7 Harbor Movers, so this setting can’t be changed.\""],"errorEverPainted":true,"loadingFlashes":[],"switchTimeline":[],"settleAfterMs":3069}
+
+[2/7] [chromium] › tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:288:9 › W7 Check 43 · PRIVACY-TOGGLE (head) › U1 fail-first: a failed save (lost) — is the error still shown once the switch rests on the stored value?
+[chromium] › tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:288:9 › W7 Check 43 · PRIVACY-TOGGLE (head) › U1 fail-first: a failed save (lost) — is the error still shown once the switch rests on the stored value?
+MEASURE U1 lost (head): {"mode":"lost","injectedHits":1,"setterAnswers":["failed: net::ERR_FAILED"],"storedBefore":{"name":null,"activity":null},"storedAfter":{"name":null,"activity":null},"switchBefore":"on","switchAtSettle":"on","switchEqualsStored":true,"errorVisibleAtSettle":true,"errorSpans":["+87..still shown \"That change wasn’t saved. The switches show your saved setting.\nTry again\""],"errorEverPainted":true,"loadingFlashes":[],"switchTimeline":[],"settleAfterMs":3054}
+
+[3/7] [chromium] › tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:288:9 › W7 Check 43 · PRIVACY-TOGGLE (head) › U1 fail-first: a failed save (landButDrop) — is the error still shown once the switch rests on the stored value?
+[chromium] › tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:288:9 › W7 Check 43 · PRIVACY-TOGGLE (head) › U1 fail-first: a failed save (landButDrop) — is the error still shown once the switch rests on the stored value?
+MEASURE U1 landButDrop (head): {"mode":"landButDrop","injectedHits":1,"setterAnswers":["failed: net::ERR_FAILED"],"storedBefore":{"name":null,"activity":null},"storedAfter":{"name":"private","activity":null},"switchBefore":"on","switchAtSettle":"off","switchEqualsStored":true,"errorVisibleAtSettle":true,"errorSpans":["+112..still shown \"We couldn’t confirm that change. The switches show what’s saved now.\nTry again\""],"errorEverPainted":true,"loadingFlashes":[],"switchTimeline":["+112 wsf-privacy-panel-name-A=false"],"settleAfterMs":3050}
+
+[4/7] [chromium] › tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:288:9 › W7 Check 43 · PRIVACY-TOGGLE (head) › U1 fail-first: a failed save (realRefusal) — is the error still shown once the switch rests on the stored value?
+[chromium] › tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:288:9 › W7 Check 43 · PRIVACY-TOGGLE (head) › U1 fail-first: a failed save (realRefusal) — is the error still shown once the switch rests on the stored value?
+MEASURE U1 realRefusal (head): {"mode":"realRefusal","injectedHits":0,"setterAnswers":["403 {\"error\":{\"message\":\"Members only.\",\"status\":\"PERMISSION_DENIED\"}}"],"storedBefore":{"name":null,"activity":null},"storedAfter":{"name":null,"activity":null},"switchBefore":"on","switchAtSettle":"absent","switchEqualsStored":"row gone","errorVisibleAtSettle":true,"errorSpans":["+70..still shown \"You’re no longer a member of W7 Summit Walkers, so this setting can’t be changed.\""],"errorEverPainted":true,"loadingFlashes":[],"switchTimeline":[],"settleAfterMs":3054}
+
+[5/7] [chromium] › tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:350:7 › W7 Check 43 · PRIVACY-TOGGLE (head) › U1c positive control: a persistent error is seen by the same instrument
+[chromium] › tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:350:7 › W7 Check 43 · PRIVACY-TOGGLE (head) › U1c positive control: a persistent error is seen by the same instrument
+MEASURE U1c control (head): {"errorVisibleAtSettle":true,"errorSpans":["+303..still shown \"Your communities couldn’t be loaded just now.\nTry again\""],"errorEverPainted":true,"loadingFlashes":["+232"],"switchTimeline":[],"settleAfterMs":4239}
+
+[6/7] [chromium] › tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:366:7 › W7 Check 43 · PRIVACY-TOGGLE (head) › R rows 1–4 and 6: name OFF, name OFF + activity ON, activity OFF, A leaves B, what others read, public paths
+[chromium] › tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:366:7 › W7 Check 43 · PRIVACY-TOGGLE (head) › R rows 1–4 and 6: name OFF, name OFF + activity ON, activity OFF, A leaves B, what others read, public paths
+MEASURE R0 initial (defaults) (head): {"storedA":{"name":null,"activity":null},"storedB":{"name":null,"activity":null},"uiA":["on","on"],"others":{"membersOk":true,"mNamedInMembers":true,"memberCount":2,"uidInPayload":false,"activityOk":true,"activityEntries":["O (named)","M (named)"],"contributorsToday":2,"activityUid":false}}
+
+MEASURE R1/R3 name OFF, settled (head): {"storedA":{"name":"private","activity":null},"storedB":{"name":null,"activity":null},"ui":{"aName":"off","aActivity":"on","bName":"on","bActivity":"on"},"notes":{"anonymousNoteA":0,"offNoteA":null},"othersA":{"membersOk":true,"mNamedInMembers":false,"memberCount":2,"uidInPayload":false,"activityOk":true,"activityEntries":["O (named)","anonymous"],"contributorsToday":2,"activityUid":false},"othersB":{"membersOk":true,"mNamedInMembers":true,"memberCount":2,"uidInPayload":false},"error":false}
+
+MEASURE R1/R3 name OFF, after reload (head): {"storedA":{"name":"private","activity":null},"storedB":{"name":null,"activity":null},"ui":{"aName":"off","aActivity":"on","bName":"on","bActivity":"on"},"notes":{"anonymousNoteA":0,"offNoteA":null},"othersA":{"membersOk":true,"mNamedInMembers":false,"memberCount":2,"uidInPayload":false,"activityOk":true,"activityEntries":["O (named)","anonymous"],"contributorsToday":2,"activityUid":false},"othersB":{"membersOk":true,"mNamedInMembers":true,"memberCount":2,"uidInPayload":false},"error":false}
+
+MEASURE R2 activity OFF (name OFF), after reload (head): {"storedA":{"name":"private","activity":"private"},"storedB":{"name":null,"activity":null},"ui":{"aName":"off","aActivity":"off","bName":"on","bActivity":"on"},"notes":{"anonymousNoteA":0,"offNoteA":null},"othersA":{"membersOk":true,"mNamedInMembers":false,"memberCount":2,"uidInPayload":false,"activityOk":true,"activityEntries":["O (named)"],"contributorsToday":2,"activityUid":false},"othersB":{"membersOk":true,"mNamedInMembers":true,"memberCount":2,"uidInPayload":false},"error":false}
+
+MEASURE R3b name ON, activity OFF, after reload (head): {"storedA":{"name":"visible","activity":"private"},"storedB":{"name":null,"activity":null},"ui":{"aName":"on","aActivity":"off","bName":"on","bActivity":"on"},"notes":{"anonymousNoteA":0,"offNoteA":null},"othersA":{"membersOk":true,"mNamedInMembers":true,"memberCount":2,"uidInPayload":false,"activityOk":true,"activityEntries":["O (named)"],"contributorsToday":2,"activityUid":false},"othersB":{"membersOk":true,"mNamedInMembers":true,"memberCount":2,"uidInPayload":false},"error":false}
+
+MEASURE R4 set requests (head): [{"groupId":"w7c43a-mui12mox-7e98darows","name":"private"},{"groupId":"w7c43a-mui12mox-7e98darows","activity":"private"},{"groupId":"w7c43a-mui12mox-7e98darows","name":"visible"}]
+
+MEASURE R6 public paths (head): {"wsfGoalRecentAdditions":{"ok":true,"mName":false,"oName":false,"mUid":false},"wsfGoalPulse":{"ok":true,"mName":false,"oName":false,"mUid":false},"displayPage":{"chars":143,"mName":false,"oName":false,"sample":"Confirmed 6:48 AM W7 HARBOR MOVERS W7 privacy goal Open · Ends Sat, Oct 3 See what WE can do. 0 of 500 squats 0% complete 500 to go SAMPLE DATA"}}
+
+  1) [chromium] › tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:366:7 › W7 Check 43 · PRIVACY-TOGGLE (head) › R rows 1–4 and 6: name OFF, name OFF + activity ON, activity OFF, A leaves B, what others read, public paths 
+
+    Error: row 3: the anonymous note is shown
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 1
+    Received: 0
+
+      406 |     expect.soft(r1.r.othersA.memberCount, 'row 1: still counted in A').toBe(2);
+      407 |     expect.soft(r1.r.othersA.activityEntries, 'row 3: an anonymous row, not a missing one').toContain('anonymous');
+    > 408 |     expect.soft(r1.r.notes.anonymousNoteA, 'row 3: the anonymous note is shown').toBe(1);
+          |                                                                                  ^
+      409 |     expect.soft(r1.r.othersA.contributorsToday, 'row 3: still counted today').toBe(2);
+      410 |
+      411 |     // Row 2: activity OFF → settle, then reload.
+        at /home/user/goarrive/apps/westayfit/tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:408:82
+
+    Error Context: test-results/sprint-w7-privacy-toggle-v-65a89-at-others-read-public-paths-chromium/error-context.md
+
+
+[7/7] [chromium] › tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:456:7 › W7 Check 43 · PRIVACY-TOGGLE (head) › R5 a nonmember (and a signed-out caller) cannot set, and nothing is written
+[chromium] › tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:456:7 › W7 Check 43 · PRIVACY-TOGGLE (head) › R5 a nonmember (and a signed-out caller) cannot set, and nothing is written
+MEASURE R5 nonmember (head): {"nonmember":{"ok":false,"code":"PERMISSION_DENIED","message":"Members only."},"signedOut":{"ok":false,"code":"UNAUTHENTICATED"},"nonmemberMembershipDocCreated":false,"mStoredUnchanged":true,"nonmemberReadMembers":{"ok":false,"code":"PERMISSION_DENIED"}}
+
+  1 failed
+    [chromium] › tests-e2e/sprint-w7-privacy-toggle-verify.spec.ts:366:7 › W7 Check 43 · PRIVACY-TOGGLE (head) › R rows 1–4 and 6: name OFF, name OFF + activity ON, activity OFF, A leaves B, what others read, public paths 
+  6 passed (49.7s)

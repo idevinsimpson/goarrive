@@ -1,0 +1,111 @@
+
+Running 56 tests using 1 worker
+
+  ✓   1 [chromium] › tests-e2e/sprint-w1b-contribute-exits.spec.ts:143:7 › contribute exits · Back returns to the mounted tab › from the RECEIPT (2.7s)
+  ✓   2 [chromium] › tests-e2e/sprint-w1b-contribute-exits.spec.ts:155:7 › contribute exits · Back returns to the mounted tab › from an UNRESOLVED attempt (2.6s)
+  ✓   3 [chromium] › tests-e2e/sprint-w1b-contribute-exits.spec.ts:175:7 › contribute exits · a cold arrival still gets its destination › closed goal opened directly: Back lands on the community, once, and leaves no contribute entry behind (2.1s)
+  ✓   4 [chromium] › tests-e2e/sprint-w1b-kiosk-confinement.spec.ts:363:9 › kiosk confinement · tablet-800x1280 › entry offers no way into the visitor's account · tablet-800x1280 (1.6s)
+  ✓   5 [chromium] › tests-e2e/sprint-w1b-kiosk-confinement.spec.ts:375:9 › kiosk confinement · tablet-800x1280 › the dark receipt offers no way into the visitor's account · tablet-800x1280 (4.9s)
+  ✓   6 [chromium] › tests-e2e/sprint-w1b-kiosk-confinement.spec.ts:363:9 › kiosk confinement · short-phone-390x640 › entry offers no way into the visitor's account · short-phone-390x640 (1.7s)
+  ✓   7 [chromium] › tests-e2e/sprint-w1b-kiosk-confinement.spec.ts:375:9 › kiosk confinement · short-phone-390x640 › the dark receipt offers no way into the visitor's account · short-phone-390x640 (5.0s)
+  ✓   8 [chromium] › tests-e2e/sprint-w1b-kiosk-confinement.spec.ts:421:7 › kiosk confinement · the unresolved notice at the short class › the notice wraps readably and Finish is still reachable under it (2.0s)
+  ✓   9 [chromium] › tests-e2e/sprint-w1b-kiosk-confinement.spec.ts:458:7 › kiosk confinement · the states a correction could quietly break › the unknown outcome keeps its guidance, its record and its confinement (2.1s)
+  ✓  10 [chromium] › tests-e2e/sprint-w1b-kiosk-confinement.spec.ts:500:7 › kiosk confinement · the states a correction could quietly break › a failed sign-out still refuses to show a resting screen, and now says so legibly (2.0s)
+  ✓  11 [chromium] › tests-e2e/sprint-w1b-kiosk-confinement.spec.ts:544:7 › kiosk confinement · the states a correction could quietly break › ordinary personal contribution is untouched: no kiosk semantics, and its own way back (4.0s)
+  ✓  12 [chromium] › tests-e2e/sprint-w1b-kiosk-confinement.spec.ts:702:7 › kiosk confinement · the states a correction could quietly break › a repeated ?kiosk parameter is one verdict, not two (1.5s)
+  ✓  13 [chromium] › tests-e2e/sprint-w1b-kiosk-confinement.spec.ts:733:7 › kiosk confinement · the states a correction could quietly break › the boundary: this is in-app confinement, not a device lockdown (1.6s)
+MEASURE Home · planted scroll: 136
+MEASURE Home · MOVE open: sheet / Home painted behind: {"sheet":true,"home":true}
+MEASURE Home · Tab stops outside the sheet: []
+MEASURE Home · after Close: {"focus":"wsf-member-tab-move","tab":"wsf-member-tab-home","scroll":136,"sameInstance":true}
+  ✓  14 [chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:213:7 › APP-FEEL-PARITY-1 · one-goal MOVE is a sheet over the mounted tab › Home: the tab stays mounted and visible behind every step, untouchable, and Close returns exact scroll, focus and instance (2.9s)
+MEASURE You · receipt: sheet / You painted behind: {"sheet":true,"you":true}
+  ✓  15 [chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:271:7 › APP-FEEL-PARITY-1 · one-goal MOVE is a sheet over the mounted tab › the receipt is in the sheet too, over the tab; “Back to community” still goes to the community (2.2s)
+  ✓  16 [chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:298:7 › APP-FEEL-PARITY-1 · one-goal MOVE is a sheet over the mounted tab › Escape and the scrim close the sheet back to the same tab (2.0s)
+MEASURE entry timeline (first 8 samples with the panel): [{"t":1,"y":28,"o":0},{"t":8,"y":19.8,"o":0.292186},{"t":19,"y":13.4,"o":0.522148},{"t":33,"y":8.6,"o":0.691554},{"t":49,"y":5.5,"o":0.804809},{"t":66,"y":3.4,"o":0.879196},{"t":82,"y":2,"o":0.926844},{"t":99,"y":1.2,"o":0.956862}]
+MEASURE exit timeline: [{"t":0,"y":0,"o":1},{"t":1,"y":0,"o":1},{"t":18,"y":0.4,"o":0.983988},{"t":34,"y":1.6,"o":0.942446},{"t":51,"y":3.3,"o":0.881474},{"t":68,"y":5.5,"o":0.803947},{"t":84,"y":8,"o":0.714352},{"t":101,"y":10.8,"o":0.613679},{"t":118,"y":13.9,"o":0.502526},{"t":134,"y":17.3,"o":0.383104},{"t":151,"y":20.9,"o":0.253675},{"t":168,"y":24.7,"o":0.117255}]
+MEASURE reduced-motion entry: [{"t":0,"y":0,"o":1},{"t":8,"y":0,"o":1},{"t":31,"y":0,"o":1},{"t":38,"y":0,"o":1}]
+  ✓  17 [chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:320:7 › APP-FEEL-PARITY-1 · one-goal MOVE is a sheet over the mounted tab › the sheet travels in and out; reduced motion gets none (6.1s)
+  ✓  18 [chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:367:7 › APP-FEEL-PARITY-1 · one-goal MOVE is a sheet over the mounted tab › preserved: a cold one-goal link and “Already moved?” stay pages with their own Back; kiosk has no sheet (2.0s)
+MEASURE chooser · Tab stops outside the MOVE sheet: []
+  ✓  19 [chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:387:7 › APP-FEEL-PARITY-1 · one-goal MOVE is a sheet over the mounted tab › several goals: the chosen goal opens in a sheet over the chooser, and Back returns to the choice (2.0s)
+MEASURE Close + browser Back: {"path":"/you","tab":"wsf-member-tab-you","sheets":0,"moveSheets":0}
+  ✓  20 [chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:434:7 › APP-FEEL-PARITY-1 · the exit window cannot exit twice › Close, then the browser’s Back inside the exit: one step back, not two (2.9s)
+MEASURE Close during resolution: {"path":"/you","tab":"wsf-member-tab-you","sheets":0,"moveSheets":0,"sawFlow":false}
+  ✓  21 [chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:449:7 › APP-FEEL-PARITY-1 · the exit window cannot exit twice › Close while MOVE is still working out the goal: the answer does not open the flow (2.3s)
+MEASURE MOVE pressed inside the exit: {"path":"/you","tab":"wsf-member-tab-you","sheets":0,"moveSheets":0}
+  ✓  22 [chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:488:7 › APP-FEEL-PARITY-1 · the exit window cannot exit twice › pressing MOVE again inside the exit: the tab behind cannot be reached until the sheet is gone; then MOVE opens normally (4.0s)
+MEASURE goal sheet · Tab / Shift+Tab stops: {"fwd":["wsf-contribute-timer-start","wsf-contribute-done","wsf-contribute-skip-timer","wsf-contribute-close","wsf-contribute-timer-start","wsf-contribute-done","wsf-contribute-skip-timer","wsf-contribute-close","wsf-contribute-timer-start","wsf-contribute-done","wsf-contribute-skip-timer","wsf-contribute-close","wsf-contribute-timer-start","wsf-contribute-done","wsf-contribute-skip-timer","wsf-contribute-close","wsf-contribute-timer-start","wsf-contribute-done","wsf-contribute-skip-timer","wsf-contribute-close"],"back":["wsf-contribute-skip-timer","wsf-contribute-done","wsf-contribute-timer-start","wsf-contribute-close","wsf-contribute-skip-timer","wsf-contribute-done","wsf-contribute-timer-start","wsf-contribute-close","wsf-contribute-skip-timer","wsf-contribute-done","wsf-contribute-timer-start","wsf-contribute-close","wsf-contribute-skip-timer","wsf-contribute-done","wsf-contribute-timer-start","wsf-contribute-close","wsf-contribute-skip-timer","wsf-contribute-done","wsf-contribute-timer-start","wsf-contribute-close"]}
+  ✓  23 [chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:560:7 › APP-FEEL-PARITY-1 · F2: focus stays in the topmost panel › the goal sheet: focus enters on Close, Tab and Shift+Tab stay in the panel, the scrim is no stop (1.6s)
+MEASURE chooser · stops: ["wsf-move-choose-w9afpgoal0-murur9hj-485095f2","wsf-move-choose-w9afpgoal1-murur9hj-485095f2","wsf-move-close","wsf-move-choose-w9afpgoal0-murur9hj-485095f2","wsf-move-choose-w9afpgoal1-murur9hj-485095f2","wsf-move-close","wsf-move-choose-w9afpgoal0-murur9hj-485095f2","wsf-move-choose-w9afpgoal1-murur9hj-485095f2","wsf-move-close","wsf-move-choose-w9afpgoal0-murur9hj-485095f2","wsf-move-choose-w9afpgoal1-murur9hj-485095f2","wsf-move-close","wsf-move-choose-w9afpgoal1-murur9hj-485095f2","wsf-move-choose-w9afpgoal0-murur9hj-485095f2","wsf-move-close","wsf-move-choose-w9afpgoal1-murur9hj-485095f2","wsf-move-choose-w9afpgoal0-murur9hj-485095f2","wsf-move-close","wsf-move-choose-w9afpgoal1-murur9hj-485095f2","wsf-move-choose-w9afpgoal0-murur9hj-485095f2","wsf-move-close","wsf-move-choose-w9afpgoal1-murur9hj-485095f2","wsf-move-choose-w9afpgoal0-murur9hj-485095f2","wsf-move-close"]
+MEASURE goal over chooser · stops: ["wsf-contribute-timer-start","wsf-contribute-done","wsf-contribute-skip-timer","wsf-contribute-close","wsf-contribute-timer-start","wsf-contribute-done","wsf-contribute-skip-timer","wsf-contribute-close","wsf-contribute-timer-start","wsf-contribute-done","wsf-contribute-skip-timer","wsf-contribute-close","wsf-contribute-timer-start","wsf-contribute-done","wsf-contribute-skip-timer","wsf-contribute-close","wsf-contribute-skip-timer","wsf-contribute-done","wsf-contribute-timer-start","wsf-contribute-close","wsf-contribute-skip-timer","wsf-contribute-done","wsf-contribute-timer-start","wsf-contribute-close","wsf-contribute-skip-timer","wsf-contribute-done","wsf-contribute-timer-start","wsf-contribute-close","wsf-contribute-skip-timer","wsf-contribute-done","wsf-contribute-timer-start","wsf-contribute-close"]
+  ✓  24 [chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:576:7 › APP-FEEL-PARITY-1 · F2: focus stays in the topmost panel › the chooser, then a goal over it: each is contained while it is topmost; Close returns to the choice (2.2s)
+MEASURE count step · focus: "heading"
+MEASURE review step · focus: "heading"
+MEASURE receipt · focus: "wsf-contribute-result-headline"
+  ✓  25 [chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:605:7 › APP-FEEL-PARITY-1 · F2: focus stays in the topmost panel › a step that replaces the one the member was on keeps focus in the panel; a control the member is using keeps it (3.6s)
+MEASURE pending / unknown · focus: "heading"
+  ✓  26 [chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:646:7 › APP-FEEL-PARITY-1 · F2: focus stays in the topmost panel › pending and unknown keep focus in the panel (labelled injection: the reply is dropped) (2.4s)
+MEASURE 844 · loading: {"wordmarks":["wsf-member-topbar-wordmark-home","wsf-member-topbar-wordmark"],"formWordmark":0,"h1s":[],"loadingText":"YOUR COMMUNITY\nLoading your community…"}
+  ✓  27 [chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:672:9 › APP-FEEL-PARITY-1 · Community Home loading is the final composition › 390x844: no second masthead while the community resolves (1.4s)
+MEASURE 640 · loading: {"wordmarks":["wsf-member-topbar-wordmark-home","wsf-member-topbar-wordmark"],"formWordmark":0,"h1s":[],"loadingText":"YOUR COMMUNITY\nLoading your community…"}
+  ✓  28 [chromium] › tests-e2e/sprint-w9-app-feel-parity-1.spec.ts:672:9 › APP-FEEL-PARITY-1 · Community Home loading is the final composition › 390x640: no second masthead while the community resolves (1.3s)
+  ✓  29 [chromium] › tests-e2e/ui-contribute-short-phone.spec.ts:276:9 › 390x640 › MOVE step: "I'm done" and "Skip timer" are reachable at rest, clear of the safe inset, and take a real tap (2.2s)
+  ✓  30 [chromium] › tests-e2e/ui-contribute-short-phone.spec.ts:276:9 › 390x664 › MOVE step: "I'm done" and "Skip timer" are reachable at rest, clear of the safe inset, and take a real tap (3.2s)
+  ✓  31 [chromium] › tests-e2e/ui-contribute-short-phone.spec.ts:276:9 › 390x844 › MOVE step: "I'm done" and "Skip timer" are reachable at rest, clear of the safe inset, and take a real tap (3.2s)
+  ✘  32 [chromium] › tests-e2e/ui-contribute-short-phone.spec.ts:319:9 › 390x640 › entry, review, confirmed, unknown and refused all keep their primary reachable and clear of the safe inset (4.0s)
+  ✓  33 [chromium] › tests-e2e/ui-contribute-short-phone.spec.ts:398:9 › 390x640 › /move/[goalId] wears no shell and does not scroll sideways (1.4s)
+  ✓  34 [chromium] › tests-e2e/ui-contribute-short-phone.spec.ts:319:9 › 390x664 › entry, review, confirmed, unknown and refused all keep their primary reachable and clear of the safe inset (3.5s)
+  ✓  35 [chromium] › tests-e2e/ui-contribute-short-phone.spec.ts:398:9 › 390x664 › /move/[goalId] wears no shell and does not scroll sideways (1.3s)
+  ✓  36 [chromium] › tests-e2e/ui-contribute-torture-2.spec.ts:304:5 › R5: leaving and returning while the outcome is unknown restores the SAME attempt, not a new one (5.0s)
+  ✓  37 [chromium] › tests-e2e/ui-contribute-torture-2.spec.ts:362:5 › R7: an unresolved attempt stops the pulse poll and the reminder shows no shared total (8.4s)
+  ✓  38 [chromium] › tests-e2e/ui-contribute-torture-2.spec.ts:408:5 › R9: a goal closing while the outcome is unknown — the landed attempt replays, the lost one is refused (2.4s)
+  ✓  39 [chromium] › tests-e2e/ui-contribute-torture-2.spec.ts:506:5 › R10: an authorized wsfAdjustGoal correction moves both own credit and the shared total on the contribute screen (5.5s)
+  ✓  40 [chromium] › tests-e2e/ui-contribute-torture-2.spec.ts:562:5 › R8: a goal that closes while the member is on Review never becomes a write (3.7s)
+  ✓  41 [chromium] › tests-e2e/ui-contribute-torture-2.spec.ts:613:5 › R14: the pending reminder and the refusal screen are reachable and operable by keyboard (2.6s)
+  ✓  42 [chromium] › tests-e2e/ui-contribute-torture-2.spec.ts:699:5 › R15: an unresolved attempt stays reachable after membership is lost, and its replay ends in the truth (3.0s)
+  ✓  43 [chromium] › tests-e2e/ui-contribute-torture.spec.ts:250:5 › R1 — a double tap on Record is one submission and one truthful receipt (6.1s)
+  ✓  44 [chromium] › tests-e2e/ui-contribute-torture.spec.ts:336:5 › R3 — a late success for goal A never lands on goal B, and A stays reconcilable (4.7s)
+  ✓  45 [chromium] › tests-e2e/ui-contribute-torture.spec.ts:459:5 › R6 — leaving and returning mid-flight keeps the attempt, and the late reply is discarded (4.8s)
+  ✓  46 [chromium] › tests-e2e/ui-contribute-torture.spec.ts:555:5 › R11 — a stale before-total never inverts the confirmed result copy (1.6s)
+  ✓  47 [chromium] › tests-e2e/ui-contribute.spec.ts:254:5 › happy path: move → enter → review → recording → confirmed, then a concurrent peer (6.6s)
+  ✓  48 [chromium] › tests-e2e/ui-contribute.spec.ts:420:5 › mode=record starts at entry; a cold link without groupId stays generic (7.5s)
+  ✓  49 [chromium] › tests-e2e/ui-contribute.spec.ts:465:5 › unknown outcome keeps the same attempt; replaying a landed attempt is "already recorded" (4.4s)
+  ✓  50 [chromium] › tests-e2e/ui-contribute.spec.ts:591:5 › a definitive refusal retires the reminder and says what was not recorded (2.9s)
+  ✓  51 [chromium] › tests-e2e/ui-contribute.spec.ts:645:5 › closed goal, goal crossing, and contributing past the target (6.0s)
+  ✓  52 [chromium] › tests-e2e/ui-contribute.spec.ts:740:5 › sign-in and not-found states are in the same visual system and do not enumerate (1.9s)
+  ✓  53 [chromium] › tests-e2e/ui-contribute.spec.ts:771:5 › membership lost while on the entry screen: the poll ends and the goal is not found (8.6s)
+  ✓  54 [chromium] › tests-e2e/ui-kiosk.spec.ts:262:5 › a whole walk-up: start → sign in → contribute → Finish → start, with nothing left behind (6.9s)
+  ✓  55 [chromium] › tests-e2e/ui-kiosk.spec.ts:490:5 › an unauthorized goal shows the display’s generic refusal, word for word (1.2s)
+  ✓  56 [chromium] › tests-e2e/ui-kiosk.spec.ts:531:5 › nobody touches it: the countdown finishes the session, and Stay puts it back (1.6m)
+
+
+  1) [chromium] › tests-e2e/ui-contribute-short-phone.spec.ts:319:9 › 390x640 › entry, review, confirmed, unknown and refused all keep their primary reachable and clear of the safe inset 
+
+    Error: confirmed: the primary is not reachable at rest: {"wsf-contribute-record-more":"runs below the safe bottom inset (bottom 657, limit 640)"}
+
+    expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 1
+    + Received  + 3
+
+    - Object {}
+    + Object {
+    +   "wsf-contribute-record-more": "runs below the safe bottom inset (bottom 657, limit 640)",
+    + }
+
+      339 |         await expect(page.getByTestId('wsf-member-tabs'), `${state}: a focused flow is wearing member chrome`).toHaveCount(0);
+      340 |         const blockedHere = await unreachableAtRest(page, [primaryTestId]);
+    > 341 |         expect(blockedHere, `${state}: the primary is not reachable at rest: ${JSON.stringify(blockedHere)}`).toEqual({});
+          |                                                                                                               ^
+      342 |         const primary = await page.getByTestId(primaryTestId).boundingBox();
+      343 |         expect(primary, `${state}: ${primaryTestId} is not rendered`).not.toBeNull();
+      344 |         /*
+        at check (/home/user/goarrive/apps/westayfit/tests-e2e/ui-contribute-short-phone.spec.ts:341:111)
+        at /home/user/goarrive/apps/westayfit/tests-e2e/ui-contribute-short-phone.spec.ts:368:7
+
+    Error Context: test-results/ui-contribute-short-phone--a3dff-and-clear-of-the-safe-inset-chromium/error-context.md
+
+  1 failed
+    [chromium] › tests-e2e/ui-contribute-short-phone.spec.ts:319:9 › 390x640 › entry, review, confirmed, unknown and refused all keep their primary reachable and clear of the safe inset 
+  55 passed (4.7m)

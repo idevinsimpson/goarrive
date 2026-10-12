@@ -1,0 +1,234 @@
+import { Tabs, useNavigation, useRouter } from 'expo-router';
+import { signOut } from 'firebase/auth';
+import { useRef, useState } from 'react';
+import { View } from 'react-native';
+
+import { useWsfAuth } from '../../src/auth';
+import { getFirebaseAuth } from '../../src/firebase';
+import { wsfTheme } from '../../src/theme';
+import { armTabsFocusReturnTo, useTabsFocusReturn } from '../../src/ui/focusReturn';
+import { useReducedMotion } from '../../src/ui/useReducedMotion';
+import { MemberTabBar } from '../../src/ui/MemberTabBar';
+import {
+  MemberShellActionsProvider,
+  useMemberShellActions,
+} from '../../src/ui/memberShellActions';
+import { MemberTopBar, type MemberMenuItem } from '../../src/ui/MemberTopBar';
+import { TabSceneFade } from '../../src/ui/TabSceneFade';
+
+/**
+ * THE MEMBER SHELL: one persistent top bar, four real tabs, and MOVE as an
+ * action rather than a destination.
+ *
+ * `(tabs)` IS IN PARENTHESES, AND THAT IS THE LOAD-BEARING DETAIL. A route
+ * group contributes nothing to the URL, so the files in this directory serve
+ * `/`, `/community`, `/community/<id>`, `/activity` and `/you` — the addresses
+ * members and links already use, unchanged to the character. Adopting a real
+ * tab navigator therefore needed no redirect, no rewrite change and no
+ * deep-link migration.
+ *
+ * THE TOP BAR IS OUTSIDE THE NAVIGATOR, ON PURPOSE. It is rendered here, above
+ * `<Tabs>`, so it is mounted once for all four tabs: switching tabs cannot
+ * change it, remount it, or move it by a pixel, and no route can give itself a
+ * different one. Before this, each route drew its own, which is exactly why
+ * Home, Community and Progress carried a navy 22px wordmark, You carried a
+ * white 17px one inside a full-bleed navy card, and MOVE carried none.
+ *
+ * `backBehavior="history"` IS THE BACK-PATH FIX, and it is the router's own
+ * documented setting rather than a hand-rolled history mutation. Without it a
+ * cross-tab navigation — Community list to the Home-owned community detail —
+ * REPLACED the browser history entry instead of pushing one, so Back left the
+ * app entirely. All five navigation methods were measured at +0 before and +1
+ * after; all six `backBehavior` modes were driven, and every mode that gives a
+ * real back destination also makes tab switches cost history entries while
+ * every mode that keeps them cheap leaves Back exiting the app. `history` is
+ * the smallest documented cost that works. The trade — three tab switches now
+ * add two entries where they added one — was measured, reported and accepted.
+ */
+export default function MemberTabsLayout() {
+  /*
+    THE SHELL'S ACTION REGISTRY WRAPS THE SHELL, NOT THE OTHER WAY AROUND.
+
+    The bar reads what the focused screen has registered, so the provider has
+    to sit ABOVE the component that renders the bar — a component cannot
+    consume a context it provides. `ownerUid` empties the registry when the
+    account changes, so one person's Champion action can never be offered to
+    the next person to sign in on the same device.
+  */
+  const { user } = useWsfAuth();
+  return (
+    <MemberShellActionsProvider ownerUid={user?.uid ?? null}>
+      <MemberShell />
+    </MemberShellActionsProvider>
+  );
+}
+
+function MemberShell() {
+  const router = useRouter();
+  const reducedMotion = useReducedMotion();
+  /**
+   * NO ACCOUNT, NO CHROME.
+   *
+   * The shell is how a member moves between their own destinations, and there
+   * is nothing to move between until there is an account — the signed-out home
+   * is a marketing surface, not a tab. The bar used to take `signedIn` and
+   * return null; now that it belongs to the navigator it would otherwise
+   * render on `/` for a signed-out visitor, which is exactly what
+   * `ui-app-shell.spec.ts` caught on the first run of this migration.
+   */
+  const { user } = useWsfAuth();
+  const signedIn = Boolean(user);
+  const [menuOpen, setMenuOpen] = useState(false);
+  /*
+    WHAT THE SCREEN THE MEMBER IS ON HAS ASKED FOR. Today that is exactly one
+    thing — a Champion's Manage community, relocated out of Community Home's
+    own chrome row — and it is offered ABOVE the utilities, because it belongs
+    to the page in front of them while Settings, Build details and Sign out
+    belong to the app.
+  */
+  const routeActions = useMemberShellActions();
+  const [signingOut, setSigningOut] = useState(false);
+  /*
+    FOCUS COMES BACK TO THE CONTROL THAT OPENED MOVE OR THE CONTRIBUTION FLOW.
+    Both are presented over this shell and both leave the document when they
+    close, which drops keyboard focus onto `body`. The shell is the one place
+    that sees them cover it and uncover it, so it is the one place that puts
+    focus back (src/ui/focusReturn.ts).
+  */
+  const shellRef = useRef<View>(null);
+  useTabsFocusReturn(shellRef);
+  // Which tab was selected last, for the tab fade (src/ui/TabSceneFade.tsx).
+  const lastSelectedTab = useRef<string | null>(null);
+
+  /**
+   * THE MENU HOLDS THE QUIET GLOBAL UTILITIES, AND NOTHING THAT DOES NOT WORK.
+   *
+   * Sign out used to sit at the bottom of Home AND inside the navy card on
+   * You; Build details sat only at the bottom of Home, where a member on
+   * another tab could not reach it. Gathering them here is the point of the
+   * affordance.
+   *
+   * No notification bell and no avatar: neither is backed by anything, and a
+   * bell with no notification system behind it is a control that lies.
+   * No "Switch community" either — there is no real switch to invoke, and a
+   * row promising one would be an invention.
+   */
+  const menu: MemberMenuItem[] = [
+    ...routeActions.map(
+      (action): MemberMenuItem => ({
+        kind: 'action',
+        key: action.key,
+        label: action.label,
+        onPress: action.onPress,
+      }),
+    ),
+    {
+      kind: 'link',
+      key: 'settings',
+      label: 'Settings',
+      href: '/settings',
+      onNavigate: (href) => {
+        // The menu closes as Settings opens, so its item cannot take focus
+        // back; the menu's own button does (src/ui/focusReturn.ts).
+        armTabsFocusReturnTo('wsf-member-topbar-menu-button');
+        router.push(href as never);
+      },
+    },
+    {
+      kind: 'link',
+      key: 'build',
+      label: 'Build details',
+      href: '/health',
+      onNavigate: (href) => router.push(href as never),
+    },
+    {
+      kind: 'action',
+      key: 'signout',
+      label: signingOut ? 'Signing out…' : 'Sign out',
+      onPress: () => {
+        if (signingOut) return;
+        setSigningOut(true);
+        void signOut(getFirebaseAuth()).finally(() => setSigningOut(false));
+      },
+    },
+  ];
+
+  /*
+    APP-FEEL-PARITY-1 CHECKPOINT 2. THE WORDMARK SELECTS HOME AS IT STANDS.
+
+    It used to be `router.navigate('/')`, which pushed Home's index route onto
+    the Home stack; the index's own redirect then built a SECOND copy of the
+    member's community through its loading branch. Measured on `91392f9d`:
+    the loading screen, 16 callables and two community instances, with the
+    member's scroll and loaded state left behind in the first. That is the
+    owner's "slow tab change" and "duplicate Home header".
+
+    It now does exactly what the Home tab in the bar does, and what the
+    contribution flow's "Back to home" already does: select the Home tab with
+    its mounted screen, its scroll and its data. From Home it is a no-op, as
+    the top bar has always promised.
+  */
+  const rootNavigation = useNavigation();
+  const goHome = () =>
+    rootNavigation.dispatch({
+      type: 'POP_TO',
+      payload: { name: '(tabs)', params: { screen: '(home)' } },
+    } as never);
+
+  return (
+    <View ref={shellRef} style={{ flex: 1, backgroundColor: wsfTheme.colors.background }}>
+      {signedIn ? (
+        <MemberTopBar
+          menu={menu}
+          menuOpen={menuOpen}
+          onMenuToggle={setMenuOpen}
+          onHome={goHome}
+        />
+      ) : null}
+      <View style={{ flex: 1 }}>
+        <Tabs
+          backBehavior="history"
+          screenOptions={{
+            headerShown: false,
+            sceneStyle: { backgroundColor: wsfTheme.colors.background },
+            // KEEP EVERY VISITED TAB MOUNTED. This is what makes "switching
+            // away and back does not throw your page out" true. Named rather
+            // than inherited, so a later edit has to argue with a line.
+            freezeOnBlur: false,
+            // The navigator swaps tabs instantly; the fade is the entering
+            // tab's content, below (src/ui/TabSceneFade.tsx).
+            animation: 'none',
+          }}
+          /*
+            APP-FEEL-PARITY-1 CHECKPOINT 3. A TAB CHANGE FADES, QUIETLY.
+            The reference's tab switch is "a quiet fade only (no lift/
+            bounce)": the leaving tab is gone at once and the new one comes
+            from 0.35 opacity to full over 140 ms (styles.css MOTION-FEEL-1,
+            --dur-tab). Only a change of tab fades. Reduced motion: none.
+          */
+          screenLayout={({ route, navigation, children }) => {
+            const tabs = navigation.getState();
+            return (
+              <TabSceneFade
+                routeKey={route.key}
+                selectedKey={tabs.routes[tabs.index]?.key}
+                lastSelected={lastSelectedTab}
+                reducedMotion={reducedMotion}
+              >
+                {children}
+              </TabSceneFade>
+            );
+          }}
+          tabBar={(props) =>
+            signedIn ? <MemberTabBar {...props} onMove={() => router.push('/move')} /> : null
+          }
+        >
+          <Tabs.Screen name="(home)" />
+          <Tabs.Screen name="community" />
+          <Tabs.Screen name="activity" />
+          <Tabs.Screen name="you" />
+        </Tabs>
+      </View>
+    </View>
+  );
+}

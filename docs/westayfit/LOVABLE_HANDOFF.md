@@ -1,48 +1,93 @@
-# We Stay Fit — Lovable ↔ Firebase Handoff
+# We Stay Fit — Lovable / Firebase Boundary and North Star Handoff
 
-WSF has two active surfaces: a Lovable-built marketing/interest site and this Firebase-side first-party app. They live in the same Firebase project (they share Firestore and Auth) but are treated as separate systems for data flow.
+Reconciled: September 26, 2026.
+Governing product strategy: Strategic Master v3.0 + v3.1 addendum.
 
-## The Four Never-Builds
+There are now two completely different uses of Lovable in WSF. Do not conflate them.
 
-These are non-negotiable at every milestone.
+## 1. Public marketing Lovable/Supabase
 
-### 1. No dual-write
+The public WSF marketing/inquiry surface belongs to the Lovable/Supabase lineage.
 
-No single write operation (from either surface) may fan out to a second collection with "keep them in sync" as the reason. Every write targets exactly one collection.
+It may own, within approved scope:
+- public marketing/SEO content;
+- inquiry leads and business pipeline records;
+- approved public pricing/interest content;
+- historical/transitional community-candidate or Champion-interest records;
+- approved Expo marketing experiments.
 
-**Why:** dual-write is the shortest path to divergence. When two collections drift, there is no ground truth, and reconciling them costs weeks.
+It does not own the active WSF membership/contribution system.
 
-### 2. No bidirectional sync
+Firebase owns active authenticated communities, memberships, permissions, goals,
+contributions/check-ins, member settings and the community product.
 
-Cross-collection copies flow one way per collection. If collection A receives copies of B, then B does not receive copies of A. No triggers exist that read from A and write back to B (or vice versa).
+## 2. WE Community Home Lovable project — North Star only
 
-**Why:** bidirectional sync creates cycles that are hard to detect, cheap to introduce, and expensive to unwind.
+The project currently used as the member-experience North Star is a design/interaction
+laboratory. It is not the public marketing production surface and is not a production
+backend.
 
-### 3. No auto-conversion of `interest_responses`
+Its local/synthetic data exists to make visual and interaction behavior concrete enough
+to review and port.
 
-An `interest_responses` document is a marketing-side artifact. It does not automatically become a user account, membership, or profile document. Conversion requires an explicit, user-triggered action.
+Never treat as production authority:
+- localStorage state;
+- simulated ledgers or confirmation outcomes;
+- sample identities, counts, communities or invitations;
+- reviewer tools, sample-scenario menus, role switches, coverage sheets;
+- prototype-only actions;
+- browser-local persistence or timing.
 
-**Why:** interest capture is a low-friction top-of-funnel event; account creation is a deliberate high-consent event. Collapsing them silently confuses consent boundaries and produces zombie accounts.
+The exact frozen journey reference is recorded in
+`docs/westayfit/ops/NORTH_STAR_JOURNEY_MANIFEST.json` or the issued journey packet.
+A newer Lovable edit never silently retargets an issued Firebase implementation packet.
 
-### 4. No auto-conversion of `champion_campaigns`
+## 3. No dual active system
 
-A `champion_campaigns` document is a Lovable-side submission artifact. It does not automatically become a live campaign, a member communication, or a downstream Firebase document. Conversion requires an explicit, human-reviewed action.
+These remain non-negotiable:
+1. No permanent dual-write for active community/membership/contribution state.
+2. No bidirectional sync to keep an old prototype alive.
+3. No automatic conversion of marketing-interest records into active accounts/memberships.
+4. No automatic conversion of unreviewed Champion/campaign interest into live community authority.
+5. No Supabase Auth as a second permanent member identity system for the WSF community product.
 
-**Why:** campaign submissions are unvetted user input. Auto-conversion turns unvetted input into system state.
+If a historical marketing-side record is ever converted, it requires an explicitly
+approved, one-direction, reviewed migration/conversion flow.
 
-## Allowed Cross-Boundary Reads
+## 4. Production system of record
 
-The WSF Firebase app may **read** from Lovable-written collections (`interest_responses`, `champion_campaigns`) once appropriate `firestore.rules` blocks land in a future milestone. Reads are one-way and do not imply conversion.
+Firebase / `apps/westayfit` owns production community truth, including:
+- member profile and membership context;
+- community groups and trusted community roles;
+- goals/challenges and their lifecycle;
+- contribution/check-in records and derived totals;
+- member visibility/privacy settings;
+- kiosk/station records when those flows are approved;
+- publication authorization for aggregate displays.
 
-## Conversion Contract (for future milestones)
+GoArrive separately owns individualized coaching, tailored plans, Workout Player,
+scheduling and coaching billing.
 
-Every conversion path (interest → account, campaign submission → live campaign, etc.) is a discrete milestone with:
+## 5. Porting a North Star journey
 
-- A single dedicated Cloud Function invoked by an explicit user action.
-- An audit document written to a WSF-owned `wsf_conversion_log` collection.
-- No trigger-based fan-out to other collections.
-- Rules that require the initiating user's `uid` to match the target document owner.
+Before coding:
+- identify the exact frozen Lovable reference;
+- identify its states and viewports;
+- identify source donor files/tokens when available;
+- identify accepted differences where the production platform/data contract must differ;
+- reserve the canonical Firebase product files.
 
-## What Ships In M-U1
+During porting:
+- preserve Firebase identity, permissions, accounting and recovery truth;
+- preserve the visual hierarchy, interaction job, motion/focus intent and app feel;
+- do not import prototype data authority.
 
-Nothing that touches the boundary. M-U1's WSF app does not read `interest_responses` or `champion_campaigns` and does not write to any Lovable-owned collection.
+After porting:
+ACTUAL AFTER is compared to the frozen target and independently reviewed. Visual parity
+does not prove backend correctness; backend correctness does not waive visual review.
+
+## 6. Historical collection names
+
+Older documents mention records such as `interest_responses` and
+`champion_campaigns`. Treat those as marketing/transitional lineage, not a mandate to
+re-create their old conversion architecture inside the current Firebase product.

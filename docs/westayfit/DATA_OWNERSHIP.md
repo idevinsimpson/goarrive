@@ -1,36 +1,79 @@
 # We Stay Fit — Data Ownership
 
-Anchor: `092839b1fa3ff43b0d0139e2b56d0f1662d4cfdf`.
+Reconciled: September 26, 2026.
 
-Firestore and Storage are shared at the project level. Collection-level ownership is explicit and enforced by `firestore.rules`.
+This document defines ownership boundaries. Exact live schema/source must still be read
+from current code/rules before a migration or release.
 
-## Ownership Rule
+## 1. Rule
 
-Every collection in the `goarrive` Firestore project belongs to exactly one owning app. Cross-app reads require a documented, one-direction path (see `LOVABLE_HANDOFF.md`).
+Every active production datum has one owning system.
 
-## GoArrive-owned (pre-existing)
+Do not create a permanent second active membership, contribution, goal, or permission
+record merely to keep a prototype or marketing surface synchronized.
 
-All collections that exist at anchor commit belong to GoArrive. This document does not enumerate them; the source of truth is `apps/goarrive/` code + `firestore.rules`. WSF must not read from or write to any GoArrive collection.
+## 2. Firebase / WSF-owned active product data
 
-## WSF-owned (post-M-U1)
+Current WSF source/rules include active WSF collections and records. The old statement
+that WSF has "zero collections" is historical M-U1 evidence and is no longer current.
 
-M-U1 introduces **zero** new WSF collections. The app does not read or write Firestore.
+Direct member/community identity collections include:
+- `wsfMemberProfiles`
+- `wsfCommunityGroups`
+- `wsfMemberships`
 
-M-U2 and later will introduce WSF-owned collections under a `wsf_` prefix (planned; not committed until the milestone that creates them). Every new WSF collection gets:
+Current server code also owns goal/challenge/contribution and operational records,
+including collections in these families:
+- `wsfGoals`, `wsfGoalCounters`, `wsfGoalMemberTotals`, `wsfGoalAdjustments`
+- `wsfContributions`, `wsfCheckIns`
+- `wsfChallenges`, `wsfChallengeMoves`, `wsfChallengeCounters`,
+  `wsfChallengeParticipants`
+- `wsfCombinedGoals`, `wsfCombinedCredits`, `wsfCombinedGoalClaims`
+- `wsfKioskStations`, `wsfKioskPairings`
+- `wsfTurnEntries`, `wsfTurnLines`, `wsfTurnMembers`, `wsfTurnReceipts`
+- bounded support/rate-limit/send-audit collections used by current server flows.
 
-- A dedicated rule block in `firestore.rules`.
-- An entry in this file (name, purpose, allowed writers, allowed readers).
-- Dual regression against GoArrive rules before merge.
+This list describes current source families, not an authorization to add new data.
+Read current source and Firestore rules for the exact collection/access contract.
 
-## Lovable-side collections (existing, cross-boundary)
+WSF community roles live in trusted membership records, not new Firebase custom claims.
 
-The Lovable WSF marketing surface writes to (at least):
+## 3. GoArrive-owned data
 
-- `interest_responses` — WSF marketing interest capture.
-- `champion_campaigns` — WSF champion campaign submissions.
+GoArrive owns its existing coaching product data: individualized coaching relationships,
+tailored plans, coach/member communications, Workout Player/programming, scheduling and
+coaching billing.
 
-These collections are read-only from the WSF Firebase app's perspective until an explicit conversion milestone (see `MILESTONES.md` M-U3, M-U4). No auto-conversion; no dual-write; no bidirectional sync.
+WSF code must not casually reuse GoArrive collections as its community data model.
 
-## User Records
+## 4. Lovable/Supabase marketing-side data
 
-Auth users are shared across both apps (single Firebase Auth pool). A user record does not encode "GoArrive user" vs "WSF user" via custom claims — see `ARCHITECTURE.md` (f). App-specific membership is expressed via WSF-owned Firestore documents keyed by `uid`, not via claims.
+The public marketing/inquiry surface may own approved:
+- public content;
+- inquiry/business-pipeline records;
+- transitional interest/campaign records.
+
+Those records are not active Firebase memberships or contributions.
+
+No automatic bulk conversion, dual-write, or permanent real-time mirror is implied.
+
+## 5. North Star prototype data
+
+The WE Community Home Lovable reference project owns no production WSF truth.
+
+Its sample identities, goals, contributions, invitations, localStorage state and
+simulated outcomes are design evidence only and are excluded from real analytics.
+
+## 6. Auth identities
+
+Auth identity and WSF community membership are separate concepts.
+
+WSF does not create a Champion global custom claim. Community authority is derived from
+trusted WSF membership/relationship records and server-side checks.
+
+## 7. Shared infrastructure
+
+Firestore rules and indexes are shared deployment surfaces where configured for the
+environment. A documentation statement about collection ownership is not permission to
+deploy rules/indexes. Follow the current release-control process, drift review and required
+regressions.

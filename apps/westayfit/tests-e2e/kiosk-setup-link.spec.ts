@@ -12,6 +12,9 @@ import { randomBytes } from 'node:crypto';
 
 import { expect, test, type Browser, type Page } from '@playwright/test';
 
+import { clearVerifyGate } from './helpers/mobile';
+import { openMemberManage } from './helpers/memberShell';
+
 const AUTH_EMULATOR = 'http://127.0.0.1:9099';
 const PROJECT_ID = 'demo-wsf-local';
 const PASSWORD = 'kiosk-secret-1';
@@ -47,8 +50,7 @@ async function championWithGoal(page: Page): Promise<{ groupId: string; goalId: 
   await expect(page.getByTestId('wsf-verify')).toBeVisible({ timeout: 20_000 });
   await sendSettled;
   await markEmailVerified(email);
-  await page.getByTestId('wsf-verify-check').click();
-  await expect(page.getByTestId('wsf-profile')).toBeVisible({ timeout: 20_000 });
+  await clearVerifyGate(page, 'wsf-profile', 20_000);
   await page.getByTestId('wsf-profile-termsCheckbox').click();
   await page.getByTestId('wsf-profile-submit').click();
   await expect(page.getByTestId('wsf-home-signed-in')).toBeVisible({ timeout: 20_000 });
@@ -77,7 +79,7 @@ async function championWithGoal(page: Page): Promise<{ groupId: string; goalId: 
 }
 
 async function openManage(page: Page): Promise<void> {
-  await page.getByTestId('wsf-community-manage').click();
+  await openMemberManage(page);
   await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible({ timeout: 15_000 });
 }
 

@@ -27,6 +27,81 @@ export const SAMPLE_TINT = '#FBF1D3';
 // Faint navy wash behind a selected option row; navy text stays readable on it.
 export const OPTION_SELECTED_TINT = '#EEF2F6';
 
+/* ==========================================================================
+   THE NORTH-STAR GRAMMAR
+   --------------------------------------------------------------------------
+   Promoted here from the Home design target once that target was approved, so
+   every screen that follows speaks the same visual language instead of each
+   one re-inventing it. Read off the owner's boards in
+   docs/design-target/owner-north-star/, not invented.
+
+   The three things this product's token set did not have and the boards
+   require: a brighter green for ACTION, a type tier above 32 for the numbers
+   that carry a screen, and any depth at all.
+   ========================================================================== */
+
+/**
+ * The action green. Brighter than confirmed-progress green, and deliberately
+ * a SEPARATE token from it: a button must never be able to restate what the
+ * Living WE is saying about the shared total.
+ */
+export const ACTION_GREEN = '#22C55E';
+/** Its darker edge — for text on pale green, and for a pressed state. */
+export const ACTION_GREEN_DEEP = '#15803D';
+/** Ink on a filled action. Near-black green, not pure black. */
+export const ON_ACTION = '#04260F';
+
+/** A deeper navy than the hero's, for a ground the hero can sit on. */
+export const NAVY_DEEP = '#081729';
+/** A third ink, quieter than TEXT_MUTED. Contrast-checked on cream. */
+export const INK_QUIET = '#6B7C93';
+/** The hairline this product uses between rows and around raised surfaces. */
+export const HAIRLINE = '#E6E2DA';
+/** Cream on navy, and the rule that separates blocks inside a navy surface. */
+export const ON_NAVY = CREAM;
+export const ON_NAVY_MUTED = 'rgba(247,245,240,0.76)';
+export const ON_NAVY_RULE = 'rgba(247,245,240,0.16)';
+
+/**
+ * THE DISPLAY TIER. theme.ts stops at 28 and this kit at 32, which cannot make
+ * a community's shared total the largest thing on its own screen — the defect
+ * the owner's BEFORE board names as "limited visual energy".
+ */
+export const display = {
+  xl: { fontSize: 40, lineHeight: 44, fontWeight: '900' as const, letterSpacing: -1.4 },
+  lg: { fontSize: 34, lineHeight: 38, fontWeight: '900' as const, letterSpacing: -1.2 },
+  md: { fontSize: 29, lineHeight: 33, fontWeight: '900' as const, letterSpacing: -1 },
+};
+
+/**
+ * DEPTH. There was none: no shadow, elevation or gradient token anywhere, which
+ * is why every surface in this product is a bordered rectangle.
+ * react-native-web maps these to box-shadow.
+ */
+export const elevation = {
+  card: {
+    shadowColor: '#0B1F3A',
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 3,
+  },
+  hero: {
+    shadowColor: '#0B1F3A',
+    shadowOpacity: 0.22,
+    shadowRadius: 28,
+    shadowOffset: { width: 0, height: 14 },
+    elevation: 8,
+  },
+  action: {
+    shadowColor: ACTION_GREEN_DEEP,
+    shadowOpacity: 0.32,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 6,
+  },
+};
+
 export const kit = StyleSheet.create({
   // ---- page ----
   scroll: { flex: 1, backgroundColor: CREAM },

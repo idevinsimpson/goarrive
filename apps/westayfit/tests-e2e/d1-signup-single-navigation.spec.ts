@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
 
+import { clearVerifyGate } from './helpers/mobile';
+
 /**
  * D-1 — signup performs ONE navigation to /verify-email.
  *
@@ -86,8 +88,7 @@ test('D-1: a verified member is not pulled back to /verify-email by the late sen
   await expect(page.getByTestId('wsf-verify')).toBeVisible({ timeout: 15_000 });
 
   await markEmailVerified(email);
-  await page.getByTestId('wsf-verify-check').click();
-  await expect(page.getByTestId('wsf-profile')).toBeVisible({ timeout: 15_000 });
+  await clearVerifyGate(page, 'wsf-profile', 15_000);
 
   // The send finishes late. Profile-setup must survive it. The window starts
   // when the released response has actually arrived, so a slow function cold

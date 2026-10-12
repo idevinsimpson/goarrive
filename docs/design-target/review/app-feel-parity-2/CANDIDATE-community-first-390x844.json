@@ -1,0 +1,49 @@
+{
+  "stage": "CANDIDATE",
+  "label": "CANDIDATE BUILD be21eab4 / NOT ACCEPTED",
+  "device": "390x844",
+  "journey": "community-first",
+  "before": {
+    "path": "/community/w9afp2ca-muhf89gs-6204e2c844",
+    "moveSheets": 0,
+    "communityInstances": 1,
+    "tabBars": 1,
+    "loadingPainted": 0,
+    "scroll": null
+  },
+  "after": {
+    "path": "/community",
+    "moveSheets": 0,
+    "communityInstances": 1,
+    "tabBars": 1,
+    "loadingPainted": 0,
+    "scroll": null
+  },
+  "loadingSeen": [],
+  "frames": [
+    {
+      "file": "CANDIDATE-community-first-000ms-390x844.png",
+      "mark": 0,
+      "shutterMs": 121,
+      "sha256": "5e32a4816fcb113010c1763dd1f2fbb34501ab255afb61685859fcb81731987e"
+    },
+    {
+      "file": "CANDIDATE-community-first-150ms-390x844.png",
+      "mark": 150,
+      "shutterMs": 323,
+      "sha256": "b037fa061a062fc8e6b4694675964fe34187322e56f2259165c175d051fe1685"
+    },
+    {
+      "file": "CANDIDATE-community-first-400ms-390x844.png",
+      "mark": 400,
+      "shutterMs": 457,
+      "sha256": "b037fa061a062fc8e6b4694675964fe34187322e56f2259165c175d051fe1685"
+    },
+    {
+      "file": "CANDIDATE-community-first-settled-390x844.png",
+      "mark": -1,
+      "shutterMs": 1950,
+      "sha256": "b037fa061a062fc8e6b4694675964fe34187322e56f2259165c175d051fe1685"
+    }
+  ]
+}

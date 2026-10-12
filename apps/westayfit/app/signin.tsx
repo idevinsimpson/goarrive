@@ -9,6 +9,8 @@ import { AuthFlagOffPanel } from '../src/AuthFlagOffPanel';
 import {
   ErrorText,
   FieldLabel,
+  ForkLink,
+  ForkRow,
   FormShell,
   PasswordField,
   SecondaryLink,
@@ -16,6 +18,11 @@ import {
   SubmitButton,
   TextField,
 } from '../src/AuthFormPrimitives';
+import {
+  authDestinationCard,
+  authReturnHeading,
+  readAuthDestinationKind,
+} from '../src/authDestination';
 import { authErrorMessage, isCredentialMismatch } from '../src/authErrors';
 import { wsfAuthEnabled } from '../src/featureFlags';
 import { getFirebaseAuth, getFirebaseFirestore } from '../src/firebase';
@@ -29,6 +36,19 @@ export default function SignIn() {
   const [error, setError] = useState<string | null>(null);
   const [mismatch, setMismatch] = useState(false);
   const passwordRef = useRef<TextInput>(null);
+  /*
+    WHAT THIS SCREEN IS CARRYING, read once on mount.
+
+    Session storage is not reactive, and re-reading it every render would let
+    the heading change under somebody mid-type. Read is all this does — the
+    destination is resolved and consumed by `nextRouteAfterAuth`, on the
+    terminal hop, exactly as before.
+  */
+  const [destinationKind] = useState(() => readAuthDestinationKind());
+  const returning = destinationKind !== null;
+  const words = destinationKind
+    ? authReturnHeading(destinationKind)
+    : { heading: 'Welcome back.', intro: 'Sign in to your community.' };
 
   // Already-signed-in short-circuit. E3.5 §3C C5: a member who taps the app
   // icon after their session survived (verified, profile written) must not
@@ -119,9 +139,39 @@ export default function SignIn() {
 
   return (
     <FormShell
-      heading="Sign in"
-      intro="Welcome back. Sign in to your community."
+      heading={words.heading}
+      intro={words.intro}
       testID="wsf-signin"
+      /* An error does NOT re-brand the product: the field is unchanged and
+         the banded message in the sheet carries the state. A screen that is
+         carrying a destination keeps saying so even while showing an error —
+         losing the destination card is how somebody concludes the round trip
+         was dropped. */
+      tone={mismatch ? 'error' : returning ? 'returning' : 'ordinary'}
+      destination={destinationKind ? authDestinationCard(destinationKind) : undefined}
+      /* THE WAYS OUT SIT AT THE FOOT, not trailing the primary action: on a
+         tall phone that is where a thumb is, and it stops the sheet ending in
+         a column of links above empty cream.
+
+         WHEN THE CREDENTIAL FORKS ARE SHOWING, THE FOOT DROPS THEM. They are
+         the same two destinations; offering each twice on one screen is the
+         duplication this atlas has had to correct before. */
+      foot={
+        mismatch ? null : (
+          <>
+            <SecondaryLink
+              href="/reset-password"
+              label="Forgot your password?"
+              testID="wsf-signin-forgot"
+            />
+            <SecondaryLink
+              href="/signup"
+              label="New here? Create an account"
+              testID="wsf-signin-create"
+            />
+          </>
+        )
+      }
     >
       <FieldLabel>Email</FieldLabel>
       <TextField
@@ -157,32 +207,22 @@ export default function SignIn() {
           invisible; as tappable links they resolve the dead end E3.5 §3C
           caught. */}
       {mismatch ? (
-        <>
-          <SecondaryLink
+        <ForkRow>
+          <ForkLink
             href="/reset-password"
-            label="Forgot your password?"
+            label="Reset password"
             testID="wsf-signin-error-forgot"
           />
-          <SecondaryLink
-            href="/signup"
-            label="New here? Create an account"
-            testID="wsf-signin-error-create"
-          />
-        </>
+          <ForkLink href="/signup" label="Create account" testID="wsf-signin-error-create" />
+        </ForkRow>
       ) : null}
       <SubmitButton
-        label="Sign in"
+        label={returning ? 'Sign in and continue' : 'Sign in'}
         onPress={onSubmit}
         submitting={submitting}
         disabled={!email || !password}
         testID="wsf-signin-submit"
       />
-      <SecondaryLink
-        href="/reset-password"
-        label="Forgot your password?"
-        testID="wsf-signin-forgot"
-      />
-      <SecondaryLink href="/signup" label="New here? Create an account" />
     </FormShell>
   );
 }

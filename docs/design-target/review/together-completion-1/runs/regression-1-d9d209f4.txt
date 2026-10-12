@@ -1,0 +1,75 @@
+
+Running 47 tests using 1 worker
+
+  ✓   1 [chromium] › tests-e2e/e4-a1-shared-goal.spec.ts:212:5 › member A + member B contribute in independent browser contexts; unauthed display sums both (12.2s)
+  ✓   2 [chromium] › tests-e2e/sprint-w9-contribute-exits.spec.ts:242:7 › contribution exits land on the mounted community › from the receipt: the same screen, the same place on it, one tab navigator, the new total (4.8s)
+  ✓   3 [chromium] › tests-e2e/sprint-w9-contribute-exits.spec.ts:259:7 › contribution exits land on the mounted community › from a refusal: "Back to community" returns the same way (2.7s)
+  ✓   4 [chromium] › tests-e2e/sprint-w9-contribute-exits.spec.ts:277:7 › contribution exits land on the mounted community › a signed-out refusal keeps its own destination: Sign in (1.8s)
+  ✓   5 [chromium] › tests-e2e/sprint-w9-contribute-exits.spec.ts:320:7 › contribution exits land on the mounted community › "Back to home" on a cold arrival opens Home and leaves no contribution entry behind (2.3s)
+  ✓   6 [chromium] › tests-e2e/sprint-w9-contribute-exits.spec.ts:346:7 › contribution exits land on the mounted community › from MOVE opened on another tab: the community, not the tab beneath (5.0s)
+  ✓   7 [chromium] › tests-e2e/sprint-w9-contribute-exits.spec.ts:372:7 › contribution exits land on the mounted community › a cold "Back to community", once the context verifies, replaces rather than pushes (2.4s)
+  ✓   8 [chromium] › tests-e2e/sprint-w9-contribute-exits.spec.ts:401:7 › contribution exits land on the mounted community › a warm "Back to home" from Goal Setup returns to the mounted Home tab, not a copy of it (3.0s)
+MEASURE Home · planted scroll: 160
+MEASURE Home · MOVE Close: {"focus":"wsf-member-tab-move","tab":"wsf-member-tab-home"}
+MEASURE Home · MOVE Escape: {"focus":"wsf-member-tab-move","tab":"wsf-member-tab-home"}
+  ✓   9 [chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:247:9 › FOCUS-RETURN-1 · focus goes back to the opener › MOVE from Home: Close and Escape return focus to MOVE; the tab and its scroll are kept (2.7s)
+MEASURE Community · planted scroll: null
+MEASURE Community · MOVE Close: {"focus":"wsf-member-tab-move","tab":"wsf-member-tab-community"}
+MEASURE Community · MOVE Escape: {"focus":"wsf-member-tab-move","tab":"wsf-member-tab-community"}
+  ✓  10 [chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:247:9 › FOCUS-RETURN-1 · focus goes back to the opener › MOVE from Community: Close and Escape return focus to MOVE; the tab and its scroll are kept (2.8s)
+MEASURE You · planted scroll: null
+MEASURE You · MOVE Close: {"focus":"wsf-member-tab-move","tab":"wsf-member-tab-you"}
+MEASURE You · MOVE Escape: {"focus":"wsf-member-tab-move","tab":"wsf-member-tab-you"}
+  ✓  11 [chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:247:9 › FOCUS-RETURN-1 · focus goes back to the opener › MOVE from You: Close and Escape return focus to MOVE; the tab and its scroll are kept (2.7s)
+MEASURE hero launcher · scroll at the press: 60
+MEASURE hero launcher · Back: {"focus":"wsf-community-goal-record-w9frgoal0-murvemwo-172620b","tab":"wsf-member-tab-home"}
+  ✓  12 [chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:282:7 › FOCUS-RETURN-1 · focus goes back to the opener › Back: the route’s own Back returns focus to the Home hero’s “Already moved?”; Home keeps its scroll (1.9s)
+MEASURE MOVE from You · Back: {"focus":"wsf-member-tab-move","tab":"wsf-member-tab-you"}
+  ✓  13 [chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:307:7 › FOCUS-RETURN-1 · focus goes back to the opener › Back: after MOVE from You hands straight to the one open goal, Back returns focus to MOVE on You (2.2s)
+MEASURE sheet choice · Back: {"focus":"wsf-move-choose-w9frgoal0-murveq41-47535cs"}
+  ✓  14 [chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:325:7 › FOCUS-RETURN-1 · focus goes back to the opener › Back: a goal chosen in the MOVE sheet gets focus back, and closing the sheet then returns it to MOVE (2.1s)
+MEASURE hero launcher · receipt · Back to community: {"focus":"wsf-community-goal-record-w9frgoal0-murverqq-7cfd6df","tab":"wsf-member-tab-home"}
+  ✓  15 [chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:349:7 › FOCUS-RETURN-1 · focus goes back to the opener › Finish: “Back to community” returns focus to the hero launcher that opened the flow (1.9s)
+MEASURE MOVE from You · receipt · Back to community: {"focus":"wsf-member-tab-move","tab":"wsf-member-tab-home"}
+  ✓  16 [chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:368:7 › FOCUS-RETURN-1 · focus goes back to the opener › Finish: “Back to community” after MOVE from You returns focus to MOVE, on the community (2.4s)
+MEASURE MOVE from the list · own-only receipt · Back to home: {"focus":"wsf-member-tab-move","tab":"wsf-member-tab-home"}
+  ✓  17 [chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:387:7 › FOCUS-RETURN-1 · focus goes back to the opener › Finish: “Back to home” from the own-only receipt returns focus to MOVE, on the list the member left (2.1s)
+MEASURE Goal Setup · contribution · Back to home: {"focus":"wsf-community-name","tab":"wsf-member-tab-home"}
+  ✓  18 [chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:413:7 › FOCUS-RETURN-1 · with no opener: the heading, else the current tab; never body › a contribution opened from Goal Setup: “Back to home” focuses the community’s heading, not body (2.4s)
+MEASURE blank-space click after the return: {"focus":"body"}
+  ✓  19 [chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:439:7 › FOCUS-RETURN-1 · with no opener: the heading, else the current tab; never body › a click on blank space after the return is the member’s: focus stays where they put it (3.0s)
+MEASURE launcher taken away after the return: {"focus":"body"}
+  ✓  20 [chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:466:7 › FOCUS-RETURN-1 · with no opener: the heading, else the current tab; never body › a restored control that is then taken away: focus moves on to the heading, not body (3.7s)
+MEASURE cold contribute · Back: {"focus":"wsf-community-name"}
+MEASURE cold MOVE · Close: {"focus":"wsf-community-name"}
+  ✓  21 [chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:489:7 › FOCUS-RETURN-1 · with no opener: the heading, else the current tab; never body › cold arrivals: Back from a contribution opened directly, and Close on MOVE opened directly, focus the community’s heading (2.6s)
+MEASURE cold contribute (no community) · Back: {"path":"/","focus":"body","headings":0}
+  ✓  22 [chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:513:7 › FOCUS-RETURN-1 · with no opener: the heading, else the current tab; never body › cold arrival on a Home with no heading: focus goes to the current tab (4.1s)
+  ✓  23 [chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:532:7 › FOCUS-RETURN-1 · with no opener: the heading, else the current tab; never body › a plain page load and a tab switch move nothing (3.8s)
+  ✓  24 [chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:545:7 › FOCUS-RETURN-1 · with no opener: the heading, else the current tab; never body › the tab bar answers Enter: a keyboard member reaches every destination, and focus stays on the tab they chose (1.7s)
+MEASURE Progress Start moving · Close: {"path":"/community/w9fr-murvfd74-5a7aaeg","tab":"wsf-member-tab-home","focus":"wsf-community-name"}
+  ✓  25 [chromium] › tests-e2e/sprint-w9-focus-return-1.spec.ts:563:7 › FOCUS-RETURN-1 · with no opener: the heading, else the current tab; never body › Progress’s own “Start moving”: measured, and never body (2.7s)
+  ✓  26 [chromium] › tests-e2e/ui-contribute-crossing.spec.ts:206:5 › the crossing is the server’s to say: once, to the member who made it (4.9s)
+  ✓  27 [chromium] › tests-e2e/ui-contribute-crossing.spec.ts:298:5 › a replay of the crossing attempt says the same thing, and that it counted once (1.8s)
+  ✓  28 [chromium] › tests-e2e/ui-contribute-repeat-policy.spec.ts:227:5 › multiple: the screen says more can be added, and "Add more" records a real second contribution (2.0s)
+  ✓  29 [chromium] › tests-e2e/ui-contribute-repeat-policy.spec.ts:296:5 › absent policy: a goal written before the field existed behaves exactly as multiple (1.7s)
+  ✓  30 [chromium] › tests-e2e/ui-contribute-repeat-policy.spec.ts:331:5 › once: today’s copy is unchanged, no second contribution is offered, and a forced one is refused in plain words (2.9s)
+  ✓  31 [chromium] › tests-e2e/ui-contribute-short-phone.spec.ts:276:9 › 390x640 › MOVE step: "I'm done" and "Skip timer" are reachable at rest, clear of the safe inset, and take a real tap (2.5s)
+  ✓  32 [chromium] › tests-e2e/ui-contribute-short-phone.spec.ts:276:9 › 390x664 › MOVE step: "I'm done" and "Skip timer" are reachable at rest, clear of the safe inset, and take a real tap (2.2s)
+  ✓  33 [chromium] › tests-e2e/ui-contribute-short-phone.spec.ts:276:9 › 390x844 › MOVE step: "I'm done" and "Skip timer" are reachable at rest, clear of the safe inset, and take a real tap (2.8s)
+  ✓  34 [chromium] › tests-e2e/ui-contribute-short-phone.spec.ts:319:9 › 390x640 › entry, review, confirmed, unknown and refused all keep their primary reachable and clear of the safe inset (3.4s)
+  ✓  35 [chromium] › tests-e2e/ui-contribute-short-phone.spec.ts:398:9 › 390x640 › /move/[goalId] wears no shell and does not scroll sideways (1.2s)
+  ✓  36 [chromium] › tests-e2e/ui-contribute-short-phone.spec.ts:319:9 › 390x664 › entry, review, confirmed, unknown and refused all keep their primary reachable and clear of the safe inset (3.9s)
+  ✓  37 [chromium] › tests-e2e/ui-contribute-short-phone.spec.ts:398:9 › 390x664 › /move/[goalId] wears no shell and does not scroll sideways (1.3s)
+  ✓  38 [chromium] › tests-e2e/ui-contribute.spec.ts:254:5 › happy path: move → enter → review → recording → confirmed, then a concurrent peer (6.8s)
+  ✓  39 [chromium] › tests-e2e/ui-contribute.spec.ts:420:5 › mode=record starts at entry; a cold link without groupId stays generic (7.6s)
+  ✓  40 [chromium] › tests-e2e/ui-contribute.spec.ts:465:5 › unknown outcome keeps the same attempt; replaying a landed attempt is "already recorded" (4.3s)
+  ✓  41 [chromium] › tests-e2e/ui-contribute.spec.ts:591:5 › a definitive refusal retires the reminder and says what was not recorded (3.0s)
+  ✓  42 [chromium] › tests-e2e/ui-contribute.spec.ts:645:5 › closed goal, goal crossing, and contributing past the target (6.2s)
+  ✓  43 [chromium] › tests-e2e/ui-contribute.spec.ts:740:5 › sign-in and not-found states are in the same visual system and do not enumerate (1.9s)
+  ✓  44 [chromium] › tests-e2e/ui-contribute.spec.ts:771:5 › membership lost while on the entry screen: the poll ends and the goal is not found (8.8s)
+  ✓  45 [chromium] › tests-e2e/ui-kiosk.spec.ts:262:5 › a whole walk-up: start → sign in → contribute → Finish → start, with nothing left behind (6.8s)
+  ✓  46 [chromium] › tests-e2e/ui-kiosk.spec.ts:490:5 › an unauthorized goal shows the display’s generic refusal, word for word (1.3s)
+  ✓  47 [chromium] › tests-e2e/ui-kiosk.spec.ts:531:5 › nobody touches it: the countdown finishes the session, and Stay puts it back (1.6m)
+
+  47 passed (4.2m)

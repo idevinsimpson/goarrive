@@ -1,0 +1,315 @@
+{
+  "lovableRef": "09b8a73cc4e661115e52cb1ec4aebcb625c5fc9a",
+  "source": "src/ui/ProgressParityView.tsx via /design-target/progress-parity",
+  "frames": [
+    {
+      "state": "populated",
+      "viewport": "390x844",
+      "fixture": "fixture/progress-populated-390x844.png",
+      "fixtureSha256": "2ea1147577bbfa021aaa3b1b74bd3f5624f5823beb1f4219bef8b8f9d5174e9b",
+      "lovable": "lovable-09b8a73c/progress-populated-390x844.png",
+      "lovableSha256": "2ff0dce8aa7e68a68a5ce82469d474c876754fa1cd23900cb0a5ff60d8fc7eea",
+      "crop": {
+        "x": 0,
+        "y": 92,
+        "width": 390,
+        "height": 677
+      },
+      "sideBySide": "fixture/cmp-progress-populated-390x844-side-by-side.png",
+      "overlay50": "fixture/cmp-progress-populated-390x844-overlay-50.png",
+      "difference": "fixture/cmp-progress-populated-390x844-difference.png",
+      "differingPixelShare": 0.0691,
+      "aligned": {
+        "referenceRuleY": 409,
+        "viewRuleY": 409,
+        "viewShiftPx": 0,
+        "window": {
+          "referenceY": 409,
+          "viewY": 409,
+          "height": 360
+        },
+        "sideBySide": "fixture/cmp-progress-populated-390x844-aligned-side-by-side.png",
+        "overlay50": "fixture/cmp-progress-populated-390x844-aligned-overlay-50.png",
+        "difference": "fixture/cmp-progress-populated-390x844-aligned-difference.png",
+        "differingPixelShare": 0.1204
+      }
+    },
+    {
+      "state": "populated",
+      "viewport": "390x640",
+      "fixture": "fixture/progress-populated-390x640.png",
+      "fixtureSha256": "3b99518cb876dc0dde8355298ee36c59f79a82535b90d361ee199464192f41c2",
+      "lovable": null,
+      "lovableSha256": null,
+      "crop": {
+        "x": 0,
+        "y": 86,
+        "width": 390,
+        "height": 479
+      }
+    },
+    {
+      "state": "receipts-contract",
+      "viewport": "390x844",
+      "fixture": "fixture/progress-receipts-contract-390x844.png",
+      "fixtureSha256": "be03b94df58ea99c57c762afa92c25dddaf08272b89bcffb3f10a6933c51a536",
+      "lovable": "lovable-09b8a73c/progress-populated-390x844.png",
+      "lovableSha256": "2ff0dce8aa7e68a68a5ce82469d474c876754fa1cd23900cb0a5ff60d8fc7eea",
+      "crop": {
+        "x": 0,
+        "y": 92,
+        "width": 390,
+        "height": 677
+      },
+      "note": "receipt rows are fixture props; no canonical source",
+      "sideBySide": "fixture/cmp-progress-receipts-contract-390x844-side-by-side.png",
+      "overlay50": "fixture/cmp-progress-receipts-contract-390x844-overlay-50.png",
+      "difference": "fixture/cmp-progress-receipts-contract-390x844-difference.png",
+      "differingPixelShare": 0.0058,
+      "aligned": {
+        "referenceRuleY": 409,
+        "viewRuleY": 409,
+        "viewShiftPx": 0,
+        "window": {
+          "referenceY": 409,
+          "viewY": 409,
+          "height": 360
+        },
+        "sideBySide": "fixture/cmp-progress-receipts-contract-390x844-aligned-side-by-side.png",
+        "overlay50": "fixture/cmp-progress-receipts-contract-390x844-aligned-overlay-50.png",
+        "difference": "fixture/cmp-progress-receipts-contract-390x844-aligned-difference.png",
+        "differingPixelShare": 0.0013
+      }
+    },
+    {
+      "state": "first-eligible",
+      "viewport": "390x844",
+      "fixture": "fixture/progress-first-eligible-390x844.png",
+      "fixtureSha256": "bb29fb97c0e548b4e6a4460a6f52539f561eb7d2c3dfc8bb76c39da15bc73aa1",
+      "lovable": "lovable-09b8a73c/progress-first-eligible-390x844.png",
+      "lovableSha256": "9afe801ab69b297800f04d87a284acb0ce7432c28c888b1a8b80a5ee95ef5535",
+      "crop": {
+        "x": 0,
+        "y": 92,
+        "width": 390,
+        "height": 677
+      },
+      "sideBySide": "fixture/cmp-progress-first-eligible-390x844-side-by-side.png",
+      "overlay50": "fixture/cmp-progress-first-eligible-390x844-overlay-50.png",
+      "difference": "fixture/cmp-progress-first-eligible-390x844-difference.png",
+      "differingPixelShare": 0.2111,
+      "aligned": {
+        "referenceRuleY": 314,
+        "viewRuleY": 267,
+        "viewShiftPx": 47,
+        "window": {
+          "referenceY": 314,
+          "viewY": 267,
+          "height": 455
+        },
+        "sideBySide": "fixture/cmp-progress-first-eligible-390x844-aligned-side-by-side.png",
+        "overlay50": "fixture/cmp-progress-first-eligible-390x844-aligned-overlay-50.png",
+        "difference": "fixture/cmp-progress-first-eligible-390x844-aligned-difference.png",
+        "differingPixelShare": 0.0281
+      }
+    },
+    {
+      "state": "first-eligible",
+      "viewport": "390x640",
+      "fixture": "fixture/progress-first-eligible-390x640.png",
+      "fixtureSha256": "da927de70e8ee1907c43f51c3f69b0157e017df78439e3c621f1303e5ef312f7",
+      "lovable": "lovable-09b8a73c/progress-first-eligible-390x640.png",
+      "lovableSha256": "5ee4ca7ab14821b8ef95eb8b2580df8ccdc56da2e114532c1ed97a030863bb35",
+      "crop": {
+        "x": 0,
+        "y": 86,
+        "width": 390,
+        "height": 479
+      },
+      "sideBySide": "fixture/cmp-progress-first-eligible-390x640-side-by-side.png",
+      "overlay50": "fixture/cmp-progress-first-eligible-390x640-overlay-50.png",
+      "difference": "fixture/cmp-progress-first-eligible-390x640-difference.png",
+      "differingPixelShare": 0.3004,
+      "aligned": {
+        "referenceRuleY": 294,
+        "viewRuleY": 247,
+        "viewShiftPx": 47,
+        "window": {
+          "referenceY": 294,
+          "viewY": 247,
+          "height": 271
+        },
+        "sideBySide": "fixture/cmp-progress-first-eligible-390x640-aligned-side-by-side.png",
+        "overlay50": "fixture/cmp-progress-first-eligible-390x640-aligned-overlay-50.png",
+        "difference": "fixture/cmp-progress-first-eligible-390x640-aligned-difference.png",
+        "differingPixelShare": 0.043
+      }
+    },
+    {
+      "state": "no-open-goal",
+      "viewport": "390x844",
+      "fixture": "fixture/progress-no-open-goal-390x844.png",
+      "fixtureSha256": "620005ede7100da349ca1b4b56880447cf65f576ce56832d5d434f0d3ebba1b5",
+      "lovable": "lovable-09b8a73c/progress-no-open-goal-390x844.png",
+      "lovableSha256": "166ca7b63f0a2fccea602e2b1941ae9140e3bf092ab9548666267f264df15ce1",
+      "crop": {
+        "x": 0,
+        "y": 92,
+        "width": 390,
+        "height": 677
+      },
+      "sideBySide": "fixture/cmp-progress-no-open-goal-390x844-side-by-side.png",
+      "overlay50": "fixture/cmp-progress-no-open-goal-390x844-overlay-50.png",
+      "difference": "fixture/cmp-progress-no-open-goal-390x844-difference.png",
+      "differingPixelShare": 0.1626,
+      "aligned": {
+        "referenceRuleY": 330,
+        "viewRuleY": 267,
+        "viewShiftPx": 63,
+        "window": {
+          "referenceY": 330,
+          "viewY": 267,
+          "height": 439
+        },
+        "sideBySide": "fixture/cmp-progress-no-open-goal-390x844-aligned-side-by-side.png",
+        "overlay50": "fixture/cmp-progress-no-open-goal-390x844-aligned-overlay-50.png",
+        "difference": "fixture/cmp-progress-no-open-goal-390x844-aligned-difference.png",
+        "differingPixelShare": 0.0034
+      }
+    },
+    {
+      "state": "no-open-goal",
+      "viewport": "390x640",
+      "fixture": "fixture/progress-no-open-goal-390x640.png",
+      "fixtureSha256": "ff9a25238828fde4a46de95a03e290c681189f15667ea03da811f690733e55b9",
+      "lovable": null,
+      "lovableSha256": null,
+      "crop": {
+        "x": 0,
+        "y": 86,
+        "width": 390,
+        "height": 479
+      }
+    },
+    {
+      "state": "partial",
+      "viewport": "390x844",
+      "fixture": "fixture/progress-partial-390x844.png",
+      "fixtureSha256": "f3e31426770d2606c9735a486cba62be7df6a9b648dfe733ae9a8a16dd2266c8",
+      "lovable": "lovable-09b8a73c/progress-partial-390x844.png",
+      "lovableSha256": "20f81a123cfc3c9324e7271198b93a28f895700652b5c04fc2334c1397925e47",
+      "crop": {
+        "x": 0,
+        "y": 92,
+        "width": 390,
+        "height": 677
+      },
+      "sideBySide": "fixture/cmp-progress-partial-390x844-side-by-side.png",
+      "overlay50": "fixture/cmp-progress-partial-390x844-overlay-50.png",
+      "difference": "fixture/cmp-progress-partial-390x844-difference.png",
+      "differingPixelShare": 0.1714,
+      "aligned": {
+        "referenceRuleY": 443,
+        "viewRuleY": 409,
+        "viewShiftPx": 34,
+        "window": {
+          "referenceY": 443,
+          "viewY": 409,
+          "height": 326
+        },
+        "sideBySide": "fixture/cmp-progress-partial-390x844-aligned-side-by-side.png",
+        "overlay50": "fixture/cmp-progress-partial-390x844-aligned-overlay-50.png",
+        "difference": "fixture/cmp-progress-partial-390x844-aligned-difference.png",
+        "differingPixelShare": 0.0718
+      }
+    },
+    {
+      "state": "partial",
+      "viewport": "390x640",
+      "fixture": "fixture/progress-partial-390x640.png",
+      "fixtureSha256": "2ab57996cc1d6c2cc889cc07275225c345a115173f394babeca62f6c59f4d8d7",
+      "lovable": null,
+      "lovableSha256": null,
+      "crop": {
+        "x": 0,
+        "y": 86,
+        "width": 390,
+        "height": 479
+      }
+    },
+    {
+      "state": "failure",
+      "viewport": "390x844",
+      "fixture": "fixture/progress-failure-390x844.png",
+      "fixtureSha256": "bc113e3b1b026520e069f258d9c66581de452d033486f27c513cd98a640aa84f",
+      "lovable": "lovable-09b8a73c/progress-failure-390x844.png",
+      "lovableSha256": "a60eca2030dd152ca7f7484f554d0d2ea88787e934593ded26d434f04cfb6277",
+      "crop": {
+        "x": 0,
+        "y": 92,
+        "width": 390,
+        "height": 677
+      },
+      "sideBySide": "fixture/cmp-progress-failure-390x844-side-by-side.png",
+      "overlay50": "fixture/cmp-progress-failure-390x844-overlay-50.png",
+      "difference": "fixture/cmp-progress-failure-390x844-difference.png",
+      "differingPixelShare": 0.2001,
+      "aligned": {
+        "referenceRuleY": 314,
+        "viewRuleY": 267,
+        "viewShiftPx": 47,
+        "window": {
+          "referenceY": 314,
+          "viewY": 267,
+          "height": 455
+        },
+        "sideBySide": "fixture/cmp-progress-failure-390x844-aligned-side-by-side.png",
+        "overlay50": "fixture/cmp-progress-failure-390x844-aligned-overlay-50.png",
+        "difference": "fixture/cmp-progress-failure-390x844-aligned-difference.png",
+        "differingPixelShare": 0.0237
+      }
+    },
+    {
+      "state": "failure",
+      "viewport": "390x640",
+      "fixture": "fixture/progress-failure-390x640.png",
+      "fixtureSha256": "c929c97935044f67ff2e594ef91b9d032ce522e7bba98dafc52f1b0a66d32e44",
+      "lovable": null,
+      "lovableSha256": null,
+      "crop": {
+        "x": 0,
+        "y": 86,
+        "width": 390,
+        "height": 479
+      }
+    },
+    {
+      "state": "unknown-shared",
+      "viewport": "390x844",
+      "fixture": "fixture/progress-unknown-shared-390x844.png",
+      "fixtureSha256": "0e7f60a8b1902d9039bbc42107865371280e277d95a228c726b9d8dc45051d27",
+      "lovable": null,
+      "lovableSha256": null,
+      "crop": {
+        "x": 0,
+        "y": 92,
+        "width": 390,
+        "height": 677
+      }
+    },
+    {
+      "state": "unknown-shared",
+      "viewport": "390x640",
+      "fixture": "fixture/progress-unknown-shared-390x640.png",
+      "fixtureSha256": "27a9c749127cc5dc0b286c49236dba2cee0a67c7324a6540265d78fe7d871623",
+      "lovable": null,
+      "lovableSha256": null,
+      "crop": {
+        "x": 0,
+        "y": 86,
+        "width": 390,
+        "height": 479
+      }
+    }
+  ]
+}

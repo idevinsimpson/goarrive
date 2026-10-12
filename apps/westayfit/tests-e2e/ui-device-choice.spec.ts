@@ -441,6 +441,10 @@ test('“A shared screen here”: the existing kiosk session, and an empty devic
   });
 
   await page.goto(`/event/${goalId}`);
+  // MOVE-CAMERA-NATIVE-PORT-1 (Director #497 6009679048): the Playwright harness
+  // seeds wsf.moveCamera.v1 into every context; this scenario starts from its
+  // historical device state, so that seed is removed before the journey.
+  await page.evaluate(() => window.localStorage.removeItem('wsf.moveCamera.v1'));
   await expect(page.getByTestId('wsf-event-device-choice')).toBeVisible({ timeout: 20_000 });
 
   // ---- the answer hands the device to the EXISTING kiosk route ------------

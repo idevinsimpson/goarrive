@@ -1,0 +1,44 @@
+
+Running 6 tests using 1 worker
+
+[1/6] [chromium] › tests-e2e/sprint-w7-community-settings-baseline.spec.ts:250:7 › W7 Check 45A · Community route baseline (head) › A1 populated Community tab: hierarchy (fail-before) and truths (preserve)
+[chromium] › tests-e2e/sprint-w7-community-settings-baseline.spec.ts:250:7 › W7 Check 45A · Community route baseline (head) › A1 populated Community tab: hierarchy (fail-before) and truths (preserve)
+MEASURE A1 Community text (head): "W7 Harbor Movers a997 Private community MEMBERS 3 YOUR ROLE Member GOALS 4 YOUR COMMUNITIES ✓ W7 Harbor Movers a997 W7 Summit Walkers a997 ＋ Join ＋ Start THIS PERIOD Harbor Squat Month a997 OPEN 180 / 500 confirmed 36% complete 320 squats to go Sep 6 – Oct 1 Minutes Together a997 Sep 6 – Oct 5 · 130 of 120 minutes REACHED · STILL OPEN GOAL HISTORY What we’ve done together Spring Squat Sprint a997 Sep 6 – 23 · 230 of 200 squats CLOSED · REACHED Winter Squat Stretch a997 Sep 6 – 16 · 150 of 400 squats CLOSED · UNFINISHED MEMBERS 3 people MA Mara Member a997 OA Olu Champion a997 CHAMPION 1 member shown without names Names follow each member’s privacy choice for this community. OPEN ANOTHER COMMUNITY W7 Summit Walkers a997 2 members · Summit Steps a997 200 of 1,000 steps · 20% Switch Home Community MOVE Progress You"
+
+MEASURE A1 Community populated (head): {"failBefore":{"pass":["C-F1 the community identity banner leads (its name above the switcher and any page title)","C-F2 facts in order: Members / Your role / Goals","C-F3 chips for both joined communities plus Join and Start","C-F4 \"This period\" with the current goal","C-F5 \"Goal history\" / \"What we’ve done together\" with the closed goals","C-F6 the Members roster (\"3 people\") comes after history","C-F7 the first 390x844 screen holds the banner, the facts and This period (no utility stack first)"],"fail":[]},"preserve":{"pass":["C-P1 no invented place / descriptor / sample copy","C-P2 switch offers real memberships only (C1, C2; never C3 or a removed C4)","C-P3 a name-private member is never named here","C-P4 no rank / streak / score"],"fail":[]}}
+
+[2/6] [chromium] › tests-e2e/sprint-w7-community-settings-baseline.spec.ts:283:7 › W7 Check 45A · Community route baseline (head) › A2 at 390x640 the first screen reaches This period and the current goal
+[chromium] › tests-e2e/sprint-w7-community-settings-baseline.spec.ts:283:7 › W7 Check 45A · Community route baseline (head) › A2 at 390x640 the first screen reaches This period and the current goal
+MEASURE A2 Community 390x640 (head): {"failBefore":{"pass":["C-F8 390x640: This period and the current goal title are in the first viewport"],"fail":[]},"preserve":{"pass":[],"fail":[]}}
+
+[3/6] [chromium] › tests-e2e/sprint-w7-community-settings-baseline.spec.ts:297:7 › W7 Check 45A · Community route baseline (head) › A3 truths: lifecycles distinct, roster follows privacy, warm entry paints no skeleton, public boundary
+[chromium] › tests-e2e/sprint-w7-community-settings-baseline.spec.ts:297:7 › W7 Check 45A · Community route baseline (head) › A3 truths: lifecycles distinct, roster follows privacy, warm entry paints no skeleton, public boundary
+MEASURE A3 lifecycle segments (head): {"where":"/community","segR":"\nSep 6 – 23 · 230 of 200 squats\nCLOSED · REACHED\n","segU":"\nSep 6 – 16 · 150 of 400 squats\nCLOSED · UNFINISHED\nMEMBERS\n3 people\nM8\nMara Member 8d48\nO8\nOlu Champion 8d48\nCHAMPION\n1 member shown without names\nNames follow"}
+
+MEASURE A3 roster text (head): "‹ W7 Harbor Movers 8d48 COMMUNITY Members 3 members M8 Mara Member 8d48 O8 Olu Champion 8d48 Champion Home Community MOVE Progress You"
+
+MEASURE A3 Community truths (head): {"failBefore":{"pass":[],"fail":[]},"preserve":{"pass":["C-P5 closed-reached and closed-unfinished stay distinct (U never reads reached)","C-P6 roster names O and M, never the name-private Q","C-P7 warm entry from Home paints no full loading frame","C-P8 the public display names nobody"],"fail":[]}}
+
+[4/6] [chromium] › tests-e2e/sprint-w7-community-settings-baseline.spec.ts:339:7 › W7 Check 45A · Community route baseline (head) › A4 failed reads (INJECTED): nothing guessed, no Living WE on an unknown total
+[chromium] › tests-e2e/sprint-w7-community-settings-baseline.spec.ts:339:7 › W7 Check 45A · Community route baseline (head) › A4 failed reads (INJECTED): nothing guessed, no Living WE on an unknown total
+MEASURE A4 communities failed (head): "Community Your communities could not be loaded just now. Nothing has changed — this is the reading, not the record. Try again Go to Home Start a community Home Community MOVE Progress You"
+
+MEASURE A4 goals failed (head): "W7 Harbor Movers 953f Private community MEMBERS 3 YOUR ROLE Member GOALS — YOUR COMMUNITIES ✓ W7 Harbor Movers 953f W7 Summit Walkers 953f ＋ Join ＋ Start THIS PERIOD This community’s goals couldn’t be loaded just now. Try again GOAL HISTORY What we’ve done together Past goals couldn’t be loaded just"
+
+MEASURE A4 total unknown (head): {"we":0,"weLabels":[],"text":"W7 Harbor Movers 953f Private community MEMBERS 3 YOUR ROLE Member GOALS 4 YOUR COMMUNITIES ✓ W7 Harbor Movers 953f W7 Summit Walkers 953f ＋ Join ＋ Start THIS PERIOD Harbor Squat Month 953f UNKNOWN Progress unknown We can’t confirm the current total. Nothing is shown as zero. Sep 6 – Oct 1 Minutes T"}
+
+MEASURE A4 Community failed reads (head): {"failBefore":{"pass":["C-F9 unknown total: no Living WE instrument (and no \"0 of 500\")"],"fail":[]},"preserve":{"pass":["C-P9 communities read fails: no count / role / goals guessed","C-P10 goals read fails: no \"no goal\" claim and no goal count guessed"],"fail":[]}}
+
+[5/6] [chromium] › tests-e2e/sprint-w7-community-settings-baseline.spec.ts:381:7 › W7 Check 45B · Settings baseline (head) › B1 Settings is a panel over the mounted You: dialog, Close first, Escape / scrim, focus trap and return
+[chromium] › tests-e2e/sprint-w7-community-settings-baseline.spec.ts:381:7 › W7 Check 45B · Settings baseline (head) › B1 Settings is a panel over the mounted You: dialog, Close first, Escape / scrim, focus trap and return
+MEASURE B1 after Settings (head): {"opened":true,"path":"/settings","dText":"Settings Close Each choice applies only inside that community, to its signed-in members — never the public web, a display, a kiosk or marketing. Totals always include you. W7 Harbor Movers 121d Show m","switchesInDialog":4}
+
+MEASURE B1 Settings panel (head): {"failBefore":{"pass":["S-F1 Settings opens as a dialog over the still-mounted You","S-F2 the panel is titled Settings and holds both communities’ controls (≥ 4 switches)","S-F3 focus enters on Close","S-F4 Escape closes it and focus returns to Settings","S-F5 a scrim press closes it and focus returns to Settings","S-F6 Tab stays inside the panel (25 presses)"],"fail":[]},"preserve":{"pass":[],"fail":[]}}
+
+[6/6] [chromium] › tests-e2e/sprint-w7-community-settings-baseline.spec.ts:424:7 › W7 Check 45B · Settings baseline (head) › B2 truths through whatever Settings surface exists: name OFF in C1 is stored, C2 untouched, others read it
+[chromium] › tests-e2e/sprint-w7-community-settings-baseline.spec.ts:424:7 › W7 Check 45B · Settings baseline (head) › B2 truths through whatever Settings surface exists: name OFF in C1 is stored, C2 untouched, others read it
+MEASURE B2 privacy (head): {"before":{"c1":"on","c2":"on"},"flipped":true,"stored":{"c1":"private","c2":null},"oSeesM":false,"after":{"c1":"off","c2":"on"}}
+
+MEASURE B2 Settings truths (head): {"failBefore":{"pass":[],"fail":[]},"preserve":{"pass":["S-P1 name OFF in C1 is stored, and the switch shows the stored value after reopening","S-P2 C2 is untouched (stored and shown)","S-P3 another member no longer sees M named in C1"],"fail":[]}}
+
+  6 passed (47.2s)

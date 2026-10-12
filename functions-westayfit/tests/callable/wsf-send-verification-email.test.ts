@@ -2,15 +2,21 @@
  * wsfSendVerificationEmail — link retargeting, auth guards, and the refusal to
  * run unconfigured.
  *
- * No emulator needed: every path asserted here returns or throws before any
- * Firestore access. Run:
- *   cd functions-westayfit && npm run test:callable
+ * The guard cases return or throw before any Firestore access. The send cases
+ * (EMAIL-STAGING-REPAIR) run against the Firestore + Auth emulators, as the
+ * reset suite does (gate1.sh runs the callable step under `firestore,auth`):
+ *   firebase emulators:exec --only firestore,auth --project demo-wsf-local \
+ *     "npm --prefix functions-westayfit run test:callable"
  */
 
 process.env.GCLOUD_PROJECT = 'demo-wsf-local';
+process.env.FIRESTORE_EMULATOR_HOST = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080';
+process.env.FIREBASE_AUTH_EMULATOR_HOST = process.env.FIREBASE_AUTH_EMULATOR_HOST || '127.0.0.1:9099';
 
+import { getAuth as getAdminAuth } from 'firebase-admin/auth';
+import { getFirestore } from 'firebase-admin/firestore';
 import { HttpsError } from 'firebase-functions/v2/https';
-import { retargetActionLink, wsfSendVerificationEmail } from '../../src/index';
+import { canonicalActionHandler, retargetActionLink, wsfSendVerificationEmail } from '../../src/index';
 
 const HANDLER = 'https://goarrive.firebaseapp.com/__/auth/action';
 
@@ -52,6 +58,26 @@ describe('retargetActionLink', () => {
   it('is idempotent — retargeting an already-correct link is a no-op', () => {
     const already = `${HANDLER}?mode=verifyEmail&oobCode=Z9`;
     expect(retargetActionLink(already, HANDLER)).toBe(already);
+  });
+});
+
+describe('canonicalActionHandler', () => {
+  it('keeps an https handler as origin + path', () => {
+    expect(canonicalActionHandler(HANDLER)).toBe(HANDLER);
+    expect(canonicalActionHandler('https://Example.TEST/__/auth/action')).toBe('https://example.test/__/auth/action');
+  });
+
+  // Operator config that cannot be a handler: refused rather than carried onto every link.
+  it.each([
+    ['empty', ''],
+    ['not a URL', 'not a url'],
+    ['relative', '/__/auth/action'],
+    ['plain http', 'http://goarrive.firebaseapp.com/__/auth/action'],
+    ['credentials', 'https://user:pw@goarrive.firebaseapp.com/__/auth/action'],
+    ['a query', 'https://goarrive.firebaseapp.com/__/auth/action?mode=x'],
+    ['a fragment', 'https://goarrive.firebaseapp.com/__/auth/action#x'],
+  ])('refuses %s', (_label, raw) => {
+    expect(canonicalActionHandler(raw)).toBeNull();
   });
 });
 
@@ -100,5 +126,197 @@ describe('wsfSendVerificationEmail guards', () => {
       req({ uid: 'u1', token: { email: 'a@example.com', email_verified: false } })
     );
     await expect(p).rejects.toThrow(/WSF_EMAIL_FROM/);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EMAIL-STAGING-REPAIR: the send path, its quota accounting and its failures.
+// Staging field test: "Didn't send", then a resend refused as resource-exhausted
+// although nothing had left — the quota was spent before anything was sent.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('wsfSendVerificationEmail send path (emulators)', () => {
+  const saved = { ...process.env };
+  let fetchSpy: jest.SpyInstance;
+  let errorSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    process.env.WSF_EMAIL_API_KEY = 'test-key';
+    process.env.WSF_EMAIL_FROM = 'westayfit@example.test';
+    process.env.WSF_APP_URL = 'https://example.test';
+    fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({ ok: true, status: 200, json: async () => ({ id: 'stub' }) } as never);
+    errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    jest.spyOn(getAdminAuth(), 'generateEmailVerificationLink').mockResolvedValue('https://example.test/verify?mode=verifyEmail&oobCode=STUB-CODE&apiKey=STUB');
+  });
+  afterEach(() => {
+    fetchSpy.mockRestore();
+    errorSpy.mockRestore();
+    jest.restoreAllMocks();
+    for (const k of CONFIG_KEYS) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  });
+
+  /**
+   * An unverified caller (the shape its ID token gives) with a clean quota. Link minting is stubbed with a fixed
+   * minted link: what these cases test is the quota accounting and failure handling around it, and the reset suite's
+   * beforeAll clears every Auth-emulator account, which would race a real account created here when suites run in
+   * parallel. The real Admin call is exercised by the reset suite.
+   */
+  async function member(tag: string) {
+    const email = `verify-${tag}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.test`;
+    const uid = `uid-${tag}-${Math.random().toString(36).slice(2, 10)}`;
+    await getFirestore().doc(`wsfVerificationSends/${uid}`).delete().catch(() => undefined);
+    return { email, uid, call: () => wsfSendVerificationEmail.run(req({ uid, token: { email, email_verified: false } })) };
+  }
+  const quotaDoc = async (uid: string) => (await getFirestore().doc(`wsfVerificationSends/${uid}`).get()).data();
+  const noAddressLogged = (email: string) => {
+    for (const call of errorSpy.mock.calls) for (const arg of call) expect(String(arg)).not.toContain(email);
+  };
+
+  it('success: mints the link, POSTs it once to the caller\'s own address, and keeps the cooldown', async () => {
+    const m = await member('ok');
+    await expect(m.call()).resolves.toEqual({ sent: true });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchSpy.mock.calls[0] as [string, { body: string }];
+    expect(url).toBe('https://api.resend.com/emails');
+    const body = JSON.parse(init.body) as { to: string[]; text: string };
+    expect(body.to).toEqual([m.email]);
+    // The minted link is retargeted at the action handler with its query string intact.
+    expect(body.text).toContain('/__/auth/action?mode=verifyEmail&oobCode=STUB-CODE&apiKey=STUB');
+    expect(getAdminAuth().generateEmailVerificationLink).toHaveBeenCalledWith(m.email, { url: 'https://example.test', handleCodeInApp: false });
+    expect((await quotaDoc(m.uid))?.lastSentAt).toEqual(expect.any(Number));
+    expect((await quotaDoc(m.uid))?.countToday).toBe(1);
+    // A second request inside the cooldown is refused, and nothing is sent.
+    const caught = (await m.call().catch((e) => e)) as HttpsError;
+    expect(caught.code).toBe('resource-exhausted');
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('provider rejection: internal, no "sent" result, the cooldown is given back, and an immediate retry sends', async () => {
+    const m = await member('reject');
+    fetchSpy.mockResolvedValueOnce({ ok: false, status: 403 } as never);
+    const caught = (await m.call().catch((e) => e)) as HttpsError;
+    expect(caught).toBeInstanceOf(HttpsError);
+    expect(caught.code).toBe('internal');
+    expect(errorSpy).toHaveBeenCalledWith('[wsfSendVerificationEmail] provider rejected send', 403);
+    const after = await quotaDoc(m.uid);
+    expect(after?.lastSentAt).toBeUndefined();
+    expect(after?.countToday).toBe(1);
+    // The field-test failure: this retry used to be refused as resource-exhausted.
+    await expect(m.call()).resolves.toEqual({ sent: true });
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    noAddressLogged(m.email);
+  });
+
+  // The provider may have accepted a POST whose response never arrived: releasing would allow a duplicate.
+  it('an ambiguous network failure KEEPS the cooldown: classified, not immediately retryable', async () => {
+    const m = await member('network');
+    fetchSpy.mockRejectedValueOnce(new TypeError('fetch failed'));
+    expect(((await m.call().catch((e) => e)) as HttpsError).code).toBe('internal');
+    expect(errorSpy).toHaveBeenCalledWith('[wsfSendVerificationEmail] provider outcome unknown');
+    expect(errorSpy).not.toHaveBeenCalledWith('[wsfSendVerificationEmail] provider rejected send', expect.anything());
+    const after = await quotaDoc(m.uid);
+    expect(after?.lastSentAt).toEqual(expect.any(Number));
+    expect(after?.countToday).toBe(1);
+    const retry = (await m.call().catch((e) => e)) as HttpsError;
+    expect(retry.code).toBe('resource-exhausted');
+    expect(retry.message).toMatch(/wait/);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    noAddressLogged(m.email);
+  });
+
+  it('a bad action-handler config fails closed BEFORE reserving: classified, nothing minted or sent, no cooldown', async () => {
+    const m = await member('handler');
+    const bad = 'http://handler.example.test/__/auth/action?leak=1';
+    process.env.WSF_AUTH_ACTION_HANDLER = bad;
+    try {
+      const caught = (await m.call().catch((e) => e)) as HttpsError;
+      expect(caught.code).toBe('failed-precondition');
+      expect(caught.message).toMatch(/WSF_AUTH_ACTION_HANDLER/);
+      expect(caught.message).not.toContain('handler.example.test');
+      expect(errorSpy).toHaveBeenCalledWith('[wsf mail] invalid config', 'WSF_AUTH_ACTION_HANDLER');
+      for (const call of errorSpy.mock.calls) for (const arg of call) expect(String(arg)).not.toContain('handler.example.test');
+      expect(getAdminAuth().generateEmailVerificationLink).not.toHaveBeenCalled();
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(await quotaDoc(m.uid)).toBeUndefined();
+    } finally {
+      delete process.env.WSF_AUTH_ACTION_HANDLER;
+    }
+    // Once the operator value is fixed, the member's first request sends: no false cooldown.
+    await expect(m.call()).resolves.toEqual({ sent: true });
+  });
+
+  it('a valid action-handler config is used canonically for the link', async () => {
+    const m = await member('handler-ok');
+    process.env.WSF_AUTH_ACTION_HANDLER = 'https://Handler.Example.TEST/auth/action';
+    try {
+      await expect(m.call()).resolves.toEqual({ sent: true });
+    } finally {
+      delete process.env.WSF_AUTH_ACTION_HANDLER;
+    }
+    const body = JSON.parse((fetchSpy.mock.calls[0] as [string, { body: string }])[1].body) as { text: string };
+    expect(body.text).toContain('https://handler.example.test/auth/action?mode=verifyEmail&oobCode=STUB-CODE&apiKey=STUB');
+  });
+
+  it('an unusable minted link is a definite pre-provider failure: classified, nothing POSTed, released and retryable', async () => {
+    const m = await member('minted');
+    (getAdminAuth().generateEmailVerificationLink as unknown as jest.Mock).mockResolvedValueOnce('not a link');
+    expect(((await m.call().catch((e) => e)) as HttpsError).code).toBe('internal');
+    expect(errorSpy).toHaveBeenCalledWith('[wsfSendVerificationEmail] action link unusable');
+    for (const call of errorSpy.mock.calls) for (const arg of call) expect(String(arg)).not.toContain('not a link');
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect((await quotaDoc(m.uid))?.lastSentAt).toBeUndefined();
+    noAddressLogged(m.email);
+    await expect(m.call()).resolves.toEqual({ sent: true });
+  });
+
+  it('Admin link-minting failure: internal with the code only, nothing POSTed, released and retryable', async () => {
+    const m = await member('admin');
+    (getAdminAuth().generateEmailVerificationLink as unknown as jest.Mock)
+      .mockRejectedValueOnce(Object.assign(new Error(`continue URL refused for ${m.email}`), { code: 'auth/unauthorized-continue-uri' }));
+    expect(((await m.call().catch((e) => e)) as HttpsError).code).toBe('internal');
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledWith('[wsfSendVerificationEmail] Admin SDK failed', 'auth/unauthorized-continue-uri');
+    noAddressLogged(m.email);
+    await expect(m.call()).resolves.toEqual({ sent: true });
+  });
+
+  it('a slow failed attempt never releases a NEWER reservation (no cooldown bypass)', async () => {
+    const m = await member('newer');
+    const ref = getFirestore().doc(`wsfVerificationSends/${m.uid}`);
+    const newer = Date.now() + 120_000;
+    // While this attempt is in flight past the cooldown, another request reserves; then this attempt fails.
+    fetchSpy.mockImplementationOnce(async () => { await ref.set({ lastSentAt: newer }, { merge: true }); return { ok: false, status: 503 } as never; });
+    expect(((await m.call().catch((e) => e)) as HttpsError).code).toBe('internal');
+    expect((await quotaDoc(m.uid))?.lastSentAt).toBe(newer);
+  });
+
+  it('failed attempts still count toward the daily cap, so failures cannot hammer the provider', async () => {
+    const m = await member('cap');
+    fetchSpy.mockResolvedValue({ ok: false, status: 500 } as never);
+    for (let i = 0; i < 10; i += 1) expect(((await m.call().catch((e) => e)) as HttpsError).code).toBe('internal');
+    const capped = (await m.call().catch((e) => e)) as HttpsError;
+    expect(capped.code).toBe('resource-exhausted');
+    expect(capped.message).toMatch(/today/);
+    expect(fetchSpy).toHaveBeenCalledTimes(10);
+  });
+
+  it('concurrent requests: the reservation is atomic, exactly one sends', async () => {
+    const m = await member('race');
+    fetchSpy.mockImplementation(async () => { await new Promise((r) => setTimeout(r, 150)); return { ok: true, status: 200 } as never; });
+    const results = await Promise.allSettled([m.call(), m.call(), m.call()]);
+    const sent = results.filter((r) => r.status === 'fulfilled');
+    const refused = results.filter((r) => r.status === 'rejected').map((r) => ((r as PromiseRejectedResult).reason as HttpsError).code);
+    expect(sent).toHaveLength(1);
+    expect(refused).toEqual(['resource-exhausted', 'resource-exhausted']);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('the address comes from the token only: a body address is ignored', async () => {
+    const m = await member('relay');
+    await expect(wsfSendVerificationEmail.run({ auth: { uid: m.uid, token: { email: m.email, email_verified: false } }, data: { email: 'victim@example.test' }, rawRequest: {} } as never)).resolves.toEqual({ sent: true });
+    expect((JSON.parse((fetchSpy.mock.calls[0] as [string, { body: string }])[1].body) as { to: string[] }).to).toEqual([m.email]);
   });
 });

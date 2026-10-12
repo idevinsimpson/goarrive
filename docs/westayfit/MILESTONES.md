@@ -1,7 +1,12 @@
 # We Stay Fit — Milestones
 
-**Roadmap of record. Approved by Devin 2026-09-05.** Governed by
-`WE_STAY_FIT_MASTER.md`; delivery sequence from `EXPO_CRITICAL_PATH.md`.
+**Roadmap lineage. Approved by Devin 2026-09-05; reconciled September 26, 2026.**
+This file preserves milestone identifiers and historical delivery intent. It is not the
+volatile current-state ledger and does not override Strategic Master v3.0 + v3.1.
+
+Current state: follow the canonical CURRENT STATE comment on #365.
+Current execution/ownership: follow `ops/FABLE_OPERATING_PROTOCOL_v1.md` and the worker
+inbox map. Current product direction: Strategic Master v3.0 plus the v3.1 addendum.
 
 > **Supersession.** This file previously carried M-U3 "Interest → App Bridge" and M-U4
 > "Champion Campaigns Landing Surface". Those names came from the Lovable lineage and
@@ -21,19 +26,23 @@
 
 ## 2. In flight
 
-### M-U2 — Adult Member Identity & Community Foundation
+### M-U2 — Member Identity & Community Foundation
 
-*An authenticated adult creates a gated private community and becomes its Founding Champion.*
+> Historical note: this milestone was originally titled "Adult Member Identity & Community
+> Foundation." Devin removed the 18+ account gate on September 6. Do not silently restore
+> adults-only enforcement. Final eligibility/consent policy remains a separate approval
+> boundary; under-13/youth-specific systems remain excluded under the strategic master.
+
+*An eligible authenticated member creates a gated community and becomes its Founding Champion through trusted community-scoped membership.*
 
 **Built:** signup → verify → profile setup → sign-in; create community (name, `groupType`,
 `joinPolicy`); community detail page; `wsfMemberProfiles` / `wsfCommunityGroups` /
 `wsfMemberships` / `wsfVerificationSends`; `wsfHealth` / `wsfCreateCommunity` /
 `wsfSendVerificationEmail`.
 
-**Not landed:**
-- PR #300 is stale — head `7721db7`, missing every 2026-09-01/02 commit
-- Hosting redeploy at `452834c` has no receipt
-- No member can complete signup: verification email unconfigured
+**Historical snapshot only:** the former PR/staging/email notes below this milestone have
+been superseded by later implementation. Do not use this section for current readiness.
+Read the canonical CURRENT STATE comment and current release receipts instead.
 
 ---
 
@@ -44,7 +53,7 @@ Six slices. **Feature freeze Sep 28 · code freeze Oct 4 · event Oct 11.**
 The reframe that makes this fit: **FitLife is one community**, created by hand before the
 doors open. Attendees join it; they do not search, choose a type, or resolve duplicates.
 
-| Slice | Substance | M-U parent | Owner |
+| Slice | Substance | M-U parent | Historical owner at 2026-09-05 plan |
 |---|---|---|---|
 | **E1** | Verification email actually delivers | M-U2 completion | Manus (config) + Maia (deploy) |
 | **E2** | Join an existing community by link / QR | M-U3, reduced | Maia |
@@ -52,6 +61,8 @@ doors open. Attendees join it; they do not search, choose a type, or resolve dup
 | **E4** | Aggregate counters, honest and live | M-U5, reduced | Maia |
 | **E5** | Community Pulse display view (kiosk two) | M-U5, reduced | Maia |
 | **E6** | Expo hardening — attract, auto-reset, large targets | M-U7, reduced | Maia |
+
+Current owner/worker routing is not taken from the historical table above. Resolve it from the canonical CURRENT STATE record and `ops/WORKER_INBOXES.md` under the one-ACTIVE-NOW rule.
 
 ### Dependency correction
 
@@ -65,7 +76,7 @@ and E2 starts now.**
 
 | Cut | Why it is safe to cut |
 |---|---|
-| **M-U6 Universal Start/Join Funnel** — cut entirely | One community. No funnel to route. |
+| **Broad M-U6 discovery/full universal funnel** — not required for the FitLife critical path | FitLife is one event community. Separately, the bounded real Start-a-community / invite / join path is now part of the useful product direction under Strategic v3.1. |
 | Community search | Nothing to search for. |
 | 5 of 7 community types | FitLife Moves is one group of one type. |
 | General invitation system | Joining is by public QR, not per-person invite. |
@@ -75,7 +86,7 @@ and E2 starts now.**
 
 ### NOT cut, and not negotiable
 
-Privacy controls · adult-only enforcement · honest aggregate counters · sample-data
+Privacy controls · approved eligibility/consent enforcement (without silently reinstating 18+) · honest aggregate counters · sample-data
 labelling. These are the conditions of shipping, not scope — and the FitLife brief's own
 success criteria depend on the numbers being real.
 
@@ -83,7 +94,7 @@ success criteria depend on the numbers being real.
 
 ## 4. Post-Expo
 
-- **M-U6** Universal Start and Join Funnel — community search, all seven types, phone handoff
+- **M-U6 broader expansion** — general discovery/search, fuller type coverage, and broader routing beyond the bounded working Start/Join path
 - **M-U8** Organization Verification and Conversion
 - **M-U9** Move Markers and physical touchpoints
 - **M-U10** Public Launch and Monetization Readiness

@@ -13,7 +13,15 @@ import {
 import { getFirebaseFunctions, wsfUsingEmulators } from '../../src/firebase';
 import { wsfTheme } from '../../src/theme';
 import { PROGRESS_GREEN } from '../../src/ui/brandAssets';
+import { ACTION_GREEN } from '../../src/ui/kit';
 import { formatActiveWindowLabel, formatClock, formatPeriod } from '../../src/ui/dates';
+import {
+  displayFreshnessSize,
+  displayTier,
+  displayTypeFactor,
+  displayWeWidth,
+  isWideTier,
+} from '../../src/ui/displayLayout';
 import { communityNameType, goalTitleType, totalLineType } from '../../src/ui/displayTypeScale';
 import { LivingWeProgress } from '../../src/ui/LivingWeProgress';
 import {
@@ -61,7 +69,7 @@ const RECENT_VISIBLE = 5;
 export default function DisplayGoal() {
   const params = useLocalSearchParams<{ goalId: string }>();
   const goalId = params.goalId;
-  const { width: windowWidth } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   // The static export renders the phone layout (no window at export time),
   // so the first client render must produce the same tree or React reports a
   // hydration mismatch (#418) and re-renders from scratch. The wide layout is
@@ -71,7 +79,36 @@ export default function DisplayGoal() {
   useEffect(() => {
     setHydrated(true);
   }, []);
-  const wide = hydrated && windowWidth >= 900;
+  /*
+    FOUR TIERS, NOT ONE BOOLEAN. `displayTier` is display-only and carries the
+    reasoning; the two names below are what this file needs from it.
+
+      wide      two columns on one axis  — booth and collective
+      big       distance typography      — everything except a phone
+
+    They are separate because PORTRAIT is the tier that has neither shape: one
+    column like a phone, sized for a room like a booth. Keeping them apart is
+    what stops a picture frame being handed the phone card, without handing a
+    phone the frame's composition.
+  */
+  const tier = displayTier(windowWidth, windowHeight, hydrated);
+  const wide = isWideTier(tier);
+  const big = tier !== 'phone';
+  /*
+    Applied AFTER the stylesheet entry it refines, exactly like the
+    length-tiered sizes below, so the wide styles stay the single source of
+    the distance hierarchy and the room only scales it. 1 for booth and phone,
+    so neither moves by a pixel.
+  */
+  const tf = displayTypeFactor(tier);
+  const freshnessSize = displayFreshnessSize(tier);
+  const roomType = (fontSize: number, lineHeight?: number) =>
+    tf === 1
+      ? null
+      : {
+          fontSize: Math.round(fontSize * tf),
+          ...(lineHeight === undefined ? null : { lineHeight: Math.round(lineHeight * tf) }),
+        };
   const [state, setState] = useState<DisplayState>({ kind: 'loading' });
   // Bumping this starts a brand-new polling session. It is the ONLY way to
   // recover from a refusal, and it exists so that recovery is an explicit act
@@ -324,13 +361,13 @@ export default function DisplayGoal() {
     // The refusal states are deliberately NOT changed. They are approved as
     // they stand, they are terminal rather than transitional, and they are
     // the one place where looking unlike the ready page is the point.
-    if (state.kind === 'loading' && !wide) {
+    if (state.kind === 'loading' && tier === 'phone') {
       return (
         <View
           key="loading-phone"
           style={[styles.canvas, styles.canvasPhonePage]}
           testID="wsf-display-loading"
-          {...({ dataSet: { layout: 'phone' } } as Record<string, unknown>)}
+          {...({ dataSet: { layout: 'phone', tier } } as Record<string, unknown>)}
         >
           <View style={styles.phoneHeader}>
             <WsfWordmark variant="navy" height={22} testID="wsf-display-wordmark" />
@@ -368,13 +405,41 @@ export default function DisplayGoal() {
             };
     return (
       <View
-        key={`generic-${wide ? 'wide' : 'phone'}`}
-        style={[styles.canvas, wide ? styles.canvasWide : styles.canvasPhone]}
+        key={`generic-${tier}`}
+        /*
+          D-11. A REFUSAL ON A WALL IS THE WHOLE SCREEN'S MESSAGE.
+
+          The ready wide canvas is `space-between` because it has a header, a
+          body and a footer to push apart. The generic states have neither, so
+          the same style pinned "Nothing to show here" to the top edge and left
+          two thirds of the glass empty under it. The COLLECTIVE tier gets a
+          centred canvas of its own.
+
+          THE BOOTH DELIBERATELY DOES NOT. A first cut applied this to every
+          wide tier, which silently changed 1280x800 and 1440x900 — a
+          composition this packet preserves and whose own evidence claimed it
+          was untouched. Centring it may well be better; it is not this
+          packet's to change, and saying one thing while doing another is
+          worse than either. The phone and portrait canvases were already
+          centred and are unaffected.
+        */
+        style={[
+          styles.canvas,
+          tier === 'collective'
+            ? styles.canvasGenericWide
+            : wide
+              ? styles.canvasWide
+              : styles.canvasPhone,
+        ]}
         testID={copy.testID}
-        {...({ dataSet: { layout: wide ? 'wide' : 'phone' } } as Record<string, unknown>)}
+        {...({ dataSet: { layout: wide ? 'wide' : 'phone', tier } } as Record<string, unknown>)}
       >
-        <View style={styles.genericBlock}>
-          <WsfWordmark variant="white" height={wide ? 44 : 22} testID="wsf-display-wordmark" />
+        <View style={[styles.genericBlock, big ? { maxWidth: Math.round(720 * tf) } : null]}>
+          <WsfWordmark
+            variant="white"
+            height={tier === 'collective' ? 64 : tier === 'booth' ? 44 : tier === 'portrait' ? 34 : 22}
+            testID="wsf-display-wordmark"
+          />
           {/*
             D-1 / R7b. Loading, unavailable and unreachable are whole surfaces
             of their own, and this sentence is what each one is. It is their
@@ -382,14 +447,14 @@ export default function DisplayGoal() {
             size is unchanged.
           */}
           <Text
-            style={[styles.genericHeadline, wide ? styles.genericHeadlineWide : null]}
+            style={[styles.genericHeadline, big ? styles.genericHeadlineWide : null, roomType(56, 64)]}
             accessibilityRole="header"
             {...({ 'aria-level': 1 } as Record<string, unknown>)}
           >
             {copy.headline}
           </Text>
           {copy.body ? (
-            <Text style={[styles.genericBody, wide ? styles.genericBodyWide : null]}>{copy.body}</Text>
+            <Text style={[styles.genericBody, big ? styles.genericBodyWide : null, roomType(26, 34)]}>{copy.body}</Text>
           ) : null}
           {copy.action ? recheck : null}
         </View>
@@ -428,9 +493,7 @@ export default function DisplayGoal() {
           : null;
   const together = closed ? `${formatCount(sharedTotal)} ${unit} completed together.` : null;
   const near = phase === 'nearGoal';
-  const weWidth = wide
-    ? Math.min(640, Math.round(windowWidth * 0.42))
-    : Math.max(96, Math.min(320, windowWidth - 2 * 20 - 2 * 22));
+  const weWidth = displayWeWidth(tier, windowWidth);
 
   // D-6 / D-7. THE DISPLAY CANNOT SCROLL. The wide canvas is a fixed
   // two-column page and the phone page is a single unscrollable card, so a
@@ -441,15 +504,24 @@ export default function DisplayGoal() {
   // confirmed (src/ui/displayTypeScale.ts); the first tier of each scale is
   // the approved size exactly, so every reviewed fixture is untouched, and
   // each is applied AFTER the stylesheet entry it refines.
-  const layout = wide ? 'wide' : 'phone';
-  const titleType = goalTitleType(pulse.goalTitle, layout);
-  const communityType = communityNameType(pulse.communityDisplayName, layout);
+  const layout = big ? 'wide' : 'phone';
+  const roomScale = <T extends Record<string, number>>(t: T): T =>
+    tf === 1
+      ? t
+      : (Object.fromEntries(
+          Object.entries(t).map(([k, v]) => [
+            k,
+            k === 'letterSpacing' ? Number((v * tf).toFixed(2)) : Math.round(v * tf),
+          ])
+        ) as T);
+  const titleType = roomScale(goalTitleType(pulse.goalTitle, layout));
+  const communityType = roomScale(communityNameType(pulse.communityDisplayName, layout));
   const openTotalText = `${formatCount(sharedTotal)} of ${formatCount(target)} ${unit}`;
   const closedTotalText = `${formatCount(sharedTotal)} ${unit} completed together.`;
 
   const totalLine = (
     <Text
-      style={[styles.total, wide ? styles.totalWide : null, totalLineType(openTotalText, layout)]}
+      style={[styles.total, big ? styles.totalWide : null, roomScale(totalLineType(openTotalText, layout))]}
       testID="wsf-display-total-line"
     >
       <Text testID="wsf-display-shared-total">{formatCount(sharedTotal)}</Text>
@@ -458,36 +530,36 @@ export default function DisplayGoal() {
   );
 
   const facts = (
-    <View style={[styles.facts, wide ? styles.factsWide : null]}>
+    <View style={[styles.facts, big ? styles.factsWide : null]}>
       {phase === 'closedReached' ? (
         <>
           <Text
-            style={[styles.total, wide ? styles.totalWide : null, totalLineType(closedTotalText, layout)]}
+            style={[styles.total, big ? styles.totalWide : null, roomScale(totalLineType(closedTotalText, layout))]}
             testID="wsf-display-total-line"
           >
             <Text testID="wsf-display-shared-total">{formatCount(sharedTotal)}</Text>
             {` ${unit} completed together.`}
           </Text>
-          <Text style={[styles.percent, wide ? styles.percentWide : null]} testID="wsf-display-target">
+          <Text style={[styles.percent, big ? styles.percentWide : null, roomType(36, 44)]} testID="wsf-display-target">
             {`Goal: ${formatCount(target)} ${unit}`}
           </Text>
         </>
       ) : (
         <>
           {totalLine}
-          <Text style={[styles.percent, wide ? styles.percentWide : null]} testID="wsf-display-percent">
+          <Text style={[styles.percent, big ? styles.percentWide : null, roomType(36, 44)]} testID="wsf-display-percent">
             {percentText}
           </Text>
         </>
       )}
       <Text
-        style={[styles.status, wide ? styles.statusWide : null, near ? styles.statusNear : null]}
+        style={[styles.status, big ? styles.statusWide : null, roomType(30, 38), near ? styles.statusNear : null]}
         testID="wsf-display-remaining"
       >
         {statusLine(sharedTotal, target, status)}
       </Text>
       {together && phase !== 'closedReached' ? (
-        <Text style={[styles.together, wide ? styles.togetherWide : null]} testID="wsf-display-together">
+        <Text style={[styles.together, big ? styles.togetherWide : null, roomType(24, 30)]} testID="wsf-display-together">
           {together}
         </Text>
       ) : null}
@@ -504,11 +576,14 @@ export default function DisplayGoal() {
       aria-live="polite"
     >
       {stale ? (
-        <Text style={[styles.freshnessText, styles.freshnessStaleText]} testID="wsf-display-stale">
+        <Text
+          style={[styles.freshnessText, { fontSize: freshnessSize }, styles.freshnessStaleText]}
+          testID="wsf-display-stale"
+        >
           Connection interrupted
         </Text>
       ) : null}
-      <Text style={styles.freshnessText} testID="wsf-display-confirmed-at">
+      <Text style={[styles.freshnessText, { fontSize: freshnessSize }]} testID="wsf-display-confirmed-at">
         {`${stale ? 'Last confirmed' : 'Confirmed'} ${formatClock(confirmedAt)}`}
       </Text>
     </View>
@@ -530,7 +605,7 @@ export default function DisplayGoal() {
   const recentPanel =
     recentLines.length > 0 ? (
       <View
-        style={[styles.recent, wide ? styles.recentWide : null]}
+        style={[styles.recent, big ? styles.recentWide : null]}
         testID="wsf-display-recent"
         // D-2's rule, same reason: lines appear because other people acted,
         // never because the viewer did anything. Polite — a wall display
@@ -544,7 +619,7 @@ export default function DisplayGoal() {
           stylesheet's.
         */}
         <Text
-          style={[styles.recentHeading, wide ? styles.recentHeadingWide : null]}
+          style={[styles.recentHeading, big ? styles.recentHeadingWide : null, roomType(15)]}
           testID="wsf-display-recent-heading"
           accessibilityRole="header"
           {...({ 'aria-level': 2 } as Record<string, unknown>)}
@@ -557,7 +632,7 @@ export default function DisplayGoal() {
             // the index is the only key available — and it is the right one:
             // position in the list is exactly what this row is.
             key={`${i}-${line}`}
-            style={[styles.recentLine, wide ? styles.recentLineWide : null]}
+            style={[styles.recentLine, big ? styles.recentLineWide : null, roomType(20, 30)]}
             testID="wsf-display-recent-line"
           >
             {line}
@@ -567,8 +642,8 @@ export default function DisplayGoal() {
     ) : null;
 
   const identity = (
-    <View style={[styles.identity, wide ? styles.identityWide : null]}>
-      <Text style={[styles.community, wide ? styles.communityWide : null, communityType]} testID="wsf-display-community">
+    <View style={[styles.identity, big ? styles.identityWide : null]}>
+      <Text style={[styles.community, big ? styles.communityWide : null, communityType]} testID="wsf-display-community">
         {pulse.communityDisplayName}
       </Text>
       {/*
@@ -577,7 +652,7 @@ export default function DisplayGoal() {
         styles as before.
       */}
       <Text
-        style={[styles.goalTitle, wide ? styles.goalTitleWide : null, titleType]}
+        style={[styles.goalTitle, big ? styles.goalTitleWide : null, titleType]}
         testID="wsf-display-goal-title"
         accessibilityRole="header"
         {...({ 'aria-level': 1 } as Record<string, unknown>)}
@@ -586,18 +661,18 @@ export default function DisplayGoal() {
       </Text>
       <View style={styles.periodRow}>
         {periodText ? (
-          <Text style={[styles.period, wide ? styles.periodWide : null]} testID="wsf-display-period">
+          <Text style={[styles.period, big ? styles.periodWide : null, roomType(26, 32)]} testID="wsf-display-period">
             {periodText}
           </Text>
         ) : null}
         {closed ? (
-          <Text style={[styles.closedPill, wide ? styles.closedPillWide : null]} testID="wsf-display-closed">
+          <Text style={[styles.closedPill, big ? styles.closedPillWide : null, roomType(18)]} testID="wsf-display-closed">
             Closed
           </Text>
         ) : null}
       </View>
       {headline ? (
-        <Text style={[styles.headline, wide ? styles.headlineWide : null]} testID="wsf-display-headline">
+        <Text style={[styles.headline, big ? styles.headlineWide : null, roomType(52, 60)]} testID="wsf-display-headline">
           {headline}
         </Text>
       ) : null}
@@ -626,10 +701,14 @@ export default function DisplayGoal() {
         key="ready-wide"
         style={[styles.canvas, styles.canvasWide]}
         testID="wsf-display-screen"
-        {...({ dataSet: { layout: 'wide', phase, stale: stale ? 'true' : 'false' } } as Record<string, unknown>)}
+        {...({ dataSet: { layout: 'wide', tier, phase, stale: stale ? 'true' : 'false' } } as Record<string, unknown>)}
       >
         <View style={styles.wideHeader}>
-          <WsfWordmark variant="white" height={44} testID="wsf-display-wordmark" />
+          <WsfWordmark
+            variant="white"
+            height={tier === 'collective' ? 64 : 44}
+            testID="wsf-display-wordmark"
+          />
           {freshness}
         </View>
         <View style={styles.wideBody}>
@@ -645,6 +724,45 @@ export default function DisplayGoal() {
     );
   }
 
+  /*
+    PORTRAIT: a picture frame on a wall.
+
+    One column like the phone, distance typography like the booth, on a navy
+    canvas of its own. It is not a resize of either: the phone's cream page
+    with a hero card inside it reads as a phone screenshot blown up when it is
+    two feet wide, and the booth's two columns leave a portrait frame with a
+    column of air down one side.
+
+    NO QR AND NO JOIN CONTROL. The accepted target draws that seam at the foot
+    of this composition, and it is deliberately not built: there is no join URL
+    or encoder on this route, and shipping a placeholder or a dead control
+    would be a capability claim the product cannot honour. The space it would
+    have taken is closed up rather than left as a hole — the body centres, so
+    the column breathes instead of leaving a gap where a code is not.
+  */
+  if (tier === 'portrait') {
+    return (
+      <View
+        key="ready-portrait"
+        style={[styles.canvas, styles.canvasPortrait]}
+        testID="wsf-display-screen"
+        {...({ dataSet: { layout: 'portrait', tier, phase, stale: stale ? 'true' : 'false' } } as Record<string, unknown>)}
+      >
+        <View style={styles.wideHeader}>
+          <WsfWordmark variant="white" height={34} testID="wsf-display-wordmark" />
+          {freshness}
+        </View>
+        <View style={styles.portraitBody}>
+          {identity}
+          {we}
+          {facts}
+        </View>
+        {recentPanel}
+        {testNote}
+      </View>
+    );
+  }
+
   // Phone / public page: the Community Home language — cream page, the navy
   // hero carrying the WE and the result, identity above it.
   return (
@@ -652,7 +770,7 @@ export default function DisplayGoal() {
       key="ready-phone"
       style={[styles.canvas, styles.canvasPhonePage]}
       testID="wsf-display-screen"
-      {...({ dataSet: { layout: 'phone', phase, stale: stale ? 'true' : 'false' } } as Record<string, unknown>)}
+      {...({ dataSet: { layout: 'phone', tier, phase, stale: stale ? 'true' : 'false' } } as Record<string, unknown>)}
     >
       <View style={styles.phoneHeader}>
         <WsfWordmark variant="navy" height={22} testID="wsf-display-wordmark" />
@@ -687,6 +805,23 @@ const styles = StyleSheet.create({
     paddingVertical: 32,
     justifyContent: 'center',
   },
+  // Loading, unavailable and unreachable on a wide screen: centred, because
+  // the sentence IS the screen. See D-11 at the generic root.
+  canvasGenericWide: {
+    backgroundColor: NAVY,
+    paddingHorizontal: 64,
+    paddingVertical: 40,
+    justifyContent: 'center',
+  },
+  // A picture frame: one navy column at frame scale. Not the phone's cream
+  // page, and not the booth's two columns.
+  canvasPortrait: {
+    backgroundColor: NAVY,
+    paddingHorizontal: 44,
+    paddingVertical: 44,
+    justifyContent: 'space-between',
+  },
+  portraitBody: { flex: 1, justifyContent: 'center', alignItems: 'stretch', gap: 18 },
   canvasPhonePage: {
     backgroundColor: CREAM,
     paddingHorizontal: 20,
@@ -702,7 +837,10 @@ const styles = StyleSheet.create({
   genericBody: { color: HERO_MUTED, fontSize: 17, lineHeight: 24, textAlign: 'center' },
   genericBodyWide: { fontSize: 26, lineHeight: 34 },
   recheckButton: {
-    backgroundColor: PROGRESS_GREEN,
+    // An action, not a confirmed number: Board 00 reserves PROGRESS_GREEN for
+    // confirmed progress, and a wall-display action is still an action
+    // (Director 5796783829, released 5800718059).
+    backgroundColor: ACTION_GREEN,
     paddingHorizontal: 28,
     minHeight: 54,
     justifyContent: 'center',

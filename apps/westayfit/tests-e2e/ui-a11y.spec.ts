@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page, type Route } from '@playwright/test';
+import { openMemberManage } from './helpers/memberShell';
 
 /**
  * ACCESSIBILITY CONTRACT across the three member-facing surfaces —
@@ -573,7 +574,7 @@ for (const width of [390, 195]) {
       await expect(page.getByTestId('wsf-community-invite-qr-symbol')).toBeVisible();
       await noOverflow(page, width, 'Community Home, invite QR open');
 
-      await page.getByTestId('wsf-community-manage').click();
+      await openMemberManage(page);
       await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible();
       await page.getByTestId('wsf-community-details-toggle').click();
       await expect(page.getByTestId('wsf-community-details')).toBeVisible();
@@ -738,7 +739,7 @@ test('R3 every control is at least 44×44 across Community Home, the sheet, the 
     await record('Community Home');
 
     // ---- the Manage sheet, fully expanded --------------------------------------
-    await page.getByTestId('wsf-community-manage').click();
+    await openMemberManage(page);
     await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible();
     await page.getByTestId('wsf-community-details-toggle').click();
     await expect(page.getByTestId('wsf-community-details')).toBeVisible();
@@ -881,7 +882,9 @@ test('R4 every Tab stop shows a focus ring, and the controls that matter are on 
       `every Community Home Tab stop shows a focus ring; order was ${homeIds.join(' → ')}`
     ).toEqual([]);
     for (const expected of [
-      'wsf-community-manage',
+      // The way into Champion tools is the shell's menu button now: the page's
+      // own Manage row moved into that menu and the row was deleted with it.
+      'wsf-member-topbar-menu-button',
       `wsf-community-goal-link-${goalA}`,
       `wsf-community-goal-record-${goalA}`,
       `wsf-community-goal-link-${goalB}`,
@@ -935,7 +938,7 @@ test('R5a the Manage sheet announces itself as a modal dialog called Champion to
     await expect(page.getByTestId(`wsf-community-goal-percent-${goalId}`)).toBeVisible({
       timeout: 30_000,
     });
-    await page.getByTestId('wsf-community-manage').click();
+    await openMemberManage(page);
     await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible();
 
     const dialog = page.locator('[role="dialog"]');
@@ -970,7 +973,7 @@ test('R5b the Manage sheet traps focus, blocks the page behind it, and returns f
     await expect(page.getByTestId(`wsf-community-goal-percent-${goalId}`)).toBeVisible({
       timeout: 30_000,
     });
-    await page.getByTestId('wsf-community-manage').click();
+    await openMemberManage(page);
     await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible();
 
     // ---- the page behind is not reachable with a pointer ----------------------
@@ -998,14 +1001,21 @@ test('R5b the Manage sheet traps focus, blocks the page behind it, and returns f
     await expect
       .poll(
         () => page.evaluate(() => document.activeElement?.getAttribute('data-testid') ?? 'none'),
-        { timeout: 5_000, message: 'Escape returns focus to Manage' }
+        {
+          timeout: 5_000,
+          message: 'Escape returns focus to the control that opened Champion tools',
+        }
       )
-      .toBe('wsf-community-manage');
+      // Manage is reached through the shell's menu now, and that menu's row is
+      // gone the moment it is chosen. The bar hands focus back to its own
+      // button as the menu closes, so this is the control the sheet has to
+      // return focus to — still the one the member opened it from.
+      .toBe('wsf-member-topbar-menu-button');
 
     // ---- focus stays inside, at phone width and at 200 % reflow width --------
     for (const width of [390, 195]) {
       await page.setViewportSize({ width, height: 844 });
-      await page.getByTestId('wsf-community-manage').click();
+      await openMemberManage(page);
       await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible();
       const seen: string[] = [];
       for (let i = 0; i < 8; i += 1) {
@@ -1218,7 +1228,7 @@ test('R7a axe finds no WCAG A/AA violation on any state of any surface', async (
     });
     await scan('Community Home');
 
-    await page.getByTestId('wsf-community-manage').click();
+    await openMemberManage(page);
     await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible();
     await expect(page.getByTestId(`wsf-goal-display-auth-toggle-${goalB}`)).toBeVisible();
     await expect(page.getByTestId(`wsf-goal-display-auth-toggle-${goalC}`)).toBeVisible();
@@ -1290,7 +1300,7 @@ test('R7b every surface has a title, one level-1 heading, a named wordmark, and 
       `241 of 500 ${UNIT_40}, 48.2% filled`
     );
 
-    await page.getByTestId('wsf-community-manage').click();
+    await openMemberManage(page);
     await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible();
     await expect(page.getByTestId(`wsf-goal-display-auth-toggle-${goalB}`)).toBeVisible();
     await expect(page.getByTestId(`wsf-goal-display-auth-toggle-${goalC}`)).toBeVisible();

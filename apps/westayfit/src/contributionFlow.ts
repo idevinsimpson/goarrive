@@ -6,7 +6,7 @@
  * talks to the network or to storage.
  */
 
-import { formatCount, isReached, totalOfTargetLabel } from './ui/progressFormat';
+import { fillRatio, formatCount, isReached, totalOfTargetLabel } from './ui/progressFormat';
 
 export const MAX_COUNT = 100_000;
 
@@ -353,4 +353,104 @@ export function resultCopy(
         standing: `${who} ${isAre} now at ${total}.`,
       };
   }
+}
+
+// ---- the Together completion (TOGETHER-COMPLETION-1) -------------------------
+
+/** The two payoffs the owner-selected design breaks over two lines, exactly so. */
+export const TOGETHER_PAYOFF_CLOSER = 'You moved us closer.';
+export const TOGETHER_PAYOFF_CROSSED = 'WE did it. Together.';
+const PAYOFF_LINES: Record<string, [string, string]> = {
+  [TOGETHER_PAYOFF_CLOSER]: ['You moved', 'us closer.'],
+  [TOGETHER_PAYOFF_CROSSED]: ['WE did it.', 'Together.'],
+};
+
+export type TogetherPresentation = {
+  variant: ResultVariant;
+  /** The receipt's heading: the same sentence resultCopy has always given. */
+  headline: string;
+  /** The large payoff. Communal on a server-confirmed crossing, never attributive. */
+  payoff: string;
+  /** The deliberate two-line break for the two designed payoffs; null for any other sentence. */
+  payoffLines: [string, string] | null;
+  standing: string | null;
+  /** The server's crossing signal, and nothing else. */
+  crossed: boolean;
+  /** Whether this receipt may play the one-time Together motion. */
+  animate: boolean;
+  /** The confirmed ratios the mark tweens between; equal when there is no reliable before. */
+  fromRatio: number;
+  toRatio: number;
+  /** The confirmed shared total the screen showed before this write, only when it is a reliable snapshot. */
+  before: number | null;
+};
+
+/**
+ * What the Together receipt shows, and whether it may move.
+ *
+ * TRUTH and FRESHNESS are separate inputs. The receipt facts come from the
+ * server's confirmed receipt alone and are the same however the receipt is
+ * reached. `fresh` is a transient fact about THIS screen — the first confirmed
+ * response to a Record pressed in this uninterrupted flow — and is never
+ * stored, restored or derived here.
+ *
+ * Motion is allowed only when all of these hold:
+ *   - fresh, and not an already-recorded replay;
+ *   - the receipt carries shared state (never on an own-only receipt);
+ *   - the story is `ordinary` (below target) or the server's `crossed`;
+ *   - a reliable before exists: the confirmed total the screen showed for the
+ *     SAME target, not above the confirmed after. It is never invented from
+ *     `sharedTotal - addedCount`, and a missing one is not reconstructed.
+ * A reached-without-signal or post-target receipt is static: it may not stage
+ * a crossing the server did not grant.
+ */
+export function togetherPresentation(
+  r: ContributeReceipt,
+  opts: {
+    communityName: string | null;
+    unitHint?: string | null;
+    sharedBefore?: number | null;
+    beforeTarget?: number | null;
+    fresh: boolean;
+  }
+): TogetherPresentation {
+  const sharedBefore = opts.sharedBefore ?? null;
+  const variant = resultVariant(r, sharedBefore);
+  const copy = resultCopy(r, opts.communityName, opts.unitHint ?? null, sharedBefore);
+  const crossed = variant === 'crossed';
+  const hasShared = variant !== 'ownOnly';
+  const payoff = crossed ? TOGETHER_PAYOFF_CROSSED : copy.subline;
+  const standing =
+    crossed && r.alreadyRecorded && copy.standing ? `It counted once. ${copy.standing}` : copy.standing;
+
+  const toRatio = hasShared ? fillRatio(r.sharedTotal!, r.target!) : 0;
+  const reliableBefore =
+    hasShared &&
+    sharedBefore != null &&
+    Number.isFinite(sharedBefore) &&
+    sharedBefore >= 0 &&
+    opts.beforeTarget != null &&
+    opts.beforeTarget === r.target &&
+    sharedBefore <= r.sharedTotal!;
+  const before = reliableBefore ? sharedBefore : null;
+  const fromRatio = before != null ? fillRatio(before, r.target!) : toRatio;
+  const animate =
+    opts.fresh &&
+    hasShared &&
+    !r.alreadyRecorded &&
+    before != null &&
+    (variant === 'ordinary' || variant === 'crossed');
+
+  return {
+    variant,
+    headline: copy.headline,
+    payoff,
+    payoffLines: PAYOFF_LINES[payoff] ?? null,
+    standing,
+    crossed,
+    animate,
+    fromRatio,
+    toRatio,
+    before,
+  };
 }

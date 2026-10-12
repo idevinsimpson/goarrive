@@ -1,0 +1,159 @@
+{
+  "schemaVersion": 1,
+  "milestone": "EXPO-ATTENDEE-JOURNEY-PROOF-1",
+  "productSha": "ab77fbfce97e60c1c22492397b2ab6b491f9e0db",
+  "previousKnownGoodSha": "a31276516e786ac8f848269de4c839b3b9e13123",
+  "journeys": [
+    {
+      "id": "event-use-my-phone",
+      "entry": "/event/{goalId}",
+      "setup": "signed-in active member of the event's community on their own phone; one open single-activity goal (squats) with display authorized",
+      "actions": [
+        "open the event page and answer the device question with My own phone",
+        "press Use my phone",
+        "enter a count, press Review, then Record"
+      ],
+      "expected": [
+        "the event's one activity stands selected and is said back as squats",
+        "Use my phone opens /contribute/{goalId} with no kiosk Finish control",
+        "choosing the phone creates no place in any line",
+        "the receipt shows the member's own amount, and the shared total includes it exactly once"
+      ],
+      "knownExclusions": [
+        "Safari and native builds: not exercised; emulator Chromium only",
+        "a printed QR code: the event address is opened directly, not scanned"
+      ]
+    },
+    {
+      "id": "event-join-line",
+      "entry": "/event/{goalId}",
+      "setup": "signed-in active member on their own phone; the goal has at least one enrolled station screen showing Nobody is waiting.",
+      "actions": [
+        "open the event page and answer My own phone",
+        "press Join the kiosk queue and leave the name box open without joining",
+        "type the name the screen should use, then press the join button"
+      ],
+      "expected": [
+        "nothing is in the line until the join button is pressed, and the station still reads Nobody is waiting.",
+        "after joining, the member's own queue page opens and the station counts them as a number",
+        "the station screen never shows the member's account name, the name they chose, or any identifier while they wait"
+      ],
+      "knownExclusions": [
+        "kiosk or station hardware: station screens are browser windows",
+        "how being called feels in a loud hall: owner device review"
+      ]
+    },
+    {
+      "id": "two-station-turns",
+      "entry": "/station/{goalId}",
+      "setup": "two station screens enrolled as Station 1 and Station 2 on one goal; two members in line from their own phones, in a known order",
+      "actions": [
+        "press Call next on Station 1, then on Station 2",
+        "on the second member's phone press I'm ready, then on the first member's phone",
+        "press Start their turn on both stations",
+        "enter 20 on Station 1 and 30 on Station 2 and record both"
+      ],
+      "expected": [
+        "Station 1 calls the first member and Station 2 the second, each by the chosen name and a three-character code, and the two codes differ",
+        "each phone shows its own station's code and Go to Station 1. or Go to Station 2., never the other's",
+        "a station's Start stays disabled until its own called member taps I'm ready; another member's ready does not open it",
+        "each station's result shows its own code with 20 squats recorded. or 30 squats recorded., and each phone's receipt shows its own amount",
+        "once the result clears, neither station shows any name or code from the finished turns"
+      ],
+      "knownExclusions": [
+        "printed station signage and kiosk hardware",
+        "the follow-along player's timing and feel: owner device review"
+      ]
+    },
+    {
+      "id": "phone-and-stations-converge",
+      "entry": "/station/{goalId}",
+      "setup": "goal target 100 squats with a seeded 40 already recorded; one member on Use my phone and two members mid-turn at Station 1 and Station 2",
+      "actions": [
+        "record 15 on the phone, 20 at Station 1 and 30 at Station 2 at the same moment"
+      ],
+      "expected": [
+        "both station screens settle on 105 of 100 squats, 100% complete, 5 beyond our goal · still open",
+        "the phone, read fresh, shows the same shared total of 105",
+        "each of the three is recorded once; a station turn is recorded as the attempt that station started",
+        "the target crossing is recorded once for the goal and is not credited to any single member"
+      ],
+      "knownExclusions": [
+        "a celebration or animation at the crossing: not part of this journey"
+      ]
+    },
+    {
+      "id": "station-lost-answer",
+      "entry": "/station/{goalId}",
+      "setup": "one enrolled station mid-turn with a member who tapped I'm ready; the member's phone loses its connection",
+      "actions": [
+        "on the station enter 25 and record while the station's network drops so the answer never arrives",
+        "press record again once",
+        "reconnect the phone"
+      ],
+      "expected": [
+        "the station keeps the same turn and the same count available to try again",
+        "the second press reports the same 25 squats recorded. and adds nothing",
+        "the shared total rises by 25 exactly once",
+        "while offline the phone claims no result; once reconnected it shows 25 squats recorded."
+      ],
+      "knownExclusions": [
+        "the wording the station prints for a lost answer: at this build it prints internal instead of That didn't go through. Try again. (GAP-1, reproduced on emulators, not fixed here)"
+      ]
+    },
+    {
+      "id": "line-place-ends",
+      "entry": "/queue/{goalId}",
+      "setup": "one enrolled station and three members in line one after another from their own phones",
+      "actions": [
+        "first member: press Switch to my phone and record 10 there",
+        "second member: get called and do not answer for 45 seconds",
+        "third member: get called, tap I'm ready, then the station presses Let them go"
+      ],
+      "expected": [
+        "Switch to my phone opens the contribution screen for the same activity and the station stops counting them",
+        "the unanswered call ends with Your turn timed out on the member's phone and an empty station",
+        "Let them go returns the third member to You're not in the line with no receipt",
+        "only the switched member's 10 is recorded; neither of the other two records anything"
+      ],
+      "knownExclusions": [
+        "waiting the real 45 seconds: the emulator proof runs the lease out in the store instead"
+      ]
+    },
+    {
+      "id": "closed-goal-turn",
+      "entry": "/station/{goalId}",
+      "setup": "one enrolled station mid-turn with a ready member; the goal is closed before the station records",
+      "actions": [
+        "enter 12 on the station and record"
+      ],
+      "expected": [
+        "the station prints This goal is closed.",
+        "nothing is recorded and the shared total does not move",
+        "the member's phone shows no receipt"
+      ],
+      "knownExclusions": [
+        "refusal before recording: at this build a member can still join, be called, tap ready and be started on a goal that is already closed, and the event page still offers Join the kiosk queue (GAP-2, reproduced on emulators, a product decision not settled here)"
+      ]
+    },
+    {
+      "id": "shared-screen-finish",
+      "entry": "/kiosk/{goalId}",
+      "setup": "a shared screen at the event with an authorized goal and a member who has an account",
+      "actions": [
+        "start, sign in, record a contribution",
+        "press Finish",
+        "start again as the next person"
+      ],
+      "expected": [
+        "after Finish the screen is back at its start, signed out, with no previous person's name, email, own credit, receipt or pending record",
+        "the next person starts at the sign-in gate and their own credit reads zero, while the shared total keeps both people's contributions",
+        "left untouched, the countdown performs the same Finish and Stay puts it back"
+      ],
+      "knownExclusions": [
+        "kiosk hardware lock-down: this is in-app confinement, not a device lock",
+        "a mailbox: the walk-up uses an account that already exists"
+      ]
+    }
+  ]
+}

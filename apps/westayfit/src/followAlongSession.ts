@@ -50,6 +50,7 @@ import {
   type FollowAlongStep,
   type MediaPresentation,
 } from './followAlong';
+import { demoMediaFor } from './movementDemoMedia';
 import { figureKindFor, type MoveFigureKind, type MovePose } from './ui/moveFigure';
 
 /** How often the screen re-reads the clock. Fine enough to look alive. */
@@ -155,7 +156,14 @@ export function useFollowAlongSession(input: {
     };
   }, [running]);
 
-  const plan = useMemo(() => buildFollowAlongPlan({ unit, length }), [unit, length]);
+  // THE MEDIA SEAM, filled only from the approved catalog and only for this
+  // exact movement (EXPO-MOVEMENT-VIDEO-1). With no approved clip — every real
+  // movement today — it is `{ kind: 'none' }` and the drawn guide stands.
+  const demoMedia = useMemo(() => demoMediaFor(unit), [unit]);
+  const plan = useMemo(
+    () => buildFollowAlongPlan({ unit, length, media: demoMedia }),
+    [unit, length, demoMedia]
+  );
 
   const elapsedMs = clockElapsed(clock, now);
   const at = stepAt(plan, elapsedMs);

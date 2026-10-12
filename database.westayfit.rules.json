@@ -1,0 +1,30 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "wsfLivePose": {
+      "$key": {
+        "frame": {
+          ".read": "root.child('wsfLivePose').child($key).child('meta').child('expiresAt').val() > now",
+          ".write": "newData.exists() && auth != null && auth.token.firebase.sign_in_provider.length > 0 && auth.token.firebase.sign_in_provider !== 'anonymous' && auth.uid === root.child('wsfLivePose').child($key).child('meta').child('writerUid').val() && root.child('wsfLivePose').child($key).child('meta').child('expiresAt').val() > now",
+          ".validate": "newData.hasChildren(['seq', 't', 'p', 'rep']) && (!data.exists() || (newData.child('seq').val() > data.child('seq').val() && newData.child('t').val() >= data.child('t').val() + 50))",
+          "seq": {
+            ".validate": "newData.isNumber() && newData.val() % 1 === 0 && newData.val() >= 1 && newData.val() <= 2147483647"
+          },
+          "t": {
+            ".validate": "newData.isNumber() && newData.val() % 1 === 0 && newData.val() >= 0 && newData.val() <= 120000"
+          },
+          "p": {
+            ".validate": "newData.isString() && newData.val().length === 87 && newData.val().matches(/^[A-Za-z0-9_-]+$/)"
+          },
+          "rep": {
+            ".validate": "newData.isNumber() && newData.val() % 1 === 0 && newData.val() >= 0 && newData.val() <= 9999"
+          },
+          "$other": {
+            ".validate": false
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "asOf": "2026-09-26T13:14:21Z",
+  "lovable": {
+    "projectId": "e15b9fa0-b2a0-4314-bc21-9c573b8eceb1",
+    "frozenProjectHead": "d4f606244ba3995080fb0bcd471cbebf4cbbc56a",
+    "rule": "A journey-specific frozen reference wins over the project-wide head. An issued reference never moves silently."
+  },
+  "canonical": {
+    "repository": "idevinsimpson/goarrive",
+    "app": "apps/westayfit",
+    "developmentHeadAtCreation": "938e00d8c985993f69becc8924d3037f18425afc",
+    "currentlyVerifiedStagingAtCreation": "74d1928145bbc76267498ee63b9423b6f6cdfae8"
+  },
+  "journeys": {
+    "communitySettings": {
+      "status": "canonical accepted and integrated; staging release pending at manifest creation",
+      "lovableReferenceProductSha": "d4f606244ba3995080fb0bcd471cbebf4cbbc56a",
+      "lovableEvidenceNote": "frozen Community/Settings comparisons at 390x640 and 390x844",
+      "canonicalAcceptedProductSha": "ffb517e5",
+      "canonicalIntegratedSha": "938e00d8c985993f69becc8924d3037f18425afc",
+      "acceptedDifferences": [
+        "No Lovable prototype/sample strip or kicker in canonical",
+        "Canonical uses authoritative group type, join policy and goal windows",
+        "Native font/icon/glyph rendering may differ",
+        "Fixture role differences remain truthful rather than cosmetically forced"
+      ]
+    },
+    "youMemberReturn": {
+      "status": "Lovable journey reference frozen",
+      "lovableReferenceProductSha": "642f830",
+      "canonicalAcceptedProductSha": "18ba6de2",
+      "canonicalStagedWithinSha": "74d1928145bbc76267498ee63b9423b6f6cdfae8",
+      "note": "Use exact journey evidence from the issued packet; do not fall back to a newer project head without Director disposition."
+    },
+    "progressFirstContribution": {
+      "status": "Lovable journey reference frozen",
+      "lovableReferenceProductSha": "09b8a73",
+      "canonicalAcceptedProductSha": "bdc82c0e",
+      "canonicalStagedWithinSha": "74d1928145bbc76267498ee63b9423b6f6cdfae8",
+      "note": "Private own history remains distinct from shared history; do not blend units."
+    },
+    "championManageContext": {
+      "status": "Lovable journey reference frozen",
+      "lovableReferenceProductSha": "d4f606244ba3995080fb0bcd471cbebf4cbbc56a",
+      "evidenceOriginSha": "08192ac",
+      "note": "Manage is contextual and menu-scoped; canonical authority remains server/trusted-state based."
+    },
+    "goalComposer": {
+      "status": "Lovable journey reference frozen",
+      "lovableReferenceProductSha": "128644b3",
+      "lovableEvidenceSha": "917fc319",
+      "note": "Use the issued Goal Composer packet, not arbitrary current Lovable pixels."
+    },
+    "goalCapability": {
+      "status": "Lovable journey reference frozen",
+      "lovableReferenceProductSha": "0b881829",
+      "priorReferenceSha": "6ab12079",
+      "note": "Movement capability and goal setup reference only; product truth still comes from canonical rules/data."
+    },
+    "motion": {
+      "status": "limited accepted motion reference",
+      "lovableReferenceProductSha": "06198931",
+      "note": "Port behavior/timing semantics, not demo-only CSS or local authority."
+    },
+    "home": {
+      "status": "project-wide frozen reference only; route-specific packet required before a new Home parity build",
+      "lovableReferenceProductSha": null,
+      "fallbackFrozenProjectHead": "d4f606244ba3995080fb0bcd471cbebf4cbbc56a"
+    },
+    "move": {
+      "status": "project-wide frozen reference plus issued journey packets; route-specific packet required before broad redesign",
+      "lovableReferenceProductSha": null,
+      "fallbackFrozenProjectHead": "d4f606244ba3995080fb0bcd471cbebf4cbbc56a"
+    }
+  },
+  "requiredPacketFields": [
+    "journey",
+    "lovableProjectId",
+    "frozenReferenceProductSha",
+    "frozenReferenceEvidenceShaOrNull",
+    "states",
+    "viewports",
+    "sourceDonors",
+    "acceptedDifferences",
+    "navigationFocusMotionContract",
+    "canonicalReservedFiles"
+  ]
+}

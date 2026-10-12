@@ -1,0 +1,80 @@
+{
+  "lovableRef": "642f830baa1153b0d9465dc75690028768083fb7",
+  "phase": "before",
+  "frames": [
+    {
+      "state": "normal",
+      "viewport": "390x844",
+      "phase": "before",
+      "canonical": "canonical-before/you-normal-390x844.png",
+      "canonicalSha256": "95ed9a21eec1f3f028f20002c6844de0e9276cc75f60429595a24bef1388f672",
+      "lovable": "lovable-642f830b/you-normal-390x844.png",
+      "lovableSha256": "86f270cb9a0bf86fe84240f86a1e819468e9d1534a37fb118516be32ae33b671",
+      "sideBySide": "canonical-before/cmp-you-normal-390x844-side-by-side.png",
+      "overlay50": "canonical-before/cmp-you-normal-390x844-overlay-50.png",
+      "difference": "canonical-before/cmp-you-normal-390x844-difference.png",
+      "differingPixelShare": 0.478
+    },
+    {
+      "state": "normal",
+      "viewport": "390x640",
+      "phase": "before",
+      "canonical": "canonical-before/you-normal-390x640.png",
+      "canonicalSha256": "86e17e92f2a97124ea2a0658782193b6efa168097b51af6d89501147ac4f410e",
+      "lovable": "lovable-642f830b/you-normal-390x640.png",
+      "lovableSha256": "87063a31aa66222d205f4c73d9a2157a41845965f8385299e2ae14ca2914eb2b",
+      "sideBySide": "canonical-before/cmp-you-normal-390x640-side-by-side.png",
+      "overlay50": "canonical-before/cmp-you-normal-390x640-overlay-50.png",
+      "difference": "canonical-before/cmp-you-normal-390x640-difference.png",
+      "differingPixelShare": 0.4954
+    },
+    {
+      "state": "no-own",
+      "viewport": "390x844",
+      "phase": "before",
+      "canonical": "canonical-before/you-no-own-390x844.png",
+      "canonicalSha256": "a691372f70530c722b8b0d604a2c994a543bb72bffc2637c22bf64ad0b0d2e5b",
+      "lovable": "lovable-642f830b/you-no-own-390x844.png",
+      "lovableSha256": "0e83eb0998064a5f848cd3a08d50de1cda7f718bd602e2b4619702d0e1702232",
+      "sideBySide": "canonical-before/cmp-you-no-own-390x844-side-by-side.png",
+      "overlay50": "canonical-before/cmp-you-no-own-390x844-overlay-50.png",
+      "difference": "canonical-before/cmp-you-no-own-390x844-difference.png",
+      "differingPixelShare": 0.4422
+    },
+    {
+      "state": "no-own",
+      "viewport": "390x640",
+      "phase": "before",
+      "canonical": "canonical-before/you-no-own-390x640.png",
+      "canonicalSha256": "65e55c69762b5198723a5edf9544354e6556d1559f39616a3759225ddafc1a55",
+      "lovable": "lovable-642f830b/you-no-own-390x640.png",
+      "lovableSha256": "b48fd978bb2de7de24387726339c4ceca9f62b46dd06b86f1ff5f563c20dd7d5",
+      "sideBySide": "canonical-before/cmp-you-no-own-390x640-side-by-side.png",
+      "overlay50": "canonical-before/cmp-you-no-own-390x640-overlay-50.png",
+      "difference": "canonical-before/cmp-you-no-own-390x640-difference.png",
+      "differingPixelShare": 0.4926
+    },
+    {
+      "state": "no-eligible",
+      "viewport": "390x844",
+      "phase": "before",
+      "canonical": "canonical-before/you-no-eligible-390x844.png",
+      "canonicalSha256": "b64d06080b2ea70086b7f35283c360b557d07c7fb7ac44fe10b727f7a63c39a1",
+      "lovable": "lovable-642f830b/you-no-eligible-390x844.png",
+      "lovableSha256": "3885859b8a8a81082bce6e21fee44a5fd17f28f951714776d91932b2208a5e8c",
+      "sideBySide": "canonical-before/cmp-you-no-eligible-390x844-side-by-side.png",
+      "overlay50": "canonical-before/cmp-you-no-eligible-390x844-overlay-50.png",
+      "difference": "canonical-before/cmp-you-no-eligible-390x844-difference.png",
+      "differingPixelShare": 0.3795
+    },
+    {
+      "state": "failed",
+      "viewport": "390x844",
+      "phase": "before",
+      "canonical": "canonical-before/you-failed-390x844.png",
+      "canonicalSha256": "f827064f4a120a884bc3ba727f5a855a69990d416f5f8af0f1530fbaa1e5de6f",
+      "lovable": null,
+      "lovableSha256": null
+    }
+  ]
+}

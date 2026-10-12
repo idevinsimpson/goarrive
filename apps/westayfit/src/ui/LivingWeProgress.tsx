@@ -41,6 +41,8 @@ export function LivingWeProgress({
   width = 220,
   surface = 'light',
   animateFrom = null,
+  unfilledTint,
+  displayRatio = null,
   testID,
 }: {
   completed: number;
@@ -51,11 +53,25 @@ export function LivingWeProgress({
   surface?: 'light' | 'dark';
   /** The previously CONFIRMED total a future transition would start from. */
   animateFrom?: number | null;
+  /**
+   * RECEIPT-ONLY OPT-IN (TOGETHER-COMPLETION-1). A tint for the unfilled layer,
+   * so the Together receipt can show its slate WE from the same locked asset.
+   * Absent everywhere else, where the owner's colourways are unchanged.
+   */
+  unfilledTint?: string;
+  /**
+   * RECEIPT-ONLY OPT-IN (TOGETHER-COMPLETION-1). A presentation ratio the
+   * clip shows instead of completed/target while the Together receipt tweens
+   * between two CONFIRMED totals. Each value is still mapped through this
+   * mark's own area calibration. It never changes the label, which always
+   * states the exact confirmed figures. Null everywhere else.
+   */
+  displayRatio?: number | null;
   testID?: string;
 }) {
   const height = Math.round(width / LIVING_WE_ASPECT);
   const reducedMotion = useReducedMotion();
-  const ratio = fillRatio(completed, target);
+  const ratio = displayRatio == null ? fillRatio(completed, target) : Math.max(0, Math.min(1, displayRatio));
   const clipPx = heightFractionForFill(ratio) * height;
 
   // Start where the previous confirmed state was (or at the current state on
@@ -78,7 +94,8 @@ export function LivingWeProgress({
     if (lastTarget.current === clipPx) return;
     lastTarget.current = clipPx;
     const transition = livingWeTransition();
-    if (reducedMotion || transition == null) {
+    // A presentation ratio is already the frame to show: the receipt drives it.
+    if (reducedMotion || transition == null || displayRatio != null) {
       anim.setValue(clipPx);
       return;
     }
@@ -87,7 +104,7 @@ export function LivingWeProgress({
       duration: transition.durationMs,
       useNativeDriver: false,
     }).start();
-  }, [anim, clipPx, reducedMotion]);
+  }, [anim, clipPx, reducedMotion, displayRatio]);
 
   const unfilled = surface === 'dark' ? monogramUnfilledWhite : monogramUnfilledNavy;
   const label = `${totalOfTargetLabel(completed, target, unit)}, ${percentLabel(completed, target)} filled`;
@@ -103,7 +120,11 @@ export function LivingWeProgress({
       testID={testID}
       {...({ dataSet: { 'fill-ratio': fillRatioAttribute(completed, target) } } as Record<string, unknown>)}
     >
-      <Image source={unfilled} style={[styles.layer, { width, height }]} resizeMode="contain" />
+      <Image
+        source={unfilled}
+        style={[styles.layer, { width, height }, unfilledTint ? { tintColor: unfilledTint } : null]}
+        resizeMode="contain"
+      />
       <Animated.View style={[styles.clip, { width, height: anim }]}>
         <Image
           source={monogramFillGreen}

@@ -1,0 +1,17 @@
+
+Running 6 tests using 1 worker
+
+  ✓  1 [chromium] › tests-e2e/sprint-w9-recovery-port-rendering.spec.ts:148:7 › RECOVERY-PORT-1 · the ported recovery states › unknown: the reference order on the accepted words, one action, no discard, no shared figure (7.9s)
+  ✓  2 [chromium] › tests-e2e/sprint-w9-recovery-port-rendering.spec.ts:182:7 › RECOVERY-PORT-1 · the ported recovery states › Confirm is a write: an attempt that never reached the server is recorded by it, once (1.7s)
+  ✓  3 [chromium] › tests-e2e/sprint-w9-recovery-port-rendering.spec.ts:209:7 › RECOVERY-PORT-1 · the ported recovery states › receipt: the Together hierarchy — amount, WE, payoff, shared total, own credit, standing, then the green way back (1.6s)
+  ✓  4 [chromium] › tests-e2e/sprint-w9-recovery-port-rendering.spec.ts:263:7 › RECOVERY-PORT-1 · the ported recovery states › review: Edit and the green Record side by side, nothing written first (1.6s)
+MEASURE hero launcher → chrome Back: {"path":"/community/w9rpr-murxg9rn-77ef4fx","focus":"a[wsf-community-goal-record-w9rprgoal-murxg9rn-77ef4fx]","homeTabCurrent":"true"}
+MEASURE unknown → labelled exit: {"path":"/community/w9rpr-murxg9rn-77ef4fx","focus":"a[wsf-community-goal-record-w9rprgoal-murxg9rn-77ef4fx]","communityScreens":1}
+MEASURE return through the launcher: {"restoredSameAttempt":true,"sendsOnReturn":0}
+MEASURE receipt → labelled exit: {"path":"/community/w9rpr-murxg9rn-77ef4fx","focus":"a[wsf-community-goal-record-w9rprgoal-murxg9rn-77ef4fx]","communityScreens":1}
+MEASURE MOVE centre (from You) → contribute: {"path":"/contribute/w9rprgoal-murxg9rn-77ef4fx","ownBackLabel":"Close"}
+MEASURE MOVE centre (from You) → the route's own Back: {"path":"/you","focus":"button[wsf-member-tab-move]","youTabCurrent":"true","moveLauncherFocused":true}
+  ✓  5 [chromium] › tests-e2e/sprint-w9-recovery-port-rendering.spec.ts:279:7 › RECOVERY-PORT-1 · the ported recovery states › exits, measured: the kept attempt survives a round trip; where each way out lands, and focus (11.8s)
+  ✓  6 [chromium] › tests-e2e/sprint-w9-recovery-port-rendering.spec.ts:404:7 › RECOVERY-PORT-1 · the ported recovery states › the route's own Back, opened cold: it says "Back" and still lands on its fallback, replacing (5.2s)
+
+  6 passed (31.4s)

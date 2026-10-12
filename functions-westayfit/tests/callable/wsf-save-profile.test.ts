@@ -1,6 +1,6 @@
 /**
- * wsfSaveProfile callable — create, update-preserves-createdAt, unverified,
- * bad-name. Invokes the v2 handler via `.run(request)` against a live
+ * wsfSaveProfile callable — create, update-preserves-createdAt, unverified
+ * participant (allowed since KIOSK-UNVERIFIED-PARTICIPANT-1), bad-name. Invokes the v2 handler via `.run(request)` against a live
  * Firestore emulator.
  * Run:
  *   cd functions-westayfit
@@ -104,25 +104,49 @@ describe('wsfSaveProfile', () => {
     expect(data.updatedAt.toMillis()).toBeGreaterThan(seededCreatedAt.toMillis());
   });
 
-  test('unverified email is rejected with failed-precondition', async () => {
+  test('KIOSK-UNVERIFIED-PARTICIPANT-1: an unverified account saves its own profile, and verifying later keeps it', async () => {
     await clearProfile(CAROL_UID);
 
+    // An authenticated account whose address is NOT verified yet.
+    const created = await wsfSaveProfile.run(makeRequest(CAROL_UID, false, { displayName: '  Carol  ' }));
+    expect(created).toEqual({ created: true });
+    const first = (await getFirestore().doc(`wsfMemberProfiles/${CAROL_UID}`).get()).data() as {
+      displayName: string;
+      acceptedTermsVersion: string;
+      acceptedPrivacyVersion: string;
+      createdAt: Timestamp;
+      updatedAt: Timestamp;
+      acceptedTermsAt?: Timestamp;
+    };
+    // The same validation and server stamps a verified caller gets.
+    expect(first.displayName).toBe('Carol');
+    expect(first.acceptedTermsVersion).toBe('pending-approval-2026-08-25');
+    expect(first.acceptedPrivacyVersion).toBe('pending-approval-2026-08-25');
+    expect(first.createdAt).toBeInstanceOf(Timestamp);
+
+    // Still validated while unverified.
     let caught: unknown;
     try {
-      await wsfSaveProfile.run(
-        makeRequest(CAROL_UID, false, { displayName: 'Carol' })
-      );
+      await wsfSaveProfile.run(makeRequest(CAROL_UID, false, { displayName: 'C' }));
     } catch (e) {
       caught = e;
     }
+    expect((caught as HttpsError).code).toBe('invalid-argument');
 
-    expect(caught).toBeInstanceOf(HttpsError);
-    expect((caught as HttpsError).code).toBe('failed-precondition');
-    expect((caught as HttpsError).message).toMatch(/Verify your email/);
+    // The SAME uid verifies its address and saves again: an update of the
+    // same profile, with createdAt and the consent record untouched.
+    const updated = await wsfSaveProfile.run(makeRequest(CAROL_UID, true, { displayName: 'Carol V' }));
+    expect(updated).toEqual({ created: false });
+    const after = (await getFirestore().doc(`wsfMemberProfiles/${CAROL_UID}`).get()).data() as typeof first;
+    expect(after.displayName).toBe('Carol V');
+    expect(after.createdAt.toMillis()).toBe(first.createdAt.toMillis());
+    expect(after.acceptedTermsVersion).toBe(first.acceptedTermsVersion);
+  });
 
-    // Nothing written.
-    const snap = await getFirestore().doc(`wsfMemberProfiles/${CAROL_UID}`).get();
-    expect(snap.exists).toBe(false);
+  test('an unverified caller can only ever write its own profile', async () => {
+    await clearProfile(DAVE_UID);
+    await wsfSaveProfile.run(makeRequest(CAROL_UID, false, { displayName: 'Carol', uid: DAVE_UID, userId: DAVE_UID }));
+    expect((await getFirestore().doc(`wsfMemberProfiles/${DAVE_UID}`).get()).exists).toBe(false);
   });
 
   test('bad displayName (too short after trim) is rejected with invalid-argument', async () => {

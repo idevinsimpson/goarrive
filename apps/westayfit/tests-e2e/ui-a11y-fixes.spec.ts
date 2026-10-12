@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 
 import { expect, test, type Page } from '@playwright/test';
+import { openMemberManage } from './helpers/memberShell';
 
 /**
  * PROOF FOR THE ACCESSIBILITY / RESPONSIVE CORRECTIONS.
@@ -239,8 +240,8 @@ test('(a) the Champion tools sheet is a dialog with an accessible name', async (
   try {
     await signInVia(page, fx.championEmail, fx.password);
     await page.goto(`/community/${fx.groupId}`);
-    await expect(page.getByTestId('wsf-community-manage')).toBeVisible({ timeout: 30_000 });
-    await page.getByTestId('wsf-community-manage').click();
+    await expect(page.getByTestId('wsf-community')).toBeVisible({ timeout: 30_000 });
+    await openMemberManage(page);
     await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible();
     await expect(page.getByRole('dialog', { name: 'Champion tools' })).toBeVisible();
   } finally {
@@ -312,7 +313,7 @@ test('(d) no interactive target is under 44 px', async ({ browser }) => {
     await expect(page.getByTestId('wsf-community-invite')).toBeVisible();
     expect(await undersizedTargets(page, MIN_TARGET_PX), 'Community Home').toEqual([]);
 
-    await page.getByTestId('wsf-community-manage').click();
+    await openMemberManage(page);
     await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible();
     await page.getByTestId('wsf-community-details-toggle').click();
     await expect(page.getByTestId('wsf-community-details')).toBeVisible();
@@ -409,8 +410,8 @@ test('(g) two goals in the sheet do not share one accessible name', async ({ bro
   try {
     await signInVia(page, fx.championEmail, fx.password);
     await page.goto(`/community/${fx.groupId}`);
-    await expect(page.getByTestId('wsf-community-manage')).toBeVisible({ timeout: 30_000 });
-    await page.getByTestId('wsf-community-manage').click();
+    await expect(page.getByTestId('wsf-community')).toBeVisible({ timeout: 30_000 });
+    await openMemberManage(page);
     await expect(page.getByTestId(`wsf-goal-display-auth-toggle-${fx.goals.squats}`)).toBeVisible();
     await expect(page.getByTestId(`wsf-goal-display-auth-toggle-${fx.goals.minutes}`)).toBeVisible();
     // Both controls read "Authorize public display" on screen, and that is

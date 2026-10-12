@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 
 import { expect, test, type BrowserContext, type Page, type Route } from '@playwright/test';
+import { openMemberManage } from './helpers/memberShell';
 
 /**
  * CHAMPION TOOLS — TORTURE ROUND 2 (overnight 2026-09-18).
@@ -185,10 +186,7 @@ async function snap(page: Page, name: string): Promise<void> {
 // sheet on Community Home. Opening it is the real interaction a Champion
 // performs, so every Champion visit goes through it.
 async function openManage(page: Page): Promise<void> {
-  const manage = page.getByTestId('wsf-community-manage');
-  await expect(manage).toBeVisible({ timeout: 20_000 });
-  await manage.click();
-  await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible({ timeout: 20_000 });
+  await openMemberManage(page);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

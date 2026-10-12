@@ -1,0 +1,21 @@
+{
+  "commit": "0e5d6f38",
+  "panelAnimationsRunningOnOpen": 0,
+  "closePressToPanelGoneMs": 15,
+  "focusAfterClose": {
+    "testId": "wsf-you-settings",
+    "label": "Settings"
+  },
+  "stage": "CANDIDATE",
+  "device": "390x640",
+  "frames": [
+    {
+      "file": "CANDIDATE-cp4-reduced-settings-open-390x640.png",
+      "sha256": "2c7e681a62eea5ece52d2c10577a53107889872177f190a0fddbff63596e9c8f"
+    },
+    {
+      "file": "CANDIDATE-cp4-reduced-settings-closed-390x640.png",
+      "sha256": "1d82a239625f8288e9dc4d59aa1cba792f9ee4a1351de4e4e8983dac028250de"
+    }
+  ]
+}

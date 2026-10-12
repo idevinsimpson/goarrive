@@ -13,11 +13,17 @@
     "hosting mirrors firebase.westayfit.json exactly — including the",
     "/community/** rewrite, which is the thing GATE 1 has to prove. Keep the two",
     "in sync: if a rewrite or header changes there, change it here, or the",
-    "harness stops testing what actually ships."
+    "harness stops testing what actually ships.",
+    "",
+    "database backs KIOSK-LIVE-POSE-2: its rules (database.westayfit.rules.json)",
+    "and the live-pose suite in functions-westayfit/tests/live-pose."
   ],
   "firestore": {
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
+  },
+  "database": {
+    "rules": "database.westayfit.rules.json"
   },
   "functions": [
     {
@@ -40,6 +46,7 @@
     "trailingSlash": false,
     "rewrites": [
       { "source": "/community/*/challenge", "destination": "/community/__dynamic/challenge.html" },
+      { "source": "/community/*/members", "destination": "/community/__dynamic/members.html" },
       { "source": "/community/**", "destination": "/community/__dynamic.html" },
       { "source": "/join/**", "destination": "/join/__dynamic.html" },
       { "source": "/contribute/**", "destination": "/contribute/__dynamic.html" },
@@ -49,7 +56,8 @@
       { "source": "/event/**", "destination": "/event/__dynamic.html" },
       { "source": "/queue/**", "destination": "/queue/__dynamic.html" },
       { "source": "/move/**", "destination": "/move/__dynamic.html" },
-      { "source": "/combined/**", "destination": "/combined/__dynamic.html" }
+      { "source": "/combined/**", "destination": "/combined/__dynamic.html" },
+      { "source": "/go/**", "destination": "/go/__dynamic.html" }
     ],
     "headers": [
       {
@@ -65,6 +73,7 @@
   "emulators": {
     "auth": { "host": "127.0.0.1", "port": 9099 },
     "firestore": { "host": "127.0.0.1", "port": 8080 },
+    "database": { "host": "127.0.0.1", "port": 9000 },
     "functions": { "host": "127.0.0.1", "port": 5001 },
     "hosting": { "host": "127.0.0.1", "port": 5010 },
     "ui": { "enabled": false },

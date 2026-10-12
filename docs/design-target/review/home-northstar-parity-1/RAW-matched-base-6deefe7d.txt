@@ -1,0 +1,6 @@
+
+Running 2 tests using 1 worker
+
+[1/2] [chromium] › tests-e2e/sprint-w9-home-northstar-parity-1.spec.ts:206:9 › HOME-NORTHSTAR-PARITY-1 · matched producer · BASE › 390x844: the Home route against the frozen original
+[2/2] [chromium] › tests-e2e/sprint-w9-home-northstar-parity-1.spec.ts:206:9 › HOME-NORTHSTAR-PARITY-1 · matched producer · BASE › 390x640: the Home route against the frozen original
+  2 passed (2.2m)

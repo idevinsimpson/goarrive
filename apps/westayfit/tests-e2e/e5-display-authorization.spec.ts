@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 
 import { expect, test, type BrowserContext, type Page, type Route } from '@playwright/test';
+import { openMemberManage } from './helpers/memberShell';
 
 /**
  * PACKAGE E — the display permission, driven through the REAL control.
@@ -213,10 +214,7 @@ async function snap(page: Page, name: string): Promise<void> {
 // Champion performs, so every Champion visit goes through it; the
 // authorization assertions below are unchanged.
 async function openManage(page: Page): Promise<void> {
-  const manage = page.getByTestId('wsf-community-manage');
-  await expect(manage).toBeVisible({ timeout: 20_000 });
-  await manage.click();
-  await expect(page.getByTestId('wsf-community-manage-panel')).toBeVisible({ timeout: 20_000 });
+  await openMemberManage(page);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
