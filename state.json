@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "dd8119f1e3a7da02381fa6f2391fde6af0596b37d6844e4496d332dd1b4309bf",
-  "eventCount": 1323,
+  "ledgerHead": "d28953a97ff814de68279cc731c95e5507ed37e155c94dace0c078b38302f13a",
+  "eventCount": 1325,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2193,7 +2193,7 @@
       },
       "label": "Live pose over RTDB for station turns: per-turn capability key, phone writes / station reads, rules + staging deploy step, WSF_LIVE_POSE switch, never a contribution",
       "origin": "ledger",
-      "phase": "ACCEPTED",
+      "phase": "INTEGRATED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
@@ -2205,7 +2205,7 @@
         "subjectSha": "87b48fa852174311bef1b8c337e2be0f505ad280",
         "prHeadSha": "87b48fa852174311bef1b8c337e2be0f505ad280",
         "evidenceSha": null,
-        "mergeSha": null
+        "mergeSha": "a6eaf0be95cb0a81de4f24bc6d7f30ac82ce922f"
       },
       "proof": null,
       "served": null,
@@ -2242,8 +2242,8 @@
           "id": 6109907167
         },
         "lastTransition": {
-          "kind": "comment",
-          "id": 6109907167
+          "kind": "pull_request",
+          "id": 622
         }
       },
       "review": {
@@ -2949,7 +2949,7 @@
       },
       "label": "Pin the claude/wsf-app-shell merge carrying KIOSK-LIVE-POSE-2 through the reviewed full staging path (functions changed): pin-candidate.mjs output, reviewed label, inventory counts",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "WITHDRAWN",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 396,
@@ -2985,7 +2985,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6110702704
+          "id": 6127197090
         }
       },
       "review": {
@@ -7940,7 +7940,8 @@
       "ack": {
         "kind": "comment",
         "id": 6110702704
-      }
+      },
+      "superseded": true
     },
     "ef7c846836e4ad9c293ba0358804ce476ab936658e0a6f5d3a48f5d128eb5882": {
       "packet": "KIOSK-GUEST-MOVE-1",
