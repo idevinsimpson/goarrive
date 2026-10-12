@@ -111,11 +111,92 @@ test('no other step or job deploys the database', () => {
   assert.equal(all.length, 1);
 });
 
-test('a candidate without the rules file is refused before anything is read or deployed', () => {
-  const guard = databaseStep.indexOf('if [ ! -f database.westayfit.rules.json ]');
-  assert.notEqual(guard, -1);
-  assert.ok(guard < databaseStep.indexOf('projects:list'));
-  assert.ok(guard < databaseStep.indexOf('firebase deploy'));
+const PRE_LIVE_POSE = ['ec162d17a0540e936741027f9b8f90dd372cfaf4', 'ab77fbfce97e60c1c22492397b2ab6b491f9e0db'];
+const ABSENT_LINE = '::error::The candidate has no database.westayfit.rules.json, which firebase.westayfit.staging.json deploys. Pin a candidate that carries KIOSK-LIVE-POSE-2.';
+
+/** The step's own `run:` script, dedented, exactly as the runner executes it. */
+function stepScript() {
+  const lines = databaseStep.split('\n');
+  const at = lines.findIndex((l) => l === '        run: |');
+  assert.notEqual(at, -1, 'the step has no run block');
+  return lines.slice(at + 1).filter((l) => l.trim() !== '').map((l) => l.replace(/^ {10}/, '')).join('\n') + '\n';
+}
+
+/**
+ * Runs the step in a fixture tree: app/ is the working directory and
+ * node_modules/.bin/firebase is a fake that records every call and answers
+ * projects:list with the given listing. No network, no credential.
+ */
+function runStep({ approved, rulesFile, listing }) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-rtdb-step-'));
+  const app = path.join(root, 'app');
+  const bin = path.join(root, 'node_modules', '.bin');
+  fs.mkdirSync(app, { recursive: true });
+  fs.mkdirSync(bin, { recursive: true });
+  if (rulesFile) fs.writeFileSync(path.join(app, 'database.westayfit.rules.json'), '{"rules":{}}');
+  const calls = path.join(root, 'calls.log');
+  const listingFile = path.join(root, 'listing.json');
+  fs.writeFileSync(listingFile, JSON.stringify(listing ?? { result: [] }));
+  const fake = path.join(bin, 'firebase');
+  fs.writeFileSync(fake, `#!/bin/sh\necho "$*" >> "${calls}"\nif [ "$1" = "projects:list" ]; then cat "${listingFile}"; fi\n`);
+  fs.chmodSync(fake, 0o755);
+  const r = spawnSync('bash', ['-c', stepScript()], {
+    cwd: app,
+    encoding: 'utf8',
+    env: { PATH: process.env.PATH, APPROVED: approved, STAGING_PROJECT: 'westayfit-staging' },
+  });
+  const invoked = fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8').split('\n').filter(Boolean) : [];
+  return { status: r.status, stdout: r.stdout || '', stderr: r.stderr || '', invoked };
+}
+
+test('the approved candidate reaches the step through env, never interpolated into the script', () => {
+  assert.match(databaseStep, /\n        env:\n          APPROVED: \$\{\{ needs\.gate\.outputs\.app_sha \}\}\n/);
+  assert.equal(/\$\{\{/.test(stepScript()), false);
+});
+
+for (const sha of PRE_LIVE_POSE) {
+  test(`reviewed pre-live-pose candidate ${sha} without the rules file: notice, success, no firebase call`, () => {
+    const r = runStep({ approved: sha, rulesFile: false });
+    assert.equal(r.status, 0, r.stderr);
+    const notices = r.stdout.split('\n').filter((l) => l.startsWith('::notice::'));
+    assert.equal(notices.length, 1);
+    assert.ok(notices[0].includes(sha));
+    assert.match(notices[0], /database rules deploy is skipped/);
+    assert.equal(/::error::/.test(r.stdout), false);
+    assert.deepEqual(r.invoked, []);
+  });
+}
+
+test('any other candidate without the rules file is refused with the existing line, before any firebase call', () => {
+  for (const approved of ['0123456789abcdef0123456789abcdef01234567', 'ec162d17', 'ec162d17a0540e936741027f9b8f90dd372cfaf4x', '']) {
+    const r = runStep({ approved, rulesFile: false });
+    assert.equal(r.status, 1);
+    assert.equal(r.stdout, `${ABSENT_LINE}\n`);
+    assert.deepEqual(r.invoked, []);
+  }
+});
+
+test('rules file present but no default instance: still refused with the existing line, nothing deployed', () => {
+  for (const approved of [PRE_LIVE_POSE[0], '0123456789abcdef0123456789abcdef01234567']) {
+    const r = runStep({ approved, rulesFile: true, listing: { status: 'success', result: [project({ hostingSite: 'westayfit-staging' })] } });
+    assert.equal(r.status, 1);
+    assert.ok(r.stdout.includes(MISSING_LINE));
+    assert.equal(r.invoked.some((c) => c.startsWith('deploy')), false);
+  }
+});
+
+test('rules file present with the default instance: deploys only the database, and the step stays before the functions deploy', () => {
+  const r = runStep({
+    approved: '0123456789abcdef0123456789abcdef01234567',
+    rulesFile: true,
+    listing: { status: 'success', result: [project({ realtimeDatabaseInstance: 'westayfit-staging-default-rtdb' })] },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.invoked, [
+    'projects:list --json',
+    'deploy --project westayfit-staging --config firebase.westayfit.staging.json --only database --non-interactive',
+  ]);
+  assert.ok(deploy.indexOf('      - name: Deploy the Realtime Database rules') < deploy.indexOf('      - name: Deploy WSF functions'));
 });
 
 test('a project with no default instance fails with exactly the one plain line', () => {

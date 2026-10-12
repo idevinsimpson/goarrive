@@ -597,9 +597,19 @@ jobs:
       # did not take its rules stops the deploy before any function changes.
       - name: Deploy the Realtime Database rules
         working-directory: app
+        env:
+          APPROVED: ${{ needs.gate.outputs.app_sha }}
         run: |
           set -euo pipefail
           if [ ! -f database.westayfit.rules.json ]; then
+            # The two reviewed pre-live-pose builds (staging now, and the recorded
+            # rollback target) carry no rules file; skip, never deploy, for them only.
+            case "$APPROVED" in
+              ec162d17a0540e936741027f9b8f90dd372cfaf4|ab77fbfce97e60c1c22492397b2ab6b491f9e0db)
+                echo "::notice::Candidate $APPROVED is a reviewed pre-live-pose build with no database.westayfit.rules.json; the database rules deploy is skipped."
+                exit 0
+                ;;
+            esac
             echo "::error::The candidate has no database.westayfit.rules.json, which firebase.westayfit.staging.json deploys. Pin a candidate that carries KIOSK-LIVE-POSE-2."
             exit 1
           fi
