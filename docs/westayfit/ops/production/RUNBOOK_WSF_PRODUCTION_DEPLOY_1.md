@@ -35,7 +35,7 @@
 | **A:** launch now, the gate as a fast-follow packet | `A` | `ec162d17a0540e936741027f9b8f90dd372cfaf4` | the launch backend, **ungated**: an anonymous token can save a profile and join (see "Security review item") |
 | **B:** launch gated | `G` | `e65bfee9eecb2370f602d09880da604709fba58a` | A plus ANON-GATE-1 (#601): exactly four paths over A, and an anonymous token is refused at all 42 signed-in callables (`wsfHealth`, which reads and writes nothing, is the one exemption) |
 
-- **Record L** (`@ANCHOR_L@`) is G plus KIOSK-TURN-LIFECYCLE-1 (#606) and KIOSK-LIVE-POSE-2 (#622): the `claude/wsf-app-shell` merge of #622.
+- **Record L** (`a6eaf0be95cb0a81de4f24bc6d7f30ac82ce922f`) is G plus KIOSK-TURN-LIFECYCLE-1 (#606) and KIOSK-LIVE-POSE-2 (#622): the `claude/wsf-app-shell` merge of #622.
   - It is exactly fifteen paths over G.
   - Its exports (59, of which 17 are public), Firestore rules, indexes and consent constants are A's.
   - It is the candidate for the section "Live pose (production)", and it can also be the main run's record.
@@ -533,7 +533,7 @@ Run every capture from `~/wsf-prod`.
    - `wsfHealth` answers a signed-in operator account.
    - `wsfPreviewCommunity` answers a signed-out call with its uniform not-found.
 9. **The post-go journey on `app.westay.fit`** (the former step 7.6, aligned to the candidate). It runs **after** the step-9 receipt and the owner's go, in the order of the appendix "The go". It is not a deploy step, and nothing here changes the backend.
-   - **Which backend it proves:** the candidate the receipt names, `ec162d17` (record A), `e65bfee9` (record G) or `@ANCHOR_L@` (record L). All three serve the same journey. Under A, the anonymous exposure stays open until the gate's fast-follow lands.
+   - **Which backend it proves:** the candidate the receipt names, `ec162d17` (record A), `e65bfee9` (record G) or `a6eaf0be95cb0a81de4f24bc6d7f30ac82ce922f` (record L). All three serve the same journey. Under A, the anonymous exposure stays open until the gate's fast-follow lands.
    - **Twin step 1 (connected, sign-up closed).** Signed out, open an approved community link: the preview loads, and the Twin offers no sign-up, because `productionSignupOpen` is closed.
    - **Twin step 2 (sign-up open): a two-account journey,** in two separate browsers, each with its own real, owner-controlled address:
      1. Account 1 signs up and receives the verification email.
@@ -644,12 +644,14 @@ L0 records this as the DEPLOYMENT RECEIPT. It is not acceptance, and it is not a
 - The owner's approval and L0's decisions D1 and D2, #365 `6109245392`.
 - D3′, #365 `6109490508`, which replaces D3.
 - The KIOSK-LIVE-POSE-PROD-1 release, #365 `6109578489`.
+- The record-L pin, #365 `6127217055`: the merge of #622 into `claude/wsf-app-shell`, parents `8a067b29` and `87b48fa8`.
+- The owner's choice to take live pose straight to production, without staging, #365 `6127197090`.
 - The feature and its privacy notes: `docs/westayfit/ops/security/KIOSK-LIVE-POSE-2.md`.
 
 **What it turns on.** The WSF functions mint a key for each station turn and write that key's `meta` to goarrive's default Realtime Database, `goarrive-default-rtdb` in us-central1 (D1). GoArrive itself uses no Realtime Database. The functions derive that URL from the project id, so no code or config changes for production.
 
 **Before this section, in order:**
-1. **KIOSK-LIVE-POSE-2 is accepted** at subject `87b48fa852174311bef1b8c337e2be0f505ad280` (#365 `6109907167`) and integrated as record L, `@ANCHOR_L@`.
+1. **KIOSK-LIVE-POSE-2 is accepted** at subject `87b48fa852174311bef1b8c337e2be0f505ad280` (#365 `6109907167`) and integrated as record L, `a6eaf0be95cb0a81de4f24bc6d7f30ac82ce922f`.
 2. **OP-PROD-RTDB-CREATE-1 is done and verified** (#365 `6109456026`): the instance exists in locked mode, and the runtime account has its access.
 3. **The operator pastes the rules by hand in the console** (D2):
    - from `database.westayfit.rules.json` at that subject;
@@ -659,7 +661,7 @@ L0 records this as the DEPLOYMENT RECEIPT. It is not acceptance, and it is not a
 The production config declares no `database` target, and the pre-flight refuses one. No `firebase deploy` here touches the database rules.
 
 **The candidate is record L.**
-- The pre-flight admits it only as exactly `@ANCHOR_L@`, descending from G and changing exactly its fifteen reviewed paths.
+- The pre-flight admits it only as exactly `a6eaf0be95cb0a81de4f24bc6d7f30ac82ce922f`, descending from G and changing exactly its fifteen reviewed paths.
 - Step 1's table holds for it: its `record`, `candidate`, `rulesHashes.candidate` and `main` rows are A's values.
 
 **Which run:**
@@ -725,7 +727,7 @@ If the rules read itself is refused with your token, open console › Realtime D
 
 ### 2. The env line
 
-Run steps 1 and 3 as written, with `RECORD=L` and `CANDIDATE=@ANCHOR_L@`. In step 3's heredoc, add one line:
+Run steps 1 and 3 as written, with `RECORD=L` and `CANDIDATE=a6eaf0be95cb0a81de4f24bc6d7f30ac82ce922f`. In step 3's heredoc, add one line:
 
 ```sh
 cat > "$CAND/functions-westayfit/.env.goarrive" <<'ENV'

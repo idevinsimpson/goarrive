@@ -672,8 +672,9 @@ test('record G: the CLI compares with the reviewed e65bfee9, which a synthetic c
 // ── record L: KIOSK-LIVE-POSE-2 integrated (KIOSK-LIVE-POSE-PROD-1) ──────────
 
 test('record L is pinned to KIOSK-LIVE-POSE-2\'s integrated commit, and names its fifteen paths', () => {
-  // Fails until the pin: L0 posts the #622 merge SHA, and only then is L usable.
+  // Pinned to the #622 merge (#365 6127217055); a placeholder fails here.
   assert.match(ANCHOR_L, /^[0-9a-f]{40}$/);
+  assert.equal(ANCHOR_L, 'a6eaf0be95cb0a81de4f24bc6d7f30ac82ce922f');
   assert.notEqual(ANCHOR_L, ANCHOR_G);
   assert.deepEqual([...CANDIDATE_L_DELTA_PATHS].sort(), [
     'database.westayfit.rules.json',

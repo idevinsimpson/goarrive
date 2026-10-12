@@ -93,8 +93,10 @@ export const CANDIDATE_G_DELTA_PATHS = Object.freeze([
  * this commit, descend from G, and change exactly CANDIDATE_L_DELTA_PATHS over
  * G: KIOSK-TURN-LIFECYCLE-1 (#606) and KIOSK-LIVE-POSE-2 (#622). Its exports,
  * public invokers, Firestore rules, indexes and consent constants are A's.
+ * Pinned by L0 in #365 6127217055: the merge of #622, parents 8a067b29 and
+ * 87b48fa8 (the accepted subject).
  */
-export const ANCHOR_L = '@ANCHOR_L@';
+export const ANCHOR_L = 'a6eaf0be95cb0a81de4f24bc6d7f30ac82ce922f';
 export const CANDIDATE_L_DELTA_PATHS = Object.freeze([
   'database.westayfit.rules.json',
   'docs/westayfit/ops/security/KIOSK-TURN-LIFECYCLE-1.md',
