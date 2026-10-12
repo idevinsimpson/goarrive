@@ -584,6 +584,42 @@ jobs:
         working-directory: app
         run: node ../ops/.github/wsf-staging/report-mail-secret.mjs "$STAGING_PROJECT" WSF_EMAIL_API_KEY
 
+      # KIOSK-LIVE-POSE-2: THE REALTIME DATABASE RULES, BEFORE THE FUNCTIONS
+      # THAT USE THEM.
+      #
+      # The functions write /wsfLivePose/{key}/meta, and phones and kiosks read
+      # and write `frame` under these rules, so the rules land first. The file
+      # is the candidate's database.westayfit.rules.json, named by the staging
+      # config copied in by the preflight above. This step creates nothing: the
+      # default instance is the owner's to create, and a missing one fails here
+      # with the one line that says so. The GoArrive regression has already run
+      # in the build job this job needs. Not continue-on-error: a database that
+      # did not take its rules stops the deploy before any function changes.
+      - name: Deploy the Realtime Database rules
+        working-directory: app
+        run: |
+          set -euo pipefail
+          if [ ! -f database.westayfit.rules.json ]; then
+            echo "::error::The candidate has no database.westayfit.rules.json, which firebase.westayfit.staging.json deploys. Pin a candidate that carries KIOSK-LIVE-POSE-2."
+            exit 1
+          fi
+          ../node_modules/.bin/firebase projects:list --json > /tmp/projects.json
+          node -e '
+            const [file, project] = process.argv.slice(1);
+            const list = JSON.parse(require("fs").readFileSync(file, "utf8")).result;
+            const p = Array.isArray(list) ? list.find((x) => x && x.projectId === project) : undefined;
+            const instance = p && p.resources ? p.resources.realtimeDatabaseInstance : undefined;
+            if (typeof instance !== "string" || instance === "") {
+              console.log(`::error::Create the Realtime Database default instance in ${project} (us-central1, locked mode)`);
+              process.exit(1);
+            }
+          ' /tmp/projects.json "$STAGING_PROJECT"
+          ../node_modules/.bin/firebase deploy \
+            --project "$STAGING_PROJECT" \
+            --config firebase.westayfit.staging.json \
+            --only database \
+            --non-interactive
+
       - name: Deploy WSF functions
         id: deploy-functions
         continue-on-error: true
