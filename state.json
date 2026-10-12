@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "dc4052eb73b853ed1a99ed21c1e6e727a411cc6a81478933da27e4f907b8863c",
-  "eventCount": 1332,
+  "ledgerHead": "dd3a7635c782bf6b7d0177778cffa82f27e38c8f13441c468bda2f16f096f4f3",
+  "eventCount": 1335,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2270,15 +2270,17 @@
       },
       "label": "Live pose to production: preflight admits WSF_LIVE_POSE=1 and a reviewed record for the integrated candidate; runbook section (rules by hand + sha256, env, deploy, readback, emergency off); doc D1-D3",
       "origin": "ledger",
-      "phase": "ACKED",
+      "phase": "UNDER_REVIEW",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
-      "pr": null,
-      "reviewers": [],
+      "pr": 624,
+      "reviewers": [
+        "W3"
+      ],
       "artifact": {
-        "subjectSha": null,
-        "prHeadSha": null,
+        "subjectSha": "a1cf2a8292c3e7d515729b34f2d283385a522b45",
+        "prHeadSha": "a1cf2a8292c3e7d515729b34f2d283385a522b45",
         "evidenceSha": null,
         "mergeSha": null
       },
@@ -2305,7 +2307,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6127217055
+          "id": 6129063253
         }
       },
       "review": {
@@ -2318,7 +2320,7 @@
         "appliesTo": "subject",
         "after": "director"
       },
-      "deliveries": 0,
+      "deliveries": 1,
       "pendingFinding": null
     },
     "KIOSK-PAIRING-CLARITY-PROOF-1": {
@@ -8037,7 +8039,16 @@
       "ack": {
         "kind": "comment",
         "id": 6128872837
-      }
+      },
+      "superseded": true
+    },
+    "21e4a1187face7a915ed21506fbe6d7527d9a7927b0f3dd34fcc6ddc9382429a": {
+      "packet": "KIOSK-LIVE-POSE-PROD-1",
+      "worker": "W3",
+      "reason": "review",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
