@@ -7,6 +7,7 @@ import { defineSecret, projectID } from 'firebase-functions/params';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 
 import { optionalRealUid, requireRealIdentity } from './anon-gate';
+import { readMyContributions } from './my-contributions';
 import {
   LIVE_POSE_TTL_MS,
   armPoseKey,
@@ -11409,3 +11410,12 @@ export const wsfCommunityActivity = onCall<CommunityActivityRequest>(
     return { entries, contributorsToday, nextCursor };
   }
 );
+
+// PROGRESS-SELF-HISTORY-1: defined here, not re-exported, so the staging
+// export scanner (pin-candidate.mjs exportedFunctions) and the anon-gate
+// source scan both measure it. The read itself lives in ./my-contributions.
+export const wsfMyContributions = onCall<{ limit?: unknown }>({ region: 'us-central1' }, async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in first.');
+  requireRealIdentity(request);
+  return readMyContributions(request.auth.uid, request.data?.limit);
+});

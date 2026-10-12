@@ -409,6 +409,14 @@
       ]
     },
     {
+      "collectionGroup": "wsfContributions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "userId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "wsfGoalMemberTotals",
       "queryScope": "COLLECTION",
       "fields": [
