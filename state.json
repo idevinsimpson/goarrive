@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "aed21802e05986b6bb5f18768c45c5bccad6cf388117bcbc6d2b952997d1d8eb",
-  "eventCount": 1330,
+  "ledgerHead": "dc4052eb73b853ed1a99ed21c1e6e727a411cc6a81478933da27e4f907b8863c",
+  "eventCount": 1332,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -66,7 +66,9 @@
     "W4": [],
     "W5": [],
     "W7": [],
-    "W9": []
+    "W9": [
+      "PROGRESS-SELF-HISTORY-1"
+    ]
   },
   "packets": {
     "ANON-GATE-1": {
@@ -4292,6 +4294,65 @@
       "deliveries": 2,
       "pendingFinding": null
     },
+    "PROGRESS-SELF-HISTORY-1": {
+      "owner": "W9",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Own contribution history: wsfMyContributions({limit<=100}) -> dated own items + truncated; caller-only, non-anonymous, read-only; index wsfContributions(userId, createdAt desc)",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "functions-westayfit/src/my-contributions.ts",
+        "functions-westayfit/src/index.ts",
+        "functions-westayfit/tests/callable/wsf-my-contributions.test.ts",
+        "firestore.indexes.json",
+        "docs/westayfit/ops/security/PROGRESS-SELF-HISTORY-1.md"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6128740540
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6128740540
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "security",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
+      "pendingFinding": null
+    },
     "STAGING-FASTPATH-DOCS-LINEAGE-FIX": {
       "owner": "W3",
       "kind": "work",
@@ -7968,12 +8029,15 @@
       "packet": "KIOSK-LIVE-POSE-PROD-1",
       "worker": "W9",
       "reason": "release",
-      "status": "redelivered",
+      "status": "acked",
       "comments": [
         6127713152,
         6128561949
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6128872837
+      }
     }
   },
   "fastpath": {

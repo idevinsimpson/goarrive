@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=aed21802e05986b6bb5f18768c45c5bccad6cf388117bcbc6d2b952997d1d8eb events=1330 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=dc4052eb73b853ed1a99ed21c1e6e727a411cc6a81478933da27e4f907b8863c events=1332 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `aed21802e05986b6bb5f18768c45c5bccad6cf388117bcbc6d2b952997d1d8eb` (1330 events)
+- Ledger head: `dc4052eb73b853ed1a99ed21c1e6e727a411cc6a81478933da27e4f907b8863c` (1332 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -33,7 +33,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | W4 | #394 | — | — | — | — | — | — | off |
 | W5 | #395 | — | — | — | — | — | — | off |
 | W7 | #434 | — | — | — | — | — | — | off |
-| W9 | #497 | KIOSK-LIVE-POSE-PROD-1 | — | — | EVENT-LIFECYCLE-BACKEND-RECOVERY-1, KIOSK-GUEST-MOVE-1, KIOSK-PRESENCE-1, MEMBER-ACTIVITY-1, MEMBER-TRUTH-BACKEND-1 | — | — | on |
+| W9 | #497 | KIOSK-LIVE-POSE-PROD-1 | — | — | EVENT-LIFECYCLE-BACKEND-RECOVERY-1, KIOSK-GUEST-MOVE-1, KIOSK-PRESENCE-1, MEMBER-ACTIVITY-1, MEMBER-TRUTH-BACKEND-1 | PROGRESS-SELF-HISTORY-1 | PROGRESS-SELF-HISTORY-1 | on |
 
 ## Packets
 
@@ -101,6 +101,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | PRODUCTION-DEPLOY-PATH-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #600 | dfd48c87 | dfd48c87 | — | 1d3f1c2c | — | W7 | comment:6075293540 | pull_request:600 | — | Reviewed WSF-only production deploy path for goarrive: production-only Firebase config, network-free pre-flight guard, operator runbook with candidates A/B, receipts, rollback; nothing deployed | 1×ops-source then director | — |
 | PRODUCTION-FIREBASE-INVENTORY-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #599 | 80b603c7 | 80b603c7 | — | 0f1fd585 | — | W4 | comment:6074831300 | comment:6077389004 | — | Read-only production Firebase source-vs-deployed inventory, Web Twin activation prerequisites and WSF-only rollout and rollback plan | 1×ops-source then director | — |
 | PROFILE-PHOTOS-FIREBASE-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #593 | 57fd86b8 | 57fd86b8 | — | b8381195 | — | W4 | comment:6052427068 | pull_request:593 | — | Canonical private profile photos and permitted community roster for native and Lovable staging | 1×journey-qa then director | — |
+| PROGRESS-SELF-HISTORY-1 | W9 | work | INTEGRATED (source-only) | ledger | QUEUED | — | — | — | — | — | — | — | — | comment:6128740540 | — | Own contribution history: wsfMyContributions({limit<=100}) -> dated own items + truncated; caller-only, non-anonymous, read-only; index wsfContributions(userId, createdAt desc) | 1×security then director | — |
 | STAGING-FASTPATH-DOCS-LINEAGE-FIX | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #551 | 963dd558 | 963dd558 | — | 9825aa36 | — | W4 | comment:5944563639 | pull_request:551 | — | Step 7 correction: allow provably non-runtime docs/instruction lineage while preserving fail-closed fast-path invariants | 1×ops-source then director | — |
 | STAGING-FASTPATH-FAILED-TARGET-RETRY-FIX | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #556 | 92fdfecd | 92fdfecd | — | b4b479a6 | — | W4 | comment:5954269955 | pull_request:556 | — | Add a fail-closed one-shot recorded retry authorization for an exact repaired staging target and failed run | 1×ops-source then director | — |
 | STAGING-FASTPATH-INVENTORY-BASELINE-FIX | W3 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #555 | 825b9c01 | 825b9c01 | — | 745b4f62 | — | W4 | comment:5953663400 | pull_request:555 | — | Correct fast-path inventory preflight to use the reviewed complete measured baseline without double-counting retained functions | 1×ops-source then director | — |
@@ -319,5 +320,5 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | 2705d6e763b6 | W3 | LIVE-POSE-STAGING-PIN-1 | release | acked | 6110103305, 6110663553 | comment:6110702704 |
 | ef7c846836e4 | W9 | KIOSK-GUEST-MOVE-1 | release | acked | 6111833254 | comment:6111870196 |
 | 7a11a7148c22 | W5 | KIOSK-GUEST-MOVE-1 | review | redelivered | 6113079769, 6114680608 | — |
-| 781dcc461cae | W9 | KIOSK-LIVE-POSE-PROD-1 | release | redelivered | 6127713152, 6128561949 | — |
+| 781dcc461cae | W9 | KIOSK-LIVE-POSE-PROD-1 | release | acked | 6127713152, 6128561949 | comment:6128872837 |
 
