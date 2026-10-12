@@ -302,3 +302,36 @@ describe('an anonymous token counts as signed out where signing in is optional',
     }
   });
 });
+
+// ── 6. re-exported callables ─────────────────────────────────────────────────
+
+/**
+ * Callables defined in their own module and re-exported from index.ts. The
+ * source scan in section 2 reads only index.ts, so each one is pinned here:
+ * the re-export line, the gate in its own source, refusal and acceptance.
+ */
+const REEXPORTED_GATED = [{ name: 'wsfMyContributions', file: 'my-contributions' }] as const;
+
+describe('re-exported WSF callables carry the gate', () => {
+  test.each(REEXPORTED_GATED.map((r) => [r.name, r.file]))('%s is re-exported from index.ts and gated in %s.ts', (name, file) => {
+    expect(INDEX).toMatch(new RegExp(`^export \\{ ${name} \\} from '\\./${file}';$`, 'm'));
+    const src = stripComments(readFileSync(path.resolve(__dirname, `../../src/${file}.ts`), 'utf8'));
+    const fns = exportedCallables(src).filter((f) => f.name === name);
+    expect(fns).toHaveLength(1);
+    expect([...fns[0].body.matchAll(/if \(!request\.auth\)/g)]).toHaveLength(1);
+    expect(fns[0].body).toMatch(/if \(!request\.auth\) throw new HttpsError\('unauthenticated', '[^']*'\);\s*requireRealIdentity\(request\);/);
+  });
+
+  test.each(REEXPORTED_GATED.map((r) => [r.name]))('%s refuses an anonymous token with failed-precondition', async (name) => {
+    const r = await attempt(callable(name).run(req(`${RUN}Anon${name}`, ANON_TOKEN)));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect([name, r.error.code, r.error.message]).toEqual([name, 'failed-precondition', ANONYMOUS_REFUSAL]);
+  });
+
+  test.each(REEXPORTED_GATED.map((r) => [r.name]))('%s does not answer a real account with the anonymous refusal', async (name) => {
+    for (const token of [PASSWORD_TOKEN, NO_CLAIM_TOKEN]) {
+      const r = await attempt(callable(name).run(req(`${RUN}Real${name}`, token)));
+      if (!r.ok) expect([name, r.error.message]).not.toEqual([name, ANONYMOUS_REFUSAL]);
+    }
+  });
+});

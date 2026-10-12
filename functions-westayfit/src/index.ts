@@ -11409,3 +11409,5 @@ export const wsfCommunityActivity = onCall<CommunityActivityRequest>(
     return { entries, contributorsToday, nextCursor };
   }
 );
+
+export { wsfMyContributions } from './my-contributions';
