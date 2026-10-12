@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "6bcb7a8bbf64dd34f5d9aeeef433cdb5b9c5ad7d270e0bdcb4b1888bf5472127",
-  "eventCount": 1337,
+  "ledgerHead": "abca3a047a2c3db6669eb3255169367e095d7b3ce9fd592a143ce08075e2ae4e",
+  "eventCount": 1338,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2287,7 +2287,9 @@
       "proof": null,
       "served": null,
       "releasedQueueIndex": null,
-      "reviewedBy": [],
+      "reviewedBy": [
+        "W3"
+      ],
       "subjectPaths": [
         ".github/wsf-production/",
         "docs/westayfit/ops/production/RUNBOOK_WSF_PRODUCTION_DEPLOY_1.md",
@@ -2307,7 +2309,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6129063253
+          "id": 6129827148
         }
       },
       "review": {
@@ -8053,7 +8055,8 @@
       "ack": {
         "kind": "comment",
         "id": 6129522845
-      }
+      },
+      "superseded": true
     }
   },
   "fastpath": {
