@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "d28953a97ff814de68279cc731c95e5507ed37e155c94dace0c078b38302f13a",
-  "eventCount": 1325,
+  "ledgerHead": "5a2b005eccc979f5acd0448ebb3affb03714a688bf730c976edaf2e62a62852f",
+  "eventCount": 1327,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -2268,8 +2268,8 @@
       },
       "label": "Live pose to production: preflight admits WSF_LIVE_POSE=1 and a reviewed record for the integrated candidate; runbook section (rules by hand + sha256, env, deploy, readback, emergency off); doc D1-D3",
       "origin": "ledger",
-      "phase": "BLOCKED",
-      "phaseBeforeBlock": "ACKED",
+      "phase": "ACKED",
+      "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 497,
       "pr": null,
@@ -2289,12 +2289,7 @@
         "docs/westayfit/ops/production/RUNBOOK_WSF_PRODUCTION_DEPLOY_1.md",
         "docs/westayfit/ops/security/KIOSK-LIVE-POSE-2.md"
       ],
-      "blockedBy": [
-        {
-          "packet": "KIOSK-GUEST-MOVE-1",
-          "until": "ACCEPTED"
-        }
-      ],
+      "blockedBy": [],
       "importRefs": [],
       "authority": {
         "queued": {
@@ -2308,7 +2303,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6111692559
+          "id": 6127217055
         }
       },
       "review": {
@@ -7968,6 +7963,14 @@
       ],
       "ack": null,
       "superseded": true
+    },
+    "781dcc461caec58eaaa7e22f1babff67f47b9b3be579233435f52f0ff2712cc8": {
+      "packet": "KIOSK-LIVE-POSE-PROD-1",
+      "worker": "W9",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {

@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=d28953a97ff814de68279cc731c95e5507ed37e155c94dace0c078b38302f13a events=1325 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=5a2b005eccc979f5acd0448ebb3affb03714a688bf730c976edaf2e62a62852f events=1327 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `d28953a97ff814de68279cc731c95e5507ed37e155c94dace0c078b38302f13a` (1325 events)
+- Ledger head: `5a2b005eccc979f5acd0448ebb3affb03714a688bf730c976edaf2e62a62852f` (1327 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -33,7 +33,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | W4 | #394 | — | — | — | — | — | — | off |
 | W5 | #395 | — | — | — | — | — | — | off |
 | W7 | #434 | — | — | — | — | — | — | off |
-| W9 | #497 | — | — | — | EVENT-LIFECYCLE-BACKEND-RECOVERY-1, KIOSK-GUEST-MOVE-1, KIOSK-LIVE-POSE-PROD-1, KIOSK-PRESENCE-1, MEMBER-ACTIVITY-1, MEMBER-TRUTH-BACKEND-1 | — | — | off |
+| W9 | #497 | KIOSK-LIVE-POSE-PROD-1 | — | — | EVENT-LIFECYCLE-BACKEND-RECOVERY-1, KIOSK-GUEST-MOVE-1, KIOSK-PRESENCE-1, MEMBER-ACTIVITY-1, MEMBER-TRUTH-BACKEND-1 | — | — | on |
 
 ## Packets
 
@@ -71,7 +71,7 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | KIOSK-GUEST-MOVE-1 | W9 | work | INTEGRATED (source-only) | ledger | BLOCKED (from UNDER_REVIEW) | #625 | 627abf17 | 627abf17 | — | — | — | W5 | comment:6111692815 | comment:6114578806 | SECURITY-REVIEWER-CAPACITY (Devin) | Guest kiosk squats: station-authenticated wsfStationGuestContribute, no uid/name, idempotent on attemptId, capped, refused while a turn is assigned, never a raffle ticket | 1×security then director | — |
 | KIOSK-LIVE-POSE-1 | W9 | work | INTEGRATED (source-only) | ledger | WITHDRAWN | — | — | — | — | — | — | — | comment:6105503842 | comment:6105637354 | — | Live pose relay for station turns: wsfTurnPosePush (phone) + wsfStationLivePose (station secret), WSF_LIVE_POSE kill switch, deleted on every turn exit, never a contribution | 1×ops-source then director | — |
 | KIOSK-LIVE-POSE-2 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #622 | 87b48fa8 | 87b48fa8 | — | a6eaf0be | — | W3 | comment:6105638191 | pull_request:622 | — | Live pose over RTDB for station turns: per-turn capability key, phone writes / station reads, rules + staging deploy step, WSF_LIVE_POSE switch, never a contribution | 1×ops-source then director | — |
-| KIOSK-LIVE-POSE-PROD-1 | W9 | work | INTEGRATED (source-only) | ledger | BLOCKED (from ACKED) | — | — | — | — | — | — | — | comment:6109578489 | comment:6111692559 | KIOSK-GUEST-MOVE-1≥ACCEPTED | Live pose to production: preflight admits WSF_LIVE_POSE=1 and a reviewed record for the integrated candidate; runbook section (rules by hand + sha256, env, deploy, readback, emergency off); doc D1-D3 | 1×ops-source then director | — |
+| KIOSK-LIVE-POSE-PROD-1 | W9 | work | INTEGRATED (source-only) | ledger | ACKED | — | — | — | — | — | — | — | comment:6109578489 | comment:6127217055 | — | Live pose to production: preflight admits WSF_LIVE_POSE=1 and a reviewed record for the integrated candidate; runbook section (rules by hand + sha256, env, deploy, readback, emergency off); doc D1-D3 | 1×ops-source then director | — |
 | KIOSK-PAIRING-CLARITY-PROOF-1 | W9 | work | STAGED (hosted) | ledger | STAGED | #553 | 4537c26c | 4537c26c | — | ab77fbfc | hosted run 37025084843: PASS | W4 | comment:5945136749 | comment:5955903159 | — | Clarify venue-station pairing from the Champion's own phone and prove the existing flow end-to-end | 1×journey-qa then director | — |
 | KIOSK-PRESENCE-1 | W9 | work | INTEGRATED (source-only) | ledger | BLOCKED (from RELEASED) | — | — | — | — | — | — | — | comment:6106979422 | comment:6107569755 | KIOSK-LIVE-POSE-2≥ACCEPTED | Shared-screen presence: moved-today count + initials (opt-in photos on kiosk only) on wsfStationState/wsfGoalPulse, profile sharedScreenPresence setting, staging-on/production-dark | 1×ops-source then director | — |
 | KIOSK-REVOKE-ACTIVE-TURN-1 | W9 | work | INTEGRATED (source-only) | ledger | WITHDRAWN | — | — | — | — | — | — | — | — | comment:6079352515 | — | On wsfRevokeStation, end or requeue that station's assigned/ready/active line entry server-side and surface the new status via wsfMyTurn/wsfTurnState; callable tests; doc note | 1×ops-source then director | — |
@@ -319,4 +319,5 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | 2705d6e763b6 | W3 | LIVE-POSE-STAGING-PIN-1 | release | acked | 6110103305, 6110663553 | comment:6110702704 |
 | ef7c846836e4 | W9 | KIOSK-GUEST-MOVE-1 | release | acked | 6111833254 | comment:6111870196 |
 | 7a11a7148c22 | W5 | KIOSK-GUEST-MOVE-1 | review | redelivered | 6113079769, 6114680608 | — |
+| 781dcc461cae | W9 | KIOSK-LIVE-POSE-PROD-1 | release | requested | — | — |
 
