@@ -1,0 +1,22 @@
+{
+  "note": "Synthetic emulator fixture — not real members or activity.",
+  "community": "Maple Street Movers",
+  "groupId": "w1bkamudb4ckc1163ec",
+  "authorizedGoalId": "w1bkamudb4ckc1163ecg",
+  "unauthorizedGoalId": "w1bkamudb4ckc1163ecu",
+  "title": "Squats together this week",
+  "target": 500,
+  "unit": "squats",
+  "startTotal": 241,
+  "added": 20,
+  "newTotal": 261,
+  "targetClass": {
+    "width": 800,
+    "height": 1280
+  },
+  "wideClass": {
+    "width": 1024,
+    "height": 1366
+  },
+  "wideThresholdPx": 900
+}

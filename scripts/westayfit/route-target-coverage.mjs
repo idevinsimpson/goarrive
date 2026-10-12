@@ -56,6 +56,11 @@ const TARGETS = {
   '/verify-email': 'review/batch-a-identity/',
   '/reset-password': 'review/batch-a-identity/',
   '/profile-setup': 'review/batch-a-identity/',
+  // The social community (owner decision 5787909127; PR #441): the accepted
+  // PROPOSED target package carries the matched AFTERs beside it.
+  '/community/[groupId]/members': 'review/community-presence/',
+  '/settings': 'review/community-presence/',
+  '/settings/privacy': 'review/community-presence/',
 };
 
 
@@ -81,35 +86,41 @@ const NOTES = {
   '/contribute/[goalId]':
     'Contribution entry, review, and all six outcomes on a PHONE. **Implemented and accepted.** Its kiosk mode (`?kiosk=1`) at 800x1280 is a separate target in `review/batch-e-room-screens/`, **accepted as reference only** and not implemented.',
   '/goals/new':
-    'Opening a goal — eight states, three phone classes. Target **reviewed and accepted as reference**; NOT implemented. `review/page-02-move/` also holds a unit-shortcut PROPOSAL for this route; the two disagree and that package records the open decision.',
+    'Opening a goal — eight states, three phone classes. **Implemented and accepted** on the real route (#433 at `e0546b3`, integrated at `2fffcf3`; the accepted target is `review/goal-setup-next/`, with this batch\'s drawing as the earlier reference). `review/page-02-move/` also holds a unit-shortcut PROPOSAL for this route; the two disagree and that package records the open decision.',
   '/join/[joinCode]':
-    'The invitation — ten states including the event-path device question, which lives on this route and is NOT drawn again in Batch D. **Implemented** to the accepted target; awaiting visual/functional review. Its BEFORE was captured first and is frozen; `after/` carries the matched ACTUAL AFTER at all three phone classes.',
+    'The invitation — ten states including the event-path device question, which lives on this route and is NOT drawn again in Batch D. **Implemented and accepted** at `a760a4e` (PR #417), staged since `d0477cc`. Its BEFORE was captured first and is frozen; `after/` carries the matched ACTUAL AFTER at all three phone classes.',
   '/start-community':
-    'Starting a community — seven states. One page, not a wizard, and no success screen: the success is Community Home. Target **reviewed and accepted as reference**; NOT implemented.',
+    'Starting a community — seven states. One page, not a wizard, and no success screen: the success is Community Home. Target **reviewed and accepted as reference**. The route is **built** and runs today; it is **not built to this target** — the drawings stay reference.',
   '/combined/[setupId]':
-    'Watching a combined goal — five states. Read-only; NOT a setup flow. Target **reviewed and accepted as reference**; NOT implemented.',
+    'Watching a combined goal — five states. Read-only; NOT a setup flow. Target **reviewed and accepted as reference**. The route is **built** and runs today; it is **not built to this target** — the drawings stay reference.',
   '/community/[groupId]/challenge':
-    'The challenge in the room — ten states plus a move-card state strip. The one surface that counts people, and the package says why that is honest here. Target **reviewed and accepted as reference**; NOT implemented.',
+    'The challenge in the room — ten states plus a move-card state strip. The one surface that counts people, and the package says why that is honest here. Target **reviewed and accepted as reference**. The route is **built** and runs today; it is **not built to this target** — the drawings stay reference.',
   '/':
-    'The home resolver. Drawn only in the states where the redirect does NOT happen, because every other case replaces into Community Home. Target **reviewed and accepted as reference**; NOT implemented.',
+    'The home resolver. Drawn only in the states where the redirect does NOT happen, because every other case replaces into Community Home. Target **reviewed and accepted as reference**. The route is **built** and runs today; it is **not built to this target** — the drawings stay reference.',
   '/event/[goalId]':
-    'Standing in the room — eleven states, including the event route\'s OWN device question (the join route\'s variant differs and is Batch B). Target **reviewed and accepted as reference**; NOT implemented.',
+    'Standing in the room — eleven states, including the event route\'s OWN device question (the join route\'s variant differs and is Batch B). Target **reviewed and accepted as reference**. The route is **built** and runs today; it is **not built to this target** — the drawings stay reference.',
   '/queue/[goalId]':
-    'Waiting, being called, finishing — thirteen states. The name a screen in a room will read is chosen by the person it is about, before anything is sent. Target **reviewed and accepted as reference**; NOT implemented.',
+    'Waiting, being called, finishing — thirteen states. The name a screen in a room will read is chosen by the person it is about, before anything is sent. Target **reviewed and accepted as reference**. The route is **built** and runs today; it is **not built to this target** — the drawings stay reference.',
   '/kiosk/[goalId]':
-    'The kiosk start screen, 800x1280 portrait — six states. A display with one button: it chooses no movement, shows no QR and runs no contribution. Target **reviewed and accepted as reference**; NOT implemented.',
+    'The kiosk start screen, 800x1280 portrait — six states. A display with one button: it chooses no movement, shows no QR and runs no contribution. Target **reviewed and accepted as reference**. The route is **built** and runs today; it is **not built to this target** — the drawings stay reference.',
   '/station/[goalId]':
-    'The station beside the mat, 1280x800 landscape — fifteen states, including the three that prove no name survives a recorded turn. Target **reviewed and accepted as reference**; NOT implemented.',
+    'The station beside the mat, 1280x800 landscape — fifteen states, including the three that prove no name survives a recorded turn. Target **reviewed and accepted as reference**. The route is **built** and runs today; it is **not built to this target** — the drawings stay reference.',
   '/display/[goalId]':
-    'The public display — ten states on four boards (390x844, 800x1280, 1280x800, 1920x1080), a 40-frame matrix. Target **reviewed and accepted as reference**; NOT implemented.',
+    'The public display — ten states on four boards (390x844, 800x1280, 1280x800, 1920x1080), a 40-frame matrix. Target **reviewed and accepted as reference**. The route is **built** and runs today; its responsive layout tiers are **implemented and accepted** (#435 at `1fd669f` against the accepted #429 target, integrated at `ba774ef`); this ten-state matrix stays reference for the states it draws.',
   '/move/[goalId]':
-    'The follow-along on its own route — seven states on both layouts. No turn, no queue, nobody called: a timer anybody can start, beside a way to enter what they counted. The player counts nothing. Target **reviewed and accepted as reference**; NOT implemented.',
+    'The follow-along on its own route — seven states on both layouts. No turn, no queue, nobody called: a timer anybody can start, beside a way to enter what they counted. The player counts nothing. Target **reviewed and accepted as reference**. The route is **built** and runs today; it is **not built to this target** — the drawings stay reference.',
   '/signin':
     'Plus its error state and all three pending-destination returns, which are states of this route rather than routes of their own. **Implemented, accepted, and staged** at `3562156`.',
   '/signup': '**Implemented, accepted, and staged** at `3562156`.',
   '/verify-email': '**Implemented, accepted, and staged** at `3562156`. One open question on the `unconfigured` outcome is recorded on PR #365.',
   '/reset-password': '**Implemented, accepted, and staged** at `3562156`.',
   '/profile-setup': '**Implemented, accepted, and staged** at `3562156`. The owed truth correction it carried is closed in that package.',
+  '/community/[groupId]/members':
+    'Members as people — initials, names where the member allows it, a truthful count, one quiet empty state when everyone is private. **Implemented and accepted** (#441 at `bfc422a`, integrated at `3e6a86b`); not served.',
+  '/settings':
+    'Settings, reached from an ordinary row inside You (W9 exposes it from the persistent shell later). **Implemented and accepted** (#441 at `bfc422a`, integrated at `3e6a86b`); not served.',
+  '/settings/privacy':
+    'Per-community "Show my name" / "Show my contributions", ON by default and read at read time; public screens stay identity-free. **Implemented and accepted** (#441 at `bfc422a`, integrated at `3e6a86b`); not served.',
 };
 
 /** What an uncovered route is, so the gap is legible without opening the code. */
@@ -143,46 +154,49 @@ const BATCHES = [
     title: 'The invitation, and what a Champion starts',
     dir: 'batch-b-join-and-setup',
     routes: ['/join/[joinCode]', '/start-community', '/goals/new', '/combined/[setupId]'],
-    // PARTLY, AND THE WORD MATTERS. One of this batch's four routes is built;
-    // the other three are still reference only. A batch status that said
-    // "implemented" would claim three routes that do not exist yet.
+    // PARTLY, AND THE WORD MATTERS. All four routes exist; two are built to
+    // their accepted targets and two are not. "NOT implemented" used to stand
+    // here for the other three, which read as "does not exist" — false: the
+    // routes ran on staging while their drawings were still reference.
     status:
-      '**reviewed & accepted** as target reference · `/join/[joinCode]` implemented · the other three NOT implemented',
+      '**reviewed & accepted** as target reference · `/join/[joinCode]` and `/goals/new` implemented and accepted · `/start-community` and `/combined/[setupId]` built, not to this target',
   },
   {
     key: 'C',
     title: 'The challenge, and the door',
     dir: 'batch-c-challenge-and-door',
     routes: ['/community/[groupId]/challenge', '/'],
-    status: '**reviewed & accepted** as target reference · NOT implemented',
+    status: '**reviewed & accepted** as target reference · routes built · NOT built to this target',
   },
   {
     key: 'D',
     title: 'The event and the line, on your own phone',
     dir: 'batch-d-event-and-line',
     routes: ['/event/[goalId]', '/queue/[goalId]'],
-    status: '**reviewed & accepted** as target reference · NOT implemented',
+    status: '**reviewed & accepted** as target reference · routes built · NOT built to this target',
   },
   {
     key: 'E',
     title: 'The screens in the room',
     dir: 'batch-e-room-screens',
     routes: ['/kiosk/[goalId]', '/contribute/[goalId]?kiosk=1', '/station/[goalId]'],
-    status: '**reviewed & accepted** as target reference · NOT implemented',
+    status:
+      '**reviewed & accepted** as target reference · routes built · the kiosk contribution screen\'s confinement and idle-Finish are implemented and accepted (#427, #436) · NOT built to this target\'s drawings',
   },
   {
     key: 'F',
     title: 'The public display',
     dir: 'batch-f-public-display',
     routes: ['/display/[goalId]'],
-    status: '**reviewed & accepted** as target reference · NOT implemented',
+    status:
+      '**reviewed & accepted** as target reference · route built · responsive layout tiers implemented and accepted (#435 against the #429 target) · this matrix stays reference',
   },
   {
     key: 'G',
     title: 'The follow-along',
     dir: 'batch-g-follow-along',
     routes: ['/move/[goalId]'],
-    status: '**reviewed & accepted** as target reference · NOT implemented',
+    status: '**reviewed & accepted** as target reference · route built · NOT built to this target',
   },
 ];
 
@@ -193,7 +207,8 @@ const BOARDS = [
     title: 'The physical product, end to end',
     dir: 'physical-flow',
     routes: ['(no single route — the whole journey)'],
-    status: '**reviewed & accepted** as target reference · NOT implemented',
+    status:
+      '**reviewed & accepted** as target reference · the journey\'s routes and callables are built and ran hosted on staging (run 45, the turn-service row) · the room itself has not been driven end to end',
   },
 ];
 
@@ -285,9 +300,18 @@ const IMPLEMENTED = [
   '/reset-password',
   '/verify-email',
   '/profile-setup',
-  // Batch B, first surface only. `/start-community`, `/goals/new` and
-  // `/combined/[setupId]` are NOT implemented and are not listed here.
+  // Batch B: two of four surfaces. `/start-community` and
+  // `/combined/[setupId]` exist as routes but are not built to their
+  // accepted drawings, so they are not listed here.
   '/join/[joinCode]',
+  '/goals/new',
+  // The public display's responsive layout tiers, accepted against the #429
+  // target (PR #435). Batch F's ten-state matrix stays reference.
+  '/display/[goalId]',
+  // The social community, accepted at target, contract and pixels (PR #441).
+  '/community/[groupId]/members',
+  '/settings',
+  '/settings/privacy',
 ];
 
 function routes(dir, prefix = '') {
@@ -337,13 +361,19 @@ function markdown() {
   lines.push(`| Routes with a real-RN target | **${covered.length}** |`);
   lines.push(`| Routes with no target | **${uncovered.length}** |`);
   lines.push(`| Routes implemented against an approved target | **${IMPLEMENTED.length}** |`);
+  lines.push(`| Routes built but not to their accepted target | **${covered.length - IMPLEMENTED.length}** |`);
+  lines.push('');
+  lines.push(
+    '> **Every route in these tables exists in the app tree** — the tree is the source, so a row here is a built route by construction. "Implemented" means built to an accepted target; "built, not to this target" means the route runs today while its drawings stay reference. Neither word means "does not exist".',
+  );
   lines.push('');
   lines.push('### Covered — a real-RN target exists');
   lines.push('');
-  lines.push('| Route | Target package | Notes |');
-  lines.push('| --- | --- | --- |');
+  lines.push('| Route | Built | Target package | Notes |');
+  lines.push('| --- | --- | --- | --- |');
   for (const r of covered) {
-    lines.push(`| \`${r}\` | \`${TARGETS[r]}\` | ${NOTES[r] ?? ''} |`);
+    const built = IMPLEMENTED.includes(r) ? 'built · **to the accepted target**' : 'built · not to this target';
+    lines.push(`| \`${r}\` | ${built} | \`${TARGETS[r]}\` | ${NOTES[r] ?? ''} |`);
   }
   lines.push('');
   lines.push('### Not covered — no target of any kind');
