@@ -90,14 +90,17 @@ Live baseline: 59 ACTIVE services (owner read 2026-10-13 01:39Z). Name-set equal
 
 *none-direct: no direct requireRealIdentity/optionalRealUid call; these use station credentials, public preview/health or token flows; W11 must confirm each is intended.
 
-## Generator / approval chain (NON-EXECUTED)
-- Generator `main:.github/wsf-staging/pin-candidate.mjs` sha256 `136aa124030eb4e88d92156d6b4ff726b6d00cdfda75024f5814522bd9369625`. Not executed here (no full history/credentials in sandbox). Exact command for the authorized runner: as defined in `wsf-staging-deploy.yml` with `mode=dry-run`/`target_source=pin`, `app_sha=a6eaf0be…`. Exit code: NOT RUN.
-- Approval `approved-candidate.json` sha256 `7c02460335a5b96554adf6fc0aa4cc338f32f39ec70cbaaa63345c9a856f1484`: approvedAppSha `ec162d17`, expectedPriorFunctions 49.
-- Predicted (source-inspected) result: REFUSE at lines 852–856 (run #61 hosted verification failed) and prior-count MISMATCH (49 vs live 59). Ancestry, exact-set/no-delete, RTDB, MAX_NEVER_SERVED: UNRESOLVED (unreached).
-- Existing controls cannot represent this candidate. Control-change proposal CP-1 (non-anchoring failed-run record naming #61, fresh 59-name baseline, new approval for `a6eaf0be` with expectedPriorFunctions 59, all other checks unchanged) needs a separate owner decision and review. Not implemented here.
+## Protected-workflow results: NO RUN EXISTS (blocked)
+- Protected workflow: `main:.github/workflows/wsf-staging-deploy.yml` (read 2026-10-13 21:55Z). Modes: deploy, player-journey, cleanup-recovery, mail-preflight, social-privacy, journey-activation, lovable-kiosk, lovable-device-matrix. **None is a non-deploy validation mode, and none invokes the generator.**
+- Repository code search: `pin-candidate.mjs` is referenced only in `.github/wsf-staging/` (CONTROL-PLANE.md, read-inventory.mjs, approved-candidate.json, tests). No workflow calls it.
+- PR #629 head: 0 check runs, 0 workflow runs.
+- Therefore: run link/ID **none**; generator result **NOT RUN**; exact inventory comparator **NOT RUN**; approval-chain verification **NOT RUN**; workflow checksums **NOT RUN**; workflow no-loss check **NOT RUN**. Nothing below is a workflow result.
+- Reference only (source-inspected prediction, NOT a result): generator `pin-candidate.mjs` sha256 `136aa124030eb4e88d92156d6b4ff726b6d00cdfda75024f5814522bd9369625` would REFUSE at lines 852-856 (run #61 hosted verification failed) and on prior count (approval `7c02460335a5b96554adf6fc0aa4cc338f32f39ec70cbaaa63345c9a856f1484` expects 49; live 59).
+- Required control change: a non-deploy generator/validation mode in the protected workflow. Recorded as a SEPARATE proposal outside this candidate, not built. The approval-baseline change (CP-1) is likewise separate. This candidate stays BLOCKED; no control change is used to make it pass.
+- Cloud Shell: not needed. The missing evidence is a GitHub workflow run, not a live Google Cloud fact.
 
 ## No-loss validation
-- Name-level: 59 live = 59 candidate (attested, not generator-executed). Deletions: 0.
+- Name-level: 59 live = 59 candidate (W11-attested, source-read; NOT a workflow result). Deletions: 0.
 - Invokers: 46 Public / 13 Require auth must be identical after any deploy.
 
 ## Deployment proposal (NOT EXECUTED)
@@ -113,3 +116,16 @@ No proven-safe rollback target. `ab77fbfc` (49, ungated) and `ec162d17` (ungated
 
 ## Checksums
 - `functions-westayfit/src/index.ts` @ a6eaf0be, raw API fetch, sha256 (reviewer to re-derive): `290e1fee43f1371a276f2e8d185d3947da6f31e9c48d77243f635a6fde51b16c`
+
+## W11 / L0 readiness
+- W11: reviewable for source/inventory/authorization paths; NOT ready for an evidence PASS (no workflow results).
+- L0: NOT ready (no workflow results; audits paused).
+
+## Remaining blockers
+1. No protected-workflow mode runs the generator/validation (control change, separate proposal).
+2. Approval baseline expects 49 and anchors on failed run #61 (CP-1, separate proposal).
+3. P1 anonymous-session containment conditional.
+4. No proven no-loss rollback target (`ab77fbfc` is not one).
+
+## Next owner decision
+Approve or reject sending the separate generator-validation-mode proposal for independent review.
