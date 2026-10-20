@@ -230,7 +230,7 @@ describe('runKioskFinish', () => {
       ts: Date.now(),
       state: 'unknown',
     };
-    savePendingNew(row, UID);
+    await savePendingNew(row, UID);
     // The real helper, not a stub: this is the end-to-end storage claim.
     const { clearPendingIfAttempt } = await import('../src/pendingContribution');
     await runKioskFinish(
@@ -252,7 +252,7 @@ describe('runKioskFinish', () => {
       ts: Date.now(),
       state: 'unknown',
     };
-    savePendingNew(row, OTHER_UID);
+    await savePendingNew(row, OTHER_UID);
     const { clearPendingIfAttempt } = await import('../src/pendingContribution');
     const result = await runKioskFinish(
       // A confirmed session for UID, finishing on a device where OTHER_UID

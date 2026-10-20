@@ -1,7 +1,7 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useWsfAuth } from '../../src/auth';
@@ -102,12 +102,23 @@ export default function JoinPage() {
   const [previewState, setPreviewState] = useState<PreviewState>({ kind: 'loading' });
   const [joinState, setJoinState] = useState<JoinState>({ kind: 'idle' });
 
-  // Stash the code the moment this page mounts. Signup / verify / profile-setup
-  // read it and route back here on success. Cleared once we successfully route
-  // into /community/<id>, and when the tab closes.
+  // Stash the code as soon as this page knows who is looking at it. Signup /
+  // verify / profile-setup read it and route back here on success. Cleared
+  // once we successfully route into /community/<id>, and when the tab closes
+  // (web) or after two hours (a phone, which has no tab: src/pendingJoinCode.ts).
+  //
+  // WHOSE IT IS is decided here, once, when auth has settled: a signed-out
+  // visitor's code is the pre-auth handoff for whoever signs in next; a
+  // signed-in member's code is theirs alone and is never offered to another
+  // account after they sign out. Deliberately NOT re-run when the account
+  // changes later — the round trip signs somebody in on purpose, and that
+  // must not re-label the visitor's code mid-flight.
+  const stashUid = useRef<string | null>(null);
+  stashUid.current = user?.uid ?? null;
   useEffect(() => {
-    if (joinCode) setPendingJoinCode(joinCode);
-  }, [joinCode]);
+    if (!joinCode || !ready) return;
+    void setPendingJoinCode(joinCode, stashUid.current);
+  }, [joinCode, ready]);
 
   // The event rides sessionStorage for the same reason the join code does:
   // signup -> verify -> profile-setup replace this screen, and the round trip

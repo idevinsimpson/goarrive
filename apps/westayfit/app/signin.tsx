@@ -22,11 +22,16 @@ import {
   authDestinationCard,
   authReturnHeading,
   readAuthDestinationKind,
+  type AuthDestinationKind,
 } from '../src/authDestination';
 import { authErrorMessage, isCredentialMismatch } from '../src/authErrors';
 import { wsfAuthEnabled } from '../src/featureFlags';
 import { getFirebaseAuth, getFirebaseFirestore } from '../src/firebase';
-import { nextRouteAfterAuth } from '../src/pendingJoinCode';
+import {
+  isPendingJoinCodeReady,
+  routeAfterAuth,
+  usePendingJoinCodeReady,
+} from '../src/pendingJoinCode';
 
 export default function SignIn() {
   const { ready, user } = useWsfAuth();
@@ -43,8 +48,24 @@ export default function SignIn() {
     the heading change under somebody mid-type. Read is all this does — the
     destination is resolved and consumed by `nextRouteAfterAuth`, on the
     terminal hop, exactly as before.
+
+    "Once" means once the store CAN answer. On web that is mount, as it always
+    was. On a phone the pending join code is read from storage at launch, so
+    a cold start straight onto this screen reads it the moment that read
+    lands (milliseconds, and while the form is still behind "Loading…" for
+    auth). The form is only ever shown to someone signed out, so a code
+    stashed under an account is not announced here.
   */
-  const [destinationKind] = useState(() => readAuthDestinationKind());
+  const joinCodeReady = usePendingJoinCodeReady();
+  const readDestinationOnce = useRef(isPendingJoinCodeReady());
+  const [destinationKind, setDestinationKind] = useState<AuthDestinationKind | null>(() =>
+    isPendingJoinCodeReady() ? readAuthDestinationKind(null) : null
+  );
+  useEffect(() => {
+    if (!joinCodeReady || readDestinationOnce.current) return;
+    readDestinationOnce.current = true;
+    setDestinationKind(readAuthDestinationKind(null));
+  }, [joinCodeReady]);
   const returning = destinationKind !== null;
   const words = destinationKind
     ? authReturnHeading(destinationKind)
@@ -71,7 +92,9 @@ export default function SignIn() {
         router.replace('/profile-setup');
         return;
       }
-      router.replace(nextRouteAfterAuth('/') as never);
+      const next = await routeAfterAuth('/', user.uid);
+      if (cancelled) return;
+      router.replace(next as never);
     })();
     return () => {
       cancelled = true;
@@ -116,8 +139,11 @@ export default function SignIn() {
       // profileless member must complete their gate BEFORE the join round-trip
       // resumes, otherwise the wsfJoinCommunity guards fail and the visitor
       // dead-ends. Only a member who is verified AND has a profile is allowed
-      // to consult nextRouteAfterAuth — the pending code survives sessionStorage
-      // across the gate hops and is consumed on the final terminal hop.
+      // to consult nextRouteAfterAuth — the pending code survives the gate hops
+      // (session storage on web, the bounded native store on a phone) and is
+      // consumed on the final terminal hop. `routeAfterAuth` waits for that
+      // store to have been read, and only honours a code that is this
+      // account's or was stashed signed out.
       if (!credential.user.emailVerified) {
         router.replace('/verify-email');
         return;
@@ -128,7 +154,7 @@ export default function SignIn() {
         router.replace('/profile-setup');
         return;
       }
-      router.replace(nextRouteAfterAuth('/'));
+      router.replace(await routeAfterAuth('/', credential.user.uid));
     } catch (e) {
       setError(authErrorMessage(e, 'Sign-in failed.'));
       setMismatch(isCredentialMismatch(e));

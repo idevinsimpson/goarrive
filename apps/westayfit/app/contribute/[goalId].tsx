@@ -67,15 +67,16 @@ import {
 } from '../../src/memberReads';
 import { moveAttemptIdFor } from '../../src/moveSession';
 import { cameraEntryAllowed, clampReps, ADJUST_MAX } from '../../src/movement-camera/flow';
-import { useMoveCameraSettings } from '../../src/movement-camera/settingsStore';
+import { useMoveCameraSettings, useMoveCameraSettingsLoaded } from '../../src/movement-camera/settingsStore';
 import { cameraCounterSupported } from '../../src/movement-camera/support';
 import {
   clearPendingIfAttempt,
   isSameContext,
-  loadPending,
-  retireLegacyPending,
-  savePendingNew,
-  updatePendingIfAttempt,
+  mayBeginNewAttempt,
+  openAttempt,
+  replayAttempt,
+  restorePendingAttempt,
+  settleAttempt,
   type PendingContribution,
 } from '../../src/pendingContribution';
 import { wsfTheme } from '../../src/theme';
@@ -503,6 +504,9 @@ export default function ContributeToGoal() {
     camera does not reopen behind them.
   */
   const moveCameraSettings = useMoveCameraSettings();
+  // NATIVE-STATE-1: on a phone the preference is read from device storage at
+  // launch. Until it has been, the camera does not open on the defaults.
+  const moveCameraLoaded = useMoveCameraSettingsLoaded();
   const [cameraSupported] = useState(() => cameraCounterSupported());
   const [cameraDeclined, setCameraDeclined] = useState(false);
   const [cameraEstimate, setCameraEstimate] = useState<number | null>(null);
@@ -524,6 +528,22 @@ export default function ContributeToGoal() {
   // before the load completes, so this value is never the one on screen.
   const [repeatPolicy, setRepeatPolicy] = useState<RepeatPolicy>(() => known?.policy ?? 'once');
   const [pending, setPending] = useState<PendingContribution | null>(null);
+  /*
+    NATIVE-STATE-1. The pending record lives behind the device storage
+    boundary now (AsyncStorage on a phone), so reading it back takes a moment.
+    `restoreSettled` is false from every context change until this account's
+    stored attempt for this goal has been read; until then no NEW attempt may
+    begin (Record, or the camera that leads to one), because it would overwrite
+    a reminder the member has not reconciled yet.
+
+    `pendingDurable` says whether the attempt on screen is actually on the
+    device. A new attempt's record is written and CONFIRMED before its request
+    fires; if the device refused it, the request still goes (recording is never
+    blocked on storage), but the screen does not promise the attempt will be
+    here after leaving. A restored attempt is durable by definition.
+  */
+  const [restoreSettled, setRestoreSettled] = useState(false);
+  const [pendingDurable, setPendingDurable] = useState(true);
   const [refusal, setRefusal] = useState<Refusal | null>(null);
   // Ref instead of state — the in-flight attempt id must NOT trigger a
   // re-render (would risk generating a new id mid-submit and defeat
@@ -627,6 +647,8 @@ export default function ContributeToGoal() {
     // `knownGoal`); nothing, for a context it does not know.
     const recorded = knownGoal(uid, goalId, groupIdHint);
     setPending(null);
+    setPendingDurable(true);
+    setRestoreSettled(false);
     setLastResult(null);
     setRepeatPolicy(recorded?.policy ?? 'once');
     setLegacyOrphan(null);
@@ -651,22 +673,35 @@ export default function ContributeToGoal() {
     setTimerStartedAt(null);
     setTimerRunning(false);
 
-    if (!goalId) return;
+    if (!goalId) {
+      setRestoreSettled(true);
+      return;
+    }
 
     // A record written before the key carried a uid belongs to an account we
     // cannot identify. It is retired, never adopted and never resubmitted.
-    const orphaned = retireLegacyPending(goalId);
-    if (orphaned) setLegacyOrphan(orphaned);
-
-    if (!uid) return;
-    const existing = loadPending(goalId, uid);
-    if (existing) {
-      setPending({ ...existing, state: 'unknown' });
-      // Persist the escalated state so a second reload shows the same screen
-      // even if the user does nothing. Restoring it NEVER makes it confirmed;
-      // only a server response does that.
-      updatePendingIfAttempt({ ...existing, state: 'unknown' }, uid, existing.attemptId);
-    }
+    //
+    // This account's own unconfirmed attempt comes back as `unknown`, and the
+    // escalation is persisted so a second reload shows the same screen even
+    // if the user does nothing. Restoring it NEVER makes it confirmed, never
+    // shows a receipt and never opens the camera; only a server response
+    // confirms anything (src/pendingContribution.ts `restorePendingAttempt`).
+    //
+    // The read is asynchronous (device storage), so its answer is applied
+    // only if this is still the context that asked: a sign-out, account
+    // switch, goal switch or unmount meanwhile bumps the generation and the
+    // answer is dropped — it can never restore one account's attempt into
+    // another's session.
+    const restoringFor = generationRef.current;
+    void restorePendingAttempt(goalId, uid).then(({ pending: restored, orphan }) => {
+      if (generationRef.current !== restoringFor) return;
+      if (orphan) setLegacyOrphan(orphan);
+      if (restored) {
+        setPending(restored);
+        setPendingDurable(true);
+      }
+      setRestoreSettled(true);
+    });
 
     return () => {
       // Navigating away invalidates everything outstanding, so a response that
@@ -950,8 +985,9 @@ export default function ContributeToGoal() {
         return;
       }
       const data = result.data;
-      // Server truth received — the pending row is no longer needed.
-      clearPendingIfAttempt(goalId as string, owner, attemptId);
+      // Server truth received — the pending row is no longer needed. The
+      // stored record is cleared by `settleAttempt` once this returns, under
+      // the same context check (src/pendingContribution.ts).
       setPending(null);
       setLastResult(data);
       // Applied in the same batch as the receipt, so the receipt mounts already
@@ -1059,6 +1095,10 @@ export default function ContributeToGoal() {
     if (state.kind !== 'ready') return;
     if (submitting) return;
     if (reviewCount == null) return;
+    // Not before this account's stored attempt has been read back (device
+    // storage answers asynchronously): a new attempt now could overwrite a
+    // reminder the member has not reconciled.
+    if (!mayBeginNewAttempt({ restoreSettled, pending, settled: refusal != null || lastResult != null })) return;
     inFlightRef.current = true;
     const count = reviewCount;
     setEntryError(null);
@@ -1069,9 +1109,6 @@ export default function ContributeToGoal() {
     if (!attemptRef.current) attemptRef.current = takeRoundAttemptId() ?? mintAttemptId();
     const attemptId = attemptRef.current;
 
-    // Persist BEFORE sending. If the tab crashes mid-flight, a reload sees
-    // this record and offers reconcile with the SAME attemptId — the
-    // server-side idempotency check will count it exactly once.
     const pendingRow: PendingContribution = {
       goalId: goalId as string,
       attemptId,
@@ -1079,7 +1116,6 @@ export default function ContributeToGoal() {
       ts: Date.now(),
       state: 'sending',
     };
-    savePendingNew(pendingRow, uid as string);
     setPending(pendingRow);
 
     const generation = generationRef.current;
@@ -1094,32 +1130,51 @@ export default function ContributeToGoal() {
           goalId: contextRef.current.goalId,
         }
       );
+    // The request may only go out as the account that pressed Record. The
+    // callable authenticates as whoever is signed in WHEN IT IS CALLED, and
+    // the server keys idempotency on that uid, so after an await the live auth
+    // user is checked too — not only this screen's record of it, which
+    // follows auth a render later.
+    const mayFire = () => stillCurrent() && getFirebaseAuth().currentUser?.uid === owner;
+    const isRefusal = (e: unknown) => classifyContributeError(e).kind === 'refused';
 
     try {
+      // Persist BEFORE sending, and wait for the device's answer. If the app
+      // is killed mid-flight, the next launch restores this record and offers
+      // reconcile with the SAME attemptId — the server-side idempotency check
+      // counts it exactly once. If the device refused the write, the request
+      // still goes, but the screen will not promise the attempt survives
+      // leaving it (`pendingDurable`).
+      const opened = await openAttempt(pendingRow, owner, mayFire);
+      if (!opened.fire) {
+        // The context moved on while the record was being written: nothing
+        // was sent, and the record has been retired. The new context has
+        // already reset this screen; if somehow it has not, return to review.
+        if (stillCurrent()) setPending(null);
+        return;
+      }
+      if (stillCurrent()) setPendingDurable(opened.durable);
       // The ONE path that can produce a fresh receipt: the first confirmed
       // answer to this Record, in this uninterrupted flow.
-      await sendContribute(attemptId, count, true);
-    } catch (e) {
-      const failure = classifyContributeError(e);
-      if (failure.kind === 'refused') {
+      const settled = await settleAttempt(pendingRow, owner, {
+        send: () => sendContribute(attemptId, count, true),
+        isRefusal,
+        stillCurrent,
+      });
+      if (!stillCurrent()) return;
+      if (settled.kind === 'refused') {
         // The server ran the request and refused it: nothing was recorded and
-        // nothing will be. The reminder would only ask the member to replay a
-        // request that will be refused again, so it is retired — under the
-        // ORIGINAL account, and only if the slot is still this attempt.
-        clearPendingIfAttempt(goalId as string, owner, attemptId);
-        if (!stillCurrent()) return;
+        // nothing will be. The reminder has been retired under the ORIGINAL
+        // account (only if the slot was still this attempt). Distinct from
+        // unknown, always.
+        const failure = classifyContributeError(settled.error);
         setPending(null);
         attemptRef.current = null;
-        setRefusal({ reason: failure.reason, count });
-      } else {
-        // Unknown outcome: the persisted row is escalated under the ORIGINAL
-        // account, so the attempt stays reconcilable even if the context has
-        // moved on. Conditional: this failure may only touch the record if
-        // the slot is still ITS attempt.
-        const escalated: PendingContribution = { ...pendingRow, state: 'unknown' };
-        updatePendingIfAttempt(escalated, owner, attemptId);
-        if (!stillCurrent()) return;
-        setPending(escalated);
+        if (failure.kind === 'refused') setRefusal({ reason: failure.reason, count });
+      } else if (settled.kind === 'unknown') {
+        // Unknown outcome: the stored row was escalated under the ORIGINAL
+        // account, conditionally, so the attempt stays reconcilable.
+        setPending({ ...pendingRow, state: 'unknown' });
       }
     } finally {
       inFlightRef.current = false;
@@ -1127,7 +1182,19 @@ export default function ContributeToGoal() {
       // form, which the new context already reset.
       if (stillCurrent()) setSubmitting(false);
     }
-  }, [state, submitting, reviewCount, goalId, uid, sendContribute, takeRoundAttemptId]);
+  }, [
+    state,
+    submitting,
+    reviewCount,
+    goalId,
+    uid,
+    sendContribute,
+    takeRoundAttemptId,
+    restoreSettled,
+    pending,
+    refusal,
+    lastResult,
+  ]);
 
   // Replay the SAME attempt. The server keys idempotency on goal, account and
   // attemptId and returns the original receipt if the earlier call landed.
@@ -1153,6 +1220,7 @@ export default function ContributeToGoal() {
     const generation = generationRef.current;
     const owner = uid as string;
     const startedGoal = goalId;
+    const replay = pending;
     const stillCurrent = () =>
       isSameContext(
         { generation, uid: owner, goalId: startedGoal },
@@ -1163,28 +1231,28 @@ export default function ContributeToGoal() {
         }
       );
 
-    // Flip the persisted state to 'sending' during the replay so a further
-    // crash mid-replay still lands us on the pending screen.
-    updatePendingIfAttempt({ ...pending, state: 'sending' }, owner, pending.attemptId);
-    setPending({ ...pending, state: 'sending' });
+    // The persisted state flips to 'sending' during the replay (queued on the
+    // record ahead of whatever the outcome writes, and only if the record is
+    // still this attempt) so a further crash mid-replay still lands us on the
+    // pending screen.
+    setPending({ ...replay, state: 'sending' });
 
     try {
-      await sendContribute(pending.attemptId, pending.count);
-    } catch (e) {
-      const failure = classifyContributeError(e);
-      if (failure.kind === 'refused') {
-        clearPendingIfAttempt(goalId as string, owner, pending.attemptId);
-        if (!stillCurrent()) return;
+      const settled = await replayAttempt(replay, owner, {
+        send: () => sendContribute(replay.attemptId, replay.count),
+        isRefusal: (e: unknown) => classifyContributeError(e).kind === 'refused',
+        stillCurrent,
+      });
+      if (!stillCurrent()) return;
+      if (settled.kind === 'refused') {
+        const failure = classifyContributeError(settled.error);
         setPending(null);
         attemptRef.current = null;
-        setRefusal({ reason: failure.reason, count: pending.count });
-      } else {
-        const escalated: PendingContribution = { ...pending, state: 'unknown' };
+        if (failure.kind === 'refused') setRefusal({ reason: failure.reason, count: replay.count });
+      } else if (settled.kind === 'unknown') {
         // Conditional, for the same reason as onRecord: an old replay failure
         // must not overwrite a newer attempt's record.
-        updatePendingIfAttempt(escalated, owner, pending.attemptId);
-        if (!stillCurrent()) return;
-        setPending(escalated);
+        setPending({ ...replay, state: 'unknown' });
       }
     } finally {
       inFlightRef.current = false;
@@ -1237,6 +1305,9 @@ export default function ContributeToGoal() {
     state.kind === 'closed' || state.kind === 'notFound' || state.kind === 'error';
   const kioskTerminal =
     kiosk &&
+    // Not before the stored attempt has been read back: the deadline must
+    // know whether there is an unresolved attempt before it can run.
+    restoreSettled &&
     kioskMayFinishUnattended({
       outcome: kioskOutcome,
       attemptInFlight: kioskAttemptInFlight,
@@ -2337,9 +2408,17 @@ export default function ContributeToGoal() {
             {/* Not true on a shared device: the visitor is about to be signed
                 out of it. The kiosk says where the attempt actually is instead
                 (KIOSK_UNRESOLVED_NOTICE, on the Finish bar below). */}
-            {kiosk ? null : (
+            {/* NATIVE-STATE-1: only when the device actually kept the record.
+                If it refused the write, the attempt exists on this screen and
+                nowhere else, and saying it will be here later would be a
+                promise nothing keeps. */}
+            {kiosk ? null : pendingDurable ? (
               <Text style={styles.stepBody}>
                 You can leave this page. The same attempt will be here when you come back.
+              </Text>
+            ) : (
+              <Text style={styles.stepBody} testID="wsf-contribute-not-saved">
+                This device couldn’t save this attempt, so it won’t be here if you leave this page. Confirm it here.
               </Text>
             )}
           </View>
@@ -2598,6 +2677,11 @@ export default function ContributeToGoal() {
     !kiosk &&
     beforeWrite &&
     !legacyOrphan &&
+    // NATIVE-STATE-1: not before the stored attempt has been read back (a
+    // restored attempt must never be overtaken by the camera), and not on
+    // default settings the member may have turned off on this device.
+    mayBeginNewAttempt({ restoreSettled, pending, settled: refusal != null || lastResult != null }) &&
+    moveCameraLoaded &&
     state.kind === 'ready' &&
     cameraEntryAllowed({
       settings: moveCameraSettings,
@@ -2606,6 +2690,32 @@ export default function ContributeToGoal() {
       resumed: roundAttemptRef.current != null,
       supported: cameraSupported,
     });
+  /*
+    While either of those two answers is still on its way (milliseconds), a
+    member the camera WOULD open for sees the camera's own loading frame — the
+    one the lazy camera screen shows anyway — rather than a flash of the manual
+    screen. The camera itself does not mount until both have answered, so a
+    restored attempt is never covered by it, even for a frame.
+  */
+  const cameraWaiting =
+    !cameraOpen &&
+    (!restoreSettled || !moveCameraLoaded) &&
+    step === 'move' &&
+    !cameraDeclined &&
+    !kiosk &&
+    beforeWrite &&
+    !legacyOrphan &&
+    state.kind === 'ready' &&
+    cameraEntryAllowed({
+      settings: moveCameraSettings,
+      unit,
+      mode: params.mode === 'move' ? 'start' : 'already',
+      resumed: roundAttemptRef.current != null,
+      supported: cameraSupported,
+    });
+  if (cameraWaiting) {
+    return <View style={styles.cameraLoading} testID="wsf-camera-loading" />;
+  }
   if (cameraOpen) {
     return (
       <Suspense fallback={<View style={styles.cameraLoading} testID="wsf-camera-loading" />}>
