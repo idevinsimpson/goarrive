@@ -18,7 +18,9 @@ import {
 } from '../../src/memberReads';
 import type { ProgressGoal, ProgressState } from '../../src/progressParity';
 import { formatEndedOn, formatEndsAt, hasWindowEnded } from '../../src/ui/dates';
+import { injectedRenderFault } from '../../src/crashHarness';
 import { ProgressParityView } from '../../src/ui/ProgressParityView';
+import { nativeErrorBoundary } from '../../src/ui/RouteErrorFallback';
 import { isReached } from '../../src/ui/progressFormat';
 
 /**
@@ -231,7 +233,12 @@ function progressFromRecord(uid: string): Ready | null {
   return composeProgress(owned, false);
 }
 
+/** INT-01. A throw in Progress is contained inside the Progress tab. */
+export const ErrorBoundary = nativeErrorBoundary('tab');
+
 export default function ActivityScreen() {
+  // A test build's Progress fault (src/crashHarness.ts); inert otherwise.
+  injectedRenderFault('progress');
   const { ready, user } = useWsfAuth();
   // The first frame already stands on the account's record when it can: a
   // loading state painted for one frame and then replaced is still a flash.

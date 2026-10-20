@@ -1,6 +1,8 @@
 import { Stack } from 'expo-router';
 
+import { injectedRenderFault } from '../../../src/crashHarness';
 import { wsfTheme } from '../../../src/theme';
+import { nativeErrorBoundary } from '../../../src/ui/RouteErrorFallback';
 
 /**
  * THE COMMUNITY TAB, AS A STACK WITH ONE SCREEN FOR NOW.
@@ -19,7 +21,12 @@ import { wsfTheme } from '../../../src/theme';
  * never lights. Keeping the layout keeps the tab's route name stable whatever
  * the Community tab grows later.
  */
+/** INT-01. A throw in the Community tab is contained inside the Community tab. */
+export const ErrorBoundary = nativeErrorBoundary('tab');
+
 export default function CommunityTabLayout() {
+  // A test build's Community-tab fault (src/crashHarness.ts); inert otherwise.
+  injectedRenderFault('community-tab');
   return (
     <Stack
       screenOptions={{ headerShown: false, contentStyle: { backgroundColor: wsfTheme.colors.background } }}

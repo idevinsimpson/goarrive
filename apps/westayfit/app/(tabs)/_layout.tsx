@@ -15,6 +15,7 @@ import {
 } from '../../src/ui/memberShellActions';
 import { MemberTopBar, type MemberMenuItem } from '../../src/ui/MemberTopBar';
 import { TabSceneFade } from '../../src/ui/TabSceneFade';
+import { nativeErrorBoundary } from '../../src/ui/RouteErrorFallback';
 
 /**
  * THE MEMBER SHELL: one persistent top bar, four real tabs, and MOVE as an
@@ -45,6 +46,13 @@ import { TabSceneFade } from '../../src/ui/TabSceneFade';
  * the smallest documented cost that works. The trade — three tab switches now
  * add two entries where they added one — was measured, reported and accepted.
  */
+/**
+ * INT-01. A throw in the shell itself (top bar, tab bar, a tab with no
+ * boundary of its own) is contained here, under the root stack, instead of
+ * ending the process. Tabs with their own boundary keep the shell alive.
+ */
+export const ErrorBoundary = nativeErrorBoundary('shell');
+
 export default function MemberTabsLayout() {
   /*
     THE SHELL'S ACTION REGISTRY WRAPS THE SHELL, NOT THE OTHER WAY AROUND.

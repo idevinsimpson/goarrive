@@ -112,6 +112,7 @@ import {
 } from '../../src/ui/sheetMotion';
 import { useReducedMotion } from '../../src/ui/useReducedMotion';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { nativeErrorBoundary } from '../../src/ui/RouteErrorFallback';
 
 // Poll wsfGoalPulse at the server cache TTL so a peer's contribution
 // surfaces without a manual refresh. Matches GOAL_PULSE_CACHE_TTL_MS in
@@ -375,6 +376,13 @@ function ReturnButton({
     </Pressable>
   );
 }
+
+/**
+ * INT-01. A throw here is contained on this screen. Its fallback never says
+ * "recorded": whether an attempt landed is unknown from there, so it says the
+ * contribution is not confirmed and points to Progress.
+ */
+export const ErrorBoundary = nativeErrorBoundary('contribute');
 
 export default function ContributeToGoal() {
   const params = useLocalSearchParams<{

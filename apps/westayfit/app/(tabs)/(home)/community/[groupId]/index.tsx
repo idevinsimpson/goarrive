@@ -133,6 +133,7 @@ import {
   totalOfTargetLabel,
   totalOfTargetParts,
 } from '../../../../../src/ui/progressFormat';
+import { injectedRenderFault } from '../../../../../src/crashHarness';
 
 type GroupDoc = {
   displayName: string;
@@ -1415,6 +1416,10 @@ export default function CommunityPage() {
       : null,
     `${user?.uid ?? 'none'}:${groupId}`,
   );
+
+  // INT-01: a test build's community-detail fault, the `window.location.origin`
+  // read ST-01 crashed on (src/crashHarness.ts); inert otherwise.
+  injectedRenderFault('community-detail-origin');
 
   useFocusEffect(
     useCallback(() => {

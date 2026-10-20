@@ -2,6 +2,7 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { WSF_BUILD_STAMP } from '../src/buildStamp';
 import { wsfIsStaging } from '../src/firebase';
+import { CrashRecordsCard } from '../src/ui/CrashRecordsCard';
 import { kit } from '../src/ui/kit';
 import { WsfWordmark } from '../src/ui/WsfWordmark';
 
@@ -19,6 +20,8 @@ export default function Health() {
           <Row label="Commit" value={WSF_BUILD_STAMP.commitSha} testID="wsf-health-commit" />
           <Row label="Built at" value={WSF_BUILD_STAMP.builtAt} testID="wsf-health-builtAt" />
         </View>
+        {/* INT-01: scrubbed records from earlier launches; nothing on web. */}
+        <CrashRecordsCard />
         {wsfIsStaging ? (
           <>
             <Text style={kit.eyebrow}>Environment</Text>
