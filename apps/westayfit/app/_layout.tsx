@@ -1,3 +1,6 @@
+// INT-01: first, so the global error handler is wrapped before any other
+// module of the app runs (src/crashContainment.ts).
+import '../src/crashContainment';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
@@ -8,13 +11,26 @@ import { WsfAuthProvider } from '../src/auth';
 import { getFirebaseApp } from '../src/firebase';
 import { InAppBrowserBanner } from '../src/InAppBrowserBanner';
 import { StagingBanner } from '../src/StagingBanner';
+import { fireAsyncCrashFaults, injectedRenderFault } from '../src/crashHarness';
 import { wsfTheme } from '../src/theme';
 import { isMoveSheetRoute, isOverMemberTabs } from '../src/ui/moveSheetRoute';
+import { nativeErrorBoundary } from '../src/ui/RouteErrorFallback';
 import { useReducedMotion } from '../src/ui/useReducedMotion';
+
+/**
+ * INT-01. THE LAST-RESORT BOUNDARY. A throw anywhere in the shell that no
+ * route boundary below catches (the staging strip, the providers, the stack
+ * itself) renders this in place of the whole layout. It needs no provider:
+ * the safe-area and auth providers it would sit under are what just failed.
+ * Native only; web keeps its own behaviour (src/ui/RouteErrorFallback.tsx).
+ */
+export const ErrorBoundary = nativeErrorBoundary('root');
 
 export default function RootLayout() {
   useEffect(() => {
     getFirebaseApp();
+    // A test build's injected timer / rejection faults (src/crashHarness.ts).
+    fireAsyncCrashFaults();
   }, []);
 
   return (
@@ -68,6 +84,8 @@ export default function RootLayout() {
 function AppShell() {
   // Asked once, here, because both presented screens below answer to it.
   const reduced = useReducedMotion();
+  // A test build's root-shell fault (src/crashHarness.ts); inert otherwise.
+  injectedRenderFault('root-shell');
   return (
     <View style={{ flex: 1, backgroundColor: wsfTheme.colors.background }}>
       <StagingBanner />

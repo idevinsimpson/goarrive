@@ -1,6 +1,7 @@
 import { Stack } from 'expo-router';
 
 import { wsfTheme } from '../../../src/theme';
+import { nativeErrorBoundary } from '../../../src/ui/RouteErrorFallback';
 
 /**
  * THE HOME TAB IS A STACK, AND IT OWNS THE COMMUNITY DETAIL.
@@ -21,6 +22,13 @@ import { wsfTheme } from '../../../src/theme';
  * `challenge.tsx` and `members.tsx` sit here for the same reason: they are
  * children of the detail, reached from the community the member is in.
  */
+/**
+ * INT-01. A throw anywhere in the Home tab's stack (the list, community
+ * detail, challenge, members) is contained inside the Home tab: the top bar
+ * and the tab bar stay and still switch tabs.
+ */
+export const ErrorBoundary = nativeErrorBoundary('homeTab');
+
 export default function HomeTabLayout() {
   return (
     <Stack

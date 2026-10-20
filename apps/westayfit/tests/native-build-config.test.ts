@@ -20,6 +20,7 @@ const ENV_KEYS = [
   'EAS_BUILD_PROFILE',
   'EXPO_PUBLIC_WSF_ENV',
   'EXPO_PUBLIC_WSF_USE_EMULATORS',
+  'EXPO_PUBLIC_WSF_CRASH_HARNESS',
   ...STAGING_KEYS,
 ];
 const COMPLETE_STAGING = Object.fromEntries(STAGING_KEYS.map((k) => [k, 'dummy-value']));
@@ -108,6 +109,36 @@ describe('NATIVE-BUILD-1: app.config.js build-time backend refusals', () => {
         EAS_BUILD_PROFILE: 'development-store',
         EXPO_PUBLIC_WSF_ENV: 'staging',
         ...COMPLETE_STAGING,
+      })()
+    ).toEqual({ name: 'We Stay Fit' });
+  });
+
+  it('NATIVE-INTEGRATOR-1 (INT-01): refuses a production build carrying the injected-throw harness', () => {
+    expect(
+      run({
+        EAS_BUILD_PLATFORM: 'ios',
+        EAS_BUILD_PROFILE: 'preview',
+        EXPO_PUBLIC_WSF_ENV: 'production',
+        EXPO_PUBLIC_WSF_CRASH_HARNESS: 'progress',
+      })
+    ).toThrow(/EXPO_PUBLIC_WSF_CRASH_HARNESS is set for a production ios build/);
+    // A staging test build may carry it: that is what it is for.
+    expect(
+      run({
+        EAS_BUILD_PLATFORM: 'android',
+        EAS_BUILD_PROFILE: 'preview',
+        EXPO_PUBLIC_WSF_ENV: 'staging',
+        EXPO_PUBLIC_WSF_CRASH_HARNESS: 'progress,timer',
+        ...COMPLETE_STAGING,
+      })()
+    ).toEqual({ name: 'We Stay Fit' });
+    // Blank is unset.
+    expect(
+      run({
+        EAS_BUILD_PLATFORM: 'ios',
+        EAS_BUILD_PROFILE: 'preview',
+        EXPO_PUBLIC_WSF_ENV: 'production',
+        EXPO_PUBLIC_WSF_CRASH_HARNESS: '  ',
       })()
     ).toEqual({ name: 'We Stay Fit' });
   });

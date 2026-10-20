@@ -36,6 +36,7 @@ import {
 } from '../../src/ui/kit';
 import { fillRatio, formatCount, totalOfTargetLabel } from '../../src/ui/progressFormat';
 import { SAME_LOAD_MS, peekGoals, peekMyCommunities, readGoals, readMyCommunities } from '../../src/memberReads';
+import { nativeErrorBoundary } from '../../src/ui/RouteErrorFallback';
 
 /**
  * MOVE. The shell's one action, resolved.
@@ -146,6 +147,9 @@ function resolveFromRecord(uid: string): Resolution | null {
   }
   return { kind: 'choose', groupId, community, goals: open };
 }
+
+/** INT-01. A throw in the MOVE resolver is contained on this screen. */
+export const ErrorBoundary = nativeErrorBoundary('screen');
 
 export default function MoveResolver() {
   const { ready, user } = useWsfAuth();

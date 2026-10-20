@@ -56,6 +56,15 @@ module.exports = ({ config }) => {
         );
       }
     }
+    // NATIVE-INTEGRATOR-1 (INT-01): the injected-throw test harness
+    // (src/crashHarness.ts) is inert in production at runtime too; a
+    // production build that names it is a mistake, so it does not build.
+    if (env === 'production' && (process.env.EXPO_PUBLIC_WSF_CRASH_HARNESS || '').trim()) {
+      throw new Error(
+        `WSF native build refused: EXPO_PUBLIC_WSF_CRASH_HARNESS is set for a production ${platform} build. ` +
+          `The injected-throw harness is for staging test builds only; unset it.`
+      );
+    }
     if (env === 'staging' && embedsJs) {
       const missing = STAGING_KEYS.filter((k) => !(process.env[k] || '').trim());
       if (missing.length) {
