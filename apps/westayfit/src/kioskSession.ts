@@ -254,8 +254,9 @@ export type KioskFinishPlan = {
  * IT USED TO PROMISE PORTABILITY IT CANNOT KEEP. The old wording — "Your
  * attempt is saved to your account; check it from your own device." — reads as
  * though the attempt travels with the account. It does not. The record that
- * makes the SAME attempt replayable lives in `localStorage` on the browser that
- * made it (src/pendingContribution.ts), keyed to that uid; a different device
+ * makes the SAME attempt replayable lives in the device store of the browser or
+ * phone that made it (src/pendingContribution.ts: localStorage on web,
+ * AsyncStorage on iOS and Android), keyed to that uid; a different device
  * signing into the same account finds no such record. W3's storage-level probe
  * confirmed it. A member's own credit total is durable and readable elsewhere,
  * but a total is not this attempt's outcome: somebody who does not already know
@@ -322,8 +323,10 @@ export type KioskFinishDeps = {
   /** firebase signOut, injected so the rule can be tested without auth. */
   signOut: () => Promise<void>;
   /** src/pendingContribution.ts `clearPendingIfAttempt` — the guarded clear
-   * that refuses when the stored record is a DIFFERENT attempt. */
-  clearPendingIfAttempt: (goalId: string, uid: string, attemptId: string) => boolean;
+   * that refuses when the stored record is a DIFFERENT attempt. Asynchronous
+   * since the record moved behind the device storage boundary; it is awaited,
+   * so the clear completes while the uid it needs is still signed in. */
+  clearPendingIfAttempt: (goalId: string, uid: string, attemptId: string) => boolean | Promise<boolean>;
   /** Removes this feature's own storage keys. */
   clearKioskKeys: () => void;
 };
@@ -362,7 +365,7 @@ export async function runKioskFinish(
   let clearedPendingDraft = false;
   if (plan.clearPendingDraft && input.uid && input.attemptId) {
     try {
-      clearedPendingDraft = deps.clearPendingIfAttempt(input.goalId, input.uid, input.attemptId);
+      clearedPendingDraft = await deps.clearPendingIfAttempt(input.goalId, input.uid, input.attemptId);
     } catch {
       clearedPendingDraft = false;
     }
