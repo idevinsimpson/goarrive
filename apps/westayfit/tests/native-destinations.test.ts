@@ -27,14 +27,14 @@ let disk: FakeAsyncStorage;
 
 async function launch() {
   bootNative(disk);
-  const [pj, ev, mk, ks, pad, ad] = await Promise.all([
-    import('../src/pendingJoinCode'),
-    import('../src/eventReturn'),
-    import('../src/markerEntry'),
-    import('../src/kioskSession'),
-    import('../src/postAuthDestination'),
-    import('../src/authDestination'),
-  ]);
+  // One at a time: concurrent dynamic imports right after `vi.doMock` can
+  // resolve before the mocks are registered, and then load the WEB stores.
+  const pj = await import('../src/pendingJoinCode');
+  const ev = await import('../src/eventReturn');
+  const mk = await import('../src/markerEntry');
+  const ks = await import('../src/kioskSession');
+  const pad = await import('../src/postAuthDestination');
+  const ad = await import('../src/authDestination');
   return { pj, ev, mk, ks, pad, ad };
 }
 
