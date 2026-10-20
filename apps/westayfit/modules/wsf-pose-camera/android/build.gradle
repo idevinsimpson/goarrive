@@ -1,0 +1,45 @@
+// UNCOMPILED in sprint sandbox — first compile happens in an EAS development build
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.wsfposecamera'
+version = '0.1.0'
+
+// MediaPipe Tasks Vision for Android.
+// Web (engine.ts) and iOS (podspec) run 0.10.35. Maven presence of
+// com.google.mediapipe:tasks-vision:0.10.35 is UNVERIFIED from the sprint sandbox
+// (dl.google.com is blocked there), so Android pins the nearest CONFIRMED release,
+// 0.10.29: Google's own mediapipe-samples pose_landmarker Android app built against it
+// (google-ai-edge/mediapipe-samples 1daf138, 2025-09-25, until 1.0.0 on 2026-08-04).
+// The PoseLandmarker API used here is identical at v0.10.26 and v0.10.35 (source read).
+// Move to 0.10.35 once the EAS build log shows it resolves (one line). Never 1.x without
+// a privacy review (web 1.0.0 added a metrics logger).
+def mediapipeTasksVisionVersion = '0.10.29'
+// CameraX: the version Google's pose sample uses (camera-core/camera2/lifecycle/view).
+def cameraxVersion = '1.4.2'
+
+android {
+  namespace 'expo.modules.wsfposecamera'
+  defaultConfig {
+    versionCode 1
+    versionName '0.1.0'
+    // MediaPipe reaches its classes from JNI; keep them if a release build minifies.
+    consumerProguardFiles 'proguard-rules.pro'
+  }
+  sourceSets {
+    main {
+      // The ONE bundled model, shared with iOS: modules/wsf-pose-camera/assets/pose_landmarker_lite.task
+      assets.srcDirs += ['../assets']
+    }
+  }
+}
+
+dependencies {
+  implementation "com.google.mediapipe:tasks-vision:${mediapipeTasksVisionVersion}"
+  implementation "androidx.camera:camera-core:${cameraxVersion}"
+  implementation "androidx.camera:camera-camera2:${cameraxVersion}"
+  implementation "androidx.camera:camera-lifecycle:${cameraxVersion}"
+  implementation "androidx.camera:camera-view:${cameraxVersion}"
+}
