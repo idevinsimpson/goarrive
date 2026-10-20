@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "3fa25ff1a349f1f2a8dcbeb8d79394dc79037f0f9515fceb9b8a7ae7b87da422",
-  "eventCount": 1359,
+  "ledgerHead": "2fc339d1af43ecd01605dcdbef7ed8652487346bd3019949328e96e9e6afae8c",
+  "eventCount": 1364,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -8489,40 +8489,50 @@
       "packet": "NATIVE-BOOT-1",
       "worker": "W12",
       "reason": "release",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        6303072227
+      ],
       "ack": null
     },
     "2c10b95549b54fc7d8fda84eb705ae25decab6fb0ed9066e751b5780771d6af3": {
       "packet": "NATIVE-CAMERA-1",
       "worker": "W15",
       "reason": "release",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        6303072420
+      ],
       "ack": null
     },
     "2caea7f27d6506c47c75b8c7840d37a7b83f61a11a8aa64385813db148910a47": {
       "packet": "NATIVE-MEMBER-1",
       "worker": "W16",
       "reason": "release",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        6303072630
+      ],
       "ack": null
     },
     "fbac724f5bab5e60f0ff603c579063e3baaebb4da3f605af5a6b9620efef6b3f": {
       "packet": "NATIVE-MOTION-1",
       "worker": "W14",
       "reason": "release",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        6303072853
+      ],
       "ack": null
     },
     "ec0eb4c92b4aec2091cafe6b14e11ac69500791b7b8a7f278916264bb16404fc": {
       "packet": "NATIVE-STATE-1",
       "worker": "W13",
       "reason": "release",
-      "status": "requested",
-      "comments": [],
+      "status": "delivered",
+      "comments": [
+        6303073115
+      ],
       "ack": null
     }
   },

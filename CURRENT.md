@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=3fa25ff1a349f1f2a8dcbeb8d79394dc79037f0f9515fceb9b8a7ae7b87da422 events=1359 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=2fc339d1af43ecd01605dcdbef7ed8652487346bd3019949328e96e9e6afae8c events=1364 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `3fa25ff1a349f1f2a8dcbeb8d79394dc79037f0f9515fceb9b8a7ae7b87da422` (1359 events)
+- Ledger head: `2fc339d1af43ecd01605dcdbef7ed8652487346bd3019949328e96e9e6afae8c` (1364 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -333,9 +333,9 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | 7a11a7148c22 | W5 | KIOSK-GUEST-MOVE-1 | review | redelivered | 6113079769, 6114680608 | — |
 | 781dcc461cae | W9 | KIOSK-LIVE-POSE-PROD-1 | release | acked | 6127713152, 6128561949 | comment:6128872837 |
 | 21e4a1187fac | W3 | KIOSK-LIVE-POSE-PROD-1 | review | acked | 6129382439 | comment:6129522845 |
-| 65a6162d12cc | W12 | NATIVE-BOOT-1 | release | requested | — | — |
-| 2c10b95549b5 | W15 | NATIVE-CAMERA-1 | release | requested | — | — |
-| 2caea7f27d65 | W16 | NATIVE-MEMBER-1 | release | requested | — | — |
-| fbac724f5bab | W14 | NATIVE-MOTION-1 | release | requested | — | — |
-| ec0eb4c92b4a | W13 | NATIVE-STATE-1 | release | requested | — | — |
+| 65a6162d12cc | W12 | NATIVE-BOOT-1 | release | delivered | 6303072227 | — |
+| 2c10b95549b5 | W15 | NATIVE-CAMERA-1 | release | delivered | 6303072420 | — |
+| 2caea7f27d65 | W16 | NATIVE-MEMBER-1 | release | delivered | 6303072630 | — |
+| fbac724f5bab | W14 | NATIVE-MOTION-1 | release | delivered | 6303072853 | — |
+| ec0eb4c92b4a | W13 | NATIVE-STATE-1 | release | delivered | 6303073115 | — |
 
