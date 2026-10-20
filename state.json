@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "2ae8e2ba0596bdb90611134da756577fcfcebb61a18b71096123c3b4600597d1",
-  "eventCount": 1347,
+  "ledgerHead": "3fa25ff1a349f1f2a8dcbeb8d79394dc79037f0f9515fceb9b8a7ae7b87da422",
+  "eventCount": 1359,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -49,6 +49,9 @@
     "W15": {
       "inbox": 631
     },
+    "W16": {
+      "inbox": 631
+    },
     "W3": {
       "inbox": 396,
       "classes": [
@@ -81,18 +84,11 @@
   },
   "queue": {
     "W11": [],
-    "W12": [
-      "NATIVE-BOOT-1"
-    ],
-    "W13": [
-      "NATIVE-STATE-1"
-    ],
-    "W14": [
-      "NATIVE-MOTION-1"
-    ],
-    "W15": [
-      "NATIVE-CAMERA-1"
-    ],
+    "W12": [],
+    "W13": [],
+    "W14": [],
+    "W15": [],
+    "W16": [],
     "W3": [],
     "W4": [],
     "W5": [],
@@ -3997,10 +3993,10 @@
       },
       "label": "Native-safe Firebase boot (no window.location at import), explicit native backend, RN auth persistence, device storage boundary (PR #632)",
       "origin": "ledger",
-      "phase": "QUEUED",
+      "phase": "RELEASED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
-      "inbox": null,
+      "inbox": 631,
       "pr": null,
       "reviewers": [],
       "artifact": {
@@ -4011,7 +4007,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": null,
+      "releasedQueueIndex": 0,
       "reviewedBy": [],
       "subjectPaths": [
         "apps/westayfit/app.config.js",
@@ -4035,11 +4031,14 @@
           "kind": "comment",
           "id": 6299271000
         },
-        "released": null,
+        "released": {
+          "kind": "comment",
+          "id": 6302210014
+        },
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6299271000
+          "id": 6302210014
         }
       },
       "review": {
@@ -4068,10 +4067,10 @@
       },
       "label": "Native pose camera module (MediaPipe) feeding the unchanged frozen counter; JS tested, native uncompiled (PR #638)",
       "origin": "ledger",
-      "phase": "QUEUED",
+      "phase": "RELEASED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
-      "inbox": null,
+      "inbox": 631,
       "pr": null,
       "reviewers": [],
       "artifact": {
@@ -4082,7 +4081,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": null,
+      "releasedQueueIndex": 0,
       "reviewedBy": [],
       "subjectPaths": [
         "apps/westayfit/modules/wsf-pose-camera/WsfPoseCamera.podspec",
@@ -4118,11 +4117,102 @@
           "kind": "comment",
           "id": 6299283720
         },
-        "released": null,
+        "released": {
+          "kind": "comment",
+          "id": 6302216132
+        },
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6299283720
+          "id": 6302216132
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "journey-qa",
+            "count": 1
+          },
+          {
+            "class": "security",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
+      "pendingFinding": null
+    },
+    "NATIVE-MEMBER-1": {
+      "owner": "W16",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Member-feature native truth (NATIVE-PARITY-TARGET-1 5.5): You sign-out race, invite URL in Home join, native copy/share, privacy refusal hardening, truthful native copy",
+      "origin": "ledger",
+      "phase": "RELEASED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": 631,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": 0,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "apps/westayfit/app/(tabs)/community",
+        "apps/westayfit/app/(tabs)/(home)/community/[groupId]",
+        "apps/westayfit/app/(tabs)/you.tsx",
+        "apps/westayfit/src/ui/YouParityView.tsx",
+        "apps/westayfit/app/settings/privacy.tsx",
+        "apps/westayfit/src/ui/CommunityPrivacyControls.tsx",
+        "apps/westayfit/src/ui/CommunityPrivacyPanelView.tsx",
+        "apps/westayfit/app/start-community.tsx",
+        "apps/westayfit/app/join/[joinCode].tsx",
+        "apps/westayfit/app/goals/new.tsx",
+        "apps/westayfit/app/signin.tsx",
+        "apps/westayfit/app/signup.tsx",
+        "apps/westayfit/app/reset-password.tsx",
+        "apps/westayfit/src/ui/JoinQrCode.tsx",
+        "apps/westayfit/src/ui/JoinQrCode.native.tsx",
+        "apps/westayfit/src/ui/qr.ts",
+        "apps/westayfit/src/shareGoalDisplay.ts",
+        "apps/westayfit/src/shareGoalDisplay.native.ts",
+        "apps/westayfit/src/ui/shareLink.ts",
+        "apps/westayfit/src/ui/shareLink.native.ts",
+        "apps/westayfit/src/joinInput.ts",
+        "apps/westayfit/src/ui/DateTimeField.tsx",
+        "apps/westayfit/src/ui/DateTimeField.native.tsx",
+        "apps/westayfit/src/ui/DeviceChoice.tsx",
+        "apps/westayfit/src/ui/MarkerEntryScreen.tsx",
+        "apps/westayfit/app/(tabs)/(home)/index.tsx",
+        "apps/westayfit/tests"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6302219944
+        },
+        "released": {
+          "kind": "comment",
+          "id": 6302221942
+        },
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6302221942
         }
       },
       "review": {
@@ -4151,10 +4241,10 @@
       },
       "label": "Together completion motion on iOS/Android with shared web timing, reduced-motion safe (PR #634)",
       "origin": "ledger",
-      "phase": "QUEUED",
+      "phase": "RELEASED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
-      "inbox": null,
+      "inbox": 631,
       "pr": null,
       "reviewers": [],
       "artifact": {
@@ -4165,7 +4255,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": null,
+      "releasedQueueIndex": 0,
       "reviewedBy": [],
       "subjectPaths": [
         "apps/westayfit/src/ui/TogetherCompletion.tsx",
@@ -4183,11 +4273,14 @@
           "kind": "comment",
           "id": 6299279967
         },
-        "released": null,
+        "released": {
+          "kind": "comment",
+          "id": 6302214041
+        },
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6299279967
+          "id": 6302214041
         }
       },
       "review": {
@@ -4212,10 +4305,10 @@
       },
       "label": "Continuity records on the device storage boundary: pending attempt, join code, community, camera prefs; six proof cases (PR #635)",
       "origin": "ledger",
-      "phase": "QUEUED",
+      "phase": "RELEASED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
-      "inbox": null,
+      "inbox": 631,
       "pr": null,
       "reviewers": [],
       "artifact": {
@@ -4226,7 +4319,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": null,
+      "releasedQueueIndex": 0,
       "reviewedBy": [],
       "subjectPaths": [
         "apps/westayfit/app/(tabs)/(home)/community/[groupId]/index.tsx",
@@ -4264,11 +4357,14 @@
           "kind": "comment",
           "id": 6299274765
         },
-        "released": null,
+        "released": {
+          "kind": "comment",
+          "id": 6302211942
+        },
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6299274765
+          "id": 6302211942
         }
       },
       "review": {
@@ -8388,6 +8484,46 @@
         "id": 6129522845
       },
       "superseded": true
+    },
+    "65a6162d12ccbc73e2fa872a65a260e741c9aa9a8d16885c5f7da0fd6d81a66d": {
+      "packet": "NATIVE-BOOT-1",
+      "worker": "W12",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
+    },
+    "2c10b95549b54fc7d8fda84eb705ae25decab6fb0ed9066e751b5780771d6af3": {
+      "packet": "NATIVE-CAMERA-1",
+      "worker": "W15",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
+    },
+    "2caea7f27d6506c47c75b8c7840d37a7b83f61a11a8aa64385813db148910a47": {
+      "packet": "NATIVE-MEMBER-1",
+      "worker": "W16",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
+    },
+    "fbac724f5bab5e60f0ff603c579063e3baaebb4da3f605af5a6b9620efef6b3f": {
+      "packet": "NATIVE-MOTION-1",
+      "worker": "W14",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
+    },
+    "ec0eb4c92b4aec2091cafe6b14e11ac69500791b7b8a7f278916264bb16404fc": {
+      "packet": "NATIVE-STATE-1",
+      "worker": "W13",
+      "reason": "release",
+      "status": "requested",
+      "comments": [],
+      "ack": null
     }
   },
   "fastpath": {
