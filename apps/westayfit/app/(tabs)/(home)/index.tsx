@@ -223,13 +223,18 @@ export default function BrandShell() {
   }, [myCommunities, figuresRefreshToken, user?.uid]);
 
   const onJoinCodeSubmit = useCallback(() => {
-    const trimmed = joinCodeInput.trim();
-    if (!JOIN_CODE_SHAPE.test(trimmed)) {
+    // MF-02: a bare code, or the invite link members are actually given
+    // (src/joinInput.ts). Required inline so this lane's edit stays inside
+    // its reserved hunk of this integrator-owned file (NATIVE-PARITY-TARGET-1
+    // 5.0); a bare code still routes to exactly `/join/<code>`.
+    const { parseJoinInput } = require('../../../src/joinInput') as typeof import('../../../src/joinInput');
+    const parsed = parseJoinInput(joinCodeInput);
+    if (!parsed) {
       setJoinFieldError('That does not look like a valid code.');
       return;
     }
     setJoinFieldError(null);
-    router.push(`/join/${trimmed}` as never);
+    router.push(parsed.href as never);
   }, [joinCodeInput]);
 
   const onSignOut = useCallback(async () => {
