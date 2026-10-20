@@ -1,9 +1,19 @@
 import { initializeApp, type FirebaseApp } from 'firebase/app';
-import { connectAuthEmulator, getAuth, type Auth } from 'firebase/auth';
+import { connectAuthEmulator, type Auth } from 'firebase/auth';
 import { connectFirestoreEmulator, getFirestore, type Firestore } from 'firebase/firestore';
 import { connectFunctionsEmulator, getFunctions, type Functions } from 'firebase/functions';
 
-import { readStagingEnv, resolveStagingConfig, type WsfFirebaseConfig } from './stagingEnv';
+import { Platform } from 'react-native';
+
+import { createWsfAuth } from './firebaseAuthInit';
+import { currentWebHostname } from './platformHost';
+import {
+  nativeTargetProblem,
+  readStagingEnv,
+  resolveStagingConfig,
+  WsfStagingConfigError,
+  type WsfFirebaseConfig,
+} from './stagingEnv';
 
 // Real registration for the "We Stay Fit" Web App in the shared `goarrive`
 // Firebase project (console receipt posted to #dev-westayfit on 2026-08-26).
@@ -35,8 +45,11 @@ export function selectProjectId(opts: {
   flagRaw: string | undefined;
   hasWindow: boolean;
   hostname: string | undefined;
+  /** A native DEVELOPMENT build (iOS/Android, __DEV__). Never true on web. */
+  nativeDev?: boolean;
 }): typeof PROD_PROJECT_ID | typeof EMULATOR_PROJECT_ID {
   if (!isEmulatorFlagOn(opts.flagRaw)) return PROD_PROJECT_ID;
+  if (opts.nativeDev === true) return EMULATOR_PROJECT_ID;
   if (!opts.hasWindow) return PROD_PROJECT_ID;
   if (opts.hostname !== undefined && LOOPBACK_HOSTNAMES.has(opts.hostname)) {
     return EMULATOR_PROJECT_ID;
@@ -62,19 +75,42 @@ export function selectProjectId(opts: {
 //
 // Returns true under SSR (no window) because the connect*Emulator calls are
 // no-ops there; project selection above is deliberately stricter.
+//
+// NATIVE. React Native defines `window`; a production-mode native bundle has
+// no `window.location` (a dev session gets Metro's), and reading
+// `window.location.hostname` here used to throw at module load. On iOS/Android
+// the loopback-host gate is meaningless (a dev build's location IS loopback),
+// so native never consults it: the structural guard is the development build
+// itself — the emulator is only reachable from a __DEV__ binary.
+const isNative = Platform.OS === 'ios' || Platform.OS === 'android';
+const nativeDev = isNative && typeof __DEV__ !== 'undefined' && __DEV__ === true;
+
 function shouldUseEmulators(): boolean {
   const raw = process.env.EXPO_PUBLIC_WSF_USE_EMULATORS;
   if (!isEmulatorFlagOn(raw)) return false;
+  if (isNative) return nativeDev;
   if (typeof window === 'undefined') return true;
-  return LOOPBACK_HOSTNAMES.has(window.location.hostname);
+  const hostname = currentWebHostname();
+  return hostname !== undefined && LOOPBACK_HOSTNAMES.has(hostname);
 }
 
 const emulated = shouldUseEmulators();
 const projectId = selectProjectId({
   flagRaw: process.env.EXPO_PUBLIC_WSF_USE_EMULATORS,
-  hasWindow: typeof window !== 'undefined',
-  hostname: typeof window !== 'undefined' ? window.location.hostname : undefined,
+  // Native never takes the web loopback path: a release build whose bundle
+  // carries a loopback origin must not select the emulator project id.
+  hasWindow: !isNative && typeof window !== 'undefined',
+  hostname: isNative ? undefined : currentWebHostname(),
+  nativeDev,
 });
+
+// A phone build must name its backend; see nativeTargetProblem.
+const nativeProblem = nativeTargetProblem({
+  isNative,
+  envName: process.env.EXPO_PUBLIC_WSF_ENV,
+  emulated,
+});
+if (nativeProblem) throw new WsfStagingConfigError(nativeProblem);
 
 const productionConfig: WsfFirebaseConfig = {
   apiKey: 'AIzaSyBgLIP0uvGJ98fde3aZthZjILTg6unkkX0',
@@ -105,7 +141,32 @@ const firebaseConfig: WsfFirebaseConfig = stagingConfig ?? productionConfig;
 export const wsfIsStaging = stagingConfig !== null;
 
 // Emulator ports, matching firebase.westayfit.emulators.json.
-const EMULATOR_HOST = '127.0.0.1';
+//
+// A physical phone cannot reach the developer machine at 127.0.0.1, and the
+// Android emulator reaches it at 10.0.2.2. A native development build may name
+// the host with EXPO_PUBLIC_WSF_EMULATOR_HOST; only loopback, 10.0.2.2 and
+// private-network addresses are accepted, so it cannot point at a public host.
+export function selectEmulatorHost(raw: string | undefined, native: boolean): string {
+  const fallback = '127.0.0.1';
+  if (!native) return fallback;
+  const host = (raw ?? '').trim();
+  if (host === '') return fallback;
+  const privateHost =
+    host === '127.0.0.1' ||
+    host === 'localhost' ||
+    host === '10.0.2.2' ||
+    /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host) ||
+    /^192\.168\.\d{1,3}\.\d{1,3}$/.test(host) ||
+    /^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/.test(host);
+  if (!privateHost) {
+    throw new WsfStagingConfigError(
+      `EXPO_PUBLIC_WSF_EMULATOR_HOST "${host}" is not a loopback or private-network address.`
+    );
+  }
+  return host;
+}
+
+const EMULATOR_HOST = selectEmulatorHost(process.env.EXPO_PUBLIC_WSF_EMULATOR_HOST, isNative);
 const AUTH_EMULATOR_PORT = 9099;
 const FIRESTORE_EMULATOR_PORT = 8080;
 const FUNCTIONS_EMULATOR_PORT = 5001;
@@ -124,7 +185,7 @@ export function getFirebaseApp(): FirebaseApp {
 
 export function getFirebaseAuth(): Auth {
   if (!authInstance) {
-    authInstance = getAuth(getFirebaseApp());
+    authInstance = createWsfAuth(getFirebaseApp());
     if (emulated) {
       // disableWarnings keeps the emulator's red banner out of screenshots in
       // the Playwright run; it does not weaken any check.
