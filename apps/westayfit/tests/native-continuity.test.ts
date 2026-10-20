@@ -257,8 +257,11 @@ describe('3. a late response cannot recreate a cleared or newer attempt', () => 
   it('holds when the late write and the new attempt interleave at the storage level', async () => {
     // Without per-record queuing, the old attempt's read could happen before
     // the new attempt's write lands and its write after — overwriting it.
+    // (Attempt 1 has been reconciled and cleared; the new write is
+    // create-only, so it needs an empty slot.)
     const pc = await launch();
     await pc.savePendingNew(row('att-1', 11), A);
+    await pc.clearPending(GOAL, A);
 
     const release = disk.hold();
     const newer = pc.savePendingNew(row('att-2', 7), A);
@@ -416,16 +419,18 @@ describe('6. a restored attempt opens no camera and manufactures no success', ()
 
     pc = await launch();
     // Before the stored attempt has been read back, nothing new may begin.
-    expect(pc.mayBeginNewAttempt({ restoreSettled: false, pending: null, settled: false })).toBe(false);
+    expect(pc.mayBeginNewAttempt({ restoreSettled: false, restoreFailed: false, pending: null, settled: false })).toBe(false);
     const restored = await pc.restorePendingAttempt(GOAL, A);
     // A reminder, never a receipt: no server call, no confirmed state.
     expect(server.calls).toEqual([]);
     expect(restored.pending?.state).toBe('unknown');
     expect(Object.keys(restored.pending as object).sort()).toEqual(['attemptId', 'count', 'goalId', 'state', 'ts']);
     // With it on screen, neither Record nor the camera may begin.
-    expect(pc.mayBeginNewAttempt({ restoreSettled: true, pending: restored.pending, settled: false })).toBe(false);
+    expect(pc.mayBeginNewAttempt({ restoreSettled: true, restoreFailed: false, pending: restored.pending, settled: false })).toBe(false);
     // Only a settled restore with nothing pending opens new-attempt entry.
-    expect(pc.mayBeginNewAttempt({ restoreSettled: true, pending: null, settled: false })).toBe(true);
+    expect(pc.mayBeginNewAttempt({ restoreSettled: true, restoreFailed: false, pending: null, settled: false })).toBe(true);
+    // A restore that could not read the slot keeps it closed (fail closed).
+    expect(pc.mayBeginNewAttempt({ restoreSettled: true, restoreFailed: true, pending: null, settled: false })).toBe(false);
   });
 
   it('the contribute screen gates the camera and Record on it, and restores without a receipt', () => {
@@ -434,8 +439,8 @@ describe('6. a restored attempt opens no camera and manufactures no success', ()
     expect(camera).toContain('mayBeginNewAttempt({ restoreSettled');
     expect(camera).toContain('moveCameraLoaded');
 
-    const restore = code.slice(code.indexOf('const restoringFor'), code.indexOf('return () => {', code.indexOf('const restoringFor')));
-    expect(restore).toContain('restorePendingAttempt(goalId, uid)');
+    const restore = code.slice(code.indexOf('const restoringFor'), code.indexOf('}, []);', code.indexOf('const restoringFor')));
+    expect(restore).toContain('restorePendingAttempt(forGoal, forUid)');
     expect(restore).toContain('generationRef.current !== restoringFor');
     for (const forbidden of ['setLastResult', 'setFreshAttempt', 'sendContribute', 'setStep']) {
       expect(restore, forbidden).not.toContain(forbidden);

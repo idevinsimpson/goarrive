@@ -18,16 +18,25 @@
  * "not done" answer (a write reports not durable, a read reports unreadable)
  * — and the queue moves on.
  *
- * What the bound cannot do is cancel the device call. If a timed-out write
- * later completes, it lands then, possibly after operations queued behind
- * it. That is the residual; it needs a device that hangs a storage call for
- * longer than the bound and then completes it.
+ * WHAT THE BOUND DOES NOT DO: CANCEL. It stops WAITING; it does not stop
+ * the operation. The device call it was waiting on still completes whenever
+ * the device gets to it, and the operation's own LATER STEPS still run after
+ * that — a conditional clear that answered "did nothing" at the bound can
+ * remove the record a few seconds later, and a late write can land after
+ * operations that were queued behind it (they no longer wait for it). Each
+ * step is still conditional on what it reads at the time, so a late step
+ * cannot write over a different attempt's record (the new-attempt write is
+ * create-only) or recreate one a clear removed (`updatePendingIfAttempt`
+ * requires the record to be there). What it can do is act after its caller
+ * has stopped listening. That is the residual; it needs a device that hangs
+ * a storage call for longer than the bound and then completes it.
  */
 export const STORAGE_OP_TIMEOUT_MS = 5_000;
 
 export type KeyQueue = <T>(key: string, op: () => Promise<T>, timedOut: () => T) => Promise<T>;
 
-function bounded<T>(op: () => Promise<T>, ms: number, timedOut: () => T): Promise<T> {
+/** `op`, or `timedOut()` if it has not answered within `ms`. Does not cancel `op` (see above). */
+export function bounded<T>(op: () => Promise<T>, ms: number, timedOut: () => T): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     let done = false;
     const timer = setTimeout(() => {
