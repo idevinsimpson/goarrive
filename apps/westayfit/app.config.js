@@ -32,6 +32,16 @@ function isEmulatorFlagOn(raw) {
   return raw === '1' || (typeof raw === 'string' && raw.trim().toLowerCase() === 'true');
 }
 
+// NATIVE-INTEGRATOR-1 (INT-11). The sign-in switch as src/featureFlags.ts reads
+// it ('1' / 'true' is on), plus an explicit off ('0' / 'false'). Anything else,
+// unset included, is not a decision.
+function authFlagOf(raw) {
+  const v = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  if (v === '1' || v === 'true') return 'on';
+  if (v === '0' || v === 'false') return 'off';
+  return 'unset';
+}
+
 module.exports = ({ config }) => {
   const platform = process.env.EAS_BUILD_PLATFORM;
   if (platform === 'ios' || platform === 'android') {
@@ -71,6 +81,30 @@ module.exports = ({ config }) => {
         throw new Error(
           `WSF native build refused: profile "${profile}" embeds its JavaScript with EXPO_PUBLIC_WSF_ENV=staging, ` +
             `but these staging values are missing from the EAS environment: ${missing.join(', ')}.`
+        );
+      }
+    }
+    // NATIVE-INTEGRATOR-1 (INT-11): a build that embeds its JS must say whether
+    // sign-in is on. With EXPO_PUBLIC_WSF_AUTH_ENABLED unset the binary renders
+    // "Accounts are opening soon" on every entry screen and the whole member
+    // loop is unreachable (src/featureFlags.ts defaults it off: the launch
+    // switch). Staging must have it on; production may switch it off, but only
+    // by saying 0. A development client takes the flag from the local dev
+    // server's environment, not this build's.
+    if (embedsJs) {
+      const raw = process.env.EXPO_PUBLIC_WSF_AUTH_ENABLED;
+      const auth = authFlagOf(raw);
+      if (auth === 'unset') {
+        throw new Error(
+          `WSF native build refused: profile "${profile}" embeds its JavaScript, but EXPO_PUBLIC_WSF_AUTH_ENABLED is not ` +
+            `set to 1 or 0 (got "${raw === undefined ? '' : raw}"). This ${platform} build would ship with sign-in switched ` +
+            `off. Set it to 1; only a production build may say 0.`
+        );
+      }
+      if (auth === 'off' && env !== 'production') {
+        throw new Error(
+          `WSF native build refused: EXPO_PUBLIC_WSF_AUTH_ENABLED is off for a ${env} ${platform} build, which would ship ` +
+            `with sign-in switched off and could not be tested. Set it to 1.`
         );
       }
     }
