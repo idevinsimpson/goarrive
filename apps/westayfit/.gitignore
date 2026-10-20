@@ -1,0 +1,5 @@
+# Native projects are generated (Continuous Native Generation); never commit a local prebuild.
+/ios/
+/android/
+# eas env:pull writes .env.local; never commit local env files.
+.env*.local
