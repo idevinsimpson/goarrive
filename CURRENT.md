@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=2fc339d1af43ecd01605dcdbef7ed8652487346bd3019949328e96e9e6afae8c events=1364 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=e9960a67f3c1bc98185f34b57a9748b50d02395d073d5ec876298cee3485925d events=1372 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `2fc339d1af43ecd01605dcdbef7ed8652487346bd3019949328e96e9e6afae8c` (1364 events)
+- Ledger head: `e9960a67f3c1bc98185f34b57a9748b50d02395d073d5ec876298cee3485925d` (1372 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -30,9 +30,9 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | Worker | Inbox | Active now | Reviewing | Waiting on review | Blocked | Next | Queue | WATCH |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | W11 | #627 | — | — | — | — | — | — | off |
-| W12 | #631 | NATIVE-BOOT-1 | — | — | — | — | — | on |
-| W13 | #631 | NATIVE-STATE-1 | — | — | — | — | — | on |
-| W14 | #631 | NATIVE-MOTION-1 | — | — | — | — | — | on |
+| W12 | #631 | NATIVE-BOOT-1 | — | — | — | NATIVE-BUILD-1 | NATIVE-BUILD-1 | on |
+| W13 | #631 | NATIVE-STATE-1 | — | — | — | NATIVE-STATE-2 | NATIVE-STATE-2 | on |
+| W14 | #631 | NATIVE-MOTION-1 | — | — | — | NATIVE-MEDIA-1 | NATIVE-MEDIA-1 | on |
 | W15 | #631 | NATIVE-CAMERA-1 | — | — | — | — | — | on |
 | W16 | #631 | NATIVE-MEMBER-1 | — | — | — | — | — | on |
 | W3 | #396 | — | — | WORKER-EXECUTION-PROFILES-1 | NORTHSTAR-MIRROR-INTAKE-1 | — | — | off |
@@ -103,10 +103,13 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | MEMBER-TRUTH-BACKEND-1 | W9 | work | INTEGRATED (source-only) | ledger | BLOCKED (from ACKED) | — | — | — | — | — | — | — | comment:6029989725 | comment:6035507739 | TOGETHER-CROSSING-DESIGN-DECISION (Director and Owner) | Unblock real member Together crossing and privacy-safe public preview labels for the shared Firebase backend and Lovable Web Twin | 1×journey-qa then director | — |
 | MOVE-CAMERA-NATIVE-PORT-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #577 | d6d47879 | d6d47879 | — | 856e20e0 | — | W7 | comment:5997538756 | pull_request:577 | — | Port the owner-accepted camera-assisted squat MOVE North Star into the current Expo app without automatic contribution credit | 1×journey-qa then director | — |
 | NATIVE-BOOT-1 | W12 | work | INTEGRATED (source-only) | ledger | RELEASED | — | — | — | — | — | — | — | comment:6302210014 | comment:6302210014 | — | Native-safe Firebase boot (no window.location at import), explicit native backend, RN auth persistence, device storage boundary (PR #632) | 1×ops-source+1×security then director | — |
+| NATIVE-BUILD-1 | W12 | work | INTEGRATED (source-only) | ledger | QUEUED | — | — | — | — | — | — | — | — | comment:6299272882 | — | EAS development/preview profiles (staging only), native deps, camera/privacy permissions, build-readiness doc (PR #633) | 1×ops-source+1×security then director | — |
 | NATIVE-CAMERA-1 | W15 | work | INTEGRATED (source-only) | ledger | RELEASED | — | — | — | — | — | — | — | comment:6302216132 | comment:6302216132 | — | Native pose camera module (MediaPipe) feeding the unchanged frozen counter; JS tested, native uncompiled (PR #638) | 1×journey-qa+1×security then director | — |
+| NATIVE-MEDIA-1 | W14 | work | INTEGRATED (source-only) | ledger | QUEUED | — | — | — | — | — | — | — | — | comment:6299281781 | — | Native movement demo playback via expo-video following the web clip contract; no approved native media yet (PR #636) | 1×journey-qa then director | — |
 | NATIVE-MEMBER-1 | W16 | work | INTEGRATED (source-only) | ledger | RELEASED | — | — | — | — | — | — | — | comment:6302221942 | comment:6302221942 | — | Member-feature native truth (NATIVE-PARITY-TARGET-1 5.5): You sign-out race, invite URL in Home join, native copy/share, privacy refusal hardening, truthful native copy | 1×journey-qa+1×security then director | — |
 | NATIVE-MOTION-1 | W14 | work | INTEGRATED (source-only) | ledger | RELEASED | — | — | — | — | — | — | — | comment:6302214041 | comment:6302214041 | — | Together completion motion on iOS/Android with shared web timing, reduced-motion safe (PR #634) | 1×journey-qa then director | — |
 | NATIVE-STATE-1 | W13 | work | INTEGRATED (source-only) | ledger | RELEASED | — | — | — | — | — | — | — | comment:6302211942 | comment:6302211942 | — | Continuity records on the device storage boundary: pending attempt, join code, community, camera prefs; six proof cases (PR #635) | 1×journey-qa+1×security then director | — |
+| NATIVE-STATE-2 | W13 | work | INTEGRATED (source-only) | ledger | QUEUED | — | — | — | — | — | — | — | — | comment:6299276566 | — | Shared post-auth destinations (join/event/marker/kiosk) with account ownership; native privacy-panel order (PR #637) | 1×journey-qa+1×security then director | — |
 | NORTHSTAR-MIRROR-INTAKE-1 | W3 | work | INTEGRATED (source-only) | ledger | BLOCKED (from ACKED) | — | — | — | — | — | — | — | comment:6035534615 | comment:6040736205 | W3-SOURCE-EDIT-CONSENT (Devin) | Complete the existing automatic Lovable delta receiver so Devin never has to relay native handoffs | 1×ops-source then director | — |
 | PROD-RUNTIME-SA-AUTH-ROLE-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #607 | def247c0 | def247c0 | — | e7036148 | — | W3 | comment:6083892481 | pull_request:607 | — | Runbook B13: read back the production WSF functions' runtime service account roles (email action links need Identity Toolkit permission); owner by-name grant before step 6; step 8 line, receipt field | 1×ops-source then director | — |
 | PRODUCTION-DEPLOY-PATH-1 | W9 | work | INTEGRATED (source-only) | ledger | INTEGRATED | #600 | dfd48c87 | dfd48c87 | — | 1d3f1c2c | — | W7 | comment:6075293540 | pull_request:600 | — | Reviewed WSF-only production deploy path for goarrive: production-only Firebase config, network-free pre-flight guard, operator runbook with candidates A/B, receipts, rollback; nothing deployed | 1×ops-source then director | — |
@@ -333,9 +336,9 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | 7a11a7148c22 | W5 | KIOSK-GUEST-MOVE-1 | review | redelivered | 6113079769, 6114680608 | — |
 | 781dcc461cae | W9 | KIOSK-LIVE-POSE-PROD-1 | release | acked | 6127713152, 6128561949 | comment:6128872837 |
 | 21e4a1187fac | W3 | KIOSK-LIVE-POSE-PROD-1 | review | acked | 6129382439 | comment:6129522845 |
-| 65a6162d12cc | W12 | NATIVE-BOOT-1 | release | delivered | 6303072227 | — |
-| 2c10b95549b5 | W15 | NATIVE-CAMERA-1 | release | delivered | 6303072420 | — |
-| 2caea7f27d65 | W16 | NATIVE-MEMBER-1 | release | delivered | 6303072630 | — |
-| fbac724f5bab | W14 | NATIVE-MOTION-1 | release | delivered | 6303072853 | — |
-| ec0eb4c92b4a | W13 | NATIVE-STATE-1 | release | delivered | 6303073115 | — |
+| 65a6162d12cc | W12 | NATIVE-BOOT-1 | release | retried | 6303072227 | — |
+| 2c10b95549b5 | W15 | NATIVE-CAMERA-1 | release | retried | 6303072420 | — |
+| 2caea7f27d65 | W16 | NATIVE-MEMBER-1 | release | retried | 6303072630 | — |
+| fbac724f5bab | W14 | NATIVE-MOTION-1 | release | retried | 6303072853 | — |
+| ec0eb4c92b4a | W13 | NATIVE-STATE-1 | release | retried | 6303073115 | — |
 

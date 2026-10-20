@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "2fc339d1af43ecd01605dcdbef7ed8652487346bd3019949328e96e9e6afae8c",
-  "eventCount": 1364,
+  "ledgerHead": "e9960a67f3c1bc98185f34b57a9748b50d02395d073d5ec876298cee3485925d",
+  "eventCount": 1372,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -84,9 +84,15 @@
   },
   "queue": {
     "W11": [],
-    "W12": [],
-    "W13": [],
-    "W14": [],
+    "W12": [
+      "NATIVE-BUILD-1"
+    ],
+    "W13": [
+      "NATIVE-STATE-2"
+    ],
+    "W14": [
+      "NATIVE-MEDIA-1"
+    ],
     "W15": [],
     "W16": [],
     "W3": [],
@@ -4058,6 +4064,71 @@
       "deliveries": 0,
       "pendingFinding": null
     },
+    "NATIVE-BUILD-1": {
+      "owner": "W12",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "EAS development/preview profiles (staging only), native deps, camera/privacy permissions, build-readiness doc (PR #633)",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "apps/westayfit/.gitignore",
+        "apps/westayfit/app.config.js",
+        "apps/westayfit/app.json",
+        "apps/westayfit/eas.json",
+        "apps/westayfit/package-lock.json",
+        "apps/westayfit/package.json",
+        "docs/westayfit/native/NATIVE-BUILD-READINESS.md"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6299272882
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6299272882
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          },
+          {
+            "class": "security",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
+      "pendingFinding": null
+    },
     "NATIVE-CAMERA-1": {
       "owner": "W15",
       "kind": "work",
@@ -4135,6 +4206,62 @@
           },
           {
             "class": "security",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
+      "pendingFinding": null
+    },
+    "NATIVE-MEDIA-1": {
+      "owner": "W14",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Native movement demo playback via expo-video following the web clip contract; no approved native media yet (PR #636)",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "apps/westayfit/src/ui/MovementDemoMedia.tsx",
+        "apps/westayfit/tests/movement-demo-media-native.test.tsx"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6299281781
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6299281781
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "journey-qa",
             "count": 1
           }
         ],
@@ -4365,6 +4492,82 @@
         "lastTransition": {
           "kind": "comment",
           "id": 6302211942
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "journey-qa",
+            "count": 1
+          },
+          {
+            "class": "security",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
+      "pendingFinding": null
+    },
+    "NATIVE-STATE-2": {
+      "owner": "W13",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Shared post-auth destinations (join/event/marker/kiosk) with account ownership; native privacy-panel order (PR #637)",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "apps/westayfit/app/event/[goalId].tsx",
+        "apps/westayfit/app/kiosk/[goalId].tsx",
+        "apps/westayfit/app/profile-setup.tsx",
+        "apps/westayfit/app/signin.tsx",
+        "apps/westayfit/app/verify-email.tsx",
+        "apps/westayfit/src/authDestination.ts",
+        "apps/westayfit/src/currentCommunity.ts",
+        "apps/westayfit/src/eventReturn.ts",
+        "apps/westayfit/src/kioskSession.ts",
+        "apps/westayfit/src/markerEntry.ts",
+        "apps/westayfit/src/pendingJoinCode.ts",
+        "apps/westayfit/src/postAuthDestination.ts",
+        "apps/westayfit/src/ui/CommunityPrivacyControls.tsx",
+        "apps/westayfit/src/ui/MarkerEntryScreen.tsx",
+        "apps/westayfit/tests/continuity-web.test.ts",
+        "apps/westayfit/tests/native-continuity.test.ts",
+        "apps/westayfit/tests/native-destinations.test.ts",
+        "apps/westayfit/tests/nativeStorageHarness.ts"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6299276566
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6299276566
         }
       },
       "review": {
@@ -8489,7 +8692,7 @@
       "packet": "NATIVE-BOOT-1",
       "worker": "W12",
       "reason": "release",
-      "status": "delivered",
+      "status": "retried",
       "comments": [
         6303072227
       ],
@@ -8499,7 +8702,7 @@
       "packet": "NATIVE-CAMERA-1",
       "worker": "W15",
       "reason": "release",
-      "status": "delivered",
+      "status": "retried",
       "comments": [
         6303072420
       ],
@@ -8509,7 +8712,7 @@
       "packet": "NATIVE-MEMBER-1",
       "worker": "W16",
       "reason": "release",
-      "status": "delivered",
+      "status": "retried",
       "comments": [
         6303072630
       ],
@@ -8519,7 +8722,7 @@
       "packet": "NATIVE-MOTION-1",
       "worker": "W14",
       "reason": "release",
-      "status": "delivered",
+      "status": "retried",
       "comments": [
         6303072853
       ],
@@ -8529,7 +8732,7 @@
       "packet": "NATIVE-STATE-1",
       "worker": "W13",
       "reason": "release",
-      "status": "delivered",
+      "status": "retried",
       "comments": [
         6303073115
       ],
