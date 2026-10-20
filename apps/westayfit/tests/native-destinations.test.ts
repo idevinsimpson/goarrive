@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { bootNative, createFakeAsyncStorage, fakeAuth, type FakeAsyncStorage } from './nativeStorageHarness';
+import { bootNative, createFakeAsyncStorage, fakeAuth, flush, type FakeAsyncStorage } from './nativeStorageHarness';
 
 /**
  * NATIVE-STATE-2 — the event return, the marker return and the kiosk return
@@ -226,29 +226,151 @@ describe('the privacy panel never puts a guess first on a phone', () => {
     expect(cc.currentFirstWhenReady(B, rows)?.map((r) => r.groupId)).toEqual(['g1', 'g2']);
   });
 
-  it('the panel holds its loading state while the order is not known', () => {
-    const code = readFileSync(path.resolve('src/ui/CommunityPrivacyControls.tsx'), 'utf8');
-    expect(code).toContain('useCurrentCommunityReady();');
-    expect(code).toContain('const ordered = currentFirstWhenReady(uid, rows);');
-    expect(code).toContain("load={phase === 'ready' && ordered === null ? 'loading' : phase}");
-    expect(code).not.toMatch(/resolveCurrentCommunity\(/);
+  it('the panel draws no rows until the order is known, then draws the remembered community first', async () => {
+    bootNative(disk);
+    let cc = await import('../src/currentCommunity');
+    await cc.currentCommunityReady();
+    await cc.rememberCurrentCommunity(A, 'g2');
+
+    const release = disk.holdReads();
+    bootNative(disk);
+    const row = (groupId: string) => ({ groupId, displayName: groupId, role: 'member', nameVisibility: 'visible', activityVisibility: 'visible' });
+    vi.doMock('../src/auth', () => ({ useWsfAuth: () => ({ user: { uid: A }, ready: true }) }));
+    vi.doMock('../src/memberReads', () => ({
+      readMyCommunities: async () => ({ items: [row('g1'), row('g2')] }),
+      forgetCommunity: () => undefined,
+      peekMemberProfile: () => null,
+    }));
+    vi.doMock('firebase/functions', () => ({ httpsCallable: () => async () => ({ data: {} }) }));
+    cc = await import('../src/currentCommunity');
+    const { CommunityPrivacyControls } = await import('../src/ui/CommunityPrivacyControls');
+    const { createElement, act } = await import('react');
+    const { createRoot } = await import('react-dom/client');
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const blocks = () =>
+      Array.from(container.querySelectorAll('[data-testid^="wsf-privacy-panel-block-"]')).map((el) =>
+        (el.getAttribute('data-testid') as string).replace('wsf-privacy-panel-block-', '')
+      );
+    try {
+      await act(async () => {
+        root.render(createElement(CommunityPrivacyControls));
+        await flush();
+      });
+      // The communities have been read, but the remembered one has not: no
+      // rows, and the panel says it is loading.
+      expect(blocks()).toEqual([]);
+      expect(container.querySelector('[data-testid="wsf-privacy-panel-loading"]')).not.toBeNull();
+      await act(async () => {
+        release();
+        await cc.currentCommunityReady();
+        await flush();
+      });
+      expect(blocks()).toEqual(['g2', 'g1']);
+    } finally {
+      act(() => root.unmount());
+      container.remove();
+      for (const m of ['../src/auth', '../src/memberReads', 'firebase/functions']) vi.doUnmock(m);
+    }
   });
 });
 
 describe('the stash sites say whose destination it is', () => {
   const read = (rel: string) => readFileSync(path.resolve(rel), 'utf8');
 
-  it('the marker screen arms the return for the account looking at it', () => {
+  it('a marker armed by a signed-in member is that member\u2019s; armed signed out, it is the next sign-in\u2019s', async () => {
+    const m = await launch();
+    const arm = await import('../src/handoffArming');
+    await arm.armMarkerReturn(SLUG, A);
+    expect(m.mk.readMarkerReturn(Date.now(), A)).toBe(SLUG);
+    expect(m.mk.readMarkerReturn(Date.now(), B)).toBeNull();
+    expect(m.mk.readMarkerReturn(Date.now(), null)).toBeNull();
+    await arm.armMarkerReturn(SLUG, null);
+    expect(m.mk.readMarkerReturn(Date.now(), B)).toBe(SLUG);
+    // The screen arms through that helper, for the account looking at it.
     const screen = read('src/ui/MarkerEntryScreen.tsx');
-    const arm = screen.slice(screen.indexOf('const armReturn'), screen.indexOf('const onJoin'));
-    expect(arm).toContain('setMarkerReturn(slug, Date.now(), uid)');
+    expect(screen.slice(screen.indexOf('const armReturn'), screen.indexOf('const onJoin'))).toContain('armMarkerReturn(slug, uid)');
   });
 
-  it('"use a different account" and the kiosk start screen hand off to the next sign-in on purpose', () => {
+  it('the kiosk\u2019s return is always the next sign-in\u2019s handoff', async () => {
+    const m = await launch();
+    const arm = await import('../src/handoffArming');
+    expect(await arm.armKioskReturn(KIOSK_GOAL)).toBe(true);
+    expect(m.ks.readKioskReturnGoal(null)).toBe(KIOSK_GOAL);
+    expect(m.ks.readKioskReturnGoal(B)).toBe(KIOSK_GOAL);
+    expect(read('app/kiosk/[goalId].tsx')).toContain('void armKioskReturn(goalId);');
+  });
+
+  it('"use a different account" hands off to the next sign-in on purpose', () => {
     const event = read('app/event/[goalId].tsx');
     const sw = event.slice(event.indexOf('const onUseDifferentAccount'), event.indexOf('router.replace(\'/signin\''));
     expect(sw).toContain('setEventReturn(goalId, Date.now(), null)');
     expect(sw.indexOf('setEventReturn')).toBeLessThan(sw.indexOf('signOut('));
-    expect(read('app/kiosk/[goalId].tsx')).toContain('setKioskReturnGoal(goalId, null)');
+  });
+});
+
+describe('a shared screen\u2019s fresh destination is not outranked by a stale one', () => {
+  const read = (rel: string) => readFileSync(path.resolve(rel), 'utf8');
+  it('an event handoff left by an abandoned sign-in, a relaunch, then kiosk Contribute: routes to the kiosk', async () => {
+    let m = await launch();
+    await m.ev.setEventReturn(GOAL, Date.now(), null);
+    m = await launch();
+    const arm = await import('../src/handoffArming');
+    await arm.armKioskReturn(KIOSK_GOAL);
+    expect(await m.pj.routeAfterAuth('/', B)).toBe(`/contribute/${KIOSK_GOAL}?kiosk=1`);
+    expect(disk.map.has('wsf.eventReturn')).toBe(false);
+  });
+
+  it('a stale join code or marker does not outrank or outlive the kiosk\u2019s return either', async () => {
+    let m = await launch();
+    await m.pj.setPendingJoinCode(JOIN, null);
+    await m.mk.setMarkerReturn(SLUG, Date.now(), null);
+    m = await launch();
+    const arm = await import('../src/handoffArming');
+    await arm.armKioskReturn(KIOSK_GOAL);
+    expect(await m.pj.routeAfterAuth('/', B)).toBe(`/contribute/${KIOSK_GOAL}?kiosk=1`);
+    expect(disk.map.has('wsf.pendingJoinCode')).toBe(false);
+    expect(disk.map.has('wsf.markerReturn')).toBe(false);
+  });
+
+  it('a stale kiosk return does not outrank a marker scanned afterwards', async () => {
+    let m = await launch();
+    await m.ks.setKioskReturnGoal(KIOSK_GOAL, null);
+    m = await launch();
+    const arm = await import('../src/handoffArming');
+    await arm.armMarkerReturn(SLUG, null);
+    expect(await m.pj.routeAfterAuth('/', B)).toBe(`/go/${SLUG}`);
+  });
+
+  it('a kiosk start screen at rest clears every destination an earlier visitor armed', async () => {
+    let m = await launch();
+    await m.pj.setPendingJoinCode(JOIN, null);
+    await m.ev.setEventReturn(GOAL, Date.now(), null);
+    await m.mk.setMarkerReturn(SLUG, Date.now(), null);
+    await m.ks.setKioskReturnGoal(KIOSK_GOAL, null);
+    m = await launch();
+    const arm = await import('../src/handoffArming');
+    expect(await arm.resetSharedScreenHandoffs()).toBe(true);
+    expect(await m.pj.routeAfterAuth('/', B)).toBe('/');
+    for (const k of ['wsf.pendingJoinCode', 'wsf.eventReturn', 'wsf.markerReturn', 'wsf.kioskReturnGoalId']) {
+      expect(disk.map.has(k), k).toBe(false);
+    }
+    expect(read('app/kiosk/[goalId].tsx')).toContain('void resetSharedScreenHandoffs();');
+  });
+});
+
+describe('the kiosk return expires in a process that outlives it (the #635 mirror expiry)', () => {
+  it('two hours after it was armed it no longer routes, without a relaunch', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const t0 = new Date('2026-10-20T10:00:00Z').getTime();
+    vi.setSystemTime(t0);
+    const m = await launch();
+    await m.ks.setKioskReturnGoal(KIOSK_GOAL, null);
+    vi.setSystemTime(t0 + 2 * 60 * 60 * 1000 - 1000);
+    expect(await m.pj.routeAfterAuth('/', B)).toBe(`/contribute/${KIOSK_GOAL}?kiosk=1`);
+    vi.setSystemTime(t0 + 2 * 60 * 60 * 1000 + 1000);
+    expect(m.ks.readKioskReturnGoal(B)).toBeNull();
+    expect(await m.pj.routeAfterAuth('/', B)).toBe('/');
   });
 });

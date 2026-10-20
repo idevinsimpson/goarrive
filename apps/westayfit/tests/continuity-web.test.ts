@@ -226,3 +226,34 @@ describe('web (NATIVE-STATE-2): event, marker and kiosk returns under the same o
     expect(window.sessionStorage.getItem('wsf.eventReturn')).not.toBeNull();
   });
 });
+
+describe('web (NATIVE-STATE-2 review): an owned record found after a same-tab reload is still cleared at sign-out', () => {
+  it('the session watch starts when the module loads over an owned record, and sign-out clears it', async () => {
+    window.sessionStorage.setItem(
+      'wsf.markerReturn',
+      JSON.stringify({ slug: 'flag-01', at: Date.now(), owner: A })
+    );
+    // The "reload": fresh module instances over the same sessionStorage.
+    vi.resetModules();
+    const before = authListeners.length;
+    const { readMarkerReturn } = await import('../src/markerEntry');
+    await import('../src/pendingJoinCode');
+    await new Promise((r) => setTimeout(r, 0));
+    expect(authListeners.length).toBe(before + 1);
+    expect(readMarkerReturn(Date.now(), A)).toBe('flag-01');
+    authListeners[authListeners.length - 1]!(null);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(window.sessionStorage.getItem('wsf.markerReturn')).toBeNull();
+  });
+
+  it('nothing owned in the tab: no watch is started by loading the module', async () => {
+    window.sessionStorage.setItem('wsf.markerReturn', JSON.stringify({ slug: 'flag-01', at: Date.now() }));
+    vi.resetModules();
+    const before = authListeners.length;
+    await import('../src/markerEntry');
+    await import('../src/pendingJoinCode');
+    await new Promise((r) => setTimeout(r, 0));
+    expect(authListeners.length).toBe(before);
+    window.sessionStorage.clear();
+  });
+});
