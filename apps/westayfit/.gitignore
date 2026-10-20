@@ -1,0 +1,8 @@
+# Native projects are generated (Continuous Native Generation); never commit a local prebuild.
+/ios/
+/android/
+# eas env:pull --path .env.development.local (see docs/westayfit/native/NATIVE-BUILD-READINESS.md);
+# .env.local is not used for native. Never commit local env files, including one renamed aside
+# with .off for the emulator suite.
+.env*.local
+.env*.local.off
