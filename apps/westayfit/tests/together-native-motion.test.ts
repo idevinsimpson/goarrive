@@ -32,6 +32,8 @@ import {
 } from '../src/ui/togetherMotionNative';
 import {
   decideTogetherPhase,
+  isMeasured,
+  MIN_MEASURED_PX,
   NATIVE_START_DEADLINE_MS,
   nextTogetherPhase,
   settlesAtDeadline,
@@ -87,6 +89,30 @@ describe('one decision at mount: decideTogetherPhase', () => {
       expect(decideTogetherPhase({ ...eligible, platform, appActive: false })).toBe('settled');
     });
   }
+
+  it('a preference query that definitely failed settles at once on native, instead of waiting out the deadline', () => {
+    for (const platform of ['ios', 'android']) {
+      expect(decideTogetherPhase({ ...eligible, platform, reducedKnown: false, reducedFailed: true })).toBe('settled');
+      expect(nextTogetherPhase('pending', { ...eligible, platform, reducedKnown: false, reducedFailed: true })).toBe('settled');
+      // A later real answer is what counts once it exists.
+      expect(decideTogetherPhase({ ...eligible, platform, reducedKnown: true, reducedFailed: false })).toBe('playing');
+    }
+    // The web never reads this input.
+    expect(decideTogetherPhase({ ...eligible, platform: 'web', reducedKnown: false, reducedFailed: true })).toBe('playing');
+  });
+
+  it('a pending receipt whose app left the foreground settles instead of starting', () => {
+    expect(nextTogetherPhase('pending', { ...eligible, appActive: false })).toBe('settled');
+  });
+
+  it('a zero or near-zero box is not a measurement', () => {
+    expect(MIN_MEASURED_PX).toBe(1);
+    expect(isMeasured({ width: 390, height: 420 })).toBe(true);
+    expect(isMeasured({ width: 1, height: 1 })).toBe(true);
+    for (const box of [{ width: 0, height: 420 }, { width: 390, height: 0.4 }, { width: Number.NaN, height: 10 }, null, undefined]) {
+      expect(isMeasured(box)).toBe(false);
+    }
+  });
 
   it('reduced motion settles at once on every platform', () => {
     for (const platform of ['web', 'ios', 'android']) {
@@ -180,8 +206,10 @@ describe('one timeline for both drivers', () => {
 
   it('the pulse keyframes and easing are one set of numbers', () => {
     expect(TOGETHER_PULSE_EASING).toEqual([0.2, 0.65, 0.3, 1]);
-    // The same curve the donor wrote as cubic-bezier(.2,.65,.3,1).
-    expect(TOGETHER_PULSE_EASING_CSS).toBe('cubic-bezier(0.2,0.65,0.3,1)');
+    // The donor's string, byte for byte, and it is exactly those four numbers.
+    expect(TOGETHER_PULSE_EASING_CSS).toBe('cubic-bezier(.2,.65,.3,1)');
+    const parsed = /^cubic-bezier\(([^)]*)\)$/.exec(TOGETHER_PULSE_EASING_CSS)![1].split(',').map(Number);
+    expect(parsed).toEqual([...TOGETHER_PULSE_EASING]);
     for (const crossed of [false, true]) {
       expect(pulseKeyframes(crossed)).toEqual(
         pulseStops(crossed).map((s) => ({ transform: `scale(${s.scale})`, offset: s.offset }))
@@ -255,17 +283,28 @@ describe('the native timeline is the web timeline, sampled', () => {
     expect(b.pulse.outputRange.at(-1)).toBe(1);
   });
 
-  it('every track is a valid interpolation and ends inside the canvas window', () => {
+  it('every track is a valid interpolation, and each part’s clock ends where that part does', () => {
     for (const geom of [ordinary, crossing]) {
       const t = buildNativeTogetherTimeline(geom);
-      const tracks: Track[] = [t.pulse, t.glow.opacity];
+      const pieceTracks: Track[] = [];
       for (const piece of t.pieces) {
-        tracks.push(...Object.values(piece.head));
-        for (const chord of piece.trail) tracks.push(...Object.values(chord));
+        pieceTracks.push(...Object.values(piece.head));
+        for (const chord of piece.trail) pieceTracks.push(...Object.values(chord));
       }
-      for (const wave of t.waves) tracks.push(...Object.values(wave));
-      for (const track of tracks) isValidTrack(track);
-      for (const track of tracks.slice(1)) expect(track.inputRange.at(-1)!).toBeLessThanOrEqual(TOGETHER_TIMING.canvasEndMs);
+      const waveTracks: Track[] = t.waves.flatMap((wave) => Object.values(wave));
+      for (const track of [t.pulse, t.glow.opacity, ...pieceTracks, ...waveTracks]) isValidTrack(track);
+      // Pieces: their clock stops when the last piece's window ends.
+      const pieces = buildPieces(geom);
+      expect(t.piecesEndMs).toBe(Math.max(...pieces.map((p) => p.delay + p.duration)));
+      expect(Math.max(...pieceTracks.map((tr) => tr.inputRange.at(-1)!))).toBe(t.piecesEndMs);
+      // Glow: its clock stops when the release ends.
+      expect(t.glowEndMs).toBe(TOGETHER_GLOW.releaseStartMs + TOGETHER_GLOW.releaseMs);
+      expect(t.glow.opacity.inputRange.at(-1)).toBe(t.glowEndMs);
+      // Waves keep the web's canvas end.
+      expect(t.wavesEndMs).toBe(TOGETHER_TIMING.canvasEndMs);
+      for (const tr of waveTracks) expect(tr.inputRange.at(-1)!).toBeLessThanOrEqual(t.wavesEndMs);
+      expect(t.piecesEndMs).toBeLessThan(t.wavesEndMs);
+      expect(t.glowEndMs).toBeLessThan(t.wavesEndMs);
     }
   });
 
@@ -403,15 +442,90 @@ describe('the native driver: truth first, one settle, every timer cancelled', ()
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('stop(false) — unmount — only stops: no settle callback, no further ratio, no timers left', () => {
+  it('stop(false) — unmount — only stops: no settle callback, no further ratio, no timers left, NO value written', () => {
     const onRatio = vi.fn();
     const settled = vi.fn();
-    const stop = startTogetherNativeMotion({ run: createNativeTogetherRun(ordinary), from: 0.2, to: 0.3, onRatio, onSettled: settled });
+    const run = createNativeTogetherRun(ordinary);
+    const stop = startTogetherNativeMotion({ run, from: 0.2, to: 0.3, onRatio, onSettled: settled });
     vi.advanceTimersByTime(500);
+    const values = [run.pulse, run.glowClock, run.pieceClock, run.waveClock];
+    const writes = values.map((v) => vi.spyOn(v, 'setValue'));
     stop(false);
+    for (const w of writes) expect(w).not.toHaveBeenCalled();
     vi.advanceTimersByTime(5000);
     expect(onRatio).not.toHaveBeenCalled();
     expect(settled).not.toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('a finish writes every value to its end, each clock to its own end', () => {
+    const run = createNativeTogetherRun(crossing);
+    const stop = startTogetherNativeMotion({ run, from: 0.99, to: 1, onRatio: () => undefined, onSettled: () => undefined });
+    vi.advanceTimersByTime(300);
+    const writes = {
+      pulse: vi.spyOn(run.pulse, 'setValue'),
+      glow: vi.spyOn(run.glowClock, 'setValue'),
+      pieces: vi.spyOn(run.pieceClock, 'setValue'),
+      waves: vi.spyOn(run.waveClock, 'setValue'),
+    };
+    stop(true);
+    expect(writes.pulse).toHaveBeenCalledWith(1);
+    expect(writes.glow).toHaveBeenCalledWith(run.timeline.glowEndMs);
+    expect(writes.pieces).toHaveBeenCalledWith(run.timeline.piecesEndMs);
+    expect(writes.waves).toHaveBeenCalledWith(run.timeline.wavesEndMs);
+  });
+
+  it('the run builds every layer style once: the same objects on every read', () => {
+    const run = createNativeTogetherRun(crossing);
+    expect(run.styles.pieces).toHaveLength(28);
+    expect(run.styles.bands).toHaveLength(10);
+    expect(run.styles.waves).toHaveLength(3);
+    // Static and animated parts are prebuilt arrays, not built per render.
+    expect(Array.isArray(run.styles.pieces[0].head)).toBe(true);
+    expect(run.styles.pieces[0].trail).toHaveLength(2);
+  });
+});
+
+describe('the web build never carries the native driver', () => {
+  it('togetherMotionNative.web.ts stands in with the same names, each failing safe', async () => {
+    const native = await import('../src/ui/togetherMotionNative');
+    const web = await import('../src/ui/togetherMotionNative.web');
+    for (const name of ['createNativeTogetherRun', 'startTogetherNativeMotion', 'TogetherNativeLayer'] as const) {
+      expect(typeof (web as Record<string, unknown>)[name]).not.toBe('undefined');
+      expect(typeof (native as Record<string, unknown>)[name]).not.toBe('undefined');
+    }
+    // Building a run on the web throws (TogetherCompletion settles on that)…
+    expect(() => web.createNativeTogetherRun(ordinary)).toThrow(/does not run on the web/);
+    // …a start is a no-op whose finish settles at the confirmed ratio, and whose unmount stop does nothing…
+    const onRatio = vi.fn();
+    const onSettled = vi.fn();
+    const stop = web.startTogetherNativeMotion({ run: {} as never, from: 0.2, to: 0.3, onRatio, onSettled });
+    stop(false);
+    expect(onSettled).not.toHaveBeenCalled();
+    stop(true);
+    expect(onRatio).toHaveBeenCalledWith(0.3);
+    expect(onSettled).toHaveBeenCalledTimes(1);
+    // …and the layer renders nothing.
+    expect(web.TogetherNativeLayer({ run: {} as never })).toBeNull();
+  });
+
+  it('the stand-in imports nothing at runtime (types only), so the web bundle has no native driver code', () => {
+    const src = readFileSync(nodePath.resolve(__dirname, '../src/ui/togetherMotionNative.web.ts'), 'utf8');
+    const runtimeImports = [...src.matchAll(/^import (?!type )[^;]*from '([^']+)'/gm)].map((m) => m[1]);
+    expect(runtimeImports).toEqual([]);
+    expect(src).not.toMatch(/from 'react-native'/);
+  });
+});
+
+describe('the native announcement states confirmed figures only', () => {
+  it('amount and shared total, from the receipt — or the amount alone on an own-only receipt', async () => {
+    const { togetherAnnouncement } = await import('../src/ui/TogetherCompletion');
+    expect(
+      togetherAnnouncement({ eyebrow: 'Recorded', amountText: '+20', unit: 'squats', shared: { total: 3720, target: 5000, unit: 'squats' } })
+    ).toBe('Recorded: +20 squats. Shared total: 3,720 of 5,000 squats.');
+    expect(
+      togetherAnnouncement({ eyebrow: 'Already recorded', amountText: '35', unit: 'squats', shared: { total: 5015, target: 5000, unit: 'squats' } })
+    ).toBe('Already recorded: 35 squats. Shared total: 5,015 of 5,000 squats.');
+    expect(togetherAnnouncement({ eyebrow: 'Recorded', amountText: '+20', unit: null, shared: null })).toBe('Recorded: +20.');
   });
 });

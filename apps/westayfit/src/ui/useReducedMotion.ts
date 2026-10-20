@@ -2,37 +2,47 @@ import { useEffect, useState } from 'react';
 import { AccessibilityInfo } from 'react-native';
 
 /**
- * The person's reduced-motion preference, and whether it has been read yet.
+ * The person's reduced-motion preference, whether it has been read yet, and
+ * whether reading it definitely failed.
  *
- * Web reads the media query synchronously, so the preference is known on the
- * first render (react-native-web's AccessibilityInfo does the same, but
- * subscribing here keeps the value live).
+ * WEB reads the media query synchronously, so the preference is known on the
+ * first render and stays live through the query's change event. Unchanged.
  *
- * Native can only ask AccessibilityInfo, which answers asynchronously. Until
- * it answers, `known` is false, so a caller that must not move for a
- * reduced-motion user (NATIVE-MOTION-1, the Together receipt) can wait rather
- * than start on a guessed `false`. An answer that never comes, or a query that
- * fails, leaves `known` false: an unreadable preference is never treated as
- * permission to move.
+ * NATIVE can only ask AccessibilityInfo, which answers asynchronously:
+ *
+ *  - `known` is false until THIS mount's own query answers, or a change event
+ *    reaches this mount. A caller that must not move for a reduced-motion user
+ *    (NATIVE-MOTION-1, the Together receipt) waits for it.
+ *  - `failed` is true when the query rejected and nothing has answered since,
+ *    so such a caller can settle at once instead of waiting out a deadline.
+ *    An unreadable preference is never treated as permission to move.
+ *  - ORDER WINS. Every change event bumps a runtime-wide epoch; a query's
+ *    answer that arrives after a change event it did not see is stale and is
+ *    dropped — from this mount's state and from the runtime cache — so a late
+ *    `isReduceMotionEnabled()` can never overwrite a newer change.
+ *  - THE CACHE SEEDS, IT DOES NOT CERTIFY (decision for NATIVE-MOTION-1
+ *    review item 8c). The last answer this runtime received seeds `reduced`
+ *    on a new mount, so a reduced-motion user reads `true` from the first
+ *    render; but `known` still waits for this mount's own answer. A cached
+ *    `true` can therefore only make a caller hold still sooner; a cached
+ *    `false` never lets one start moving early. The Together receipt keeps
+ *    its 500 ms start deadline as the bound on that wait.
  */
-export type ReducedMotionPreference = { reduced: boolean; known: boolean };
+export type ReducedMotionPreference = { reduced: boolean; known: boolean; failed: boolean };
 
 const QUERY = '(prefers-reduced-motion: reduce)';
 
 const hasMatchMedia = (): boolean =>
   typeof window !== 'undefined' && typeof window.matchMedia === 'function';
 
-/**
- * The last answer AccessibilityInfo gave on this runtime (native path only).
- * The root layout keeps a subscriber mounted for the app's lifetime, so a
- * screen mounted later starts from the known value instead of waiting for a
- * second round trip. Every mount still re-asks and keeps listening.
- */
+/** The last answer AccessibilityInfo gave on this runtime (native path only). */
 let lastNativeAnswer: boolean | null = null;
+/** Bumped by every reduce-motion change event seen on this runtime (native path only). */
+let nativeEpoch = 0;
 
 function initialPreference(): ReducedMotionPreference {
-  if (hasMatchMedia()) return { reduced: window.matchMedia(QUERY).matches, known: true };
-  return lastNativeAnswer == null ? { reduced: false, known: false } : { reduced: lastNativeAnswer, known: true };
+  if (hasMatchMedia()) return { reduced: window.matchMedia(QUERY).matches, known: true, failed: false };
+  return { reduced: lastNativeAnswer ?? false, known: false, failed: false };
 }
 
 export function useReducedMotionPreference(): ReducedMotionPreference {
@@ -40,7 +50,9 @@ export function useReducedMotionPreference(): ReducedMotionPreference {
 
   useEffect(() => {
     const apply = (reduced: boolean) =>
-      setPref((prev) => (prev.known && prev.reduced === reduced ? prev : { reduced, known: true }));
+      setPref((prev) =>
+        prev.known && !prev.failed && prev.reduced === reduced ? prev : { reduced, known: true, failed: false }
+      );
 
     if (hasMatchMedia()) {
       const mq = window.matchMedia(QUERY);
@@ -48,15 +60,27 @@ export function useReducedMotionPreference(): ReducedMotionPreference {
       mq.addEventListener?.('change', onChange);
       return () => mq.removeEventListener?.('change', onChange);
     }
+
     let active = true;
-    const answer = (v: boolean) => {
-      lastNativeAnswer = v;
-      if (active) apply(v);
+    const onChange = (reduced: boolean) => {
+      nativeEpoch += 1;
+      lastNativeAnswer = reduced;
+      if (active) apply(reduced);
     };
-    AccessibilityInfo.isReduceMotionEnabled()
-      .then(answer)
-      .catch(() => undefined);
-    const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', answer);
+    // Subscribe first, so a change while the query is in flight is never missed.
+    const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', onChange);
+    const askedAt = nativeEpoch;
+    AccessibilityInfo.isReduceMotionEnabled().then(
+      (reduced) => {
+        // A change event arrived after this query was asked: it is newer than this answer.
+        if (nativeEpoch !== askedAt) return;
+        lastNativeAnswer = reduced;
+        if (active) apply(reduced);
+      },
+      () => {
+        if (active) setPref((prev) => (prev.known || prev.failed ? prev : { ...prev, failed: true }));
+      }
+    );
     return () => {
       active = false;
       // react-native-web returns nothing here when it has no media query (jsdom).
@@ -71,8 +95,6 @@ export function useReducedMotionPreference(): ReducedMotionPreference {
  * True when the person has asked for reduced motion. Unchanged on the web.
  * On native it reads the last answer this runtime received (or `false` before
  * any) until AccessibilityInfo answers this mount.
- * A caller that must not start motion before the answer uses
- * `useReducedMotionPreference` and waits for `known`.
  */
 export function useReducedMotion(): boolean {
   return useReducedMotionPreference().reduced;

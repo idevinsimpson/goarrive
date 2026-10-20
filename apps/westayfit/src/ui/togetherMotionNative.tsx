@@ -1,5 +1,5 @@
-import { Fragment } from 'react';
-import { Animated, Easing, StyleSheet, View, type ViewStyle } from 'react-native';
+import { Fragment, memo, type ComponentProps } from 'react';
+import { Animated, Easing, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 
 import {
   bezier,
@@ -25,7 +25,10 @@ import {
  * Nothing timing-related is restated here.
  *
  * HOW IT PLAYS. React Native has no canvas, so the canvas layer is redrawn as
- * views, all driven from one clock that starts with the pulse:
+ * views. Every part starts at the same instant as the pulse, and each part's
+ * clock runs only as long as that part is visible (the pieces until the last
+ * piece's window ends, the glow until its release ends, the waves until the
+ * web's canvas end), so nothing keeps animating invisible views:
  *   - pulse   — the mark's scale, an `Easing.bezier` of the web's
  *               cubic-bezier over 2,700 ms through the same keyframe offsets
  *               (native driver);
@@ -99,6 +102,12 @@ export type NativeTogetherTimeline = {
   shared: TogetherTimeline;
   width: number;
   height: number;
+  /** When the last piece's window ends (ms): the pieces' clock stops here. */
+  piecesEndMs: number;
+  /** When the glow's release ends (ms): the glow's clock stops here. */
+  glowEndMs: number;
+  /** The waves' clock stops at the web's canvas end. */
+  wavesEndMs: number;
   /** The mark's scale over pulse progress (0–1): the same offsets and scales as the web keyframes. */
   pulse: Track;
   glow: { bands: Array<{ left: number; top: number; size: number; alpha: number }>; opacity: Track };
@@ -192,7 +201,9 @@ export function buildNativeTogetherTimeline(geom: TogetherGeometry): NativeToget
   }
 
   // Pieces: the same pieces the web draws, each sampled across its window.
-  const pieces = buildPieces(geom).map<PieceTrack>((piece) => {
+  const sourcePieces = buildPieces(geom);
+  const piecesEndMs = Math.max(...sourcePieces.map((piece) => piece.delay + piece.duration));
+  const pieces = sourcePieces.map<PieceTrack>((piece) => {
     const head = { x: track(), y: track(), rotate: track(), scaleX: track(), scaleY: track(), opacity: track() };
     const trail = [0, 1].map(() => ({ x: track(), y: track(), rotate: track(), scaleX: track(), opacity: track() }));
     let headAngle: number | null = null;
@@ -270,6 +281,9 @@ export function buildNativeTogetherTimeline(geom: TogetherGeometry): NativeToget
     shared,
     width,
     height,
+    piecesEndMs,
+    glowEndMs: glowEnd,
+    wavesEndMs: shared.canvasEndMs,
     pulse,
     glow: { bands, opacity: glowOpacity },
     pieces,
@@ -280,21 +294,32 @@ export function buildNativeTogetherTimeline(geom: TogetherGeometry): NativeToget
 type AnimatedNumber = Animated.AnimatedInterpolation<number>;
 type AnimatedString = Animated.AnimatedInterpolation<string>;
 type AnimatedViewStyle = Animated.WithAnimatedValue<ViewStyle>;
+/** Whatever Animated.View accepts as `style`: static and animated parts together. */
+type AnimatedStyleProp = ComponentProps<typeof Animated.View>['style'];
 
-/** One instance's animated values and the styles built on them, created once. */
+/**
+ * One instance's animated values and EVERY style the layer renders — static
+ * and animated — built once, so a re-render of the receipt (the fill tween
+ * re-renders it every frame) hands the memoised layer the same objects and
+ * the layer does not re-render at all.
+ */
 export type NativeTogetherRun = {
   timeline: NativeTogetherTimeline;
-  /** Milliseconds since the start, 0 → canvasEndMs, native driver. */
-  clock: Animated.Value;
   /** Pulse progress 0 → 1 under the web's easing, native driver. */
   pulse: Animated.Value;
-  /** Milliseconds since the start for the waves, JS driver (they change layout). */
-  waves: Animated.Value;
+  /** Milliseconds since the start, 0 → glowEndMs, native driver. */
+  glowClock: Animated.Value;
+  /** Milliseconds since the start, 0 → piecesEndMs, native driver. */
+  pieceClock: Animated.Value;
+  /** Milliseconds since the start, 0 → wavesEndMs, JS driver (waves change layout). */
+  waveClock: Animated.Value;
   styles: {
+    root: StyleProp<ViewStyle>;
     pulse: AnimatedViewStyle;
-    glow: AnimatedViewStyle;
-    pieces: Array<{ head: AnimatedViewStyle; trail: AnimatedViewStyle[] }>;
-    waves: AnimatedViewStyle[];
+    glow: AnimatedStyleProp;
+    bands: ViewStyle[];
+    pieces: Array<{ head: AnimatedStyleProp; trail: AnimatedStyleProp[] }>;
+    waves: AnimatedStyleProp[];
   };
 };
 
@@ -309,49 +334,79 @@ const rad = (value: Animated.Value, t: Track): AnimatedString =>
 
 export function createNativeTogetherRun(geom: TogetherGeometry): NativeTogetherRun {
   const timeline = buildNativeTogetherTimeline(geom);
-  const clock = new Animated.Value(0);
   const pulse = new Animated.Value(0);
-  const waves = new Animated.Value(0);
+  const glowClock = new Animated.Value(0);
+  const pieceClock = new Animated.Value(0);
+  const waveClock = new Animated.Value(0);
   const skew = `${PIECE_SKEW_RAD}rad`;
   return {
     timeline,
-    clock,
     pulse,
-    waves,
+    glowClock,
+    pieceClock,
+    waveClock,
     styles: {
+      root: [layer.root, { width: timeline.width, height: timeline.height }],
       pulse: { transform: [{ scale: num(pulse, timeline.pulse) }] },
-      glow: { opacity: num(clock, timeline.glow.opacity) },
+      glow: [StyleSheet.absoluteFill, { opacity: num(glowClock, timeline.glow.opacity) }],
+      bands: timeline.glow.bands.map((band) => ({
+        position: 'absolute',
+        left: band.left,
+        top: band.top,
+        width: band.size,
+        height: band.size,
+        borderRadius: band.size / 2,
+        backgroundColor: `rgba(${FILL_RGB},${band.alpha})`,
+      })),
       pieces: timeline.pieces.map((piece) => ({
-        head: {
-          opacity: num(clock, piece.head.opacity),
-          transform: [
-            { translateX: num(clock, piece.head.x) },
-            { translateY: num(clock, piece.head.y) },
-            { rotate: rad(clock, piece.head.rotate) },
-            { skewX: skew },
-            { scaleX: num(clock, piece.head.scaleX) },
-            { scaleY: num(clock, piece.head.scaleY) },
-          ],
+        head: [
+          {
+            position: 'absolute',
+            left: -piece.length / 2,
+            top: -piece.breadth / 2,
+            width: piece.length,
+            height: piece.breadth,
+            backgroundColor: `rgb(${piece.color})`,
+            boxShadow: PIECE_SHADOW,
+          },
+          {
+            opacity: num(pieceClock, piece.head.opacity),
+            transform: [
+              { translateX: num(pieceClock, piece.head.x) },
+              { translateY: num(pieceClock, piece.head.y) },
+              { rotate: rad(pieceClock, piece.head.rotate) },
+              { skewX: skew },
+              { scaleX: num(pieceClock, piece.head.scaleX) },
+              { scaleY: num(pieceClock, piece.head.scaleY) },
+            ],
+          },
+        ],
+        trail: piece.trail.map((chord) => [
+          layer.trail,
+          { backgroundColor: `rgb(${piece.color})` },
+          {
+            opacity: num(pieceClock, chord.opacity),
+            transform: [
+              { translateX: num(pieceClock, chord.x) },
+              { translateY: num(pieceClock, chord.y) },
+              { rotate: rad(pieceClock, chord.rotate) },
+              { scaleX: num(pieceClock, chord.scaleX) },
+            ],
+          },
+        ]),
+      })),
+      waves: timeline.waves.map((wave) => [
+        layer.wave,
+        {
+          left: num(waveClock, wave.left),
+          top: num(waveClock, wave.top),
+          width: num(waveClock, wave.size),
+          height: num(waveClock, wave.size),
+          borderRadius: num(waveClock, wave.borderRadius),
+          borderWidth: num(waveClock, wave.borderWidth),
+          opacity: num(waveClock, wave.opacity),
         },
-        trail: piece.trail.map((chord) => ({
-          opacity: num(clock, chord.opacity),
-          transform: [
-            { translateX: num(clock, chord.x) },
-            { translateY: num(clock, chord.y) },
-            { rotate: rad(clock, chord.rotate) },
-            { scaleX: num(clock, chord.scaleX) },
-          ],
-        })),
-      })),
-      waves: timeline.waves.map((wave) => ({
-        left: num(waves, wave.left),
-        top: num(waves, wave.top),
-        width: num(waves, wave.size),
-        height: num(waves, wave.size),
-        borderRadius: num(waves, wave.borderRadius),
-        borderWidth: num(waves, wave.borderWidth),
-        opacity: num(waves, wave.opacity),
-      })),
+      ]),
     },
   };
 }
@@ -363,8 +418,9 @@ const now = (): number =>
  * Plays one run. The same contract as the web's `runTogetherMotion`: returns
  * `stop(finish)`; `stop(true)` settles (final ratio, then `onSettled`),
  * `stop(false)` only stops — used on unmount. Every animation, timer and frame
- * it starts is stopped by that one function, and every value is left at its
- * end (scale 1, decoration invisible).
+ * it starts is stopped by that one function. Only a FINISH writes values (scale
+ * 1, decoration invisible, then the settle): an unmount's stop leaves the
+ * values alone, so nothing is written to nodes that are detaching.
  */
 export function startTogetherNativeMotion(opts: {
   run: NativeTogetherRun;
@@ -374,7 +430,7 @@ export function startTogetherNativeMotion(opts: {
   onSettled: () => void;
 }): (finish: boolean) => void {
   const { run, from, to, onRatio, onSettled } = opts;
-  const { shared } = run.timeline;
+  const { shared, piecesEndMs, glowEndMs, wavesEndMs } = run.timeline;
   let disposed = false;
   let settled = false;
   let fillFrame = 0;
@@ -394,18 +450,10 @@ export function startTogetherNativeMotion(opts: {
       easing: Easing.bezier(...shared.pulse.easing),
       useNativeDriver: true,
     }),
-    Animated.timing(run.clock, {
-      toValue: shared.canvasEndMs,
-      duration: shared.canvasEndMs,
-      easing: Easing.linear,
-      useNativeDriver: true,
-    }),
-    Animated.timing(run.waves, {
-      toValue: shared.canvasEndMs,
-      duration: shared.canvasEndMs,
-      easing: Easing.linear,
-      useNativeDriver: false,
-    }),
+    // Each clock reads in ms (value = elapsed) and stops when its part has ended.
+    Animated.timing(run.glowClock, { toValue: glowEndMs, duration: glowEndMs, easing: Easing.linear, useNativeDriver: true }),
+    Animated.timing(run.pieceClock, { toValue: piecesEndMs, duration: piecesEndMs, easing: Easing.linear, useNativeDriver: true }),
+    Animated.timing(run.waveClock, { toValue: wavesEndMs, duration: wavesEndMs, easing: Easing.linear, useNativeDriver: false }),
   ];
 
   const stop = (finish: boolean) => {
@@ -417,16 +465,20 @@ export function startTogetherNativeMotion(opts: {
     cancelAnimationFrame(fillFrame);
     timers.forEach(clearTimeout);
     animations.forEach((a) => a.stop());
-    run.pulse.setValue(1);
-    run.clock.setValue(shared.canvasEndMs);
-    run.waves.setValue(shared.canvasEndMs);
-    if (finish) settle();
+    if (finish) {
+      run.pulse.setValue(1);
+      run.glowClock.setValue(glowEndMs);
+      run.pieceClock.setValue(piecesEndMs);
+      run.waveClock.setValue(wavesEndMs);
+      settle();
+    }
   };
 
   // Always from the first frame, even if these values played before.
   run.pulse.setValue(0);
-  run.clock.setValue(0);
-  run.waves.setValue(0);
+  run.glowClock.setValue(0);
+  run.pieceClock.setValue(0);
+  run.waveClock.setValue(0);
   animations.forEach((a) => a.start());
 
   // The confirmed-ratio tween, exactly as the web runs it.
@@ -452,62 +504,33 @@ export function startTogetherNativeMotion(opts: {
 /**
  * The decorative layer over the stage, on top of the receipt like the web
  * canvas, never touchable and hidden from assistive technology. Rendered only
- * while a run plays.
+ * while a run plays. Memoised on the run, whose every style is built once:
+ * the fill tween re-renders the receipt each frame, and this layer's ~90
+ * views do not re-render with it.
  */
-export function TogetherNativeLayer({ run }: { run: NativeTogetherRun }) {
+export const TogetherNativeLayer = memo(function TogetherNativeLayer({ run }: { run: NativeTogetherRun }) {
   const { timeline: t, styles: s } = run;
   return (
-    <View
-      style={[layer.root, { width: t.width, height: t.height }]}
-      aria-hidden
-      testID="wsf-together-native-layer"
-    >
-      <Animated.View style={[StyleSheet.absoluteFill, s.glow]}>
-        {t.glow.bands.map((band, i) => (
-          <View
-            key={i}
-            style={{
-              position: 'absolute',
-              left: band.left,
-              top: band.top,
-              width: band.size,
-              height: band.size,
-              borderRadius: band.size / 2,
-              backgroundColor: `rgba(${FILL_RGB},${band.alpha})`,
-            }}
-          />
+    <View style={s.root} aria-hidden testID="wsf-together-native-layer">
+      <Animated.View style={s.glow}>
+        {s.bands.map((band, i) => (
+          <View key={i} style={band} />
         ))}
       </Animated.View>
       {t.pieces.map((piece, i) => (
         <Fragment key={i}>
           {piece.trail.map((_, j) => (
-            <Animated.View
-              key={j}
-              style={[layer.trail, { backgroundColor: `rgb(${piece.color})` }, s.pieces[i].trail[j]]}
-            />
+            <Animated.View key={j} style={s.pieces[i].trail[j]} />
           ))}
-          <Animated.View
-            style={[
-              {
-                position: 'absolute',
-                left: -piece.length / 2,
-                top: -piece.breadth / 2,
-                width: piece.length,
-                height: piece.breadth,
-                backgroundColor: `rgb(${piece.color})`,
-                boxShadow: PIECE_SHADOW,
-              },
-              s.pieces[i].head,
-            ]}
-          />
+          <Animated.View style={s.pieces[i].head} />
         </Fragment>
       ))}
-      {t.waves.map((_, i) => (
-        <Animated.View key={i} style={[layer.wave, s.waves[i]]} />
+      {s.waves.map((wave, i) => (
+        <Animated.View key={i} style={wave} />
       ))}
     </View>
   );
-}
+});
 
 const layer = StyleSheet.create({
   root: { position: 'absolute', left: 0, top: 0, overflow: 'hidden', pointerEvents: 'none' },

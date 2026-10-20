@@ -5,6 +5,7 @@ import { httpsCallable } from 'firebase/functions';
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -1972,7 +1973,9 @@ export default function ContributeToGoal() {
             <View
               style={styles.togetherBody}
               testID="wsf-contribute-receipt"
-              aria-live="polite"
+              // Web: a polite live region. Native: off — TogetherCompletion
+              // announces the confirmed receipt once itself (NATIVE-MOTION-1).
+              aria-live={Platform.OS === 'web' ? 'polite' : undefined}
               {...({ dataSet: { variant } } as Record<string, unknown>)}
             >
               <TogetherCompletion

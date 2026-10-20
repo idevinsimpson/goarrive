@@ -12,7 +12,8 @@
  *   pending — native only: eligible, but the reduced-motion preference has not
  *             been read yet. The mark shows the trusted before ratio (the same
  *             frame `playing` opens on) and nothing moves until the answer
- *             arrives. Reduced → settled; not reduced → playing.
+ *             arrives. Reduced → settled; not reduced → playing; a query that
+ *             definitely failed → settled at once.
  *
  * ONE DECISION. Eligibility (`fresh`, `animate`) is read at mount and the
  * caller keeps it; `nextTogetherPhase` can only leave `pending`, never re-enter
@@ -38,6 +39,8 @@ export type TogetherPhaseInput = {
   /** Whether the reduced-motion preference has been read. Always true in effect on the web. */
   reducedKnown: boolean;
   reduced: boolean;
+  /** Native only: the preference query definitely failed and nothing has answered since. */
+  reducedFailed?: boolean;
   /** Platform.OS. */
   platform: string;
   /** Native only: false when the app is not in the foreground. Defaults to true. */
@@ -50,7 +53,7 @@ export function decideTogetherPhase(input: TogetherPhaseInput): TogetherPhase {
   if (input.platform === 'web') return input.reduced ? 'settled' : 'playing';
   if (input.appActive === false) return 'settled';
   if (input.reduced) return 'settled';
-  if (!input.reducedKnown) return 'pending';
+  if (!input.reducedKnown) return input.reducedFailed ? 'settled' : 'pending';
   return 'playing';
 }
 
@@ -68,4 +71,20 @@ export function settlesAtDeadline(phase: TogetherPhase, started: boolean): boole
 /** Leaving the foreground (background, or iOS's inactive) settles a native receipt for good. */
 export function settlesOnAppState(next: string): boolean {
   return next === 'background' || next === 'inactive';
+}
+
+/**
+ * Whether a measured box is real. A zero or near-zero layout (a collapsed or
+ * not-yet-laid-out view) is not a measurement: the receipt keeps waiting, and
+ * the start deadline settles it if nothing real arrives.
+ */
+export const MIN_MEASURED_PX = 1;
+export function isMeasured(box: { width: number; height: number } | null | undefined): boolean {
+  return (
+    box != null &&
+    Number.isFinite(box.width) &&
+    Number.isFinite(box.height) &&
+    box.width >= MIN_MEASURED_PX &&
+    box.height >= MIN_MEASURED_PX
+  );
 }

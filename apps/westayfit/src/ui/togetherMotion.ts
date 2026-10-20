@@ -65,7 +65,8 @@ export function fillRatioAt(ms: number, from: number, to: number): number {
  * the same four numbers to `Easing.bezier`, so both ease identically.
  */
 export const TOGETHER_PULSE_EASING = [0.2, 0.65, 0.3, 1] as const;
-export const TOGETHER_PULSE_EASING_CSS = `cubic-bezier(${TOGETHER_PULSE_EASING.join(',')})`;
+/** The donor's own string, byte for byte; a test proves it is the four numbers above. */
+export const TOGETHER_PULSE_EASING_CSS = 'cubic-bezier(.2,.65,.3,1)';
 
 /** The pulse as numbers: offsets in [0, 1] of the 2,700 ms iteration and the scale there. */
 export function pulseStops(crossed: boolean): ReadonlyArray<{ offset: number; scale: number }> {
