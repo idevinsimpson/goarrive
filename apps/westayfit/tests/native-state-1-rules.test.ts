@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { classifyContributeError, isDefiniteRefusal } from '../src/contributionFlow';
+import { classifyContributeError, isDefiniteRefusal, isSignInExpired } from '../src/contributionFlow';
 import type { PendingContribution, RequestContext } from '../src/pendingContribution';
 import { bootNative, createFakeAsyncStorage, flush, type FakeAsyncStorage } from './nativeStorageHarness';
 
@@ -334,22 +334,30 @@ describe('F1d: the contribute route is wired to those rules', () => {
   });
 
   it('restore: settled only by the read’s answer (or for no goal), on every path (S7)', () => {
+    // The context effect settles only for "no goal", and otherwise starts the restore.
     const effect = slice('    generationRef.current += 1;\n    identityRef.current = uid;', '}, [goalId, uid]);');
-    const settles = [...effect.matchAll(/setRestoreSettled\(true\)/g)].map((m) => m.index as number);
-    expect(settles).toHaveLength(2);
+    const effectSettles = [...effect.matchAll(/setRestoreSettled\(true\)/g)].map((m) => m.index as number);
+    expect(effectSettles).toHaveLength(1);
     const noGoal = effect.indexOf('if (!goalId) {');
     const noGoalEnd = effect.indexOf('return;', noGoal);
-    expect(settles[0]).toBeGreaterThan(noGoal);
-    expect(settles[0]).toBeLessThan(noGoalEnd);
-    const read = effect.indexOf('restorePendingAttempt(goalId, uid)');
-    const caught = effect.indexOf('.catch(', read);
-    const then = effect.indexOf('.then(', read);
-    expect(read).toBeGreaterThan(noGoalEnd);
+    expect(effectSettles[0]).toBeGreaterThan(noGoal);
+    expect(effectSettles[0]).toBeLessThan(noGoalEnd);
+    expect(effect.indexOf('startRestore(goalId, uid);')).toBeGreaterThan(noGoalEnd);
+    // The restore itself: unsettled before the read, settled only after it
+    // answers (a rejection is mapped to a failed read by the catch).
+    const restore = slice('const startRestore = useCallback(', '}, []);');
+    const read = restore.indexOf('restorePendingAttempt(forGoal, forUid)');
+    expect(restore.indexOf('setRestoreSettled(false);')).toBeGreaterThan(-1);
+    expect(restore.indexOf('setRestoreSettled(false);')).toBeLessThan(read);
+    const caught = restore.indexOf('.catch(', read);
+    const then = restore.indexOf('.then(', read);
     expect(caught).toBeGreaterThan(read);
     expect(then).toBeGreaterThan(caught);
-    expect(settles[1]).toBeGreaterThan(then);
-    // The only settle before the read is the no-goal one.
-    expect(effect.slice(0, read).match(/setRestoreSettled\(true\)/g)).toHaveLength(1);
+    const settles = [...restore.matchAll(/setRestoreSettled\(true\)/g)].map((m) => m.index as number);
+    expect(settles).toHaveLength(1);
+    expect(settles[0]).toBeGreaterThan(then);
+    // Retry is the same restore, for the same context.
+    expect(ROUTE).toContain('if (goalId) startRestore(goalId, uid);');
   });
 });
 
@@ -359,18 +367,21 @@ describe('F1d: the contribute route is wired to those rules', () => {
 
 describe('a restore that cannot answer still settles', () => {
   it('restorePendingAttempt never rejects, even when the storage boundary itself throws', async () => {
-    bootNative(disk);
-    vi.doMock('../src/storage/kv', () => ({
-      deviceKv: {
-        getItem: () => Promise.reject(new Error('boom')),
-        readItem: () => Promise.reject(new Error('boom')),
-        setItem: () => Promise.reject(new Error('boom')),
-        removeItem: () => Promise.reject(new Error('boom')),
-        keysWithPrefix: () => Promise.reject(new Error('boom')),
-      },
-    }));
-    const pc = await import('../src/pendingContribution');
-    await expect(pc.restorePendingAttempt(GOAL, A)).resolves.toEqual({ pending: null, orphan: null, readFailed: true });
+    const pc = await launch();
+    // The same module instance the code under test calls into: every call
+    // rejects, so only restorePendingAttempt's own catch stands between the
+    // screen and a rejection. (Spies, not a module swap: a swap racing the
+    // boot's own mock was not deterministic under load.)
+    const { deviceKv } = await import('../src/storage/kv');
+    const spies = (['getItem', 'readItem', 'setItem', 'removeItem', 'keysWithPrefix'] as const).map((m) =>
+      vi.spyOn(deviceKv, m).mockRejectedValue(new Error('boom'))
+    );
+    try {
+      await expect(pc.restorePendingAttempt(GOAL, A)).resolves.toEqual({ pending: null, orphan: null, readFailed: true });
+      expect(spies[0]).toHaveBeenCalled();
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
   });
 
   it('a read that never answers releases the restore after the time bound', async () => {
@@ -670,6 +681,10 @@ describe('a replay refused as unauthenticated keeps its reminder', () => {
     expect(isDefiniteRefusal(UNAUTHENTICATED, 'replay')).toBe(false);
     expect(isDefiniteRefusal(REFUSED_CLOSED, 'replay')).toBe(true);
     expect(isDefiniteRefusal(NETWORK_LOST, 'new')).toBe(false);
+    // What the screen says for it: an expired sign-in, and only that.
+    expect(isSignInExpired(UNAUTHENTICATED)).toBe(true);
+    expect(isSignInExpired(NETWORK_LOST)).toBe(false);
+    expect(isSignInExpired(REFUSED_CLOSED)).toBe(false);
   });
 
   it('the owner’s reminder survives the unauthenticated replay and a relaunch, and replays once signed in', async () => {
@@ -691,5 +706,218 @@ describe('a replay refused as unauthenticated keeps its reminder', () => {
     const settled = await pc.replayAttempt(again.pending!, A, io(async (id, n) => server.contribute(GOAL, A, id, n), { replay: true }));
     expect(settled).toMatchObject({ kind: 'confirmed', data: { alreadyRecorded: true } });
     expect(stored()).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #635 delta review: a slow or failed restore read must not lose an attempt
+// ---------------------------------------------------------------------------
+
+/**
+ * A native-like AsyncStorage (the reviewer's probe): every call runs strictly
+ * after the previous one, as Android's SerialExecutor and iOS's serial method
+ * queue do, and the NEXT getItem of `slowKey` takes `slowMs` of wall time.
+ */
+function serialSlowOnce(base: FakeAsyncStorage, slowKey: string, slowMs: number) {
+  let tail: Promise<unknown> = Promise.resolve();
+  let slowUsed = false;
+  const serial = <T,>(fn: () => Promise<T>): Promise<T> => {
+    const run = tail.then(fn);
+    tail = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
+  };
+  base.api.getItem = (k: string) =>
+    serial(async () => {
+      if (k === slowKey && !slowUsed) {
+        slowUsed = true;
+        await new Promise((r) => setTimeout(r, slowMs));
+      }
+      return base.map.has(k) ? (base.map.get(k) as string) : null;
+    });
+  base.api.setItem = (k: string, v: string) =>
+    serial(async () => {
+      base.map.set(k, v);
+    });
+  base.api.removeItem = (k: string) =>
+    serial(async () => {
+      base.map.delete(k);
+    });
+  base.api.getAllKeys = () => serial(async () => [...base.map.keys()]);
+}
+
+describe('#635 delta: a restore that could not read the slot fails closed, and a new attempt is create-only', () => {
+  const KEY = pendingKeyOf(GOAL, A);
+
+  it('V1: a read error at restore, then recovery, then Record — att-old is shown, not overwritten', async () => {
+    disk.map.set(KEY, JSON.stringify(row('att-old', 12, 'unknown')));
+    const pc = await launch();
+    disk.state.failReads = true;
+    const restored = await pc.restorePendingAttempt(GOAL, A);
+    expect(restored).toEqual({ pending: null, orphan: null, readFailed: true });
+    // The screen keeps new attempts closed on a failed read.
+    expect(pc.mayBeginNewAttempt({ restoreSettled: true, restoreFailed: true, pending: null, settled: false })).toBe(false);
+    disk.state.failReads = false; // the device recovers
+    // Even if Record were reached, the write is create-only.
+    const opened = await pc.openAttempt(row('att-new', 3), A, () => true);
+    expect(opened).toEqual({ fire: false, durable: false, conflict: row('att-old', 12, 'unknown') });
+    expect(stored()?.attemptId).toBe('att-old');
+    // And Retry reads it back.
+    expect((await pc.restorePendingAttempt(GOAL, A)).pending?.attemptId).toBe('att-old');
+  });
+
+  it('V2: a 6 s slot read times out the restore; Record after the read has answered does not overwrite', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    disk.map.set(KEY, JSON.stringify(row('att-old', 12, 'unknown')));
+    serialSlowOnce(disk, KEY, 6_000);
+    const pc = await launch();
+    let restored: unknown = 'waiting';
+    void pc.restorePendingAttempt(GOAL, A).then((r) => (restored = r));
+    await vi.advanceTimersByTimeAsync(5_010);
+    expect(restored).toEqual({ pending: null, orphan: null, readFailed: true });
+    await vi.advanceTimersByTimeAsync(3_000); // Record at ~8 s
+    let opened: unknown = null;
+    void pc.openAttempt(row('att-new', 3), A, () => true).then((o) => (opened = o));
+    await vi.advanceTimersByTimeAsync(10);
+    expect(opened).toMatchObject({ fire: false, durable: false, conflict: { attemptId: 'att-old' } });
+    expect(stored()?.attemptId).toBe('att-old');
+  });
+
+  it('V3: Record while that slow native read is still outstanding does not overwrite either', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    disk.map.set(KEY, JSON.stringify(row('att-old', 12, 'unknown')));
+    serialSlowOnce(disk, KEY, 6_000);
+    const pc = await launch();
+    let restored: unknown = 'waiting';
+    void pc.restorePendingAttempt(GOAL, A).then((r) => (restored = r));
+    await vi.advanceTimersByTimeAsync(5_010);
+    expect(restored).toMatchObject({ readFailed: true });
+    let opened: unknown = null;
+    void pc.openAttempt(row('att-new', 3), A, () => true).then((o) => (opened = o));
+    await vi.advanceTimersByTimeAsync(1_100);
+    expect(opened).toMatchObject({ fire: false, durable: false, conflict: { attemptId: 'att-old' } });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(stored()?.attemptId).toBe('att-old');
+  });
+
+  it('V4 control: a 4.9 s slot read restores att-old', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    disk.map.set(KEY, JSON.stringify(row('att-old', 12, 'unknown')));
+    serialSlowOnce(disk, KEY, 4_900);
+    const pc = await launch();
+    let restored: { pending: PendingContribution | null } | null = null;
+    void pc.restorePendingAttempt(GOAL, A).then((r) => (restored = r));
+    await vi.advanceTimersByTimeAsync(4_950);
+    expect(restored!.pending?.attemptId).toBe('att-old');
+  });
+
+  it('the SAME attempt may still be written again (a re-Record after it was not sent)', async () => {
+    const pc = await launch();
+    disk.map.set(KEY, JSON.stringify(row('att-1', 5)));
+    expect(await pc.openAttempt(row('att-1', 5), A, () => true)).toEqual({ fire: true, durable: true });
+    expect(await pc.savePendingNew(row('att-2', 5), A)).toBe(false);
+    expect(stored()?.attemptId).toBe('att-1');
+  });
+
+  it('the route: fails closed with Retry, and shows a conflict as the pending attempt instead of sending', () => {
+    const record = ROUTE.slice(ROUTE.indexOf('const onRecord = useCallback'), ROUTE.indexOf('const onReconcile = useCallback'));
+    expect(record).toContain('mayBeginNewAttempt({ restoreSettled, restoreFailed, pending,');
+    const conflict = record.slice(record.indexOf('if (opened.conflict) {'), record.indexOf('if (!opened.fire) {'));
+    expect(conflict).toContain("setPending({ ...opened.conflict, state: 'unknown' });");
+    expect(conflict).toContain('setPendingDurable(true);');
+    expect(conflict).toContain('return;');
+    expect(record.indexOf('if (opened.conflict) {')).toBeLessThan(record.indexOf('await settleAttempt('));
+    // The camera, too.
+    const camera = ROUTE.slice(ROUTE.indexOf('const cameraOpen ='), ROUTE.indexOf('const cameraWaiting ='));
+    expect(camera).toContain('mayBeginNewAttempt({ restoreSettled, restoreFailed, pending,');
+    // The restore marks a failed read, and the screen replaces entry, review
+    // and the camera with the visible state and its Retry.
+    expect(ROUTE.slice(ROUTE.indexOf('const startRestore = useCallback('))).toMatch(/if \(readFailed\) setRestoreFailed\(true\);\s*setRestoreSettled\(true\);/);
+    const failed = ROUTE.slice(ROUTE.indexOf('if (restoreFailed && beforeWrite) {'), ROUTE.indexOf("// ---- review ----"));
+    expect(failed).toContain('{RESTORE_FAILED_HEADING}');
+    expect(failed).toContain('onPress={onRetryRestore}');
+    expect(failed).toContain('testID="wsf-contribute-restore-retry"');
+    expect(failed).toContain('renderKioskFinish(kioskOutcome)');
+    expect(ROUTE.indexOf('if (restoreFailed && beforeWrite) {')).toBeLessThan(ROUTE.indexOf("if (step === 'review' && reviewCount != null) {"));
+    expect(ROUTE.indexOf('if (restoreFailed && beforeWrite) {')).toBeLessThan(ROUTE.indexOf('const cameraOpen ='));
+  });
+
+  it('the route says one line when Record or Confirm ends without sending, and for an unauthenticated replay', () => {
+    const record = ROUTE.slice(ROUTE.indexOf('const onRecord = useCallback'), ROUTE.indexOf('const onReconcile = useCallback'));
+    expect(record.match(/setAttemptNotice\(ATTEMPT_NOT_SENT_NOTICE\)/g)).toHaveLength(2);
+    expect(record).toContain('setAttemptNotice(ATTEMPT_CONFLICT_NOTICE)');
+    const reconcile = ROUTE.slice(ROUTE.indexOf('const onReconcile = useCallback'), ROUTE.indexOf('const onRetryRestore'));
+    expect(reconcile).toContain('setAttemptNotice(ATTEMPT_NOT_SENT_NOTICE)');
+    expect(reconcile).toContain('if (isSignInExpired(settled.error)) setAttemptNotice(REPLAY_SIGN_IN_NOTICE);');
+    expect(ROUTE.match(/testID="wsf-contribute-attempt-notice"/g)).toHaveLength(2);
+  });
+});
+
+describe('#635 delta: the cheaper should-fix guards', () => {
+  it('mayFireAs: nobody is not an owner', async () => {
+    const { mayFireAs } = await launch();
+    const nobody = { generation: 1, uid: null, goalId: GOAL };
+    expect(mayFireAs(null, nobody, nobody, null)).toBe(false);
+    expect(mayFireAs('', { ...nobody, uid: '' }, { ...nobody, uid: '' }, '')).toBe(false);
+    expect(mayFireAs(undefined, nobody, nobody, undefined)).toBe(false);
+  });
+
+  it('every write path refuses a goal id outside the shape and touches nothing', async () => {
+    const pc = await launch();
+    const bad = 'g.x';
+    const badKey = `wsf.pendingContribution.${bad}.${A}`;
+    disk.map.set(badKey, JSON.stringify({ ...row('att-1', 3), goalId: bad }));
+    const before = new Map(disk.map);
+    const badRow = { ...row('att-2', 3), goalId: bad };
+    expect(await pc.savePending(badRow, A)).toBe(false);
+    // B's slot for the bad goal is empty, so only the guard stops these two.
+    expect(await pc.savePendingNew(badRow, B)).toBe(false);
+    expect((await pc.openAttempt(badRow, B, () => true)).durable).toBe(false);
+    expect(await pc.updatePendingIfAttempt({ ...badRow, attemptId: 'att-1', state: 'unknown' }, A, 'att-1')).toBe(false);
+    expect(await pc.clearPendingIfAttempt(bad, A, 'att-1')).toBe(false);
+    expect(await pc.clearPending(bad, A)).toBe(false);
+    expect(await pc.loadPending(bad, A)).toBeNull();
+    expect(disk.map).toEqual(before);
+  });
+
+  it('a replay, too, sends with nothing awaited after its gate', async () => {
+    const pc = await launch();
+    await pc.savePendingNew(row('att-1', 3, 'unknown'), A);
+    const order: string[] = [];
+    await pc.replayAttempt(row('att-1', 3, 'unknown'), A, {
+      send: async () => {
+        order.push('send');
+        return 'ok';
+      },
+      isRefusal: () => false,
+      stillCurrent: () => true,
+      mayFire: () => {
+        order.push('gate');
+        void Promise.resolve().then(() => order.push('microtask'));
+        return true;
+      },
+    });
+    expect(order).toEqual(['gate', 'send', 'microtask']);
+  });
+
+  it('a device-store read that never answers is bounded: the camera settings and the remembered community still answer', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    disk.map.set('wsf.moveCamera.v1', JSON.stringify({ cameraCounter: false, stickFigure: true }));
+    disk.holdReads(); // never released
+    bootNative(disk);
+    const st = await import('../src/movement-camera/settingsStore');
+    const cc = await import('../src/currentCommunity');
+    const { STORAGE_OP_TIMEOUT_MS } = await import('../src/storage/keyQueue');
+    let settingsReady = false;
+    let communityReady = false;
+    void st.moveCameraSettingsReady().then(() => (settingsReady = true));
+    void cc.currentCommunityReady().then(() => (communityReady = true));
+    await vi.advanceTimersByTimeAsync(STORAGE_OP_TIMEOUT_MS * 2 + 10);
+    expect(settingsReady).toBe(true);
+    expect(st.moveCameraSettingsLoaded()).toBe(true);
+    expect(communityReady).toBe(true);
+    expect(cc.isCurrentCommunityReady()).toBe(true);
   });
 });

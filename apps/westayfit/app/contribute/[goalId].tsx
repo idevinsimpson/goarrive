@@ -25,9 +25,16 @@ import {
 import { useWsfAuth } from '../../src/auth';
 import { AuthFlagOffPanel } from '../../src/AuthFlagOffPanel';
 import {
+  ATTEMPT_CONFLICT_NOTICE,
+  ATTEMPT_NOT_SENT_NOTICE,
+  REPLAY_SIGN_IN_NOTICE,
+  RESTORE_FAILED_BODY,
+  RESTORE_FAILED_HEADING,
+  RESTORE_RETRY_LABEL,
   canAddMore,
   classifyContributeError,
   isDefiniteRefusal,
+  isSignInExpired,
   parseEntry,
   recordMoreLabel,
   refusalCopy,
@@ -547,6 +554,15 @@ export default function ContributeToGoal() {
     here after leaving. A restored attempt is durable by definition.
   */
   const [restoreSettled, setRestoreSettled] = useState(false);
+  // The restore could not read the slot (an error, or no answer within the
+  // storage bound). FAIL CLOSED: Record and the camera stay disabled and the
+  // screen says so, with Retry, because the slot may hold an unresolved
+  // attempt nobody has seen. `restoreSettled` is still set, so a kiosk's
+  // deadline runs.
+  const [restoreFailed, setRestoreFailed] = useState(false);
+  // One line under Record or Confirm when it ended without sending, or a
+  // replay came back "not signed in". Cleared by the next action.
+  const [attemptNotice, setAttemptNotice] = useState<string | null>(null);
   const [pendingDurable, setPendingDurable] = useState(true);
   const [refusal, setRefusal] = useState<Refusal | null>(null);
   // Ref instead of state — the in-flight attempt id must NOT trigger a
@@ -644,6 +660,50 @@ export default function ContributeToGoal() {
   );
   const [legacyOrphan, setLegacyOrphan] = useState<PendingContribution | null>(null);
 
+  // Read this account's stored attempt for this goal and settle the screen on
+  // the answer. Called on every context change (below) and by Retry on the
+  // "couldn't read" state.
+  //
+  // A record written before the key carried a uid belongs to an account we
+  // cannot identify. It is retired, never adopted and never resubmitted.
+  //
+  // This account's own unconfirmed attempt comes back as `unknown`, and the
+  // escalation is persisted so a second reload shows the same screen even
+  // if the user does nothing. Restoring it NEVER makes it confirmed, never
+  // shows a receipt and never opens the camera; only a server response
+  // confirms anything (src/pendingContribution.ts `restorePendingAttempt`).
+  //
+  // The read is asynchronous (device storage), so its answer is applied
+  // only if this is still the context that asked: a sign-out, account
+  // switch, goal switch or unmount meanwhile bumps the generation and the
+  // answer is dropped — it can never restore one account's attempt into
+  // another's session.
+  //
+  // It settles on every path. `restorePendingAttempt` does not reject (and a
+  // storage call that never answers is bounded), but if it ever did, the
+  // screen settles exactly as for a failed read.
+  //
+  // A FAILED READ FAILS CLOSED. "Nothing stored" and "could not read" are
+  // different answers: on the second, new attempts stay disabled
+  // (`restoreFailed`) until Retry reads the slot.
+  const startRestore = useCallback((forGoal: string, forUid: string | null) => {
+    const restoringFor = generationRef.current;
+    setRestoreFailed(false);
+    setRestoreSettled(false);
+    void restorePendingAttempt(forGoal, forUid)
+      .catch((): RestoredAttempt => ({ pending: null, orphan: null, readFailed: true }))
+      .then(({ pending: restored, orphan, readFailed }) => {
+        if (generationRef.current !== restoringFor) return;
+        if (orphan) setLegacyOrphan(orphan);
+        if (restored) {
+          setPending(restored);
+          setPendingDurable(true);
+        }
+        if (readFailed) setRestoreFailed(true);
+        setRestoreSettled(true);
+      });
+  }, []);
+
   // Restore this ACCOUNT's unconfirmed attempt for this goal, and clear
   // everything on sign-out, an account switch or a goal switch. Both the
   // pending screen and the last receipt are cleared: a receipt shows a
@@ -664,6 +724,8 @@ export default function ContributeToGoal() {
     setPending(null);
     setPendingDurable(true);
     setRestoreSettled(false);
+    setRestoreFailed(false);
+    setAttemptNotice(null);
     setLastResult(null);
     setRepeatPolicy(recorded?.policy ?? 'once');
     setLegacyOrphan(null);
@@ -693,37 +755,8 @@ export default function ContributeToGoal() {
       return;
     }
 
-    // A record written before the key carried a uid belongs to an account we
-    // cannot identify. It is retired, never adopted and never resubmitted.
-    //
-    // This account's own unconfirmed attempt comes back as `unknown`, and the
-    // escalation is persisted so a second reload shows the same screen even
-    // if the user does nothing. Restoring it NEVER makes it confirmed, never
-    // shows a receipt and never opens the camera; only a server response
-    // confirms anything (src/pendingContribution.ts `restorePendingAttempt`).
-    //
-    // The read is asynchronous (device storage), so its answer is applied
-    // only if this is still the context that asked: a sign-out, account
-    // switch, goal switch or unmount meanwhile bumps the generation and the
-    // answer is dropped — it can never restore one account's attempt into
-    // another's session.
-    //
-    // It settles on every path. `restorePendingAttempt` does not reject (and a
-    // storage call that never answers is bounded), but if it ever did, the
-    // screen settles with nothing restored: otherwise Record, the camera and
-    // a kiosk's deadline would wait on it for good.
-    const restoringFor = generationRef.current;
-    void restorePendingAttempt(goalId, uid)
-      .catch((): RestoredAttempt => ({ pending: null, orphan: null, readFailed: true }))
-      .then(({ pending: restored, orphan }) => {
-        if (generationRef.current !== restoringFor) return;
-        if (orphan) setLegacyOrphan(orphan);
-        if (restored) {
-          setPending(restored);
-          setPendingDurable(true);
-        }
-        setRestoreSettled(true);
-      });
+    // This account's stored attempt, read and applied by `startRestore`.
+    startRestore(goalId, uid);
 
     return () => {
       // Navigating away invalidates everything outstanding, so a response that
@@ -1120,10 +1153,11 @@ export default function ContributeToGoal() {
     // Not before this account's stored attempt has been read back (device
     // storage answers asynchronously): a new attempt now could overwrite a
     // reminder the member has not reconciled.
-    if (!mayBeginNewAttempt({ restoreSettled, pending, settled: refusal != null || lastResult != null })) return;
+    if (!mayBeginNewAttempt({ restoreSettled, restoreFailed, pending, settled: refusal != null || lastResult != null })) return;
     inFlightRef.current = true;
     const count = reviewCount;
     setEntryError(null);
+    setAttemptNotice(null);
     setSubmitting(true);
     sharedBeforeRef.current = state.pulse.sharedTotal;
     beforeTargetRef.current = state.pulse.target;
@@ -1160,11 +1194,27 @@ export default function ContributeToGoal() {
       // still goes, but the screen will not promise the attempt survives
       // leaving it (`pendingDurable`).
       const opened = await openAttempt(pendingRow, owner, mayFire);
+      if (opened.conflict) {
+        // The slot already held a DIFFERENT, unresolved attempt this screen
+        // had not shown. Nothing was written and nothing was sent: that
+        // attempt is what the member confirms first.
+        if (stillCurrent()) {
+          setPending({ ...opened.conflict, state: 'unknown' });
+          setPendingDurable(true);
+          attemptRef.current = null;
+          setAttemptNotice(ATTEMPT_CONFLICT_NOTICE);
+        }
+        return;
+      }
       if (!opened.fire) {
-        // The context moved on while the record was being written: nothing
-        // was sent, and the record has been retired. The new context has
-        // already reset this screen; if somehow it has not, return to review.
-        if (stillCurrent()) setPending(null);
+        // The context or the signed-in account moved on while the record was
+        // being written: nothing was sent, and the record has been retired.
+        // A new context has already reset this screen; if it has not, the
+        // member is back on review and told why.
+        if (stillCurrent()) {
+          setPending(null);
+          setAttemptNotice(ATTEMPT_NOT_SENT_NOTICE);
+        }
         return;
       }
       if (stillCurrent()) setPendingDurable(opened.durable);
@@ -1183,6 +1233,7 @@ export default function ContributeToGoal() {
         // The live account was not the one that pressed Record at the moment
         // of sending: nothing left the device, and the record is retired.
         setPending(null);
+        setAttemptNotice(ATTEMPT_NOT_SENT_NOTICE);
       } else if (settled.kind === 'refused') {
         // The server ran the request and refused it: nothing was recorded and
         // nothing will be. The reminder has been retired under the ORIGINAL
@@ -1213,6 +1264,7 @@ export default function ContributeToGoal() {
     currentContext,
     takeRoundAttemptId,
     restoreSettled,
+    restoreFailed,
     pending,
     refusal,
     lastResult,
@@ -1229,6 +1281,7 @@ export default function ContributeToGoal() {
     inFlightRef.current = true;
     setSubmitting(true);
     setEntryError(null);
+    setAttemptNotice(null);
     attemptRef.current = pending.attemptId;
     // A replay has NO trustworthy "before". The total on screen was captured
     // before the unknown period, polling is off for the whole of it, and the
@@ -1268,6 +1321,7 @@ export default function ContributeToGoal() {
       if (settled.kind === 'notSent') {
         // Not sent: the record is untouched, and the reminder stays.
         setPending({ ...replay, state: 'unknown' });
+        setAttemptNotice(ATTEMPT_NOT_SENT_NOTICE);
       } else if (settled.kind === 'refused') {
         const failure = classifyContributeError(settled.error);
         setPending(null);
@@ -1277,12 +1331,21 @@ export default function ContributeToGoal() {
         // Conditional, for the same reason as onRecord: an old replay failure
         // must not overwrite a newer attempt's record.
         setPending({ ...replay, state: 'unknown' });
+        // "Not signed in" keeps the reminder (it says nothing about whether
+        // the original landed), so say why nothing moved.
+        if (isSignInExpired(settled.error)) setAttemptNotice(REPLAY_SIGN_IN_NOTICE);
       }
     } finally {
       inFlightRef.current = false;
       if (stillCurrent()) setSubmitting(false);
     }
   }, [pending, submitting, goalId, uid, sendContribute, currentContext]);
+
+  // Retry on the "couldn't read this device's saved attempt" state: the same
+  // restore, again, for the same context.
+  const onRetryRestore = useCallback(() => {
+    if (goalId) startRestore(goalId, uid);
+  }, [goalId, uid, startRestore]);
 
   // There is deliberately no control that discards an unresolved attempt's
   // reminder: it is the only recovery context for effort whose outcome is
@@ -2415,6 +2478,11 @@ export default function ContributeToGoal() {
             <Text style={styles.stepBody}>
               We don’t know whether this effort was recorded. Don’t record it again.
             </Text>
+            {attemptNotice ? (
+              <Text style={styles.stepBody} testID="wsf-contribute-attempt-notice">
+                {attemptNotice}
+              </Text>
+            ) : null}
             <View style={styles.sheetActionsInline}>
               <Pressable
                 onPress={onReconcile}
@@ -2630,6 +2698,52 @@ export default function ContributeToGoal() {
     );
   }
 
+  // ---- the device's saved attempt could not be read --------------------------
+  // FAIL CLOSED (NATIVE-STATE-1). The restore could not read this account's
+  // slot, so it may hold an unresolved attempt nobody has seen. Entry, review
+  // and the camera are not offered — a new attempt could replace that one —
+  // until Retry reads it. A kiosk keeps its Finish and its deadline.
+  if (restoreFailed && beforeWrite) {
+    return screen(
+      <>
+        {renderChrome(false)}
+        <View style={styles.sheet} testID="wsf-contribute-restore-failed" aria-live="polite">
+          {renderSheetHead('Your attempt')}
+          <View style={styles.sheetBody}>
+            <Text style={styles.stepHeading} {...HEADING_1}>{RESTORE_FAILED_HEADING}</Text>
+            <Text style={styles.stepBody}>{RESTORE_FAILED_BODY}</Text>
+            <View style={styles.sheetActionsInline}>
+              <Pressable
+                onPress={onRetryRestore}
+                disabled={!restoreSettled}
+                accessibilityRole="button"
+                style={styles.primaryButton}
+                testID="wsf-contribute-restore-retry"
+              >
+                <Text style={styles.primaryButtonText}>{RESTORE_RETRY_LABEL}</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+        <View style={styles.actions}>
+          {kiosk ? (
+            renderKioskFinish(kioskOutcome)
+          ) : (
+            <ReturnButton
+              href={backHref}
+              style={styles.tertiaryButton}
+              textStyle={styles.tertiaryButtonText}
+              testID="wsf-contribute-back"
+              label={backLabel}
+            />
+          )}
+        </View>
+        {renderTestNote()}
+      </>,
+      'wsf-contribute-screen'
+    );
+  }
+
   // ---- review ---------------------------------------------------------------
   if (step === 'review' && reviewCount != null) {
     return screen(
@@ -2656,6 +2770,11 @@ export default function ContributeToGoal() {
                 {repeatNotice(repeatPolicy)}
               </Text>
             </View>
+            {attemptNotice ? (
+              <Text style={styles.stepBody} testID="wsf-contribute-attempt-notice">
+                {attemptNotice}
+              </Text>
+            ) : null}
             <View style={[styles.sheetActionsInline, styles.pair]}>
               <Pressable
                 onPress={onEdit}
@@ -2704,7 +2823,7 @@ export default function ContributeToGoal() {
     // NATIVE-STATE-1: not before the stored attempt has been read back (a
     // restored attempt must never be overtaken by the camera), and not on
     // default settings the member may have turned off on this device.
-    mayBeginNewAttempt({ restoreSettled, pending, settled: refusal != null || lastResult != null }) &&
+    mayBeginNewAttempt({ restoreSettled, restoreFailed, pending, settled: refusal != null || lastResult != null }) &&
     moveCameraLoaded &&
     state.kind === 'ready' &&
     cameraEntryAllowed({

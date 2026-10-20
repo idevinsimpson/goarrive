@@ -20,16 +20,22 @@
  * this process never overwrites that newer write.
  *
  * AN UNREADABLE KEY IS NOT AN EMPTY ONE. If the store cannot be read (the
- * read is tried twice), the key is answered as nothing — so no screen waits
- * on it forever — but `unreadable(key)` says so, and a caller that would
- * write a value DERIVED from "nothing stored" checks it first rather than
- * overwrite a record it could not see. An explicit write clears the flag.
+ * read is tried twice, each try bounded), the key is answered as nothing —
+ * so no screen waits on it forever — but `unreadable(key)` says so, and a
+ * caller that would write a value DERIVED from "nothing stored" checks it
+ * first rather than overwrite a record it could not see. An explicit write
+ * clears the flag. (Only the camera settings derive a write today, and they
+ * check it. A member's own explicit change made AFTER an unreadable launch
+ * read — a settings toggle, a chosen community — is written as asked, and
+ * replaces the stored value it could not see; that is their choice now.) A
+ * prefix listing that fails or does not answer reads as no keys.
  *
  * EXPIRY. A store whose values expire (the native session store, two hours)
  * reports each value's expiry when it is read and its lifetime when written.
  * The in-memory copy honours it: an expired value reads as nothing, however
  * long this process has been running.
  */
+import { bounded, STORAGE_OP_TIMEOUT_MS } from './keyQueue';
 import type { DeviceKv } from './kv';
 
 export type KeyMirror = {
@@ -77,9 +83,13 @@ export function createKeyMirror(
 
   const loaded = (key: string) => readSync(key) !== undefined || memory.has(key);
 
+  // Every read is BOUNDED (src/storage/keyQueue.ts): a device call that never
+  // answers counts as unreadable after the bound, so a screen waiting on
+  // `load` is never held for good. (The session store bounds its own calls
+  // too; the device store does not, so this is where its reads are bounded.)
   const readOnce = async (key: string) => {
     try {
-      return await kv.readItem(key);
+      return await bounded(() => kv.readItem(key), STORAGE_OP_TIMEOUT_MS, () => ({ ok: false }) as const);
     } catch {
       return { ok: false } as const;
     }
@@ -119,7 +129,7 @@ export function createKeyMirror(
     async loadPrefix(prefix) {
       let keys: string[] = [];
       try {
-        keys = await kv.keysWithPrefix(prefix);
+        keys = await bounded(() => kv.keysWithPrefix(prefix), STORAGE_OP_TIMEOUT_MS, () => []);
       } catch {
         keys = [];
       }

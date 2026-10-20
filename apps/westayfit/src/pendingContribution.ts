@@ -112,13 +112,26 @@ async function readSlotUnqueued(goalId: string, uid: string): Promise<SlotRead> 
   return { ok: true, value: parsePending(read.value, goalId) };
 }
 
-/** Write a NEW attempt's record, unless the slot could not be read. Run inside the slot's queue. */
-async function writeNewUnqueued(p: PendingContribution, uid: string): Promise<boolean> {
-  const read = await deviceKv.readItem(pendingKey(p.goalId, uid));
-  // A record we could not read may be an unresolved attempt; it is not
-  // overwritten. The new attempt is reported not durable instead.
-  if (!read.ok) return false;
-  return deviceKv.setItem(pendingKey(p.goalId, uid), JSON.stringify(p));
+type NewWrite = { durable: boolean; conflict: PendingContribution | null };
+
+/**
+ * Write a NEW attempt's record — CREATE-ONLY. Run inside the slot's queue.
+ *
+ *   - unreadable slot: nothing written (a record we could not read may be an
+ *     unresolved attempt); not durable.
+ *   - readable slot holding a DIFFERENT attempt: nothing written; that
+ *     attempt comes back as `conflict`, for the screen to show as the
+ *     unresolved attempt it is. Overwriting it would lose the member's only
+ *     reminder of effort whose outcome is unknown — which is what a restore
+ *     that timed out, or failed and then recovered, used to allow.
+ *   - empty slot, or the SAME attempt (a re-Record after it was not sent):
+ *     written; durable if the device kept it.
+ */
+async function writeNewUnqueued(p: PendingContribution, uid: string): Promise<NewWrite> {
+  const read = await readSlotUnqueued(p.goalId, uid);
+  if (!read.ok) return { durable: false, conflict: null };
+  if (read.value && read.value.attemptId !== p.attemptId) return { durable: false, conflict: read.value };
+  return { durable: await deviceKv.setItem(pendingKey(p.goalId, uid), JSON.stringify(p)), conflict: null };
 }
 
 /** Clear the slot only if it is readable and does not hold a different attempt. Run inside the slot's queue. */
@@ -131,6 +144,7 @@ async function clearIfAttemptUnqueued(goalId: string, uid: string, attemptId: st
 
 /** This account's record for this goal; null when absent, malformed or unreadable. */
 export async function loadPending(goalId: string, uid: string): Promise<PendingContribution | null> {
+  if (!isGoalIdShape(goalId)) return null;
   const read = await onSlot(
     pendingKey(goalId, uid),
     () => readSlotUnqueued(goalId, uid),
@@ -190,6 +204,7 @@ export function retireLegacyPending(goalId: string): Promise<PendingContribution
  * still works within the session from the screen's own state.)
  */
 export function savePending(p: PendingContribution, uid: string): Promise<boolean> {
+  if (!isGoalIdShape(p.goalId)) return Promise.resolve(false);
   return onSlot(
     pendingKey(p.goalId, uid),
     () => deviceKv.setItem(pendingKey(p.goalId, uid), JSON.stringify(p)),
@@ -198,20 +213,22 @@ export function savePending(p: PendingContribution, uid: string): Promise<boolea
 }
 
 /**
- * Create the record for a genuinely NEW attempt.
- *
- * Unconditional by design — except over a slot the device could not read:
- * starting an attempt is the one moment a record is supposed to come into
- * existence, but an unreadable slot may hold an unresolved attempt, and that
- * is not overwritten (the new attempt is reported not durable instead).
- * Everything asynchronous uses `updatePendingIfAttempt` instead.
+ * Create the record for a genuinely NEW attempt — create-only: it never
+ * replaces a different attempt's record, and never writes over a slot the
+ * device could not read (see `writeNewUnqueued`). Everything asynchronous
+ * uses `updatePendingIfAttempt` instead.
  *
  * Resolves TRUE ONLY WHEN THE DEVICE ACCEPTED THE WRITE. That answer is what
  * entitles the screen to say "the same attempt will be here when you come
  * back"; see `openAttempt`, which waits for it before the request fires.
  */
 export function savePendingNew(p: PendingContribution, uid: string): Promise<boolean> {
-  return onSlot(pendingKey(p.goalId, uid), () => writeNewUnqueued(p, uid), () => false);
+  if (!isGoalIdShape(p.goalId)) return Promise.resolve(false);
+  return onSlot(
+    pendingKey(p.goalId, uid),
+    async () => (await writeNewUnqueued(p, uid)).durable,
+    () => false
+  );
 }
 
 /**
@@ -237,6 +254,7 @@ export function updatePendingIfAttempt(
   uid: string,
   attemptId: string
 ): Promise<boolean> {
+  if (!isGoalIdShape(p.goalId)) return Promise.resolve(false);
   return onSlot(
     pendingKey(p.goalId, uid),
     async () => {
@@ -258,10 +276,12 @@ export function updatePendingIfAttempt(
  * not clear a newer one, and a slot that could not be read is not cleared.
  */
 export function clearPendingIfAttempt(goalId: string, uid: string, attemptId: string): Promise<boolean> {
+  if (!isGoalIdShape(goalId)) return Promise.resolve(false);
   return onSlot(pendingKey(goalId, uid), () => clearIfAttemptUnqueued(goalId, uid, attemptId), () => false);
 }
 
 export function clearPending(goalId: string, uid: string): Promise<boolean> {
+  if (!isGoalIdShape(goalId)) return Promise.resolve(false);
   return onSlot(pendingKey(goalId, uid), () => deviceKv.removeItem(pendingKey(goalId, uid)), () => false);
 }
 
@@ -350,15 +370,22 @@ export async function restorePendingAttempt(goalId: string, uid: string | null):
  * asynchronously now, and a new attempt started before it answered would
  * overwrite a reminder the member has not reconciled — and could book the
  * same effort twice under two attempt ids. And never while an attempt is
- * pending, or a refusal or receipt is on screen. (The camera additionally
- * stays closed while a legacy record is present; that rule is the screen's.)
+ * pending, or a refusal or receipt is on screen, or while the restore could
+ * not read the slot at all. (The camera additionally stays closed while a
+ * legacy record is present; that rule is the screen's.)
  */
 export function mayBeginNewAttempt(s: {
   restoreSettled: boolean;
+  /**
+   * The restore could not read this account's slot (an error, or no answer
+   * within the storage bound). FAIL CLOSED: the slot may hold an unresolved
+   * attempt nobody has seen, so nothing new begins until a retry reads it.
+   */
+  restoreFailed: boolean;
   pending: PendingContribution | null;
   settled: boolean;
 }): boolean {
-  return s.restoreSettled && !s.pending && !s.settled;
+  return s.restoreSettled && !s.restoreFailed && !s.pending && !s.settled;
 }
 
 /**
@@ -375,11 +402,13 @@ export function mayBeginNewAttempt(s: {
  *   - the owner is the account the context was started for.
  */
 export function mayFireAs(
-  owner: string,
+  owner: string | null | undefined,
   started: RequestContext,
   current: RequestContext,
   liveUid: string | null | undefined
 ): boolean {
+  // An owner is somebody: "nobody signed in, still nobody" is not a match.
+  if (typeof owner !== 'string' || owner === '') return false;
   return isSameContext(started, current) && started.uid === owner && liveUid === owner;
 }
 
@@ -399,20 +428,42 @@ export function mayFireAs(
  * at all and the record this call just wrote is retired — in the SAME queued
  * operation as the write, so a restore cannot read it in between and offer
  * an attempt that was never sent.
+ *
+ * CREATE-ONLY: a slot that already holds a different attempt is a
+ * `conflict`, not a slot to overwrite (`writeNewUnqueued`).
+ *
+ * If the device does not answer within the storage bound, the request still
+ * fires (not durable). Should the read then answer with a different attempt,
+ * the late write is refused as a conflict, so that attempt is not replaced.
  */
+export type OpenedAttempt = {
+  fire: boolean;
+  durable: boolean;
+  /**
+   * The slot already held a DIFFERENT attempt this screen had not shown (the
+   * restore failed or timed out, another tab wrote it, ...). Nothing was
+   * written and nothing may be sent: the screen shows this attempt as the
+   * unresolved one instead.
+   */
+  conflict?: PendingContribution;
+};
+
 export function openAttempt(
   row: PendingContribution,
   uid: string,
   mayFire: () => boolean
-): Promise<{ fire: boolean; durable: boolean }> {
+): Promise<OpenedAttempt> {
+  if (!isGoalIdShape(row.goalId)) return Promise.resolve({ fire: mayFire(), durable: false });
   // Set when the time bound answered for this call. A write that completes
   // after that must not then act on its own: the caller already has its
   // answer, and the request may already be out.
   let answeredLate = false;
   return onSlot(
     pendingKey(row.goalId, uid),
-    async () => {
-      const durable = await writeNewUnqueued(row, uid);
+    async (): Promise<OpenedAttempt> => {
+      const write = await writeNewUnqueued(row, uid);
+      if (write.conflict) return { fire: false, durable: false, conflict: write.conflict };
+      const durable = write.durable;
       if (answeredLate) return { fire: false, durable };
       if (mayFire()) return { fire: true, durable };
       if (durable) await clearIfAttemptUnqueued(row.goalId, uid, row.attemptId);
