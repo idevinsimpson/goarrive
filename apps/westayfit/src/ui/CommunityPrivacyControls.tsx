@@ -2,6 +2,7 @@ import { httpsCallable } from 'firebase/functions';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useWsfAuth } from '../auth';
+import { serverWroteMessage } from '../callableRefusal';
 import { getFirebaseFunctions } from '../firebase';
 import { currentFirst, resolveCurrentCommunity } from '../currentCommunity';
 import { forgetCommunity, peekMemberProfile, readMyCommunities } from '../memberReads';
@@ -21,9 +22,12 @@ import type { PrivacyCommunity, PrivacySaveErrorKind, Visibility } from './commu
  * A FAILED SAVE STAYS SAID (W7 Check 43). The stored values are re-read
  * QUIETLY after a failure, and the failure stays until the member retries or
  * makes another change, in one of three kinds:
- *   · `membershipRefused` — `not-found` / `permission-denied`: this account no
- *     longer belongs there; that community's record goes, and its block says
- *     so with no switches;
+ *   · `membershipRefused` — `not-found` / `permission-denied` WRITTEN BY THE
+ *     FUNCTION ("Members only."), and a quiet re-read of the memberships no
+ *     longer lists that community: this account no longer belongs there;
+ *     that community's record goes, and its block says so with no switches.
+ *     A body-less 403/404 (a block in front of the function, MF-04) or a
+ *     refusal the re-read does not confirm is classified as below instead;
  *   · `unconfirmed` — the re-read found the asked-for value stored (the write
  *     landed though its reply did not), or could not re-read at all;
  *   · `notSaved` — the re-read found the value unchanged.
@@ -65,6 +69,16 @@ type SetResponse = { groupId: string; name: Visibility; activity: Visibility };
 type Failure = { kind: PrivacySaveErrorKind; setting: Setting; value: Visibility };
 
 const REFUSED = new Set(['functions/not-found', 'functions/permission-denied']);
+
+/** Whether the account's memberships still list `groupId`; null when they could not be read. */
+async function stillListed(uid: string, groupId: string): Promise<boolean | null> {
+  try {
+    const answer = await readMyCommunities(uid);
+    return (answer.items ?? []).some((i) => i.groupId === groupId);
+  } catch {
+    return null;
+  }
+}
 
 export function CommunityPrivacyControls({ compact = false }: { compact?: boolean }) {
   const { user, ready } = useWsfAuth();
@@ -203,12 +217,21 @@ export function CommunityPrivacyControls({ compact = false }: { compact?: boolea
       } catch (e) {
         if (epoch.current !== ep) return;
         const code = (e as { code?: unknown } | null)?.code;
-        if (typeof code === 'string' && REFUSED.has(code)) {
-          forgetCommunity(uid, groupId);
-          setFailure(groupId, { kind: 'membershipRefused', setting, value });
-          setSavingFor(groupId, null);
-          await load({ quiet: true });
-          return;
+        // NATIVE-MEMBER-1 F-6 (MF-04). "No longer a member" is said, and the
+        // community forgotten, only when the FUNCTION refused in its own words
+        // and the memberships, re-read quietly, agree. A body-less 403/404 is
+        // the staging block or a proxy in front of the function: it says
+        // nothing about membership, so it is a save that did not go through.
+        if (typeof code === 'string' && REFUSED.has(code) && serverWroteMessage(e)) {
+          const listed = await stillListed(uid, groupId);
+          if (epoch.current !== ep) return;
+          if (listed === false) {
+            forgetCommunity(uid, groupId);
+            setFailure(groupId, { kind: 'membershipRefused', setting, value });
+            setSavingFor(groupId, null);
+            await load({ quiet: true });
+            return;
+          }
         }
         // Re-read rather than guess -- quietly, and without clearing the failure.
         setSavingFor(groupId, null);

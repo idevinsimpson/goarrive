@@ -6,6 +6,7 @@ import { useWsfAuth } from '../auth';
 import { AuthFlagOffPanel } from '../AuthFlagOffPanel';
 import { SecondaryLink, StatusText } from '../AuthFormPrimitives';
 import { describeCallableError } from '../callableErrors';
+import { isBodylessRefusal } from '../callableRefusal';
 import { clearEventReturn } from '../eventReturn';
 import { wsfAuthEnabled } from '../featureFlags';
 import {
@@ -51,6 +52,8 @@ type Phase =
   | { kind: 'resolved'; marker: ResolvedMarker };
 
 const INVALID_TITLE = 'This code isn’t active';
+const RESOLVE_FAILED = 'We couldn’t open this code. Try again.';
+const JOIN_FAILED = 'We couldn’t join you just now. Try again.';
 
 export function MarkerEntryScreen({
   slug,
@@ -84,10 +87,15 @@ export function MarkerEntryScreen({
       .catch((e: unknown) => {
         if (cancelled) return;
         const code = (e as { code?: unknown })?.code;
-        if (code === 'functions/not-found' || code === 'functions/invalid-argument') {
+        // NATIVE-MEMBER-1 (MF-04's pattern, HB-01 note). A body-less 401/403/404
+        // is a block in front of the function, not its answer: it says nothing
+        // about this code ("isn't active") or this account ("can't do that").
+        if (isBodylessRefusal(e)) {
+          setPhase({ kind: 'error', message: RESOLVE_FAILED });
+        } else if (code === 'functions/not-found' || code === 'functions/invalid-argument') {
           setPhase({ kind: 'invalid' });
         } else {
-          setPhase({ kind: 'error', message: describeCallableError(e, 'We couldn’t open this code. Try again.') });
+          setPhase({ kind: 'error', message: describeCallableError(e, RESOLVE_FAILED) });
         }
       });
     return () => {
@@ -135,8 +143,9 @@ export function MarkerEntryScreen({
       setAttempt((n) => n + 1);
     } catch (e) {
       const code = (e as { code?: unknown })?.code;
-      if (code === 'functions/not-found') setPhase({ kind: 'invalid' });
-      else setJoinError(describeCallableError(e, 'We couldn’t join you just now. Try again.'));
+      if (isBodylessRefusal(e)) setJoinError(JOIN_FAILED);
+      else if (code === 'functions/not-found') setPhase({ kind: 'invalid' });
+      else setJoinError(describeCallableError(e, JOIN_FAILED));
     } finally {
       setJoining(false);
     }
