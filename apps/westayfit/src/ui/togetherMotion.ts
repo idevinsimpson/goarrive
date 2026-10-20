@@ -10,6 +10,11 @@
  * decides a crossing and never stores anything. The receipt is fully readable
  * before, during and after it; cancelling it at any moment leaves the same
  * exact final receipt.
+ *
+ * NATIVE-MOTION-1: the timing constants and per-frame functions below
+ * (pulse stops and easing, glow, waves, pieces) are the single source for
+ * both drivers — `runTogetherMotion` here on the web, and
+ * togetherMotionNative.tsx on iOS/Android.
  */
 
 /** The receipt-only palette. Scoped to the Together receipt; no shared token changes. */
@@ -53,17 +58,120 @@ export function fillRatioAt(ms: number, from: number, to: number): number {
   return from + (to - from) * easeOutCubic(p);
 }
 
+/**
+ * The pulse's iteration easing, as numbers: cubic-bezier(.2,.65,.3,1). The web
+ * hands it to the Web Animation as the effect easing (applied to the whole
+ * 2,700 ms iteration, keyframes linear between offsets); NATIVE-MOTION-1 hands
+ * the same four numbers to `Easing.bezier`, so both ease identically.
+ */
+export const TOGETHER_PULSE_EASING = [0.2, 0.65, 0.3, 1] as const;
+export const TOGETHER_PULSE_EASING_CSS = `cubic-bezier(${TOGETHER_PULSE_EASING.join(',')})`;
+
+/** The pulse as numbers: offsets in [0, 1] of the 2,700 ms iteration and the scale there. */
+export function pulseStops(crossed: boolean): ReadonlyArray<{ offset: number; scale: number }> {
+  return [
+    { offset: 0, scale: 1 },
+    { offset: 0.28, scale: 0.96 },
+    { offset: 0.46, scale: 0.94 },
+    { offset: 0.57, scale: crossed ? 1.13 : 1.1 },
+    { offset: 0.72, scale: 0.99 },
+    { offset: 0.83, scale: 1.018 },
+    { offset: 1, scale: 1 },
+  ];
+}
+
 /** The gather (94%) and the single rebound (110%, or 113% on a crossing). */
 export function pulseKeyframes(crossed: boolean): Keyframe[] {
-  return [
-    { transform: 'scale(1)', offset: 0 },
-    { transform: 'scale(0.96)', offset: 0.28 },
-    { transform: 'scale(0.94)', offset: 0.46 },
-    { transform: `scale(${crossed ? 1.13 : 1.1})`, offset: 0.57 },
-    { transform: 'scale(0.99)', offset: 0.72 },
-    { transform: 'scale(1.018)', offset: 0.83 },
-    { transform: 'scale(1)', offset: 1 },
+  return pulseStops(crossed).map((s) => ({ transform: `scale(${s.scale})`, offset: s.offset }));
+}
+
+/** The glow's gather and release windows, in ms from the start of the motion. */
+export const TOGETHER_GLOW = {
+  gatherStartMs: 280,
+  gatherMs: 1180,
+  releaseStartMs: 1610,
+  releaseMs: 920,
+  /** The radial gradient's stops: alpha at the centre, at 40% of the radius, and 0 at the edge. */
+  centerAlpha: 0.3,
+  midAlpha: 0.12,
+  midStop: 0.4,
+} as const;
+
+/** The glow's strength at `ms`: a smooth gather from 280 ms, a smooth release from 1,610 ms. */
+export function glowAlphaAt(ms: number): number {
+  const gather = smooth(clamp01((ms - TOGETHER_GLOW.gatherStartMs) / TOGETHER_GLOW.gatherMs));
+  const release = 1 - smooth(clamp01((ms - TOGETHER_GLOW.releaseStartMs) / TOGETHER_GLOW.releaseMs));
+  return gather * release;
+}
+
+/** The glow's radius on a stage `width` wide. */
+export function glowRadius(width: number): number {
+  return Math.max(180, width * 0.59);
+}
+
+/** The halo waves in draw order: two on every motion, a third, fainter one on a crossing. */
+export function togetherWaves(crossed: boolean): ReadonlyArray<{ delayMs: number; strength: number }> {
+  const waves: Array<{ delayMs: number; strength: number }> = [
+    { delayMs: TOGETHER_TIMING.waveDelaysMs[0], strength: 0.55 },
+    { delayMs: TOGETHER_TIMING.waveDelaysMs[1], strength: 0.22 },
   ];
+  if (crossed) waves.push({ delayMs: TOGETHER_TIMING.crossingWaveDelayMs, strength: 0.12 });
+  return waves;
+}
+
+/** One wave at `ms`: its radius, alpha and stroke width, or null outside its 900 ms. */
+export function waveAt(
+  ms: number,
+  delay: number,
+  strength: number,
+  width: number
+): { radius: number; alpha: number; lineWidth: number } | null {
+  const raw = (ms - delay) / TOGETHER_TIMING.waveDurationMs;
+  if (raw < 0 || raw > 1) return null;
+  const p = 1 - Math.pow(1 - raw, 3);
+  return {
+    radius: 28 + p * width * 0.85,
+    alpha: Math.pow(1 - raw, 1.4) * strength,
+    lineWidth: (1 - raw) * 7 + 0.5,
+  };
+}
+
+/**
+ * The whole timeline as one value, for whichever driver plays it. Every
+ * number comes from TOGETHER_TIMING, the pulse stops and the wave list above;
+ * nothing here is platform-specific.
+ */
+export type TogetherTimeline = {
+  crossed: boolean;
+  pulse: {
+    durationMs: number;
+    easing: typeof TOGETHER_PULSE_EASING;
+    stops: ReadonlyArray<{ offset: number; scale: number }>;
+    peakScale: number;
+  };
+  fill: { startMs: number; durationMs: number };
+  waves: ReadonlyArray<{ delayMs: number; strength: number; durationMs: number }>;
+  pieces: number;
+  canvasEndMs: number;
+  settleMs: number;
+};
+
+export function togetherTimeline(crossed: boolean): TogetherTimeline {
+  const stops = pulseStops(crossed);
+  return {
+    crossed,
+    pulse: {
+      durationMs: TOGETHER_TIMING.pulseDurationMs,
+      easing: TOGETHER_PULSE_EASING,
+      stops,
+      peakScale: Math.max(...stops.map((s) => s.scale)),
+    },
+    fill: { startMs: TOGETHER_TIMING.fillStartMs, durationMs: TOGETHER_TIMING.fillDurationMs },
+    waves: togetherWaves(crossed).map((w) => ({ ...w, durationMs: TOGETHER_TIMING.waveDurationMs })),
+    pieces: pieceCount(crossed),
+    canvasEndMs: TOGETHER_TIMING.canvasEndMs,
+    settleMs: TOGETHER_TIMING.settleMs,
+  };
 }
 
 /** Decorative pieces. A count of light, not of people or contributions. */
@@ -115,7 +223,8 @@ export function buildPieces(opts: {
   return pieces;
 }
 
-function bezier(points: TogetherPiece['points'], n: number): Point {
+/** A point on a piece's cubic Bézier path at parameter `n` in [0, 1]. */
+export function bezier(points: TogetherPiece['points'], n: number): Point {
   const q = 1 - n;
   const [p0, p1, p2, p3] = points;
   return {
@@ -124,8 +233,52 @@ function bezier(points: TogetherPiece['points'], n: number): Point {
   };
 }
 
-const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
-const smooth = (n: number) => n * n * (3 - 2 * n);
+/**
+ * One piece at `ms`, or null outside its own window: where its head and its
+ * trail's tail are on the path, its alpha, and its shrinking length and
+ * breadth. The web canvas and the native layer both draw from this.
+ */
+export function pieceFrameAt(
+  piece: TogetherPiece,
+  ms: number
+): {
+  p: number;
+  u: number;
+  tailU: number;
+  head: Point;
+  tangent: Point;
+  tail: Point;
+  alpha: number;
+  length: number;
+  breadth: number;
+} | null {
+  const p = (ms - piece.delay) / piece.duration;
+  if (p < 0 || p > 1) return null;
+  const u = p * p * 0.62 + p * 0.38;
+  const head = bezier(piece.points, u);
+  const tangent = bezier(piece.points, Math.min(1, u + 0.018));
+  const alpha = clamp01(p * 7) * clamp01((1 - p) * 9);
+  const tailU = Math.max(0, u - 0.19);
+  const tail = bezier(piece.points, tailU);
+  return {
+    p,
+    u,
+    tailU,
+    head,
+    tangent,
+    tail,
+    alpha,
+    length: piece.length * (1 - p * 0.53),
+    breadth: piece.breadth * (1 - p * 0.2),
+  };
+}
+
+function clamp01(n: number): number {
+  return Math.max(0, Math.min(1, n));
+}
+function smooth(n: number): number {
+  return n * n * (3 - 2 * n);
+}
 
 /**
  * Runs the decorative layer, the scale pulse and the confirmed-ratio tween on
@@ -202,7 +355,7 @@ export function runTogetherMotion(opts: {
     animations.push(
       mark.animate(pulseKeyframes(crossed), {
         duration: TOGETHER_TIMING.pulseDurationMs,
-        easing: 'cubic-bezier(.2,.65,.3,1)',
+        easing: TOGETHER_PULSE_EASING_CSS,
       })
     );
   }
@@ -219,14 +372,9 @@ export function runTogetherMotion(opts: {
       markHeight: markBox.height,
     });
     const drawPiece = (piece: TogetherPiece, ms: number) => {
-      const p = (ms - piece.delay) / piece.duration;
-      if (p < 0 || p > 1) return;
-      const u = p * p * 0.62 + p * 0.38;
-      const head = bezier(piece.points, u);
-      const tangent = bezier(piece.points, Math.min(1, u + 0.018));
-      const alpha = clamp01(p * 7) * clamp01((1 - p) * 9);
-      const tailU = Math.max(0, u - 0.19);
-      const tail = bezier(piece.points, tailU);
+      const at = pieceFrameAt(piece, ms);
+      if (!at) return;
+      const { u, head, tangent, alpha, tailU, tail, length, breadth } = at;
       const trail = g.createLinearGradient(tail.x, tail.y, head.x, head.y);
       trail.addColorStop(0, `rgba(${piece.color},0)`);
       trail.addColorStop(1, `rgba(${piece.color},${alpha * 0.47})`);
@@ -242,8 +390,6 @@ export function runTogetherMotion(opts: {
       g.save();
       g.translate(head.x, head.y);
       g.rotate(Math.atan2(tangent.y - head.y, tangent.x - head.x));
-      const length = piece.length * (1 - p * 0.53);
-      const breadth = piece.breadth * (1 - p * 0.2);
       g.fillStyle = `rgba(${piece.color},${alpha})`;
       g.shadowColor = `rgba(145,203,125,${alpha * 0.55})`;
       g.shadowBlur = 12;
@@ -257,17 +403,15 @@ export function runTogetherMotion(opts: {
       g.restore();
     };
     const drawWave = (ms: number, delay: number, strength: number) => {
-      const raw = (ms - delay) / TOGETHER_TIMING.waveDurationMs;
-      if (raw < 0 || raw > 1) return;
-      const p = 1 - Math.pow(1 - raw, 3);
-      const radius = 28 + p * width * 0.85;
-      const alpha = Math.pow(1 - raw, 1.4) * strength;
+      const wave = waveAt(ms, delay, strength, width);
+      if (!wave) return;
+      const { radius, alpha, lineWidth } = wave;
       g.save();
       g.translate(centerX, centerY);
       g.scale(1, 0.87);
       g.beginPath();
       g.arc(0, 0, radius, 0, Math.PI * 2);
-      g.lineWidth = (1 - raw) * 7 + 0.5;
+      g.lineWidth = lineWidth;
       g.strokeStyle = `rgba(145,203,125,${alpha})`;
       g.shadowColor = `rgba(145,203,125,${alpha * 0.6})`;
       g.shadowBlur = 15;
@@ -279,22 +423,18 @@ export function runTogetherMotion(opts: {
       if (disposed) return;
       const ms = now - started;
       g.clearRect(0, 0, width, height);
-      const gather = smooth(clamp01((ms - 280) / 1180));
-      const release = 1 - smooth(clamp01((ms - 1610) / 920));
-      const glowAlpha = gather * release;
+      const glowAlpha = glowAlphaAt(ms);
       if (glowAlpha > 0) {
-        const radius = Math.max(180, width * 0.59);
+        const radius = glowRadius(width);
         const glow = g.createRadialGradient(centerX, centerY, 4, centerX, centerY, radius);
-        glow.addColorStop(0, `rgba(145,203,125,${glowAlpha * 0.3})`);
-        glow.addColorStop(0.4, `rgba(145,203,125,${glowAlpha * 0.12})`);
+        glow.addColorStop(0, `rgba(145,203,125,${glowAlpha * TOGETHER_GLOW.centerAlpha})`);
+        glow.addColorStop(TOGETHER_GLOW.midStop, `rgba(145,203,125,${glowAlpha * TOGETHER_GLOW.midAlpha})`);
         glow.addColorStop(1, 'rgba(145,203,125,0)');
         g.fillStyle = glow;
         g.fillRect(0, 0, width, height);
       }
       pieces.forEach((piece) => drawPiece(piece, ms));
-      drawWave(ms, TOGETHER_TIMING.waveDelaysMs[0], 0.55);
-      drawWave(ms, TOGETHER_TIMING.waveDelaysMs[1], 0.22);
-      if (crossed) drawWave(ms, TOGETHER_TIMING.crossingWaveDelayMs, 0.12);
+      for (const wave of togetherWaves(crossed)) drawWave(ms, wave.delayMs, wave.strength);
       if (ms < TOGETHER_TIMING.canvasEndMs) frame = requestAnimationFrame(draw);
       else canvas.remove();
     };
