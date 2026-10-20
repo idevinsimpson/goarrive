@@ -94,14 +94,35 @@ export function configureDemoPlayer(player: VideoPlayer): void {
 
 const inForeground = (state: string): boolean => state !== 'background' && state !== 'inactive';
 
+/**
+ * ONE SLOT PER SOURCE. Everything the slot learns — failures, the pending
+ * retry, whether the poster failed, what it is showing — is about ONE poster
+ * and ONE clip. Keying the slot on them means a changed source starts a fresh
+ * slot (the old player released, its retry cancelled, its counters gone), so
+ * nothing from one clip can be applied to, or call into, another. The slot
+ * itself is also scoped (below), so it stays correct even if rendered unkeyed.
+ */
 export function MovementDemoMedia(props: MovementDemoMediaProps) {
+  return <MovementDemoSlot key={`${props.posterUri}\n${props.clipUri}`} {...props} />;
+}
+
+type Showing = 'poster' | 'playing' | 'paused';
+
+/** The slot itself. Exported for tests; the app renders it through MovementDemoMedia. */
+export function MovementDemoSlot(props: MovementDemoMediaProps) {
   const { posterUri, clipUri, label, playback, reducedMotion, imageStyle, fallback, testIDPrefix } = props;
   const id = (s: string) => `${testIDPrefix}-${s}`;
 
-  const [failed, setFailed] = useState(false);
-  const [posterFailed, setPosterFailed] = useState(false);
-  const [showing, setShowing] = useState<'poster' | 'playing' | 'paused'>('poster');
-  const failures = useRef(0);
+  // SOURCE-SCOPED STATE. A failure belongs to the clip it happened to, a
+  // broken poster to that poster, and what is showing to the player showing
+  // it: read against the current source, anything recorded for another one
+  // reads as nothing.
+  const [failedFor, setFailedFor] = useState<string | null>(null);
+  const failed = failedFor === clipUri;
+  const [posterFailedFor, setPosterFailedFor] = useState<string | null>(null);
+  const posterFailed = posterFailedFor === posterUri;
+  const attempts = useRef({ clip: clipUri, failures: 0, attemptFailed: false });
+  if (attempts.current.clip !== clipUri) attempts.current = { clip: clipUri, failures: 0, attemptFailed: false };
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Read by player events and retries, which outlive the render they began in.
@@ -114,13 +135,34 @@ export function MovementDemoMedia(props: MovementDemoMediaProps) {
   // navigation has loaded). Until then the poster stays up, which is truthful.
   const focused = useRef(false);
   const foreground = useRef(inForeground(AppState.currentState));
-  /** Whether the current source has put a frame on screen. */
+  /** Whether the current player has put a frame on screen. */
   const frameShown = useRef(false);
-  /** Whether the player reports itself playing. */
+  /** Whether the current player reports itself playing. */
   const isPlaying = useRef(false);
+
+  // Declared BEFORE the player so its cleanup runs before useVideoPlayer's
+  // release on unmount: every later cleanup then knows the player is going and
+  // leaves it alone, so nothing is ever called on a released player.
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
 
   // Only a live slot gives the player the clip; settling on the poster drops it.
   const player = useVideoPlayer(live ? clipUri : null, configureDemoPlayer);
+  const playerRef = useRef(player);
+  playerRef.current = player;
+  /** Whether `p` is still this slot's player (not replaced, not being released). */
+  const usable = useCallback((p: VideoPlayer) => alive.current && playerRef.current === p, []);
+
+  // What is showing belongs to the player that showed it: a new player has
+  // shown nothing yet, so it reads as the poster until its own first frame.
+  const [shown, setShown] = useState<{ player: VideoPlayer; value: Showing }>({ player, value: 'poster' });
+  const showing: Showing = shown.player === player ? shown.value : 'poster';
+  const setShowing = useCallback((value: Showing) => setShown({ player: playerRef.current, value }), []);
 
   /** The clip may play only while the round runs and someone can see it. */
   const mayPlay = useCallback(
@@ -130,7 +172,7 @@ export function MovementDemoMedia(props: MovementDemoMediaProps) {
 
   const reveal = useCallback(() => {
     if (isPlaying.current && frameShown.current && playbackRef.current === 'running') setShowing('playing');
-  }, []);
+  }, [setShowing]);
 
   const clearRetry = () => {
     if (retryTimer.current) clearTimeout(retryTimer.current);
@@ -138,38 +180,47 @@ export function MovementDemoMedia(props: MovementDemoMediaProps) {
   };
 
   // One attempt fails once, however many ways it reports it (a status error
-  // and a rejected replace for the same load count as one failure).
-  const attemptFailed = useRef(false);
-
+  // and a rejected replace for the same load count as one failure). Every
+  // retry is bound to the player and clip it was scheduled for: if either has
+  // changed by the time it fires or answers, it does nothing.
   const fail = useCallback(() => {
-    if (attemptFailed.current) return;
-    attemptFailed.current = true;
-    failures.current += 1;
+    const scope = attempts.current;
+    if (scope.clip !== clipUri || playerRef.current !== player) return;
+    if (scope.attemptFailed) return;
+    scope.attemptFailed = true;
+    scope.failures += 1;
     clearRetry();
-    if (!shouldRetryDemo(failures.current)) {
+    if (!shouldRetryDemo(scope.failures)) {
       setShowing('poster');
-      setFailed(true);
+      setFailedFor(clipUri);
       return;
     }
+    const retryPlayer = player;
+    const current = () => usable(retryPlayer) && attempts.current === scope && liveRef.current;
     retryTimer.current = setTimeout(() => {
       retryTimer.current = null;
-      if (!liveRef.current) return;
-      attemptFailed.current = false;
+      if (!current()) return;
+      scope.attemptFailed = false;
       frameShown.current = false;
       setShowing('poster');
-      player.replaceAsync(clipUri).then(
-        () => {
-          if (mayPlay()) safely(() => player.play());
-        },
-        () => fail()
-      );
+      safely(() => {
+        retryPlayer.replaceAsync(clipUri).then(
+          () => {
+            if (current() && mayPlay()) safely(() => retryPlayer.play());
+          },
+          () => {
+            if (current()) fail();
+          }
+        );
+      });
     }, DEMO_RETRY_DELAY_MS);
-  }, [player, clipUri, mayPlay]);
+  }, [player, clipUri, mayPlay, setShowing, usable]);
 
-  // A new player (a new source) starts with no frame and not playing.
+  // A new player starts with no frame, not playing, and no retry of the old one pending.
   useEffect(() => {
     frameShown.current = false;
     isPlaying.current = false;
+    return () => clearRetry();
   }, [player]);
 
   // The only two events this slot hears, and all they change is what it shows.
@@ -179,6 +230,7 @@ export function MovementDemoMedia(props: MovementDemoMediaProps) {
       if (next === 'error') fail();
     });
     const playing = player.addListener('playingChange', ({ isPlaying: now }) => {
+      if (!usable(player)) return;
       isPlaying.current = now;
       // A play that lands after the round stopped running is not shown as playing.
       if (now && !mayPlay()) safely(() => player.pause());
@@ -189,7 +241,7 @@ export function MovementDemoMedia(props: MovementDemoMediaProps) {
       safely(() => status.remove());
       safely(() => playing.remove());
     };
-  }, [player, live, fail, mayPlay, reveal]);
+  }, [player, live, fail, mayPlay, reveal, usable]);
 
   // THE ROUND DECIDES; THE CLIP FOLLOWS.
   useEffect(() => {
@@ -204,7 +256,7 @@ export function MovementDemoMedia(props: MovementDemoMediaProps) {
       safely(() => (player.currentTime = 0));
       setShowing('poster');
     }
-  }, [playback, live, player, mayPlay]);
+  }, [playback, live, player, mayPlay, setShowing]);
 
   // Leaving the screen pauses; coming back resumes only a round still running.
   useFocusEffect(
@@ -213,23 +265,21 @@ export function MovementDemoMedia(props: MovementDemoMediaProps) {
       if (mayPlay()) safely(() => player.play());
       return () => {
         focused.current = false;
-        safely(() => player.pause());
+        if (usable(player)) safely(() => player.pause());
       };
-    }, [player, mayPlay])
+    }, [player, mayPlay, usable])
   );
 
   // The app leaving the foreground pauses; returning resumes only a round still running.
   useEffect(() => {
     const sub = AppState.addEventListener('change', (next) => {
       foreground.current = inForeground(next);
+      if (!usable(player)) return;
       if (!foreground.current) safely(() => player.pause());
       else if (mayPlay()) safely(() => player.play());
     });
     return () => sub.remove();
-  }, [player, mayPlay]);
-
-  // No retry outlives the slot.
-  useEffect(() => () => clearRetry(), []);
+  }, [player, mayPlay, usable]);
 
   const onFirstFrameRender = useCallback(() => {
     frameShown.current = true;
@@ -252,7 +302,7 @@ export function MovementDemoMedia(props: MovementDemoMediaProps) {
         style={overlay ? [imageStyle, styles.overlay] : imageStyle}
         resizeMode="contain"
         accessibilityLabel={label}
-        onError={() => setPosterFailed(true)}
+        onError={() => setPosterFailedFor(posterUri)}
         testID={id('poster')}
       />
     );

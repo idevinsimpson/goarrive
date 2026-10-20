@@ -38,31 +38,36 @@ const ctl = vi.hoisted(() => {
     private time = 0;
     listeners = new Map<string, Set<(payload: any) => void>>();
     calls: string[] = [];
+    /** Calls attempted on this player after it was released (each throws, like the native object). */
+    afterRelease: string[] = [];
     replaceResult: 'resolve' | 'reject' = 'resolve';
     constructor(source: unknown) {
       this.source = source;
     }
-    private live() {
-      if (this.released) throw new Error('Cannot use a released shared object');
+    private live(name: string) {
+      if (this.released) {
+        this.afterRelease.push(name);
+        throw new Error('Cannot use a released shared object');
+      }
     }
     get currentTime() {
       return this.time;
     }
     set currentTime(t: number) {
-      this.live();
+      this.live('seek');
       this.calls.push(`seek:${t}`);
       this.time = t;
     }
     play() {
-      this.live();
+      this.live('play');
       this.calls.push('play');
     }
     pause() {
-      this.live();
+      this.live('pause');
       this.calls.push('pause');
     }
     replaceAsync(source: unknown) {
-      this.live();
+      this.live('replace');
       this.calls.push('replace');
       this.source = source;
       return this.replaceResult === 'resolve' ? Promise.resolve() : Promise.reject(new Error('load failed'));
@@ -169,12 +174,14 @@ vi.mock('react-native', async () => {
 });
 
 import { DEMO_RETRY_DELAY_MS, DEMO_RETRY_LIMIT, type DemoPlayback } from '../src/movementDemoMedia';
-import { MovementDemoMedia } from '../src/ui/MovementDemoMedia';
+import { MovementDemoMedia, MovementDemoSlot } from '../src/ui/MovementDemoMedia';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const POSTER = '/media/movements/squats@v1.png';
 const CLIP = '/media/movements/squats@v1.mp4';
+const POSTER_B = '/media/movements/push-ups@v1.png';
+const CLIP_B = '/media/movements/push-ups@v1.mp4';
 
 let container: HTMLDivElement;
 let root: Root;
@@ -196,14 +203,21 @@ afterEach(() => {
   act(() => root.unmount());
   container.remove();
   vi.useRealTimers();
+  // In every test, nothing was ever called on a player after it was released.
+  for (const p of ctl.players) expect(p.afterRelease).toEqual([]);
 });
 
-function render(playback: DemoPlayback, reducedMotion = false) {
+function render(
+  playback: DemoPlayback,
+  reducedMotion = false,
+  source: { poster: string; clip: string; slot?: boolean } = { poster: POSTER, clip: CLIP }
+) {
+  const Component = source.slot ? MovementDemoSlot : MovementDemoMedia;
   act(() => {
     root.render(
-      <MovementDemoMedia
-        posterUri={POSTER}
-        clipUri={CLIP}
+      <Component
+        posterUri={source.poster}
+        clipUri={source.clip}
         label="Movement guide: squats."
         playback={playback}
         reducedMotion={reducedMotion}
@@ -562,4 +576,91 @@ describe('the media can reach nothing that counts', () => {
     const props = src.slice(src.indexOf('export type MovementDemoMediaProps'), src.indexOf('};', src.indexOf('export type MovementDemoMediaProps')));
     expect(props).not.toMatch(/=>|\(\)/);
   });
+});
+
+describe('one slot per source: nothing carries from one clip to another', () => {
+  const A = { poster: POSTER, clip: CLIP };
+  const B = { poster: POSTER_B, clip: CLIP_B };
+
+  for (const slot of [false, true]) {
+    const how = slot ? 'the slot itself, unkeyed' : 'MovementDemoMedia (keyed on its source)';
+
+    it(`${how}: a source change mid-retry cancels the retry and never calls the released player`, async () => {
+      render('running', false, { ...A, slot });
+      const a = player();
+      emit('statusChange', { status: 'error' }); // a retry of A is now pending
+      expect(vi.getTimerCount()).toBe(1);
+      render('running', false, { ...B, slot });
+      expect(a.released).toBe(true);
+      expect(vi.getTimerCount()).toBe(0); // A's retry is gone
+      const b = player();
+      expect(b).not.toBe(a);
+      expect(b.source).toBe(CLIP_B);
+      await act(async () => vi.advanceTimersByTime(DEMO_RETRY_DELAY_MS * 5));
+      await flush();
+      expect(a.count('replace')).toBe(0);
+      expect(a.afterRelease).toEqual([]); // not one call reached the released player
+      expect(b.calls).not.toContain('replace');
+    });
+
+    it(`${how}: the new clip gets its own full retry budget and its own poster-first reveal`, async () => {
+      render('running', false, { ...A, slot });
+      emit('statusChange', { status: 'error' });
+      await act(async () => vi.advanceTimersByTime(DEMO_RETRY_DELAY_MS));
+      await flush();
+      emit('statusChange', { status: 'error' }); // A has used both retries' worth of failures
+      render('running', false, { ...B, slot });
+      const b = player();
+      // B starts on its own poster, not on anything A showed.
+      expect(state()).toBe('poster');
+      expect(el('fa-poster')?.getAttribute('data-uri')).toBe(POSTER_B);
+      // B fails: it is retried DEMO_RETRY_LIMIT times before settling — A's count did not carry over.
+      for (let i = 1; i <= DEMO_RETRY_LIMIT; i += 1) {
+        emit('statusChange', { status: 'error' });
+        expect(state()).toBe('poster');
+        await act(async () => vi.advanceTimersByTime(DEMO_RETRY_DELAY_MS));
+        await flush();
+        expect(b.count('replace')).toBe(i);
+      }
+      emit('statusChange', { status: 'error' });
+      expect(state()).toBe('fallback');
+    });
+
+    it(`${how}: a playing clip replaced by another shows the poster until the new clip's own first frame`, () => {
+      render('running', false, { ...A, slot });
+      emit('playingChange', { isPlaying: true });
+      firstFrame();
+      expect(state()).toBe('playing');
+      render('running', false, { ...B, slot });
+      expect(state()).toBe('poster');
+      expect(el('fa-poster')?.getAttribute('data-uri')).toBe(POSTER_B);
+      emit('playingChange', { isPlaying: true });
+      expect(state()).toBe('poster'); // B playing, but no frame of B yet
+      firstFrame();
+      expect(state()).toBe('playing');
+    });
+
+    it(`${how}: a clip that settled on the fallback does not make the next clip a fallback`, async () => {
+      render('running', false, { ...A, slot });
+      for (let i = 0; i <= DEMO_RETRY_LIMIT; i += 1) {
+        emit('statusChange', { status: 'error' });
+        await act(async () => vi.advanceTimersByTime(DEMO_RETRY_DELAY_MS));
+        await flush();
+      }
+      expect(state()).toBe('fallback');
+      render('running', false, { ...B, slot });
+      expect(state()).toBe('poster');
+      expect(player().source).toBe(CLIP_B);
+      expect(el('fa-video')).not.toBeNull();
+    });
+
+    it(`${how}: a broken poster does not break the next poster`, () => {
+      render('idle', false, { ...A, slot });
+      act(() => ctl.imageErrors.get('fa-poster')!());
+      expect(el('guide')).not.toBeNull();
+      render('idle', false, { ...B, slot });
+      expect(el('fa-poster')?.getAttribute('data-uri')).toBe(POSTER_B);
+      expect(el('guide')).toBeNull();
+    });
+  }
 });
