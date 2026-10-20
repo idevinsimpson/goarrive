@@ -1,11 +1,11 @@
-<!-- wsf-control ledgerHead=e9960a67f3c1bc98185f34b57a9748b50d02395d073d5ec876298cee3485925d events=1372 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=032a1925e84a6625bdaddda84f459410db31eee4beeaebdf2eef63f0e967c7c4 events=1377 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `e9960a67f3c1bc98185f34b57a9748b50d02395d073d5ec876298cee3485925d` (1372 events)
+- Ledger head: `032a1925e84a6625bdaddda84f459410db31eee4beeaebdf2eef63f0e967c7c4` (1377 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
@@ -336,9 +336,9 @@ GitHub is the authority for facts (PR state, heads, CI, comments). This page rec
 | 7a11a7148c22 | W5 | KIOSK-GUEST-MOVE-1 | review | redelivered | 6113079769, 6114680608 | — |
 | 781dcc461cae | W9 | KIOSK-LIVE-POSE-PROD-1 | release | acked | 6127713152, 6128561949 | comment:6128872837 |
 | 21e4a1187fac | W3 | KIOSK-LIVE-POSE-PROD-1 | review | acked | 6129382439 | comment:6129522845 |
-| 65a6162d12cc | W12 | NATIVE-BOOT-1 | release | retried | 6303072227 | — |
-| 2c10b95549b5 | W15 | NATIVE-CAMERA-1 | release | retried | 6303072420 | — |
-| 2caea7f27d65 | W16 | NATIVE-MEMBER-1 | release | retried | 6303072630 | — |
-| fbac724f5bab | W14 | NATIVE-MOTION-1 | release | retried | 6303072853 | — |
-| ec0eb4c92b4a | W13 | NATIVE-STATE-1 | release | retried | 6303073115 | — |
+| 65a6162d12cc | W12 | NATIVE-BOOT-1 | release | redelivered | 6303072227, 6303651117 | — |
+| 2c10b95549b5 | W15 | NATIVE-CAMERA-1 | release | redelivered | 6303072420, 6303651327 | — |
+| 2caea7f27d65 | W16 | NATIVE-MEMBER-1 | release | redelivered | 6303072630, 6303651500 | — |
+| fbac724f5bab | W14 | NATIVE-MOTION-1 | release | redelivered | 6303072853, 6303651689 | — |
+| ec0eb4c92b4a | W13 | NATIVE-STATE-1 | release | redelivered | 6303073115, 6303651870 | — |
 

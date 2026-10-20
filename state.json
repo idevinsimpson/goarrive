@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "e9960a67f3c1bc98185f34b57a9748b50d02395d073d5ec876298cee3485925d",
-  "eventCount": 1372,
+  "ledgerHead": "032a1925e84a6625bdaddda84f459410db31eee4beeaebdf2eef63f0e967c7c4",
+  "eventCount": 1377,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -8692,9 +8692,10 @@
       "packet": "NATIVE-BOOT-1",
       "worker": "W12",
       "reason": "release",
-      "status": "retried",
+      "status": "redelivered",
       "comments": [
-        6303072227
+        6303072227,
+        6303651117
       ],
       "ack": null
     },
@@ -8702,9 +8703,10 @@
       "packet": "NATIVE-CAMERA-1",
       "worker": "W15",
       "reason": "release",
-      "status": "retried",
+      "status": "redelivered",
       "comments": [
-        6303072420
+        6303072420,
+        6303651327
       ],
       "ack": null
     },
@@ -8712,9 +8714,10 @@
       "packet": "NATIVE-MEMBER-1",
       "worker": "W16",
       "reason": "release",
-      "status": "retried",
+      "status": "redelivered",
       "comments": [
-        6303072630
+        6303072630,
+        6303651500
       ],
       "ack": null
     },
@@ -8722,9 +8725,10 @@
       "packet": "NATIVE-MOTION-1",
       "worker": "W14",
       "reason": "release",
-      "status": "retried",
+      "status": "redelivered",
       "comments": [
-        6303072853
+        6303072853,
+        6303651689
       ],
       "ack": null
     },
@@ -8732,9 +8736,10 @@
       "packet": "NATIVE-STATE-1",
       "worker": "W13",
       "reason": "release",
-      "status": "retried",
+      "status": "redelivered",
       "comments": [
-        6303073115
+        6303073115,
+        6303651870
       ],
       "ack": null
     }
