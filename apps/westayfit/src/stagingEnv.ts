@@ -355,3 +355,31 @@ export function readStagingEnv(): StagingEnvInput {
     emulatorFlagRaw: process.env.EXPO_PUBLIC_WSF_USE_EMULATORS,
   };
 }
+
+/**
+ * Native builds must NAME their backend.
+ *
+ * On web, "no selector and no staging values" is the established production
+ * build and stays silent. A phone build is different: a development or
+ * internal-test binary built from a shell that simply forgot its variables
+ * would otherwise talk to LIVE PRODUCTION with real members' data. So on iOS
+ * and Android the only accepted shapes are an explicit
+ * `EXPO_PUBLIC_WSF_ENV=production`, an explicit `EXPO_PUBLIC_WSF_ENV=staging`
+ * (with its complete config, checked by resolveStagingConfig), or the
+ * development-only emulator flag. Anything else refuses to start.
+ */
+export function nativeTargetProblem(input: {
+  isNative: boolean;
+  envName: string | undefined;
+  emulated: boolean;
+}): string | null {
+  if (!input.isNative || input.emulated) return null;
+  const envName = (input.envName ?? '').trim();
+  if (envName === 'production' || envName === 'staging') return null;
+  return (
+    'WSF NATIVE CONFIGURATION REFUSED — a phone build must name its backend. ' +
+    'Set EXPO_PUBLIC_WSF_ENV=staging (with the staging config) or EXPO_PUBLIC_WSF_ENV=production, ' +
+    'or EXPO_PUBLIC_WSF_USE_EMULATORS=1 in a development build. ' +
+    `Got EXPO_PUBLIC_WSF_ENV=${envName === '' ? '(not set)' : `"${envName}"`}.`
+  );
+}
