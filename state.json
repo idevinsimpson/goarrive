@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "baae9c7559dbd59fd11f8a9822af15451b2d7a2523bbc279f5cf3a031417aff1",
-  "eventCount": 1340,
+  "ledgerHead": "2ae8e2ba0596bdb90611134da756577fcfcebb61a18b71096123c3b4600597d1",
+  "eventCount": 1347,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -40,6 +40,15 @@
     "W12": {
       "inbox": 631
     },
+    "W13": {
+      "inbox": 631
+    },
+    "W14": {
+      "inbox": 631
+    },
+    "W15": {
+      "inbox": 631
+    },
     "W3": {
       "inbox": 396,
       "classes": [
@@ -72,7 +81,18 @@
   },
   "queue": {
     "W11": [],
-    "W12": [],
+    "W12": [
+      "NATIVE-BOOT-1"
+    ],
+    "W13": [
+      "NATIVE-STATE-1"
+    ],
+    "W14": [
+      "NATIVE-MOTION-1"
+    ],
+    "W15": [
+      "NATIVE-CAMERA-1"
+    ],
     "W3": [],
     "W4": [],
     "W5": [],
@@ -3966,6 +3986,306 @@
         "after": "director"
       },
       "deliveries": 2,
+      "pendingFinding": null
+    },
+    "NATIVE-BOOT-1": {
+      "owner": "W12",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Native-safe Firebase boot (no window.location at import), explicit native backend, RN auth persistence, device storage boundary (PR #632)",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "apps/westayfit/app.config.js",
+        "apps/westayfit/app.json",
+        "apps/westayfit/package-lock.json",
+        "apps/westayfit/package.json",
+        "apps/westayfit/src/InAppBrowserBanner.tsx",
+        "apps/westayfit/src/firebase.ts",
+        "apps/westayfit/src/firebaseAuthInit.native.ts",
+        "apps/westayfit/src/firebaseAuthInit.ts",
+        "apps/westayfit/src/platformHost.ts",
+        "apps/westayfit/src/stagingEnv.ts",
+        "apps/westayfit/src/storage/kv.native.ts",
+        "apps/westayfit/src/storage/kv.ts",
+        "apps/westayfit/tests/native-boot.test.ts"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6299271000
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6299271000
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "ops-source",
+            "count": 1
+          },
+          {
+            "class": "security",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
+      "pendingFinding": null
+    },
+    "NATIVE-CAMERA-1": {
+      "owner": "W15",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Native pose camera module (MediaPipe) feeding the unchanged frozen counter; JS tested, native uncompiled (PR #638)",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "apps/westayfit/modules/wsf-pose-camera/WsfPoseCamera.podspec",
+        "apps/westayfit/modules/wsf-pose-camera/android/build.gradle",
+        "apps/westayfit/modules/wsf-pose-camera/android/proguard-rules.pro",
+        "apps/westayfit/modules/wsf-pose-camera/android/src/main/java/expo/modules/wsfposecamera/WsfPoseCameraModule.kt",
+        "apps/westayfit/modules/wsf-pose-camera/android/src/main/java/expo/modules/wsfposecamera/WsfPoseCameraView.kt",
+        "apps/westayfit/modules/wsf-pose-camera/android/src/main/java/expo/modules/wsfposecamera/WsfPoseModel.kt",
+        "apps/westayfit/modules/wsf-pose-camera/android/src/main/java/expo/modules/wsfposecamera/WsfPoseRun.kt",
+        "apps/westayfit/modules/wsf-pose-camera/assets/pose_landmarker_lite.task",
+        "apps/westayfit/modules/wsf-pose-camera/expo-module.config.json",
+        "apps/westayfit/modules/wsf-pose-camera/index.ts",
+        "apps/westayfit/modules/wsf-pose-camera/ios/WsfPoseCameraModule.swift",
+        "apps/westayfit/modules/wsf-pose-camera/ios/WsfPoseCameraView.swift",
+        "apps/westayfit/modules/wsf-pose-camera/ios/WsfPoseModel.swift",
+        "apps/westayfit/modules/wsf-pose-camera/ios/WsfPoseRun.swift",
+        "apps/westayfit/modules/wsf-pose-camera/src/WsfPoseCamera.types.ts",
+        "apps/westayfit/modules/wsf-pose-camera/src/WsfPoseCameraView.tsx",
+        "apps/westayfit/src/movement-camera/controller.native.ts",
+        "apps/westayfit/src/movement-camera/nativeEngine.ts",
+        "apps/westayfit/src/movement-camera/support.native.ts",
+        "apps/westayfit/src/ui/CameraRepCounter.tsx",
+        "apps/westayfit/src/ui/CameraSkeletonOverlay.native.tsx",
+        "apps/westayfit/src/ui/NativeCameraPreview.native.tsx",
+        "apps/westayfit/src/ui/NativeCameraPreview.tsx",
+        "apps/westayfit/tests/move-camera-native-adapter.test.ts",
+        "docs/westayfit/qa/move-camera-native-adapter-1.md"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6299283720
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6299283720
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "journey-qa",
+            "count": 1
+          },
+          {
+            "class": "security",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
+      "pendingFinding": null
+    },
+    "NATIVE-MOTION-1": {
+      "owner": "W14",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Together completion motion on iOS/Android with shared web timing, reduced-motion safe (PR #634)",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "apps/westayfit/src/ui/TogetherCompletion.tsx",
+        "apps/westayfit/src/ui/togetherMotion.ts",
+        "apps/westayfit/src/ui/togetherMotionNative.tsx",
+        "apps/westayfit/src/ui/togetherPhase.ts",
+        "apps/westayfit/src/ui/useReducedMotion.ts",
+        "apps/westayfit/tests/together-native-motion.test.ts",
+        "apps/westayfit/tests/together-native-view.test.tsx"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6299279967
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6299279967
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "journey-qa",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
+      "pendingFinding": null
+    },
+    "NATIVE-STATE-1": {
+      "owner": "W13",
+      "kind": "work",
+      "completion": {
+        "terminal": "INTEGRATED",
+        "proofType": "source-only"
+      },
+      "label": "Continuity records on the device storage boundary: pending attempt, join code, community, camera prefs; six proof cases (PR #635)",
+      "origin": "ledger",
+      "phase": "QUEUED",
+      "phaseBeforeBlock": null,
+      "queueIndexBeforeBlock": null,
+      "inbox": null,
+      "pr": null,
+      "reviewers": [],
+      "artifact": {
+        "subjectSha": null,
+        "prHeadSha": null,
+        "evidenceSha": null,
+        "mergeSha": null
+      },
+      "proof": null,
+      "served": null,
+      "releasedQueueIndex": null,
+      "reviewedBy": [],
+      "subjectPaths": [
+        "apps/westayfit/app/(tabs)/(home)/community/[groupId]/index.tsx",
+        "apps/westayfit/app/(tabs)/(home)/index.tsx",
+        "apps/westayfit/app/(tabs)/community/index.tsx",
+        "apps/westayfit/app/(tabs)/you.tsx",
+        "apps/westayfit/app/contribute/[goalId].tsx",
+        "apps/westayfit/app/join/[joinCode].tsx",
+        "apps/westayfit/app/move/index.tsx",
+        "apps/westayfit/app/profile-setup.tsx",
+        "apps/westayfit/app/signin.tsx",
+        "apps/westayfit/app/signup.tsx",
+        "apps/westayfit/app/verify-email.tsx",
+        "apps/westayfit/src/authDestination.ts",
+        "apps/westayfit/src/currentCommunity.ts",
+        "apps/westayfit/src/kioskSession.ts",
+        "apps/westayfit/src/movement-camera/settingsStore.ts",
+        "apps/westayfit/src/pendingContribution.ts",
+        "apps/westayfit/src/pendingJoinCode.ts",
+        "apps/westayfit/src/storage/mirror.ts",
+        "apps/westayfit/src/storage/sessionKv.native.ts",
+        "apps/westayfit/src/storage/sessionKv.ts",
+        "apps/westayfit/src/storage/syncRead.native.ts",
+        "apps/westayfit/src/storage/syncRead.ts",
+        "apps/westayfit/tests/continuity-web.test.ts",
+        "apps/westayfit/tests/contribute-account-isolation.test.ts",
+        "apps/westayfit/tests/kiosk-session.test.ts",
+        "apps/westayfit/tests/native-continuity.test.ts",
+        "apps/westayfit/tests/nativeStorageHarness.ts"
+      ],
+      "blockedBy": [],
+      "importRefs": [],
+      "authority": {
+        "queued": {
+          "kind": "comment",
+          "id": 6299274765
+        },
+        "released": null,
+        "accepted": null,
+        "lastTransition": {
+          "kind": "comment",
+          "id": 6299274765
+        }
+      },
+      "review": {
+        "workerReviews": [
+          {
+            "class": "journey-qa",
+            "count": 1
+          },
+          {
+            "class": "security",
+            "count": 1
+          }
+        ],
+        "appliesTo": "subject",
+        "after": "director"
+      },
+      "deliveries": 0,
       "pendingFinding": null
     },
     "NORTHSTAR-MIRROR-INTAKE-1": {
