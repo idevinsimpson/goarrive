@@ -14,18 +14,9 @@ vi.mock('react-native-safe-area-context', () => ({
   initialWindowMetrics: { insets: { top: 47, bottom: 34, left: 0, right: 0 }, frame: { x: 0, y: 0, width: 390, height: 844 } },
 }));
 
-import {
-  CRASH_RECORDS_KEY,
-  MAX_CRASH_RECORDS,
-  crashRecordOf,
-  installCrashContainment,
-  WITHHELD_MESSAGE,
-  persistCrash,
-  readCrashRecords,
-  recordMessage,
-  scrubFrames,
-  scrubMessage,
-} from '../src/crashContainment';
+import * as webContainment from '../src/crashContainment';
+import { installCrashContainment } from '../src/crashContainment.native';
+import * as webHarness from '../src/crashHarness';
 import {
   armCrashSiteForTest,
   disarmAllCrashSites,
@@ -33,10 +24,24 @@ import {
   injectedRenderFault,
   isCrashSiteArmed,
   parseCrashHarness,
-} from '../src/crashHarness';
+} from '../src/crashHarness.native';
+import {
+  CRASH_RECORDS_KEY,
+  MAX_CRASH_RECORDS,
+  crashRecordOf,
+  WITHHELD_MESSAGE,
+  persistCrash,
+  readCrashRecords,
+  recordMessage,
+  scrubFrames,
+  scrubMessage,
+} from '../src/crashRecords';
 import type { DeviceKv } from '../src/storage/kv';
-import { CrashRecordsCard } from '../src/ui/CrashRecordsCard';
-import { RouteErrorFallback, nativeErrorBoundary, type FallbackVariant } from '../src/ui/RouteErrorFallback';
+import * as webRecordsCard from '../src/ui/CrashRecordsCard';
+import { CrashRecordsCard } from '../src/ui/CrashRecordsCard.native';
+import * as webFallback from '../src/ui/RouteErrorFallback';
+import { RouteErrorFallback, nativeErrorBoundary } from '../src/ui/RouteErrorFallback.native';
+import type { FallbackVariant } from '../src/ui/routeErrorTypes';
 
 /**
  * NATIVE-INTEGRATOR-1 (INT-01): crash containment, everything vitest can run.
@@ -378,15 +383,26 @@ describe('route boundaries and their fallback', () => {
     expect(tryJs).toContain('this.setState({ error: undefined }');
   });
 
-  it('every boundary is native only: undefined on web, so expo-router wraps nothing there', () => {
+  it('every boundary is native only: the web module returns undefined, so expo-router wraps nothing there', () => {
+    const variants = ['root', 'shell', 'homeTab', 'tab', 'screen', 'contribute'] as FallbackVariant[];
+    // The module Metro bundles for web.
+    for (const v of variants) expect(webFallback.nativeErrorBoundary(v)).toBeUndefined();
+    // The native module, with its own second guard should it ever be bundled for web.
     (Platform as { OS: string }).OS = 'web';
-    for (const v of ['root', 'shell', 'homeTab', 'tab', 'screen', 'contribute'] as FallbackVariant[]) {
-      expect(nativeErrorBoundary(v)).toBeUndefined();
-    }
+    for (const v of variants) expect(nativeErrorBoundary(v)).toBeUndefined();
     (Platform as { OS: string }).OS = 'android';
-    expect(nativeErrorBoundary('tab')).toBeTypeOf('function');
+    for (const v of variants) expect(nativeErrorBoundary(v)).toBeTypeOf('function');
     // Stable identity per variant (no new component type per render).
     expect(nativeErrorBoundary('tab')).toBe(nativeErrorBoundary('tab'));
+  });
+
+  it('the web modules are inert: no handler, no harness, no records card', () => {
+    expect(webContainment.installCrashContainment()).toBe(false);
+    expect(webHarness.crashHarnessEnabled()).toBe(false);
+    expect(webHarness.isCrashSiteArmed('progress')).toBe(false);
+    expect(() => webHarness.injectedRenderFault('progress')).not.toThrow();
+    expect(() => webHarness.fireAsyncCrashFaults()).not.toThrow();
+    expect(webRecordsCard.CrashRecordsCard({})).toBeNull();
   });
 
   function Progress() {
@@ -506,7 +522,7 @@ describe('route boundaries and their fallback', () => {
     expect(localStorage.getItem(CRASH_RECORDS_KEY)).toBeNull();
   });
 
-  it('Build details shows nothing when nothing was recorded (always, on web)', async () => {
+  it('Build details shows nothing when nothing was recorded', async () => {
     act(() => root.render(<CrashRecordsCard />));
     await act(async () => undefined);
     expect(container.innerHTML).toBe('');
