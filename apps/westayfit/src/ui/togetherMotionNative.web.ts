@@ -11,7 +11,7 @@
  * throws (TogetherCompletion settles on that), starting one is a no-op whose
  * stop settles, and the layer renders nothing.
  */
-import type { ReactElement } from 'react';
+import { memo } from 'react';
 
 import type { NativeTogetherRun, TogetherGeometry } from './togetherMotionNative';
 
@@ -35,6 +35,7 @@ export function startTogetherNativeMotion(opts: {
   };
 }
 
-export function TogetherNativeLayer(_props: { run: NativeTogetherRun }): ReactElement | null {
+// The same shape as the native export (a memoised component), rendering nothing.
+export const TogetherNativeLayer = memo(function TogetherNativeLayer(_props: { run: NativeTogetherRun }) {
   return null;
-}
+});

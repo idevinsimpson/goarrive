@@ -487,12 +487,22 @@ describe('the native driver: truth first, one settle, every timer cancelled', ()
 });
 
 describe('the web build never carries the native driver', () => {
-  it('togetherMotionNative.web.ts stands in with the same names, each failing safe', async () => {
-    const native = await import('../src/ui/togetherMotionNative');
+  it('togetherMotionNative.web.ts provides every runtime name TogetherCompletion imports, in the same shape, each failing safe', async () => {
+    const native = (await import('../src/ui/togetherMotionNative')) as Record<string, unknown>;
     const web = await import('../src/ui/togetherMotionNative.web');
-    for (const name of ['createNativeTogetherRun', 'startTogetherNativeMotion', 'TogetherNativeLayer'] as const) {
-      expect(typeof (web as Record<string, unknown>)[name]).not.toBe('undefined');
-      expect(typeof (native as Record<string, unknown>)[name]).not.toBe('undefined');
+    const stub = web as Record<string, unknown>;
+    // Exactly the runtime names TogetherCompletion imports from './togetherMotionNative' (types excluded).
+    const completion = readFileSync(nodePath.resolve(__dirname, '../src/ui/TogetherCompletion.tsx'), 'utf8');
+    const block = /import \{([^}]*)\} from '\.\/togetherMotionNative';/.exec(completion)![1];
+    const used = block
+      .split(',')
+      .map((n) => n.trim())
+      .filter((n) => n && !n.startsWith('type '));
+    expect(used.sort()).toEqual(['TogetherNativeLayer', 'createNativeTogetherRun', 'startTogetherNativeMotion']);
+    for (const name of used) {
+      expect(stub[name], name).toBeDefined();
+      expect(typeof stub[name], name).toBe(typeof native[name]);
+      expect((stub[name] as { $$typeof?: symbol }).$$typeof, name).toBe((native[name] as { $$typeof?: symbol }).$$typeof);
     }
     // Building a run on the web throws (TogetherCompletion settles on that)…
     expect(() => web.createNativeTogetherRun(ordinary)).toThrow(/does not run on the web/);
@@ -506,13 +516,14 @@ describe('the web build never carries the native driver', () => {
     expect(onRatio).toHaveBeenCalledWith(0.3);
     expect(onSettled).toHaveBeenCalledTimes(1);
     // …and the layer renders nothing.
-    expect(web.TogetherNativeLayer({ run: {} as never })).toBeNull();
+    const layer = web.TogetherNativeLayer as unknown as { type: (p: { run: unknown }) => unknown };
+    expect(layer.type({ run: {} })).toBeNull();
   });
 
-  it('the stand-in imports nothing at runtime (types only), so the web bundle has no native driver code', () => {
+  it('the stand-in imports only React at runtime (the native driver by type only), so the web bundle has no native driver code', () => {
     const src = readFileSync(nodePath.resolve(__dirname, '../src/ui/togetherMotionNative.web.ts'), 'utf8');
     const runtimeImports = [...src.matchAll(/^import (?!type )[^;]*from '([^']+)'/gm)].map((m) => m[1]);
-    expect(runtimeImports).toEqual([]);
+    expect(runtimeImports).toEqual(['react']);
     expect(src).not.toMatch(/from 'react-native'/);
   });
 });

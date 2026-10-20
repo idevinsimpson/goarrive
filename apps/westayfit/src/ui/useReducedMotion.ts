@@ -45,48 +45,61 @@ function initialPreference(): ReducedMotionPreference {
   return { reduced: lastNativeAnswer ?? false, known: false, failed: false };
 }
 
+/**
+ * One subscription to the preference, shared by both hooks: `answer` gets
+ * every trusted value (the media query's changes on the web; this mount's own
+ * native answer, unless a newer change event beat it, and every change event),
+ * `failed` a rejected native query. Returns the unsubscribe.
+ */
+function watchReducedMotion(answer: (reduced: boolean) => void, failed: () => void): () => void {
+  if (hasMatchMedia()) {
+    const mq = window.matchMedia(QUERY);
+    const onChange = () => answer(mq.matches);
+    mq.addEventListener?.('change', onChange);
+    return () => mq.removeEventListener?.('change', onChange);
+  }
+
+  let active = true;
+  const onChange = (reduced: boolean) => {
+    nativeEpoch += 1;
+    lastNativeAnswer = reduced;
+    if (active) answer(reduced);
+  };
+  // Subscribe first, so a change while the query is in flight is never missed.
+  const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', onChange);
+  const askedAt = nativeEpoch;
+  AccessibilityInfo.isReduceMotionEnabled().then(
+    (reduced) => {
+      // A change event arrived after this query was asked: it is newer than this answer.
+      if (nativeEpoch !== askedAt) return;
+      lastNativeAnswer = reduced;
+      if (active) answer(reduced);
+    },
+    () => {
+      if (active) failed();
+    }
+  );
+  return () => {
+    active = false;
+    // react-native-web returns nothing here when it has no media query (jsdom).
+    sub?.remove?.();
+  };
+}
+
 export function useReducedMotionPreference(): ReducedMotionPreference {
   const [pref, setPref] = useState<ReducedMotionPreference>(initialPreference);
 
-  useEffect(() => {
-    const apply = (reduced: boolean) =>
-      setPref((prev) =>
-        prev.known && !prev.failed && prev.reduced === reduced ? prev : { reduced, known: true, failed: false }
-      );
-
-    if (hasMatchMedia()) {
-      const mq = window.matchMedia(QUERY);
-      const onChange = () => apply(mq.matches);
-      mq.addEventListener?.('change', onChange);
-      return () => mq.removeEventListener?.('change', onChange);
-    }
-
-    let active = true;
-    const onChange = (reduced: boolean) => {
-      nativeEpoch += 1;
-      lastNativeAnswer = reduced;
-      if (active) apply(reduced);
-    };
-    // Subscribe first, so a change while the query is in flight is never missed.
-    const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', onChange);
-    const askedAt = nativeEpoch;
-    AccessibilityInfo.isReduceMotionEnabled().then(
-      (reduced) => {
-        // A change event arrived after this query was asked: it is newer than this answer.
-        if (nativeEpoch !== askedAt) return;
-        lastNativeAnswer = reduced;
-        if (active) apply(reduced);
-      },
-      () => {
-        if (active) setPref((prev) => (prev.known || prev.failed ? prev : { ...prev, failed: true }));
-      }
-    );
-    return () => {
-      active = false;
-      // react-native-web returns nothing here when it has no media query (jsdom).
-      sub?.remove?.();
-    };
-  }, []);
+  useEffect(
+    () =>
+      watchReducedMotion(
+        (reduced) =>
+          setPref((prev) =>
+            prev.known && !prev.failed && prev.reduced === reduced ? prev : { reduced, known: true, failed: false }
+          ),
+        () => setPref((prev) => (prev.known || prev.failed ? prev : { ...prev, failed: true }))
+      ),
+    []
+  );
 
   return pref;
 }
@@ -95,7 +108,15 @@ export function useReducedMotionPreference(): ReducedMotionPreference {
  * True when the person has asked for reduced motion. Unchanged on the web.
  * On native it reads the last answer this runtime received (or `false` before
  * any) until AccessibilityInfo answers this mount.
+ *
+ * Its own boolean state, not the preference object: a mount whose answer
+ * equals the value it was seeded with does not re-render (React skips an
+ * unchanged boolean), so the layouts and every Living WE that read this do
+ * not each re-render once per mount for nothing. Only TogetherCompletion needs
+ * `known`/`failed`, and it reads useReducedMotionPreference.
  */
 export function useReducedMotion(): boolean {
-  return useReducedMotionPreference().reduced;
+  const [reduced, setReduced] = useState<boolean>(() => initialPreference().reduced);
+  useEffect(() => watchReducedMotion(setReduced, () => undefined), []);
+  return reduced;
 }

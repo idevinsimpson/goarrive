@@ -105,6 +105,21 @@ describe('native: unknown until this mount’s own answer', () => {
     expect(probe.last()).toEqual({ reduced: true, known: true, failed: false });
   });
 
+  it('useReducedMotion(): an answer equal to the seeded value does not re-render (N3)', async () => {
+    const hook = await freshHook();
+    // Cold runtime: seeded false; the mount's own answer is false → still one render.
+    const cold = mount(hook, 'boolean');
+    await answer(0, false);
+    expect(cold.bools).toEqual([false]);
+    // Warm the cache with `true`, then a new boolean consumer: seeded true, answered true → one render.
+    change(true);
+    expect(cold.bools).toEqual([false, true]); // a real change does re-render
+    const warm = mount(hook, 'boolean');
+    expect(warm.bools).toEqual([true]);
+    await answer(1, true);
+    expect(warm.bools).toEqual([true]);
+  });
+
   it('useReducedMotion() is the same answer as a boolean: false until answered, then the answer', async () => {
     const hook = await freshHook();
     const probe = mount(hook, 'boolean');
