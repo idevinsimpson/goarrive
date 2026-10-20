@@ -36,7 +36,8 @@
       "themeColor": "#0B1F3A"
     },
     "plugins": [
-      "expo-router"
+      "expo-router",
+      "expo-video"
     ],
     "experiments": {
       "typedRoutes": true
