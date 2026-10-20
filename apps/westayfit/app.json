@@ -7,16 +7,27 @@
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.westayfit.app"
+      "bundleIdentifier": "com.westayfit.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "We Stay Fit uses your camera to count your squats on this device. Nothing is recorded or uploaded."
+      }
     },
     "android": {
       "package": "com.westayfit.app",
       "adaptiveIcon": {
         "backgroundColor": "#0B1F3A"
-      }
+      },
+      "permissions": [
+        "android.permission.CAMERA"
+      ],
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "bundler": "metro",

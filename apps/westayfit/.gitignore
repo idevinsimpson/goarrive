@@ -1,0 +1,4 @@
+
+# Native projects are generated (Continuous Native Generation); never commit a local prebuild.
+/ios/
+/android/
