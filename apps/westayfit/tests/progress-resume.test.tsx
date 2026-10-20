@@ -135,4 +135,3 @@ describe('Progress on a return to the app (INT-12)', () => {
     expect(readMyCommunities).not.toHaveBeenCalled();
   });
 });
-
