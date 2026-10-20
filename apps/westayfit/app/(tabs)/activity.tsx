@@ -21,6 +21,7 @@ import { formatEndedOn, formatEndsAt, hasWindowEnded } from '../../src/ui/dates'
 import { injectedRenderFault } from '../../src/crashHarness';
 import { ProgressParityView } from '../../src/ui/ProgressParityView';
 import { nativeErrorBoundary } from '../../src/ui/RouteErrorFallback';
+import { RESUME_MIN_AWAY_MS, useResumeRefresh } from '../../src/useResumeRefresh';
 import { isReached } from '../../src/ui/progressFormat';
 
 /**
@@ -281,6 +282,8 @@ export default function ActivityScreen() {
   */
   const [revalidate, setRevalidate] = useState(0);
   const keepOnScreen = useRef(false);
+  /** INT-12: the next revalidation reads fresh (a return to the app), not from the record. */
+  const freshNext = useRef(false);
   const focusedOnce = useRef(false);
   useFocusEffect(
     useCallback(() => {
@@ -309,12 +312,37 @@ export default function ActivityScreen() {
     }, [ready, user]),
   );
 
+  /*
+    NATIVE-INTEGRATOR-1 (INT-12). COMING BACK TO THE APP READS FRESH.
+    Unlike a tab return, which recomposes from the account's record, a return
+    to the app after at least 30 s away (src/useResumeRefresh.ts) asks the
+    server: other devices may have recorded, and a goal may have ended while
+    the app slept. What is on screen stays while it reads ("Checking…" after a
+    moment); if the read fails the rows stay, marked as last read, with Retry.
+    An error on screen is retried on any return.
+  */
+  useResumeRefresh(
+    () => {
+      if (!ready || !user) return;
+      if (state.kind === 'error') {
+        setAttempt((n) => n + 1);
+        return;
+      }
+      freshNext.current = true;
+      keepOnScreen.current = true;
+      setRevalidate((n) => n + 1);
+    },
+    { minAwayMs: state.kind === 'error' ? 0 : RESUME_MIN_AWAY_MS },
+  );
+
   useEffect(() => {
     if (!ready || !user) return;
     const token = ++liveRef.current;
     const uid = user.uid;
-    const reuse = attempt > 0 ? 0 : SAME_LOAD_MS;
-    const recorded = attempt > 0 ? null : progressFromRecord(uid);
+    const fresh = attempt > 0 || freshNext.current;
+    freshNext.current = false;
+    const reuse = fresh ? 0 : SAME_LOAD_MS;
+    const recorded = fresh ? null : progressFromRecord(uid);
     const keep = keepOnScreen.current;
     keepOnScreen.current = false;
     setState((prev) => recorded ?? (keep && prev.kind === 'ready' ? prev : { kind: 'loading' }));

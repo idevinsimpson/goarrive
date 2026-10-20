@@ -71,7 +71,18 @@ import { getFirebaseAuth, getFirebaseFirestore, getFirebaseFunctions } from './f
  */
 export const SAME_LOAD_MS = 10_000;
 
-type Entry = { value?: unknown; at?: number; inflight?: Promise<unknown> };
+/**
+ * NATIVE-INTEGRATOR-1 (INT-26). How young an in-flight read must be for a
+ * FRESH read (`reuseMs` 0: a Retry, a return, a refresh) to share it. Identical
+ * reads issued together (two effects in one render, a double-run in
+ * development) still share one request; a read that has been in flight longer
+ * than this may be hung on a dead connection (the callable timeout is 70 s), and
+ * a Retry must not join it. A read that accepts a recent answer
+ * (`reuseMs` > 0, a mount) shares any read in flight, as before.
+ */
+export const JOIN_INFLIGHT_MS = 1_000;
+
+type Entry = { value?: unknown; at?: number; inflight?: Promise<unknown>; inflightAt?: number };
 
 let owner: string | null = null;
 const store = new Map<string, Entry>();
@@ -181,7 +192,14 @@ function read<T>(
 ): Promise<T> {
   scope(uid);
   const entry = store.get(key) ?? {};
-  if (entry.inflight) return entry.inflight as Promise<T>;
+  if (entry.inflight) {
+    const young = entry.inflightAt !== undefined && Date.now() - entry.inflightAt <= JOIN_INFLIGHT_MS;
+    if (reuseMs > 0 || young) return entry.inflight as Promise<T>;
+    // INT-26: a fresh read does not join an older read that may be hung. It
+    // supersedes it: the generation advances, so the older answer can never
+    // land over this one (it joins this read instead, below).
+    advance(key);
+  }
   if (reuseMs > 0 && entry.at !== undefined && Date.now() - entry.at <= reuseMs) {
     return Promise.resolve(entry.value as T);
   }
@@ -203,6 +221,9 @@ function read<T>(
         // list) is asked again, fresh, rather than answered from before.
         const now = store.get(key);
         if (now && now.at !== undefined) return now.value as T;
+        // A fresher read already in flight (INT-26) is the answer: share it
+        // rather than asking again, so superseded reads never chain requests.
+        if (now?.inflight && now.inflight !== p) return now.inflight as Promise<T>;
         return read(uid, key, fetch, 0, onRecorded);
       }
       // Another account owns the record now: nothing is recorded, and the
@@ -217,7 +238,7 @@ function read<T>(
       }
       throw e;
     });
-  store.set(key, { ...entry, inflight: p });
+  store.set(key, { ...entry, inflight: p, inflightAt: Date.now() });
   return p;
 }
 

@@ -1,7 +1,7 @@
 import { Link, router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
 import { signOut } from 'firebase/auth';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { useWsfAuth } from '../../../src/auth';
 import { describeCallableError } from '../../../src/callableErrors';
@@ -19,6 +19,8 @@ import { ButtonLink } from '../../../src/ui/ButtonLink';
 import { CARD_BORDER, NAVY, kit } from '../../../src/ui/kit';
 import { formatCount, totalOfTargetLabel } from '../../../src/ui/progressFormat';
 import { SAME_LOAD_MS, readGoals, readMyCommunities } from '../../../src/memberReads';
+import { AndroidKeyboardInsetView, KEYBOARD_SCROLL_PROPS } from '../../../src/ui/keyboardAvoidance';
+import { RESUME_MIN_AWAY_MS, useResumeRefresh } from '../../../src/useResumeRefresh';
 
 type MyCommunityItem = {
   groupId: string;
@@ -78,6 +80,12 @@ export default function BrandShell() {
   const [joinCodeInput, setJoinCodeInput] = useState('');
   const [joinFieldError, setJoinFieldError] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
+  /*
+    NATIVE-INTEGRATOR-1 (INT-04). RETRY IS A REAL READ. Bumped by the error's
+    Retry (and by a return to the app while that error shows): the list reads
+    again from `loading`, fresh, never an answer from before the failure.
+  */
+  const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     // Only fetch for a signed-in user with auth enabled. Feature-flag-off, no
@@ -89,8 +97,11 @@ export default function BrandShell() {
       try {
         // Shared with the identical read the community this list redirects to
         // makes (src/memberReads.ts): in flight, or settled within this load.
+        // A Retry reads fresh, and does not join a read that may be hung.
         const result = {
-          data: (await readMyCommunities(user.uid, SAME_LOAD_MS)) as unknown as { items: MyCommunityItem[] },
+          data: (await readMyCommunities(user.uid, reloadToken > 0 ? 0 : SAME_LOAD_MS)) as unknown as {
+            items: MyCommunityItem[];
+          },
         };
         if (cancelled) return;
         setMyCommunities({ kind: 'ready', items: result.data.items });
@@ -105,7 +116,8 @@ export default function BrandShell() {
     return () => {
       cancelled = true;
     };
-  }, [ready, user]);
+  }, [ready, user, reloadToken]);
+  const retryCommunities = useCallback(() => setReloadToken((n) => n + 1), []);
 
   /*
     A GENUINE RETURN TO THIS SCREEN RE-READS WHAT IT SHOWS, QUIETLY.
@@ -163,6 +175,23 @@ export default function BrandShell() {
       cancelled = true;
     };
   }, [ready, user, returnToken, myCommunities.kind]);
+
+  /*
+    NATIVE-INTEGRATOR-1 (INT-12, INT-04). COMING BACK TO THE APP IS A RETURN.
+    On a phone the app can sit in the background for hours and no focus event
+    fires when it comes back (src/useResumeRefresh.ts). A return after at least
+    30 s re-reads exactly what a return to this screen re-reads, quietly. An
+    error on screen (a cold start offline) is retried on any return to the
+    app, so reconnecting and coming back needs no tap.
+  */
+  useResumeRefresh(
+    () => {
+      if (!wsfAuthEnabled || !ready || !user) return;
+      if (myCommunities.kind === 'error') setReloadToken((n) => n + 1);
+      else if (myCommunities.kind === 'ready') setReturnToken((n) => n + 1);
+    },
+    { minAwayMs: myCommunities.kind === 'error' ? 0 : RESUME_MIN_AWAY_MS },
+  );
 
   // The open goal of each community, so a card can say what is happening and
   // what the next action is. One wsfListGoals read per community (the same
@@ -245,11 +274,14 @@ export default function BrandShell() {
   // Signed-in branch: covers auth-enabled + settled + user present.
   const showSignedIn = wsfAuthEnabled && ready && !!user;
 
-  return (
+  const page = (
     <ScrollView
       style={kit.scroll}
       contentContainerStyle={kit.page}
       keyboardShouldPersistTaps="handled"
+      // INT-06: the join field and Go stay above the keyboard (iOS insets;
+      // Android pads the frame below). Inert on web.
+      {...KEYBOARD_SCROLL_PROPS}
       testID="wsf-home"
     >
       <View style={kit.column}>
@@ -279,6 +311,7 @@ export default function BrandShell() {
         ) : showSignedIn ? (
           <SignedInHome
             state={myCommunities}
+            onRetry={retryCommunities}
             goalsByGroup={goalsByGroup}
             joinCodeInput={joinCodeInput}
             setJoinCodeInput={setJoinCodeInput}
@@ -327,6 +360,13 @@ export default function BrandShell() {
         </View>
       </View>
     </ScrollView>
+  );
+  // Android only: a frame that pads by the IME (INT-06). Web and iOS render
+  // the scroll view exactly as before, with no wrapper.
+  return Platform.OS === 'android' ? (
+    <AndroidKeyboardInsetView style={styles.keyboardFrame}>{page}</AndroidKeyboardInsetView>
+  ) : (
+    page
   );
 }
 
@@ -457,6 +497,7 @@ function wantsCommunityList(view: string | string[] | undefined): boolean {
  */
 function SignedInHome({
   state,
+  onRetry,
   goalsByGroup,
   joinCodeInput,
   setJoinCodeInput,
@@ -464,6 +505,7 @@ function SignedInHome({
   onJoinCodeSubmit,
 }: {
   state: MyCommunitiesState;
+  onRetry: () => void;
   goalsByGroup: Record<string, CardGoalState>;
   joinCodeInput: string;
   setJoinCodeInput: (v: string) => void;
@@ -553,7 +595,7 @@ function SignedInHome({
       */}
       <View style={styles.section}>
         <Text style={kit.eyebrow}>Choose a community</Text>
-        <MyCommunitiesList state={state} goalsByGroup={goalsByGroup} />
+        <MyCommunitiesList state={state} goalsByGroup={goalsByGroup} onRetry={onRetry} />
       </View>
 
       {noCommunityYet ? (
@@ -586,9 +628,11 @@ function SignedInHome({
 function MyCommunitiesList({
   state,
   goalsByGroup,
+  onRetry,
 }: {
   state: MyCommunitiesState;
   goalsByGroup: Record<string, CardGoalState>;
+  onRetry: () => void;
 }) {
   if (state.kind === 'idle' || state.kind === 'loading') {
     return (
@@ -603,10 +647,22 @@ function MyCommunitiesList({
   if (state.kind === 'error') {
     return (
       <View
+        style={styles.errorBlock}
         testID="wsf-home-my-error"
         {...({ 'data-state': 'error' } as Record<string, unknown>)}
       >
+        {/* The message names the connection when that is what failed
+            (src/callableErrors.ts). INT-04: and there is a way to try again,
+            in place, without switching tabs. */}
         <Text style={kit.errorText}>{state.message}</Text>
+        <Pressable
+          onPress={onRetry}
+          style={kit.secondaryButton}
+          testID="wsf-home-my-retry"
+          accessibilityRole="button"
+        >
+          <Text style={kit.secondaryButtonText}>Retry</Text>
+        </Pressable>
       </View>
     );
   }
@@ -796,6 +852,10 @@ function JoinWithCodeField({
 const styles = StyleSheet.create({
   // A state's contents stack with the same rhythm as the page column.
   stack: { gap: 18 },
+  // The communities error: its sentence, then Retry under it.
+  errorBlock: { gap: 12, alignItems: 'flex-start' },
+  // Android's keyboard frame around the page (INT-06): the page's own extent.
+  keyboardFrame: { flex: 1 },
   section: { gap: 12 },
   // Consecutive cards in a list: the same rhythm as the challenge page.
   list: { gap: 12 },
