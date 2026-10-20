@@ -5,6 +5,11 @@
 //  - active true / new runId → stop any old run, open the camera and model for this run.
 //  - active false, an error, the view being destroyed or leaving its window → stop: camera
 //    unbound, model closed.
+//  - App-switcher privacy: on API 33+ the Recents screenshot is disabled for as long as this view
+//    is attached (paused or failed included), so no JS round trip can re-enable it before the
+//    task snapshot. A black cover hides the preview whenever no run is open or the window lost
+//    focus (any API level); the PreviewView itself stays VISIBLE, so its TextureView keeps
+//    consuming frames while the notification shade is down.
 // Events from a run that is no longer current are dropped here, and JS drops any event whose
 // runId is not its current run.
 package expo.modules.wsfposecamera
@@ -37,12 +42,15 @@ class WsfPoseCameraView(context: Context, appContext: AppContext) : ExpoView(con
     // TextureView: composes with React Native's view hierarchy and overlays.
     implementationMode = PreviewView.ImplementationMode.COMPATIBLE
   }
+  /** Drawn over the preview: never a stale or backgrounded frame on screen or in a snapshot. */
+  private val cover = View(context).apply { setBackgroundColor(Color.BLACK) }
   private var run: WsfPoseRun? = null
   private var startedRunId = 0
 
   init {
     setBackgroundColor(Color.BLACK)
     addView(previewView, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+    addView(cover, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
   }
 
   override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
@@ -53,6 +61,11 @@ class WsfPoseCameraView(context: Context, appContext: AppContext) : ExpoView(con
       View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY)
     )
     previewView.layout(0, 0, width, height)
+    cover.measure(
+      View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+      View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY)
+    )
+    cover.layout(0, 0, width, height)
   }
 
   /** Called once all props of an update are set (OnViewDidUpdateProps). Main thread. */
@@ -74,23 +87,29 @@ class WsfPoseCameraView(context: Context, appContext: AppContext) : ExpoView(con
       }
     }
     run = next
-    setRecentsScreenshot(false)
+    updateCover()
     next.start()
   }
 
   /** OnViewDestroys. */
   fun release() {
     stopRun()
+    setRecentsScreenshot(true)
   }
 
-  /**
-   * Never leave a live frame on screen for the Recents snapshot. The window loses focus before the
-   * task snapshot is taken, so the preview is hidden then, without waiting for JS. On API 33+ the
-   * Recents screenshot is also disabled while a run is open.
-   */
+  /** The preview shows only while a run is open and the window has focus (it loses focus before the task snapshot). */
+  private fun updateCover() {
+    cover.visibility = if (run != null && hasWindowFocus()) View.INVISIBLE else View.VISIBLE
+  }
+
   override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
     super.onWindowFocusChanged(hasWindowFocus)
-    previewView.visibility = if (hasWindowFocus) View.VISIBLE else View.INVISIBLE
+    updateCover()
+  }
+
+  override fun onAttachedToWindow() {
+    super.onAttachedToWindow()
+    setRecentsScreenshot(false)
   }
 
   private fun setRecentsScreenshot(enabled: Boolean) {
@@ -100,6 +119,7 @@ class WsfPoseCameraView(context: Context, appContext: AppContext) : ExpoView(con
 
   override fun onDetachedFromWindow() {
     super.onDetachedFromWindow()
+    setRecentsScreenshot(true)
     val current = run ?: return
     // Off screen: release the camera now and let JS pause.
     stopRun()
@@ -119,6 +139,6 @@ class WsfPoseCameraView(context: Context, appContext: AppContext) : ExpoView(con
     val current = run ?: return
     run = null
     current.stop()
-    setRecentsScreenshot(true)
+    updateCover()
   }
 }

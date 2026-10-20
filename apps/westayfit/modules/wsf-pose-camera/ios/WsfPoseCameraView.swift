@@ -6,8 +6,10 @@
 //  - active false, an error, or the view leaving its window → stop: camera off, model closed.
 //  - A run id is never reopened: a run that stopped itself (error, detach) stays stopped even if
 //    the props still say active; JS mints a new id for every start.
-//  - The preview is hidden as soon as the app resigns active, so the app-switcher snapshot never
-//    holds a live frame of the member (natively, without waiting for JS to pause).
+//  - The preview shows only while a run is open AND the app is active. It is hidden as soon as the
+//    app resigns active, so the app-switcher snapshot never holds a live frame of the member
+//    (natively, without waiting for JS to pause), and it is hidden whenever no run is open, so a
+//    paused or failed camera never leaves a frozen frame on screen.
 // Events from a run that is no longer current are dropped here, and JS drops any event whose
 // runId is not its current run.
 
@@ -32,6 +34,8 @@ final class WsfPoseCameraView: ExpoView {
   private var run: WsfPoseRun?
   #endif
   private var startedRunId = 0
+  /// Main thread. Read from UIApplication at init, then kept by the two notifications below.
+  private var appActive = false
 
   required init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
@@ -39,17 +43,26 @@ final class WsfPoseCameraView: ExpoView {
     backgroundColor = .black
     previewLayer.videoGravity = .resizeAspectFill
     layer.addSublayer(previewLayer)
+    appActive = UIApplication.shared.applicationState == .active
+    updatePreviewVisibility()
     let center = NotificationCenter.default
     center.addObserver(self, selector: #selector(appWillResignActive), name: UIApplication.willResignActiveNotification, object: nil)
     center.addObserver(self, selector: #selector(appDidBecomeActive), name: UIApplication.didBecomeActiveNotification, object: nil)
   }
 
   @objc private func appWillResignActive() {
-    setPreviewHidden(true)
+    appActive = false
+    updatePreviewVisibility()
   }
 
   @objc private func appDidBecomeActive() {
-    setPreviewHidden(false)
+    appActive = true
+    updatePreviewVisibility()
+  }
+
+  /// Visible only while a run is open and the app is active.
+  private func updatePreviewVisibility() {
+    setPreviewHidden(!(appActive && run != nil))
   }
 
   private func setPreviewHidden(_ hidden: Bool) {
@@ -96,6 +109,7 @@ final class WsfPoseCameraView: ExpoView {
       }
     }
     run = next
+    updatePreviewVisibility()
     next.start(previewLayer: previewLayer)
   }
 
@@ -119,5 +133,6 @@ final class WsfPoseCameraView: ExpoView {
     run = nil
     current.stop()
     previewLayer.session = nil
+    updatePreviewVisibility()
   }
 }

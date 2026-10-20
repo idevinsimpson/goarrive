@@ -30,8 +30,16 @@
  * PRIVACY: frames stay in native memory; only landmark numbers arrive here,
  * and this code never stores or sends them. The camera never requests audio.
  * The native MediaPipe SDKs send Google usage telemetry (no frames, images or
- * landmarks), so the counter stays off until the owner decides: see
- * support.native.ts NATIVE_CAMERA_TELEMETRY_APPROVED.
+ * landmarks; per-platform list in nativeCameraGate.ts), so the counter stays
+ * off until the owner decides. Defence in depth: besides the support probe,
+ * startCamera itself refuses (the 'unsupported' failure, manual entry) while
+ * NATIVE_CAMERA_TELEMETRY_APPROVED is false, so no second mount of the camera
+ * screen can show the permission prompt or create a landmarker.
+ *
+ * ERRORS: a listener that throws never escapes a native event handler (it
+ * fails the run closed), and a native side that only sends frames the
+ * adapter rejects (no timestampUnit, no size) fails the run after
+ * MAX_INVALID_STREAK of them instead of looking "live" forever.
  */
 import { AppState } from 'react-native';
 
@@ -43,6 +51,7 @@ import {
   type PoseEventPayload,
   type WsfPoseCameraNativeModule,
 } from '../../modules/wsf-pose-camera';
+import { NATIVE_CAMERA_TELEMETRY_APPROVED } from './nativeCameraGate';
 import { NativeFrameGate, type NativeCameraBinding, type NativeCameraHost } from './nativeEngine';
 import {
   RepCounterOrchestrator,
@@ -58,6 +67,12 @@ import { visualFor } from './visual';
 export const REQUESTED_CAMERA = { facingMode: 'user', width: 640, height: 480, frameRate: 30 } as const;
 
 export type RepCounterView = RepCounterSnapshot & { visual: VisualPose | null };
+
+/**
+ * Consecutive rejected ('invalid') pose events after which the run fails: about 1 s at 30 fps.
+ * Duplicate and older frames are ordinary drops and do not count; any accepted frame resets it.
+ */
+export const MAX_INVALID_STREAK = 30;
 
 type AppStateStatusLike = string;
 export interface AppStateLike {
@@ -85,6 +100,8 @@ interface Run {
   /** Permission granted while the app was not active: open the camera on the next 'active'. */
   awaitingActive: boolean;
   ready: boolean;
+  /** Pose events rejected as invalid in a row (see MAX_INVALID_STREAK). */
+  invalidStreak: number;
 }
 
 const STAGES: ReadonlySet<CameraFailure> = new Set(['permission', 'model', 'inference', 'ended']);
@@ -156,7 +173,24 @@ export class RepCounterController implements NativeCameraHost {
     return () => { this.bindingListeners.delete(fn); };
   }
 
-  private emit() { const s = this.snapshot; for (const fn of this.listeners) fn(s); }
+  /**
+   * Every listener gets the snapshot even if another throws. A throw (rendering) never escapes a
+   * native event handler: as the web lifecycle does, it ends the open run (released, failure
+   * panel with manual entry). That failure is emitted once more; the run is already gone then,
+   * so a listener that throws again cannot loop.
+   */
+  private emit(): void {
+    const s = this.snapshot;
+    let threw = false;
+    for (const fn of [...this.listeners]) {
+      try {
+        fn(s);
+      } catch {
+        threw = true;
+      }
+    }
+    if (threw && this.run) this.fail(this.run, 'inference');
+  }
 
   private setBinding(next: NativeCameraBinding) {
     if (next.active === this.binding.active && next.runId === this.binding.runId) return;
@@ -166,7 +200,7 @@ export class RepCounterController implements NativeCameraHost {
 
   private begin(): Run {
     this.release();
-    const run: Run = { token: this.nextToken++, gate: new NativeFrameGate(), asking: true, awaitingActive: false, ready: false };
+    const run: Run = { token: this.nextToken++, gate: new NativeFrameGate(), asking: true, awaitingActive: false, ready: false, invalidStreak: 0 };
     this.run = run;
     return run;
   }
@@ -198,7 +232,8 @@ export class RepCounterController implements NativeCameraHost {
     if (this.appState?.currentState && AWAY.has(this.appState.currentState)) return;
     this.orch.beginRun();
     const mod = this.native;
-    if (!mod || typeof mod.requestCameraPermissionAsync !== 'function') {
+    // The telemetry gate, again: never ask for the camera (nor create a landmarker) while it is off.
+    if (!NATIVE_CAMERA_TELEMETRY_APPROVED || !mod || typeof mod.requestCameraPermissionAsync !== 'function') {
       this.release();
       this.orch.setCamera('failed', 'unsupported'); this.emit(); return;
     }
@@ -238,15 +273,25 @@ export class RepCounterController implements NativeCameraHost {
     const run = this.current(payload?.runId);
     if (!run || !run.ready) return;
     const r = run.gate.accept(payload);
-    if (!r.ok) return;
+    if (!r.ok) {
+      if (r.drop === 'invalid') {
+        run.invalidStreak += 1;
+        // A native side that only sends unusable frames would otherwise look "live" forever.
+        if (run.invalidStreak >= MAX_INVALID_STREAK) this.fail(run, 'inference');
+      }
+      return;
+    }
+    run.invalidStreak = 0;
     try {
       this.orch.onFrame(r.frame);
-      this.emit();
     } catch {
-      // As the web lifecycle does: a throw while counting or rendering ends the run
-      // (camera released, failure panel with manual entry), never an uncaught error.
+      // As the web lifecycle does: a throw while counting ends the run (camera released,
+      // failure panel with manual entry), never an uncaught error. A throw while rendering is
+      // handled the same way inside emit().
       this.fail(run, 'inference');
+      return;
     }
+    this.emit();
   }
 
   handleError(payload: CameraErrorPayload): void {

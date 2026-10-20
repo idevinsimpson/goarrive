@@ -22,6 +22,21 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import * as nodePath from 'node:path';
 
 const fakeView = vi.hoisted(() => ({ props: [] as Record<string, unknown>[] }));
+/**
+ * The telemetry gate as the native code reads it. `approved: null` reads the REAL constant
+ * (nativeCameraGate.ts, false); a test sets true/false to drive both states through the real
+ * support probe and controller, then restores null. Production has no such seam.
+ */
+const gateState = vi.hoisted(() => ({ approved: null as boolean | null }));
+
+vi.mock('../src/movement-camera/nativeCameraGate', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../src/movement-camera/nativeCameraGate')>();
+  return {
+    get NATIVE_CAMERA_TELEMETRY_APPROVED() {
+      return gateState.approved ?? real.NATIVE_CAMERA_TELEMETRY_APPROVED;
+    },
+  };
+});
 
 vi.mock('expo', async () => {
   const { createElement: h } = await import('react');
@@ -42,6 +57,7 @@ vi.mock('react-native-svg', async () => {
 });
 
 import { requireNativeView, requireOptionalNativeModule } from 'expo';
+import { Platform as RNPlatform } from 'react-native';
 
 import {
   loadWsfPoseCameraModule,
@@ -54,6 +70,7 @@ import {
 import { RepCounterController as WebController } from '../src/movement-camera/controller';
 import { cameraEntryAllowed, DEFAULT_MOVE_CAMERA_SETTINGS } from '../src/movement-camera/flow';
 import {
+  MAX_INVALID_STREAK,
   REQUESTED_CAMERA as NATIVE_REQUESTED_CAMERA,
   RepCounterController as NativeController,
   type AppStateLike,
@@ -85,15 +102,54 @@ const APP = nodePath.resolve(__dirname, '..');
 const MOD = 'modules/wsf-pose-camera';
 const read = (p: string) => readFileSync(nodePath.join(APP, p), 'utf8');
 /**
- * Code without comments: block comments and comment-only lines are removed. A `//` after code, or
- * inside a string literal ("a//b"), is kept and scanned, so it cannot hide code from the scan.
+ * Code without comments, for the static scans. A small scanner that knows string literals ("…",
+ * '…', `…` and Swift/Kotlin """…"""), so a comment marker inside a string ("a//b", "/*")
+ * hides nothing, and a code line that starts with `*` (a continued expression) is kept. Block
+ * comments are not treated as nested (Swift and Kotlin allow nesting): an inner close ends the
+ * comment early, which can only leave more text for the scan, never less. Strings are kept.
  */
-const strip = (c: string) =>
-  c
-    .replace(/\/\*[\s\S]*?\*\//g, '')
+function strip(c: string): string {
+  let out = '';
+  let i = 0;
+  while (i < c.length) {
+    if (c.startsWith('//', i)) {
+      const nl = c.indexOf('\n', i);
+      i = nl < 0 ? c.length : nl;
+    } else if (c.startsWith('/*', i)) {
+      const end = c.indexOf('*/', i + 2);
+      const stop = end < 0 ? c.length : end + 2;
+      out += c.slice(i, stop).replace(/[^\n]/g, '');
+      i = stop;
+    } else if (c.startsWith('"""', i)) {
+      const end = c.indexOf('"""', i + 3);
+      const stop = end < 0 ? c.length : end + 3;
+      out += c.slice(i, stop);
+      i = stop;
+    } else if (c[i] === '"' || c[i] === "'" || c[i] === '`') {
+      const q = c[i];
+      let j = i + 1;
+      while (j < c.length && c[j] !== q && (q === '`' || c[j] !== '\n')) j += c[j] === '\\' ? 2 : 1;
+      const stop = Math.min(c.length, j + 1);
+      out += c.slice(i, stop);
+      i = stop;
+    } else {
+      out += c[i];
+      i += 1;
+    }
+  }
+  return out
     .split('\n')
-    .filter((line) => !/^\s*(\/\/|\*)/.test(line))
+    .filter((line) => line.trim() !== '')
     .join('\n');
+}
+/** Swift imports, including indented, attributed (`@preconcurrency`), access-level and kind (`import struct M.T`) forms. */
+const SWIFT_IMPORT =
+  /(?:^|;)[ \t]*(?:@\w+(?:\([^)\n]*\))?[ \t]+)*(?:(?:public|package|internal|fileprivate|private)[ \t]+)?import[ \t]+(?:(?:typealias|struct|class|enum|protocol|let|var|func)[ \t]+)?(\w+)/gm;
+/** Kotlin imports, including indented ones. */
+const KOTLIN_IMPORT = /(?:^|;)[ \t]*import[ \t]+([\w.]+)/gm;
+const importsOf = (code: string, re: RegExp) => [...code.matchAll(re)].map((m) => m[1]);
+/** A comment block as one line: line breaks and their `*`, `//` or `#` prefixes become one space. */
+const oneLine = (t: string) => t.replace(/[ \t]*\n[ \t]*(?:\*(?!\/)|\/\/|#)?[ \t]*/g, ' ');
 const filesUnder = (dir: string): string[] =>
   readdirSync(nodePath.join(APP, dir)).flatMap((n) => {
     const rel = `${dir}/${n}`;
@@ -559,7 +615,18 @@ function controller(opts: { mod?: WsfPoseCameraNativeModule | null; appState?: R
 
 const poseFor = (runId: number, poses: Pose[], t: number) => ({ ...nativeEvent(poses, t, 'android'), runId });
 
+/** The controller tests drive a camera run, which needs the telemetry gate open (approved = true). */
+function withGateApproved() {
+  beforeEach(() => {
+    gateState.approved = true;
+  });
+  afterEach(() => {
+    gateState.approved = null;
+  });
+}
+
 describe('controller.native — the same public API as controller.ts', () => {
+  withGateApproved();
   it('exposes the same public surface (and REQUESTED_CAMERA), plus the native binding seam', () => {
     for (const k of ['subscribe', 'startCamera', 'stopCamera', 'beginSet', 'finishSet', 'dispose']) {
       expect(typeof (WebController.prototype as unknown as Record<string, unknown>)[k], k).toBe('function');
@@ -588,6 +655,28 @@ describe('controller.native — the same public API as controller.ts', () => {
 });
 
 describe('controller.native — one run, one owner; released on every way out', () => {
+  withGateApproved();
+
+  it('defence in depth: with the telemetry gate off, startCamera never asks for the camera and fails closed to the manual path', async () => {
+    for (const off of [null, false] as const) {
+      gateState.approved = off; // null = the real constant (false)
+      const f = fakeModule();
+      const { ctl, bindings } = controller({ mod: f.mod });
+      await ctl.startCamera(null);
+      expect(f.calls.request).toBe(0);
+      expect(ctl.snapshot).toMatchObject({ camera: 'failed', failure: 'unsupported' });
+      expect(bindings.some((b) => b.active)).toBe(false);
+      ctl.dispose();
+    }
+    gateState.approved = true;
+    const g = fakeModule();
+    const on = controller({ mod: g.mod });
+    await on.ctl.startCamera(null);
+    expect(g.calls.request).toBe(1);
+    expect(on.bindings.at(-1)).toEqual({ active: true, runId: 1 });
+    on.ctl.dispose();
+  });
+
   it('full flow: permission → camera bound for run 1 → ready → stable → GO → 3 squats → Finish → released', async () => {
     const { ctl, appState, bindings } = controller();
     expect(bindings).toEqual([{ active: false, runId: 0 }]);
@@ -761,6 +850,80 @@ describe('controller.native — one run, one owner; released on every way out', 
     ctl.dispose();
   });
 
+  it('a listener that always throws never escapes a native event handler; the run fails closed once and other listeners still hear it', async () => {
+    const { ctl, bindings } = controller();
+    let armed = false;
+    const seen: string[] = [];
+    const other: string[] = [];
+    ctl.subscribe((s) => {
+      if (!armed) return;
+      seen.push(s.camera);
+      throw new Error('always');
+    });
+    ctl.subscribe((s) => other.push(s.camera));
+    await ctl.startCamera(null);
+    armed = true;
+    expect(() => ctl.handleReady({ runId: 1, engine: 'x' })).not.toThrow();
+    expect(ctl.snapshot).toMatchObject({ camera: 'failed', failure: 'inference' });
+    expect(bindings.at(-1)).toEqual({ active: false, runId: 1 });
+    expect(seen).toEqual(['live', 'failed']); // threw on 'live', once more on the failure, no loop
+    expect(other.slice(-2)).toEqual(['live', 'failed']);
+    // The same for a frame, an error and an interruption of a later run, and for Stop.
+    armed = false;
+    await ctl.startCamera(null);
+    ctl.handleReady({ runId: 2, engine: 'x' });
+    armed = true;
+    expect(() => ctl.handlePose(poseFor(2, [member(0)], 0))).not.toThrow();
+    expect(ctl.snapshot).toMatchObject({ camera: 'failed', failure: 'inference' });
+    for (const [token, act] of [
+      [3, (c: NativeController) => c.handleError({ runId: 3, stage: 'model' })],
+      [4, (c: NativeController) => c.handleInterrupted({ runId: 4, reason: 'detached' })],
+    ] as const) {
+      armed = false;
+      await ctl.startCamera(null);
+      expect(bindings.at(-1)).toEqual({ active: true, runId: token });
+      armed = true;
+      expect(() => act(ctl)).not.toThrow();
+      expect(bindings.at(-1)).toEqual({ active: false, runId: token });
+    }
+    expect(() => ctl.stopCamera()).not.toThrow();
+    ctl.dispose();
+  });
+
+  it(`a native side that sends only rejected frames (no timestampUnit) fails the run after ${MAX_INVALID_STREAK} in a row instead of looking live forever`, async () => {
+    const { ctl, bindings } = controller();
+    await ctl.startCamera(null);
+    ctl.handleReady({ runId: 1, engine: 'x' });
+    const unitless = (t: number) => {
+      const e: Record<string, unknown> = { ...poseFor(1, [member(0)], t) };
+      delete e.timestampUnit;
+      return e as unknown as PoseEventPayload;
+    };
+    for (let k = 0; k < MAX_INVALID_STREAK - 1; k += 1) ctl.handlePose(unitless(k * 33));
+    expect(ctl.snapshot.camera).toBe('live');
+    ctl.handlePose(unitless(MAX_INVALID_STREAK * 33));
+    expect(ctl.snapshot).toMatchObject({ camera: 'failed', failure: 'inference' });
+    expect(bindings.at(-1)).toEqual({ active: false, runId: 1 });
+    expect(ctl.frameStats).toMatchObject({ accepted: 0, invalid: MAX_INVALID_STREAK });
+    ctl.dispose();
+  });
+
+  it('an accepted frame resets the invalid streak, and duplicate or older frames never count toward it', async () => {
+    const { ctl } = controller();
+    await ctl.startCamera(null);
+    ctl.handleReady({ runId: 1, engine: 'x' });
+    const bad = (t: number) => ({ ...poseFor(1, [member(0)], t), width: 0 });
+    let t = 0;
+    for (let round = 0; round < 3; round += 1) {
+      for (let k = 0; k < MAX_INVALID_STREAK - 1; k += 1) ctl.handlePose(bad((t += 33)));
+      ctl.handlePose(poseFor(1, [member(0)], (t += 33)));
+    }
+    for (let k = 0; k < 3 * MAX_INVALID_STREAK; k += 1) ctl.handlePose(poseFor(1, [member(0)], t)); // duplicates
+    expect(ctl.snapshot.camera).toBe('live');
+    expect(ctl.frameStats).toMatchObject({ accepted: 3, invalid: 3 * (MAX_INVALID_STREAK - 1), duplicate: 3 * MAX_INVALID_STREAK });
+    ctl.dispose();
+  });
+
   it('does not start while the app is in the background', async () => {
     const { ctl, bindings } = controller({ appState: fakeAppState('background') });
     await ctl.startCamera(null);
@@ -783,21 +946,57 @@ describe('controller.native — one run, one owner; released on every way out', 
 
 describe('support.native — fail closed: the telemetry gate, then the linked module', () => {
   const linked = fakeModule().mod;
-  it('the telemetry approval constant is false, so native support is false even with the module linked', () => {
+  it('the telemetry approval constant is false in the real file, and support.native re-exports it', async () => {
+    const real = await vi.importActual<typeof import('../src/movement-camera/nativeCameraGate')>('../src/movement-camera/nativeCameraGate');
+    expect(real.NATIVE_CAMERA_TELEMETRY_APPROVED).toBe(false);
+    expect(read('src/movement-camera/nativeCameraGate.ts')).toMatch(/^export const NATIVE_CAMERA_TELEMETRY_APPROVED: boolean = false;$/m);
     expect(nativeSupport.NATIVE_CAMERA_TELEMETRY_APPROVED).toBe(false);
     expect(nativeSupport.nativeCameraCounterAllowed(nativeSupport.NATIVE_CAMERA_TELEMETRY_APPROVED, { os: 'ios', load: () => linked })).toBe(false);
     expect(nativeSupport.nativeCameraCounterAllowed(nativeSupport.NATIVE_CAMERA_TELEMETRY_APPROVED, { os: 'android', load: () => linked })).toBe(false);
-    const req = vi.mocked(requireOptionalNativeModule);
-    req.mockReturnValue(linked);
-    try {
-      expect(nativeSupport.cameraCounterSupported()).toBe(false);
-    } finally {
-      req.mockReturnValue(null);
-    }
-    // With support false, a squat "Start moving" never opens the camera: members get the manual flow.
-    const entry = { settings: DEFAULT_MOVE_CAMERA_SETTINGS, unit: 'squats', mode: 'start' as const, resumed: false };
-    expect(cameraEntryAllowed({ ...entry, supported: nativeSupport.cameraCounterSupported() })).toBe(false);
-    expect(cameraEntryAllowed({ ...entry, supported: true })).toBe(true);
+  });
+
+  for (const os of ['ios', 'android'] as const) {
+    it(`on ${os} with the module linked, the wired cameraCounterSupported() is false with the gate off and true only with it on`, () => {
+      const req = vi.mocked(requireOptionalNativeModule);
+      const platform = RNPlatform as { OS: string };
+      const was = platform.OS;
+      platform.OS = os;
+      req.mockReturnValue(linked);
+      try {
+        // Positive control: this really is "native + linked", so only the gate can say no.
+        expect(nativeSupport.nativePoseCameraLinked()).toBe(true);
+        for (const off of [null, false] as const) {
+          gateState.approved = off; // null = the real constant
+          expect(nativeSupport.cameraCounterSupported()).toBe(false);
+          // With support false, a squat "Start moving" never opens the camera: members get the manual flow.
+          const entry = { settings: DEFAULT_MOVE_CAMERA_SETTINGS, unit: 'squats', mode: 'start' as const, resumed: false };
+          expect(cameraEntryAllowed({ ...entry, supported: nativeSupport.cameraCounterSupported() })).toBe(false);
+        }
+        gateState.approved = true;
+        expect(nativeSupport.cameraCounterSupported()).toBe(true);
+        req.mockReturnValue(null); // approved, but a binary without the module
+        expect(nativeSupport.cameraCounterSupported()).toBe(false);
+      } finally {
+        gateState.approved = null;
+        req.mockReturnValue(null);
+        platform.OS = was;
+      }
+    });
+  }
+
+  it('the contribute screen takes `supported` only from cameraCounterSupported(), and mounts the camera only inside `if (cameraOpen)`', () => {
+    const screen = read('app/contribute/[goalId].tsx');
+    expect(screen).toContain("import { cameraCounterSupported } from '../../src/movement-camera/support';");
+    expect(screen.match(/cameraCounterSupported/g)).toHaveLength(2); // the import and the one call
+    expect(screen).toContain('  const [cameraSupported] = useState(() => cameraCounterSupported());\n');
+    expect(screen.match(/\bcameraSupported\b/g)).toHaveLength(2); // declared once, read once
+    expect(screen).toContain('      supported: cameraSupported,\n');
+    expect(screen.match(/<CameraRepCounter\b/g)).toHaveLength(1);
+    const open = screen.indexOf('  if (cameraOpen) {\n');
+    const mount = screen.indexOf('<CameraRepCounter');
+    expect(open).toBeGreaterThan(0);
+    expect(mount).toBeGreaterThan(open);
+    expect(mount - open).toBeLessThan(200);
   });
 
   it('once approved, support still needs the linked module on iOS/Android (both gate states covered)', () => {
@@ -808,13 +1007,19 @@ describe('support.native — fail closed: the telemetry gate, then the linked mo
     expect(nativeSupport.nativeCameraCounterAllowed(false, { os: 'ios', load: () => linked })).toBe(false);
   });
 
-  it('the gate states its reason and points at the review and the owner decision', () => {
-    const code = read('src/movement-camera/support.native.ts');
-    expect(code).toMatch(/export const NATIVE_CAMERA_TELEMETRY_APPROVED: boolean = false;/);
-    for (const need of ['#638', 'ClearcutLoggingClient', 'com.google.android.datatransport', 'No camera frames, images or landmarks', "owner's"]) {
-      expect(code, need).toContain(need);
+  it('the gate states its reason (per platform) and points at the review and the owner decision; both native readers use it', () => {
+    const gate = oneLine(read('src/movement-camera/nativeCameraGate.ts'));
+    for (const need of ['#638', 'ClearcutLoggingClient', 'MPPTaskRunner.mm', 'is NOT confirmed', 'com.google.android.datatransport',
+      'CctTransportBackend.decorate', 'MediaPipe itself does not read the OS version', 'SIM MCC/MNC', 'build fingerprint', "device's IP address",
+      'No camera frames, images or landmarks', "owner's"]) {
+      expect(gate, need).toContain(need);
     }
-    expect(code).toMatch(/return nativeCameraCounterAllowed\(NATIVE_CAMERA_TELEMETRY_APPROVED\);/);
+    const support = read('src/movement-camera/support.native.ts');
+    expect(support).toContain("import { NATIVE_CAMERA_TELEMETRY_APPROVED } from './nativeCameraGate';");
+    expect(support).toMatch(/return nativeCameraCounterAllowed\(NATIVE_CAMERA_TELEMETRY_APPROVED\);/);
+    const ctl = read('src/movement-camera/controller.native.ts');
+    expect(ctl).toContain("import { NATIVE_CAMERA_TELEMETRY_APPROVED } from './nativeCameraGate';");
+    expect(ctl).toContain("if (!NATIVE_CAMERA_TELEMETRY_APPROVED || !mod || typeof mod.requestCameraPermissionAsync !== 'function') {");
   });
 
   it('iOS/Android with the module → true; without it (Expo Go, an older binary) → false; web → false', () => {
@@ -910,6 +1115,7 @@ describe('CameraSkeletonOverlay.native — react-native-svg body guide', () => {
 });
 
 describe('NativeCameraPreview.native — the preview slot bound to the controller', () => {
+  withGateApproved();
   let container: HTMLDivElement;
   let root: Root;
   beforeEach(() => {
@@ -1083,13 +1289,28 @@ describe('native sources: header, settings, wiring and versions (static; the cod
   it('review fixes for #638 are in place (fail-closed catches, frames freed, camera state, run ids, Recents/snapshot, R8, one session queue, preset order, SDK constants)', () => {
     const krun = kt('WsfPoseRun.kt');
     expect(krun.match(/catch \(error: Exception\)/g)).toEqual(['catch (error: Exception)']); // only the unbind cleanup
-    expect(krun.match(/catch \(error: Throwable\)/g)?.length).toBe(4); // bind, loadModel, detectForVideo, analyze
+    expect(krun.match(/catch \(error: Throwable\)/g)?.length).toBe(5); // bind, loadModel, detectForVideo, analyze, closeQuietly
     for (const need of ['mpImage.close()', 'if (rotated !== bitmap) bitmap.recycle()', 'observeCameraState(camera.cameraInfo.cameraState)',
       'cameraState?.removeObserver(observer)', 'CameraState.ERROR_CAMERA_IN_USE', 'CameraState.ErrorType.CRITICAL']) expect(krun, need).toContain(need);
-    expect(kt('WsfPoseModel.kt')).toContain('} catch (gpuError: Throwable) {');
+    // Delta review A1: every PoseLandmarker.close() goes through closeQuietly (a graph error rethrows from close()).
+    expect(strip(krun).match(/\.close\(\)/g)).toEqual(['.close()', '.close()', '.close()']); // landmarker (in closeQuietly), mpImage, image
+    expect(strip(krun)).toContain('    try {\n      landmarker.close()\n    } catch (error: Throwable) {');
+    expect(strip(krun).match(/closeQuietly\(/g)).toHaveLength(4); // the definition + stop, loadModel when stopped, failed inference
+    expect(krun.indexOf('        landmarker = null\n        closeQuietly(current)\n        send("onCameraError", mapOf("stage" to "inference"')).toBeGreaterThan(0);
+    const kmodel = kt('WsfPoseModel.kt');
+    expect(kmodel).toContain('} catch (gpuError: Throwable) {');
+    // Delta review A3: the GPU error is kept when the CPU retry fails; linkage / VM errors are not retried.
+    for (const need of ['if (gpuError is LinkageError || gpuError is VirtualMachineError) throw gpuError', 'cpuError.addSuppressed(gpuError)']) expect(kmodel, need).toContain(need);
+    expect(krun).toContain('val gpu = error.suppressed.firstOrNull()');
     const kview = kt('WsfPoseCameraView.kt');
     for (const need of ['startedRunId = wanted', 'WsfPoseContract.runChange(run?.runId ?: 0, startedRunId, active, runId)',
       'override fun onWindowFocusChanged', 'setRecentsScreenshotEnabled(enabled)', 'Build.VERSION_CODES.TIRAMISU']) expect(kview, need).toContain(need);
+    // Delta review A2: Recents follows the view's attachment, not the run; a black cover, not PreviewView visibility.
+    expect(kview).toContain('  override fun onAttachedToWindow() {\n    super.onAttachedToWindow()\n    setRecentsScreenshot(false)\n  }');
+    expect(kview).toContain('    super.onDetachedFromWindow()\n    setRecentsScreenshot(true)\n');
+    expect(strip(kview).match(/setRecentsScreenshot\((true|false)\)/g)).toEqual(['setRecentsScreenshot(true)', 'setRecentsScreenshot(false)', 'setRecentsScreenshot(true)']);
+    expect(kview).toContain('cover.visibility = if (run != null && hasWindowFocus()) View.INVISIBLE else View.VISIBLE');
+    expect(strip(kview)).not.toMatch(/previewView\.visibility/);
     expect(read(`${MOD}/android/proguard-rules.pro`)).toContain('-keep class com.google.common.flogger.** { *; }');
     const run = swift('WsfPoseRun.swift');
     expect(run).toContain('private static let sessionQueue = DispatchQueue(');
@@ -1102,6 +1323,10 @@ describe('native sources: header, settings, wiring and versions (static; the cod
     const view = swift('WsfPoseCameraView.swift');
     for (const need of ['UIApplication.willResignActiveNotification', 'UIApplication.didBecomeActiveNotification', 'previewLayer.isHidden = hidden',
       'CATransaction.setDisableActions(true)', 'if wanted == startedRunId { return }', 'nonisolated(unsafe) private var run: WsfPoseRun?']) expect(view, need).toContain(need);
+    // Delta review N1: the preview shows only while a run is open and the app is active (read at init).
+    for (const need of ['appActive = UIApplication.shared.applicationState == .active', 'setPreviewHidden(!(appActive && run != nil))']) expect(view, need).toContain(need);
+    expect(strip(view).match(/setPreviewHidden\(/g)).toHaveLength(2); // the definition + updatePreviewVisibility
+    expect(strip(view).match(/updatePreviewVisibility\(\)/g)).toHaveLength(6); // definition, init, resign, become, run start, stopRun
   });
 
   it('MediaPipe versions: iOS = web 0.10.35; Android pinned to the nearest confirmed 0.10.x and kept in step; never 1.x', () => {
@@ -1193,15 +1418,25 @@ describe('privacy: the module records, stores and sends nothing itself; the SDK 
     // A '//' inside a string no longer hides the rest of the line from the scan.
     expect(strip('let s = "a//b"; let x = AVCaptureMovieFileOutput()')).toMatch(NATIVE_FORBIDDEN);
     expect(strip('// AVCaptureMovieFileOutput in a comment')).not.toMatch(NATIVE_FORBIDDEN);
+    expect(strip('let a = 1 // AVCaptureMovieFileOutput after code, in a comment')).not.toMatch(NATIVE_FORBIDDEN);
+    expect(strip('/** KDoc\n * URLSession in a doc comment\n */\nval a = 1')).not.toMatch(NATIVE_FORBIDDEN);
+    // Delta review N3 (a): a code line that starts with `*` (a continued expression) is scanned.
+    expect(strip('let t = 2\n    * Double(URLSession.shared.configuration.timeoutIntervalForRequest)')).toMatch(NATIVE_FORBIDDEN);
+    expect(strip('val n = 2\n  * java.net.URL("x").openConnection().hashCode()')).toMatch(FQN_FORBIDDEN);
+    // (b) comment markers inside strings do not open or close a comment.
+    expect(strip('let wsfA = "/*"; let wsfO = URLSession.shared; let wsfB = "*/"')).toMatch(NATIVE_FORBIDDEN);
+    expect(strip('val s = """ /* """; val o = java.net.URL("x"); val e = """ */ """')).toMatch(FQN_FORBIDDEN);
   });
 
   it('imports are pinned: Swift only the reviewed frameworks; Kotlin exactly the reviewed set', () => {
-    const swiftImports = new Set(
-      filesUnder(MOD).filter((f) => f.endsWith('.swift')).flatMap((f) => (strip(read(f)).match(/^import \w+/gm) ?? []).map((l) => l.slice(7))),
-    );
+    // Delta review N3 (c): indented, attributed and access-level imports are caught too.
+    for (const line of [' import Network', '@preconcurrency import Network', '@_implementationOnly import Network', 'public import Network',
+      'import struct Network.NWConnection', 'import UIKit; import Network']) expect(importsOf(line, SWIFT_IMPORT), line).toContain('Network');
+    expect(importsOf('  import java.net.URL', KOTLIN_IMPORT)).toEqual(['java.net.URL']);
+    const swiftImports = new Set(filesUnder(MOD).filter((f) => f.endsWith('.swift')).flatMap((f) => importsOf(strip(read(f)), SWIFT_IMPORT)));
     expect([...swiftImports].sort()).toEqual(['AVFoundation', 'CoreMedia', 'CoreVideo', 'CryptoKit', 'ExpoModulesCore', 'Foundation', 'MediaPipeTasksVision', 'UIKit']);
     const ktImports = [
-      ...new Set(filesUnder(MOD).filter((f) => f.endsWith('.kt') && !f.includes('/src/test/')).flatMap((f) => (read(f).match(/^import [\w.]+/gm) ?? []).map((l) => l.slice(7)))),
+      ...new Set(filesUnder(MOD).filter((f) => f.endsWith('.kt') && !f.includes('/src/test/')).flatMap((f) => importsOf(strip(read(f)), KOTLIN_IMPORT))),
     ].sort();
     expect(ktImports).toEqual([
       'android.Manifest',
@@ -1252,17 +1487,31 @@ describe('privacy: the module records, stores and sends nothing itself; the SDK 
     ]);
   });
 
-  it('the MediaPipe SDK usage telemetry is disclosed wherever the module speaks about privacy; datatransport is NOT excluded', () => {
-    const types = read(`${MOD}/src/WsfPoseCamera.types.ts`);
-    for (const need of ['SDK USAGE TELEMETRY', 'Clearcut (play.googleapis.com/log)', 'com.google.android.datatransport',
-      'No camera frames, images or landmarks', 'NATIVE_CAMERA_TELEMETRY_APPROVED = false']) expect(types, need).toContain(need);
+  it('the MediaPipe SDK usage telemetry is disclosed per platform wherever the module speaks about privacy; datatransport is NOT excluded', () => {
+    const types = oneLine(read(`${MOD}/src/WsfPoseCamera.types.ts`));
+    for (const need of ['SDK USAGE TELEMETRY', 'iOS: MediaPipeTasksCommon 0.10.35, through Clearcut (play.googleapis.com/log)',
+      'What the Clearcut client adds to each request on iOS is NOT confirmed', 'Android: tasks-core 0.10.29, through com.google.android.datatransport',
+      'device model and manufacturer', 'build fingerprint', 'OS build id and SDK version', 'locale and country', 'SIM MCC/MNC',
+      'network type and subtype', 'timezone offset', 'wall-clock and uptime timestamps', 'The OS version comes from CCT, not from MediaPipe',
+      "device's IP address", 'No camera frames, images or landmarks', 'NATIVE_CAMERA_TELEMETRY_APPROVED = false']) expect(types, need).toContain(need);
     expect(types).not.toMatch(/no\s+\*?\s*network, no audio/);
-    const podspec = read(`${MOD}/WsfPoseCamera.podspec`);
-    expect(podspec).toContain('Its MediaPipeTasksCommon dependency sends Google usage telemetry');
-    expect(podspec).toContain('ClearcutLoggingClient');
+    // iOS says only what the evidence shows: no Android-only device fields on the iOS line.
+    const iosLine = types.slice(types.indexOf('iOS: MediaPipeTasksCommon'), types.indexOf('Android: tasks-core'));
+    expect(iosLine).not.toMatch(/MCC|fingerprint|device model|timezone/);
+    const podspec = oneLine(read(`${MOD}/WsfPoseCamera.podspec`));
+    for (const need of ['Its MediaPipeTasksCommon dependency sends Google usage telemetry through Clearcut', 'ClearcutLoggingClient',
+      'iOS version, bundle id and app version', 'What the Clearcut client itself adds to each request on iOS is NOT confirmed',
+      'What the Clearcut client adds to each request is not confirmed', "device's IP address"]) expect(podspec, need).toContain(need);
     expect(podspec).not.toContain('Nothing is recorded, stored or uploaded');
     const gradle = read(`${MOD}/android/build.gradle`);
-    for (const need of ['com.google.android.datatransport', 'ACCESS_NETWORK_STATE', 'RemoteLoggingClient', 'no frames, images or landmarks']) expect(gradle, need).toContain(need);
+    const gradleText = oneLine(gradle);
+    for (const need of ['com.google.android.datatransport', 'RemoteLoggingClient', 'MediaPipe itself does not read the OS version',
+      'CctTransportBackend.decorate', 'device model, manufacturer', 'build fingerprint', 'OS build id and SDK version', 'SIM MCC/MNC',
+      'network type and mobile subtype', 'timezone offset', 'wall-clock and uptime timestamps', "device's IP address", 'No frames, images or landmarks',
+      'is already in every Android build of this app without this module', 'expo-dev-launcher depends on ML Kit barcode-scanning',
+      'What MediaPipe adds is a caller']) expect(gradleText, need).toContain(need);
+    // Delta review B: the manifest entries are not MediaPipe's doing.
+    expect(gradleText).not.toMatch(/That adds ACCESS_NETWORK_STATE/);
     expect(gradle).not.toMatch(/Never 1\.x without/);
     // Excluding the uploader would crash: RemoteLoggingClient throws NoClassDefFoundError.
     const gradleCode = strip(gradle); // the warning comment itself names the forbidden line
@@ -1287,10 +1536,9 @@ describe('privacy: the module records, stores and sends nothing itself; the SDK 
 
   it('the app config blocks the microphone and explains the camera honestly (owned by NATIVE-BUILD-1; checked by meaning, not wording)', () => {
     const app = JSON.parse(read('app.json')).expo;
-    // Android: the camera is requested, the microphone is blocked, nothing asks for audio.
-    expect(app.android.permissions).toContain('android.permission.CAMERA');
+    // Android: exactly the camera is requested (a location, network or storage permission fails here), and the microphone is blocked.
+    expect(app.android.permissions).toEqual(['android.permission.CAMERA']);
     expect(app.android.blockedPermissions).toContain('android.permission.RECORD_AUDIO');
-    expect(app.android.permissions.filter((p: string) => /RECORD_AUDIO|MICROPHONE|CAPTURE_AUDIO/i.test(p))).toEqual([]);
     // iOS: no microphone purpose string anywhere in the app config.
     expect(app.ios.infoPlist.NSMicrophoneUsageDescription).toBeUndefined();
     expect(read('app.json') + read('app.config.js')).not.toMatch(/NSMicrophoneUsageDescription/);
@@ -1311,6 +1559,7 @@ describe('privacy: the module records, stores and sends nothing itself; the SDK 
       'src/movement-camera/nativeEngine.ts',
       'src/movement-camera/controller.native.ts',
       'src/movement-camera/support.native.ts',
+      'src/movement-camera/nativeCameraGate.ts',
       'src/ui/CameraSkeletonOverlay.native.tsx',
       'src/ui/NativeCameraPreview.tsx',
       'src/ui/NativeCameraPreview.native.tsx',
@@ -1328,6 +1577,11 @@ describe('privacy: the module records, stores and sends nothing itself; the SDK 
       'src/movement-camera/nativeEngine.ts',
       'src/movement-camera/support.native.ts',
       'src/ui/NativeCameraPreview.native.tsx',
+    ]);
+    // The telemetry gate is read only by the two native files.
+    expect(appFiles.filter((f) => /from '\.\/nativeCameraGate'|movement-camera\/nativeCameraGate'/.test(read(f))).sort()).toEqual([
+      'src/movement-camera/controller.native.ts',
+      'src/movement-camera/support.native.ts',
     ]);
     for (const f of importers.filter((x) => !x.includes('.native.'))) {
       for (const line of strip(read(f)).split('\n').filter((l) => l.includes('modules/wsf-pose-camera'))) {

@@ -65,7 +65,8 @@ fetch() {
 
 echo "== fetching pinned jars into $JARS"
 for a in "${ARTIFACTS[@]}"; do fetch $a; done
-[ -s "$JARS/fbjni-classes.jar" ] || unzip -p "$JARS/fbjni-0.7.0.aar" classes.jar > "$JARS/fbjni-classes.jar"
+# Always re-extracted from the sha256-pinned AAR, never reused from a shared work dir.
+unzip -p "$JARS/fbjni-0.7.0.aar" classes.jar > "$JARS/fbjni-classes.jar"
 
 KOTLINC_CP=$JARS/kotlin-compiler-2.1.20.jar:$JARS/kotlin-stdlib-2.1.20.jar:$JARS/kotlin-script-runtime-2.1.20.jar:$JARS/kotlin-reflect-1.6.10.jar:$JARS/trove4j-1.0.20200330.jar:$JARS/kotlinx-coroutines-core-jvm-1.8.0.jar:$JARS/annotations-13.0.jar
 kotlinc() { java -Xmx3g -cp "$KOTLINC_CP" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler "$@"; }
@@ -85,7 +86,8 @@ kotlinc -no-stdlib -no-reflect -cp "$STDLIB" -jvm-target 17 -language-version 2.
   -d "$OUT/jvm" "$SRC/WsfPoseContract.kt" "$TESTSRC/WsfPoseContractTest.kt"
 java -cp "$OUT/jvm:$STDLIB" expo.modules.wsfposecamera.WsfPoseContractTestKt \
   "$MOD/assets/pose_landmarker_lite.task" "$MOD/android/build.gradle" \
-  "$FIXTURES/landmark-stream.json" "$OUT/android-emitted.json"
+  "$FIXTURES/landmark-stream.json" "$OUT/android-emitted.json" \
+  "$SRC/WsfPoseContract.kt" "$TESTSRC/WsfPoseContractTest.kt"
 if [ "$UPDATE" = 1 ]; then
   cp "$OUT/android-emitted.json" "$FIXTURES/android-emitted.json"
   echo "  updated $FIXTURES/android-emitted.json"

@@ -45,9 +45,17 @@ internal object WsfPoseModel {
     return try {
       Loaded(make(Delegate.GPU), WsfPoseContract.engine("GPU"))
     } catch (gpuError: Throwable) {
-      // Any GPU failure tries the CPU once. If the CPU fails too (or the JNI library cannot
-      // load at all), the Throwable reaches WsfPoseRun.loadModel, which fails the run closed.
-      Loaded(make(Delegate.CPU), WsfPoseContract.engine("CPU"))
+      // A linkage error (the JNI library cannot load: a missing ABI, 16 KB pages) or a VM error
+      // (out of memory) would only fail again on the CPU and hide the real cause: pass it on as is.
+      if (gpuError is LinkageError || gpuError is VirtualMachineError) throw gpuError
+      // Any other GPU failure tries the CPU once. If that fails too, the CPU error carries the GPU
+      // error (suppressed) to WsfPoseRun.loadModel, which reports both and fails the run closed.
+      try {
+        Loaded(make(Delegate.CPU), WsfPoseContract.engine("CPU"))
+      } catch (cpuError: Throwable) {
+        cpuError.addSuppressed(gpuError)
+        throw cpuError
+      }
     }
   }
 

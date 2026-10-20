@@ -5,12 +5,15 @@
 // runs it with kotlinc 2.1.20 — see docs/westayfit/qa/camera-evidence/run-kotlin-jvm.sh.
 //
 //   args: <model .task> <android/build.gradle> <input stream .json> <output events .json>
+//         <WsfPoseContract.kt> <WsfPoseContractTest.kt>
 //
 // Besides unit tests, it plays a recorded landmark stream (tests/fixtures/native-camera/
 // landmark-stream.json) through exactly what WsfPoseRun.analyze does with MediaPipe's output —
 // WsfFrameClock.accept, WsfPoseContract.people and posePayload, plus the runId send() adds — and
 // writes the resulting onPose events. tests/move-camera-native-contract.test.ts feeds those events
 // through the JS adapter and the real frozen session and checks them against the JS reference.
+// The output records the sha256 of both Kotlin sources (contractSources), and the vitest checks it
+// against the files in the tree: an edit to the Kotlin contract fails vitest until this is re-run.
 package expo.modules.wsfposecamera
 
 import java.io.File
@@ -205,8 +208,10 @@ private fun landmarksOf(person: List<*>): List<WsfLandmark> = person.map { raw -
 }
 
 fun main(args: Array<String>) {
-  check(args.size == 4) { "usage: <model.task> <build.gradle> <input.json> <output.json>" }
+  check(args.size == 6) { "usage: <model.task> <build.gradle> <input.json> <output.json> <WsfPoseContract.kt> <WsfPoseContractTest.kt>" }
   val (modelPath, gradlePath, inputPath, outputPath) = args
+  val contractPath = args[4]
+  val testPath = args[5]
   val c = Checks()
 
   c.run("nsToMs truncates nanoseconds to whole milliseconds") {
@@ -338,6 +343,14 @@ fun main(args: Array<String>) {
     val out = StringBuilder()
     out.append("{\"generator\":\"WsfPoseContractTest.kt on the JVM: WsfFrameClock.accept + WsfPoseContract.people/posePayload + runId\",\n")
     out.append("\"inputSha256\":").append(json(WsfPoseContract.sha256Hex(inputBytes))).append(",\n")
+    out.append("\"contractSources\":").append(
+      json(
+        mapOf(
+          "WsfPoseContract.kt" to WsfPoseContract.sha256Hex(File(contractPath).readBytes()),
+          "WsfPoseContractTest.kt" to WsfPoseContract.sha256Hex(File(testPath).readBytes()),
+        )
+      )
+    ).append(",\n")
     out.append("\"mediapipe\":").append(json(WsfPoseContract.MEDIAPIPE_VERSION)).append(",\n")
     out.append("\"dropped\":").append(json(dropped)).append(",\n")
     out.append("\"events\":[\n")

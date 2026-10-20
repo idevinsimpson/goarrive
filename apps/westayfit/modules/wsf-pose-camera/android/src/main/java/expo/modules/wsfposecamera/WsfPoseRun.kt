@@ -112,8 +112,9 @@ internal class WsfPoseRun(
     }
     // After any frame already being analysed, close the model; then end the thread.
     analysisExecutor.execute {
-      landmarker?.close()
+      val current = landmarker
       landmarker = null
+      closeQuietly(current)
     }
     analysisExecutor.shutdown()
   }
@@ -180,11 +181,15 @@ internal class WsfPoseRun(
     } catch (error: Throwable) {
       // Throwable, not Exception: UnsatisfiedLinkError / NoClassDefFoundError from MediaPipe's JNI
       // library or OutOfMemoryError must fail the run (manual entry), never kill the app.
-      send("onCameraError", mapOf("stage" to "model", "message" to (error.message ?: "The pose model did not load.")))
+      // When the CPU retry failed too, the GPU error rides along (suppressed) for the diagnosis.
+      val gpu = error.suppressed.firstOrNull()
+      val message = (error.message ?: error.javaClass.simpleName) +
+        (if (gpu != null) " (GPU: ${gpu.message ?: gpu.javaClass.simpleName})" else "")
+      send("onCameraError", mapOf("stage" to "model", "message" to message))
       return
     }
     if (stopped) {
-      loaded.landmarker.close()
+      closeQuietly(loaded.landmarker)
       return
     }
     landmarker = loaded.landmarker
@@ -206,8 +211,10 @@ internal class WsfPoseRun(
       val result = try {
         current.detectForVideo(mpImage, timestampMs)
       } catch (error: Throwable) {
-        current.close()
+        // The graph is in error here, so close() may throw too: forget it first, close quietly,
+        // and still report the failure.
         landmarker = null
+        closeQuietly(current)
         send("onCameraError", mapOf("stage" to "inference", "message" to (error.message ?: "Pose inference failed.")))
         return
       } finally {
@@ -220,6 +227,20 @@ internal class WsfPoseRun(
       send("onCameraError", mapOf("stage" to "inference", "message" to (error.message ?: "Frame analysis failed.")))
     } finally {
       image.close()
+    }
+  }
+
+  /**
+   * PoseLandmarker.close() rethrows a graph error (TaskRunner.close -> reportError when no error
+   * listener is set). A throw on a background thread would kill the process, so every close goes
+   * through here: the run is already ending, there is nothing else to free.
+   */
+  private fun closeQuietly(landmarker: PoseLandmarker?) {
+    if (landmarker == null) return
+    try {
+      landmarker.close()
+    } catch (error: Throwable) {
+      // Nothing to report: the run already failed or stopped.
     }
   }
 

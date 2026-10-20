@@ -14,15 +14,32 @@
  * photo or movie output, no network call, no audio. Only landmark numbers
  * cross into JavaScript.
  *
- * SDK USAGE TELEMETRY (disclosed; review of #638, finding 1 / F1). The
- * MediaPipe Tasks native SDKs this module links send Google usage telemetry
- * whenever a pose landmarker is created and while it runs:
- *  - iOS: MediaPipeTasksCommon 0.10.35, through Clearcut (play.googleapis.com/log).
- *  - Android: tasks-core 0.10.29, through com.google.android.datatransport,
- *    which queues events and uploads them later.
- * It carries the task name, running mode, app id, app version, OS version,
- * frame counts and latencies. No camera frames, images or landmarks. The app
- * therefore keeps the native counter OFF (support.native.ts
+ * SDK USAGE TELEMETRY (disclosed; review of #638, finding 1 / F1 and the
+ * delta review's Android completion). The MediaPipe Tasks native SDKs this
+ * module links send Google usage telemetry whenever a pose landmarker is
+ * created and while it runs. Per platform:
+ *  - iOS: MediaPipeTasksCommon 0.10.35, through Clearcut
+ *    (play.googleapis.com/log). What MediaPipe hands its logger (MPPTaskRunner,
+ *    v0.10.35): task name, running mode, host system (iOS), iOS version,
+ *    bundle id and app version; session start, clone and end; CPU/GPU input,
+ *    finished and dropped frame counts; total and peak latency; elapsed time;
+ *    init errors. What the Clearcut client adds to each request on iOS is NOT
+ *    confirmed (no device, locale or carrier API reference was found in it,
+ *    but no upload was decoded).
+ *  - Android: tasks-core 0.10.29, through com.google.android.datatransport
+ *    (CCT backend), which queues events on the device and uploads them later.
+ *    MediaPipe's own fields: package name, versionCode and platform; task
+ *    name, event name and running mode; session start, clone and end; frame
+ *    counts, dropped count, elapsed time and latencies; error code.
+ *    DataTransport's CCT backend adds to every event: device model and
+ *    manufacturer, hardware, device and product names, build fingerprint, OS
+ *    build id and SDK version, locale and country, SIM MCC/MNC, network type
+ *    and subtype, timezone offset, app build number, and the event's
+ *    wall-clock and uptime timestamps. (The OS version comes from CCT, not
+ *    from MediaPipe.)
+ *  - Both: each upload reaches Google from the device's IP address.
+ * No camera frames, images or landmarks. The app therefore keeps the native
+ * counter OFF (src/movement-camera/nativeCameraGate.ts
  * NATIVE_CAMERA_TELEMETRY_APPROVED = false) until the owner decides.
  */
 import type { StyleProp, ViewStyle } from 'react-native';

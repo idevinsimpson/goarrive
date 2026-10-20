@@ -1,5 +1,6 @@
 {"generator":"WsfPoseContractTest.kt on the JVM: WsfFrameClock.accept + WsfPoseContract.people/posePayload + runId",
 "inputSha256":"90bdd1426bb217cbf64bd7fb65fef0e2590402d41f40355fc4dd7f95634eba81",
+"contractSources":{"WsfPoseContract.kt":"ff5c581cf8861b351de3523dda4b84443977d80eb7d70c373dc8baf0aeaff943","WsfPoseContractTest.kt":"71ccf35c46bf601917c9a7012a95182a67d61621997c306ca37ddf013cc05b72"},
 "mediapipe":"0.10.29",
 "dropped":[8,13,16,52,69,86,96,125,139,157,181,183,225,228,238,269,293,299,313],
 "events":[

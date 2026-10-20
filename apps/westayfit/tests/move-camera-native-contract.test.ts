@@ -19,6 +19,10 @@
  * snapshots. The stream is SYNTHETIC (a deterministic stick figure in the recorded format), not
  * a camera recording: this proves the two adapters agree, not that anything counts on a body.
  *
+ * The Kotlin output also records the sha256 of WsfPoseContract.kt and WsfPoseContractTest.kt, and
+ * this suite checks them against the files in the tree: any edit to the Kotlin contract fails here
+ * until the JVM run is repeated, so the snapshot cannot go stale silently.
+ *
  * Regenerate: WSF_WRITE_NATIVE_FIXTURES=1 npx vitest run tests/move-camera-native-contract.test.ts
  * then docs/westayfit/qa/camera-evidence/run-kotlin-jvm.sh --update.
  */
@@ -38,6 +42,10 @@ const APP = nodePath.resolve(__dirname, '..');
 const FIXTURES = nodePath.join(APP, 'tests/fixtures/native-camera');
 const INPUT = nodePath.join(FIXTURES, 'landmark-stream.json');
 const KOTLIN = nodePath.join(FIXTURES, 'android-emitted.json');
+const KOTLIN_SOURCES = {
+  'WsfPoseContract.kt': 'modules/wsf-pose-camera/android/src/main/java/expo/modules/wsfposecamera/WsfPoseContract.kt',
+  'WsfPoseContractTest.kt': 'modules/wsf-pose-camera/android/src/test/java/expo/modules/wsfposecamera/WsfPoseContractTest.kt',
+} as const;
 
 type RecordedLandmark = [number, number, number | null];
 interface RecordedFrame {
@@ -200,6 +208,7 @@ const input = JSON.parse(inputText) as { frames: RecordedFrame[] };
 interface KotlinOutput {
   generator: string;
   inputSha256: string;
+  contractSources: Record<keyof typeof KOTLIN_SOURCES, string>;
   mediapipe: string;
   dropped: number[];
   events: EmittedEvent[];
@@ -228,6 +237,16 @@ describe('Kotlin (JVM-run WsfPoseContract) and the JS adapter agree', () => {
     expect(kotlinOutput().inputSha256).toBe(createHash('sha256').update(inputText).digest('hex'));
     expect(kotlinOutput().generator).toMatch(/WsfFrameClock\.accept \+ WsfPoseContract\.people\/posePayload \+ runId/);
     expect(kotlinOutput().mediapipe).toBe('0.10.29');
+  });
+
+  it('the Kotlin events were produced by THESE Kotlin sources (an edit to the contract needs a new JVM run)', () => {
+    const now = Object.fromEntries(
+      Object.entries(KOTLIN_SOURCES).map(([name, rel]) => [name, createHash('sha256').update(readFileSync(nodePath.join(APP, rel))).digest('hex')]),
+    );
+    expect(
+      kotlinOutput().contractSources,
+      'WsfPoseContract.kt or WsfPoseContractTest.kt changed: run docs/westayfit/qa/camera-evidence/run-kotlin-jvm.sh --update',
+    ).toEqual(now);
   });
 
   it('Kotlin sends exactly the contract: same kept frames, same dropped frames, same payloads', () => {
