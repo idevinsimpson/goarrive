@@ -18,7 +18,8 @@ import {
   keyboardScrollProps,
   sheetBottomPadding,
   useKeyboardHeight,
-} from '../src/ui/keyboardAvoidance';
+} from '../src/ui/keyboardAvoidance.native';
+import * as webKeyboard from '../src/ui/keyboardAvoidance';
 
 /**
  * NATIVE-INTEGRATOR-1 (INT-06): the entry forms keep the focused field above
@@ -58,11 +59,11 @@ describe('the platform split', () => {
     try {
       vi.resetModules();
       (Platform as { OS: string }).OS = 'android';
-      const android = await import('../src/ui/keyboardAvoidance');
+      const android = await import('../src/ui/keyboardAvoidance.native');
       expect(android.KeyboardInsetView).toBe(android.AndroidKeyboardInsetView);
       vi.resetModules();
       (Platform as { OS: string }).OS = 'ios';
-      const ios = await import('../src/ui/keyboardAvoidance');
+      const ios = await import('../src/ui/keyboardAvoidance.native');
       expect(ios.KeyboardInsetView).toBe(View);
       expect(ios.KEYBOARD_SCROLL_PROPS).toEqual({ automaticallyAdjustKeyboardInsets: true });
     } finally {
@@ -129,6 +130,16 @@ describe('Android: the frame pads by the IME while it is up', () => {
 });
 
 describe('web renders the form shells exactly as before', () => {
+  it('the web module is inert: no props, a plain View, no keyboard height, the usual sheet padding', async () => {
+    const { View } = await import('react-native');
+    expect(webKeyboard.KEYBOARD_SCROLL_PROPS).toEqual({});
+    expect(webKeyboard.SHEET_DISMISS_PROPS).toEqual({});
+    expect(webKeyboard.KeyboardInsetView).toBe(View);
+    expect(webKeyboard.AndroidKeyboardInsetView).toBe(View);
+    expect(webKeyboard.useKeyboardHeight()).toBe(0);
+    expect(webKeyboard.sheetBottomPadding(34, 336)).toBe(42);
+  });
+
   it('FormShell and QuietShell: the same frame, no keyboard prop in the DOM, no padding', () => {
     act(() =>
       root.render(
