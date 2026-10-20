@@ -11,6 +11,7 @@ package expo.modules.wsfposecamera
 
 import android.content.Context
 import android.graphics.Color
+import android.os.Build
 import android.view.View
 import android.view.ViewGroup
 import androidx.camera.view.PreviewView
@@ -37,6 +38,7 @@ class WsfPoseCameraView(context: Context, appContext: AppContext) : ExpoView(con
     implementationMode = PreviewView.ImplementationMode.COMPATIBLE
   }
   private var run: WsfPoseRun? = null
+  private var startedRunId = 0
 
   init {
     setBackgroundColor(Color.BLACK)
@@ -55,10 +57,11 @@ class WsfPoseCameraView(context: Context, appContext: AppContext) : ExpoView(con
 
   /** Called once all props of an update are set (OnViewDidUpdateProps). Main thread. */
   fun applyProps() {
-    val change = WsfPoseContract.runChange(run?.runId ?: 0, active, runId)
+    val change = WsfPoseContract.runChange(run?.runId ?: 0, startedRunId, active, runId)
     if (change.stop) stopRun()
     val wanted = change.start
     if (wanted == 0) return
+    startedRunId = wanted
     val owner = appContext.currentActivity as? LifecycleOwner
     if (owner == null) {
       onCameraError(mapOf("runId" to wanted, "stage" to "playback", "message" to "No activity to attach the camera to."))
@@ -71,12 +74,28 @@ class WsfPoseCameraView(context: Context, appContext: AppContext) : ExpoView(con
       }
     }
     run = next
+    setRecentsScreenshot(false)
     next.start()
   }
 
   /** OnViewDestroys. */
   fun release() {
     stopRun()
+  }
+
+  /**
+   * Never leave a live frame on screen for the Recents snapshot. The window loses focus before the
+   * task snapshot is taken, so the preview is hidden then, without waiting for JS. On API 33+ the
+   * Recents screenshot is also disabled while a run is open.
+   */
+  override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
+    super.onWindowFocusChanged(hasWindowFocus)
+    previewView.visibility = if (hasWindowFocus) View.VISIBLE else View.INVISIBLE
+  }
+
+  private fun setRecentsScreenshot(enabled: Boolean) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+    appContext.currentActivity?.setRecentsScreenshotEnabled(enabled)
   }
 
   override fun onDetachedFromWindow() {
@@ -100,5 +119,6 @@ class WsfPoseCameraView(context: Context, appContext: AppContext) : ExpoView(con
     val current = run ?: return
     run = null
     current.stop()
+    setRecentsScreenshot(true)
   }
 }

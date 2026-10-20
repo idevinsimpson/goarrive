@@ -52,6 +52,7 @@ import {
   type WsfPoseCameraNativeModule,
 } from '../modules/wsf-pose-camera';
 import { RepCounterController as WebController } from '../src/movement-camera/controller';
+import { cameraEntryAllowed, DEFAULT_MOVE_CAMERA_SETTINGS } from '../src/movement-camera/flow';
 import {
   REQUESTED_CAMERA as NATIVE_REQUESTED_CAMERA,
   RepCounterController as NativeController,
@@ -76,13 +77,23 @@ import type { Keypoint, Pose } from '../src/movement-camera/types';
 import { BLAZEPOSE_INDEX, mapBlazePose, mapPerson, VISUAL_INDEX, visualFor, type RawLandmark } from '../src/movement-camera/visual';
 import { CameraSkeletonOverlay } from '../src/ui/CameraSkeletonOverlay.native';
 import { NativeCameraPreview } from '../src/ui/NativeCameraPreview.native';
+import { NativeCameraPreview as WebNativeCameraPreview } from '../src/ui/NativeCameraPreview';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const APP = nodePath.resolve(__dirname, '..');
 const MOD = 'modules/wsf-pose-camera';
 const read = (p: string) => readFileSync(nodePath.join(APP, p), 'utf8');
-const strip = (c: string) => c.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+/**
+ * Code without comments: block comments and comment-only lines are removed. A `//` after code, or
+ * inside a string literal ("a//b"), is kept and scanned, so it cannot hide code from the scan.
+ */
+const strip = (c: string) =>
+  c
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .filter((line) => !/^\s*(\/\/|\*)/.test(line))
+    .join('\n');
 const filesUnder = (dir: string): string[] =>
   readdirSync(nodePath.join(APP, dir)).flatMap((n) => {
     const rel = `${dir}/${n}`;
@@ -201,6 +212,10 @@ const outcome = (s: RepCounterSnapshot) => ({
   fresh: s.fresh,
   fullBodyVisible: s.fullBodyVisible,
   readyForCountdown: s.readyForCountdown,
+  // Coordinates and wording too, so a change that keeps the count cannot pass as parity.
+  keypoints: s.keypoints,
+  aspect: s.aspect,
+  guidance: s.guidance,
 });
 
 /** The existing real-session scenario: stand, one pre-GO squat, stand, GO, three squats. */
@@ -248,12 +263,15 @@ describe('nativeEngine.toPoseFrame — one native event → one PoseFrame', () =
     expect(a.ok && b.ok && b.frame.timestampMs - a.frame.timestampMs).toBeCloseTo(33, 6);
   });
 
-  it('the ns guard: an unlabelled clock above 1e12 is ns; a clock LABELLED ms above it is dropped, never trusted', () => {
+  it('the unit is required: an unlabelled clock is dropped, never guessed; a clock LABELLED ms above 1e12 is dropped too', () => {
     expect(NS_GUARD).toBe(1e12);
-    expect(timestampMsOf({ timestamp: 2.5e14 })).toBe(2.5e8);
-    expect(timestampMsOf({ timestamp: 2.5e8 })).toBe(2.5e8);
+    expect(timestampMsOf({ timestamp: 2.5e14 })).toBeNull();
+    expect(timestampMsOf({ timestamp: 2.5e8 })).toBeNull();
+    expect(timestampMsOf({ timestamp: 2.5e14, timestampUnit: 'ns' })).toBe(2.5e8);
     expect(timestampMsOf({ timestamp: 2.5e14, timestampUnit: 'ms' })).toBeNull();
     expect(toPoseFrame({ ...nativeEvent([], 0, 'android'), timestampUnit: 'ms' }, null)).toEqual({ ok: false, drop: 'invalid' });
+    const { timestampUnit: _unit, ...unlabelled } = nativeEvent([member(0)], 0, 'ios');
+    expect(toPoseFrame(unlabelled, null)).toEqual({ ok: false, drop: 'invalid' });
   });
 
   it('rejects what cannot be trusted: bad timestamp, unknown unit, no usable size, no people array', () => {
@@ -555,6 +573,18 @@ describe('controller.native — the same public API as controller.ts', () => {
     expect(isNativeCameraHost(new WebController({ testHook: null, pauseOnHide: false }))).toBe(false);
     ctl.dispose();
   });
+
+  it('tsc holds the native controller and preview to the surface the shared camera screen uses', () => {
+    // tsc resolves CameraRepCounter's imports to the WEB files only, so these assignments are what
+    // makes a drift in controller.native.ts / NativeCameraPreview.native.tsx a type error.
+    const native = new NativeController({ nativeModule: null, pauseOnHide: false });
+    const api: Pick<WebController, 'snapshot' | 'subscribe' | 'startCamera' | 'stopCamera' | 'beginSet' | 'finishSet' | 'dispose'> = native;
+    type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+    const previewProps: Same<Parameters<typeof NativeCameraPreview>[0], Parameters<typeof WebNativeCameraPreview>[0]> = true;
+    expect(typeof api.subscribe).toBe('function');
+    expect(previewProps).toBe(true);
+    native.dispose();
+  });
 });
 
 describe('controller.native — one run, one owner; released on every way out', () => {
@@ -639,8 +669,8 @@ describe('controller.native — one run, one owner; released on every way out', 
     ctl.dispose();
   });
 
-  it('native errors map to the web failure stages and release the camera', async () => {
-    for (const [stage, expected] of [['model', 'model'], ['inference', 'inference'], ['playback', 'playback'], ['ended', 'ended'], ['weird', 'ended']] as const) {
+  it('native errors map to the failure stages (native playback = "Camera isn\u2019t available", not the browser tap panel) and release the camera', async () => {
+    for (const [stage, expected] of [['model', 'model'], ['inference', 'inference'], ['playback', 'ended'], ['ended', 'ended'], ['permission', 'permission'], ['weird', 'ended']] as const) {
       const { ctl, bindings } = controller();
       await ctl.startCamera(null);
       ctl.handleError({ runId: 1, stage: stage as 'model' });
@@ -694,6 +724,43 @@ describe('controller.native — one run, one owner; released on every way out', 
     ctl.dispose();
   });
 
+  it('a permission answer that lands while the app is away opens the camera only on the next "active"', async () => {
+    const f = fakeModule();
+    const { ctl, appState, bindings } = controller({ mod: f.deferred });
+    const started = ctl.startCamera(null);
+    appState.fire('background'); // e.g. Android: the dialog paused the activity; the answer arrives before onResume
+    f.grant();
+    await started;
+    expect(ctl.snapshot.camera).toBe('loadingModel');
+    expect(bindings.some((b) => b.active)).toBe(false);
+    appState.fire('inactive'); // still away: nothing opens, nothing pauses
+    expect(bindings.some((b) => b.active)).toBe(false);
+    expect(ctl.snapshot.camera).toBe('loadingModel');
+    appState.fire('active');
+    expect(bindings.at(-1)).toEqual({ active: true, runId: 1 });
+    ctl.dispose();
+  });
+
+  it('a throw while counting or rendering a frame fails the run closed (released, manual entry), as the web lifecycle does', async () => {
+    const { ctl, bindings } = controller();
+    await ctl.startCamera(null);
+    ctl.handleReady({ runId: 1, engine: 'x' });
+    let thrown = 0;
+    ctl.subscribe((s) => {
+      if (s.camera === 'live' && s.keypoints && thrown === 0) {
+        thrown += 1;
+        throw new Error('listener boom');
+      }
+    });
+    expect(() => {
+      for (const t of frameTimes(0, 300)) ctl.handlePose(poseFor(1, [member(0)], t));
+    }).not.toThrow();
+    expect(thrown).toBe(1);
+    expect(ctl.snapshot).toMatchObject({ camera: 'failed', failure: 'inference' });
+    expect(bindings.at(-1)).toEqual({ active: false, runId: 1 });
+    ctl.dispose();
+  });
+
   it('does not start while the app is in the background', async () => {
     const { ctl, bindings } = controller({ appState: fakeAppState('background') });
     await ctl.startCamera(null);
@@ -714,8 +781,42 @@ describe('controller.native — one run, one owner; released on every way out', 
 
 // ── 4. Fail closed: support only with the linked module ─────────────────────
 
-describe('support.native — true ONLY when the native module is linked', () => {
+describe('support.native — fail closed: the telemetry gate, then the linked module', () => {
   const linked = fakeModule().mod;
+  it('the telemetry approval constant is false, so native support is false even with the module linked', () => {
+    expect(nativeSupport.NATIVE_CAMERA_TELEMETRY_APPROVED).toBe(false);
+    expect(nativeSupport.nativeCameraCounterAllowed(nativeSupport.NATIVE_CAMERA_TELEMETRY_APPROVED, { os: 'ios', load: () => linked })).toBe(false);
+    expect(nativeSupport.nativeCameraCounterAllowed(nativeSupport.NATIVE_CAMERA_TELEMETRY_APPROVED, { os: 'android', load: () => linked })).toBe(false);
+    const req = vi.mocked(requireOptionalNativeModule);
+    req.mockReturnValue(linked);
+    try {
+      expect(nativeSupport.cameraCounterSupported()).toBe(false);
+    } finally {
+      req.mockReturnValue(null);
+    }
+    // With support false, a squat "Start moving" never opens the camera: members get the manual flow.
+    const entry = { settings: DEFAULT_MOVE_CAMERA_SETTINGS, unit: 'squats', mode: 'start' as const, resumed: false };
+    expect(cameraEntryAllowed({ ...entry, supported: nativeSupport.cameraCounterSupported() })).toBe(false);
+    expect(cameraEntryAllowed({ ...entry, supported: true })).toBe(true);
+  });
+
+  it('once approved, support still needs the linked module on iOS/Android (both gate states covered)', () => {
+    expect(nativeSupport.nativeCameraCounterAllowed(true, { os: 'ios', load: () => linked })).toBe(true);
+    expect(nativeSupport.nativeCameraCounterAllowed(true, { os: 'android', load: () => linked })).toBe(true);
+    expect(nativeSupport.nativeCameraCounterAllowed(true, { os: 'ios', load: () => null })).toBe(false);
+    expect(nativeSupport.nativeCameraCounterAllowed(true, { os: 'web', load: () => linked })).toBe(false);
+    expect(nativeSupport.nativeCameraCounterAllowed(false, { os: 'ios', load: () => linked })).toBe(false);
+  });
+
+  it('the gate states its reason and points at the review and the owner decision', () => {
+    const code = read('src/movement-camera/support.native.ts');
+    expect(code).toMatch(/export const NATIVE_CAMERA_TELEMETRY_APPROVED: boolean = false;/);
+    for (const need of ['#638', 'ClearcutLoggingClient', 'com.google.android.datatransport', 'No camera frames, images or landmarks', "owner's"]) {
+      expect(code, need).toContain(need);
+    }
+    expect(code).toMatch(/return nativeCameraCounterAllowed\(NATIVE_CAMERA_TELEMETRY_APPROVED\);/);
+  });
+
   it('iOS/Android with the module → true; without it (Expo Go, an older binary) → false; web → false', () => {
     expect(nativeSupport.nativePoseCameraLinked({ os: 'ios', load: () => linked })).toBe(true);
     expect(nativeSupport.nativePoseCameraLinked({ os: 'android', load: () => linked })).toBe(true);
@@ -967,7 +1068,7 @@ describe('native sources: header, settings, wiring and versions (static; the cod
     const krun = kt('WsfPoseRun.kt');
     for (const need of ['CameraSelector.DEFAULT_FRONT_CAMERA', 'ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST', 'ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888',
       'AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY', 'postRotate(rotation.toFloat())',
-      'send("onPose", WsfPoseContract.posePayload(timestampNs, upright.width, upright.height, people))', 'image.close()']) expect(krun, need).toContain(need);
+      'send("onPose", WsfPoseContract.posePayload(timestampNs, width, height, people))', 'image.close()']) expect(krun, need).toContain(need);
     for (const need of ['const val TIMESTAMP_UNIT = "ns"', '"timestampUnit" to TIMESTAMP_UNIT', '"timestamp" to timestampNs.toDouble()',
       'const val MIRRORED = false', '"mirrored" to MIRRORED', 'fun nsToMs(timestampNs: Long): Long = timestampNs / 1_000_000L',
       'if (ms <= lastMs) return null', 'persons.take(MAX_POSES)']) expect(contract(), need).toContain(need);
@@ -977,6 +1078,30 @@ describe('native sources: header, settings, wiring and versions (static; the cod
     // The pure contract stays Android-free (it is compiled and run on a plain JVM).
     expect(contract().match(/^import .+$/gm)).toEqual(['import java.nio.ByteBuffer', 'import java.nio.ByteOrder', 'import java.security.MessageDigest']);
     expect(kt('WsfPoseCameraView.kt')).toContain('PreviewView.ScaleType.FILL_CENTER');
+  });
+
+  it('review fixes for #638 are in place (fail-closed catches, frames freed, camera state, run ids, Recents/snapshot, R8, one session queue, preset order, SDK constants)', () => {
+    const krun = kt('WsfPoseRun.kt');
+    expect(krun.match(/catch \(error: Exception\)/g)).toEqual(['catch (error: Exception)']); // only the unbind cleanup
+    expect(krun.match(/catch \(error: Throwable\)/g)?.length).toBe(4); // bind, loadModel, detectForVideo, analyze
+    for (const need of ['mpImage.close()', 'if (rotated !== bitmap) bitmap.recycle()', 'observeCameraState(camera.cameraInfo.cameraState)',
+      'cameraState?.removeObserver(observer)', 'CameraState.ERROR_CAMERA_IN_USE', 'CameraState.ErrorType.CRITICAL']) expect(krun, need).toContain(need);
+    expect(kt('WsfPoseModel.kt')).toContain('} catch (gpuError: Throwable) {');
+    const kview = kt('WsfPoseCameraView.kt');
+    for (const need of ['startedRunId = wanted', 'WsfPoseContract.runChange(run?.runId ?: 0, startedRunId, active, runId)',
+      'override fun onWindowFocusChanged', 'setRecentsScreenshotEnabled(enabled)', 'Build.VERSION_CODES.TIRAMISU']) expect(kview, need).toContain(need);
+    expect(read(`${MOD}/android/proguard-rules.pro`)).toContain('-keep class com.google.common.flogger.** { *; }');
+    const run = swift('WsfPoseRun.swift');
+    expect(run).toContain('private static let sessionQueue = DispatchQueue(');
+    expect(run).not.toMatch(/\n\s*private let sessionQueue/);
+    expect(run.match(/WsfPoseRun\.sessionQueue\.async/g)?.length).toBe(2);
+    expect(run.indexOf('session.addInput(input)')).toBeLessThan(run.indexOf('session.sessionPreset = .vga640x480'));
+    for (const need of ['AVCaptureSession.wasInterruptedNotification', 'AVCaptureSession.runtimeErrorNotification',
+      '= AVCaptureSessionInterruptionReasonKey', '= AVCaptureSessionErrorKey']) expect(run, need).toContain(need);
+    expect(run).not.toMatch(/Notification\.Name\("/);
+    const view = swift('WsfPoseCameraView.swift');
+    for (const need of ['UIApplication.willResignActiveNotification', 'UIApplication.didBecomeActiveNotification', 'previewLayer.isHidden = hidden',
+      'CATransaction.setDisableActions(true)', 'if wanted == startedRunId { return }', 'nonisolated(unsafe) private var run: WsfPoseRun?']) expect(view, need).toContain(need);
   });
 
   it('MediaPipe versions: iOS = web 0.10.35; Android pinned to the nearest confirmed 0.10.x and kept in step; never 1.x', () => {
@@ -1006,15 +1131,143 @@ describe('native sources: header, settings, wiring and versions (static; the cod
 
 // ── 8. Privacy ──────────────────────────────────────────────────────────────
 
-describe('privacy: frames stay in memory; nothing is recorded, stored or sent; no audio', () => {
-  const NATIVE_FORBIDDEN =
-    /AVCapturePhotoOutput|AVCaptureMovieFileOutput|AVCaptureAudio|AVAudio|AVAssetWriter|ImageCapture|VideoCapture|Recorder|AudioRecord|RECORD_AUDIO|URLSession|URLRequest|NSURLConnection|HttpURLConnection|OkHttp|Socket|FileOutputStream|FileWriter|openFileOutput|MediaStore|write\(to:|\.write\(|createFile|jpegData|pngData|JPEGRepresentation|\.compress\(|cacheDir|filesDir|ExternalStorage|UserDefaults|SharedPreferences|NSKeyedArchiver|fetch\s*\(|https?:\/\/|\.audio\b|microphone/i;
+describe('privacy: the module records, stores and sends nothing itself; the SDK usage telemetry is disclosed and gated off; no audio, no location', () => {
+  const NATIVE_FORBIDDEN = new RegExp(
+    [
+      // recording, capture and encoding
+      'AVCapturePhotoOutput', 'AVCaptureMovieFileOutput', 'AVCaptureAudio', 'AVAudio', 'AVAssetWriter', 'AVAssetExportSession',
+      'ImageCapture', 'VideoCapture', 'Recorder', 'AudioRecord', 'RECORD_AUDIO', 'MediaMuxer', 'MediaCodec', 'VTCompressionSession',
+      'CGImageDestination', 'jpegData', 'pngData', 'JPEGRepresentation', '\\.compress\\(',
+      // photo library and storage
+      'PHPhotoLibrary', 'PHAsset', 'UIImageWriteToSavedPhotosAlbum', 'UISaveVideoAtPath', 'MediaStore', 'ContentResolver',
+      'FileOutputStream', 'FileWriter', 'RandomAccessFile', 'openFileOutput', 'FileHandle', 'FileManager', 'write\\(to:', '\\.write\\(',
+      'writeBytes', 'writeText', 'outputStream\\(', 'createFile', 'cacheDir', 'filesDir', 'ExternalStorage', 'UserDefaults',
+      'SharedPreferences', 'NSKeyedArchiver',
+      // network
+      'URLSession', 'URLRequest', 'NSURLConnection', 'HttpURLConnection', 'OkHttp', 'NWConnection', 'Socket', 'openConnection',
+      'openStream', 'URL\\(string:', 'fetch\\s*\\(', 'https?:\\/\\/',
+      // audio and location
+      '\\.audio\\b', 'microphone', 'CLLocation', 'CoreLocation', 'LocationManager', 'FusedLocation', '_LOCATION\\b',
+    ].join('|'),
+    'i',
+  );
+  /** Fully-qualified uses that skip an import. */
+  const FQN_FORBIDDEN = /\b(java\.(io|net|nio\.file)|android\.(location|media)|okhttp3|retrofit2|io\.ktor)\./;
+  const MODULE_FILES = [
+    'WsfPoseCamera.podspec',
+    'android/build.gradle',
+    'android/proguard-rules.pro',
+    'android/src/main/java/expo/modules/wsfposecamera/WsfPoseCameraModule.kt',
+    'android/src/main/java/expo/modules/wsfposecamera/WsfPoseCameraView.kt',
+    'android/src/main/java/expo/modules/wsfposecamera/WsfPoseContract.kt',
+    'android/src/main/java/expo/modules/wsfposecamera/WsfPoseModel.kt',
+    'android/src/main/java/expo/modules/wsfposecamera/WsfPoseRun.kt',
+    'android/src/test/java/expo/modules/wsfposecamera/WsfPoseContractTest.kt',
+    'assets/pose_landmarker_lite.task',
+    'expo-module.config.json',
+    'index.ts',
+    'ios/WsfPoseCameraModule.swift',
+    'ios/WsfPoseCameraView.swift',
+    'ios/WsfPoseModel.swift',
+    'ios/WsfPoseRun.swift',
+    'src/WsfPoseCamera.types.ts',
+    'src/WsfPoseCameraView.tsx',
+  ].map((f) => `${MOD}/${f}`);
 
-  it('static scan of modules/wsf-pose-camera/** (Swift, Kotlin, TypeScript; comments stripped; JVM test sources are not shipped)', () => {
-    const code = filesUnder(MOD).filter((f) => /\.(swift|kt|ts|tsx)$/.test(f) && !f.includes('/android/src/test/'));
+  it('the module holds exactly the reviewed files: no .m/.mm/.h/.java, no AndroidManifest.xml, nothing unscanned', () => {
+    expect(filesUnder(MOD).sort()).toEqual([...MODULE_FILES].sort());
+    expect(existsSync(nodePath.join(APP, MOD, 'android/src/main/AndroidManifest.xml'))).toBe(false);
+    // What the builds compile: the podspec glob and the gradle source set (default src/main/java).
+    expect(read(`${MOD}/WsfPoseCamera.podspec`)).toContain("s.source_files = 'ios/**/*.{h,m,mm,swift}'");
+    expect(read(`${MOD}/android/build.gradle`)).not.toMatch(/java\.srcDirs|kotlin\.srcDirs|manifest\.srcFile/);
+  });
+
+  it('static scan of every compiled source kind (Swift, Kotlin, Java, ObjC, TS); comments removed, strings kept; JVM test sources are not shipped', () => {
+    const code = filesUnder(MOD).filter((f) => /\.(swift|kt|java|m|mm|h|ts|tsx)$/.test(f) && !f.includes('/android/src/test/'));
     expect(code.length).toBe(12);
-    expect(filesUnder(MOD).filter((f) => f.includes('/android/src/test/'))).toEqual([`${MOD}/android/src/test/java/expo/modules/wsfposecamera/WsfPoseContractTest.kt`]);
-    for (const f of code) expect(strip(read(f)), f).not.toMatch(NATIVE_FORBIDDEN);
+    for (const f of code) {
+      const c = strip(read(f));
+      expect(c, f).not.toMatch(NATIVE_FORBIDDEN);
+      expect(c, f).not.toMatch(FQN_FORBIDDEN);
+    }
+    // A '//' inside a string no longer hides the rest of the line from the scan.
+    expect(strip('let s = "a//b"; let x = AVCaptureMovieFileOutput()')).toMatch(NATIVE_FORBIDDEN);
+    expect(strip('// AVCaptureMovieFileOutput in a comment')).not.toMatch(NATIVE_FORBIDDEN);
+  });
+
+  it('imports are pinned: Swift only the reviewed frameworks; Kotlin exactly the reviewed set', () => {
+    const swiftImports = new Set(
+      filesUnder(MOD).filter((f) => f.endsWith('.swift')).flatMap((f) => (strip(read(f)).match(/^import \w+/gm) ?? []).map((l) => l.slice(7))),
+    );
+    expect([...swiftImports].sort()).toEqual(['AVFoundation', 'CoreMedia', 'CoreVideo', 'CryptoKit', 'ExpoModulesCore', 'Foundation', 'MediaPipeTasksVision', 'UIKit']);
+    const ktImports = [
+      ...new Set(filesUnder(MOD).filter((f) => f.endsWith('.kt') && !f.includes('/src/test/')).flatMap((f) => (read(f).match(/^import [\w.]+/gm) ?? []).map((l) => l.slice(7)))),
+    ].sort();
+    expect(ktImports).toEqual([
+      'android.Manifest',
+      'android.content.Context',
+      'android.content.pm.PackageManager',
+      'android.graphics.Bitmap',
+      'android.graphics.Color',
+      'android.graphics.Matrix',
+      'android.os.Build',
+      'android.os.Handler',
+      'android.os.Looper',
+      'android.util.Size',
+      'android.view.View',
+      'android.view.ViewGroup',
+      'androidx.camera.core.CameraSelector',
+      'androidx.camera.core.CameraState',
+      'androidx.camera.core.ImageAnalysis',
+      'androidx.camera.core.ImageProxy',
+      'androidx.camera.core.Preview',
+      'androidx.camera.core.UseCase',
+      'androidx.camera.core.resolutionselector.AspectRatioStrategy',
+      'androidx.camera.core.resolutionselector.ResolutionSelector',
+      'androidx.camera.core.resolutionselector.ResolutionStrategy',
+      'androidx.camera.lifecycle.ProcessCameraProvider',
+      'androidx.camera.view.PreviewView',
+      'androidx.lifecycle.LifecycleOwner',
+      'androidx.lifecycle.LiveData',
+      'androidx.lifecycle.Observer',
+      'com.google.mediapipe.framework.image.BitmapImageBuilder',
+      'com.google.mediapipe.tasks.components.containers.NormalizedLandmark',
+      'com.google.mediapipe.tasks.core.BaseOptions',
+      'com.google.mediapipe.tasks.core.Delegate',
+      'com.google.mediapipe.tasks.vision.core.RunningMode',
+      'com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarker',
+      'expo.modules.interfaces.permissions.Permissions',
+      'expo.modules.kotlin.AppContext',
+      'expo.modules.kotlin.Promise',
+      'expo.modules.kotlin.modules.Module',
+      'expo.modules.kotlin.modules.ModuleDefinition',
+      'expo.modules.kotlin.viewevent.EventDispatcher',
+      'expo.modules.kotlin.views.ExpoView',
+      'java.nio.ByteBuffer',
+      'java.nio.ByteOrder',
+      'java.security.MessageDigest',
+      'java.util.concurrent.Executor',
+      'java.util.concurrent.ExecutorService',
+      'java.util.concurrent.Executors',
+    ]);
+  });
+
+  it('the MediaPipe SDK usage telemetry is disclosed wherever the module speaks about privacy; datatransport is NOT excluded', () => {
+    const types = read(`${MOD}/src/WsfPoseCamera.types.ts`);
+    for (const need of ['SDK USAGE TELEMETRY', 'Clearcut (play.googleapis.com/log)', 'com.google.android.datatransport',
+      'No camera frames, images or landmarks', 'NATIVE_CAMERA_TELEMETRY_APPROVED = false']) expect(types, need).toContain(need);
+    expect(types).not.toMatch(/no\s+\*?\s*network, no audio/);
+    const podspec = read(`${MOD}/WsfPoseCamera.podspec`);
+    expect(podspec).toContain('Its MediaPipeTasksCommon dependency sends Google usage telemetry');
+    expect(podspec).toContain('ClearcutLoggingClient');
+    expect(podspec).not.toContain('Nothing is recorded, stored or uploaded');
+    const gradle = read(`${MOD}/android/build.gradle`);
+    for (const need of ['com.google.android.datatransport', 'ACCESS_NETWORK_STATE', 'RemoteLoggingClient', 'no frames, images or landmarks']) expect(gradle, need).toContain(need);
+    expect(gradle).not.toMatch(/Never 1\.x without/);
+    // Excluding the uploader would crash: RemoteLoggingClient throws NoClassDefFoundError.
+    const gradleCode = strip(gradle); // the warning comment itself names the forbidden line
+    expect(gradleCode).not.toMatch(/datatransport/);
+    expect(gradleCode).not.toMatch(/\bexclude\b/);
   });
 
   it('the only inputs are the front camera (video) and the bundled model; permission is CAMERA / video only', () => {

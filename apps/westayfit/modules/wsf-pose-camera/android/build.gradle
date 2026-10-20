@@ -14,8 +14,17 @@ version = '0.1.0'
 // 0.10.29: Google's own mediapipe-samples pose_landmarker Android app built against it
 // (google-ai-edge/mediapipe-samples 1daf138, 2025-09-25, until 1.0.0 on 2026-08-04).
 // The PoseLandmarker API used here is identical at v0.10.26 and v0.10.35 (source read).
-// Move to 0.10.35 once the EAS build log shows it resolves (one line). Never 1.x without
-// a privacy review (web 1.0.0 added a metrics logger).
+// Move to 0.10.35 once the EAS build log shows it resolves (one line).
+//
+// PRIVACY: unlike the web package, the native tasks-vision artifacts carry Google usage telemetry.
+// This holds for 0.10.29 and 0.10.35 alike: through tasks-core they pull
+// com.google.android.datatransport (transport-api, transport-backend-cct, transport-runtime). That
+// adds ACCESS_NETWORK_STATE, a JobService and an AlarmManager receiver to the merged manifest, and
+// RemoteLoggingClient sends the task name, running mode, app id, app version, OS version, frame
+// counts and latencies (no frames, images or landmarks). The app keeps the native counter off until
+// the owner decides (src/movement-camera/support.native.ts NATIVE_CAMERA_TELEMETRY_APPROVED).
+// Do NOT add `exclude group: 'com.google.android.datatransport'`: RemoteLoggingClient would then
+// throw NoClassDefFoundError at landmarker creation.
 def mediapipeTasksVisionVersion = '0.10.29'
 // CameraX: the version Google's pose sample uses (camera-core/camera2/lifecycle/view).
 def cameraxVersion = '1.4.2'

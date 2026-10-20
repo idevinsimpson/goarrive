@@ -2,8 +2,9 @@
 //
 // ONE CAMERA RUN: the front camera (AVCaptureSession, video only) and one PoseLandmarker,
 // opened for one `runId` and released by stop(). Frames are processed in memory on the video
-// queue and dropped; nothing is written, recorded or sent. Only landmark numbers leave, as
-// events stamped with this run's id.
+// queue and dropped; this code writes, records and sends nothing. Only landmark numbers leave, as
+// events stamped with this run's id. (MediaPipe's own SDK usage telemetry is disclosed in
+// WsfPoseCamera.podspec.)
 //
 // Data contract (see src/movement-camera/nativeEngine.ts):
 //  - Pixels are delivered UPRIGHT (connection rotated to portrait) and NOT mirrored, so the
@@ -34,7 +35,9 @@ final class WsfPoseRun: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
   private let emit: Emit
   private let session = AVCaptureSession()
   private let output = AVCaptureVideoDataOutput()
-  private let sessionQueue = DispatchQueue(label: "fit.westayfit.posecamera.session")
+  /// ONE queue for every run's session work, so a stopping run's teardown always finishes before
+  /// the next run configures and starts (two sessions never compete for the front camera).
+  private static let sessionQueue = DispatchQueue(label: "fit.westayfit.posecamera.session")
   private let videoQueue = DispatchQueue(label: "fit.westayfit.posecamera.video")
 
   // Video queue only.
@@ -67,7 +70,7 @@ final class WsfPoseRun: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     }
     previewLayer.session = session
     observeSession()
-    sessionQueue.async { [weak self, weak previewLayer] in
+    WsfPoseRun.sessionQueue.async { [weak self, weak previewLayer] in
       self?.openCamera(previewLayer: previewLayer)
     }
   }
@@ -86,7 +89,7 @@ final class WsfPoseRun: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
 
     let session = self.session
     let output = self.output
-    sessionQueue.async {
+    WsfPoseRun.sessionQueue.async {
       output.setSampleBufferDelegate(nil, queue: nil)
       if session.isRunning {
         session.stopRunning()
@@ -136,15 +139,16 @@ final class WsfPoseRun: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     session.beginConfiguration()
     defer { session.commitConfiguration() }
 
-    if session.canSetSessionPreset(.vga640x480) {
-      session.sessionPreset = .vga640x480
-    }
     guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front) else {
       throw WsfPoseCameraFailure.noFrontCamera
     }
     let input = try AVCaptureDeviceInput(device: device)
     guard session.canAddInput(input) else { throw WsfPoseCameraFailure.cameraUnavailable }
     session.addInput(input)
+    // The preset is set once the input is in, so canSetSessionPreset answers for this camera.
+    if session.canSetSessionPreset(.vga640x480) {
+      session.sessionPreset = .vga640x480
+    }
 
     // MediaPipe needs 32BGRA sample buffers.
     output.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
@@ -225,12 +229,18 @@ final class WsfPoseRun: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
 
   // MARK: - Events
 
-  // The AVFoundation notification and key constants by their string values, which do not depend
-  // on which Swift spelling the build's SDK exports for them.
-  private static let wasInterrupted = Notification.Name("AVCaptureSessionWasInterruptedNotification")
-  private static let runtimeError = Notification.Name("AVCaptureSessionRuntimeErrorNotification")
-  private static let interruptionReasonKey = "AVCaptureSessionInterruptionReasonKey"
-  private static let errorKey = "AVCaptureSessionErrorKey"
+  // The SDK constants. The iOS 18 SDK (Xcode 16, Swift 6 compiler) names the notifications
+  // AVCaptureSession.wasInterruptedNotification / .runtimeErrorNotification (NS_SWIFT_NAME in
+  // AVCaptureSession.h); the iOS 17 SDK and earlier exposed them as NSNotification.Name members.
+  #if compiler(>=6.0)
+  private static let wasInterrupted = AVCaptureSession.wasInterruptedNotification
+  private static let runtimeError = AVCaptureSession.runtimeErrorNotification
+  #else
+  private static let wasInterrupted = NSNotification.Name.AVCaptureSessionWasInterrupted
+  private static let runtimeError = NSNotification.Name.AVCaptureSessionRuntimeError
+  #endif
+  private static let interruptionReasonKey = AVCaptureSessionInterruptionReasonKey
+  private static let errorKey = AVCaptureSessionErrorKey
 
   private func observeSession() {
     let center = NotificationCenter.default

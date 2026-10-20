@@ -9,8 +9,9 @@
  *
  * WHAT IT GUARANTEES
  *  - Timestamps in ms. Android's camera clock is ns (ImageInfo.timestamp); it
- *    is divided by 1e6 here. A unit-less value above NS_GUARD is read as ns;
- *    a value LABELLED ms above it is a mislabelled clock and is dropped.
+ *    is divided by 1e6 here. The unit is REQUIRED (both native sides send it);
+ *    an event without one is dropped, never guessed. A value LABELLED ms above
+ *    NS_GUARD is a mislabelled ns clock and is dropped too.
  *  - Strictly increasing timestamps. A repeated or older frame is DROPPED,
  *    never re-timed: a duplicate must never reach the session (it would be an
  *    `outOfOrder` interruption there), and nothing is fabricated.
@@ -41,7 +42,7 @@ export const NATIVE_MAX_POSES = 3;
 /** BlazePose topology: 33 landmarks of [x, y, visibility]. */
 export const BLAZEPOSE_LANDMARKS = 33;
 export const VALUES_PER_LANDMARK = 3;
-/** ≈ 31.7 years in ms. No camera clock in ms gets here; a ns clock passes it within ~17 minutes of boot. */
+/** ≈ 31.7 years in ms. No camera clock in ms gets here, so an 'ms' value above it is a mislabelled clock. */
 export const NS_GUARD = 1e12;
 
 export type FrameDrop = 'invalid' | 'duplicate' | 'outOfOrder';
@@ -55,7 +56,7 @@ export function timestampMsOf(event: unknown): number | null {
   if (!isObject(event)) return null;
   const t = event.timestamp;
   if (!finite(t) || t < 0) return null;
-  const unit = event.timestampUnit === undefined ? (t > NS_GUARD ? 'ns' : 'ms') : event.timestampUnit;
+  const unit = event.timestampUnit;
   if (unit === 'ns') return t / 1e6;
   if (unit === 'ms') return t > NS_GUARD ? null : t;
   return null;

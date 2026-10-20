@@ -10,8 +10,20 @@
  * (src/movement-camera/nativeEngine.ts) and feeds the orchestrator, exactly
  * as web does. Nothing here counts.
  *
- * PRIVACY. Frames never leave memory: no file, no photo or movie output, no
- * network, no audio. Only landmark numbers cross into JavaScript.
+ * PRIVACY. This module's own code keeps frames in memory only: no file, no
+ * photo or movie output, no network call, no audio. Only landmark numbers
+ * cross into JavaScript.
+ *
+ * SDK USAGE TELEMETRY (disclosed; review of #638, finding 1 / F1). The
+ * MediaPipe Tasks native SDKs this module links send Google usage telemetry
+ * whenever a pose landmarker is created and while it runs:
+ *  - iOS: MediaPipeTasksCommon 0.10.35, through Clearcut (play.googleapis.com/log).
+ *  - Android: tasks-core 0.10.29, through com.google.android.datatransport,
+ *    which queues events and uploads them later.
+ * It carries the task name, running mode, app id, app version, OS version,
+ * frame counts and latencies. No camera frames, images or landmarks. The app
+ * therefore keeps the native counter OFF (support.native.ts
+ * NATIVE_CAMERA_TELEMETRY_APPROVED = false) until the owner decides.
  */
 import type { StyleProp, ViewStyle } from 'react-native';
 
@@ -35,7 +47,8 @@ export interface PoseEventPayload {
   runId: number;
   /** Camera clock of the frame, in `timestampUnit`. Strictly increasing within a run (native drops repeats before inference). */
   timestamp: number;
-  timestampUnit?: TimestampUnit;
+  /** Required: an event without it is dropped by the adapter, never guessed. */
+  timestampUnit: TimestampUnit;
   /** UPRIGHT frame size in pixels (native rotates to upright before inference). */
   width: number;
   height: number;

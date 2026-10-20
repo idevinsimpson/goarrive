@@ -6,6 +6,11 @@
 -dontwarn com.google.mediapipe.**
 -keep class com.google.protobuf.** { *; }
 -dontwarn com.google.protobuf.**
+
+# MediaPipe's Graph static initializer finds its caller through Flogger; R8 renaming breaks that
+# ("no caller found on the stack" inside ExceptionInInitializerError).
+-keep class com.google.common.flogger.** { *; }
+-dontwarn com.google.common.flogger.**
 -keepclasseswithmembernames class * {
     native <methods>;
 }

@@ -28,7 +28,10 @@
  *    (iOS session interruption; CameraX follows the activity lifecycle).
  *
  * PRIVACY: frames stay in native memory; only landmark numbers arrive here,
- * and they are never stored or sent. The camera never requests audio.
+ * and this code never stores or sends them. The camera never requests audio.
+ * The native MediaPipe SDKs send Google usage telemetry (no frames, images or
+ * landmarks), so the counter stays off until the owner decides: see
+ * support.native.ts NATIVE_CAMERA_TELEMETRY_APPROVED.
  */
 import { AppState } from 'react-native';
 
@@ -79,10 +82,12 @@ interface Run {
   gate: NativeFrameGate;
   /** True while waiting for the OS permission answer (AppState is ignored then). */
   asking: boolean;
+  /** Permission granted while the app was not active: open the camera on the next 'active'. */
+  awaitingActive: boolean;
   ready: boolean;
 }
 
-const STAGES: ReadonlySet<CameraFailure> = new Set(['permission', 'playback', 'model', 'inference', 'ended']);
+const STAGES: ReadonlySet<CameraFailure> = new Set(['permission', 'model', 'inference', 'ended']);
 const AWAY = new Set(['background', 'inactive']);
 
 export class RepCounterController implements NativeCameraHost {
@@ -97,16 +102,31 @@ export class RepCounterController implements NativeCameraHost {
   private binding: NativeCameraBinding = { active: false, runId: 0 };
   private lastStats: NativeFrameGate['stats'] = { accepted: 0, invalid: 0, duplicate: 0, outOfOrder: 0 };
   private disposed = false;
+  private readonly listening: boolean;
 
   constructor(opts: RepCounterControllerOptions = {}) {
     this.orch = new RepCounterOrchestrator(opts);
     this.native = opts.nativeModule === undefined ? loadWsfPoseCameraModule() : opts.nativeModule;
     this.appState = opts.appState ?? (AppState as unknown as AppStateLike);
-    const listen = (opts.pauseOnHide ?? true) && !!this.appState;
-    const sub = listen
-      ? this.appState!.addEventListener('change', (s) => { if (s !== 'active' && !this.run?.asking) this.pause(); })
-      : null;
+    this.listening = (opts.pauseOnHide ?? true) && !!this.appState;
+    const sub = this.listening ? this.appState!.addEventListener('change', (s) => this.onAppState(s)) : null;
     this.removeAppState = () => sub?.remove();
+  }
+
+  private onAppState(state: string): void {
+    const run = this.run;
+    if (state === 'active') {
+      if (run?.awaitingActive) {
+        run.awaitingActive = false;
+        this.setBinding({ active: true, runId: run.token });
+        this.emit();
+      }
+      return;
+    }
+    // The OS permission prompt makes the app inactive (iOS) or paused (Android); a granted
+    // run waiting to come back has no camera open yet. Anything else pauses.
+    if (run && (run.asking || run.awaitingActive)) return;
+    this.pause();
   }
 
   get snapshot(): RepCounterView {
@@ -146,7 +166,7 @@ export class RepCounterController implements NativeCameraHost {
 
   private begin(): Run {
     this.release();
-    const run: Run = { token: this.nextToken++, gate: new NativeFrameGate(), asking: true, ready: false };
+    const run: Run = { token: this.nextToken++, gate: new NativeFrameGate(), asking: true, awaitingActive: false, ready: false };
     this.run = run;
     return run;
   }
@@ -194,6 +214,13 @@ export class RepCounterController implements NativeCameraHost {
     run.asking = false;
     if (!granted) { this.fail(run, 'permission'); return; }
     this.orch.setCamera('loadingModel');
+    if (this.listening && this.appState?.currentState && AWAY.has(this.appState.currentState)) {
+      // Granted while not in the foreground (Android delivers the answer just before onResume):
+      // open the camera on the next 'active', never while away.
+      run.awaitingActive = true;
+      this.emit();
+      return;
+    }
     this.setBinding({ active: true, runId: run.token });
     this.emit();
   }
@@ -212,13 +239,22 @@ export class RepCounterController implements NativeCameraHost {
     if (!run || !run.ready) return;
     const r = run.gate.accept(payload);
     if (!r.ok) return;
-    this.orch.onFrame(r.frame);
-    this.emit();
+    try {
+      this.orch.onFrame(r.frame);
+      this.emit();
+    } catch {
+      // As the web lifecycle does: a throw while counting or rendering ends the run
+      // (camera released, failure panel with manual entry), never an uncaught error.
+      this.fail(run, 'inference');
+    }
   }
 
   handleError(payload: CameraErrorPayload): void {
     const run = this.current(payload?.runId);
     if (!run) return;
+    // Native 'playback' means the camera could not be opened (no front camera, the simulator,
+    // configuration). The web 'playback' panel is the browser's tap-to-start case, so native
+    // maps it to the generic "Camera isn't available" panel.
     const stage = payload.stage as CameraFailure;
     this.fail(run, STAGES.has(stage) ? stage : 'ended');
   }

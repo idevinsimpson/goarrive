@@ -25,7 +25,7 @@ internal object WsfPoseModel {
   fun create(context: Context): Loaded {
     val model = verifiedModel(context)
     fun make(delegate: Delegate): PoseLandmarker {
-      // MediaPipe copies the buffer from its position; start from 0 for each attempt.
+      // Start from 0 for each attempt. MediaPipe 0.10.35 TaskOptions also rewinds before copying; this keeps it explicit.
       model.rewind()
       val base = BaseOptions.builder()
         .setModelAssetBuffer(model)
@@ -44,7 +44,9 @@ internal object WsfPoseModel {
     }
     return try {
       Loaded(make(Delegate.GPU), WsfPoseContract.engine("GPU"))
-    } catch (gpuError: Exception) {
+    } catch (gpuError: Throwable) {
+      // Any GPU failure tries the CPU once. If the CPU fails too (or the JNI library cannot
+      // load at all), the Throwable reaches WsfPoseRun.loadModel, which fails the run closed.
       Loaded(make(Delegate.CPU), WsfPoseContract.engine("CPU"))
     }
   }

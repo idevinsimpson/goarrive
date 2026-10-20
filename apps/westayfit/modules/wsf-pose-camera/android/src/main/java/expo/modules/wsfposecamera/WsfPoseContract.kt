@@ -85,9 +85,16 @@ internal object WsfPoseContract {
   /** The run the view should have open for these props: `runId` while active and positive, else 0 (none). */
   fun targetRun(active: Boolean, runId: Int): Int = if (active && runId > 0) runId else 0
 
-  fun runChange(currentRunId: Int, active: Boolean, runId: Int): WsfRunChange {
+  /**
+   * What applyProps does. `startedRunId` is the last run this view opened. That run may already
+   * have stopped itself (an error or a detach) while the props still say active: a run id is never
+   * opened twice, because JS has already failed or paused that run and ignores its events. JS
+   * mints a new id for every start.
+   */
+  fun runChange(currentRunId: Int, startedRunId: Int, active: Boolean, runId: Int): WsfRunChange {
     val wanted = targetRun(active, runId)
-    if (wanted == currentRunId) return WsfRunChange(stop = false, start = 0)
+    if (wanted == 0) return WsfRunChange(stop = currentRunId != 0, start = 0)
+    if (wanted == startedRunId) return WsfRunChange(stop = false, start = 0)
     return WsfRunChange(stop = currentRunId != 0, start = wanted)
   }
 }

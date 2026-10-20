@@ -291,12 +291,20 @@ fun main(args: Array<String>) {
     eq(0, WsfPoseContract.targetRun(true, 0))
     eq(0, WsfPoseContract.targetRun(true, -1))
     eq(5, WsfPoseContract.targetRun(true, 5))
-    eq(WsfRunChange(stop = false, start = 1), WsfPoseContract.runChange(0, true, 1))
-    eq(WsfRunChange(stop = false, start = 0), WsfPoseContract.runChange(1, true, 1))
-    eq(WsfRunChange(stop = true, start = 2), WsfPoseContract.runChange(1, true, 2))
-    eq(WsfRunChange(stop = true, start = 0), WsfPoseContract.runChange(1, false, 1))
-    eq(WsfRunChange(stop = false, start = 0), WsfPoseContract.runChange(0, false, 0))
-    eq(WsfRunChange(stop = false, start = 0), WsfPoseContract.runChange(0, false, 7))
+    // (currentRunId, startedRunId, active, runId)
+    eq(WsfRunChange(stop = false, start = 1), WsfPoseContract.runChange(0, 0, true, 1))
+    eq(WsfRunChange(stop = false, start = 0), WsfPoseContract.runChange(1, 1, true, 1))
+    eq(WsfRunChange(stop = true, start = 2), WsfPoseContract.runChange(1, 1, true, 2))
+    eq(WsfRunChange(stop = true, start = 0), WsfPoseContract.runChange(1, 1, false, 1))
+    eq(WsfRunChange(stop = false, start = 0), WsfPoseContract.runChange(0, 0, false, 0))
+    eq(WsfRunChange(stop = false, start = 0), WsfPoseContract.runChange(0, 3, false, 7))
+  }
+
+  c.run("run decision: a run that stopped itself (error, detach) is never reopened under the same id") {
+    // Native stopped run 4 (current 0) while the props still say active, runId 4.
+    eq(WsfRunChange(stop = false, start = 0), WsfPoseContract.runChange(0, 4, true, 4))
+    // A new id from JS opens a new run.
+    eq(WsfRunChange(stop = false, start = 5), WsfPoseContract.runChange(0, 4, true, 5))
   }
 
   c.run("MEDIAPIPE_VERSION equals build.gradle mediapipeTasksVisionVersion") {

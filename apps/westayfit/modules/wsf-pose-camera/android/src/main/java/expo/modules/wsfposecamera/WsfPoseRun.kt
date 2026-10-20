@@ -2,8 +2,9 @@
 //
 // ONE CAMERA RUN: the front camera (CameraX Preview + ImageAnalysis, no audio, no capture or
 // recording use case) and one PoseLandmarker, opened for one `runId` and released by stop().
-// Frames are processed in memory on one analysis thread and dropped; nothing is written,
-// recorded or sent. Only landmark numbers leave, as events stamped with this run's id.
+// Frames are processed in memory on one analysis thread and dropped; this code writes, records
+// and sends nothing. Only landmark numbers leave, as events stamped with this run's id.
+// (MediaPipe's own SDK usage telemetry is disclosed in android/build.gradle.)
 //
 // Data contract (see src/movement-camera/nativeEngine.ts):
 //  - The analysis frame is the raw, UNMIRRORED sensor image; it is rotated upright by
@@ -28,6 +29,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Size
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.CameraState
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
@@ -38,6 +40,8 @@ import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LiveData
+import androidx.lifecycle.Observer
 import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarker
 import java.util.concurrent.Executor
@@ -61,6 +65,8 @@ internal class WsfPoseRun(
   // Main thread only.
   private var provider: ProcessCameraProvider? = null
   private var useCases: List<UseCase> = emptyList()
+  private var cameraState: LiveData<CameraState>? = null
+  private var cameraStateObserver: Observer<CameraState>? = null
 
   // Analysis thread only.
   private var landmarker: PoseLandmarker? = null
@@ -77,7 +83,7 @@ internal class WsfPoseRun(
       if (stopped) return@addListener
       try {
         bind(future.get())
-      } catch (error: Exception) {
+      } catch (error: Throwable) {
         send("onCameraError", mapOf("stage" to "playback", "message" to (error.message ?: "The camera did not start.")))
       }
     }, mainExecutor)
@@ -91,6 +97,9 @@ internal class WsfPoseRun(
     val bound = useCases
     provider = null
     useCases = emptyList()
+    cameraStateObserver?.let { observer -> cameraState?.removeObserver(observer) }
+    cameraState = null
+    cameraStateObserver = null
     for (useCase in bound) {
       if (useCase is ImageAnalysis) useCase.clearAnalyzer()
     }
@@ -137,8 +146,29 @@ internal class WsfPoseRun(
 
     provider = cameraProvider
     useCases = listOf(preview, analysis)
-    cameraProvider.bindToLifecycle(owner, selector, preview, analysis)
+    val camera = cameraProvider.bindToLifecycle(owner, selector, preview, analysis)
+    observeCameraState(camera.cameraInfo.cameraState)
     analysisExecutor.execute { loadModel() }
+  }
+
+  /**
+   * CameraX reports a camera that cannot open or that stops (in use by another app, disabled by
+   * policy, a fatal device or stream error) through its state, not by throwing. Without this the
+   * view would show "live" over a black preview: in use -> interrupted (JS pauses); a critical
+   * error -> failure (manual entry).
+   */
+  private fun observeCameraState(state: LiveData<CameraState>) {
+    val observer = Observer<CameraState> { value ->
+      val error = value.error ?: return@Observer
+      if (error.code == CameraState.ERROR_CAMERA_IN_USE || error.code == CameraState.ERROR_MAX_CAMERAS_IN_USE) {
+        send("onCameraInterrupted", mapOf("reason" to "camera-in-use"))
+      } else if (error.type == CameraState.ErrorType.CRITICAL) {
+        send("onCameraError", mapOf("stage" to "ended", "message" to "Camera error ${error.code}"))
+      }
+    }
+    state.observe(owner, observer)
+    cameraState = state
+    cameraStateObserver = observer
   }
 
   // ── Analysis thread ────────────────────────────────────────────────────────
@@ -147,7 +177,9 @@ internal class WsfPoseRun(
     if (stopped) return
     val loaded = try {
       WsfPoseModel.create(context)
-    } catch (error: Exception) {
+    } catch (error: Throwable) {
+      // Throwable, not Exception: UnsatisfiedLinkError / NoClassDefFoundError from MediaPipe's JNI
+      // library or OutOfMemoryError must fail the run (manual entry), never kill the app.
       send("onCameraError", mapOf("stage" to "model", "message" to (error.message ?: "The pose model did not load.")))
       return
     }
@@ -168,17 +200,23 @@ internal class WsfPoseRun(
       val timestampMs = clock.accept(timestampNs) ?: return
 
       val upright = uprightBitmap(image)
+      val width = upright.width
+      val height = upright.height
+      val mpImage = BitmapImageBuilder(upright).build()
       val result = try {
-        current.detectForVideo(BitmapImageBuilder(upright).build(), timestampMs)
-      } catch (error: Exception) {
+        current.detectForVideo(mpImage, timestampMs)
+      } catch (error: Throwable) {
         current.close()
         landmarker = null
         send("onCameraError", mapOf("stage" to "inference", "message" to (error.message ?: "Pose inference failed.")))
         return
+      } finally {
+        // Free the frame now instead of waiting for GC: closing the MPImage recycles its bitmap.
+        mpImage.close()
       }
       val people = WsfPoseContract.people(result.landmarks().map { WsfPoseModel.landmarks(it) })
-      send("onPose", WsfPoseContract.posePayload(timestampNs, upright.width, upright.height, people))
-    } catch (error: Exception) {
+      send("onPose", WsfPoseContract.posePayload(timestampNs, width, height, people))
+    } catch (error: Throwable) {
       send("onCameraError", mapOf("stage" to "inference", "message" to (error.message ?: "Frame analysis failed.")))
     } finally {
       image.close()
@@ -191,7 +229,9 @@ internal class WsfPoseRun(
     val rotation = WsfPoseContract.normalizedRotation(image.imageInfo.rotationDegrees)
     if (rotation == 0) return bitmap
     val matrix = Matrix().apply { postRotate(rotation.toFloat()) }
-    return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+    val rotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+    if (rotated !== bitmap) bitmap.recycle()
+    return rotated
   }
 
   /** Every event goes to the main thread, carries this run's id, and is dropped once the run is stopped. */

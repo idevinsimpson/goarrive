@@ -4,6 +4,10 @@
 // aspect-fill like web's object-fit: cover) plus, while `active`, one WsfPoseRun for `runId`.
 //  - active true / new runId → stop any old run, open the camera and model for this run.
 //  - active false, an error, or the view leaving its window → stop: camera off, model closed.
+//  - A run id is never reopened: a run that stopped itself (error, detach) stays stopped even if
+//    the props still say active; JS mints a new id for every start.
+//  - The preview is hidden as soon as the app resigns active, so the app-switcher snapshot never
+//    holds a live frame of the member (natively, without waiting for JS to pause).
 // Events from a run that is no longer current are dropped here, and JS drops any event whose
 // runId is not its current run.
 
@@ -21,7 +25,13 @@ final class WsfPoseCameraView: ExpoView {
   var runId = 0
 
   private let previewLayer = AVCaptureVideoPreviewLayer()
+  // Read in deinit, which is nonisolated; every other access is on the main thread.
+  #if compiler(>=5.10)
+  nonisolated(unsafe) private var run: WsfPoseRun?
+  #else
   private var run: WsfPoseRun?
+  #endif
+  private var startedRunId = 0
 
   required init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
@@ -29,6 +39,25 @@ final class WsfPoseCameraView: ExpoView {
     backgroundColor = .black
     previewLayer.videoGravity = .resizeAspectFill
     layer.addSublayer(previewLayer)
+    let center = NotificationCenter.default
+    center.addObserver(self, selector: #selector(appWillResignActive), name: UIApplication.willResignActiveNotification, object: nil)
+    center.addObserver(self, selector: #selector(appDidBecomeActive), name: UIApplication.didBecomeActiveNotification, object: nil)
+  }
+
+  @objc private func appWillResignActive() {
+    setPreviewHidden(true)
+  }
+
+  @objc private func appDidBecomeActive() {
+    setPreviewHidden(false)
+  }
+
+  private func setPreviewHidden(_ hidden: Bool) {
+    // No implicit fade: the snapshot must not catch a half-visible frame.
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    previewLayer.isHidden = hidden
+    CATransaction.commit()
   }
 
   deinit {
@@ -51,9 +80,14 @@ final class WsfPoseCameraView: ExpoView {
   /// Called once all props of an update are set (OnViewDidUpdateProps).
   func applyProps() {
     let wanted = active && runId > 0 ? runId : 0
-    if wanted == (run?.runId ?? 0) { return }
+    guard wanted > 0 else {
+      stopRun()
+      return
+    }
+    // Never reopen a run id: the same id is either still running or already stopped itself.
+    if wanted == startedRunId { return }
     stopRun()
-    guard wanted > 0 else { return }
+    startedRunId = wanted
     let next = WsfPoseRun(runId: wanted) { [weak self] source, event, payload in
       guard let self = self, self.run === source else { return }
       self.forward(event, payload)
