@@ -5,6 +5,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { useWsfAuth } from '../../../../../src/auth';
 import { describeCallableError } from '../../../../../src/callableErrors';
+import { isBodylessRefusal } from '../../../../../src/callableRefusal';
 import { getFirebaseFunctions } from '../../../../../src/firebase';
 import { memberCountLabel } from '../../../../../src/labels';
 import { InitialsAvatar, isChampionRole } from '../../../../../src/ui/CommunityPresence';
@@ -71,6 +72,21 @@ type MyCommunitiesResponse = { items: MyCommunityItem[] };
 
 type Phase = 'loading' | 'ready' | 'failed';
 
+/*
+  NATIVE-MEMBER-1 F-9 (HB-02). A BLOCK IS NOT A STATEMENT ABOUT THE ACCOUNT.
+  Under the staging hold `wsfCommunityMembers` is refused before it runs, with
+  no body, which the SDK reports as a bare `permission-denied` (or
+  `unauthenticated`) -- and this page used to turn that into "This account
+  can't do that here." for a member who is allowed to see the list. Only a
+  refusal the function itself wrote ("Members only.") is about the account;
+  a body-less one says the list is unavailable, and the network sentence and
+  every server sentence are unchanged.
+*/
+const MEMBERS_UNAVAILABLE = 'The member list is temporarily unavailable. Try again later.';
+function membersError(e: unknown, fallback: string): string {
+  return isBodylessRefusal(e) ? MEMBERS_UNAVAILABLE : describeCallableError(e, fallback);
+}
+
 export default function MembersScreen() {
   const { groupId: rawGroupId } = useLocalSearchParams<{ groupId: string }>();
   const groupId = typeof rawGroupId === 'string' ? rawGroupId : '';
@@ -111,7 +127,7 @@ export default function MembersScreen() {
       setCursor(res.data.nextCursor ?? null);
       setPhase('ready');
     } catch (e) {
-      setError(describeCallableError(e, 'The people here could not be loaded just now.'));
+      setError(membersError(e, 'The people here could not be loaded just now.'));
       setPhase('failed');
       return;
     }
@@ -153,7 +169,7 @@ export default function MembersScreen() {
       setMembers((prev) => [...prev, ...(res.data.members ?? [])]);
       setCursor(res.data.nextCursor ?? null);
     } catch (e) {
-      setError(describeCallableError(e, 'More people could not be loaded just now.'));
+      setError(membersError(e, 'More people could not be loaded just now.'));
     } finally {
       setLoadingMore(false);
     }
