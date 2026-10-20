@@ -173,12 +173,18 @@ describe('the activity across the sign-up round trip', () => {
     window.localStorage.clear();
   });
 
+  // NATIVE-STATE-3: bound to the join code it arrived on, like the event.
+  const JOIN = 'JoinCodeForActivity1';
+
   it('rides sessionStorage beside the event, by the same mechanism', () => {
-    setPendingEventActivity('squats');
-    expect(readPendingEventActivity()).toBe('squats');
-    expect(window.sessionStorage.getItem('wsf.pendingEventActivity')).toBe('squats');
+    setPendingEventActivity('squats', JOIN);
+    expect(readPendingEventActivity(null, JOIN)).toBe('squats');
+    expect(JSON.parse(window.sessionStorage.getItem('wsf.pendingEventActivity') as string)).toEqual({
+      activity: 'squats',
+      joinCode: JOIN,
+    });
     clearPendingEventActivity();
-    expect(readPendingEventActivity()).toBeNull();
+    expect(readPendingEventActivity(null, JOIN)).toBeNull();
   });
 
   it('is one of this feature’s own keys, and is declared as one', () => {
@@ -186,17 +192,20 @@ describe('the activity across the sign-up round trip', () => {
   });
 
   it('stores nothing of the wrong shape, and reads nothing of the wrong shape back', () => {
-    setPendingEventActivity('x'.repeat(ACTIVITY_LABEL_MAX + 1));
-    expect(readPendingEventActivity()).toBeNull();
+    setPendingEventActivity('x'.repeat(ACTIVITY_LABEL_MAX + 1), JOIN);
+    expect(readPendingEventActivity(null, JOIN)).toBeNull();
     expect(window.sessionStorage.getItem('wsf.pendingEventActivity')).toBeNull();
     // A hand-edited entry must not become something this app will render.
-    window.sessionStorage.setItem('wsf.pendingEventActivity', 'x'.repeat(200));
-    expect(readPendingEventActivity()).toBeNull();
+    window.sessionStorage.setItem(
+      'wsf.pendingEventActivity',
+      JSON.stringify({ activity: 'x'.repeat(200), joinCode: JOIN })
+    );
+    expect(readPendingEventActivity(null, JOIN)).toBeNull();
   });
 
   it('is dropped when there is no journey left to carry it', () => {
-    setPendingEventActivity('   ');
-    expect(readPendingEventActivity()).toBeNull();
+    setPendingEventActivity('   ', JOIN);
+    expect(readPendingEventActivity(null, JOIN)).toBeNull();
   });
 });
 

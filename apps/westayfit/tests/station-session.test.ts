@@ -171,24 +171,31 @@ describe('the credential this screen holds', () => {
 });
 
 describe('the event a newcomer arrived from', () => {
-  it('rides sessionStorage across the sign-up round trip', () => {
-    setPendingEventGoal('goal_1');
-    expect(readPendingEventGoal()).toBe('goal_1');
-    expect(window.sessionStorage.getItem('wsf.pendingEventGoalId')).toBe('goal_1');
+  // NATIVE-STATE-3: the event is stored WITH the join code it arrived on, and
+  // only the join of that code reads it back (src/joinEventHandoff.ts).
+  const JOIN = 'JoinCodeForStation_1';
+
+  it('rides sessionStorage across the sign-up round trip, bound to its join code', () => {
+    setPendingEventGoal('goal_1', JOIN);
+    expect(readPendingEventGoal(null, JOIN)).toBe('goal_1');
+    expect(JSON.parse(window.sessionStorage.getItem('wsf.pendingEventGoalId') as string)).toEqual({
+      goalId: 'goal_1',
+      joinCode: JOIN,
+    });
     clearPendingEventGoal();
-    expect(readPendingEventGoal()).toBeNull();
+    expect(readPendingEventGoal(null, JOIN)).toBeNull();
   });
 
   it('stores nothing that could become a path of its own', () => {
-    setPendingEventGoal('../../admin');
-    expect(readPendingEventGoal()).toBeNull();
-    window.sessionStorage.setItem('wsf.pendingEventGoalId', 'a/b');
-    expect(readPendingEventGoal()).toBeNull();
+    setPendingEventGoal('../../admin', JOIN);
+    expect(readPendingEventGoal(null, JOIN)).toBeNull();
+    window.sessionStorage.setItem('wsf.pendingEventGoalId', JSON.stringify({ goalId: 'a/b', joinCode: JOIN }));
+    expect(readPendingEventGoal(null, JOIN)).toBeNull();
   });
 
-  it('holds a goal id and nothing else — no credential, ever', () => {
+  it('holds a goal id and its join code and nothing else — no credential, ever', () => {
     saveStationCredential({ stationId: 'st_1', secret: SECRET, goalId: 'goal_1', slot: 1 });
-    setPendingEventGoal('goal_1');
+    setPendingEventGoal('goal_1', JOIN);
     expect(window.sessionStorage.getItem('wsf.pendingEventGoalId')).not.toContain(SECRET);
   });
 });

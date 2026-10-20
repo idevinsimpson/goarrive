@@ -126,18 +126,22 @@ export default function JoinPage() {
   //
   // A return trip arrives here WITHOUT `?event=`; nothing is written then, so
   // the context stashed on the way out is what the finished join reads.
+  //
+  // BOUND TO THIS CODE. The context is stored with the join code it arrived
+  // on, and the finished join applies it only if it joined with that same
+  // code — so an abandoned event scan cannot redirect a later, different join.
   useEffect(() => {
-    if (!ready || !eventGoalId) return;
-    void setPendingEventGoal(eventGoalId, stashUid.current);
-  }, [eventGoalId, ready]);
+    if (!ready || !eventGoalId || !joinCode) return;
+    void setPendingEventGoal(eventGoalId, joinCode, stashUid.current);
+  }, [eventGoalId, joinCode, ready]);
 
   // THE ACTIVITY RIDES WITH IT, by the same mechanism and for the same reason.
   // It is stored only alongside a usable event: an activity with no event to
   // finish at names nothing and would be a value kept for its own sake.
   useEffect(() => {
-    if (!ready || !eventGoalId || !eventActivity) return;
-    void setPendingEventActivity(eventActivity, stashUid.current);
-  }, [eventGoalId, eventActivity, ready]);
+    if (!ready || !eventGoalId || !eventActivity || !joinCode) return;
+    void setPendingEventActivity(eventActivity, joinCode, stashUid.current);
+  }, [eventGoalId, eventActivity, joinCode, ready]);
 
   /**
    * WHOSE SCREEN IS THIS — asked on THIS page only when the visitor arrived
@@ -273,7 +277,9 @@ export default function JoinPage() {
     // landed before.
     //
     // And the END of the carrying: the event and the activity are read out of
-    // the handoff for the account that just joined, handed to the address, and
+    // the handoff for the account that just joined AND the code it just
+    // joined with (a context from another join code is discarded, never
+    // routed to), handed to the address, and
     // both entries are dropped in the same breath — consumed exactly once
     // (src/joinEventHandoff.ts `takeJoinEventContext`). Read BEFORE either is
     // cleared, so the two cannot get out of step; on a phone it waits for the
@@ -285,7 +291,7 @@ export default function JoinPage() {
     // land. Bounded on purpose: it changes no outcome the call decided.
     let destination: string = `/community/${result.data.groupId}`;
     try {
-      const context = await takeJoinEventContext(user.uid);
+      const context = await takeJoinEventContext(user.uid, joinCode);
       destination = routeAfterJoin(result.data.groupId, context.goalId, context.activity);
     } catch {
       // Keep the community destination above. Nothing is said to the member:
