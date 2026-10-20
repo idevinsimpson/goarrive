@@ -27,6 +27,7 @@ import { AuthFlagOffPanel } from '../../src/AuthFlagOffPanel';
 import {
   canAddMore,
   classifyContributeError,
+  isDefiniteRefusal,
   parseEntry,
   recordMoreLabel,
   refusalCopy,
@@ -73,11 +74,14 @@ import {
   clearPendingIfAttempt,
   isSameContext,
   mayBeginNewAttempt,
+  mayFireAs,
   openAttempt,
   replayAttempt,
   restorePendingAttempt,
   settleAttempt,
   type PendingContribution,
+  type RequestContext,
+  type RestoredAttempt,
 } from '../../src/pendingContribution';
 import { wsfTheme } from '../../src/theme';
 import { PROGRESS_GREEN } from '../../src/ui/brandAssets';
@@ -627,6 +631,17 @@ export default function ContributeToGoal() {
   // A -> B -> A while a request is in flight, both pass a uid check.
   const generationRef = useRef(0);
   const contextRef = useRef<{ uid: string | null; goalId: string | undefined }>({ uid, goalId });
+  // What the screen is showing NOW, as a request context. Read from refs, so a
+  // request started earlier compares against the live screen, never its own
+  // closure.
+  const currentContext = useCallback(
+    (): RequestContext => ({
+      generation: generationRef.current,
+      uid: contextRef.current.uid,
+      goalId: contextRef.current.goalId,
+    }),
+    []
+  );
   const [legacyOrphan, setLegacyOrphan] = useState<PendingContribution | null>(null);
 
   // Restore this ACCOUNT's unconfirmed attempt for this goal, and clear
@@ -692,16 +707,23 @@ export default function ContributeToGoal() {
     // switch, goal switch or unmount meanwhile bumps the generation and the
     // answer is dropped — it can never restore one account's attempt into
     // another's session.
+    //
+    // It settles on every path. `restorePendingAttempt` does not reject (and a
+    // storage call that never answers is bounded), but if it ever did, the
+    // screen settles with nothing restored: otherwise Record, the camera and
+    // a kiosk's deadline would wait on it for good.
     const restoringFor = generationRef.current;
-    void restorePendingAttempt(goalId, uid).then(({ pending: restored, orphan }) => {
-      if (generationRef.current !== restoringFor) return;
-      if (orphan) setLegacyOrphan(orphan);
-      if (restored) {
-        setPending(restored);
-        setPendingDurable(true);
-      }
-      setRestoreSettled(true);
-    });
+    void restorePendingAttempt(goalId, uid)
+      .catch((): RestoredAttempt => ({ pending: null, orphan: null, readFailed: true }))
+      .then(({ pending: restored, orphan }) => {
+        if (generationRef.current !== restoringFor) return;
+        if (orphan) setLegacyOrphan(orphan);
+        if (restored) {
+          setPending(restored);
+          setPendingDurable(true);
+        }
+        setRestoreSettled(true);
+      });
 
     return () => {
       // Navigating away invalidates everything outstanding, so a response that
@@ -1118,25 +1140,17 @@ export default function ContributeToGoal() {
     };
     setPending(pendingRow);
 
-    const generation = generationRef.current;
     const owner = uid as string;
-    const startedGoal = goalId;
-    const stillCurrent = () =>
-      isSameContext(
-        { generation, uid: owner, goalId: startedGoal },
-        {
-          generation: generationRef.current,
-          uid: contextRef.current.uid,
-          goalId: contextRef.current.goalId,
-        }
-      );
+    const started: RequestContext = { generation: generationRef.current, uid: owner, goalId };
+    const stillCurrent = () => isSameContext(started, currentContext());
     // The request may only go out as the account that pressed Record. The
     // callable authenticates as whoever is signed in WHEN IT IS CALLED, and
-    // the server keys idempotency on that uid, so after an await the live auth
-    // user is checked too — not only this screen's record of it, which
-    // follows auth a render later.
-    const mayFire = () => stillCurrent() && getFirebaseAuth().currentUser?.uid === owner;
-    const isRefusal = (e: unknown) => classifyContributeError(e).kind === 'refused';
+    // the server keys idempotency on that uid, so the live auth user is
+    // checked too — not only this screen's record of it, which follows auth a
+    // render later. `settleAttempt` asks this immediately before it sends,
+    // with nothing awaited in between (src/pendingContribution.ts `mayFireAs`).
+    const mayFire = () => mayFireAs(owner, started, currentContext(), getFirebaseAuth().currentUser?.uid ?? null);
+    const isRefusal = (e: unknown) => isDefiniteRefusal(e, 'new');
 
     try {
       // Persist BEFORE sending, and wait for the device's answer. If the app
@@ -1156,13 +1170,20 @@ export default function ContributeToGoal() {
       if (stillCurrent()) setPendingDurable(opened.durable);
       // The ONE path that can produce a fresh receipt: the first confirmed
       // answer to this Record, in this uninterrupted flow.
+      // The attempt id and count sent are the row's own (`settleAttempt`
+      // passes them); nothing here chooses them again.
       const settled = await settleAttempt(pendingRow, owner, {
-        send: () => sendContribute(attemptId, count, true),
+        send: (id, n) => sendContribute(id, n, true),
         isRefusal,
         stillCurrent,
+        mayFire,
       });
       if (!stillCurrent()) return;
-      if (settled.kind === 'refused') {
+      if (settled.kind === 'notSent') {
+        // The live account was not the one that pressed Record at the moment
+        // of sending: nothing left the device, and the record is retired.
+        setPending(null);
+      } else if (settled.kind === 'refused') {
         // The server ran the request and refused it: nothing was recorded and
         // nothing will be. The reminder has been retired under the ORIGINAL
         // account (only if the slot was still this attempt). Distinct from
@@ -1189,6 +1210,7 @@ export default function ContributeToGoal() {
     goalId,
     uid,
     sendContribute,
+    currentContext,
     takeRoundAttemptId,
     restoreSettled,
     pending,
@@ -1217,19 +1239,14 @@ export default function ContributeToGoal() {
     // whenever the confirmed total the server returns is at or beyond target.
     sharedBeforeRef.current = null;
     beforeTargetRef.current = null;
-    const generation = generationRef.current;
     const owner = uid as string;
-    const startedGoal = goalId;
+    const started: RequestContext = { generation: generationRef.current, uid: owner, goalId };
     const replay = pending;
-    const stillCurrent = () =>
-      isSameContext(
-        { generation, uid: owner, goalId: startedGoal },
-        {
-          generation: generationRef.current,
-          uid: contextRef.current.uid,
-          goalId: contextRef.current.goalId,
-        }
-      );
+    const stillCurrent = () => isSameContext(started, currentContext());
+    // Same gate as Record, asked immediately before the replay is sent: a
+    // replay of A's attempt sent while B is the live auth user would book a
+    // NEW contribution credited to B.
+    const mayFire = () => mayFireAs(owner, started, currentContext(), getFirebaseAuth().currentUser?.uid ?? null);
 
     // The persisted state flips to 'sending' during the replay (queued on the
     // record ahead of whatever the outcome writes, and only if the record is
@@ -1238,13 +1255,20 @@ export default function ContributeToGoal() {
     setPending({ ...replay, state: 'sending' });
 
     try {
+      // The SAME attempt: `replayAttempt` sends the restored row's own id and
+      // count. A refusal of a replay is judged as a replay — an
+      // unauthenticated answer keeps the reminder (src/contributionFlow.ts).
       const settled = await replayAttempt(replay, owner, {
-        send: () => sendContribute(replay.attemptId, replay.count),
-        isRefusal: (e: unknown) => classifyContributeError(e).kind === 'refused',
+        send: (id, n) => sendContribute(id, n),
+        isRefusal: (e: unknown) => isDefiniteRefusal(e, 'replay'),
         stillCurrent,
+        mayFire,
       });
       if (!stillCurrent()) return;
-      if (settled.kind === 'refused') {
+      if (settled.kind === 'notSent') {
+        // Not sent: the record is untouched, and the reminder stays.
+        setPending({ ...replay, state: 'unknown' });
+      } else if (settled.kind === 'refused') {
         const failure = classifyContributeError(settled.error);
         setPending(null);
         attemptRef.current = null;
@@ -1258,7 +1282,7 @@ export default function ContributeToGoal() {
       inFlightRef.current = false;
       if (stillCurrent()) setSubmitting(false);
     }
-  }, [pending, submitting, goalId, uid, sendContribute]);
+  }, [pending, submitting, goalId, uid, sendContribute, currentContext]);
 
   // There is deliberately no control that discards an unresolved attempt's
   // reminder: it is the only recovery context for effort whose outcome is

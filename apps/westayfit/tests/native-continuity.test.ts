@@ -143,6 +143,7 @@ describe('1. accepted, response lost, app terminated and reopened', () => {
       },
       isRefusal,
       stillCurrent: () => true,
+      mayFire: () => true,
     });
     expect(settled.kind).toBe('unknown');
 
@@ -163,10 +164,13 @@ describe('2. the same attempt retried reconciles once', () => {
     const { pending } = await pc.restorePendingAttempt(GOAL, A);
     expect(pending?.attemptId).toBe('att-1');
 
+    // The io does NOT supply the attempt: `replayAttempt` hands it the
+    // restored row's own id and count, and that is what reaches the server.
     const io = {
-      send: async () => server.contribute(GOAL, A, pending!.attemptId, pending!.count),
+      send: async (attemptId: string, count: number) => server.contribute(GOAL, A, attemptId, count),
       isRefusal,
       stillCurrent: () => true,
+      mayFire: () => true,
     };
     const first = await pc.replayAttempt(pending!, A, io);
     expect(first).toMatchObject({ kind: 'confirmed', current: true, data: { alreadyRecorded: true } });
@@ -192,9 +196,10 @@ describe('2. the same attempt retried reconciles once', () => {
     pc = await launch();
     const { pending } = await pc.restorePendingAttempt(GOAL, A);
     const settled = await pc.replayAttempt(pending!, A, {
-      send: async () => server.contribute(GOAL, A, pending!.attemptId, pending!.count),
+      send: async (attemptId: string, count: number) => server.contribute(GOAL, A, attemptId, count),
       isRefusal,
       stillCurrent: () => true,
+      mayFire: () => true,
     });
     expect(settled).toMatchObject({ kind: 'confirmed', data: { alreadyRecorded: false } });
     expect(server.total()).toBe(4);
@@ -210,6 +215,7 @@ describe('3. a late response cannot recreate a cleared or newer attempt', () => 
       send: () => new Promise((_, reject) => (fail = reject)),
       isRefusal,
       stillCurrent: () => false,
+      mayFire: () => true,
     });
     // The attempt is reconciled and cleared by another path meanwhile.
     expect(await pc.clearPendingIfAttempt(GOAL, A, 'att-1')).toBe(true);
@@ -230,12 +236,14 @@ describe('3. a late response cannot recreate a cleared or newer attempt', () => 
       send: () => new Promise((_, reject) => (fail = reject)),
       isRefusal,
       stillCurrent: () => true,
+      mayFire: () => true,
     });
     const lateSuccess = pc.settleAttempt(row('att-1', 11), A, {
       send: () => new Promise<Receipt>((resolve) => (succeed = resolve)),
       isRefusal,
       // Even a response that believes it is current cannot clear a newer slot.
       stillCurrent: () => true,
+      mayFire: () => true,
     });
     await pc.clearPendingIfAttempt(GOAL, A, 'att-1');
     await pc.openAttempt(row('att-2', 7), A, () => true);
@@ -364,6 +372,7 @@ describe('5. refusal stays distinct from unknown', () => {
       },
       isRefusal,
       stillCurrent: () => true,
+      mayFire: () => true,
     });
     expect(refused.kind).toBe('refused');
     pc = await launch();
@@ -376,6 +385,7 @@ describe('5. refusal stays distinct from unknown', () => {
       },
       isRefusal,
       stillCurrent: () => true,
+      mayFire: () => true,
     });
     expect(unknown.kind).toBe('unknown');
     pc = await launch();
@@ -393,6 +403,7 @@ describe('5. refusal stays distinct from unknown', () => {
       },
       isRefusal,
       stillCurrent: () => true,
+      mayFire: () => true,
     });
     expect(settled.kind).toBe('refused');
     expect(disk.map.has(pendingKeyOf(GOAL, A))).toBe(false);

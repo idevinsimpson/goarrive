@@ -21,8 +21,8 @@ import { vi } from 'vitest';
 export type FakeAsyncStorage = {
   /** The "disk". Survives every simulated relaunch. */
   map: Map<string, string>;
-  /** When true, setItem / removeItem reject (disk full, storage refused). */
-  state: { failWrites: boolean };
+  /** When true, setItem / removeItem reject (disk full, storage refused); failReads: getItem / getAllKeys reject. */
+  state: { failWrites: boolean; failReads: boolean };
   /** Hold every write until the returned release() is called (FIFO). */
   hold(): () => void;
   /** Hold every read until the returned release() is called (FIFO). */
@@ -38,7 +38,7 @@ export type FakeAsyncStorage = {
 export function createFakeAsyncStorage(map: Map<string, string> = new Map()): FakeAsyncStorage {
   let held: Array<() => void> | null = null;
   let heldReads: Array<() => void> | null = null;
-  const state = { failWrites: false };
+  const state = { failWrites: false, failReads: false };
   const gate = () => (held ? new Promise<void>((resolve) => held!.push(resolve)) : Promise.resolve());
   const readGate = () =>
     heldReads ? new Promise<void>((resolve) => heldReads!.push(resolve)) : Promise.resolve();
@@ -64,6 +64,7 @@ export function createFakeAsyncStorage(map: Map<string, string> = new Map()): Fa
     api: {
       async getItem(key) {
         await readGate();
+        if (state.failReads) throw new Error('storage unreadable');
         return map.has(key) ? (map.get(key) as string) : null;
       },
       async setItem(key, value) {
@@ -78,6 +79,7 @@ export function createFakeAsyncStorage(map: Map<string, string> = new Map()): Fa
       },
       async getAllKeys() {
         await readGate();
+        if (state.failReads) throw new Error('storage unreadable');
         return [...map.keys()];
       },
     },
