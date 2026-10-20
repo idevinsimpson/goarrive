@@ -82,16 +82,19 @@ describe('community detail uses it, and the relative Open actions are outside th
     expect(block).toContain('dataSet={{ stationUrl: stationUrlFor(goal.goalId) ?? \'\' }}');
     // The only URL conditional around the station actions comes after Open.
     const blockStart = src.lastIndexOf('testID={`wsf-kiosk-stations-intro-', open);
-    expect(src.slice(blockStart, open)).not.toContain('stationUrlFor(goal.goalId) ? (');
-    expect(src.indexOf('{stationUrlFor(goal.goalId) ? (', open)).toBeGreaterThan(open);
+    // The Copy conditional, plain or behind offerableLink (F-3), comes after Open.
+    const copyGate = /\{(?:offerableLink\()?stationUrlFor\(goal\.goalId\)\)? \? \(/;
+    expect(src.slice(blockStart, open)).not.toMatch(copyGate);
+    expect(src.slice(open, open + 2000)).toMatch(copyGate);
   });
 
   it('Open combined screen renders whether or not the combined URL exists', () => {
     const open = src.indexOf('label="Open combined screen"');
     const blockStart = src.lastIndexOf('testID="wsf-combined-created"', open);
     expect(blockStart).toBeGreaterThan(0);
-    expect(src.slice(blockStart, open)).not.toContain('{combinedUrl ? (');
-    expect(src.indexOf('{combinedUrl ? (', open)).toBeGreaterThan(open);
+    const copyGate = /\{(?:offerableLink\()?combinedUrl\)? \? \(/;
+    expect(src.slice(blockStart, open)).not.toMatch(copyGate);
+    expect(src.slice(open, open + 2000)).toMatch(copyGate);
   });
 });
 
