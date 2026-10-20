@@ -222,3 +222,44 @@ describe('web (NATIVE-STATE-2): event, marker and kiosk returns under the same o
     expect(window.sessionStorage.getItem('wsf.eventReturn')).not.toBeNull();
   });
 });
+
+describe('web (NATIVE-STATE-3): the join QR event context and the device-mode answer', () => {
+  it('a signed-out stash keeps the bare values in sessionStorage, exactly as before', async () => {
+    const { setPendingEventActivity, setPendingEventGoal } = await import('../src/stationSession');
+    void setPendingEventGoal('goal_1');
+    void setPendingEventActivity('squats');
+    expect(window.sessionStorage.getItem('wsf.pendingEventGoalId')).toBe('goal_1');
+    expect(window.sessionStorage.getItem('wsf.pendingEventActivity')).toBe('squats');
+    expect(window.localStorage.length).toBe(0);
+  });
+
+  it("a member's stash carries its owner and is not applied to another account's join", async () => {
+    const je = await import('../src/joinEventHandoff');
+    void je.setPendingEventGoal('goal_1', A);
+    void je.setPendingEventActivity('squats', A);
+    expect(JSON.parse(window.sessionStorage.getItem('wsf.pendingEventGoalId') as string)).toEqual({ goalId: 'goal_1', owner: A });
+    expect(JSON.parse(window.sessionStorage.getItem('wsf.pendingEventActivity') as string)).toEqual({ activity: 'squats', owner: A });
+    expect(await je.takeJoinEventContext(B)).toEqual({ goalId: null, activity: null });
+    expect(window.sessionStorage.getItem('wsf.pendingEventGoalId')).toBeNull();
+  });
+
+  it('the same account takes its own context, once', async () => {
+    const je = await import('../src/joinEventHandoff');
+    void je.setPendingEventGoal('goal_1', A);
+    void je.setPendingEventActivity('squats', A);
+    expect(await je.takeJoinEventContext(A)).toEqual({ goalId: 'goal_1', activity: 'squats' });
+    expect(await je.takeJoinEventContext(A)).toEqual({ goalId: null, activity: null });
+  });
+
+  it('the device-mode answer stays the bare word in localStorage, readable at once', async () => {
+    const dm = await import('../src/deviceMode');
+    expect(dm.isDeviceModeReady()).toBe(true);
+    expect(await dm.saveDeviceMode('shared')).toBe(true);
+    expect(window.localStorage.getItem('wsf.deviceMode')).toBe('shared');
+    expect(dm.readDeviceMode()).toBe('shared');
+    // Not an account's: an auth change leaves it alone.
+    for (const l of authListeners) l(null);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(dm.readDeviceMode()).toBe('shared');
+  });
+});

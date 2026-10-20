@@ -20,9 +20,8 @@ import {
   DEVICE_SHARED_BODY,
   DEVICE_SHARED_RESET,
   DEVICE_SHARED_TITLE,
-  readDeviceMode,
   saveDeviceMode,
-  type DeviceMode,
+  useStoredDeviceMode,
 } from '../../src/deviceMode';
 import { wsfAuthEnabled } from '../../src/featureFlags';
 import { getFirebaseFunctions } from '../../src/firebase';
@@ -33,14 +32,11 @@ import {
 } from '../../src/pendingJoinCode';
 import { readActivityLabel } from '../../src/eventActivity';
 import {
-  clearPendingEventActivity,
-  clearPendingEventGoal,
-  readPendingEventActivity,
-  readPendingEventGoal,
-  routeAfterJoin,
   setPendingEventActivity,
   setPendingEventGoal,
-} from '../../src/stationSession';
+  takeJoinEventContext,
+} from '../../src/joinEventHandoff';
+import { routeAfterJoin } from '../../src/stationSession';
 import { readEventParam } from '../../src/ui/eventLinks';
 import { ButtonLink } from '../../src/ui/ButtonLink';
 import { DeviceChoice, SharedScreenNotice } from '../../src/ui/DeviceChoice';
@@ -120,19 +116,28 @@ export default function JoinPage() {
     void setPendingJoinCode(joinCode, stashUid.current);
   }, [joinCode, ready]);
 
-  // The event rides sessionStorage for the same reason the join code does:
+  // The event rides the same handoff as the join code, for the same reason:
   // signup -> verify -> profile-setup replace this screen, and the round trip
-  // returns to `/join/<code>` without the query string it left with.
+  // returns to `/join/<code>` without the query string it left with. Stashed
+  // once auth has settled and owned exactly as the code is
+  // (src/joinEventHandoff.ts): a signed-out scan is the handoff for whoever
+  // signs in next, a signed-in member's is theirs alone. On a phone it
+  // survives the app being killed mid-sign-up, for two hours.
+  //
+  // A return trip arrives here WITHOUT `?event=`; nothing is written then, so
+  // the context stashed on the way out is what the finished join reads.
   useEffect(() => {
-    if (eventGoalId) setPendingEventGoal(eventGoalId);
-  }, [eventGoalId]);
+    if (!ready || !eventGoalId) return;
+    void setPendingEventGoal(eventGoalId, stashUid.current);
+  }, [eventGoalId, ready]);
 
   // THE ACTIVITY RIDES WITH IT, by the same mechanism and for the same reason.
   // It is stored only alongside a usable event: an activity with no event to
   // finish at names nothing and would be a value kept for its own sake.
   useEffect(() => {
-    if (eventGoalId && eventActivity) setPendingEventActivity(eventActivity);
-  }, [eventGoalId, eventActivity]);
+    if (!ready || !eventGoalId || !eventActivity) return;
+    void setPendingEventActivity(eventActivity, stashUid.current);
+  }, [eventGoalId, eventActivity, ready]);
 
   /**
    * WHOSE SCREEN IS THIS — asked on THIS page only when the visitor arrived
@@ -148,19 +153,16 @@ export default function JoinPage() {
    * `undefined` until storage has been read, for the same hydration reason as
    * the event screen.
    */
-  const [deviceMode, setDeviceMode] = useState<DeviceMode | null | undefined>(undefined);
-  useEffect(() => {
-    setDeviceMode(readDeviceMode());
-  }, []);
+  const [deviceMode, setDeviceMode] = useStoredDeviceMode();
   const deviceEntry =
     !eventGoalId || deviceMode === undefined
       ? null
       : decideDeviceEntry({ mode: deviceMode, goalId: eventGoalId });
 
   const onChoosePersonal = useCallback(() => {
-    saveDeviceMode('personal');
+    void saveDeviceMode('personal');
     setDeviceMode('personal');
-  }, []);
+  }, [setDeviceMode]);
 
   const onChooseShared = useCallback(() => {
     // NO ACCOUNT IS CREATED ON A SHARED SCREEN. The device is handed to the
@@ -168,14 +170,14 @@ export default function JoinPage() {
     // where a shared device belongs and the only shared session this app has.
     const decided = decideDeviceEntry({ mode: 'shared', goalId: eventGoalId });
     if (decided.kind !== 'shared') return;
-    saveDeviceMode('shared');
+    void saveDeviceMode('shared');
     router.replace(decided.route as never);
   }, [eventGoalId]);
 
   const onUseOwnPhoneInstead = useCallback(() => {
-    clearDeviceMode();
+    void clearDeviceMode();
     setDeviceMode(null);
-  }, []);
+  }, [setDeviceMode]);
 
   /*
     "TRY AGAIN" HAS TO ACTUALLY TRY AGAIN.
@@ -270,26 +272,21 @@ export default function JoinPage() {
     // for every join that did not come from an event — exactly where it
     // landed before.
     //
-    // And the END of the carrying: the event and
-    // the activity are read out of session storage, handed to the address,
-    // and both entries are dropped in the same breath. Read BEFORE either is
-    // cleared, so the two cannot get out of step.
+    // And the END of the carrying: the event and the activity are read out of
+    // the handoff for the account that just joined, handed to the address, and
+    // both entries are dropped in the same breath — consumed exactly once
+    // (src/joinEventHandoff.ts `takeJoinEventContext`). Read BEFORE either is
+    // cleared, so the two cannot get out of step; on a phone it waits for the
+    // launch read first.
     //
-    // THE CARRYING IS THE OPTIONAL PART. `sessionStorage` throws in a browser
-    // that has storage blocked, and the member who scanned into an event
-    // should not lose a join that already succeeded because of it. The event
-    // address is attempted; its failure costs the event context and nothing
-    // else, and the community the member just joined is still where they
+    // THE CARRYING IS THE OPTIONAL PART. A device with storage blocked, or a
+    // context that belongs to another account, costs the event context and
+    // nothing else: the community the member just joined is still where they
     // land. Bounded on purpose: it changes no outcome the call decided.
     let destination: string = `/community/${result.data.groupId}`;
     try {
-      destination = routeAfterJoin(
-        result.data.groupId,
-        readPendingEventGoal(),
-        readPendingEventActivity()
-      );
-      clearPendingEventGoal();
-      clearPendingEventActivity();
+      const context = await takeJoinEventContext(user.uid);
+      destination = routeAfterJoin(result.data.groupId, context.goalId, context.activity);
     } catch {
       // Keep the community destination above. Nothing is said to the member:
       // the join worked and they are about to arrive.

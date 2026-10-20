@@ -26,29 +26,29 @@
  */
 
 import { EVENT_ACTIVITY_PARAM, readActivityLabel } from './eventActivity';
+import { PENDING_EVENT_ACTIVITY_KEY, PENDING_EVENT_KEY } from './joinEventHandoff';
 
-/** The one browser-storage key this feature owns. */
+/** The one browser-storage key the STATION owns. */
 const STATION_CREDENTIAL_KEY = 'wsf.stationCredential';
 
-/**
- * Where a scanned `/join/<code>?event=<goalId>` keeps the event it came from
- * while the newcomer signs up. sessionStorage, and the same reasoning as
- * src/pendingJoinCode.ts: a closed tab must not carry an event into the next
- * thing this browser does. It holds a goal id — the same value that was in
- * the URL the visitor followed — and nothing else.
- */
-const PENDING_EVENT_KEY = 'wsf.pendingEventGoalId';
-
-/**
- * The ACTIVITY that event was running, beside the event and by the same
- * mechanism: sessionStorage, same lifetime, written at the same moment, read
- * at the same moment, cleared at the same moment. It holds a label — the
- * event's own word for what it counts, which `wsfGoalPulse` already publishes
- * to an unauthenticated screen — and nothing else. It is a selection carried
- * with a journey, never a fact about the person carrying it, and it leaves
- * when the journey ends.
- */
-const PENDING_EVENT_ACTIVITY_KEY = 'wsf.pendingEventActivity';
+/*
+  THE EVENT A NEWCOMER ARRIVED FROM, AND ITS ACTIVITY — `wsf.pendingEventGoalId`
+  and `wsf.pendingEventActivity` — are the member side of a join QR, not the
+  station's. They now live in src/joinEventHandoff.ts (NATIVE-STATE-3), kept
+  like the other post-auth destinations: sessionStorage on web exactly as
+  before, a bounded native store on a phone, and owned by the account that
+  stashed them. They never shared a key, a secret or a code path with the
+  station's own session; the accessors are re-exported below so every
+  existing caller is unchanged, and the keys stay declared in the inventory.
+*/
+export {
+  clearPendingEventActivity,
+  clearPendingEventGoal,
+  readPendingEventActivity,
+  readPendingEventGoal,
+  setPendingEventActivity,
+  setPendingEventGoal,
+} from './joinEventHandoff';
 
 export const STATION_STORAGE_KEYS = [
   STATION_CREDENTIAL_KEY,
@@ -205,87 +205,6 @@ export function clearStationCredential(): void {
     readStorage()?.removeItem(STATION_CREDENTIAL_KEY);
   } catch {
     // ignore: nothing else reads this key.
-  }
-}
-
-// ---- the event a newcomer arrived from --------------------------------------
-
-function sessionStore(): Storage | null {
-  try {
-    if (typeof window === 'undefined') return null;
-    return window.sessionStorage ?? null;
-  } catch {
-    return null;
-  }
-}
-
-/** Remember which event's QR a visitor followed, so the join can finish there.
- * A goal id, which was already in the URL they followed. Nothing else. */
-export function setPendingEventGoal(goalId: string): void {
-  try {
-    if (!isIdShape(goalId)) return;
-    sessionStore()?.setItem(PENDING_EVENT_KEY, goalId);
-  } catch {
-    // The visitor lands on their new community instead of the event screen,
-    // which is a worse arrival, not a broken or leaky one.
-  }
-}
-
-export function readPendingEventGoal(): string | null {
-  try {
-    const raw = sessionStore()?.getItem(PENDING_EVENT_KEY);
-    if (raw == null) return null;
-    return isIdShape(raw) ? raw : null;
-  } catch {
-    return null;
-  }
-}
-
-export function clearPendingEventGoal(): void {
-  try {
-    sessionStore()?.removeItem(PENDING_EVENT_KEY);
-  } catch {
-    // ignore
-  }
-}
-
-/**
- * Remember which ACTIVITY that event was running, so the join can finish at
- * the thing the person actually walked up to rather than at a page that has
- * forgotten what the room was doing.
- *
- * Shape-checked by `readActivityLabel`, which refuses control characters and
- * anything past the cap outright. A value that does not survive that check is
- * simply not stored: the journey then finishes without an activity, which is
- * an arrival with less context, not a broken or a guessed one.
- */
-export function setPendingEventActivity(activity: string): void {
-  try {
-    const label = readActivityLabel(activity);
-    if (!label) return;
-    sessionStore()?.setItem(PENDING_EVENT_ACTIVITY_KEY, label);
-  } catch {
-    // Same as the event goal above: a worse arrival, not a leaky one.
-  }
-}
-
-export function readPendingEventActivity(): string | null {
-  try {
-    const raw = sessionStore()?.getItem(PENDING_EVENT_ACTIVITY_KEY);
-    if (raw == null) return null;
-    // Re-checked on the way out as well as in: a hand-edited entry must not
-    // become something this app will render or route with.
-    return readActivityLabel(raw);
-  } catch {
-    return null;
-  }
-}
-
-export function clearPendingEventActivity(): void {
-  try {
-    sessionStore()?.removeItem(PENDING_EVENT_ACTIVITY_KEY);
-  } catch {
-    // ignore
   }
 }
 
