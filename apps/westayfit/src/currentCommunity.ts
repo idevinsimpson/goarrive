@@ -109,3 +109,21 @@ export function currentFirst<T extends { groupId: string }>(items: readonly T[],
   if (i <= 0) return [...items];
   return [items[i]!, ...items.slice(0, i), ...items.slice(i + 1)];
 }
+
+/**
+ * `currentFirst` for a list that must never put a GUESS first (NATIVE-STATE-2).
+ *
+ * Null until the remembered community has been read — on a phone that read
+ * happens at launch and takes a moment; on web it is synchronous, so this is
+ * never null there. A caller given null keeps showing its loading state rather
+ * than ordering on "not read yet", which on a phone would put some other
+ * community first and then move it once the read lands.
+ */
+export function currentFirstWhenReady<T extends { groupId: string }>(
+  uid: string | null | undefined,
+  items: readonly T[]
+): T[] | null {
+  if (!isCurrentCommunityReady()) return null;
+  const current = uid ? resolveCurrentCommunity(uid, items.map((i) => i.groupId)) : null;
+  return currentFirst(items, current);
+}

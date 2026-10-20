@@ -332,7 +332,10 @@ export default function EventScreen() {
   const onUseDifferentAccount = useCallback(async () => {
     if (switchingAccount) return;
     setSwitchingAccount(true);
-    setEventReturn(goalId);
+    // Stashed with NO owner, deliberately: this return is for whoever signs in
+    // next, not for the account signing out now. An owned record would be
+    // dropped by that very sign-out (src/postAuthDestination.ts).
+    setEventReturn(goalId, Date.now(), null);
     try {
       await signOut(getFirebaseAuth());
     } catch {

@@ -84,9 +84,37 @@ export function createFakeAsyncStorage(map: Map<string, string> = new Map()): Fa
   };
 }
 
+/**
+ * Firebase Auth, reduced to what the post-auth destinations' session watch
+ * uses: `onAuthStateChanged`. `fire(uid)` is an auth answer (null: signed out).
+ * Listeners belong to one simulated process and are dropped on every boot.
+ */
+export const fakeAuth = {
+  listeners: [] as Array<(user: { uid: string } | null) => void>,
+  async fire(uid: string | null): Promise<void> {
+    for (const l of [...this.listeners]) l(uid ? { uid } : null);
+    await flush();
+  },
+};
+
+/** Mocks for the session watch's Firebase imports. Call before importing the modules. */
+export function mockAuthForDestinations(): void {
+  vi.doMock('../src/firebase', () => ({ getFirebaseAuth: () => ({}) }));
+  vi.doMock('firebase/auth', () => ({
+    onAuthStateChanged: (_auth: unknown, listener: (user: { uid: string } | null) => void) => {
+      fakeAuth.listeners.push(listener);
+      return () => {
+        fakeAuth.listeners = fakeAuth.listeners.filter((l) => l !== listener);
+      };
+    },
+  }));
+}
+
 /** A fresh "process" over the same disk. Import the modules under test after it. */
 export function bootNative(storage: FakeAsyncStorage): void {
   vi.resetModules();
+  fakeAuth.listeners = [];
+  mockAuthForDestinations();
   vi.doMock('@react-native-async-storage/async-storage', () => ({ default: storage.api }));
   vi.doMock('../src/storage/kv', async () => await import('../src/storage/kv.native'));
   vi.doMock('../src/storage/sessionKv', async () => await import('../src/storage/sessionKv.native'));

@@ -2,9 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { currentCommunityReady, isCurrentCommunityReady, resolveCurrentCommunity } from '../src/currentCommunity';
 import { pendingKey, savePendingNew } from '../src/pendingContribution';
+import { isPostAuthDestinationsReady } from '../src/postAuthDestination';
 import {
   clearPendingJoinCode,
-  isPendingJoinCodeReady,
   nextRouteAfterAuth,
   readPendingJoinCode,
   routeAfterAuth,
@@ -14,6 +14,17 @@ import { readAuthDestinationKind } from '../src/authDestination';
 import { createKeyMirror } from '../src/storage/mirror';
 import { sessionKv } from '../src/storage/sessionKv';
 import type { DeviceKv } from '../src/storage/kv';
+
+// The post-auth destinations' session watch subscribes to Firebase Auth when
+// an owned destination is written; here it is a captured listener.
+const authListeners: Array<(user: { uid: string } | null) => void> = [];
+vi.mock('../src/firebase', () => ({ getFirebaseAuth: () => ({}) }));
+vi.mock('firebase/auth', () => ({
+  onAuthStateChanged: (_a: unknown, l: (user: { uid: string } | null) => void) => {
+    authListeners.push(l);
+    return () => undefined;
+  },
+}));
 
 /**
  * NATIVE-STATE-1 — what the web build keeps, and the one rule it gains.
@@ -40,7 +51,7 @@ describe('web: the same stores, keys, formats and synchronous reads', () => {
     expect(window.sessionStorage.getItem('wsf.pendingJoinCode')).toBe(CODE);
     expect(window.localStorage.getItem('wsf.pendingJoinCode')).toBeNull();
     expect(nextRouteAfterAuth('/')).toBe(`/join/${CODE}`);
-    expect(isPendingJoinCodeReady()).toBe(true);
+    expect(isPostAuthDestinationsReady()).toBe(true);
   });
 
   it('a code seeded straight into sessionStorage (as the browser tests do) is honoured', async () => {
@@ -161,5 +172,53 @@ describe('the synchronous mirror (native path)', () => {
     await mirror.load('k');
     expect(mirror.read('k')).toBe('stored');
     expect(seen).toHaveBeenCalled();
+  });
+});
+
+describe('web (NATIVE-STATE-2): event, marker and kiosk returns under the same ownership rule', () => {
+  it('a signed-out stash is stored exactly as before', async () => {
+    const { setEventReturn } = await import('../src/eventReturn');
+    const { setMarkerReturn } = await import('../src/markerEntry');
+    const { setKioskReturnGoal } = await import('../src/kioskSession');
+    void setEventReturn('goal-1', 1000);
+    void setMarkerReturn('flag-01', 2000);
+    void setKioskReturnGoal('goal-k');
+    expect(window.sessionStorage.getItem('wsf.eventReturn')).toBe('{"goalId":"goal-1","at":1000}');
+    expect(window.sessionStorage.getItem('wsf.markerReturn')).toBe('{"slug":"flag-01","at":2000}');
+    expect(window.sessionStorage.getItem('wsf.kioskReturnGoalId')).toBe('goal-k');
+    expect(window.localStorage.length).toBe(0);
+  });
+
+  it('a stash by a signed-in account carries its owner and is not offered to anybody else', async () => {
+    const { readEventReturn, setEventReturn } = await import('../src/eventReturn');
+    const { readMarkerReturn, setMarkerReturn } = await import('../src/markerEntry');
+    const { readKioskReturnGoal, setKioskReturnGoal } = await import('../src/kioskSession');
+    const now = Date.now();
+    void setEventReturn('goal-1', now, A);
+    void setMarkerReturn('flag-01', now, A);
+    void setKioskReturnGoal('goal-k', A);
+    expect(JSON.parse(window.sessionStorage.getItem('wsf.eventReturn') as string)).toEqual({ goalId: 'goal-1', at: now, owner: A });
+    expect(readEventReturn(now, A)).toBe('goal-1');
+    expect(readEventReturn(now, B)).toBeNull();
+    expect(readEventReturn(now)).toBeNull();
+    expect(readMarkerReturn(now, A)).toBe('flag-01');
+    expect(readMarkerReturn(now, B)).toBeNull();
+    expect(readKioskReturnGoal(A)).toBe('goal-k');
+    expect(readKioskReturnGoal(null)).toBeNull();
+    expect(readAuthDestinationKind(B)).toBeNull();
+  });
+
+  it("signing out clears the account's own destinations and leaves the signed-out handoff", async () => {
+    const { setMarkerReturn } = await import('../src/markerEntry');
+    const { setEventReturn } = await import('../src/eventReturn');
+    void setPendingJoinCode(CODE, A);
+    void setMarkerReturn('flag-01', Date.now(), A);
+    void setEventReturn('goal-1', Date.now(), null);
+    expect(authListeners.length).toBeGreaterThan(0);
+    for (const l of authListeners) l(null);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(window.sessionStorage.getItem('wsf.pendingJoinCode')).toBeNull();
+    expect(window.sessionStorage.getItem('wsf.markerReturn')).toBeNull();
+    expect(window.sessionStorage.getItem('wsf.eventReturn')).not.toBeNull();
   });
 });

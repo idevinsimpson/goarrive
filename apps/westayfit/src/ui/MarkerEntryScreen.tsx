@@ -121,8 +121,11 @@ export function MarkerEntryScreen({
     // in this tab must not outrank it on the terminal hop.
     clearPendingJoinCode();
     clearEventReturn();
-    setMarkerReturn(slug);
-  }, [slug]);
+    // Whose it is: a signed-out visitor's scan is the handoff for whoever
+    // signs in next; a signed-in member sent to a gate (verify, profile) owns
+    // it, and it goes with their session (src/postAuthDestination.ts).
+    setMarkerReturn(slug, Date.now(), uid);
+  }, [slug, uid]);
 
   const onJoin = useCallback(async () => {
     if (!slug || joining) return;
