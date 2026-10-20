@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 
 import { ButtonLink } from './ui/ButtonLink';
+import { KEYBOARD_SCROLL_PROPS, KeyboardInsetView } from './ui/keyboardAvoidance';
 import {
   ACTION_GREEN,
   ACTION_GREEN_DEEP,
@@ -207,11 +208,18 @@ export function FormShell({
       testID on the sheet alone would silently stop containing the very text
       that states the screen's state — which is what three verify specs read.
     */
-    <View style={shell.screen} onLayout={onLayout} testID={testID}>
+    /*
+      NATIVE-INTEGRATOR-1 (INT-06). The focused field stays above the keyboard:
+      iOS insets the scroll view and scrolls the field into view; Android pads
+      this frame by the IME so the scroll view shrinks and does the same. Both
+      are inert on web (src/ui/keyboardAvoidance.tsx).
+    */
+    <KeyboardInsetView style={shell.screen} onLayout={onLayout} testID={testID}>
       <ScrollView
         style={kit.scroll}
         contentContainerStyle={shell.body}
         keyboardShouldPersistTaps="handled"
+        {...KEYBOARD_SCROLL_PROPS}
       >
         <View
           style={[
@@ -273,7 +281,7 @@ export function FormShell({
           ) : null}
         </View>
       </ScrollView>
-    </View>
+    </KeyboardInsetView>
   );
 }
 
@@ -428,11 +436,12 @@ export function QuietShell({
 }) {
   const { onLayout, compact } = useBox();
   return (
-    <View style={quiet.screen} onLayout={onLayout} testID={testID}>
+    <KeyboardInsetView style={quiet.screen} onLayout={onLayout} testID={testID}>
       <ScrollView
         style={kit.scroll}
         contentContainerStyle={quiet.body}
         keyboardShouldPersistTaps="handled"
+        {...KEYBOARD_SCROLL_PROPS}
       >
         <View style={quiet.chrome}>
           <WsfWordmark variant="navy" height={compact ? 18 : 21} testID="wsf-form-wordmark" />
@@ -447,7 +456,7 @@ export function QuietShell({
         <View style={shell.spacer} />
         {foot ? <View style={shell.foot}>{foot}</View> : null}
       </ScrollView>
-    </View>
+    </KeyboardInsetView>
   );
 }
 
