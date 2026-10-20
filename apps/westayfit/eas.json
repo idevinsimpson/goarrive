@@ -13,7 +13,8 @@
       },
       "android": {
         "buildType": "apk"
-      }
+      },
+      "autoIncrement": true
     },
     "development-simulator": {
       "extends": "development",
@@ -29,7 +30,8 @@
       },
       "android": {
         "buildType": "apk"
-      }
+      },
+      "autoIncrement": true
     }
   }
 }
