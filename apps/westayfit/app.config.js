@@ -9,7 +9,8 @@
  *
  * Development-client builds embed no JavaScript: their JS (and its
  * EXPO_PUBLIC_* values) comes from the developer's local `npx expo start`, so
- * the staging-values check below applies only to builds that embed their JS.
+ * the staging-values check below applies only to builds that embed their JS,
+ * and only a development client may rely on the emulator flag alone.
  */
 const STAGING_KEYS = [
   'EXPO_PUBLIC_WSF_STAGING_API_KEY',
@@ -19,6 +20,12 @@ const STAGING_KEYS = [
   'EXPO_PUBLIC_WSF_STAGING_SENDER_ID',
   'EXPO_PUBLIC_WSF_STAGING_APP_ID',
 ];
+
+// The eas.json build profiles that produce a development client
+// (developmentClient: true) and therefore embed no JavaScript. Any new
+// developmentClient profile added to eas.json must be added here too. A profile
+// missing from this list is treated as embedding its JS, the stricter check.
+const DEV_CLIENT_PROFILES = ['development', 'development-simulator'];
 
 // Same rule as src/firebase.ts isEmulatorFlagOn.
 function isEmulatorFlagOn(raw) {
@@ -30,13 +37,25 @@ module.exports = ({ config }) => {
   if (platform === 'ios' || platform === 'android') {
     const env = (process.env.EXPO_PUBLIC_WSF_ENV || '').trim();
     const emulator = isEmulatorFlagOn(process.env.EXPO_PUBLIC_WSF_USE_EMULATORS);
-    if (env !== 'production' && env !== 'staging' && !emulator) {
-      throw new Error(
-        `WSF native build refused: EXPO_PUBLIC_WSF_ENV must be "staging" or "production" for an ${platform} build (got "${env}").`
-      );
-    }
     const profile = process.env.EAS_BUILD_PROFILE || '';
-    const embedsJs = !profile.startsWith('development');
+    const embedsJs = !DEV_CLIENT_PROFILES.includes(profile);
+    if (env !== 'production' && env !== 'staging') {
+      // src/firebase.ts honours the emulator flag on native only in a __DEV__
+      // binary, so a build that embeds its JS (a release build) never uses the
+      // emulator and would refuse to start on the device.
+      if (emulator && embedsJs) {
+        throw new Error(
+          `WSF native build refused: profile "${profile}" embeds its JavaScript, so EXPO_PUBLIC_WSF_USE_EMULATORS cannot ` +
+            `name its backend (the emulator is used only by a development client). Set EXPO_PUBLIC_WSF_ENV to "staging" ` +
+            `or "production" for this ${platform} build (got "${env}").`
+        );
+      }
+      if (!emulator) {
+        throw new Error(
+          `WSF native build refused: EXPO_PUBLIC_WSF_ENV must be "staging" or "production" for an ${platform} build (got "${env}").`
+        );
+      }
+    }
     if (env === 'staging' && embedsJs) {
       const missing = STAGING_KEYS.filter((k) => !(process.env[k] || '').trim());
       if (missing.length) {
