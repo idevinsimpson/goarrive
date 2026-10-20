@@ -3,7 +3,15 @@
 Branch `claude/wsf-native-camera-1`, base `5a968141de60e6b355d2d1fa327ff2f6f6f14565` (NATIVE-BUILD-1: camera permission config, react-native-svg, generated native dirs ignored).
 Design source: the camera-lane research report (local Expo module `modules/wsf-pose-camera`, MediaPipe Tasks PoseLandmarker in the web engine's mode and settings, raw landmarks into the existing `mapPerson` → `RepCounterOrchestrator`, frozen counter unchanged).
 
-> **Status, plainly.** The JavaScript side is implemented and tested here. The Swift and Kotlin code is **UNCOMPILED**: this sandbox has no Xcode and no Android SDK (dl.google.com is blocked). Its first compile happens in an EAS development build. **Nothing here shows that the camera works, or counts accurately, on a real body or device.**
+> **Status, plainly.** The JavaScript side is implemented and tested here. The native code has **not been built for a phone**: this sandbox has no Xcode and no Android SDK (dl.google.com is blocked), so the first real build is an EAS development build.
+>
+> **The evidence pass narrowed this** (see "Compile and contract evidence" below):
+> - The Android pure contract (`WsfPoseContract.kt`) is compiled and **run** on the JVM with kotlinc 2.1.20.
+> - `WsfPoseCameraModule.kt` type-checks with **zero errors** against the real Android framework and the real expo-modules-core sources.
+> - The Kotlin emitter and the JS adapter are **proven to agree** on one recorded-format stream.
+> - Every Swift API call is cross-checked line by line against MediaPipe v0.10.35, expo-modules-core 3.0.30 and iOS 18.0 SDK headers.
+>
+> **Nothing here shows that the camera works, or counts accurately, on a real body or device.**
 
 Paths below are relative to `apps/westayfit/`.
 
@@ -39,7 +47,11 @@ Paths below are relative to `apps/westayfit/`.
 
 ## What is tested here
 
-Baseline before this change: **66 files, 1288 tests**. After: **67 files, 1339 tests**, all passing (`npx vitest run`). The +51 are in `tests/move-camera-native-adapter.test.ts`:
+Baseline before this change: **66 files, 1288 tests**. At `abe84f45`: **67 files, 1339 tests**. After the evidence pass and the NATIVE-BUILD-1 merge: **68 files, 1351 tests**, all passing (`npx vitest run --testTimeout=60000`). This lane's suites:
+- `tests/move-camera-native-adapter.test.ts`: 51 tests;
+- `tests/move-camera-native-contract.test.ts`: 6 tests.
+
+The merged NATIVE-BUILD-1 commits brought the rest. The adapter suite covers:
 
 | Area | Tests |
 |---|---|
@@ -62,12 +74,89 @@ Also run here: `npx tsc --noEmit` is clean. `npx expo export --platform ios` and
   - pod `WsfPoseCamera` at the module root, Swift module `WsfPoseCamera`, `WsfPoseCameraModule`;
   - Android project `android/`, module `expo.modules.wsfposecamera.WsfPoseCameraModule`.
 - **Podspec:** loaded and linted with cocoapods-core 1.16.2 (`Pod::Specification::Linter`): **passes**. The one warning left is the expected "git source without a tag" of a local pod.
-- **Kotlin:** all four files pass the Kotlin 2.1.20 compiler front end with **no syntax errors**. Every reported error is an unresolved Android, CameraX, MediaPipe or Expo symbol, because those jars were not on the classpath. **Semantic compile: UNVERIFIED.**
+- **Kotlin:** superseded by the real compile in "Compile and contract evidence" below.
 - **Swift:** all four files parse with **no syntax errors** under the tree-sitter-swift 0.7.1 grammar. The checker was confirmed to flag a deliberately broken file. **Type-check and compile: UNVERIFIED.**
 - **MediaPipe API names** were read from source at tag `v0.10.35`:
   - iOS headers: `PoseLandmarkerOptions` (`numPoses`, `min*Confidence`, `shouldOutputSegmentationMasks`), `BaseOptions.delegate` (`Delegate.CPU/.GPU`), `RunningMode.video`, `MPImage(sampleBuffer:orientation:)`, `detect(videoFrame:timestampInMilliseconds:)`, `NormalizedLandmark.visibility: NSNumber?`.
   - Android Java: `PoseLandmarkerOptions.builder()…setOutputSegmentationMasks`, `BaseOptions.setModelAssetBuffer`/`setDelegate`, `detectForVideo(MPImage, long)`, `NormalizedLandmark.visibility(): Optional<Float>`. These are identical at `v0.10.26`.
   - Android `setModelAssetBuffer` is copied with `ByteString.copyFrom` from the buffer's position, so the code rewinds the buffer before each delegate attempt.
+
+## Compile and contract evidence (evidence pass, on top of `abe84f45`)
+
+Everything below is reproducible with `docs/westayfit/qa/camera-evidence/run-kotlin-jvm.sh`. It uses only Maven Central jars (kotlin-compiler 2.1.20, Robolectric `android-all` 14-robolectric-10818077, kotlin-reflect, kotlinx-coroutines, fbjni). Each jar is sha256-pinned in the script, and its sha1 was cross-checked against Maven Central's own `.sha1`.
+
+**1. The Android pure contract is compiled and RUN on the JVM.**
+- Every Android computation that needs no CameraX, MediaPipe or Expo type now lives in `android/src/main/java/expo/modules/wsfposecamera/WsfPoseContract.kt` (`java.*`/`kotlin.*` imports only). Behaviour is unchanged. It holds:
+  - the ns→ms `WsfFrameClock`, which drops a frame whose ms is not after the last one, before inference;
+  - landmark flattening (missing visibility → -1);
+  - the 3-person cap;
+  - the `onPose` payload and the mirrored flag;
+  - the engine id;
+  - the model sha256 check and the direct `ByteBuffer`;
+  - the `applyProps` run decision.
+- `WsfPoseRun`, `WsfPoseModel` and `WsfPoseCameraView` now only adapt CameraX, MediaPipe and Expo types to it.
+- `android/src/test/.../WsfPoseContractTest.kt` is a framework-free JVM runner. Log excerpt:
+
+```
+info: kotlinc-jvm 2.1.20 (JRE 21.0.12.1+1-1-24.04.4-Ubuntu)
+PASS nsToMs truncates nanoseconds to whole milliseconds
+PASS frame clock: the first frame is taken; repeated, same-ms and older frames are dropped, never re-timed
+PASS flatten: x, y are MediaPipe's Floats widened to Double; a missing visibility is -1
+PASS people: at most MAX_POSES (3) in MediaPipe's order; nobody gives an empty list
+PASS posePayload: exactly the keys and types the JS contract reads
+PASS sha256: the FIPS 180-2 'abc' vector, and the bundled model is the pinned web model
+PASS verifiedModelBuffer: a direct buffer at position 0 with the whole model; any other bytes are refused
+PASS run decision: open only while active with a positive runId; a new runId restarts; inactive stops
+PASS MEDIAPIPE_VERSION equals build.gradle mediapipeTasksVisionVersion
+PASS contract fixture: the recorded stream -> the onPose events Android would send
+kotlin-jvm: 12 passed, 0 failed
+  android-emitted.json reproduced byte for byte (fa6f1aba1b16be99...)
+```
+
+**2. Every module file compiled against the real Android framework and the real expo-modules-core sources (no stubs).**
+- Inputs: `android-all` API 34 plus `node_modules/expo-modules-core/android/src/{main/java,withoutCompose}` as source roots.
+- `WsfPoseCameraModule.kt` (the Expo DSL: `Module`, `View`, `Prop`, `Events`, `OnViewDidUpdateProps`, `OnViewDestroys`, `AsyncFunction` with `Promise`, `Permissions` overloads) and `WsfPoseContract.kt` have **0 errors**.
+- The other three files have 92 errors. **Every one** is either:
+  - an unresolved reference into `androidx.camera.*`, `androidx.lifecycle.LifecycleOwner` or `com.google.mediapipe.*` (Google Maven, unreachable here); or
+  - a cascade on a value of such a type (`cannot infer type`, or a member of `PreviewView`, `ImageProxy`, `ProcessCameraProvider`, `UseCase`, `PoseLandmarker` or `NormalizedLandmark`).
+- No React Native, Expo or Android-framework symbol is unresolved in module files.
+- The script fails if the Module or Contract file gains an error, or if any other import goes unresolved.
+- The 1144 errors inside expo-modules-core itself come from React Native and AndroidX jars being absent. They are not ours.
+
+```
+  errors in module files: 92
+    WsfPoseCameraModule.kt       0
+    WsfPoseCameraView.kt         12
+    WsfPoseContract.kt           0
+    WsfPoseModel.kt              21
+    WsfPoseRun.kt                59
+  OK: WsfPoseCameraModule.kt and WsfPoseContract.kt compile clean; unresolved imports are only androidx.camera / androidx.lifecycle / com.google.mediapipe
+```
+
+**3. The Kotlin emitter and the JS adapter agree** (`tests/move-camera-native-contract.test.ts`).
+- One deterministic, recorded-format stream: `tests/fixtures/native-camera/landmark-stream.json`. It is synthetic float32 data, **not a camera recording**, with:
+  - 334 frames, including 19 injected repeated, same-ms or older frames;
+  - missing visibility;
+  - nobody in frame;
+  - four people.
+- The JVM run of the real `WsfFrameClock` + `WsfPoseContract` writes `android-emitted.json` (315 events, hash-linked to the input).
+- The test asserts:
+  - the Kotlin events equal the contract's events exactly;
+  - the Kotlin events, through `nativeEngine.ts`, give PoseFrames **identical** to the web `mapPerson` normalisation of the same stream;
+  - both drive the real frozen session to identical snapshots (GO at 1.5 s, then set 3).
+
+**4. iOS:** no Swift compiler is reachable. `docs/westayfit/qa/camera-evidence/ios-api-crosscheck.md` cites, for every MediaPipe, Expo, AVFoundation, CoreMedia, CoreVideo, Foundation and CryptoKit call, the exact declaration line and the rule that gives its Swift spelling.
+- Sources: MediaPipe v0.10.35 headers and BUILD, expo-modules-core 3.0.30, and iOS 18.0 SDK headers from the third-party `xybp888/iOS-SDKs` mirror.
+- It confirms `import MediaPipeTasksVision` exposes every header used.
+- It found that the AVCaptureSession notification constants have **different Swift spellings in the iOS 17 and 18 SDKs**. That is why the code observes them by string.
+- Still UNVERIFIED: the string values of those constants, and the swift-foundation `Data(contentsOf:options:)`.
+
+**5. Merge and config assertion.**
+- `origin/claude/wsf-native-build-1` was merged at `9e9dc2ca` (one commit past `426ab227`). It brought a reworded `NSCameraUsageDescription`, more `blockedPermissions` and `app.config.js`.
+- The privacy test now checks the **meaning**:
+  - CAMERA is requested, RECORD_AUDIO is blocked, and no audio permission is requested;
+  - there is no `NSMicrophoneUsageDescription`;
+  - the camera string says it counts on this device, and its "recorded" sentence is a negation that covers upload.
 
 ## MediaPipe versions chosen, with evidence
 
@@ -88,7 +177,11 @@ Also run here: `npx tsc --noEmit` is clean. `npx expo export --platform ios` and
 
 ## UNCOMPILED / UNVERIFIED (nothing below has run)
 
-- **UNCOMPILED:** every Swift and Kotlin file, the podspec and `build.gradle` in a real build.
+- **UNCOMPILED:**
+  - Every Swift file.
+  - The podspec and `build.gradle`.
+  - `WsfPoseCameraView.kt`, `WsfPoseModel.kt` and `WsfPoseRun.kt` in a real Android build.
+  - Partly done: `WsfPoseContract.kt` (plus its JVM test) is compiled and run on the JVM, and `WsfPoseCameraModule.kt` type-checks clean (see the evidence section).
 - **UNVERIFIED, build:**
   - MediaPipe Android 0.10.35 availability (0.10.29 is pinned);
   - CameraX 1.4.2 resolution;
@@ -191,7 +284,9 @@ A dev-only HUD is **not built**. `RepCounterController.frameStats` (accepted, du
 cd apps/westayfit
 npx tsc --noEmit
 npx vitest run tests/move-camera-native-adapter.test.ts     # 51 tests
-npx vitest run                                              # 67 files, 1339 tests
+npx vitest run --testTimeout=60000                          # 68 files, 1351 tests (after the NATIVE-BUILD-1 merge)
+npx vitest run tests/move-camera-native-contract.test.ts    # 6 tests: Kotlin <-> JS contract
+docs/westayfit/qa/camera-evidence/run-kotlin-jvm.sh         # from the repo root; Kotlin JVM tests + module compile report
 npx expo export --platform ios --output-dir /tmp/exp-ios
 npx expo export --platform android --output-dir /tmp/exp-android
 npx expo-modules-autolinking resolve -p apple --json        # wsf-pose-camera → pod WsfPoseCamera
