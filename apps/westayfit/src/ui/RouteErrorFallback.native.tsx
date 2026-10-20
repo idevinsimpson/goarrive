@@ -32,7 +32,7 @@ import type { BoundaryProps, FallbackVariant } from './routeErrorTypes';
  * recovers). None of this component ships in the web bundle.
  *
  * Each caught error is recorded, scrubbed, for Build details
- * (src/crashContainment.ts).
+ * (src/crashRecords.ts, shown by src/ui/CrashRecordsCard.native.tsx).
  */
 
 export type { FallbackVariant };
@@ -122,7 +122,6 @@ export function RouteErrorFallback({ error, retry, variant }: Props) {
     </View>
   );
 }
-
 
 const boundaries = new Map<FallbackVariant, ComponentType<BoundaryProps>>();
 
