@@ -183,6 +183,34 @@ export function isDefiniteRefusal(e: unknown, attempt: 'new' | 'replay'): boolea
   return true;
 }
 
+// ---- the device's saved attempt (NATIVE-STATE-1) ---------------------------
+//
+// OWNER-VISIBLE WORDING, PENDING SIGN-OFF. Kept here, beside the rest of the
+// contribution copy, so the screen and its tests read the same sentences.
+
+/** The restore could not read this device's saved attempt; recording stays paused until it can. */
+export const RESTORE_FAILED_HEADING = 'Couldn’t read this device’s saved attempt.';
+export const RESTORE_FAILED_BODY =
+  'There may be an earlier contribution on this device that hasn’t been confirmed. Recording is paused so nothing replaces it.';
+export const RESTORE_RETRY_LABEL = 'Try again';
+
+/** Record found an earlier unconfirmed attempt on this device; the new one was not sent. */
+export const ATTEMPT_CONFLICT_NOTICE =
+  'An earlier attempt on this device hasn’t been confirmed yet. Confirm it first: what you just entered wasn’t sent.';
+
+/** Record or Confirm stopped because the account signed in on this device changed. */
+export const ATTEMPT_NOT_SENT_NOTICE =
+  'This wasn’t sent because the account signed in on this device changed. Check the account and try again.';
+
+/** A replay answered "not signed in": the reminder stays; this says why nothing moved. */
+export const REPLAY_SIGN_IN_NOTICE = 'Your sign-in has expired. Sign in again, then confirm this contribution.';
+
+/** Whether a caught error is the server saying the request carried no usable sign-in. */
+export function isSignInExpired(e: unknown): boolean {
+  const failure = classifyContributeError(e);
+  return failure.kind === 'refused' && failure.reason === 'signedOut';
+}
+
 export function refusalCopy(
   reason: RefusalReason,
   count: number,

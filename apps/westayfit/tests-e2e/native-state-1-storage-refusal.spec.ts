@@ -35,7 +35,10 @@ import {
  * It asserts: the honest sentence is shown and the "will be here" one is not;
  * nothing was stored; "Confirm this contribution" sends the SAME attempt and
  * it counts once; and leaving the page restores nothing (as the screen said)
- * and sends nothing on arrival.
+ * and sends nothing on arrival. And, for the #635 delta: a saved attempt the
+ * browser cannot READ (LABELLED INJECTION: getItem throws for those keys)
+ * keeps recording paused behind "Couldn’t read this device’s saved attempt."
+ * until Retry reads it, and nothing is sent meanwhile.
  *
  * Requires the Firebase emulators and a served web build (WSF_PLAYWRIGHT_BASE_URL),
  * like every spec in this folder. Everything seeded is SYNTHETIC.
@@ -123,6 +126,23 @@ async function recordAndLoseTheReply(page: Page, fx: Fixture, control: { mode: s
   expect(control.seen, 'one write left the browser').toHaveLength(1);
 }
 
+const RESTORE_FAILED = 'Couldn’t read this device’s saved attempt.';
+
+/** LABELLED INJECTION: reading `wsf.pendingContribution.*` throws while `window.__wsfFailPendingReads` is true. */
+async function failPendingReads(page: Page): Promise<void> {
+  await page.addInitScript((prefix: string) => {
+    (window as unknown as { __wsfFailPendingReads: boolean }).__wsfFailPendingReads = true;
+    const original = Storage.prototype.getItem;
+    Storage.prototype.getItem = function (this: Storage, key: string) {
+      const failing = (window as unknown as { __wsfFailPendingReads?: boolean }).__wsfFailPendingReads;
+      if (failing && typeof key === 'string' && key.startsWith(prefix)) {
+        throw new DOMException('The operation is insecure.', 'SecurityError');
+      }
+      return original.call(this, key);
+    };
+  }, PENDING_PREFIX);
+}
+
 test.describe('NATIVE-STATE-1 · a browser that refuses to keep the pending attempt', () => {
   test('the unknown screen says it was not saved, and Confirm still reconciles the same attempt once', async ({ browser }) => {
     test.setTimeout(240_000);
@@ -167,6 +187,46 @@ test.describe('NATIVE-STATE-1 · a browser that refuses to keep the pending atte
       expect(control.seen.length, 'arriving sent something').toBe(sent);
       expect(await pendingKeys(page)).toEqual([]);
     });
+  });
+
+  test('a saved attempt the browser cannot read: recording stays paused, Retry reads it once it can', async ({ browser }) => {
+    test.setTimeout(240_000);
+    const fx = await seed('d');
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'en-US', timezoneId: 'America/New_York' });
+    try {
+      const page = await ctx.newPage();
+      await signInVia(page, fx.email, PASSWORD);
+      // An unresolved attempt this account left on this device.
+      await page.evaluate(
+        ({ k, goalId }) =>
+          window.localStorage.setItem(
+            k,
+            JSON.stringify({ goalId, attemptId: 'ns1readfail01', count: 20, ts: Date.now(), state: 'unknown' })
+          ),
+        { k: `${PENDING_PREFIX}${fx.goalId}.${fx.uid}`, goalId: fx.goalId }
+      );
+      await failPendingReads(page);
+      const { control, ready } = contributeRoute(page);
+      await ready;
+      await page.goto(`/contribute/${fx.goalId}?groupId=${fx.groupId}&mode=record`);
+      const failed = page.getByTestId('wsf-contribute-restore-failed');
+      await expect(failed).toBeVisible({ timeout: 60_000 });
+      await expect(failed).toContainText(RESTORE_FAILED);
+      for (const id of ['wsf-contribute-entry-screen', 'wsf-contribute-review-screen', 'wsf-contribute-submit']) {
+        await expect(page.getByTestId(id), id).toHaveCount(0);
+      }
+      expect(control.seen, 'something was sent').toEqual([]);
+      // The browser can read it again: Retry restores the attempt, untouched.
+      await page.evaluate(() => {
+        (window as unknown as { __wsfFailPendingReads: boolean }).__wsfFailPendingReads = false;
+      });
+      await page.getByTestId('wsf-contribute-restore-retry').click();
+      await expect(page.getByTestId('wsf-contribute-pending')).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByTestId('wsf-contribute-pending-count')).toHaveText('You entered 20 squats.');
+      expect(control.seen, 'something was sent').toEqual([]);
+    } finally {
+      await ctx.close();
+    }
   });
 
   test('with storage working, the screen still makes the original promise (control)', async ({ browser }) => {
