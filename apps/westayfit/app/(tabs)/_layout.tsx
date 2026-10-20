@@ -1,7 +1,7 @@
 import { Tabs, useNavigation, useRouter } from 'expo-router';
 import { signOut } from 'firebase/auth';
 import { useRef, useState } from 'react';
-import { View } from 'react-native';
+import { Platform, View } from 'react-native';
 
 import { useWsfAuth } from '../../src/auth';
 import { getFirebaseAuth } from '../../src/firebase';
@@ -16,6 +16,7 @@ import {
 import { MemberTopBar, type MemberMenuItem } from '../../src/ui/MemberTopBar';
 import { TabSceneFade } from '../../src/ui/TabSceneFade';
 import { nativeErrorBoundary } from '../../src/ui/RouteErrorFallback';
+import { signOutToSignedOutHome } from '../../src/ui/signOutReset';
 
 /**
  * THE MEMBER SHELL: one persistent top bar, four real tabs, and MOVE as an
@@ -107,6 +108,9 @@ function MemberShell() {
   useTabsFocusReturn(shellRef);
   // Which tab was selected last, for the tab fade (src/ui/TabSceneFade.tsx).
   const lastSelectedTab = useRef<string | null>(null);
+  // The root stack (this layout is its `(tabs)` screen): Home's wordmark and
+  // the menu's Sign out both act on it.
+  const rootNavigation = useNavigation();
 
   /**
    * THE MENU HOLDS THE QUIET GLOBAL UTILITIES, AND NOTHING THAT DOES NOT WORK.
@@ -156,7 +160,13 @@ function MemberShell() {
       onPress: () => {
         if (signingOut) return;
         setSigningOut(true);
-        void signOut(getFirebaseAuth()).finally(() => setSigningOut(false));
+        // INT-05: on a phone, a successful sign-out lands on signed-out Home
+        // with nothing behind it (src/ui/signOutReset.ts). Web is unchanged.
+        void signOutToSignedOutHome({
+          signOut: () => signOut(getFirebaseAuth()),
+          dispatch: (action) => rootNavigation.dispatch(action as never),
+          platform: Platform.OS,
+        }).finally(() => setSigningOut(false));
       },
     },
   ];
@@ -176,7 +186,6 @@ function MemberShell() {
     its mounted screen, its scroll and its data. From Home it is a no-op, as
     the top bar has always promised.
   */
-  const rootNavigation = useNavigation();
   const goHome = () =>
     rootNavigation.dispatch({
       type: 'POP_TO',
