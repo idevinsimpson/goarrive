@@ -29,7 +29,8 @@ import {
   authDestinationCard,
   readAuthDestinationKind,
 } from '../src/authDestination';
-import { routeAfterAuth, usePendingJoinCodeReady } from '../src/pendingJoinCode';
+import { routeAfterAuth } from '../src/pendingJoinCode';
+import { usePostAuthDestinationsReady } from '../src/postAuthDestination';
 
 type ExistingProfile = {
   displayName?: string;
@@ -39,9 +40,9 @@ type ExistingProfile = {
 
 export default function ProfileSetup() {
   const { ready, user } = useWsfAuth();
-  // Re-renders once a phone has read the pending join code from storage, so
-  // the destination card below is right on a cold start. No-op on web.
-  usePendingJoinCodeReady();
+  // Re-renders once a phone has read the post-auth destinations from storage,
+  // so the destination card below is right on a cold start. No-op on web.
+  usePostAuthDestinationsReady();
   const params = useLocalSearchParams<{ edit?: string }>();
   const editMode = params.edit === '1';
   const [displayName, setDisplayName] = useState('');

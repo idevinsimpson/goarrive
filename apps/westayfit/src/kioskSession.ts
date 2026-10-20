@@ -17,9 +17,12 @@
  * proof, and no copy in this feature says or implies that it is.
  */
 
+import { definePostAuthDestination } from './postAuthDestination';
+
 /** sessionStorage, not localStorage: a closed tab must not carry a kiosk
  * destination into the next thing this browser does. Same lifetime choice,
- * and the same reasoning, as src/pendingJoinCode.ts. */
+ * and the same reasoning, as src/pendingJoinCode.ts (on a phone, the same
+ * two-hour bound instead: src/postAuthDestination.ts). */
 const KIOSK_RETURN_KEY = 'wsf.kioskReturnGoalId';
 
 /** Every browser-storage key this feature is allowed to own. Finish removes
@@ -97,38 +100,51 @@ export function isKioskFlag(value: unknown): boolean {
   return value === '1' || value === 'true';
 }
 
-export function setKioskReturnGoal(goalId: string): void {
-  try {
-    if (typeof window === 'undefined') return;
-    const storage = window.sessionStorage;
-    if (!storage) return;
-    if (!isGoalIdShape(goalId)) return;
-    storage.setItem(KIOSK_RETURN_KEY, goalId);
-  } catch {
-    // Private browsing / locked-down UA. The kiosk still works: the visitor
-    // lands on home after signing in instead of back on the contribution
-    // screen, which is a worse walk-up, not a broken or leaky one.
-  }
-}
-
-export function readKioskReturnGoal(): string | null {
-  try {
-    if (typeof window === 'undefined') return null;
-    const raw = window.sessionStorage?.getItem(KIOSK_RETURN_KEY);
-    if (raw == null) return null;
-    return isGoalIdShape(raw) ? raw : null;
-  } catch {
+/*
+  THE MEMBER-SIDE RETURN GOAL, kept like its siblings (src/postAuthDestination.ts):
+  sessionStorage on web exactly as before; AsyncStorage with a two-hour bound
+  on a phone. A bare goal id when stashed signed out — which is what the kiosk
+  start screen does, because a shared device is signed out by design before
+  anybody walks up — and `{"goalId":…,"owner":…}` only if an account stashed
+  it, in which case it is that account's alone and goes with its session.
+*/
+const kioskReturn = definePostAuthDestination<string>({
+  key: KIOSK_RETURN_KEY,
+  decode(raw) {
+    if (isGoalIdShape(raw)) return { value: raw, owner: null };
+    try {
+      const v = JSON.parse(raw) as { goalId?: unknown; owner?: unknown } | null;
+      if (v && typeof v.goalId === 'string' && isGoalIdShape(v.goalId) && typeof v.owner === 'string' && v.owner) {
+        return { value: v.goalId, owner: v.owner };
+      }
+    } catch {
+      // fall through
+    }
     return null;
-  }
+  },
+  encode(goalId, owner) {
+    return owner ? JSON.stringify({ goalId, owner }) : goalId;
+  },
+});
+
+/**
+ * Private browsing / locked-down UA: the write is reported as not kept and
+ * the kiosk still works — the visitor lands on home after signing in instead
+ * of back on the contribution screen, which is a worse walk-up, not a broken
+ * or leaky one.
+ */
+export function setKioskReturnGoal(goalId: string, ownerUid: string | null = null): Promise<boolean> {
+  if (!isGoalIdShape(goalId)) return Promise.resolve(false);
+  return kioskReturn.write(goalId, ownerUid);
 }
 
-export function clearKioskReturnGoal(): void {
-  try {
-    if (typeof window === 'undefined') return;
-    window.sessionStorage?.removeItem(KIOSK_RETURN_KEY);
-  } catch {
-    // ignore
-  }
+/** The goal for `uid` (null: a signed-out reader), or null if it is another account's. */
+export function readKioskReturnGoal(uid: string | null = null): string | null {
+  return kioskReturn.read(uid);
+}
+
+export function clearKioskReturnGoal(): Promise<boolean> {
+  return kioskReturn.clear();
 }
 
 /** The keys Finish is allowed to remove. Nothing else in storage is touched:
@@ -327,8 +343,9 @@ export type KioskFinishDeps = {
    * since the record moved behind the device storage boundary; it is awaited,
    * so the clear completes while the uid it needs is still signed in. */
   clearPendingIfAttempt: (goalId: string, uid: string, attemptId: string) => boolean | Promise<boolean>;
-  /** Removes this feature's own storage keys. */
-  clearKioskKeys: () => void;
+  /** Removes this feature's own storage keys. Awaited when it is asynchronous,
+   * so the keys are gone before the sign-out that follows. */
+  clearKioskKeys: () => void | Promise<unknown>;
 };
 
 export type KioskFinishInput = {
@@ -371,7 +388,7 @@ export async function runKioskFinish(
     }
   }
   try {
-    deps.clearKioskKeys();
+    await deps.clearKioskKeys();
   } catch {
     // best-effort; the keys are inert to every other surface.
   }

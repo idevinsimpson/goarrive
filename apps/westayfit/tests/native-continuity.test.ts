@@ -83,6 +83,8 @@ afterEach(() => {
   vi.doUnmock('../src/storage/kv');
   vi.doUnmock('../src/storage/sessionKv');
   vi.doUnmock('../src/storage/syncRead');
+  vi.doUnmock('../src/firebase');
+  vi.doUnmock('firebase/auth');
   vi.resetModules();
 });
 
@@ -306,7 +308,7 @@ describe('4. one account never inherits or submits another account’s state', (
     bootNative(disk);
     pj = await import('../src/pendingJoinCode');
     const { readAuthDestinationKind } = await import('../src/authDestination');
-    await pj.pendingJoinCodeReady();
+    await (await import('../src/postAuthDestination')).postAuthDestinationsReady();
     // A signed out: the sign-in screen does not announce A's invitation…
     expect(readAuthDestinationKind(null)).toBeNull();
     // …and B's terminal hop is not routed by it, and drops it.
@@ -534,11 +536,11 @@ describe('the pending join code on a phone: bounded, and it survives termination
     bootNative(disk);
     pj = await import('../src/pendingJoinCode');
     const { readAuthDestinationKind } = await import('../src/authDestination');
-    expect(pj.isPendingJoinCodeReady()).toBe(false);
+    expect((await import('../src/postAuthDestination')).isPostAuthDestinationsReady()).toBe(false);
     expect(readAuthDestinationKind(null)).toBeNull();
     releaseReads();
-    await pj.pendingJoinCodeReady();
-    expect(pj.isPendingJoinCodeReady()).toBe(true);
+    await (await import('../src/postAuthDestination')).postAuthDestinationsReady();
+    expect((await import('../src/postAuthDestination')).isPostAuthDestinationsReady()).toBe(true);
     expect(readAuthDestinationKind(null)).toBe('join');
   });
 });

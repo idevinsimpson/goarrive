@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useWsfAuth } from '../auth';
 import { getFirebaseFunctions } from '../firebase';
-import { currentFirst, resolveCurrentCommunity } from '../currentCommunity';
+import { currentFirstWhenReady, useCurrentCommunityReady } from '../currentCommunity';
 import { forgetCommunity, peekMemberProfile, readMyCommunities } from '../memberReads';
 import { isChampionRole } from './CommunityPresence';
 import { CommunityPrivacyPanelView } from './CommunityPrivacyPanelView';
@@ -69,6 +69,10 @@ const REFUSED = new Set(['functions/not-found', 'functions/permission-denied']);
 export function CommunityPrivacyControls({ compact = false }: { compact?: boolean }) {
   const { user, ready } = useWsfAuth();
   const uid = user?.uid ?? null;
+  // Re-renders when a phone's launch read of the remembered community lands
+  // (always true on web), so the order below is decided on what is
+  // remembered.
+  useCurrentCommunityReady();
   const [rows, setRows] = useState<CommunityRow[]>([]);
   const [phase, setPhase] = useState<'loading' | 'ready' | 'failed'>('loading');
   /** Per community: the last save's failure, kept until a retry or a new change. */
@@ -228,11 +232,17 @@ export function CommunityPrivacyControls({ compact = false }: { compact?: boolea
 
   // The current community first, as on the Community tab (Director #506
   // `5845751705`); the rest in the order they were read.
-  const current = uid ? resolveCurrentCommunity(uid, rows.map((r) => r.groupId)) : null;
+  //
+  // NEVER A GUESS FIRST (NATIVE-STATE-2). On a phone the remembered community
+  // is read from storage at launch. Until that read has answered, `ordered`
+  // is null and the panel keeps saying it is loading, rather than drawing the
+  // list in some other order and then moving the member's community to the
+  // top under them. On web the read is synchronous and nothing changes.
+  const ordered = currentFirstWhenReady(uid, rows);
   // The member's own formatted name, only if it is ALREADY loaded (You reads
   // it): no read is added for a hint, and nothing is invented without it.
   const shownName = peekMemberProfile(uid)?.displayName?.trim() || null;
-  const communities: PrivacyCommunity[] = currentFirst(rows, current).map((r) => ({
+  const communities: PrivacyCommunity[] = (ordered ?? []).map((r) => ({
     groupId: r.groupId,
     displayName: r.displayName,
     shownName,
@@ -244,7 +254,7 @@ export function CommunityPrivacyControls({ compact = false }: { compact?: boolea
 
   return (
     <CommunityPrivacyPanelView
-      load={phase}
+      load={phase === 'ready' && ordered === null ? 'loading' : phase}
       communities={communities}
       compact={compact}
       onChange={(groupId, key, value) => void save(groupId, key, value)}

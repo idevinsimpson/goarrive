@@ -186,7 +186,10 @@ export default function KioskGoal() {
   // too) exactly the way a scanned join code already does.
   const onContribute = useCallback(() => {
     if (!goalId) return;
-    setKioskReturnGoal(goalId);
+    // No owner, deliberately: this start screen is signed out by design (it
+    // signs out whoever it finds), so the return is the handoff for the
+    // visitor about to sign in (src/postAuthDestination.ts).
+    setKioskReturnGoal(goalId, null);
     router.push(kioskContributeRoute(goalId) as never);
   }, [goalId]);
 

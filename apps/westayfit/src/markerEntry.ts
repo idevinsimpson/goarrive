@@ -25,6 +25,8 @@
 
 import { httpsCallable, type Functions } from 'firebase/functions';
 
+import { definePostAuthDestination } from './postAuthDestination';
+
 /** Lowercase letters, digits and inner hyphens, at most 48 — e.g. `flag-01`. */
 export function normalizeMarkerSlug(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -139,55 +141,69 @@ export function goalStateLine(state: MarkerGoalState): string {
 }
 
 // ── the auth return ─────────────────────────────────────────────────────────
+//
+// Kept like its siblings (src/postAuthDestination.ts): sessionStorage on web,
+// AsyncStorage with the same two-hour bound on a phone, so a scan survives the
+// app being killed mid-sign-up. Stashed signed out it is the handoff for
+// whoever signs in next; stashed by a signed-in account on its way to a gate
+// (verify, profile) it is that account's alone and goes with its session. The
+// record gains an `owner` field only in that case.
 
 const MARKER_RETURN_KEY = 'wsf.markerReturn';
 
 /** Two hours: the same visit to the same flag, as `eventReturn`. */
 export const MARKER_RETURN_MAX_AGE_MS = 2 * 60 * 60 * 1000;
 
-function storage(): Storage | null {
-  try {
-    if (typeof window === 'undefined') return null;
-    return window.sessionStorage ?? null;
-  } catch {
-    return null;
-  }
+type StoredMarkerReturn = { slug: string; at: number };
+
+const markerReturn = definePostAuthDestination<StoredMarkerReturn>({
+  key: MARKER_RETURN_KEY,
+  decode(raw) {
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+      const { slug, at, owner } = parsed as { slug?: unknown; at?: unknown; owner?: unknown };
+      const valid = normalizeMarkerSlug(slug);
+      if (!valid || valid !== slug) return null;
+      if (typeof at !== 'number' || !Number.isFinite(at)) return null;
+      if (owner !== undefined && (typeof owner !== 'string' || !owner)) return null;
+      return { value: { slug: valid, at }, owner: (owner as string | undefined) ?? null };
+    } catch {
+      return null;
+    }
+  },
+  encode(value, owner) {
+    return JSON.stringify(owner ? { ...value, owner } : value);
+  },
+});
+
+/**
+ * `ownerUid` is the account signed in at this moment, or null. Losing the
+ * return is a worse walk-back, not a leak: the visitor lands on home and can
+ * scan again.
+ */
+export function setMarkerReturn(
+  slug: string,
+  now: number = Date.now(),
+  ownerUid: string | null = null
+): Promise<boolean> {
+  const valid = normalizeMarkerSlug(slug);
+  if (!valid || !Number.isFinite(now)) return Promise.resolve(false);
+  return markerReturn.write({ slug: valid, at: now }, ownerUid);
 }
 
-export function setMarkerReturn(slug: string, now: number = Date.now()): void {
-  try {
-    const store = storage();
-    const valid = normalizeMarkerSlug(slug);
-    if (!store || !valid || !Number.isFinite(now)) return;
-    store.setItem(MARKER_RETURN_KEY, JSON.stringify({ slug: valid, at: now }));
-  } catch {
-    // Losing the return is a worse walk-back, not a leak: the visitor lands
-    // on home and can scan again.
-  }
+/**
+ * The slug to return to, or null for anything malformed, future, stale, or
+ * stashed under an account other than `uid` (null: a signed-out reader).
+ */
+export function readMarkerReturn(now: number = Date.now(), uid: string | null = null): string | null {
+  const record = markerReturn.read(uid);
+  if (!record) return null;
+  if (record.at > now) return null;
+  if (now - record.at > MARKER_RETURN_MAX_AGE_MS) return null;
+  return record.slug;
 }
 
-/** The slug to return to, or null for anything malformed, future or stale. */
-export function readMarkerReturn(now: number = Date.now()): string | null {
-  try {
-    const raw = storage()?.getItem(MARKER_RETURN_KEY);
-    if (raw == null) return null;
-    const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
-    const { slug, at } = parsed as { slug?: unknown; at?: unknown };
-    const valid = normalizeMarkerSlug(slug);
-    if (!valid || valid !== slug) return null;
-    if (typeof at !== 'number' || !Number.isFinite(at) || at > now) return null;
-    if (now - at > MARKER_RETURN_MAX_AGE_MS) return null;
-    return valid;
-  } catch {
-    return null;
-  }
-}
-
-export function clearMarkerReturn(): void {
-  try {
-    storage()?.removeItem(MARKER_RETURN_KEY);
-  } catch {
-    // ignore
-  }
+export function clearMarkerReturn(): Promise<boolean> {
+  return markerReturn.clear();
 }
