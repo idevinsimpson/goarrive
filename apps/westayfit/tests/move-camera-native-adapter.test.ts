@@ -1032,11 +1032,25 @@ describe('privacy: frames stay in memory; nothing is recorded, stored or sent; n
     expect(strip(read(`${MOD}/android/src/main/java/expo/modules/wsfposecamera/WsfPoseModel.kt`))).toMatch(/context\.assets\.open\(WsfPoseContract\.MODEL_FILE\)/);
   });
 
-  it('the app config still blocks the microphone and explains the camera (set by NATIVE-BUILD-1; not changed here)', () => {
+  it('the app config blocks the microphone and explains the camera honestly (owned by NATIVE-BUILD-1; checked by meaning, not wording)', () => {
     const app = JSON.parse(read('app.json')).expo;
+    // Android: the camera is requested, the microphone is blocked, nothing asks for audio.
+    expect(app.android.permissions).toContain('android.permission.CAMERA');
     expect(app.android.blockedPermissions).toContain('android.permission.RECORD_AUDIO');
-    expect(app.android.permissions).toEqual(['android.permission.CAMERA']);
-    expect(app.ios.infoPlist.NSCameraUsageDescription).toMatch(/Nothing is recorded or uploaded/);
+    expect(app.android.permissions.filter((p: string) => /RECORD_AUDIO|MICROPHONE|CAPTURE_AUDIO/i.test(p))).toEqual([]);
+    // iOS: no microphone purpose string anywhere in the app config.
+    expect(app.ios.infoPlist.NSMicrophoneUsageDescription).toBeUndefined();
+    expect(read('app.json') + read('app.config.js')).not.toMatch(/NSMicrophoneUsageDescription/);
+    // The camera purpose string says what the camera is for (counting, on this device) and that
+    // nothing is kept or sent: its "recorded" sentence is a negation that covers upload too.
+    const why: string = app.ios.infoPlist.NSCameraUsageDescription;
+    expect(why).toMatch(/\bcamera\b/i);
+    expect(why).toMatch(/\bcount/i);
+    expect(why).toMatch(/\bon (this|your) device\b/i);
+    const kept = why.split(/(?<=\.)\s+/).find((s) => /\brecorded\b/i.test(s));
+    expect(kept, 'a sentence about recording').toBeDefined();
+    expect(kept!).toMatch(/^(Nothing|No)\b/);
+    expect(kept!).toMatch(/\buploaded\b/i);
   });
 
   it('the new app files carry no recording, readback, network, storage or Firestore', () => {
