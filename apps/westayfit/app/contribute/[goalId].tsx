@@ -113,6 +113,13 @@ import {
 import { useReducedMotion } from '../../src/ui/useReducedMotion';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { nativeErrorBoundary } from '../../src/ui/RouteErrorFallback';
+import {
+  KEYBOARD_SCROLL_PROPS,
+  KeyboardInsetView,
+  SHEET_DISMISS_PROPS,
+  sheetBottomPadding,
+  useKeyboardHeight,
+} from '../../src/ui/keyboardAvoidance';
 
 // Poll wsfGoalPulse at the server cache TTL so a peer's contribution
 // surfaces without a manual refresh. Matches GOAL_PULSE_CACHE_TTL_MS in
@@ -1596,6 +1603,17 @@ export default function ContributeToGoal() {
       </Text>
     ) : null;
 
+  /*
+    NATIVE-INTEGRATOR-1 (INT-07). THE COUNT ENTRY STAYS USABLE WITH THE NUMBER
+    PAD UP. The sheet's panel is bottom-anchored, so on a phone the number pad
+    covered "Review my contribution" (iPhone 14: Review at ~646-773 pt, the pad
+    and its Done bar from ~550 pt). The panel now pads its bottom by the
+    keyboard, so its content rises above it and scrolls, and a drag in the
+    sheet puts the keyboard away. The page mode gets the form treatment
+    (src/ui/keyboardAvoidance.tsx). All of it is inert on web.
+  */
+  const keyboardHeight = useKeyboardHeight();
+
   // The community/goal labels, shown together only when verified.
   /**
    * `tone: 'dark'` paints the WHOLE page navy rather than putting a navy card
@@ -1634,7 +1652,7 @@ export default function ContributeToGoal() {
             styles.sheetPanel,
             tone === 'dark' ? styles.sheetPanelDark : null,
             together,
-            { paddingBottom: safeArea.bottom + 8 },
+            { paddingBottom: sheetBottomPadding(safeArea.bottom, keyboardHeight) },
           ]}
           testID="wsf-contribute-sheet-panel"
           {...({ role: 'dialog', 'aria-modal': true, 'aria-label': sheetTitle } as Record<string, unknown>)}
@@ -1680,6 +1698,7 @@ export default function ContributeToGoal() {
               together,
             ]}
             keyboardShouldPersistTaps="handled"
+            {...SHEET_DISMISS_PROPS}
             testID={testID}
           >
             <View style={styles.inner}>{children}</View>
@@ -1693,7 +1712,7 @@ export default function ContributeToGoal() {
       when the scroll view ran underneath it -- the receipt stays navy to the
       bar's edge -- and only the overlap is gone.
     */
-    <View style={[styles.screen, tone === 'dark' ? styles.screenDark : null, together]}>
+    <KeyboardInsetView style={[styles.screen, tone === 'dark' ? styles.screenDark : null, together]}>
       <ScrollView
         ref={scrollRef}
         style={[
@@ -1704,11 +1723,12 @@ export default function ContributeToGoal() {
         ]}
         contentContainerStyle={[styles.container, tone === 'dark' ? styles.containerDark : null, together]}
         keyboardShouldPersistTaps="handled"
+        {...KEYBOARD_SCROLL_PROPS}
         testID={testID}
       >
         <View style={styles.inner}>{children}</View>
       </ScrollView>
-    </View>
+    </KeyboardInsetView>
   ));
   };
 

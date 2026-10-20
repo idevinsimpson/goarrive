@@ -11,7 +11,14 @@ vi.mock('expo-router', () => ({
 }));
 
 import { FormShell, QuietShell } from '../src/AuthFormPrimitives';
-import { AndroidKeyboardInsetView, imeOverlap, keyboardScrollProps } from '../src/ui/keyboardAvoidance';
+import {
+  AndroidKeyboardInsetView,
+  imeOverlap,
+  keyboardDismissProps,
+  keyboardScrollProps,
+  sheetBottomPadding,
+  useKeyboardHeight,
+} from '../src/ui/keyboardAvoidance';
 
 /**
  * NATIVE-INTEGRATOR-1 (INT-06): the entry forms keep the focused field above
@@ -159,5 +166,58 @@ describe('where it is applied', () => {
     for (const f of ['app/signin.tsx', 'app/signup.tsx', 'app/reset-password.tsx', 'app/profile-setup.tsx', 'app/start-community.tsx']) {
       expect(read(f), f).toMatch(/<FormShell\b/);
     }
+  });
+});
+
+describe('INT-07: the MOVE count sheet rises above the number pad', () => {
+  it('the panel pads by the keyboard: iOS counts the home-indicator inset once, Android adds the navigation bar', () => {
+    // Keyboard down, and always on web: the panel's usual padding.
+    expect(sheetBottomPadding(34, 0, 'ios')).toBe(42);
+    expect(sheetBottomPadding(34, 336, 'web')).toBe(42);
+    // iPhone 14 number pad with its Done bar (~336 pt incl. the 34 pt inset).
+    expect(sheetBottomPadding(34, 336, 'ios')).toBe(344);
+    // Android IME heights exclude the navigation bar (ReactRootView: ime - systemBars).
+    expect(sheetBottomPadding(24, 300, 'android')).toBe(332);
+  });
+
+  it('a drag in the sheet puts the keyboard away on a phone, and changes nothing on web', () => {
+    expect(keyboardDismissProps('ios')).toEqual({ keyboardDismissMode: 'interactive' });
+    expect(keyboardDismissProps('android')).toEqual({ keyboardDismissMode: 'on-drag' });
+    expect(keyboardDismissProps('web')).toEqual({});
+  });
+
+  function Probe({ platform }: { platform: string }) {
+    const h = useKeyboardHeight(platform);
+    return <Text testID="kb">{String(h)}</Text>;
+  }
+
+  it('the height follows iOS will-show / will-hide and Android did-show / did-hide; web never listens', () => {
+    const handlers: Record<string, (e: unknown) => void> = {};
+    const spy = vi.spyOn(Keyboard, 'addListener').mockImplementation(((name: string, h: (e: unknown) => void) => {
+      handlers[name] = h;
+      return { remove: () => delete handlers[name] };
+    }) as never);
+    act(() => root.render(<Probe platform="web" />));
+    expect(spy).not.toHaveBeenCalled();
+    act(() => root.render(<Probe platform="ios" />));
+    expect(Object.keys(handlers).sort()).toEqual(['keyboardWillHide', 'keyboardWillShow']);
+    act(() => handlers.keyboardWillShow!({ endCoordinates: { height: 336, screenY: 508, screenX: 0, width: 390 } }));
+    expect(byId('kb')!.textContent).toBe('336');
+    act(() => handlers.keyboardWillHide!({ endCoordinates: { height: 0, screenY: 844, screenX: 0, width: 390 } }));
+    expect(byId('kb')!.textContent).toBe('0');
+    act(() => root.render(<Probe platform="android" />));
+    expect(Object.keys(handlers).sort()).toEqual(['keyboardDidHide', 'keyboardDidShow']);
+    act(() => handlers.keyboardDidShow!({ endCoordinates: { height: 300, screenY: 520, screenX: 0, width: 390 } }));
+    expect(byId('kb')!.textContent).toBe('300');
+  });
+
+  it('the contribute sheet and page use it; the count input keeps its number pad and Done (case 2 guard)', () => {
+    const src = read('app/contribute/[goalId].tsx');
+    expect(src).toContain('const keyboardHeight = useKeyboardHeight();');
+    expect(src).toContain('{ paddingBottom: sheetBottomPadding(safeArea.bottom, keyboardHeight) }');
+    expect(src).toContain('{...SHEET_DISMISS_PROPS}');
+    expect(src).toMatch(/<KeyboardInsetView style=\{\[styles\.screen,/);
+    expect(src).toMatch(/keyboardShouldPersistTaps="handled"\s*\{\.\.\.KEYBOARD_SCROLL_PROPS\}/);
+    expect(src).toMatch(/keyboardType="number-pad"\s*inputMode="numeric"\s*enterKeyHint="done"/);
   });
 });

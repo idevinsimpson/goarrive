@@ -86,6 +86,54 @@ export function AndroidKeyboardInsetView({ style, onLayout, children, ...rest }:
   );
 }
 
+/**
+ * NATIVE-INTEGRATOR-1 (INT-07). THE SOFTWARE KEYBOARD'S HEIGHT, for a
+ * bottom-anchored sheet that has to rise above it (the MOVE count entry).
+ * iOS reports it as the keyboard starts to move, Android once the IME is up;
+ * 0 while it is down, and always 0 on web (react-native-web has no keyboard
+ * events), so nothing on web changes.
+ */
+export function useKeyboardHeight(platform: string = Platform.OS): number {
+  const [height, setHeight] = useState(0);
+  useEffect(() => {
+    if (platform === 'web') return undefined;
+    const ios = platform === 'ios';
+    const show = Keyboard.addListener(ios ? 'keyboardWillShow' : 'keyboardDidShow', (e: KeyboardEvent) =>
+      setHeight(Math.max(0, e.endCoordinates.height)),
+    );
+    const hide = Keyboard.addListener(ios ? 'keyboardWillHide' : 'keyboardDidHide', () => setHeight(0));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, [platform]);
+  return height;
+}
+
+/**
+ * The bottom padding that keeps a bottom-anchored sheet's content above the
+ * keyboard. iOS's keyboard height already includes the home-indicator inset;
+ * Android's IME height excludes the navigation bar, which `safeBottom` covers.
+ * With the keyboard down (and on web) it is the panel's usual `safeBottom + gap`.
+ */
+export function sheetBottomPadding(safeBottom: number, keyboard: number, platform: string = Platform.OS, gap = 8): number {
+  if (keyboard <= 0 || platform === 'web') return safeBottom + gap;
+  if (platform === 'ios') return Math.max(safeBottom, keyboard) + gap;
+  return safeBottom + keyboard + gap;
+}
+
+/**
+ * A drag in the sheet puts the keyboard away so Review comes into view:
+ * interactively on iOS, on drag on Android. Nothing on web.
+ */
+export function keyboardDismissProps(platform: string = Platform.OS): { keyboardDismissMode?: 'interactive' | 'on-drag' } {
+  if (platform === 'ios') return { keyboardDismissMode: 'interactive' };
+  if (platform === 'android') return { keyboardDismissMode: 'on-drag' };
+  return {};
+}
+
+export const SHEET_DISMISS_PROPS = keyboardDismissProps();
+
 /** The frame around a form's ScrollView: keyboard-aware on Android, a plain View elsewhere. */
 export const KeyboardInsetView: ComponentType<ViewProps> =
   Platform.OS === 'android' ? AndroidKeyboardInsetView : View;
