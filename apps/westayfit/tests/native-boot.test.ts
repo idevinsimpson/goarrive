@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { selectEmulatorHost, selectProjectId } from '../src/firebase';
 import { currentWebHostname } from '../src/platformHost';
@@ -84,5 +84,104 @@ describe('NATIVE-BOOT-1: root-layout banner does not read location on native', (
     const path = await import('node:path');
     const src = fs.readFileSync(path.join(process.cwd(), 'src/InAppBrowserBanner.tsx'), 'utf8');
     expect(src).toMatch(/Platform\.OS !== 'web' \|\| typeof window === 'undefined' \|\| !window\.location/);
+  });
+});
+
+describe('NATIVE-BOOT-1: module-load wiring of src/firebase.ts on native', () => {
+  const ENV_KEYS = ['EXPO_PUBLIC_WSF_ENV', 'EXPO_PUBLIC_WSF_USE_EMULATORS', 'EXPO_PUBLIC_WSF_EMULATOR_HOST'];
+  const saved: Record<string, string | undefined> = {};
+
+  async function loadAs(os: string, dev: boolean, env: Record<string, string | undefined>) {
+    vi.resetModules();
+    vi.doMock('react-native', () => ({ Platform: { OS: os } }));
+    vi.stubGlobal('__DEV__', dev);
+    for (const k of ENV_KEYS) {
+      if (env[k] === undefined) delete process.env[k];
+      else process.env[k] = env[k];
+    }
+    return import('../src/firebase');
+  }
+
+  beforeAll(() => {
+    for (const k of ENV_KEYS) saved[k] = process.env[k];
+  });
+  afterEach(() => {
+    vi.doUnmock('react-native');
+    vi.unstubAllGlobals();
+    for (const k of ENV_KEYS) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+    vi.resetModules();
+  });
+
+  it('refuses an iOS release build with no backend named', async () => {
+    await expect(loadAs('ios', false, {})).rejects.toThrow(/must name its backend/);
+  });
+
+  it('refuses an Android release build that only carries the emulator flag', async () => {
+    await expect(loadAs('android', false, { EXPO_PUBLIC_WSF_USE_EMULATORS: '1' })).rejects.toThrow(/must name its backend/);
+  });
+
+  it('never selects the emulator in a native release build, even with the flag and a loopback page', async () => {
+    const m = await loadAs('ios', false, { EXPO_PUBLIC_WSF_ENV: 'production', EXPO_PUBLIC_WSF_USE_EMULATORS: '1' });
+    expect(m.wsfUsingEmulators).toBe(false);
+    expect(m.wsfFirebaseProjectId).toBe('goarrive');
+  });
+
+  it('uses the emulator only in a native development build with the flag', async () => {
+    const m = await loadAs('android', true, { EXPO_PUBLIC_WSF_USE_EMULATORS: '1', EXPO_PUBLIC_WSF_EMULATOR_HOST: '10.0.2.2' });
+    expect(m.wsfUsingEmulators).toBe(true);
+    expect(m.wsfFirebaseProjectId).toBe('demo-wsf-local');
+    expect(m.wsfEmulatorTargets.host).toBe('10.0.2.2');
+  });
+
+  it('refuses a public emulator host in a native development build', async () => {
+    await expect(
+      loadAs('ios', true, { EXPO_PUBLIC_WSF_USE_EMULATORS: '1', EXPO_PUBLIC_WSF_EMULATOR_HOST: '8.8.8.8' })
+    ).rejects.toThrow(/private-network/);
+  });
+});
+
+describe('NATIVE-BOOT-1: native storage boundary over AsyncStorage', () => {
+  afterEach(() => {
+    vi.doUnmock('@react-native-async-storage/async-storage');
+    vi.resetModules();
+  });
+
+  it('round-trips and reports failures as false/null/[] instead of throwing', async () => {
+    const store = new Map<string, string>();
+    let fail = false;
+    vi.resetModules();
+    vi.doMock('@react-native-async-storage/async-storage', () => ({
+      default: {
+        getItem: async (k: string) => {
+          if (fail) throw new Error('io');
+          return store.get(k) ?? null;
+        },
+        setItem: async (k: string, v: string) => {
+          if (fail) throw new Error('io');
+          store.set(k, v);
+        },
+        removeItem: async (k: string) => {
+          if (fail) throw new Error('io');
+          store.delete(k);
+        },
+        getAllKeys: async () => {
+          if (fail) throw new Error('io');
+          return [...store.keys()];
+        },
+      },
+    }));
+    const { deviceKv } = await import('../src/storage/kv.native');
+    expect(await deviceKv.setItem('wsf.n.a', '1')).toBe(true);
+    expect(await deviceKv.getItem('wsf.n.a')).toBe('1');
+    expect(await deviceKv.keysWithPrefix('wsf.n.')).toEqual(['wsf.n.a']);
+    expect(await deviceKv.removeItem('wsf.n.a')).toBe(true);
+    fail = true;
+    expect(await deviceKv.setItem('wsf.n.b', '2')).toBe(false);
+    expect(await deviceKv.getItem('wsf.n.b')).toBeNull();
+    expect(await deviceKv.removeItem('wsf.n.b')).toBe(false);
+    expect(await deviceKv.keysWithPrefix('wsf.n.')).toEqual([]);
   });
 });

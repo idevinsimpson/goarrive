@@ -7,7 +7,9 @@
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.westayfit.app"
@@ -16,7 +18,8 @@
       "package": "com.westayfit.app",
       "adaptiveIcon": {
         "backgroundColor": "#0B1F3A"
-      }
+      },
+      "allowBackup": false
     },
     "web": {
       "bundler": "metro",
