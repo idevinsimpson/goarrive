@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import {
   dismissInAppBanner,
@@ -14,7 +14,10 @@ export function InAppBrowserBanner() {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    // Web only. The native app is never an in-app browser, and React Native
+    // defines `window` without `window.location`, so reading location.search
+    // here threw from the root layout on every phone launch.
+    if (Platform.OS !== 'web' || typeof window === 'undefined' || !window.location) return;
     // Support a URL override for spec runs — Playwright cannot reliably spoof
     // the UA on every browser matrix, so `?wsf_in_app=1` forces the banner
     // on. `?wsf_in_app=0` forces it off. Neither value writes anywhere.

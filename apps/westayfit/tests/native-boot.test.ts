@@ -77,3 +77,12 @@ describe('NATIVE-BOOT-1: device storage boundary (web implementation)', () => {
     spy.mockRestore();
   });
 });
+
+describe('NATIVE-BOOT-1: root-layout banner does not read location on native', () => {
+  it('guards the effect on Platform.OS and a real location', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const src = fs.readFileSync(path.join(process.cwd(), 'src/InAppBrowserBanner.tsx'), 'utf8');
+    expect(src).toMatch(/Platform\.OS !== 'web' \|\| typeof window === 'undefined' \|\| !window\.location/);
+  });
+});
