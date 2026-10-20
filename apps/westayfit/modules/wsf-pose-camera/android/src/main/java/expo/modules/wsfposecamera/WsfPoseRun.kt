@@ -64,7 +64,7 @@ internal class WsfPoseRun(
 
   // Analysis thread only.
   private var landmarker: PoseLandmarker? = null
-  private var lastTimestampMs = Long.MIN_VALUE
+  private val clock = WsfFrameClock()
 
   /** Main thread. */
   fun start() {
@@ -164,10 +164,8 @@ internal class WsfPoseRun(
       val current = landmarker
       if (stopped || current == null) return
       val timestampNs = image.imageInfo.timestamp
-      val timestampMs = timestampNs / 1_000_000L
       // Drop, never fabricate: a repeated or older timestamp never reaches MediaPipe or the counter.
-      if (timestampMs <= lastTimestampMs) return
-      lastTimestampMs = timestampMs
+      val timestampMs = clock.accept(timestampNs) ?: return
 
       val upright = uprightBitmap(image)
       val result = try {
@@ -178,18 +176,8 @@ internal class WsfPoseRun(
         send("onCameraError", mapOf("stage" to "inference", "message" to (error.message ?: "Pose inference failed.")))
         return
       }
-      val people = result.landmarks().take(WsfPoseModel.MAX_POSES).map { WsfPoseModel.flatten(it) }
-      send(
-        "onPose",
-        mapOf(
-          "timestamp" to timestampNs.toDouble(),
-          "timestampUnit" to "ns",
-          "width" to upright.width,
-          "height" to upright.height,
-          "mirrored" to false,
-          "people" to people
-        )
-      )
+      val people = WsfPoseContract.people(result.landmarks().map { WsfPoseModel.landmarks(it) })
+      send("onPose", WsfPoseContract.posePayload(timestampNs, upright.width, upright.height, people))
     } catch (error: Exception) {
       send("onCameraError", mapOf("stage" to "inference", "message" to (error.message ?: "Frame analysis failed.")))
     } finally {
@@ -200,7 +188,7 @@ internal class WsfPoseRun(
   /** The frame turned upright (rotationDegrees), never mirrored. In memory only. */
   private fun uprightBitmap(image: ImageProxy): Bitmap {
     val bitmap = image.toBitmap()
-    val rotation = image.imageInfo.rotationDegrees
+    val rotation = WsfPoseContract.normalizedRotation(image.imageInfo.rotationDegrees)
     if (rotation == 0) return bitmap
     val matrix = Matrix().apply { postRotate(rotation.toFloat()) }
     return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)

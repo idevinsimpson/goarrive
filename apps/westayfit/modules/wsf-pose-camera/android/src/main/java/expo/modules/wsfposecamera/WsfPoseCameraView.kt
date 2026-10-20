@@ -55,9 +55,9 @@ class WsfPoseCameraView(context: Context, appContext: AppContext) : ExpoView(con
 
   /** Called once all props of an update are set (OnViewDidUpdateProps). Main thread. */
   fun applyProps() {
-    val wanted = if (active && runId > 0) runId else 0
-    if (wanted == (run?.runId ?: 0)) return
-    stopRun()
+    val change = WsfPoseContract.runChange(run?.runId ?: 0, active, runId)
+    if (change.stop) stopRun()
+    val wanted = change.start
     if (wanted == 0) return
     val owner = appContext.currentActivity as? LifecycleOwner
     if (owner == null) {

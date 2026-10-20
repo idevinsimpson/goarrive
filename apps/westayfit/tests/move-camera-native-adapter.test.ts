@@ -869,7 +869,7 @@ describe('the bundled model is the web model, byte for byte', () => {
     expect(createHash('sha256').update(bytes).digest('hex')).toBe(PINNED_SHA256);
     expect(MODEL_SHA256).toBe(PINNED_SHA256);
     expect(read(`${MOD}/ios/WsfPoseModel.swift`)).toContain(`static let sha256 = "${PINNED_SHA256}"`);
-    expect(read(`${MOD}/android/src/main/java/expo/modules/wsfposecamera/WsfPoseModel.kt`)).toContain(`const val SHA256 = "${PINNED_SHA256}"`);
+    expect(read(`${MOD}/android/src/main/java/expo/modules/wsfposecamera/WsfPoseContract.kt`)).toContain(`const val MODEL_SHA256 = "${PINNED_SHA256}"`);
   });
 
   it('it is the object web downloads (lite float16 v1): same file name, size and GCS md5; a MediaPipe task bundle', () => {
@@ -899,9 +899,10 @@ describe('native sources: header, settings, wiring and versions (static; the cod
   const swift = (f: string) => read(`${MOD}/ios/${f}`);
   const kt = (f: string) => read(`${MOD}/android/src/main/java/expo/modules/wsfposecamera/${f}`);
   const nativeFiles = filesUnder(MOD).filter((f) => /\.(swift|kt|podspec|gradle|pro)$/.test(f));
+  const contract = () => kt('WsfPoseContract.kt');
 
   it('every native file starts with the UNCOMPILED header', () => {
-    expect(nativeFiles.length).toBe(11);
+    expect(nativeFiles.length).toBe(13);
     for (const f of nativeFiles) {
       const first = read(f).split('\n')[0];
       expect(first, f).toMatch(/^(\/\/|#) /);
@@ -944,10 +945,13 @@ describe('native sources: header, settings, wiring and versions (static; the cod
       'options.shouldOutputSegmentationMasks = false', 'return (try make(.GPU), engine("GPU"))', 'return (try make(.CPU), engine("CPU"))',
       'fileName = "pose_landmarker_lite"', 'guard digest == sha256']) expect(s, need).toContain(need);
     const k = kt('WsfPoseModel.kt');
-    for (const need of ['const val MAX_POSES = 3', 'const val MIN_CONFIDENCE = 0.5f', '.setRunningMode(RunningMode.VIDEO)', '.setNumPoses(MAX_POSES)',
-      '.setMinPoseDetectionConfidence(MIN_CONFIDENCE)', '.setMinPosePresenceConfidence(MIN_CONFIDENCE)', '.setMinTrackingConfidence(MIN_CONFIDENCE)',
-      '.setOutputSegmentationMasks(false)', 'Loaded(make(Delegate.GPU), engine("GPU"))', 'Loaded(make(Delegate.CPU), engine("CPU"))',
-      `const val FILE = "${MODEL_FILE}"`, 'check(digest == SHA256)', '.setModelAssetBuffer(model)']) expect(k, need).toContain(need);
+    for (const need of ['.setRunningMode(RunningMode.VIDEO)', '.setNumPoses(WsfPoseContract.MAX_POSES)',
+      '.setMinPoseDetectionConfidence(WsfPoseContract.MIN_CONFIDENCE)', '.setMinPosePresenceConfidence(WsfPoseContract.MIN_CONFIDENCE)',
+      '.setMinTrackingConfidence(WsfPoseContract.MIN_CONFIDENCE)', '.setOutputSegmentationMasks(false)',
+      'Loaded(make(Delegate.GPU), WsfPoseContract.engine("GPU"))', 'Loaded(make(Delegate.CPU), WsfPoseContract.engine("CPU"))',
+      'WsfPoseContract.verifiedModelBuffer(context.assets.open(WsfPoseContract.MODEL_FILE)', '.setModelAssetBuffer(model)']) expect(k, need).toContain(need);
+    for (const need of ['const val MAX_POSES = 3', 'const val MIN_CONFIDENCE = 0.5f', `const val MODEL_FILE = "${MODEL_FILE}"`,
+      'check(sha256Hex(bytes) == MODEL_SHA256)']) expect(contract(), need).toContain(need);
     expect(NATIVE_MAX_POSES).toBe(3);
   });
 
@@ -962,11 +966,16 @@ describe('native sources: header, settings, wiring and versions (static; the cod
 
     const krun = kt('WsfPoseRun.kt');
     for (const need of ['CameraSelector.DEFAULT_FRONT_CAMERA', 'ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST', 'ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888',
-      'AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY', 'postRotate(rotation.toFloat())', '"timestampUnit" to "ns"', '"timestamp" to timestampNs.toDouble()',
-      '"mirrored" to false', 'val timestampMs = timestampNs / 1_000_000L', 'image.close()']) expect(krun, need).toContain(need);
+      'AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY', 'postRotate(rotation.toFloat())',
+      'send("onPose", WsfPoseContract.posePayload(timestampNs, upright.width, upright.height, people))', 'image.close()']) expect(krun, need).toContain(need);
+    for (const need of ['const val TIMESTAMP_UNIT = "ns"', '"timestampUnit" to TIMESTAMP_UNIT', '"timestamp" to timestampNs.toDouble()',
+      'const val MIRRORED = false', '"mirrored" to MIRRORED', 'fun nsToMs(timestampNs: Long): Long = timestampNs / 1_000_000L',
+      'if (ms <= lastMs) return null', 'persons.take(MAX_POSES)']) expect(contract(), need).toContain(need);
     expect(krun).not.toMatch(/postScale\(\s*-1/); // never mirrored
-    expect(krun.indexOf('if (timestampMs <= lastTimestampMs) return')).toBeGreaterThan(0);
-    expect(krun.indexOf('if (timestampMs <= lastTimestampMs) return')).toBeLessThan(krun.indexOf('detectForVideo('));
+    expect(krun.indexOf('val timestampMs = clock.accept(timestampNs) ?: return')).toBeGreaterThan(0);
+    expect(krun.indexOf('val timestampMs = clock.accept(timestampNs) ?: return')).toBeLessThan(krun.indexOf('detectForVideo('));
+    // The pure contract stays Android-free (it is compiled and run on a plain JVM).
+    expect(contract().match(/^import .+$/gm)).toEqual(['import java.nio.ByteBuffer', 'import java.nio.ByteOrder', 'import java.security.MessageDigest']);
     expect(kt('WsfPoseCameraView.kt')).toContain('PreviewView.ScaleType.FILL_CENTER');
   });
 
@@ -977,7 +986,7 @@ describe('native sources: header, settings, wiring and versions (static; the cod
     const gradleVersion = read(`${MOD}/android/build.gradle`).match(/def mediapipeTasksVisionVersion = '([^']+)'/)![1];
     expect(gradleVersion).toBe('0.10.29');
     expect(gradleVersion).toMatch(/^0\.10\.\d+$/);
-    expect(kt('WsfPoseModel.kt')).toContain(`const val MEDIAPIPE_VERSION = "${gradleVersion}"`);
+    expect(kt('WsfPoseContract.kt')).toContain(`const val MEDIAPIPE_VERSION = "${gradleVersion}"`);
     expect(read(`${MOD}/android/build.gradle`)).toContain('UNVERIFIED');
   });
 
@@ -1001,9 +1010,10 @@ describe('privacy: frames stay in memory; nothing is recorded, stored or sent; n
   const NATIVE_FORBIDDEN =
     /AVCapturePhotoOutput|AVCaptureMovieFileOutput|AVCaptureAudio|AVAudio|AVAssetWriter|ImageCapture|VideoCapture|Recorder|AudioRecord|RECORD_AUDIO|URLSession|URLRequest|NSURLConnection|HttpURLConnection|OkHttp|Socket|FileOutputStream|FileWriter|openFileOutput|MediaStore|write\(to:|\.write\(|createFile|jpegData|pngData|JPEGRepresentation|\.compress\(|cacheDir|filesDir|ExternalStorage|UserDefaults|SharedPreferences|NSKeyedArchiver|fetch\s*\(|https?:\/\/|\.audio\b|microphone/i;
 
-  it('static scan of modules/wsf-pose-camera/** (Swift, Kotlin, TypeScript; comments stripped)', () => {
-    const code = filesUnder(MOD).filter((f) => /\.(swift|kt|ts|tsx)$/.test(f));
-    expect(code.length).toBe(11);
+  it('static scan of modules/wsf-pose-camera/** (Swift, Kotlin, TypeScript; comments stripped; JVM test sources are not shipped)', () => {
+    const code = filesUnder(MOD).filter((f) => /\.(swift|kt|ts|tsx)$/.test(f) && !f.includes('/android/src/test/'));
+    expect(code.length).toBe(12);
+    expect(filesUnder(MOD).filter((f) => f.includes('/android/src/test/'))).toEqual([`${MOD}/android/src/test/java/expo/modules/wsfposecamera/WsfPoseContractTest.kt`]);
     for (const f of code) expect(strip(read(f)), f).not.toMatch(NATIVE_FORBIDDEN);
   });
 
@@ -1019,7 +1029,7 @@ describe('privacy: frames stay in memory; nothing is recorded, stored or sent; n
     const krun = strip(read(`${MOD}/android/src/main/java/expo/modules/wsfposecamera/WsfPoseRun.kt`));
     expect(krun).toMatch(/bindToLifecycle\(owner, selector, preview, analysis\)/);
     // The model is read from the app's own assets / bundle, never fetched.
-    expect(strip(read(`${MOD}/android/src/main/java/expo/modules/wsfposecamera/WsfPoseModel.kt`))).toMatch(/context\.assets\.open\(FILE\)/);
+    expect(strip(read(`${MOD}/android/src/main/java/expo/modules/wsfposecamera/WsfPoseModel.kt`))).toMatch(/context\.assets\.open\(WsfPoseContract\.MODEL_FILE\)/);
   });
 
   it('the app config still blocks the microphone and explains the camera (set by NATIVE-BUILD-1; not changed here)', () => {
