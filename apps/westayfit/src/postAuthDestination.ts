@@ -64,7 +64,18 @@ export type PostAuthDestination<V> = {
   /** Stash it. `owner` is the account signed in now, or null. Resolves whether the device kept it. */
   write(value: V, owner: string | null): Promise<boolean>;
   clear(): Promise<boolean>;
+  /**
+   * Clear it FOR GOOD: a removal the device refuses is retried once, and if
+   * it still refuses, the record is overwritten with `DISCARDED_RECORD`,
+   * which no destination decodes — so a record that must be consumed once
+   * cannot apply again after a relaunch. Resolves whether any of the three
+   * steps was kept.
+   */
+  discard(): Promise<boolean>;
 };
+
+/** What a record that could not be removed is overwritten with. Every codec decodes it as nothing. */
+export const DISCARDED_RECORD = '{"discarded":true}';
 
 const store = createKeyMirror(sessionKv, readSessionSync);
 const registry: PostAuthDestination<unknown>[] = [];
@@ -99,6 +110,11 @@ export function definePostAuthDestination<V>(codec: DestinationCodec<V>): PostAu
     },
     clear() {
       return store.remove(codec.key);
+    },
+    async discard() {
+      if (await store.remove(codec.key)) return true;
+      if (await store.remove(codec.key)) return true;
+      return store.write(codec.key, DISCARDED_RECORD);
     },
   };
   registry.push(destination as PostAuthDestination<unknown>);

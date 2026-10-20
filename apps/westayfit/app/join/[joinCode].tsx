@@ -32,9 +32,11 @@ import {
 } from '../../src/pendingJoinCode';
 import { readActivityLabel } from '../../src/eventActivity';
 import {
+  clearPendingEventActivity,
+  dropJoinJourney,
   setPendingEventActivity,
   setPendingEventGoal,
-  takeJoinEventContext,
+  takeJoinEventContextWithin,
 } from '../../src/joinEventHandoff';
 import { routeAfterJoin } from '../../src/stationSession';
 import { readEventParam } from '../../src/ui/eventLinks';
@@ -98,51 +100,6 @@ export default function JoinPage() {
   const [previewState, setPreviewState] = useState<PreviewState>({ kind: 'loading' });
   const [joinState, setJoinState] = useState<JoinState>({ kind: 'idle' });
 
-  // Stash the code as soon as this page knows who is looking at it. Signup /
-  // verify / profile-setup read it and route back here on success. Cleared
-  // once we successfully route into /community/<id>, and when the tab closes
-  // (web) or after two hours (a phone, which has no tab: src/pendingJoinCode.ts).
-  //
-  // WHOSE IT IS is decided here, once, when auth has settled: a signed-out
-  // visitor's code is the pre-auth handoff for whoever signs in next; a
-  // signed-in member's code is theirs alone and is never offered to another
-  // account after they sign out. Deliberately NOT re-run when the account
-  // changes later — the round trip signs somebody in on purpose, and that
-  // must not re-label the visitor's code mid-flight.
-  const stashUid = useRef<string | null>(null);
-  stashUid.current = user?.uid ?? null;
-  useEffect(() => {
-    if (!joinCode || !ready) return;
-    void setPendingJoinCode(joinCode, stashUid.current);
-  }, [joinCode, ready]);
-
-  // The event rides the same handoff as the join code, for the same reason:
-  // signup -> verify -> profile-setup replace this screen, and the round trip
-  // returns to `/join/<code>` without the query string it left with. Stashed
-  // once auth has settled and owned exactly as the code is
-  // (src/joinEventHandoff.ts): a signed-out scan is the handoff for whoever
-  // signs in next, a signed-in member's is theirs alone. On a phone it
-  // survives the app being killed mid-sign-up, for two hours.
-  //
-  // A return trip arrives here WITHOUT `?event=`; nothing is written then, so
-  // the context stashed on the way out is what the finished join reads.
-  //
-  // BOUND TO THIS CODE. The context is stored with the join code it arrived
-  // on, and the finished join applies it only if it joined with that same
-  // code — so an abandoned event scan cannot redirect a later, different join.
-  useEffect(() => {
-    if (!ready || !eventGoalId || !joinCode) return;
-    void setPendingEventGoal(eventGoalId, joinCode, stashUid.current);
-  }, [eventGoalId, joinCode, ready]);
-
-  // THE ACTIVITY RIDES WITH IT, by the same mechanism and for the same reason.
-  // It is stored only alongside a usable event: an activity with no event to
-  // finish at names nothing and would be a value kept for its own sake.
-  useEffect(() => {
-    if (!ready || !eventGoalId || !eventActivity || !joinCode) return;
-    void setPendingEventActivity(eventActivity, joinCode, stashUid.current);
-  }, [eventGoalId, eventActivity, joinCode, ready]);
-
   /**
    * WHOSE SCREEN IS THIS — asked on THIS page only when the visitor arrived
    * from an event QR (`?event=<goalId>`) and is signed out, which is the one
@@ -162,6 +119,70 @@ export default function JoinPage() {
     !eventGoalId || deviceMode === undefined
       ? null
       : decideDeviceEntry({ mode: deviceMode, goalId: eventGoalId });
+  // A SHARED SCREEN TAKES NO JOURNEY: the visitor is handed to the kiosk and
+  // no account is created here, so nothing is stashed for a round trip that
+  // will not happen, and what was stashed before the answer was known is
+  // dropped (below). "Use my own phone instead" turns this back off, and the
+  // stash effects run again.
+  const sharedScreen = !user && deviceEntry?.kind === 'shared';
+
+  // Stash the code as soon as this page knows who is looking at it. Signup /
+  // verify / profile-setup read it and route back here on success. Cleared
+  // once we successfully route into /community/<id>, and when the tab closes
+  // (web) or after two hours (a phone, which has no tab: src/pendingJoinCode.ts).
+  //
+  // WHOSE IT IS is decided here, once, when auth has settled: a signed-out
+  // visitor's code is the pre-auth handoff for whoever signs in next; a
+  // signed-in member's code is theirs alone and is never offered to another
+  // account after they sign out. Deliberately NOT re-run when the account
+  // changes later — the round trip signs somebody in on purpose, and that
+  // must not re-label the visitor's code mid-flight.
+  const stashUid = useRef<string | null>(null);
+  stashUid.current = user?.uid ?? null;
+  useEffect(() => {
+    if (!joinCode || !ready || sharedScreen) return;
+    void setPendingJoinCode(joinCode, stashUid.current);
+  }, [joinCode, ready, sharedScreen]);
+
+  // The event rides the same handoff as the join code, for the same reason:
+  // signup -> verify -> profile-setup replace this screen, and the round trip
+  // returns to `/join/<code>` without the query string it left with. Stashed
+  // once auth has settled and owned exactly as the code is
+  // (src/joinEventHandoff.ts): a signed-out scan is the handoff for whoever
+  // signs in next, a signed-in member's is theirs alone. On a phone it
+  // survives the app being killed mid-sign-up, for two hours.
+  //
+  // A return trip arrives here WITHOUT `?event=`; nothing is written then, so
+  // the context stashed on the way out is what the finished join reads.
+  //
+  // BOUND TO THIS CODE. The context is stored with the join code it arrived
+  // on, and the finished join applies it only if it joined with that same
+  // code — so an abandoned event scan cannot redirect a later join of a
+  // DIFFERENT code. (A later plain invite for the SAME code still finds it:
+  // a return trip looks exactly like that. src/joinEventHandoff.ts, ACCEPTED
+  // LIMITS.)
+  useEffect(() => {
+    if (!ready || !eventGoalId || !joinCode || sharedScreen) return;
+    void setPendingEventGoal(eventGoalId, joinCode, stashUid.current);
+  }, [eventGoalId, joinCode, ready, sharedScreen]);
+
+  // THE ACTIVITY RIDES WITH IT, by the same mechanism and for the same reason,
+  // and is bound to THIS event's goal as well as the code. It is stored only
+  // alongside a usable event: an activity with no event to finish at names
+  // nothing. An event that arrives WITHOUT a usable activity clears any older
+  // one, so a bare QR for a second event never wears the first event's word.
+  useEffect(() => {
+    if (!ready || !eventGoalId || !joinCode || sharedScreen) return;
+    if (eventActivity) void setPendingEventActivity(eventActivity, eventGoalId, joinCode, stashUid.current);
+    else void clearPendingEventActivity();
+  }, [eventGoalId, eventActivity, joinCode, ready, sharedScreen]);
+
+  // Dropped once the screen is known to be shared (src/joinEventHandoff.ts
+  // `dropJoinJourney`): left behind, the code and the event would route the
+  // next walk-up who signs in on the kiosk.
+  useEffect(() => {
+    if (sharedScreen) void dropJoinJourney();
+  }, [sharedScreen]);
 
   const onChoosePersonal = useCallback(() => {
     void saveDeviceMode('personal');
@@ -175,6 +196,8 @@ export default function JoinPage() {
     const decided = decideDeviceEntry({ mode: 'shared', goalId: eventGoalId });
     if (decided.kind !== 'shared') return;
     void saveDeviceMode('shared');
+    // Nothing this page stashed goes with the device to the kiosk.
+    void dropJoinJourney();
     router.replace(decided.route as never);
   }, [eventGoalId]);
 
@@ -288,10 +311,12 @@ export default function JoinPage() {
     // THE CARRYING IS THE OPTIONAL PART. A device with storage blocked, or a
     // context that belongs to another account, costs the event context and
     // nothing else: the community the member just joined is still where they
-    // land. Bounded on purpose: it changes no outcome the call decided.
+    // land. Bounded on purpose, in time too: past `JOIN_CONTEXT_WAIT_MS` a
+    // stalled storage call lands the member on the community rather than
+    // holding them on "Joining…" (src/joinEventHandoff.ts).
     let destination: string = `/community/${result.data.groupId}`;
     try {
-      const context = await takeJoinEventContext(user.uid, joinCode);
+      const context = await takeJoinEventContextWithin(user.uid, joinCode);
       destination = routeAfterJoin(result.data.groupId, context.goalId, context.activity);
     } catch {
       // Keep the community destination above. Nothing is said to the member:

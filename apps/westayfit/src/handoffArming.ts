@@ -21,6 +21,7 @@
  * exactly as when the screens called `set*` directly.
  */
 import { clearEventReturn } from './eventReturn';
+import { clearPendingEventActivity, clearPendingEventGoal } from './joinEventHandoff';
 import { clearKioskReturnGoal, setKioskReturnGoal } from './kioskSession';
 import { clearMarkerReturn, setMarkerReturn } from './markerEntry';
 import { clearPendingJoinCode } from './pendingJoinCode';
@@ -50,10 +51,16 @@ export function armMarkerReturn(slug: string, uid: string | null, now: number = 
 
 /**
  * A shared screen has come to rest: nothing an earlier visitor armed may
- * route the next one. Resolves whether every clear was kept.
+ * route the next one — including the event context a join QR carried
+ * (src/joinEventHandoff.ts). Resolves whether every clear was kept.
  */
 export function resetSharedScreenHandoffs(): Promise<boolean> {
-  return Promise.all([clearPendingJoinCode(), clearEventReturn(), clearMarkerReturn(), clearKioskReturnGoal()]).then(
-    (results) => results.every(Boolean)
-  );
+  return Promise.all([
+    clearPendingJoinCode(),
+    clearEventReturn(),
+    clearMarkerReturn(),
+    clearKioskReturnGoal(),
+    clearPendingEventGoal(),
+    clearPendingEventActivity(),
+  ]).then((results) => results.every(Boolean));
 }

@@ -41,7 +41,7 @@ async function launch() {
 async function scan(m: Awaited<ReturnType<typeof launch>>, owner: string | null, code: string = CODE) {
   await m.pj.setPendingJoinCode(code, owner);
   await m.je.setPendingEventGoal(EVENT, code, owner);
-  await m.je.setPendingEventActivity(ACTIVITY, code, owner);
+  await m.je.setPendingEventActivity(ACTIVITY, EVENT, code, owner);
 }
 
 /** What the join page does after `wsfJoinCommunity` succeeded for `code`. */
@@ -116,7 +116,7 @@ describe('the context never transfers to a different account', () => {
     await (await import('../src/postAuthDestination')).postAuthDestinationsReady();
     expect(m.je.readPendingEventGoal(B, CODE)).toBeNull();
     expect(m.je.readPendingEventGoal(null, CODE)).toBeNull();
-    expect(m.je.readPendingEventActivity(B, CODE)).toBeNull();
+    expect(m.je.readPendingEventActivity(B, CODE, EVENT)).toBeNull();
     expect(await finishJoin(m, B)).toBe(`/community/${GROUP}`);
     expect(disk.map.has(EVENT_KEY)).toBe(false);
     expect(disk.map.has(ACTIVITY_KEY)).toBe(false);
@@ -134,7 +134,7 @@ describe('the context never transfers to a different account', () => {
   it('sign-out clears an owned context through the session watch; a signed-out handoff stays', async () => {
     const m = await launch();
     await m.je.setPendingEventGoal(EVENT, CODE, A);
-    await m.je.setPendingEventActivity(ACTIVITY, CODE, A);
+    await m.je.setPendingEventActivity(ACTIVITY, EVENT, CODE, A);
     expect(fakeAuth.listeners).toHaveLength(1);
     await fakeAuth.fire(A);
     expect(disk.map.has(EVENT_KEY)).toBe(true);
@@ -161,7 +161,7 @@ describe('consumed exactly once, and bounded', () => {
 
   it('an activity with no event names nothing and is dropped with it', async () => {
     const m = await launch();
-    await m.je.setPendingEventActivity(ACTIVITY, CODE, null);
+    await m.je.setPendingEventActivity(ACTIVITY, EVENT, CODE, null);
     expect(await m.je.takeJoinEventContext(A, CODE)).toEqual({ goalId: null, activity: null });
     expect(disk.map.has(ACTIVITY_KEY)).toBe(false);
   });
@@ -180,7 +180,8 @@ describe('consumed exactly once, and bounded', () => {
   it('refuses to carry anything that could become a path or be rendered', async () => {
     const m = await launch();
     expect(await m.je.setPendingEventGoal('../../admin', CODE, null)).toBe(false);
-    expect(await m.je.setPendingEventActivity('x'.repeat(65), CODE, null)).toBe(false);
+    expect(await m.je.setPendingEventActivity('x'.repeat(65), EVENT, CODE, null)).toBe(false);
+    expect(await m.je.setPendingEventActivity(ACTIVITY, '../x', CODE, null)).toBe(false);
     expect(await m.je.setPendingEventGoal(EVENT, 'short', null)).toBe(false);
     expect(disk.map.size).toBe(0);
   });
@@ -278,11 +279,14 @@ describe('the station path is untouched, and the join route consumes once', () =
   it('the join route stashes owned context once auth has settled, and takes it exactly once after a join', () => {
     const join = read('app/join/[joinCode].tsx');
     expect(join).toContain('void setPendingEventGoal(eventGoalId, joinCode, stashUid.current)');
-    expect(join).toContain('void setPendingEventActivity(eventActivity, joinCode, stashUid.current)');
-    expect(join.match(/takeJoinEventContext\(/g)).toHaveLength(1);
-    expect(join).toContain('takeJoinEventContext(user.uid, joinCode)');
-    expect(join).not.toMatch(/readPendingEvent(Goal|Activity)\(|clearPendingEvent(Goal|Activity)\(/);
+    expect(join).toContain(
+      'if (eventActivity) void setPendingEventActivity(eventActivity, eventGoalId, joinCode, stashUid.current);\n    else void clearPendingEventActivity();'
+    );
+    expect(join.match(/takeJoinEventContext(Within)?\(/g)).toHaveLength(1);
+    expect(join).toContain('takeJoinEventContextWithin(user.uid, joinCode)');
+    expect(join).not.toMatch(/readPendingEvent(Goal|Activity)\(|clearPendingEventGoal\(/);
+    expect(join.match(/clearPendingEventActivity\(/g)).toHaveLength(1);
     const onJoin = join.slice(join.indexOf('const onJoin = useCallback'));
-    expect(onJoin.indexOf("'wsfJoinCommunity'")).toBeLessThan(onJoin.indexOf('takeJoinEventContext('));
+    expect(onJoin.indexOf("'wsfJoinCommunity'")).toBeLessThan(onJoin.indexOf('takeJoinEventContextWithin('));
   });
 });

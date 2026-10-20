@@ -35,11 +35,13 @@ const STATION_CREDENTIAL_KEY = 'wsf.stationCredential';
   THE EVENT A NEWCOMER ARRIVED FROM, AND ITS ACTIVITY — `wsf.pendingEventGoalId`
   and `wsf.pendingEventActivity` — are the member side of a join QR, not the
   station's. They now live in src/joinEventHandoff.ts (NATIVE-STATE-3), kept
-  like the other post-auth destinations: sessionStorage on web exactly as
-  before, a bounded native store on a phone, and owned by the account that
-  stashed them. They never shared a key, a secret or a code path with the
-  station's own session; the accessors are re-exported below so every
-  existing caller is unchanged, and the keys stay declared in the inventory.
+  like the other post-auth destinations: the same sessionStorage keys on web,
+  now holding JSON bound to the join code (and the activity to its goal); a
+  bounded native store on a phone; owned by the account that stashed them.
+  They never shared a key, a secret or a code path with the station's own
+  session. The accessors are re-exported below, and their signatures now take
+  the join code (and the activity's the goal id); the keys stay declared in
+  the inventory.
 */
 export {
   clearPendingEventActivity,

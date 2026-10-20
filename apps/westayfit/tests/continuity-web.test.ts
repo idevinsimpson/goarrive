@@ -234,12 +234,12 @@ describe('web (NATIVE-STATE-3): the join QR event context and the device-mode an
   it('a signed-out stash is stored with the join code it arrived on', async () => {
     const { setPendingEventActivity, setPendingEventGoal } = await import('../src/stationSession');
     void setPendingEventGoal('goal_1', JOIN_A);
-    void setPendingEventActivity('squats', JOIN_A);
+    void setPendingEventActivity('squats', 'goal_1', JOIN_A);
     expect(window.sessionStorage.getItem('wsf.pendingEventGoalId')).toBe(
       JSON.stringify({ goalId: 'goal_1', joinCode: JOIN_A })
     );
     expect(window.sessionStorage.getItem('wsf.pendingEventActivity')).toBe(
-      JSON.stringify({ activity: 'squats', joinCode: JOIN_A })
+      JSON.stringify({ activity: 'squats', goalId: 'goal_1', joinCode: JOIN_A })
     );
     expect(window.localStorage.length).toBe(0);
   });
@@ -247,7 +247,7 @@ describe('web (NATIVE-STATE-3): the join QR event context and the device-mode an
   it("a member's stash carries its owner and is not applied to another account's join", async () => {
     const je = await import('../src/joinEventHandoff');
     void je.setPendingEventGoal('goal_1', JOIN_A, A);
-    void je.setPendingEventActivity('squats', JOIN_A, A);
+    void je.setPendingEventActivity('squats', 'goal_1', JOIN_A, A);
     expect(JSON.parse(window.sessionStorage.getItem('wsf.pendingEventGoalId') as string)).toEqual({
       goalId: 'goal_1',
       joinCode: JOIN_A,
@@ -260,7 +260,7 @@ describe('web (NATIVE-STATE-3): the join QR event context and the device-mode an
   it('the same account takes its own context for the same code, once', async () => {
     const je = await import('../src/joinEventHandoff');
     void je.setPendingEventGoal('goal_1', JOIN_A, A);
-    void je.setPendingEventActivity('squats', JOIN_A, A);
+    void je.setPendingEventActivity('squats', 'goal_1', JOIN_A, A);
     expect(await je.takeJoinEventContext(A, JOIN_A)).toEqual({ goalId: 'goal_1', activity: 'squats' });
     expect(await je.takeJoinEventContext(A, JOIN_A)).toEqual({ goalId: null, activity: null });
   });
@@ -269,7 +269,7 @@ describe('web (NATIVE-STATE-3): the join QR event context and the device-mode an
     const je = await import('../src/joinEventHandoff');
     const { routeAfterJoin } = await import('../src/stationSession');
     void je.setPendingEventGoal('goal_1', JOIN_A);
-    void je.setPendingEventActivity('squats', JOIN_A);
+    void je.setPendingEventActivity('squats', 'goal_1', JOIN_A);
     const context = await je.takeJoinEventContext(A, JOIN_B);
     expect(context).toEqual({ goalId: null, activity: null });
     expect(routeAfterJoin('group_b', context.goalId, context.activity)).toBe('/community/group_b');

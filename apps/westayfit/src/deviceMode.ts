@@ -113,10 +113,24 @@ export function saveDeviceMode(mode: DeviceMode): Promise<boolean> {
   return store.write(DEVICE_MODE_KEY, mode);
 }
 
-/** Forget it, so the question is asked again. The one way back for a phone
- * that answered "shared" by mistake. */
-export function clearDeviceMode(): Promise<boolean> {
-  return store.remove(DEVICE_MODE_KEY);
+/** What a device answer that could not be removed is overwritten with: not
+ * an answer, so it reads as "not asked". */
+const FORGOTTEN = 'forgotten';
+
+/**
+ * Forget it, so the question is asked again. The one way back for a phone
+ * that answered "shared" by mistake — so the forgetting must actually stick:
+ * a removal the device refuses is retried once, and if it still refuses, the
+ * answer is overwritten with a value that is not an answer. Otherwise a phone
+ * that took the way back would be sent to the kiosk again after a restart.
+ * Resolves whether any of the three was kept; false means the device could
+ * not forget it (this session still reads it as forgotten).
+ */
+export async function clearDeviceMode(): Promise<boolean> {
+  if (await store.remove(DEVICE_MODE_KEY)) return true;
+  if (await store.remove(DEVICE_MODE_KEY)) return true;
+  const kept = await store.write(DEVICE_MODE_KEY, FORGOTTEN);
+  return kept;
 }
 
 /**
