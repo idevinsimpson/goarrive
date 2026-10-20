@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import * as nodePath from 'node:path';
 
-import { act, createElement, useState, type ReactNode } from 'react';
+import { act, createElement, Profiler, useState, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -40,7 +40,9 @@ const ctl = vi.hoisted(() => {
     calls: string[] = [];
     /** Calls attempted on this player after it was released (each throws, like the native object). */
     afterRelease: string[] = [];
-    replaceResult: 'resolve' | 'reject' = 'resolve';
+    replaceResult: 'resolve' | 'reject' | 'defer' = 'resolve';
+    /** Replacements held in flight ('defer'), settled by the test. */
+    pendingReplace: Array<{ resolve: () => void; reject: (e: unknown) => void }> = [];
     constructor(source: unknown) {
       this.source = source;
     }
@@ -70,6 +72,9 @@ const ctl = vi.hoisted(() => {
       this.live('replace');
       this.calls.push('replace');
       this.source = source;
+      if (this.replaceResult === 'defer') {
+        return new Promise<void>((resolve, reject) => this.pendingReplace.push({ resolve, reject }));
+      }
       return this.replaceResult === 'resolve' ? Promise.resolve() : Promise.reject(new Error('load failed'));
     }
     release() {
@@ -272,7 +277,11 @@ describe('a muted loop that stays in its slot', () => {
       contentFit: 'contain',
     });
     expect(ctl.videoProps!.allowsFullscreen).toBeUndefined(); // the deprecated prop is not used
-    expect(el('fa-video')?.getAttribute('aria-hidden')).toBe('true');
+    // expo-video's native view does not parse aria-hidden, so a React Native View around it carries it.
+    const wrapper = el('fa-video-a11y');
+    expect(wrapper?.getAttribute('aria-hidden')).toBe('true');
+    expect(wrapper?.contains(el('fa-video'))).toBe(true);
+    expect(ctl.videoProps!['aria-hidden']).toBeUndefined();
   });
 });
 
@@ -323,6 +332,15 @@ describe('poster first; the round decides and the clip follows', () => {
   it('held before any frame was shown keeps the poster, never an empty view', () => {
     render('running');
     render('held');
+    expect(state()).toBe('poster');
+    expect(el('fa-poster')).not.toBeNull();
+  });
+
+  it('a first frame that lands after the round went to held does not reveal the clip (round-phase guard)', () => {
+    render('running');
+    emit('playingChange', { isPlaying: true }); // playing, but no frame yet
+    render('held');
+    firstFrame(); // the frame arrives before playingChange(false)
     expect(state()).toBe('poster');
     expect(el('fa-poster')).not.toBeNull();
   });
@@ -663,4 +681,139 @@ describe('one slot per source: nothing carries from one clip to another', () => 
       expect(el('guide')).toBeNull();
     });
   }
+});
+
+describe('review follow-ups (#636 round 2)', () => {
+  it('a new player for the same clip is a new attempt: reduced motion toggled mid-retry does not silence it (R2-636-1)', async () => {
+    render('running');
+    emit('statusChange', { status: 'error' }); // failure 1 of the clip; a retry is pending
+    render('running', true); // reduced motion on: the clip's player is released, the retry cancelled
+    render('running', false); // and off again: a fresh player for the same clip
+    const fresh = player();
+    expect(fresh.source).toBe(CLIP);
+    emit('statusChange', { status: 'error' }); // failure 2: heard, and retried
+    expect(vi.getTimerCount()).toBe(1);
+    await act(async () => vi.advanceTimersByTime(DEMO_RETRY_DELAY_MS));
+    await flush();
+    expect(fresh.count('replace')).toBe(1);
+    // The clip's budget is per clip, not per player: failure 3 settles it.
+    emit('statusChange', { status: 'error' });
+    expect(state()).toBe('fallback');
+  });
+
+  describe('a reload in flight never acts for a slot that has moved on (R2-636-3)', () => {
+    const errorConsole = () => vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    for (const outcome of ['resolve', 'reject'] as const) {
+      it(`across unmount: a reload that ${outcome}s afterwards plays nothing, retries nothing, sets nothing`, async () => {
+        const errors = errorConsole();
+        render('running');
+        const p = player();
+        p.replaceResult = 'defer';
+        emit('statusChange', { status: 'error' });
+        await act(async () => vi.advanceTimersByTime(DEMO_RETRY_DELAY_MS));
+        expect(p.pendingReplace).toHaveLength(1); // in flight
+        const plays = p.count('play');
+        act(() => root.unmount());
+        await act(async () => {
+          if (outcome === 'resolve') p.pendingReplace[0].resolve();
+          else p.pendingReplace[0].reject(new Error('late'));
+        });
+        expect(vi.getTimerCount()).toBe(0); // nothing scheduled by the late answer
+        await act(async () => vi.advanceTimersByTime(DEMO_RETRY_DELAY_MS * 5));
+        expect(vi.getTimerCount()).toBe(0);
+        expect(p.count('play')).toBe(plays);
+        expect(p.count('replace')).toBe(1);
+        expect(p.afterRelease).toEqual([]);
+        expect(errors).not.toHaveBeenCalled();
+        errors.mockRestore();
+        root = createRoot(container);
+      });
+
+      for (const slot of [false, true]) {
+        it(`across a source change (${slot ? 'unkeyed slot' : 'keyed'}): A's reload that ${outcome}s afterwards touches neither A nor B`, async () => {
+          const errors = errorConsole();
+          render('running', false, { poster: POSTER, clip: CLIP, slot });
+          const a = player();
+          a.replaceResult = 'defer';
+          emit('statusChange', { status: 'error' });
+          await act(async () => vi.advanceTimersByTime(DEMO_RETRY_DELAY_MS));
+          expect(a.pendingReplace).toHaveLength(1);
+          const playsA = a.count('play');
+          render('running', false, { poster: POSTER_B, clip: CLIP_B, slot });
+          const b = player();
+          const callsB = [...b.calls];
+          await act(async () => {
+            if (outcome === 'resolve') a.pendingReplace[0].resolve();
+            else a.pendingReplace[0].reject(new Error('late'));
+          });
+          expect(vi.getTimerCount()).toBe(0); // no retry scheduled for anyone
+          await act(async () => vi.advanceTimersByTime(DEMO_RETRY_DELAY_MS * 5));
+          expect(vi.getTimerCount()).toBe(0);
+          expect(a.count('play')).toBe(playsA);
+          expect(a.afterRelease).toEqual([]);
+          expect(b.calls).toEqual(callsB); // B heard nothing from A's reload
+          expect(state()).toBe('poster');
+          // And B's budget is untouched: its own first failure is heard and retried.
+          emit('statusChange', { status: 'error' });
+          expect(vi.getTimerCount()).toBe(1);
+          await act(async () => vi.advanceTimersByTime(DEMO_RETRY_DELAY_MS));
+          await flush();
+          expect(b.count('replace')).toBe(1);
+          expect(state()).toBe('poster');
+          expect(errors).not.toHaveBeenCalled();
+          errors.mockRestore();
+        });
+      }
+    }
+  });
+
+  it('the key on MovementDemoMedia remounts the slot for a new source; the bare slot keeps its element (R2-636-7)', () => {
+    render('idle', false, { poster: POSTER, clip: CLIP });
+    const keyedBefore = el('fa-demo');
+    render('idle', false, { poster: POSTER_B, clip: CLIP_B });
+    expect(el('fa-demo')).not.toBe(keyedBefore); // a fresh slot: only the key does this
+    act(() => root.unmount());
+    root = createRoot(container);
+    render('idle', false, { poster: POSTER, clip: CLIP, slot: true });
+    const bareBefore = el('fa-demo');
+    render('idle', false, { poster: POSTER_B, clip: CLIP_B, slot: true });
+    expect(el('fa-demo')).toBe(bareBefore); // unkeyed: the same element, scoped internally
+  });
+
+  it('a showing update that changes nothing does not re-render the slot (R2-636-6)', () => {
+    let commits = 0;
+    const show = (playback: DemoPlayback) =>
+      act(() => {
+        root.render(
+          <Profiler id="slot" onRender={() => (commits += 1)}>
+            <MovementDemoMedia
+              posterUri={POSTER}
+              clipUri={CLIP}
+              label="Movement guide: squats."
+              playback={playback}
+              reducedMotion={false}
+              imageStyle={{ width: 240, height: 240 }}
+              fallback={null}
+              testIDPrefix="fa"
+            />
+          </Profiler>
+        );
+      });
+    show('idle'); // the round effect's setShowing('poster') at mount changes nothing
+    expect(commits).toBe(1);
+    show('running');
+    emit('playingChange', { isPlaying: true });
+    firstFrame();
+    expect(state()).toBe('playing');
+    const settled = commits;
+    // Repeated reveals: still 'playing'. React may render once more right after a
+    // real update before it can bail out; after that, an unchanged update renders
+    // nothing. Without the bail-out every one of these would commit.
+    for (let i = 0; i < 4; i += 1) {
+      emit('playingChange', { isPlaying: true });
+      firstFrame();
+    }
+    expect(commits - settled).toBeLessThanOrEqual(1);
+  });
 });

@@ -162,7 +162,14 @@ export function MovementDemoSlot(props: MovementDemoMediaProps) {
   // shown nothing yet, so it reads as the poster until its own first frame.
   const [shown, setShown] = useState<{ player: VideoPlayer; value: Showing }>({ player, value: 'poster' });
   const showing: Showing = shown.player === player ? shown.value : 'poster';
-  const setShowing = useCallback((value: Showing) => setShown({ player: playerRef.current, value }), []);
+  // A call that would change nothing keeps the same state object, so React skips the render.
+  const setShowing = useCallback(
+    (value: Showing) =>
+      setShown((prev) =>
+        prev.player === playerRef.current && prev.value === value ? prev : { player: playerRef.current, value }
+      ),
+    []
+  );
 
   /** The clip may play only while the round runs and someone can see it. */
   const mayPlay = useCallback(
@@ -216,10 +223,13 @@ export function MovementDemoSlot(props: MovementDemoMediaProps) {
     }, DEMO_RETRY_DELAY_MS);
   }, [player, clipUri, mayPlay, setShowing, usable]);
 
-  // A new player starts with no frame, not playing, and no retry of the old one pending.
+  // A new player starts with no frame, not playing, no retry of the old one
+  // pending, and a fresh attempt: the old player's reported failure does not
+  // silence the new one's (the clip's failure COUNT carries over; it is per clip).
   useEffect(() => {
     frameShown.current = false;
     isPlaying.current = false;
+    attempts.current.attemptFailed = false;
     return () => clearRetry();
   }, [player]);
 
@@ -317,19 +327,26 @@ export function MovementDemoSlot(props: MovementDemoMediaProps) {
         posterImage(false)
       ) : (
         <>
-          <VideoView
-            player={player}
-            style={StyleSheet.absoluteFill}
-            contentFit="contain"
-            nativeControls={false}
-            fullscreenOptions={FULLSCREEN_OFF}
-            allowsPictureInPicture={false}
-            startsPictureInPictureAutomatically={false}
-            allowsVideoFrameAnalysis={false}
-            onFirstFrameRender={onFirstFrameRender}
-            aria-hidden
-            testID={id('video')}
-          />
+          {/*
+            Hidden from VoiceOver and TalkBack. React Native's own View maps
+            `aria-hidden` to accessibilityElementsHidden and
+            importantForAccessibility="no-hide-descendants"; expo-video's native
+            view does not parse it, so the wrapper carries it.
+          */}
+          <View style={StyleSheet.absoluteFill} aria-hidden testID={id('video-a11y')}>
+            <VideoView
+              player={player}
+              style={StyleSheet.absoluteFill}
+              contentFit="contain"
+              nativeControls={false}
+              fullscreenOptions={FULLSCREEN_OFF}
+              allowsPictureInPicture={false}
+              startsPictureInPictureAutomatically={false}
+              allowsVideoFrameAnalysis={false}
+              onFirstFrameRender={onFirstFrameRender}
+              testID={id('video')}
+            />
+          </View>
           {/* POSTER FIRST: over the clip until the clip is actually playing. */}
           {state === 'poster' ? posterImage(true) : null}
         </>
