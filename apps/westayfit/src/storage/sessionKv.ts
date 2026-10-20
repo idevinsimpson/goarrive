@@ -31,6 +31,15 @@ export const sessionKv: DeviceKv = {
       return null;
     }
   },
+  async readItem(key) {
+    const s = webSession();
+    if (!s) return { ok: false };
+    try {
+      return { ok: true, value: s.getItem(key) };
+    } catch {
+      return { ok: false };
+    }
+  },
   async setItem(key, value) {
     const s = webSession();
     if (!s) return false;

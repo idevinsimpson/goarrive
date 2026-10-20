@@ -64,7 +64,11 @@ const hydrated: Promise<void> = HAS_SYNC_STORAGE
         if (earlyPatch) {
           memory = moveCameraSettingsOf({ ...stored, ...earlyPatch });
           earlyPatch = null;
-          void persist(memory);
+          // Only on top of a choice that was actually read: if the device
+          // could not be read, the defaults under this toggle are a guess, and
+          // writing them would overwrite the stored choice nobody saw. The
+          // toggle still holds for this session.
+          if (!store.unreadable(MOVE_CAMERA_SETTINGS_KEY)) void persist(memory);
         } else {
           memory = stored;
         }
