@@ -365,18 +365,21 @@ describe('F1d: the contribute route is wired to those rules', () => {
 
 describe('a restore that cannot answer still settles', () => {
   it('restorePendingAttempt never rejects, even when the storage boundary itself throws', async () => {
-    bootNative(disk);
-    vi.doMock('../src/storage/kv', () => ({
-      deviceKv: {
-        getItem: () => Promise.reject(new Error('boom')),
-        readItem: () => Promise.reject(new Error('boom')),
-        setItem: () => Promise.reject(new Error('boom')),
-        removeItem: () => Promise.reject(new Error('boom')),
-        keysWithPrefix: () => Promise.reject(new Error('boom')),
-      },
-    }));
-    const pc = await import('../src/pendingContribution');
-    await expect(pc.restorePendingAttempt(GOAL, A)).resolves.toEqual({ pending: null, orphan: null, readFailed: true });
+    const pc = await launch();
+    // The same module instance the code under test calls into: every call
+    // rejects, so only restorePendingAttempt's own catch stands between the
+    // screen and a rejection. (Spies, not a module swap: a swap racing the
+    // boot's own mock was not deterministic under load.)
+    const { deviceKv } = await import('../src/storage/kv');
+    const spies = (['getItem', 'readItem', 'setItem', 'removeItem', 'keysWithPrefix'] as const).map((m) =>
+      vi.spyOn(deviceKv, m).mockRejectedValue(new Error('boom'))
+    );
+    try {
+      await expect(pc.restorePendingAttempt(GOAL, A)).resolves.toEqual({ pending: null, orphan: null, readFailed: true });
+      expect(spies[0]).toHaveBeenCalled();
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
   });
 
   it('a read that never answers releases the restore after the time bound', async () => {
