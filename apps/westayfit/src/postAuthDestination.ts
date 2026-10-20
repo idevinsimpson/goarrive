@@ -31,8 +31,9 @@
  *     session ends on this device (sign-out or account switch, below).
  *
  * THE SESSION WATCH. The moment an owned destination exists in this process —
- * written, or found at the native launch read — this module watches the auth
- * state itself (the same pattern as src/memberReads.ts: it does not rely on
+ * written, found in the tab when this module loads (web: sessionStorage
+ * survives a same-tab reload), or found at the native launch read — this
+ * module watches the auth state itself (the same pattern as src/memberReads.ts: it does not rely on
  * every sign-out control remembering to clear it). On every auth answer, any
  * destination owned by an account other than the one signed in now is
  * removed. Signed-out handoffs are never touched by it.
@@ -101,9 +102,16 @@ export function definePostAuthDestination<V>(codec: DestinationCodec<V>): PostAu
     },
   };
   registry.push(destination as PostAuthDestination<unknown>);
-  // Native: read it at launch, and start the session watch if what was left
-  // on the device belongs to an account.
-  if (!HAS_SYNC_STORAGE) {
+  if (HAS_SYNC_STORAGE) {
+    // Web: a same-tab reload keeps sessionStorage, so an account's record can
+    // already be here when this module loads — and its sign-out must still
+    // clear it. Deferred, so loading this module never initialises Firebase
+    // by itself. (During a server render there is no window: nothing is
+    // found and nothing starts.)
+    if (peek()?.owner) queueMicrotask(watchAccountSession);
+  } else {
+    // Native: read it at launch, and start the session watch if what was
+    // left on the device belongs to an account.
     void loadKey(codec.key).then(() => {
       if (peek()?.owner) watchAccountSession();
     });

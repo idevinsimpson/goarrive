@@ -6,18 +6,16 @@ import { useWsfAuth } from '../auth';
 import { AuthFlagOffPanel } from '../AuthFlagOffPanel';
 import { SecondaryLink, StatusText } from '../AuthFormPrimitives';
 import { describeCallableError } from '../callableErrors';
-import { clearEventReturn } from '../eventReturn';
 import { wsfAuthEnabled } from '../featureFlags';
+import { armMarkerReturn } from '../handoffArming';
 import {
   clearMarkerReturn,
   goalStateLine,
   markerStep,
   markerWays,
-  setMarkerReturn,
   type MarkerResolver,
   type ResolvedMarker,
 } from '../markerEntry';
-import { clearPendingJoinCode } from '../pendingJoinCode';
 import { ButtonLink } from './ButtonLink';
 import { kit } from './kit';
 import { WsfWordmark } from './WsfWordmark';
@@ -117,14 +115,13 @@ export function MarkerEntryScreen({
   /** Arm the return on the way INTO an identity step, and only then. */
   const armReturn = useCallback(() => {
     if (!slug) return;
-    // A fresh scan is the destination now; an older invitation or event left
-    // in this tab must not outrank it on the terminal hop.
-    clearPendingJoinCode();
-    clearEventReturn();
+    // A fresh scan is the destination now; an older invitation, event or
+    // kiosk return left in this tab (or on this phone) must not outrank it on
+    // the terminal hop, so arming clears them (src/handoffArming.ts).
     // Whose it is: a signed-out visitor's scan is the handoff for whoever
     // signs in next; a signed-in member sent to a gate (verify, profile) owns
     // it, and it goes with their session (src/postAuthDestination.ts).
-    setMarkerReturn(slug, Date.now(), uid);
+    void armMarkerReturn(slug, uid);
   }, [slug, uid]);
 
   const onJoin = useCallback(async () => {
