@@ -1,21 +1,19 @@
 /**
- * The page hostname, when there is one.
+ * The browser hostname, when there is one.
  *
- * React Native defines `window` (it aliases the global object) but has no
- * `window.location`. Code that checked `typeof window !== 'undefined'` and then
- * read `window.location.hostname` therefore threw at module load on a phone,
- * before any screen rendered. Every caller that needs the browser host asks
- * here instead: it returns the hostname only where a real browser location
- * exists, and undefined everywhere else (native, SSR, tests without a DOM).
+ * React Native defines `window` (it aliases the global object) but no
+ * `window.location`. In a native DEVELOPMENT session @expo/metro-runtime
+ * installs a location pointing at the Metro server; in a production-mode
+ * native bundle (release build, `expo export`) there is none, and code that
+ * read `window.location.hostname` after only a `typeof window` check threw at
+ * module load. This returns the hostname only where a location object exists.
+ *
+ * It does NOT tell web from native — a native dev build has a location too.
+ * Decide platform with `Platform.OS`.
  */
 export function currentWebHostname(): string | undefined {
   if (typeof window === 'undefined') return undefined;
   const location = (window as { location?: { hostname?: unknown } }).location;
   if (!location || typeof location.hostname !== 'string') return undefined;
   return location.hostname;
-}
-
-/** True when a browser location exists, i.e. this is web, not native or SSR. */
-export function hasWebLocation(): boolean {
-  return currentWebHostname() !== undefined;
 }

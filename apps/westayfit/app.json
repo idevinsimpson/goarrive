@@ -14,7 +14,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.westayfit.app",
       "infoPlist": {
-        "NSCameraUsageDescription": "We Stay Fit uses your camera to count your squats on this device. Nothing is recorded or uploaded."
+        "NSCameraUsageDescription": "We Stay Fit uses your front camera to count your squats on this device. No video or photos are recorded, saved or uploaded."
       }
     },
     "android": {
@@ -26,8 +26,12 @@
         "android.permission.CAMERA"
       ],
       "blockedPermissions": [
-        "android.permission.RECORD_AUDIO"
-      ]
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.SYSTEM_ALERT_WINDOW"
+      ],
+      "allowBackup": false
     },
     "web": {
       "bundler": "metro",
@@ -36,7 +40,14 @@
       "themeColor": "#0B1F3A"
     },
     "plugins": [
-      "expo-router"
+      "expo-router",
+      [
+        "expo-video",
+        {
+          "supportsBackgroundPlayback": false,
+          "supportsPictureInPicture": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
