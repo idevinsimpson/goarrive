@@ -1,6 +1,6 @@
 # GoArrive Known Issues & Lessons Learned
 
-_Last refreshed: 2026-08-14._
+_Last refreshed: 2026-10-07._
 
 ## Resolved Issues (Reference for Future Work)
 The following issues were encountered and resolved during development. They are documented here as institutional knowledge to prevent regression and inform future decisions.
@@ -185,6 +185,52 @@ takeover position, not repeatedly assigning `currentTime`. Seeking on a timer de
 buffering it is meant to produce. Verify warmth by reading `buffered`, never by inferring
 it from the absence of a symptom.
 
+
+### WSF Staging Proof Sequence Must Be Derivable on Any Writer Run, Not Only at Deploy Time (PR #557)
+A fast-path staging deploy (run 60) succeeded and served the exact target, but the proof sequence — begin-proof, R-STAGE, proof-pass — was never derived automatically. Three separate gaps blocked derivation: begin-proof had no deriver at all; the R-STAGE rule read `snap.staging`, which is populated only by the full-path writer, never by the fast-path target flow; and proof-pass was only suggested to L0 rather than derived. The result was four proof lines that had to be recorded by hand, leaving the control-state ledger in a half-committed state until manual intervention.
+
+The fix (`shadow.mjs` `stagingProofLines`) derives the proof sequence on any writer run — scheduled fallback, comment, PR event, or `workflow_run` — by reading the ledger’s staging target, the newest concluded-success deploy-mode run whose title names that target, and the hosted `/health` marker. It derives only the lines the packet still lacks and sources each on the `workflow_run`. `set-staging` is intentionally not derived: moving the full-path staging pointer to a fast-path target would make every subsequent fast-path candidate `FULL_PATH_REQUIRED`, which is reported as a separate consequence.
+
+A W4 test-fixture finding (commit `cc180898`) surfaced a related gap: the wrong-marker test used an unrelated SHA as the “bad” marker case, but the realistic wrong-marker situation after a successful run is staging still serving the previous build — the ledger’s `staging.servedSha` or `staging.rollbackSha`. A mutant that accepted the broader freshnessFacts served set passed unnoticed until the fixture was corrected to use those realistic markers.
+
+Lesson: a proof sequence that requires manual recording after every automated deploy is a broken proof sequence. Every step needs a deriver that fires from observable state — here a deploy run ID and a hosted marker — rather than waiting for a human gesture or a future L0 suggestion. When adding a new proof step, verify at write time that all inputs to derive it are readable from the writer’s event payload, not from ledger fields that only get populated on a different code path.
+### WSF Staging Pin Generator Must Derive Baseline from Ledger, Not from a Computed Add Count
+The staging pin generator (STAGING-PIN-FASTPATH-SERVED-BASELINE-1, PR #565) was computing the served baseline as a derived value (e.g. current served plus items the PR adds) rather than reading what the ledger actually records as the live baseline. This caused fast-path preflight comparisons to check against an inflated baseline — as if items being introduced by the PR were already present on the live site — making genuine fast-path candidates appear to exceed the baseline and triggering unnecessary full-path deploy fallbacks.
+
+The fix reads the baseline directly from the ledger’s authoritative served record. Lesson: a pin generator that computes what *will* be served after a successful deploy is predicting a future state, not describing a current one. Any metric that gates a fast-path preflight must be read from the ledger’s recorded state, not derived from the pending delta. This is the same root class as the STAGING-FASTPATH-INVENTORY-BASELINE-FIX (#555) that corrected the preflight itself — both bugs let a predicted post-merge count masquerade as the actual live baseline.
+
+
+### WSF Staging Pin: Superseded Never-Served Approvals Must Be Recorded Truthfully (PR #570)
+The pin generator was not handling the case where an approval was generated and accepted but then superseded by a newer candidate before it was ever deployed to staging. The old approval remained visible in the ledger as if it were still active, conflicting with the newer approval and creating ambiguity about which candidate the ledger actually endorsed.
+
+The fix (commit `c70edcb5`) explicitly records superseded never-served approvals as such when the generator advances to a newer candidate. It does not overwrite the superseded entry — it annotates it so the ledger history remains truthful and downstream preflight checks are not confused by two live-looking approvals.
+
+Lesson: a staging approval captures intent at a point in time. When a later candidate supersedes it before any deploy occurs, that fact must be written to the ledger — not silently overwritten, and not left as an open approval. Two open approvals pointing at different candidates will cause preflight and proof-sequence checks to fail on the wrong target. The invariant to enforce: at most one approval per staging slot can be in a non-terminal state at any time; when a new approval advances, all prior approvals for the same slot must be closed with a superseded-never-served annotation if they were never served.
+
+### WSF Staged Journey Suites Need Wording-Variant Seeded Defects, Not Just Behavior-Boolean Ones (PR #573)
+The EXPO-LATEST-FULL-STAGING-PIN-1 suite (PR #573) added closed-goal journey drivers that proved all five queue-gate refusals emulator-side. Nine seeded defects initially covered gate-skip and post-advance-refusal cases. A W4 mutant audit (#394) then found that dropping the sentence-level text checks for each refusal message left the full suite green — meaning mutants that refused in wrong words, or that let a Start refusal end the turn instead of holding it, passed without detection.
+
+The root cause: boolean coverage (refused / did not refuse) proves the gate exists; it does not prove the gate says the right thing. A user who hits a refusal that says “No seats available” when the event is closed, or whose turn ends instead of being held at a Start refusal, sees a broken product even if the gate fired. Five additional wording-variant defects (one per gate: start, ready, call, join, closedStartEndsPlace) corrected this — each fails exactly its own row, and W4 mutants D1, D3, D4, D7, and D11 are now killed.
+
+Lesson: when seeding defects for any gate that produces user-visible copy, always include at least one wording-variant defect alongside the boolean skip. The two failure modes — gate absent vs. gate present but wrong copy — are independent, and a suite that only kills one is half-verified. This applies to any error, refusal, or confirmation message the suite reads from the screen rather than from Firestore directly.
+
+### WSF Control Writer: Ascending-Page Probe Copies Are Unsafe for Window-Building Under Concurrent Arrivals and Deletions
+The GitHub `recentComments` reader (`tools/wsf-control/github.mjs`) builds a bounded window of the N newest comments for a conversation. The original approach probed pages in ascending order starting from the estimated last page, keeping each page’s response as the window was filled backward. A W9 finding (#497, comment 6019310772) identified a correctness gap: if a new comment arrives after the initial count read (rolling onto a further page that the ascending probe then reads), and an older comment is deleted between two probe page requests, the newest comment can shift onto a page already consumed by the probe — silently absent from the window with no error or signal.
+
+The fix (PR #579, CONTROL-RECENT-COMMENTS-SAFE-READ-1) separates the end-finding step from the window-building step. The forward ascending probe runs only to find the actual last page and its result copies are immediately discarded. The window is then built from a fresh descending read starting at that end page, walking toward older pages. Reading newest-to-oldest means a mid-read deletion can only shift a held comment onto an earlier page (caught by dedup on comment id) — the newest comment is always on an already-read page and cannot be skipped. The regression test for W9’s exact case fails on the prior commit and passes on the fix; a mutant that trusts the probe copies again is killed by that test alone.
+
+Lesson: when reading a paginated API feed with an estimated starting page, the ascending probe is safe for end-detection but not for content collection — probe copies can be stale relative to later pages by the time the window is assembled. Separate end-finding (forward probe, disposable results) from window-building (fresh descending read), so every page in the final window is read after every later page.
+
+**Transport hardening addendum (PR #581):** a follow-on W4 review found two remaining gaps. The GitHub API page size was left at the default (100), so a transient network failure on a single page fetch could lose up to 100 comments’ worth of window — reducing the page size to 25 shrinks that blast radius without changing the correctness fix. A GET retry was also added, but only for explicit transport failures (network timeouts, connection resets); logical failures such as a wrong marker or a bad pagination state do not retry and fail closed immediately. Retrying on logical failures would loop a misconfigured caller against the API without producing a correct window. Rule: any retry in a paginated read must distinguish transport failures from logical ones — transport errors may succeed on retry; logical errors require a caller-level fix.
+
+### WSF Control Writer: A State-Mutating PATCH Must Not Retry on Transport Failure (PR #588)
+`editComment` (`tools/wsf-control/github.mjs`) was treating a PATCH 404 as success and had no defined behavior for transport failures. Run 37661819992 surfaced this when a `TypeError: fetch failed` at the shadow CURRENT PATCH left the control writer in an undefined state.
+
+The correct behavior for a state-mutating PATCH that fails at the transport layer is to **read back, not re-send**. Re-sending risks double-application: the write may have landed on the server even if the response never returned. The fix sends the PATCH exactly once, then on transport failure reads the comment back via GET to confirm whether the edit was applied. If the exact body is found, it returns ‘confirmed-by-readback’; if not, it throws an unconfirmed error — never retransmitting.
+
+The fix also separately handles HTTP error statuses (404, 4xx, 5xx), which previously could be silently swallowed. A PATCH that returns 404 means the target resource does not exist; treating it as success hides the problem. Each failure class now has an explicit outcome: 2xx returns ‘acknowledged’ without parsing the body; non-2xx throws `GitHubError`; transport failure triggers one read-back attempt; programmer errors rethrow immediately.
+
+Lesson: a state-mutating API call (PATCH, PUT, POST, DELETE) is not safe to retry on transport failure — the write may have landed. The correct recovery is a read-back to confirm the current state, with the retry decision made from what was observed, not from the failure class. Distinguish transport failures (where a read-back makes sense) from HTTP error statuses (which are definitive answers) and programmer errors (which should propagate immediately). This is the same principle as idempotency keys for public write endpoints, applied to internal writer calls that cannot carry a client-supplied key.
 ## Known Performance Risks
 
 ### GIF Memory Consumption at Scale
