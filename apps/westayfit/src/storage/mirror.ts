@@ -18,6 +18,17 @@
  * the next line) and to the store asynchronously; the returned promise says
  * whether the store accepted it. A hydration that resolves after a write in
  * this process never overwrites that newer write.
+ *
+ * AN UNREADABLE KEY IS NOT AN EMPTY ONE. If the store cannot be read (the
+ * read is tried twice), the key is answered as nothing — so no screen waits
+ * on it forever — but `unreadable(key)` says so, and a caller that would
+ * write a value DERIVED from "nothing stored" checks it first rather than
+ * overwrite a record it could not see. An explicit write clears the flag.
+ *
+ * EXPIRY. A store whose values expire (the native session store, two hours)
+ * reports each value's expiry when it is read and its lifetime when written.
+ * The in-memory copy honours it: an expired value reads as nothing, however
+ * long this process has been running.
  */
 import type { DeviceKv } from './kv';
 
@@ -26,6 +37,8 @@ export type KeyMirror = {
   read(key: string): string | null;
   /** Whether `read(key)` reflects the store yet. Always true on web. */
   loaded(key: string): boolean;
+  /** Native: the store could not be read for this key, so `read` answering null proves nothing. */
+  unreadable(key: string): boolean;
   /** Hydrate one key from the store (no-op once loaded). */
   load(key: string): Promise<void>;
   /** Hydrate every stored key with this prefix. */
@@ -40,9 +53,12 @@ export type KeyMirror = {
 
 export function createKeyMirror(
   kv: DeviceKv,
-  readSync: (key: string) => string | null | undefined
+  readSync: (key: string) => string | null | undefined,
+  now: () => number = Date.now
 ): KeyMirror {
-  const memory = new Map<string, string | null>();
+  // value + the time it stops being true (undefined: it does not expire).
+  const memory = new Map<string, { value: string | null; expiresAt?: number }>();
+  const failed = new Set<string>();
   // Per-key count of writes made in this process. A hydration started before
   // a write must not land on top of it.
   const writes = new Map<string, number>();
@@ -61,27 +77,44 @@ export function createKeyMirror(
 
   const loaded = (key: string) => readSync(key) !== undefined || memory.has(key);
 
+  const readOnce = async (key: string) => {
+    try {
+      return await kv.readItem(key);
+    } catch {
+      return { ok: false } as const;
+    }
+  };
+
   const load = async (key: string) => {
     if (loaded(key)) return;
     const before = writes.get(key) ?? 0;
-    let value: string | null = null;
-    try {
-      value = await kv.getItem(key);
-    } catch {
-      value = null;
-    }
+    let read = await readOnce(key);
+    if (!read.ok) read = await readOnce(key);
     if ((writes.get(key) ?? 0) !== before || memory.has(key)) return;
-    memory.set(key, value);
+    if (read.ok) {
+      memory.set(key, { value: read.value, expiresAt: read.expiresAt });
+    } else {
+      failed.add(key);
+      memory.set(key, { value: null });
+    }
     notify();
   };
+
+  const stamp = () => (kv.ttlMs != null ? now() + kv.ttlMs : undefined);
 
   return {
     read(key) {
       const sync = readSync(key);
       if (sync !== undefined) return sync;
-      return memory.get(key) ?? null;
+      const held = memory.get(key);
+      if (!held) return null;
+      if (held.expiresAt != null && held.expiresAt <= now()) return null;
+      return held.value;
     },
     loaded,
+    unreadable(key) {
+      return failed.has(key);
+    },
     load,
     async loadPrefix(prefix) {
       let keys: string[] = [];
@@ -94,13 +127,14 @@ export function createKeyMirror(
     },
     write(key, value) {
       bump(key);
-      memory.set(key, value);
+      failed.delete(key);
+      memory.set(key, { value, expiresAt: stamp() });
       notify();
       return kv.setItem(key, value).catch(() => false);
     },
     remove(key) {
       bump(key);
-      memory.set(key, null);
+      memory.set(key, { value: null });
       notify();
       return kv.removeItem(key).catch(() => false);
     },

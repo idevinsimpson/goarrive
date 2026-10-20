@@ -160,6 +160,29 @@ export function classifyContributeError(e: unknown): ContributeFailure {
   }
 }
 
+/**
+ * Whether a caught error is a DEFINITIVE refusal of this attempt — the one
+ * answer that retires its reminder.
+ *
+ * For a NEW attempt it is exactly `classifyContributeError`'s refusal: the
+ * attempt id has never been sent before, so a refusal of this request is a
+ * refusal of the attempt.
+ *
+ * A REPLAY is different in one case. `functions/unauthenticated` means the
+ * server never looked at the attempt at all — the replay went out without a
+ * usable sign-in — so it says nothing about whether the ORIGINAL request
+ * landed. That is "sign in and try again", not "this was not recorded": the
+ * reminder stays reconcilable for its owner, who replays it after signing in
+ * and gets the server's real answer. (Every other refusal is the server
+ * judging the attempt itself, and stays a refusal.)
+ */
+export function isDefiniteRefusal(e: unknown, attempt: 'new' | 'replay'): boolean {
+  const failure = classifyContributeError(e);
+  if (failure.kind !== 'refused') return false;
+  if (attempt === 'replay' && failure.reason === 'signedOut') return false;
+  return true;
+}
+
 export function refusalCopy(
   reason: RefusalReason,
   count: number,

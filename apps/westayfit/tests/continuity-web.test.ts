@@ -124,6 +124,10 @@ describe('the synchronous mirror (native path)', () => {
         await gate();
         return map.get(k) ?? null;
       },
+      async readItem(k) {
+        await gate();
+        return { ok: true, value: map.get(k) ?? null };
+      },
       async setItem(k, v) {
         map.set(k, v);
         return true;
