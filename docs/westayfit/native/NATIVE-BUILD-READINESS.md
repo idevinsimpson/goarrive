@@ -16,8 +16,8 @@ This document is preparation only. No EAS project was created, no build ran, and
 ### How the backend is chosen
 - **`preview`:** EAS merges the EAS `preview` environment's variables with the profile's `env` at build time and embeds the result. The build itself refuses (`app.config.js`) when `EXPO_PUBLIC_WSF_ENV=staging` and any of the six `EXPO_PUBLIC_WSF_STAGING_*` values is missing. If one were still missing at runtime, the app would refuse to start (`resolveStagingConfig`). It never falls back to production.
 - **`development` / `development-simulator`:** the profile's `env` only gets the build-time check past. The JavaScript and its `EXPO_PUBLIC_*` values come from the machine running `npx expo start`:
-  1. In `apps/westayfit`, run `npx eas-cli@latest env:pull --environment development`. This writes the EAS `development` variables to `.env.local`, which is git-ignored.
-  2. Make sure `.env.local` contains `EXPO_PUBLIC_WSF_ENV=staging`. `env:pull` does not copy the profile's `env`, so either add the line or store `EXPO_PUBLIC_WSF_ENV=staging` in the EAS `development` environment as well.
+  1. In `apps/westayfit`, run `npx eas-cli@latest env:pull --environment development --path .env.development.local`. This writes the EAS `development` variables to `.env.development.local`, which is git-ignored and read **only** by the development server. **Do not pull into `.env.local`:** Expo also loads `.env.local` for `expo export`, so a later `npm run build:web` from that checkout would quietly build a web bundle aimed at staging.
+  2. Make sure `.env.development.local` contains `EXPO_PUBLIC_WSF_ENV=staging`. `env:pull` does not copy the profile's `env`, so either add the line or store `EXPO_PUBLIC_WSF_ENV=staging` in the EAS `development` environment as well.
   3. Run `npx expo start`. If `EXPO_PUBLIC_WSF_ENV` is not set, the app refuses to start (`nativeTargetProblem`).
   4. For the local emulator suite instead, set `EXPO_PUBLIC_WSF_USE_EMULATORS=1` and `EXPO_PUBLIC_WSF_EMULATOR_HOST` to the computer's LAN address, or to `10.0.2.2` on the Android emulator.
 
