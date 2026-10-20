@@ -1,9 +1,9 @@
 # NATIVE-CAMERA-1 — native squat camera adapter (iOS/Android), QA record
 
-Branch `claude/wsf-native-camera-1`, base `5a968141de60e6b355d2d1fa327ff2f6f6f14565` (NATIVE-BUILD-1: camera permission config, react-native-svg, generated native dirs ignored).
+Branch `claude/wsf-native-camera-1`. PR base: `claude/wsf-native-build-1` @ `9e9dc2ca` (NATIVE-BUILD-1), merged into this branch at `7411c47b` (parents `ef44fed2`, `9e9dc2ca`). The branch was first cut from `5a968141`.
 Design source: the camera-lane research report (local Expo module `modules/wsf-pose-camera`, MediaPipe Tasks PoseLandmarker in the web engine's mode and settings, raw landmarks into the existing `mapPerson` → `RepCounterOrchestrator`, frozen counter unchanged).
 
-> **BLOCKING, owner decision required: the native MediaPipe SDKs carry Google usage telemetry.** Independent review of #638 (finding 1 / F1) found it. Until the owner decides, the native counter is **OFF**: `support.native.ts` has `NATIVE_CAMERA_TELEMETRY_APPROVED = false`, so `cameraCounterSupported()` is false on every native build and members see only the manual flow. See "MediaPipe SDK usage telemetry" below.
+> **BLOCKING, owner decision required: the native MediaPipe SDKs carry Google usage telemetry.** Independent review of #638 (finding 1 / F1) found it. Until the owner decides, the native counter is **OFF**: `src/movement-camera/nativeCameraGate.ts` has `NATIVE_CAMERA_TELEMETRY_APPROVED = false`, so `cameraCounterSupported()` is false on every native build and members see only the manual flow; `controller.native.ts` also refuses to ask for the camera while it is false. The delta review (PASS @ `3edaf5f5`) proved the gate from source and binaries and completed the Android disclosure. See "MediaPipe SDK usage telemetry" below.
 >
 > **Status, plainly.** The JavaScript side is implemented and tested here. The native code has **not been built for a phone**: this sandbox has no Xcode and no Android SDK (dl.google.com is blocked), so the first real build is an EAS development build.
 >
@@ -28,8 +28,8 @@ Paths below are relative to `apps/westayfit/`.
 | Model | `modules/wsf-pose-camera/assets/pose_landmarker_lite.task` | The **same bytes** as web's `MODEL_URL` (lite float16 v1). One copy, wired into the iOS resource bundle `WsfPoseCameraModel` and Android `assets.srcDirs`. Both sides **re-check the sha256 at runtime** before creating the landmarker, so a different file can never run. There is no runtime download. |
 | Engine settings (both) | `WsfPoseModel.swift`, `WsfPoseModel.kt` | As `engine.ts`: VIDEO mode, `numPoses 3`, `0.5 / 0.5 / 0.5`, no segmentation masks, GPU then CPU fallback at creation. |
 | Pure adapter | `src/movement-camera/nativeEngine.ts` | `toPoseFrame(event, lastMs)` and `NativeFrameGate`; details below. |
-| Controller | `src/movement-camera/controller.native.ts` | Same public API as `controller.ts` (`snapshot`, `subscribe`, `startCamera`, `stopCamera`, `beginSet`, `finishSet`, `dispose`, `REQUESTED_CAMERA`). Run token per start. Permission is requested before the camera opens. The binding goes inactive on Stop, pause, failure and dispose. Pauses on `AppState` leaving `active` and on a native interruption, except while the OS permission prompt is up (the iOS alert makes the app `inactive`; the Android dialog pauses the activity). Read-only `frameStats` support a dev HUD. |
-| Support probe | `src/movement-camera/support.native.ts` | **Telemetry gate first:** `cameraCounterSupported()` is false while `NATIVE_CAMERA_TELEMETRY_APPROVED` is `false`, which it is. Flipping it is a reviewed privacy decision. After approval it is true **only** on iOS/Android when `requireOptionalNativeModule('WsfPoseCamera')` returns a module with `requestCameraPermissionAsync`. Expo Go, web and older binaries get false. Whenever it is false the member stays on the manual flow (fail closed). Synthetic hooks return null on native. |
+| Controller | `src/movement-camera/controller.native.ts` | Same public API as `controller.ts` (`snapshot`, `subscribe`, `startCamera`, `stopCamera`, `beginSet`, `finishSet`, `dispose`, `REQUESTED_CAMERA`). Run token per start. Permission is requested before the camera opens. The binding goes inactive on Stop, pause, failure and dispose. Pauses on `AppState` leaving `active` and on a native interruption, except while the OS permission prompt is up (the iOS alert makes the app `inactive`; the Android dialog pauses the activity). Read-only `frameStats` support a dev HUD. **Defence in depth:** `startCamera` refuses (`unsupported`, manual entry) while the telemetry gate is off. A listener that throws never escapes a native event handler (the run fails closed), and 30 rejected frames in a row (`MAX_INVALID_STREAK`, e.g. no `timestampUnit`) fail the run instead of a silent "live". |
+| Support probe | `src/movement-camera/support.native.ts` (+ the one-constant `nativeCameraGate.ts`) | **Telemetry gate first:** `cameraCounterSupported()` is false while `NATIVE_CAMERA_TELEMETRY_APPROVED` (`nativeCameraGate.ts`, re-exported here) is `false`, which it is. Flipping it is a reviewed privacy decision. After approval it is true **only** on iOS/Android when `requireOptionalNativeModule('WsfPoseCamera')` returns a module with `requestCameraPermissionAsync`. Expo Go, web and older binaries get false. Whenever it is false the member stays on the manual flow (fail closed). Synthetic hooks return null on native. |
 | Overlay | `src/ui/CameraSkeletonOverlay.native.tsx` | react-native-svg 15.12.1. Same `figureGeometry` as web (both arms, torso, legs, head **ring**). Same viewBox, `xMidYMid slice`. Mirrored with `scaleX(-1)` for display only. |
 | Preview slot | `src/ui/NativeCameraPreview.native.tsx` (+ `NativeCameraPreview.tsx`, a web stub that renders null) and a 2-line edit in `src/ui/CameraRepCounter.tsx` | The native view, full-bleed, bound to the controller's `{active, runId}`. Every native event goes back to the controller. The web `<video>` branch is unchanged. |
 
@@ -49,9 +49,9 @@ Paths below are relative to `apps/westayfit/`.
 
 ## What is tested here
 
-Baseline before this change: **66 files, 1288 tests**. At `abe84f45`: **67 files, 1339 tests**. After the evidence pass and the NATIVE-BUILD-1 merge: **68 files, 1351 tests**. After the #638 review fixes: **68 files, 1361 tests**, all passing (`npx vitest run --testTimeout=30000`). This lane's suites:
-- `tests/move-camera-native-adapter.test.ts`: 61 tests (51 before the #638 review fixes);
-- `tests/move-camera-native-contract.test.ts`: 6 tests.
+Baseline before this change: **66 files, 1288 tests**. At `abe84f45`: **67 files, 1339 tests**. After the evidence pass and the NATIVE-BUILD-1 merge: **68 files, 1351 tests**. After the #638 review fixes: **68 files, 1361 tests**. After the delta-review follow-ups: **68 files, 1369 tests**, all passing (`npx vitest run --testTimeout=60000`). This lane's suites:
+- `tests/move-camera-native-adapter.test.ts`: 68 tests (61 after the #638 review fixes, 51 before them);
+- `tests/move-camera-native-contract.test.ts`: 7 tests (the new one ties the Kotlin output to the current Kotlin sources).
 
 The merged NATIVE-BUILD-1 commits brought the rest. The adapter suite covers:
 
@@ -59,16 +59,16 @@ The merged NATIVE-BUILD-1 commits brought the rest. The adapter suite covers:
 |---|---|
 | Pure adapter | Same `mapPerson` output as web. Aspect. ns→ms. The ns guard. Invalid events. Duplicate and out-of-order drop. Unmirroring. Visibility always present (missing → 0). Empty frames kept. Cap at 3. Malformed people skipped. Gate statistics. |
 | Parity through the **real** frozen session (`makeSessionR1421`) | iOS-ms and Android-ns event streams give frame-for-frame identical orchestrator outcomes to the web path. The outcomes compared include keypoint coordinates, aspect and guidance, not just counts (review finding 4). The standard set gives raw 4 / set 3. Lab scene with a bystander behind and one squatting at the edge: native = web, and bystanders add nothing. Tracking loss: empty frames delivered, count held, "Step back into view.", counting resumes. 15 fps still counts every rep. A 400 ms hole mid-rep voids that rep. Injected duplicate and older frames never void a rep. Orientation: an upright stream becomes ready; a sideways (un-rotated) stream never becomes ready and counts 0. Mirroring: the member's right wrist is at smaller x. |
-| `controller.native` | Public-API parity with `controller.ts`. Full flow: permission → bound for run 1 → ready → GO → 3 → Finish → released. Events of other runs ignored. A permission answer after Stop opens nothing. Denied, throwing or missing module → failure panel. Native error stages mapped. AppState `inactive`/`background` and native interruptions pause and keep banked reps. The OS permission prompt (iOS `inactive`, Android `background`) does not pause the run it is asking for. A grant that lands while the app is away opens the camera only on the next `active`. A throw while counting or rendering fails the run closed (released, manual entry). Native `playback` maps to the generic "Camera isn't available" panel. No start in the background. `frameStats`. tsc holds the native controller and preview to the web surface the camera screen uses. |
-| `support.native` | **The telemetry gate:** the constant is `false`, so support is false even with the module linked, and the camera entry stays on the manual flow. Both gate states are covered (approved + linked → true; approved + not linked, or on web → false). The constant states its reason. With the gate open, true only with the linked module on iOS/Android; Expo Go, older binaries, web and a throwing probe → false. Uses `requireOptionalNativeModule('WsfPoseCamera')`. Stays import-light. |
+| `controller.native` | Public-API parity with `controller.ts`. Full flow: permission → bound for run 1 → ready → GO → 3 → Finish → released. Events of other runs ignored. A permission answer after Stop opens nothing. Denied, throwing or missing module → failure panel. Native error stages mapped. AppState `inactive`/`background` and native interruptions pause and keep banked reps. The OS permission prompt (iOS `inactive`, Android `background`) does not pause the run it is asking for. A grant that lands while the app is away opens the camera only on the next `active`. A throw while counting or rendering fails the run closed (released, manual entry); a listener that throws on every snapshot never escapes a native handler and other listeners still hear the failure. 30 invalid frames in a row fail the run; an accepted frame resets the streak and duplicates never count. With the telemetry gate off, `startCamera` never asks for the camera (`unsupported`). Native `playback` maps to the generic "Camera isn't available" panel. No start in the background. `frameStats`. tsc holds the native controller and preview to the web surface the camera screen uses. |
+| `support.native` | **The telemetry gate:** the real constant is `false`. With `Platform.OS` set to `ios` and to `android` and `requireOptionalNativeModule` returning the linked module (positive control: `nativePoseCameraLinked()` is true), the wired `cameraCounterSupported()` is false with the gate off (the real constant, and `false`) and true only with it on; approved without the module is false. The gate is driven through a test-only module mock of `nativeCameraGate.ts`; production has no seam. The contribute screen is pinned to take `supported` only from `useState(() => cameraCounterSupported())` and to mount `<CameraRepCounter>` only inside `if (cameraOpen)`. The pure `nativeCameraCounterAllowed` covers the remaining cases (approved + not linked, or on web → false). The constant states its reason. With the gate open, true only with the linked module on iOS/Android; Expo Go, older binaries, web and a throwing probe → false. Uses `requireOptionalNativeModule('WsfPoseCamera')`. Stays import-light. |
 | Overlay / preview | react-native-svg rendering: 2 layers × 8 lines, head ring (`fill: none`, r 26–150), both arms drawn at the unmirrored data x, `scaleX(-1)` and `pointer-events: none` on the wrapper. The preview opens the native view only while the binding is active, for that run, and routes events. It renders nothing for a non-native controller. `CameraRepCounter` native slot. |
 | Model | sha256 pinned. Size and GCS md5 match `MODEL_URL`'s object. Task bundle contents. One copy, wired into the podspec and gradle. Swift and Kotlin carry the same pin. |
 | Native sources (static) | Every native file starts with the UNCOMPILED header. Config names the real classes. Module name, props, events and permission functions match on both sides. Engine settings. Camera contract (front, upright, unmirrored, drop-before-inference, ms/ns). Versions. Dependency allowlists. |
-| Privacy (static) | The module's file list is pinned exactly, so a new `.m`/`.mm`/`.h`/`.java` file or an `AndroidManifest.xml` fails the suite. Every compiled source kind is scanned (Swift, Kotlin, Java, ObjC, TS), with block comments and comment-only lines removed and strings kept: a `//` inside a string no longer hides code. The scan finds no photo, movie, audio, asset writer, recorder, encoder or muxer API; no photo library, file write, storage or preferences API; no network, socket or `URL(string:)`; no location, and no fully-qualified `java.io`/`java.net`/`android.location`/`android.media`/`okhttp3` use. Swift imports are limited to the eight reviewed frameworks and Kotlin imports are pinned exactly. The SDK telemetry is disclosed in the types, the podspec and `build.gradle`, and datatransport is **not** excluded. Exactly one camera input and one data output. Permission: video/CAMERA only. The model comes from the app's own assets. The new app files have no storage, network or Firestore. Only `.native` files import the module at runtime. |
+| Privacy (static) | The module's file list is pinned exactly, so a new `.m`/`.mm`/`.h`/`.java` file or an `AndroidManifest.xml` fails the suite. Every compiled source kind is scanned (Swift, Kotlin, Java, ObjC, TS). Comments are removed by a small string-aware scanner and strings are kept: a `//`, `/*` or `*/` inside a string hides nothing, and a code line that starts with `*` is scanned (self-tests for each, delta review N3). The scan finds no photo, movie, audio, asset writer, recorder, encoder or muxer API; no photo library, file write, storage or preferences API; no network, socket or `URL(string:)`; no location, and no fully-qualified `java.io`/`java.net`/`android.location`/`android.media`/`okhttp3` use. Swift imports are limited to the eight reviewed frameworks and Kotlin imports are pinned exactly; indented, attributed (`@preconcurrency`), access-level and `;`-separated imports are caught (self-tested). The SDK telemetry is disclosed in the types, the podspec and `build.gradle`, and datatransport is **not** excluded. Exactly one camera input and one data output. Permission: video/CAMERA only. The model comes from the app's own assets. `app.json` requests exactly `['android.permission.CAMERA']` (exact equality restored, delta review N2). The new app files have no storage, network or Firestore. Only `.native` files import the module at runtime. |
 
-Eleven hand mutants of the adapter, controller, support probe and overlay were run (no ns division, no duplicate drop, no out-of-order drop, no unmirroring, invented visibility, no people cap, no run-token check, no late-permission check, AppState pausing during the permission prompt, support always true, overlay not mirrored). **All eleven were caught** by this suite. Eight more for the #638 review fixes were all caught: gate approved, gate ignored, handlePose without catch, no AppState re-check on grant, native `playback` passed through, unit guessed, the old comment `strip()`, an extra `.m` file in the module.
+Eleven hand mutants of the adapter, controller, support probe and overlay were run (no ns division, no duplicate drop, no out-of-order drop, no unmirroring, invented visibility, no people cap, no run-token check, no late-permission check, AppState pausing during the permission prompt, support always true, overlay not mirrored). **All eleven were caught** by this suite. Eight more for the #638 review fixes were all caught: gate approved, gate ignored, handlePose without catch, no AppState re-check on grant, native `playback` passed through, unit guessed, the old comment `strip()`, an extra `.m` file in the module. Nineteen more for the delta-review follow-ups were all caught: support returns true when linked (J7c), the gate constant true, support ignores the gate, startCamera without the gate, the contribute screen's `|| true` (C1), `emit()` without isolation, no invalid-streak failure, the streak not reset, a Swift `*`-continuation `URLSession` line, `@preconcurrency import Network`, an indented `import Network`, a `"/*"` string hiding `URLSession`, a Kotlin `*`-continuation `java.net` line, `app.json` gaining location and internet permissions, a Kotlin contract edit (`NO_VISIBILITY = 0.0`, caught by the source hash), an unguarded `close()` after a failed inference (A1), the GPU error dropped (A3), Recents re-enabled on stop (A2), and the iOS preview un-hidden on become-active with no run (N1).
 
-Also run here: `npx tsc --noEmit` is clean. `npx expo export --platform ios` and `--platform android` exit 0 with the module absent. The native bundles contain the native controller and preview and **none** of the web controller (`OverconstrainedError`), the synthetic hook (`__WSF_TEST_POSE__`) or the web engine (`FilesetResolver`, `vision_bundle`). `--platform web` exits 0. Re-run after the #638 review fixes: all three exports exit 0; the iOS and Android bundles contain `WsfPoseCamera`, `requestCameraPermissionAsync` and `NATIVE_CAMERA_TELEMETRY_APPROVED`; the web bundle contains none of them (0 matches each) and still contains the web engine.
+Also run here: `npx tsc --noEmit` is clean. `npx expo export --platform ios` and `--platform android` exit 0 with the module absent. The native bundles contain the native controller and preview and **none** of the web controller (`OverconstrainedError`), the synthetic hook (`__WSF_TEST_POSE__`) or the web engine (`FilesetResolver`, `vision_bundle`). `--platform web` exits 0. Re-run after the #638 review fixes: all three exports exit 0; the iOS and Android bundles contain `WsfPoseCamera`, `requestCameraPermissionAsync` and `NATIVE_CAMERA_TELEMETRY_APPROVED`; the web bundle contains none of them (0 matches each) and still contains the web engine. Re-run after the delta-review follow-ups: all three exit 0; the native bundles also contain `MAX_INVALID_STREAK`; the web bundle has 0 matches for `WsfPoseCamera`, `requestCameraPermissionAsync`, `NATIVE_CAMERA_TELEMETRY_APPROVED` and `MAX_INVALID_STREAK`.
 
 ### Checks of the native code that were possible without compiling it
 
@@ -78,8 +78,8 @@ Also run here: `npx tsc --noEmit` is clean. `npx expo export --platform ios` and
 - **Podspec:** loaded and linted with cocoapods-core 1.16.2 (`Pod::Specification::Linter`): **passes**. The one warning left is the expected "git source without a tag" of a local pod.
 - **Kotlin:** superseded by the real compile in "Compile and contract evidence" below.
 - **Swift:** all four files parse with **no syntax errors** under the tree-sitter-swift 0.7.1 grammar. The checker was confirmed to flag a deliberately broken file.
-  - That grammar cannot parse member-level `#if` blocks or `nonisolated(unsafe)`: it also rejects expo-modules-core's own `AppContext.swift`.
-  - So since the review fixes, each file is parsed after keeping only the branch a Swift 6 (Xcode 16) compiler takes.
+  - That grammar cannot parse member-level `#if compiler(...)` blocks or `nonisolated(unsafe)`. (It also rejects expo-modules-core 3.0.30's own `AppContext.swift`, for a different construct: its `#if` inside a getter.)
+  - So `WsfPoseCameraView.swift` and `WsfPoseRun.swift` are parsed as active-branch copies: the branch a Swift 6 compiler (Xcode 16.1+ / 26) takes, with `nonisolated(unsafe)` removed. The other two parse as they are.
   - **Type-check and compile: UNVERIFIED.**
 - **MediaPipe API names** were read from source at tag `v0.10.35`:
   - iOS headers: `PoseLandmarkerOptions` (`numPoses`, `min*Confidence`, `shouldOutputSegmentationMasks`), `BaseOptions.delegate` (`Delegate.CPU/.GPU`), `RunningMode.video`, `MPImage(sampleBuffer:orientation:)`, `detect(videoFrame:timestampInMilliseconds:)`, `NormalizedLandmark.visibility: NSNumber?`.
@@ -116,27 +116,27 @@ PASS run decision: a run that stopped itself (error, detach) is never reopened u
 PASS MEDIAPIPE_VERSION equals build.gradle mediapipeTasksVisionVersion
 PASS contract fixture: the recorded stream -> the onPose events Android would send
 kotlin-jvm: 13 passed, 0 failed
-  android-emitted.json reproduced byte for byte (fa6f1aba1b16be99...)
+  android-emitted.json reproduced byte for byte (d9ff719af9eb431e...; since the delta review it also records the Kotlin sources' sha256)
 ```
 
 **2. Every module file compiled against the real Android framework and the real expo-modules-core sources (no stubs).**
 - Inputs: `android-all` API 34 plus `node_modules/expo-modules-core/android/src/{main/java,withoutCompose}` as source roots.
 - `WsfPoseCameraModule.kt` (the Expo DSL: `Module`, `View`, `Prop`, `Events`, `OnViewDidUpdateProps`, `OnViewDestroys`, `AsyncFunction` with `Promise`, `Permissions` overloads) and `WsfPoseContract.kt` have **0 errors**.
-- The other three files have 115 errors after the review fixes (92 before). **Every one** is either:
+- The other three files have 113 errors after the delta-review follow-ups (115 after the review fixes, 92 before). **Every one** is either:
   - an unresolved reference into `androidx.camera.*` (now including `CameraState`), `androidx.lifecycle.*` (`LifecycleOwner`, `LiveData`, `Observer`) or `com.google.mediapipe.*` (Google Maven, unreachable here); or
   - a cascade on a value of such a type (`cannot infer type`, or a member of `PreviewView`, `ImageProxy`, `ProcessCameraProvider`, `UseCase`, `LiveData`, `CameraState`, `PoseLandmarker` or `NormalizedLandmark`).
-- The new framework calls resolve against android-all API 34 with no error: `Activity.setRecentsScreenshotEnabled`, `Build.VERSION_CODES.TIRAMISU` and `View.onWindowFocusChanged`.
+- The new framework calls resolve against android-all API 34 with no error: `Activity.setRecentsScreenshotEnabled`, `Build.VERSION_CODES.TIRAMISU`, `View.onWindowFocusChanged`, `View.onAttachedToWindow`, `View.hasWindowFocus`, and `Throwable.addSuppressed` / `LinkageError` / `VirtualMachineError` (JDK).
 - No React Native, Expo or Android-framework symbol is unresolved in module files.
 - The script fails if the Module or Contract file gains an error, or if any other import goes unresolved.
 - The 1144 errors inside expo-modules-core itself come from React Native and AndroidX jars being absent. They are not ours.
 
 ```
-  errors in module files: 115
+  errors in module files: 113
     WsfPoseCameraModule.kt       0
-    WsfPoseCameraView.kt         13
+    WsfPoseCameraView.kt         12
     WsfPoseContract.kt           0
     WsfPoseModel.kt              21
-    WsfPoseRun.kt                81
+    WsfPoseRun.kt                80
   OK: WsfPoseCameraModule.kt and WsfPoseContract.kt compile clean; unresolved imports are only androidx.camera / androidx.lifecycle / com.google.mediapipe
 ```
 
@@ -146,14 +146,14 @@ kotlin-jvm: 13 passed, 0 failed
   - missing visibility;
   - nobody in frame;
   - four people.
-- The JVM run of the real `WsfFrameClock` + `WsfPoseContract` writes `android-emitted.json` (315 events, hash-linked to the input).
+- The JVM run of the real `WsfFrameClock` + `WsfPoseContract` writes `android-emitted.json` (315 events, hash-linked to the input). Since the delta review (N5) it also records the sha256 of `WsfPoseContract.kt` and `WsfPoseContractTest.kt`, and vitest compares them with the files in the tree: an edit to the Kotlin contract fails vitest until `run-kotlin-jvm.sh --update` is re-run. The script also re-extracts `fbjni-classes.jar` from the pinned AAR every run.
 - The test asserts:
   - the Kotlin events equal the contract's events exactly;
   - the Kotlin events, through `nativeEngine.ts`, give PoseFrames **identical** to the web `mapPerson` normalisation of the same stream;
   - both drive the real frozen session to identical snapshots (GO at 1.5 s, then set 3).
 
 **4. iOS:** no Swift compiler is reachable. `docs/westayfit/qa/camera-evidence/ios-api-crosscheck.md` cites, for every MediaPipe, Expo, AVFoundation, CoreMedia, CoreVideo, Foundation and CryptoKit call, the exact declaration line and the rule that gives its Swift spelling.
-- Sources: MediaPipe v0.10.35 headers and BUILD, expo-modules-core 3.0.30, and iOS 18.0 SDK headers from the third-party `xybp888/iOS-SDKs` mirror.
+- Sources: MediaPipe v0.10.35 headers and BUILD, expo-modules-core 3.0.30, and iOS 18.0 SDK headers from the third-party `xybp888/iOS-SDKs` mirror. The delta-review symbols are also cited in the iOS **26.0** SDK, which EAS uses by default for SDK 54 (see first-compile risk 7).
 - It confirms `import MediaPipeTasksVision` exposes every header used.
 - The AVCaptureSession notification constants are spelled differently by SDK generation:
   - iOS 18 SDK: `AVCaptureSession.wasInterruptedNotification` / `.runtimeErrorNotification` (NS_SWIFT_NAME).
@@ -170,42 +170,59 @@ kotlin-jvm: 13 passed, 0 failed
 
 ## MediaPipe SDK usage telemetry — BLOCKING, owner decision required
 
-**What the review found** (#638 finding 1 / F1, confirmed twice by adversarial verification). The binaries were inspected through their NuGet repackages, because dl.google.com is blocked:
-- **iOS:** `MediaPipeTasksCommon` 0.10.35 links `ClearcutLoggingClient` and POSTs to `play.googleapis.com/log`.
-- **Android:**
-  - `tasks-vision` 0.10.29 (and 0.10.35) depends on `tasks-core`, which pulls `com.google.android.datatransport` (`transport-api`, `transport-backend-cct`, `transport-runtime`).
-  - The merged manifest gains `ACCESS_NETWORK_STATE`, a `JobInfoSchedulerService` JobService, an `AlarmManagerSchedulerBroadcastReceiver` and `TransportBackendDiscovery`.
-  - `TaskRunner` builds a stats logger whose `RemoteLoggingClient` sends through DataTransport. It queues locally and uploads later.
-- **What is sent** whenever a pose landmarker is created and while it runs: task name, running mode, app id (bundle id / package name), app version, OS version, frame counts and latencies.
-- **What is not sent:** camera frames, images or landmarks. No footage leaves the device.
-- The **web** package 0.10.35 has no logger. That is why the Director pinned web to 0.10.35 (`engine.ts`). That reasoning does **not** carry over to the native SDKs.
+**What the review found** (#638 finding 1 / F1, confirmed twice by adversarial verification; the Android list completed by the delta review at `3edaf5f5`, finding A, from `javap` of the binaries). The binaries were inspected through their NuGet repackages, because dl.google.com is blocked.
+
+**iOS:** `MediaPipeTasksCommon` 0.10.35 links `ClearcutLoggingClient` and POSTs to `play.googleapis.com/log` (per the delta review the logger keeps its queue in memory: `CreateTasksLogger` passes an empty log directory).
+- **What MediaPipe hands its logger** (open source at v0.10.35: `MPPTaskRunner.mm:55-72`, `task_runner.cc:102-111`, `tasks_logger.h`): task name, running mode, host system and environment (iOS), iOS version, bundle id and app version (`CFBundleShortVersionString`); then session start, clone and end; CPU/GPU input, finished and dropped frame counts; total and peak latency; elapsed time; init errors.
+- **What the Clearcut client adds to each request on iOS: NOT confirmed.** The delta review found no `UIDevice`, `sysctl`, `NSLocale` or CoreTelephony reference in the Clearcut objects, which suggests no device or carrier fields, but nobody decoded an upload. The first device capture under option A must record it.
+
+**Android:** `tasks-vision` 0.10.29 (and 0.10.35) depends on `tasks-core`, whose `TaskRunner` builds a stats logger; its `RemoteLoggingClient` sends through `com.google.android.datatransport` (`transport-api`, `transport-backend-cct`, `transport-runtime`; log source `COREML_ON_DEVICE_SOLUTIONS`). Each event is queued on the device (SQLite) and uploaded later via JobScheduler or AlarmManager.
+- **MediaPipe's own fields** (`TasksStatsProtoLogger`): package name, versionCode and platform; task (solution) name, event name and running mode; session start, clone and end with init latency; invocation counts by input type, dropped count, elapsed time, average and peak latency; error code. **MediaPipe itself does not read the OS version.**
+- **DataTransport's CCT decoration** (`CctTransportBackend.decorate`, then `AndroidClientInfo` and `LogEvent`; checked in transport-backend-cct 4.0.0.5; `DefaultScheduler` decorates before it persists, so every queued MediaPipe event carries it): device model, manufacturer, hardware, device and product names, build fingerprint, OS build id and SDK version; locale and country; SIM MCC/MNC (`TelephonyManager.getSimOperator`); network type and mobile subtype; timezone offset; the app build number (`application_build`, the versionCode); the event's wall-clock and uptime timestamps.
+
+**Both platforms:** each upload reaches Google from the device's IP address. **Not sent:** camera frames, images or landmarks. No footage leaves the device.
+
+**Where DataTransport comes from (correction, delta review B).** DataTransport and its manifest entries (`ACCESS_NETWORK_STATE`, `JobInfoSchedulerService`, `AlarmManagerSchedulerBroadcastReceiver`, `TransportBackendDiscovery`) are **already in every Android build of this app, with or without this module**: `expo-dev-launcher` 6.0.21 declares `com.google.mlkit:barcode-scanning:17.3.0` (`android/build.gradle:112`), which pulls ML Kit common and DataTransport, and Expo autolinking adds every module as `api` for all variants (`ExpoAutolinkingPlugin.kt:42`). ML Kit's `MlKitInitProvider` runs at launch but has no eager components, so it does not start `TransportRuntime`. What MediaPipe adds is a **caller** (`RemoteLoggingClient`). An earlier version of this record credited the manifest entries to MediaPipe; that was wrong.
+
+The **web** package 0.10.35 has no logger. That is why the Director pinned web to 0.10.35 (`engine.ts`). That reasoning does **not** carry over to the native SDKs.
+
+**With the gate off, nothing starts** (delta review, from source and binaries): no code path creates a PoseLandmarker or TaskRunner, shows the camera prompt or opens the camera. iOS: the force-loaded graph library has no Clearcut or network symbols; the Clearcut static initialisers only build a mutex and a map; `GTMSessionFetcher` / `GTMSessionUploadFetcher` `+load` only add a did-finish-launching observer that reconnects persisted background sessions, of which there are none. Android: the MediaPipe and DataTransport AAR manifests declare no ContentProvider, startup initializer or boot receiver, and the scheduler entry points only run for jobs scheduled after `TransportRuntime.initialize`. First-build checks for this are below.
 
 **What this branch does until the owner decides.**
-- **Fail closed.** `support.native.ts` has `export const NATIVE_CAMERA_TELEMETRY_APPROVED: boolean = false`, commented with the reason and this review. `cameraCounterSupported()` returns `nativeCameraCounterAllowed(NATIVE_CAMERA_TELEMETRY_APPROVED)`, so it is false on every native build and members see only the manual squat flow. Tests cover both states of the gate.
+- **Fail closed.** `src/movement-camera/nativeCameraGate.ts` has `export const NATIVE_CAMERA_TELEMETRY_APPROVED: boolean = false`, commented with the reason, the per-platform list and this review. `support.native.ts` re-exports it, and `cameraCounterSupported()` returns `nativeCameraCounterAllowed(NATIVE_CAMERA_TELEMETRY_APPROVED)`, so it is false on every native build and members see only the manual squat flow.
+- **Defence in depth** (delta review E): `controller.native.ts` `startCamera` refuses while the gate is off (`unsupported` failure, manual entry) and never calls `requestCameraPermissionAsync`, so a second mount of the camera screen could not start the SDK either.
+- **Tests cover both states through the real code:** with `Platform.OS` set to `ios` and `android` and the linked module, the wired `cameraCounterSupported()` is false with the gate off and true only with it on; the controller asks for the camera only with it on. The contribute screen's wiring is pinned. Mutation-checked (see "What is tested here").
 - The module code, the parity tests and the contract evidence all stay. A device test needs a reviewed dev-only change that sets the constant to `true`.
-- **Disclosure.** The privacy claims in `src/WsfPoseCamera.types.ts`, `WsfPoseCamera.podspec`, `android/build.gradle`, the Swift/Kotlin run headers and `controller.native.ts` now say what is true:
+- **Disclosure.** The privacy text in `src/WsfPoseCamera.types.ts`, `WsfPoseCamera.podspec`, `android/build.gradle`, `nativeCameraGate.ts`, the Swift/Kotlin run headers and `controller.native.ts` now says, per platform, what is above:
   - the module's own code records, stores and sends nothing;
-  - the MediaPipe SDK sends the usage telemetry above.
-  - The PR body needs the same correction (wording in the reply to the integrator; GitHub is not edited from here).
+  - the MediaPipe SDK sends the usage telemetry above (iOS: MediaPipe's fields, Clearcut additions not confirmed; Android: MediaPipe's fields plus the CCT decoration).
+  - The PR body needs the same correction (text handed to the integrator; GitHub is not edited from here).
 - **Not done, on purpose:** `exclude group: 'com.google.android.datatransport'`. `RemoteLoggingClient` would then throw `NoClassDefFoundError` at landmarker creation. A test forbids the exclude.
 - **No user-facing copy was written.** The `NSCameraUsageDescription` in `app.json` belongs to NATIVE-BUILD-1 and is unchanged. It reads "No video or photos are recorded, saved or uploaded": true for media, silent on the SDK's usage telemetry. **Flagged** for the owner and BUILD-1. If option A is chosen, it and any member copy ("nothing is recorded") need an owner-approved review.
 
 **Options for the owner.**
 - **A. Accept and disclose.**
   - Keep the SDKs and set the gate to `true` in a reviewed change.
-  - Disclose in the App Store privacy label (usage / diagnostics data linked to the app id) and the Play data-safety form (app interactions / diagnostics; collected; not shared).
+  - Disclose per platform, from the corrected lists above (proposals; the owner and the store forms decide):
+    - **App Store privacy label (iOS):** diagnostics (performance data: frame counts, latencies, init errors) and usage data (product interaction: landmarker sessions), with the bundle id, app version and iOS version. Re-check against the first decoded Clearcut upload, since what Clearcut adds is not confirmed.
+    - **Play data-safety form (Android):** app info and performance (diagnostics). Its description must also cover what CCT attaches to every event: device model and manufacturer, build fingerprint, OS build and SDK version, locale and country, SIM MCC/MNC, network type, timezone offset and event timestamps. Collected; sent to Google by the SDK. These are diagnostic metadata rather than per-device identifiers, so "diagnostics" still roughly fits, but the list under it must be complete.
   - Review the camera purpose string and member copy.
-  - Change proof step 10 to: "only MediaPipe's Clearcut / DataTransport calls appear, with no image or landmark payloads".
+  - Run proof step 10 as written for option A (a differential capture).
 - **B. Reject.**
   - Keep the gate `false` until telemetry-free binaries exist: MediaPipe Tasks built from source, where `CreateTasksLogger` / `TasksStatsLoggerFactory` return the dummy logger by default.
   - Vendor them with pinned hashes, and re-review.
-  - Alternatives the review lists, each a larger change: strip the datatransport components from the merged manifest plus a 24 h device capture; or run the `.tflite` models directly on LiteRT.
+  - Alternatives the review lists, each a larger change: strip the datatransport components from the merged manifest plus a 24 h device capture (those components also serve ML Kit in `expo-dev-launcher`, so stripping them affects the dev launcher's barcode scanner); or run the `.tflite` models directly on LiteRT.
+  - Optionally, until then, keep the module out of member binaries with `expo.autolinking.exclude: ["wsf-pose-camera"]` in `package.json` (a config change for the owner), so no shipped binary contains a reachable telemetry SDK.
 
 **First EAS build checks (record the output in this file).**
-- Android: `./gradlew :app:dependencies --configuration releaseRuntimeClasspath | grep datatransport` (expect `transport-api` / `transport-backend-cct` / `transport-runtime` under `tasks-core`).
-- Android: inspect the merged manifest (`app/build/intermediates/merged_manifests/*/AndroidManifest.xml`) for `ACCESS_NETWORK_STATE`, `JobInfoSchedulerService`, `AlarmManagerSchedulerBroadcastReceiver` and `TransportBackendDiscovery`.
-- Android: `javap -c` on `TasksStatsLoggerFactory` inside `tasks-core-0.10.29.aar`. If it returns `TasksStatsDummyLogger`, this finding drops to a wording fix.
+- Android, attribution: `./gradlew :app:dependencyInsight --configuration releaseRuntimeClasspath --dependency com.google.android.datatransport:transport-runtime` (expect two paths: `tasks-core`, and ML Kit via `expo-dev-launcher`). A plain `dependencies | grep datatransport` cannot attribute it.
+- Android, manifest: diff the merged manifest (`app/build/intermediates/merged_manifests/*/AndroidManifest.xml`) against a build with `expo.autolinking.exclude: ["wsf-pose-camera"]`. Expect no difference in the DataTransport entries, because ML Kit brings them either way.
+- Android: `javap -c` on `TasksStatsLoggerFactory` inside `tasks-core-0.10.29.aar`. If it returns `TasksStatsDummyLogger`, the Android finding drops to a wording fix.
 - iOS: `nm -m` on `Pods/MediaPipeTasksCommon/frameworks/MediaPipeTasksCommon.xcframework/ios-arm64/…` and on the graph library; look for `ClearcutLoggingClient`.
+- **Gate off, on a fresh install** (both platforms): open the app and complete a manual squat contribution behind a proxy. Then confirm:
+  - no traffic to `play.googleapis.com/log` or `firebaselogging*.googleapis.com` (a development client also talks to Metro and `api.expo.dev`, and to ML Kit Firelog if the dev launcher's QR scanner is used; note those separately);
+  - Android: `adb shell dumpsys jobscheduler | grep -i com.westayfit.app` lists no DataTransport `JobInfoSchedulerService` job, and `adb shell run-as com.westayfit.app ls databases` has no `com.google.android.datatransport.events`;
+  - iOS: a cold launch shows no `play.googleapis.com` request, and the app's `NSUserDefaults` hold no `GTMSessionFetcher` background-session key.
 - **Informational (privacy-8):** the iOS `MediaPipeTasksCommon` binary also links `MPPAudioRecord` / `AVAudioSession` (`AVAudioSessionCategoryPlayAndRecord`). This module never calls it.
   - There is no `NSMicrophoneUsageDescription`, so any microphone access would crash rather than record; Android `RECORD_AUDIO` stays blocked.
   - At the first TestFlight upload, record any ITMS-90683 "missing purpose string" warning. Do **not** add a microphone string to silence it without owner review.
@@ -251,7 +268,8 @@ kotlin-jvm: 13 passed, 0 failed
   - the camera indicator going off within 1 s;
   - visibility actually populated by native MediaPipe. If it is missing, readiness is never reached: the app fails closed, but the camera would be useless.
 - **UNVERIFIED, review fixes that need a device to judge:**
-  - **App-switcher snapshot.** iOS hides the preview layer on `willResignActive`. Android hides the `PreviewView` on window-focus loss, and on API 33+ disables the Recents screenshot while a run is open. Check the switcher / Recents thumbnail mid-set.
+  - **App-switcher snapshot.** iOS shows the preview layer only while a run is open and the app is active (hidden on `willResignActive` and on every stop). Android: on API 33+ the Recents screenshot is disabled for as long as the camera view is attached (delta review A2: no longer re-enabled by a stop that races the snapshot), and a black cover hides the preview whenever no run is open or the window lost focus. Device checks (API 33+ and API 31): (a) 3-button Home mid-set, then Recents: the thumbnail is blank or the app theme; (b) pause, then Home: no camera frame in the thumbnail; (c) pull the notification shade down mid-set: `frameStats.accepted` keeps rising (the cover leaves the `PreviewView` visible, so its TextureView keeps consuming frames).
+  - **iOS frozen frame (delta review N1).** Start a run, pull down Control Center, dismiss it: the preview area is black (paused), not a frozen frame; Resume shows live video.
   - **CameraX camera-state errors** (in use → paused; critical → failure). Check with another app holding the camera.
   - **The shared iOS session queue.** Finish then Start, 10× in a row: every time `onCameraReady`, with no error or interruption.
 - **Left open:**
@@ -270,12 +288,13 @@ iOS (`eas build --profile development --platform ios`, then the pod install and 
 4. `ExpoView` (`ExpoFabricView` under the new architecture) subclass: `required init(appContext:)` only, and `EventDispatcher` properties named exactly as `Events(...)`.
 5. `AVCaptureConnection.videoRotationAngle` / `isVideoRotationAngleSupported` need the iOS 17 SDK (Xcode 15+). The `videoOrientation` fallback gives deprecation warnings only.
 6. The resource bundle `WsfPoseCameraModel.bundle` must be in the app bundle. Otherwise `WsfPoseModel.modelPath()` throws `modelMissing` (shown as the `model` failure). Xcode 14+ resource-bundle signing needs CocoaPods ≥ 1.12.
-7. Swift language mode 5.9 under the Xcode 16 compiler: concurrency warnings are possible, not errors. `nonisolated(unsafe) private var run` (review IOS-7) is guarded by `#if compiler(>=5.10)`.
+7. **Toolchain: Xcode 26.0, not 16.** `eas.json` sets no `ios.image`, so EAS uses `auto`; the SDK 54 image is `macos-sequoia-15.6-xcode-26.0` (Xcode 26.0, Swift 6.2, iOS 26.0 SDK; expo docs `build-reference/infrastructure.mdx`). React Native 0.81.5 refuses Xcode below 16.1 (`scripts/cocoapods/helpers.rb:87-88`), so the `#else` branches of the `#if compiler(...)` blocks never compile for this app. Swift language mode 5.9 under the Xcode 16.1+/26 (Swift 6.x) compiler: concurrency warnings are possible, not errors. `nonisolated(unsafe) private var run` (review IOS-7) is guarded by `#if compiler(>=5.10)`. Every delta symbol was re-cited in the iOS 26.0 SDK (`ios-api-crosscheck.md`).
 8. Review fixes to compile-check:
    - the static shared `sessionQueue`;
    - `AVCaptureSession.wasInterruptedNotification` / `.runtimeErrorNotification` under `#if compiler(>=6.0)`;
    - `UIApplication.willResignActiveNotification` / `didBecomeActiveNotification` selector observers;
-   - `CATransaction.setDisableActions`.
+   - `CATransaction.setDisableActions`;
+   - `UIApplication.shared.applicationState` read in `init` (delta review N1).
 9. **Telemetry check:** `nm -m` on `MediaPipeTasksCommon` for `ClearcutLoggingClient` (see the BLOCKING section).
 
 Android (`eas build --profile development --platform android`, Gradle log):
@@ -291,14 +310,14 @@ Android (`eas build --profile development --platform android`, Gradle log):
    - `appContext.currentActivity as? LifecycleOwner` must be non-null, otherwise the `playback` failure shows;
    - `PreviewView` must lay out inside `ExpoView` (`shouldUseAndroidLayout` and `onLayout`). A black preview with landmarks still arriving means layout, not the camera.
 6. A release (preview profile) build with minify on keeps MediaPipe and Flogger classes through `consumerProguardFiles` (Flogger added for review F9: MediaPipe's `Graph` static initializer fails under R8 renaming without it).
-7. **Telemetry checks** (see the BLOCKING section): the `datatransport` dependency grep and the merged-manifest inspection.
+7. **Telemetry checks** (see the BLOCKING section): `dependencyInsight` for transport-runtime (both paths), the merged-manifest diff against a build with the module excluded, and the gate-off checks.
 8. **16 KB pages (review F7):** `zipalign -c -P 16 -v 4 app.apk`, or `llvm-readelf -l lib/arm64-v8a/libmediapipe_tasks_vision_jni.so | grep LOAD` (Align must be `0x4000`).
    - MediaPipe added `max-page-size=16384` between v0.10.26 and v0.10.32, so 0.10.29's alignment is unknown.
    - If it is 4 KB-aligned, move to 0.10.35; its JNI library is renamed `libmediapipe_tasks_jni.so`, which is internal to the AAR.
    - Also check CameraX's `libimage_processing_util_jni.so`.
-9. Review fixes to compile-check: the `CameraState` `LiveData` observer and its removal; `Activity.setRecentsScreenshotEnabled` (API 33, guarded); `MPImage.close()` / `Bitmap.recycle()`.
+9. Review fixes to compile-check: the `CameraState` `LiveData` observer and its removal; `Activity.setRecentsScreenshotEnabled` (API 33, guarded) in `onAttachedToWindow` / `onDetachedFromWindow`; the black cover `View`; `MPImage.close()` / `Bitmap.recycle()`; `closeQuietly`; `addSuppressed` in the GPU→CPU fallback.
 
-JS (both): the bundle already exports with the module absent. With the telemetry gate `false`, `cameraCounterSupported()` must stay **false on every build**, the dev client included. Only a reviewed dev-only change that sets `NATIVE_CAMERA_TELEMETRY_APPROVED = true` makes it true, and then only where the module is linked; in Expo Go it must stay false.
+JS (both): the bundle already exports with the module absent. With the telemetry gate `false`, `cameraCounterSupported()` must stay **false on every build**, the dev client included, and `startCamera` refuses as well. Only a reviewed dev-only change that sets `NATIVE_CAMERA_TELEMETRY_APPROVED = true` in `nativeCameraGate.ts` makes it true, and then only where the module is linked; in Expo Go it must stay false.
 
 ## Device proof plan (dev build on a real iPhone and a mid-range Android; pass criteria are proposals for owner sign-off)
 
@@ -333,20 +352,18 @@ A dev-only HUD is **not built**. `RepCounterController.frameStats` (accepted, du
    - 2 devices × ≥ 2 subjects × 3 sets of 10, plus 1 fast set and 1 set with 3 deliberate half-squats.
    - Proposed pass: |camera − manual| ≤ 1 per set; half-squats add 0.
    - **Parity**: mobile web on the same phone vs the native build. Note the Android MediaPipe version above.
-10. **Privacy.** This step cannot pass as "no requests": the SDKs send usage telemetry.
-    - With a network inspector (and, on Android, `adb shell dumpsys jobscheduler | grep datatransport`, because DataTransport uploads later through JobScheduler), the only traffic is MediaPipe's:
-      - iOS: Clearcut to `play.googleapis.com/log`;
-      - Android: DataTransport to the Firelog / `firebaselogging*.googleapis.com` endpoints.
-    - No request carries image or landmark payloads. Any other request fails the step.
-    - Under option B the expectation is none at all.
-    - The app container does not grow over a session, apart from DataTransport's local event queue on Android (record its size).
+10. **Privacy** (restated by the delta review, finding C). The contribute flow around the camera talks to Firebase Auth, Firestore and Functions, and a development client talks to Metro and `api.expo.dev`, so "no other request" cannot pass on any build. The step is a **differential** check:
+    - **Gate off (every build, today):** with a network inspector, a manual squat contribution shows **no MediaPipe, Clearcut or CCT traffic**: nothing to `play.googleapis.com/log` (iOS) or `firebaselogging*.googleapis.com` (Android). On Android, `adb shell dumpsys jobscheduler | grep -i com.westayfit.app` lists no DataTransport job and `adb shell run-as com.westayfit.app ls databases` has no `com.google.android.datatransport.events`. Firebase and dev-client traffic is expected and recorded as the baseline.
+    - **Gate on (option A only, a reviewed dev-only build):** capture the same squat flow. The only new hosts allowed are `play.googleapis.com/log` (iOS) and `firebaselogging*.googleapis.com` (Android, uploaded later through JobScheduler or AlarmManager), and **no request body contains image or landmark data**. Record the decoded iOS Clearcut payload (what Clearcut adds is not confirmed).
+    - **Storage (option A):** list the app container before and after a session (iOS `Library/`, `Library/Caches`, `tmp`; Android files and databases) and record any Clearcut log directory or file (iOS) and DataTransport's event queue and its size (Android).
+    - Under option B the expectation is no MediaPipe traffic at all, gate on or off.
     - The static scan here passes.
 
 ## Review of #638 (PASS WITH REQUIRED CHANGES @ `abe84f45`): fixes applied
 
 | Finding | Status |
 |---|---|
-| **1 / F1 (blocking): MediaPipe SDK usage telemetry** | **Gated and disclosed.** `NATIVE_CAMERA_TELEMETRY_APPROVED = false` (both states tested). Disclosure in types / podspec / gradle / headers / QA. datatransport deliberately not excluded (tested). First-build checks and options A/B recorded. The owner decision is pending. |
+| **1 / F1 (blocking): MediaPipe SDK usage telemetry** | **Gated and disclosed.** `NATIVE_CAMERA_TELEMETRY_APPROVED = false` (both states tested; since the delta review through the wired entry point on iOS and Android). Disclosure in types / podspec / gradle / headers / QA. datatransport deliberately not excluded (tested). First-build checks and options A/B recorded. The owner decision is pending. |
 | Frozen-lens 1: AppState not re-checked when the permission answer arrives | **Fixed.** A grant while away opens the camera only on the next `active` (tested). |
 | Frozen-lens 2: a throw in handlePose escapes | **Fixed.** It fails the run with `inference`: released, manual entry (tested). |
 | Frozen-lens 3: build-time opt-in before member builds | **Superseded** by the telemetry gate, which is stricter: no native build opens the camera until a reviewed approval. |
@@ -355,7 +372,7 @@ A dev-only HUD is **not built**. `RepCounterController.frameStats` (accepted, du
 | Frozen-lens 6: the unit is guessed when missing | **Fixed.** `timestampUnit` is required in the contract; a missing unit is dropped (tested). |
 | Privacy-2: the scan misses .m/.mm/.h/.java/manifest | **Fixed.** Exact module file list, no `AndroidManifest.xml`, all source kinds scanned. |
 | Privacy-3: equivalent recording / network / location APIs | **Fixed.** Extended list, FQN regex, pinned Swift and Kotlin imports. |
-| Privacy-4: `strip()` treats `//` in strings as a comment | **Fixed.** Only comment-only lines and block comments are removed (tested with `"a//b"`). |
+| Privacy-4: `strip()` treats `//` in strings as a comment | **Fixed**, and since the delta review (N3) by a string-aware scanner (tested with `"a//b"`, `"/*"`, `*`-continuation lines). |
 | Privacy-5: app-switcher snapshot | **Fixed in code, device check open.** iOS hides on resign-active; Android hides on focus loss and disables the Recents screenshot on API 33+. |
 | Privacy-6 / F2: Errors (UnsatisfiedLinkError, NoClassDefFoundError, OOM) crash Android | **Fixed.** `Throwable` caught in bind, loadModel, the GPU→CPU fallback, detectForVideo and analyze. |
 | Privacy-7 / F6: per-frame bitmaps not freed | **Fixed.** `MPImage.close()` (recycles the upright bitmap) and the source bitmap recycled after rotation. |
@@ -378,6 +395,29 @@ A dev-only HUD is **not built**. `RepCounterController.frameStats` (accepted, du
 | Web-4: playwright-config test flake under load | **Not this lane's file.** The full run uses `--testTimeout=30000`. |
 | Web-5: e2e not run | **Open.** Run `npm run test:e2e -- move-camera-counter.spec.ts` against the emulator build before merge. |
 
+## Delta review of #638 (PASS @ `3edaf5f5`): follow-ups applied
+
+| Finding | Status |
+|---|---|
+| **A (telemetry lens): the Android disclosure is incomplete** | **Fixed (wording).** Per-platform lists in `types.ts`, `nativeCameraGate.ts`, `build.gradle`, the podspec (iOS), this record and the options A/B text. Android: MediaPipe's own fields plus the CCT decoration (`CctTransportBackend.decorate`, re-checked with `javap` here). iOS: only what `MPPTaskRunner` hands the logger; what Clearcut adds is stated as NOT confirmed. The disclosure test requires the new fields. |
+| B: manifest entries credited to MediaPipe | **Fixed.** `build.gradle` and this record: DataTransport is already in every Android build through `expo-dev-launcher` → ML Kit; MediaPipe adds a caller. First-build checks now use `dependencyInsight` and a merged-manifest diff against a build without the module. |
+| C: proof step 10 cannot pass | **Fixed.** Restated as a differential check: gate off, no MediaPipe / Clearcut / CCT traffic; gate on (option A only), no image or landmark payloads. |
+| D / JS N1: the "both states" test ran on web | **Fixed.** With `Platform.OS` `ios` and `android` and a linked module, the wired `cameraCounterSupported()` is false with the gate off and true with it on. The contribute screen's `useState(() => cameraCounterSupported())` and the `if (cameraOpen)` mount are pinned. Mutation-checked (J7c bypass, constant true, gate ignored, C1 `\|\| true`: all caught). |
+| E: a JS-only gate | **Fixed.** `startCamera` refuses while the gate is off (tested). The gate moved to `nativeCameraGate.ts`, shared by the two native readers. The optional autolinking exclusion is listed under option B as an owner decision (a config change). |
+| A1: `PoseLandmarker.close()` can throw | **Fixed.** `closeQuietly` at all three sites (stop, loadModel when stopped, failed inference). |
+| A2: the Recents re-enable races the snapshot | **Fixed in code, device check open.** On API 33+ the Recents screenshot is disabled while the view is attached (re-enabled on detach and destroy), so no JS round trip races it. A black cover replaces `PreviewView` visibility, so the TextureView keeps consuming frames under the notification shade. Device checks (a)–(c) are listed above. |
+| A3: the GPU error is lost when the CPU retry fails | **Fixed.** The CPU error carries the GPU error (`addSuppressed`), and both reach the `model` failure message; linkage and VM errors are not retried. |
+| iOS N1: the preview un-hides with no run | **Fixed.** Visible only while a run is open and the app is active; `applicationState` read at init. Device check listed. |
+| iOS N2: launch-time inertness not recorded; iOS container | **Recorded** (telemetry section: gate-off launch checks; step 10 storage check). |
+| iOS N3: Xcode 26, not 16 | **Fixed.** First-compile risk 7 and the cross-check name EAS `auto` → `macos-sequoia-15.6-xcode-26.0` for SDK 54; delta symbols re-cited in the iOS 26.0 SDK; the AppContext.swift remark corrected. |
+| iOS N4: PR body tree-sitter claim | **Fixed** in the corrected PR body handed to the integrator. |
+| JS N2: exact Android permissions | **Fixed.** `toEqual(['android.permission.CAMERA'])` restored; it is exactly what `app.json` holds. |
+| JS N3: privacy-scan holes | **Fixed.** String-aware comment stripping (no `*`-line rule), wider Swift and Kotlin import patterns; a self-test for each hole. |
+| JS N4: invalid frames dropped silently forever | **Fixed.** 30 in a row fail the run (`inference`); tested both ways. |
+| JS N5: the Kotlin↔JS evidence can go stale | **Fixed.** The fixture records the sha256 of `WsfPoseContract.kt` and `WsfPoseContractTest.kt`; vitest checks it (a contract edit was mutation-tested: caught). `fbjni-classes.jar` is re-extracted every run. |
+| JS N6: `emit()` does not isolate listener errors | **Fixed.** Per-listener try/catch; the run fails closed once (tested with a listener that always throws). |
+| JS N7: base line, shared-edit line, scan wording | **Fixed.** Header base `9e9dc2ca` merged at `7411c47b`; the PR body lists every shared edit; the scan wording matches what is enforced. |
+
 ## Deviations from the research report, and why
 
 - **Podspec at the module root**, not `ios/`. CocoaPods file patterns cannot climb out of the pod root with `..`, and the single shared model lives in `assets/`. `expo-module.config.json` `apple.podspecPath` points to it; autolinking resolves it (checked).
@@ -397,9 +437,9 @@ A dev-only HUD is **not built**. `RepCounterController.frameStats` (accepted, du
 ```sh
 cd apps/westayfit
 npx tsc --noEmit
-npx vitest run tests/move-camera-native-adapter.test.ts     # 61 tests
-npx vitest run --testTimeout=30000                          # 68 files, 1361 tests (after the #638 review fixes)
-npx vitest run tests/move-camera-native-contract.test.ts    # 6 tests: Kotlin <-> JS contract
+npx vitest run tests/move-camera-native-adapter.test.ts     # 68 tests
+npx vitest run --testTimeout=60000                          # 68 files, 1369 tests (after the delta-review follow-ups)
+npx vitest run tests/move-camera-native-contract.test.ts    # 7 tests: Kotlin <-> JS contract, tied to the Kotlin sources
 docs/westayfit/qa/camera-evidence/run-kotlin-jvm.sh         # from the repo root; Kotlin JVM tests + module compile report
 npx expo export --platform ios --output-dir /tmp/exp-ios
 npx expo export --platform android --output-dir /tmp/exp-android
