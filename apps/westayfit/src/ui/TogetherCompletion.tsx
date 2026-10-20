@@ -73,6 +73,85 @@ export function togetherAnnouncement(o: {
   return `${amount} Shared total: ${totalOfTargetLabel(o.shared.total, o.shared.target, o.shared.unit)}.`;
 }
 
+/**
+ * EXACTLY ONCE PER RECEIPT (native). One mounted TogetherCompletion is one
+ * receipt on screen: the contribute screen shows a new receipt only after the
+ * previous one has left (a new `lastResult` follows a cleared one), so a mount
+ * is the moment a receipt appears and it announces then — whether or not it
+ * moves, fresh or replayed. Prop updates after mount never announce.
+ *
+ * The one thing a mount count alone would get wrong is the SAME receipt
+ * mounting again without having left: a structural remount (the screen's
+ * wrapper changing shape around it) or React's development double-invoke.
+ * Both unmount and mount in the same synchronous effect flush. So the last
+ * announced receipt is remembered by its confirmed content while any instance
+ * shows it, and for the rest of the flush in which the last one unmounted; a
+ * mount of that same receipt inside that window adopts the announcement
+ * instead of repeating it. The memory is cleared in a microtask, so a receipt
+ * that appears later — even with identical figures — is announced again.
+ */
+type AnnouncedReceipt = { key: string; holders: number; releasing: boolean };
+let announcedReceipt: AnnouncedReceipt | null = null;
+
+export function togetherReceiptKey(o: {
+  eyebrow: string;
+  amountText: string;
+  unit: string | null;
+  shared: { total: number; target: number; unit: string } | null;
+}): string {
+  return JSON.stringify([
+    o.eyebrow,
+    o.amountText,
+    o.unit ?? '',
+    o.shared ? [o.shared.total, o.shared.target, o.shared.unit] : null,
+  ]);
+}
+
+/** Speaks `message` once: queued behind current speech on iOS, plain on Android. */
+function announce(message: string): void {
+  const withOptions = (AccessibilityInfo as { announceForAccessibilityWithOptions?: unknown })
+    .announceForAccessibilityWithOptions;
+  if (typeof withOptions === 'function') {
+    AccessibilityInfo.announceForAccessibilityWithOptions(message, { queue: true });
+  } else {
+    AccessibilityInfo.announceForAccessibility(message);
+  }
+}
+
+/**
+ * Claims the announcement for a receipt appearing now. Returns whether this
+ * mount must speak, and the release to call on unmount.
+ */
+function claimAnnouncement(key: string): { speak: boolean; release: () => void } {
+  const prior = announcedReceipt;
+  let record: AnnouncedReceipt;
+  let speak: boolean;
+  if (prior && prior.key === key && (prior.holders > 0 || prior.releasing)) {
+    prior.holders += 1;
+    prior.releasing = false;
+    record = prior;
+    speak = false;
+  } else {
+    record = { key, holders: 1, releasing: false };
+    announcedReceipt = record;
+    speak = true;
+  }
+  let released = false;
+  return {
+    speak,
+    release: () => {
+      if (released) return;
+      released = true;
+      record.holders -= 1;
+      if (record.holders > 0) return;
+      record.releasing = true;
+      queueMicrotask(() => {
+        if (announcedReceipt === record && record.holders === 0) announcedReceipt = null;
+      });
+    },
+  };
+}
+
 export function TogetherCompletion({
   presentation: p,
   eyebrow,
@@ -171,14 +250,21 @@ export function TogetherCompletion({
     setNativeRun(null);
   }, []);
 
-  // NATIVE: announce the confirmed receipt once, at mount (the web's live region does this there).
+  // NATIVE: announce the confirmed receipt exactly once, when it appears (the
+  // web's live region does this there). Independent of the motion: a receipt
+  // that never moves is announced the same way.
   useEffect(() => {
-    if (web) return;
-    try {
-      AccessibilityInfo.announceForAccessibility(togetherAnnouncement({ eyebrow, amountText, unit, shared }));
-    } catch {
-      // Announcing is a courtesy; the receipt is on screen either way.
+    if (web) return undefined;
+    const receipt = { eyebrow, amountText, unit, shared };
+    const claim = claimAnnouncement(togetherReceiptKey(receipt));
+    if (claim.speak) {
+      try {
+        announce(togetherAnnouncement(receipt));
+      } catch {
+        // Announcing is a courtesy; the receipt is on screen either way.
+      }
     }
+    return claim.release;
     // Mount only: the receipt is announced when it appears, not on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
