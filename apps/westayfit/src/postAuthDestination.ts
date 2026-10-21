@@ -144,9 +144,9 @@ export function definePostAuthDestination<V>(codec: DestinationCodec<V>): PostAu
       // newer — it is counted when it is issued, not when the device accepts
       // it — so the discard leaves the key to it: after one refused removal,
       // or before any removal when the caller's baseline is earlier (a
-      // timed-out take), the record being discarded is still on the device
-      // and can apply once more after a relaunch (src/joinEventHandoff.ts,
-      // ACCEPTED LIMITS).
+      // timed-out take, or one that found nothing for its code), the record
+      // being discarded is still on the device and can apply once more after
+      // a relaunch (src/joinEventHandoff.ts, ACCEPTED LIMITS).
       const since = opts?.since ?? store.writeCount(codec.key);
       const discarding = store.read(codec.key);
       const newerLanded = () => {

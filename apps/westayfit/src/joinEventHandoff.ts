@@ -58,11 +58,12 @@
  * joined rather than the event. (3) A consumed context survives if the
  * device refuses its removal twice and the overwrite — or refuses one removal
  * while a newer write lands that the device also refuses (that write counts
- * as newer, so the discard stops) — or a bounded take times out and a newer
- * write then lands that the device REFUSES: the discard leaves the key to
- * that write, so the record the take started with is still on the device and
- * can return after a relaunch. In each case it can then apply once more to a
- * later join of the same code, within the expiry.
+ * as newer, so the discard stops) — or, after a timed-out take, or one that
+ * found nothing for its code, a newer write lands that the device REFUSES:
+ * the discard leaves the key to that write, so the record the take started
+ * with is still on the device and can return after a relaunch. In each case
+ * it can then apply once more to a later join of the same code, within the
+ * expiry.
  *
  * FORMAT: `{"goalId":…,"joinCode":…}` and
  * `{"activity":…,"goalId":…,"joinCode":…}`, plus `"owner":…` when an account
@@ -237,7 +238,10 @@ const NO_CONTEXT: JoinEventContext = { goalId: null, activity: null };
  * that decodes as nothing (`discard()`, src/postAuthDestination.ts), so it
  * cannot apply again after a relaunch. Only a device that refuses the
  * removal twice AND the overwrite keeps it — and then only for the same join
- * code, within the expiry.
+ * code, within the expiry. A newer write the device also refuses keeps it
+ * too: one landing while a removal is outstanding, or, after a take that
+ * found nothing for its code, one landing after the take started (ACCEPTED
+ * LIMITS (3)).
  */
 export async function takeJoinEventContext(uid: string | null, joinCode: string): Promise<JoinEventContext> {
   const started = contextWriteCounts();
@@ -308,7 +312,9 @@ export const JOIN_CONTEXT_WAIT_MS = 1_500;
  * destination). The discards run in the background once the read has
  * answered, so a slow removal never costs the member their event. Whatever
  * the read found, it is still consumed, so it cannot apply to some later join
- * instead. Never rejects.
+ * instead, except for ACCEPTED LIMITS (3): after a timed-out take, or one that
+ * found nothing for its code, a newer write the device refuses leaves the
+ * record the take started with on the device. Never rejects.
  */
 export function takeJoinEventContextWithin(
   uid: string | null,
