@@ -1,6 +1,6 @@
 # GoArrive Known Issues & Lessons Learned
 
-_Last refreshed: 2026-08-14._
+_Last refreshed: 2026-09-10._
 
 ## Resolved Issues (Reference for Future Work)
 The following issues were encountered and resolved during development. They are documented here as institutional knowledge to prevent regression and inform future decisions.
@@ -184,6 +184,14 @@ Lesson: keeping a paused media element ready means maintaining a *buffer* around
 takeover position, not repeatedly assigning `currentTime`. Seeking on a timer defeats the
 buffering it is meant to produce. Verify warmth by reading `buffered`, never by inferring
 it from the absence of a symptom.
+
+
+### Stripe Connect Context Missing from Pause/Resume Callables
+`pauseStripeSubscription` and `resumeStripeSubscription` (PR #233) were calling `stripe.subscriptions.update(subscriptionId, params)` without the `{ stripeAccount }` options argument. Member subscriptions are created via checkout with the coach's Stripe Connect account as the target, so the subscription record lives on the connected account — not the platform account. The platform-scoped `stripe.subscriptions.update` call returned Stripe's "No such subscription" error, which the Gen 2 callable runtime wrapped as an opaque `functions/internal` with null details. Coaches saw the pause/resume appear to succeed client-side but had no effect on the subscription.
+
+Fixed in PR #310 (merged to main + staging deploy 2026-09-10): load `stripeAccountId` from the subscription Firestore doc, guard with `HttpsError('failed-precondition', ...)` if missing, and pass `{ stripeAccount: stripeAccountId }` to both `subscriptions.update` calls — matching every other subscription operation in `functions/src/index.ts`. Stripe errors are now caught and re-thrown as `HttpsError('internal', <stripe_message>)` so coaches see a legible reason rather than a bare INTERNAL. No client change needed.
+
+Lesson: any callable that mutates a resource on a connected Stripe account must pass `{ stripeAccount }` in the options object — even if the rest of the file does so consistently, a new callable that forgets it will silently operate on the wrong account scope. When a Stripe op returns "No such X" for an ID that clearly exists, check the account context before assuming an ID mismatch.
 
 ## Known Performance Risks
 
