@@ -1,6 +1,7 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { bootNative, createFakeAsyncStorage, type FakeAsyncStorage } from './nativeStorageHarness';
+import { assertNoUnhandledRejections, useUnhandledRejectionGuard } from './unhandledRejectionGuard';
 
 /**
  * ST-03 — THE WARM FIRST FRAME WAITS FOR THE REMEMBERED COMMUNITY.
@@ -44,6 +45,10 @@ const h = vi.hoisted(() => ({
   youRetry: null as null | (() => void),
   /** Whether You last said its figures are stale. */
   youStale: null as null | boolean,
+  /** The state You last drew (a failed page carries the community it failed in). */
+  youState: null as null | { kind: string; community?: { groupId: string } },
+  /** Communities whose goals read fails (RV15-639-N2). */
+  goalsFail: new Set<string>(),
 }));
 
 vi.mock('../src/memberReads', () => ({
@@ -53,7 +58,10 @@ vi.mock('../src/memberReads', () => ({
   peekMemberProfile: (uid: string | null) => (uid === h.uid ? h.record.profile : undefined),
   peekOwnCredit: () => undefined,
   readMyCommunities: () => h.fresh.mine,
-  readGoals: async () => ({ goals: [] }),
+  readGoals: async (_uid: string, groupId: string) => {
+    if (h.goalsFail.has(groupId)) throw new Error('offline');
+    return { goals: [] };
+  },
   readMemberProfile: async () => ({ displayName: 'Ann', createdAt: null }),
   readOwnCredit: async () => ({ ownCredit: 0, unit: 'reps' }),
   wasRefused: () => false,
@@ -139,6 +147,7 @@ vi.mock('../src/ui/YouParityView', () => ({
     h.youRetry = props.actions?.onRetry ?? null;
     h.youStale = props.refresh?.stale ?? null;
     const s = props.state;
+    h.youState = s;
     h.youFrames.push(s.kind === 'member' ? `member:${s.community?.groupId}` : s.kind);
     return null;
   },
@@ -180,23 +189,17 @@ const UNTIL_MS = 8_000;
 const itTimed = (name: string, fn: () => Promise<void>) => it(name, fn, TEST_MS);
 
 /*
-  NO PROMISE OUTLIVES ITS TEST UNSEEN. A rejection nobody handles (a screen's
-  load bound to a mock without the call it makes, say) used to surface only
-  as a run-level "Unhandled Rejection" after every test had passed, naming no
-  test. Each one raised while a test runs is collected here and fails that
-  test, after its pending work has been drained (afterEach).
+  NO UNHANDLED REJECTION PASSES UNSEEN (tests/unhandledRejectionGuard.ts). A
+  rejection nobody handles (a screen's load bound to a mock without the call
+  it makes, say) used to surface only as a run-level "Unhandled Rejection"
+  after every test had passed, naming no test. Each one Node reports while
+  this file runs fails the test DURING WHICH NODE REPORTS IT (usually the one
+  that raised it; one that surfaces after a test's drain fails the next), or
+  the file's afterAll, naming that test.
 */
-const unhandled: unknown[] = [];
-const onUnhandled = (reason: unknown) => {
-  unhandled.push(reason);
-};
-
-afterAll(() => {
-  process.off('unhandledRejection', onUnhandled);
-});
+useUnhandledRejectionGuard();
 
 beforeAll(async () => {
-  process.on('unhandledRejection', onUnhandled);
   disk = createFakeAsyncStorage();
   await boot();
   await import('react');
@@ -216,17 +219,21 @@ beforeEach(() => {
   freshRead();
   h.youRetry = null;
   h.youStale = null;
+  h.youState = null;
+  h.goalsFail.clear();
 });
 
 afterEach(async () => {
-  for (const c of cleanup.splice(0)) c();
-  vi.useRealTimers();
-  // Let whatever this test started run out (with every screen unmounted) before
-  // the next test boots a fresh process and re-mocks its modules: no late
-  // continuation from this test may run against the next test's mocks.
-  for (let i = 0; i < 20; i += 1) await new Promise<void>((resolve) => setImmediate(resolve));
-  const seen = unhandled.splice(0).map((r) => (r instanceof Error ? r.message : String(r)));
-  expect(seen, 'unhandled rejections raised during this test').toEqual([]);
+  try {
+    for (const c of cleanup.splice(0)) c();
+    vi.useRealTimers();
+    // Let whatever this test started run out (with every screen unmounted)
+    // before the next test boots a fresh process and re-mocks its modules: no
+    // late continuation from this test may run against the next test's mocks.
+    for (let i = 0; i < 20; i += 1) await new Promise<void>((resolve) => setImmediate(resolve));
+  } finally {
+    assertNoUnhandledRejections();
+  }
 });
 
 /**
@@ -297,10 +304,16 @@ async function render(route: 'community' | 'you') {
           if (id) seen.add(id);
         }
       }
+      // React reuses an element of the same type in place: a testID that
+      // changes on an existing node counts too.
+      if (r.type === 'attributes' && r.target instanceof Element) {
+        const id = r.target.getAttribute('data-testid');
+        if (id) seen.add(id);
+      }
     }
   };
   const observer = new MutationObserver(take);
-  observer.observe(container, { childList: true, subtree: true });
+  observer.observe(container, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-testid'] });
   await React.act(async () => {
     root.render(React.createElement(Screen));
   });
@@ -493,6 +506,93 @@ describe('heads-11 F2: a page the repaint drew survives the failed load it appea
     await until(() => h.youFrames.at(-1) === 'failed', 'the failed page');
     await settle();
     expect(h.youFrames.at(-1)).toBe('failed');
+  });
+});
+
+/*
+  RV15-639-N2. A page kept on a failed load is one the fresh read still shows.
+  When the membership list WAS read (its current community's goals then
+  failed), a member page for a community that list no longer holds, or for
+  another community than the one it resolved, is not kept: the failed page
+  for the resolved community is drawn instead. Both kept pages are covered:
+  the one the readiness repaint drew, and the one drawn at mount from the
+  record.
+*/
+describe('RV15-639-N2: a page is kept on a failed load only while the fresh read still shows it', () => {
+  const ONE = [TWO[0]];
+
+  /** You on loading under a held launch read with g2 remembered, then repainted on member:g2. */
+  async function repaintedOnG2() {
+    disk.map.set(REMEMBERED_KEY, 'g2');
+    const releaseReads = holdLaunchRead();
+    const cc = await boot();
+    const you = await render('you');
+    expect(h.youFrames.at(-1)).toBe('loading');
+    releaseReads();
+    await cc.currentCommunityReady();
+    await you.until(() => h.youFrames.at(-1) === 'member:g2', 'the repainted member page');
+    return { cc, you };
+  }
+
+  /** You drawn at mount from the record on member:g2 (the launch read already answered). */
+  async function drawnOnG2AtMount() {
+    disk.map.set(REMEMBERED_KEY, 'g2');
+    const cc = await boot();
+    await cc.currentCommunityReady();
+    const you = await render('you');
+    expect(h.youFrames[0]).toBe('member:g2');
+    return { cc, you };
+  }
+
+  async function expectFailedIn(you: Awaited<ReturnType<typeof render>>, groupId: string) {
+    await you.until(() => h.youFrames.at(-1) === 'failed', 'the failed page');
+    await you.settle();
+    expect(h.youFrames.at(-1)).toBe('failed');
+    expect(h.youState?.community?.groupId).toBe(groupId);
+    expect(h.youStale).not.toBe(true);
+  }
+
+  itTimed('repainted member:g2; the fresh list is [g1] and g1’s goals fail: the failed page for g1, member:g2 not kept', async () => {
+    h.goalsFail.add('g1');
+    const { you } = await repaintedOnG2();
+    h.fresh.land({ items: ONE });
+    await expectFailedIn(you, 'g1');
+  });
+
+  itTimed('drawn at mount on member:g2; the fresh list is [g1] and g1’s goals fail: the failed page for g1', async () => {
+    h.goalsFail.add('g1');
+    const { you } = await drawnOnG2AtMount();
+    h.fresh.land({ items: ONE });
+    await expectFailedIn(you, 'g1');
+  });
+
+  itTimed('repainted member:g2, then g1 is chosen; the fresh list holds both and g1’s goals fail: the failed page for g1', async () => {
+    h.goalsFail.add('g1');
+    const { cc, you } = await repaintedOnG2();
+    // The list still holds g2, but the load resolved g1: the page for g2 is not what it read.
+    expect(await cc.rememberCurrentCommunity(h.uid, 'g1')).toBe(true);
+    h.fresh.land({ items: TWO });
+    await expectFailedIn(you, 'g1');
+  });
+
+  itTimed('control: repainted member:g2; the fresh list holds g2 and g2’s goals fail: member:g2 kept, marked stale', async () => {
+    h.goalsFail.add('g2');
+    const { you } = await repaintedOnG2();
+    h.fresh.land({ items: TWO });
+    await you.until(() => h.youStale === true, 'the stale note');
+    await you.settle();
+    expect(h.youFrames.at(-1)).toBe('member:g2');
+    expect(h.youFrames).not.toContain('failed');
+  });
+
+  itTimed('control: drawn at mount on member:g2; the fresh list holds g2 and g2’s goals fail: member:g2 kept, marked stale', async () => {
+    h.goalsFail.add('g2');
+    const { you } = await drawnOnG2AtMount();
+    h.fresh.land({ items: TWO });
+    await you.until(() => h.youStale === true, 'the stale note');
+    await you.settle();
+    expect(h.youFrames.at(-1)).toBe('member:g2');
+    expect(h.youFrames).not.toContain('failed');
   });
 });
 

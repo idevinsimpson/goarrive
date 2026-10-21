@@ -1,6 +1,7 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { bootNative, createFakeAsyncStorage, type FakeAsyncStorage } from './nativeStorageHarness';
+import { assertNoUnhandledRejections, useUnhandledRejectionGuard } from './unhandledRejectionGuard';
 
 /**
  * ST-03 — MOVE AND HOME DECIDE ON THE REMEMBERED COMMUNITY, NOT ON "NOT READ YET".
@@ -16,15 +17,22 @@ import { bootNative, createFakeAsyncStorage, type FakeAsyncStorage } from './nat
  * Both routes are rendered into jsdom through react-native-web over the
  * NATIVE storage implementations with the launch read held
  * (tests/nativeStorageHarness.ts). The callables' answers come through a
- * mocked member-read layer, and navigation through a recorded router. While
- * a read is held, setTimeout is faked, so the 5 s storage bound cannot answer
- * for it on a loaded machine; settling runs on setImmediate. Not a device run.
+ * mocked member-read layer, and EVERY way out (router.replace, push,
+ * navigate, dismissTo, the navigation object's navigate, a <Redirect>) is
+ * recorded into one list, so "nothing navigated yet" means nothing. Every
+ * testID and text the page ever adds is recorded too, so a chooser drawn
+ * and then replaced still counts. While a read is held, setTimeout is faked,
+ * so the 5 s storage bound cannot answer for it on a loaded machine; settling
+ * runs on setImmediate. Not a device run.
  */
 
 const h = vi.hoisted(() => ({
   user: { uid: 'member-a', email: null as string | null },
-  replaced: [] as string[],
+  /** Every navigation, in order, as `<how>:<href>`. */
+  navigated: [] as string[],
   goalsAsked: [] as string[],
+  /** The member's communities, as the membership read answers. */
+  items: [] as unknown[],
 }));
 
 const A = 'member-a';
@@ -44,7 +52,7 @@ vi.mock('../src/memberReads', () => ({
   peekGoals: () => undefined,
   peekMemberProfile: () => undefined,
   peekOwnCredit: () => undefined,
-  readMyCommunities: async () => ({ items: TWO }),
+  readMyCommunities: async () => ({ items: h.items }),
   readGoals: async (_uid: string, groupId: string) => {
     h.goalsAsked.push(groupId);
     return { goals: OPEN_IN(groupId) };
@@ -67,19 +75,22 @@ vi.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
 /*
-  A hand-built expo-router (the real package cannot load here): navigation is
-  recorded, focus effects do nothing, and the rest is the surface the routes
-  reach for.
+  A hand-built expo-router (the real package cannot load here): every way out
+  is recorded into `h.navigated`, focus effects do nothing, and the rest is
+  the surface the routes reach for.
 */
 vi.mock('expo-router', () => {
+  const record = (how: string) => (href: unknown) => {
+    h.navigated.push(`${how}:${typeof href === 'string' ? href : JSON.stringify(href)}`);
+  };
   const router = {
-    push: () => undefined,
-    replace: (href: string) => {
-      h.replaced.push(href);
+    push: record('push'),
+    replace: record('replace'),
+    navigate: record('navigate'),
+    back: () => {
+      h.navigated.push('back');
     },
-    navigate: () => undefined,
-    back: () => undefined,
-    dismissTo: () => undefined,
+    dismissTo: record('dismissTo'),
     canGoBack: () => true,
   };
   const navigation = {
@@ -87,8 +98,8 @@ vi.mock('expo-router', () => {
     removeListener: () => undefined,
     isFocused: () => true,
     canGoBack: () => true,
-    dispatch: () => undefined,
-    navigate: () => undefined,
+    dispatch: record('dispatch'),
+    navigate: record('navigation.navigate'),
     goBack: () => undefined,
     setOptions: () => undefined,
     setParams: () => undefined,
@@ -104,16 +115,19 @@ vi.mock('expo-router', () => {
     useLocalSearchParams: () => ({}),
     useSegments: () => [],
     Link: ({ children }: { children?: unknown }) => children ?? null,
-    Redirect: () => null,
+    // A <Redirect> navigates when it is drawn: drawing one is recorded.
+    Redirect: ({ href }: { href: unknown }) => {
+      record('redirect')(href);
+      return null;
+    },
   };
 });
 
 let disk: FakeAsyncStorage;
 let cleanup: Array<() => void> = [];
-const unhandled: unknown[] = [];
-const onUnhandled = (reason: unknown) => {
-  unhandled.push(reason);
-};
+// An unhandled rejection fails the test during which Node reports it, or the
+// file's afterAll (tests/unhandledRejectionGuard.ts).
+useUnhandledRejectionGuard();
 
 /** A fresh process over `disk`; Firebase is mocked after the harness's own mocks have landed. */
 async function boot() {
@@ -141,15 +155,56 @@ async function render(route: 'move' | 'home') {
   const container = document.createElement('div');
   document.body.appendChild(container);
   const root = createRoot(container);
+  // Every testID and every text the page ever adds, so a frame drawn and then
+  // replaced still counts. React reuses an element of the same type in place,
+  // so a testID or a text that changes on an existing node counts too.
+  const ids = new Set<string>();
+  const texts: string[] = [];
+  const take = (records: MutationRecord[]) => {
+    for (const r of records) {
+      for (const n of Array.from(r.addedNodes)) {
+        if (n.textContent) texts.push(n.textContent);
+        if (!(n instanceof Element)) continue;
+        for (const e of [n, ...Array.from(n.querySelectorAll('[data-testid]'))]) {
+          const id = e.getAttribute('data-testid');
+          if (id) ids.add(id);
+        }
+      }
+      if (r.type === 'attributes' && r.target instanceof Element) {
+        const id = r.target.getAttribute('data-testid');
+        if (id) ids.add(id);
+      }
+      if (r.type === 'characterData' && r.target.textContent) texts.push(r.target.textContent);
+    }
+  };
+  const observer = new MutationObserver(take);
+  observer.observe(container, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+    attributes: true,
+    attributeFilter: ['data-testid'],
+  });
   await React.act(async () => {
     root.render(React.createElement(Screen));
   });
   cleanup.push(() => {
+    observer.disconnect();
     React.act(() => root.unmount());
     container.remove();
   });
   return {
     container,
+    /** Every testID ever added to the page. */
+    testIds: () => {
+      take(observer.takeRecords());
+      return ids;
+    },
+    /** Whether `text` was ever on the page. */
+    everSaid: (text: string) => {
+      take(observer.takeRecords());
+      return texts.some((t) => t.includes(text));
+    },
     settle: () =>
       React.act(async () => {
         for (let i = 0; i < 10; i += 1) await tick();
@@ -158,7 +213,6 @@ async function render(route: 'move' | 'home') {
 }
 
 beforeAll(async () => {
-  process.on('unhandledRejection', onUnhandled);
   disk = createFakeAsyncStorage();
   await boot();
   await import('react');
@@ -167,24 +221,23 @@ beforeAll(async () => {
   await import('../app/(tabs)/(home)/index');
 }, 60_000);
 
-afterAll(() => {
-  process.off('unhandledRejection', onUnhandled);
-});
-
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   disk = createFakeAsyncStorage();
   disk.map.set(REMEMBERED_KEY, 'g2');
-  h.replaced.length = 0;
+  h.navigated.length = 0;
   h.goalsAsked.length = 0;
+  h.items = TWO;
 });
 
 afterEach(async () => {
-  for (const c of cleanup.splice(0)) c();
-  vi.useRealTimers();
-  for (let i = 0; i < 20; i += 1) await tick();
-  const seen = unhandled.splice(0).map((r) => (r instanceof Error ? r.message : String(r)));
-  expect(seen, 'unhandled rejections raised during this test').toEqual([]);
+  try {
+    for (const c of cleanup.splice(0)) c();
+    vi.useRealTimers();
+    for (let i = 0; i < 20; i += 1) await tick();
+  } finally {
+    assertNoUnhandledRejections();
+  }
 });
 
 /** Hold the launch read; setTimeout is faked meanwhile (see the header). */
@@ -201,32 +254,85 @@ describe('MOVE, with B remembered and the launch read held', () => {
     await settle();
     expect(cc.isCurrentCommunityReady()).toBe(false);
     // Not sent to Home (its community chooser) for want of an answer, and no goals read for a guess.
-    expect(h.replaced).toEqual([]);
+    expect(h.navigated).toEqual([]);
     expect(h.goalsAsked).toEqual([]);
 
     release();
     await cc.currentCommunityReady();
     await settle();
     expect(h.goalsAsked).toEqual(['g2']);
-    expect(h.replaced).toEqual(['/contribute/goal-g2?groupId=g2&mode=move']);
+    expect(h.navigated).toEqual(['replace:/contribute/goal-g2?groupId=g2&mode=move']);
   }, 20_000);
 });
 
+const CHOOSER_LIST = 'wsf-home-my-list';
+const CHOOSER_HEADING = 'Choose a community';
+
 describe('Home, with B remembered and the launch read held', () => {
-  it('takes its one decision only after the read, and opens B', async () => {
+  it('takes its one decision only after the read, and opens B; the chooser is never drawn', async () => {
     const release = holdLaunchRead();
     const cc = await boot();
-    const { settle } = await render('home');
-    await settle();
+    const home = await render('home');
+    await home.settle();
     expect(cc.isCurrentCommunityReady()).toBe(false);
-    expect(h.replaced).toEqual([]);
+    // The membership list HAS been read (each card's goals were asked for), so
+    // only the remembered community is outstanding.
+    expect([...h.goalsAsked].sort()).toEqual(['g1', 'g2']);
+    expect(h.navigated).toEqual([]);
+    // heads-13 N3: while the read is held, the list is still loading; the
+    // chooser (its list, its heading, the stack it sits in) is never drawn.
+    expect(home.testIds().has('wsf-home-my-loading')).toBe(true);
+    expect(home.testIds().has(CHOOSER_LIST)).toBe(false);
+    expect(home.testIds().has('wsf-home-signed-in')).toBe(false);
+    expect(home.everSaid(CHOOSER_HEADING)).toBe(false);
 
     release();
     await cc.currentCommunityReady();
-    await settle();
-    expect(h.replaced).toEqual(['/community/g2']);
-    // Decided once: more settling decides nothing more.
-    await settle();
-    expect(h.replaced).toEqual(['/community/g2']);
+    await home.settle();
+    expect(h.navigated).toEqual(['replace:/community/g2']);
+    // Decided once: more settling decides nothing more, and the chooser never came.
+    await home.settle();
+    expect(h.navigated).toEqual(['replace:/community/g2']);
+    expect(home.testIds().has('wsf-home-opening-community')).toBe(true);
+    expect(home.testIds().has(CHOOSER_LIST)).toBe(false);
+    expect(home.everSaid(CHOOSER_HEADING)).toBe(false);
+  }, 20_000);
+
+  it('a member of ONE community: no one-card chooser while the read is held, then that community opens', async () => {
+    h.items = [TWO[0]];
+    const release = holdLaunchRead();
+    const cc = await boot();
+    const home = await render('home');
+    await home.settle();
+    expect(cc.isCurrentCommunityReady()).toBe(false);
+    expect(h.goalsAsked).toEqual(['g1']);
+    expect(h.navigated).toEqual([]);
+    expect(home.testIds().has('wsf-home-my-loading')).toBe(true);
+    expect(home.testIds().has(CHOOSER_LIST)).toBe(false);
+    expect(home.everSaid(CHOOSER_HEADING)).toBe(false);
+
+    release();
+    await cc.currentCommunityReady();
+    await home.settle();
+    expect(h.navigated).toEqual(['replace:/community/g1']);
+    expect(home.testIds().has(CHOOSER_LIST)).toBe(false);
+  }, 20_000);
+});
+
+describe('Home controls: the chooser is still drawn when it is the answer', () => {
+  it('two communities and none remembered: once the read lands, the chooser, and no navigation', async () => {
+    disk.map.delete(REMEMBERED_KEY);
+    const release = holdLaunchRead();
+    const cc = await boot();
+    const home = await render('home');
+    await home.settle();
+    expect(home.testIds().has(CHOOSER_LIST)).toBe(false);
+
+    release();
+    await cc.currentCommunityReady();
+    await home.settle();
+    expect(home.testIds().has(CHOOSER_LIST)).toBe(true);
+    expect(home.everSaid(CHOOSER_HEADING)).toBe(true);
+    expect(h.navigated).toEqual([]);
   }, 20_000);
 });

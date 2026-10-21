@@ -463,12 +463,24 @@ export default function You() {
         // in flight (it began on loading) is kept and marked stale, exactly
         // like one drawn at mount, rather than replaced by the failed page.
         const painted = !recorded && !keep && repainted.current?.uid === uid ? repainted.current.screen : null;
-        if (painted && painted.kind === 'member') {
+        // RV15-639-N2: a page is kept only while the fresh read still shows it.
+        // When the membership was read (a community was resolved, and then its
+        // goals failed), a page for a community that list no longer holds, or
+        // for another community than the one resolved, is not kept: the
+        // failed page for the resolved community is drawn instead. With no
+        // fresh list (the membership read itself failed, `community` absent),
+        // nothing contradicts the page. (The resolved community comes from
+        // that list, so today the second clause implies the first.)
+        const stillShown = (shown: Extract<Screen, { kind: 'member' }>) =>
+          !community ||
+          (communities.some((c) => c.groupId === shown.community.groupId) &&
+            shown.community.groupId === community.groupId);
+        if (painted && painted.kind === 'member' && stillShown(painted)) {
           setScreen({ ...painted, profile });
           setStale(true);
           return;
         }
-        if (recorded && recorded.kind === 'member') {
+        if (recorded && recorded.kind === 'member' && stillShown(recorded)) {
           setScreen({ ...recorded, profile });
           setStale(true);
           return;
