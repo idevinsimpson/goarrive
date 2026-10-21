@@ -18,6 +18,9 @@
  */
 
 import { definePostAuthDestination } from './postAuthDestination';
+import { deviceKv } from './storage/kv';
+import { createKeyMirror } from './storage/mirror';
+import { HAS_SYNC_STORAGE, readDeviceSync } from './storage/syncRead';
 
 /** sessionStorage, not localStorage: a closed tab must not carry a kiosk
  * destination into the next thing this browser does. Same lifetime choice,
@@ -145,6 +148,63 @@ export function readKioskReturnGoal(uid: string | null = null): string | null {
 
 export function clearKioskReturnGoal(): Promise<boolean> {
   return kioskReturn.clear();
+}
+
+/*
+  THE DURABLE KIOSK-SESSION MARKER (ST-05, native only).
+
+  The kiosk return above is a post-auth HANDOFF: it lives two hours and is
+  consumed by the sign-in hop. Nothing read it at launch. So a phone acting as
+  a kiosk that the OS killed mid-session — during verify-email, or on
+  /contribute?kiosk=1 — relaunched into member Home still signed in as the
+  visitor who walked up. This marker is the device's own record that a kiosk
+  session is open for `goalId`:
+
+    - device storage (AsyncStorage), NO expiry: a session left open
+      overnight is still a kiosk session in the morning;
+    - written when the kiosk's Contribute arms a session
+      (src/handoffArming.ts `armKioskReturn`; the contribute screen may write
+      it too);
+    - cleared only when the session is over: after Finish's sign-out has
+      SUCCEEDED (kept if the sign-out failed — the visitor may still be
+      signed in), and when the kiosk start screen comes to rest;
+    - read at launch by src/kioskLaunchGuard.ts, which sends the device back
+      to the kiosk start screen (which signs out and resets).
+
+  WEB: none of this. A tab that closes ends its session already, and nothing
+  here reads or writes browser storage.
+*/
+export const KIOSK_SESSION_MARKER_KEY = 'wsf.kioskSessionGoalId';
+
+const marker = createKeyMirror(deviceKv, readDeviceSync);
+let markerHydration: Promise<void> | null = null;
+
+/** Resolves once the marker has been read from the device (immediate on web). */
+export function kioskSessionReady(): Promise<void> {
+  if (HAS_SYNC_STORAGE) return Promise.resolve();
+  if (!markerHydration) markerHydration = marker.load(KIOSK_SESSION_MARKER_KEY);
+  return markerHydration;
+}
+// Native: read it at launch, before anything needs it.
+if (!HAS_SYNC_STORAGE) void kioskSessionReady();
+
+/** Record that a kiosk session is open for `goalId`. Native only; resolves whether the device kept it. */
+export function markKioskSession(goalId: string): Promise<boolean> {
+  if (HAS_SYNC_STORAGE || !isGoalIdShape(goalId)) return Promise.resolve(false);
+  return marker.write(KIOSK_SESSION_MARKER_KEY, goalId);
+}
+
+/** The session is over. Native only (true on web, where there is nothing to clear). */
+export function clearKioskSession(): Promise<boolean> {
+  if (HAS_SYNC_STORAGE) return Promise.resolve(true);
+  return marker.remove(KIOSK_SESSION_MARKER_KEY);
+}
+
+/** The goal of the open kiosk session, or null (always null on web, and before the launch read). */
+export function readKioskSession(): string | null {
+  if (HAS_SYNC_STORAGE) return null;
+  const raw = marker.read(KIOSK_SESSION_MARKER_KEY);
+  return raw && isGoalIdShape(raw) ? raw : null;
 }
 
 /** The keys Finish is allowed to remove. Nothing else in storage is touched:
@@ -429,6 +489,15 @@ export async function runKioskFinish(
     signedOut = true;
   } catch {
     signedOut = false;
+  }
+  // The session is over only once nobody is signed in: a failed sign-out
+  // keeps the durable marker, so a relaunch still returns to the kiosk.
+  if (signedOut) {
+    try {
+      await clearKioskSession();
+    } catch {
+      // best-effort; the start screen clears it again when it comes to rest.
+    }
   }
   return { ...plan, clearedPendingDraft, signedOut };
 }
