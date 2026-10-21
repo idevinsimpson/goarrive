@@ -184,7 +184,14 @@ describe('W13-5 on a phone: the state screen that replaces the last one takes th
     await act(async () => contribute!.resolve({ alreadyRecorded: false, sharedTotal: 46, addedCount: 6, ownCredit: 11 }));
     await settle();
     expect(byId('wsf-contribute-receipt')).not.toBeNull();
-    expect(focusedTexts()).toEqual([]);
+    // W13-12: no STATE heading is focused for a confirmed answer. The
+    // receipt's own headline may take the focus (INT-17's receipt focus,
+    // W12-20, on the integrated tree): it is left out, so this holds with or
+    // without that focus.
+    const receiptHeadline = byId('wsf-contribute-result-headline')?.textContent;
+    expect(focusedTexts().filter((t) => t !== receiptHeadline)).toEqual([]);
+    expect(focusedTexts()).not.toContain(UNKNOWN_OUTCOME_HEADING);
+    expect(focusedTexts()).not.toContain(RECORDING_HEADING);
   });
 });
 
