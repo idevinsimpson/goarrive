@@ -29,9 +29,11 @@
  * when somebody presses Start.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AccessibilityInfo } from 'react-native';
+import { AccessibilityInfo, AppState, Platform } from 'react-native';
 
 import {
+  ACTIVE_LIFECYCLE,
+  appLifecycleStep,
   buildFollowAlongPlan,
   clockElapsed,
   clockRunning,
@@ -122,6 +124,8 @@ export function useFollowAlongSession(input: {
   const [now, setNow] = useState(() => Date.now());
   const [reducedMotion, setReducedMotion] = useState(false);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  /** When the clock was last read while running (native lifecycle uses it to cap a late background event). */
+  const lastTickRef = useRef<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -146,8 +150,12 @@ export function useFollowAlongSession(input: {
       }
       return undefined;
     }
-    setNow(Date.now());
-    tickRef.current = setInterval(() => setNow(Date.now()), TICK_MS);
+    lastTickRef.current = Date.now();
+    setNow(lastTickRef.current);
+    tickRef.current = setInterval(() => {
+      lastTickRef.current = Date.now();
+      setNow(lastTickRef.current);
+    }, TICK_MS);
     return () => {
       if (tickRef.current) {
         clearInterval(tickRef.current);
@@ -242,14 +250,17 @@ export function useFollowAlongSession(input: {
     clockRef.current = clock;
   }, [clock]);
 
+  // `at`: when the interruption began. The web pauses at the event; native may
+  // date it earlier (see appLifecycleStep), so nothing accrues for it.
+  const interrupt = useCallback((reason: string, at?: number) => {
+    if (!pausesForInterruption(reason)) return;
+    if (!clockRunning(clockRef.current)) return;
+    setInterrupted(true);
+    setClock((c) => pauseClock(c, at ?? Date.now()));
+  }, []);
+
   useEffect(() => {
     if (typeof document === 'undefined') return undefined;
-    const interrupt = (reason: string) => {
-      if (!pausesForInterruption(reason)) return;
-      if (!clockRunning(clockRef.current)) return;
-      setInterrupted(true);
-      setClock((c) => pauseClock(c, Date.now()));
-    };
     const onVisibility = () => {
       if (document.visibilityState === 'hidden') interrupt('hidden');
     };
@@ -260,7 +271,23 @@ export function useFollowAlongSession(input: {
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('pagehide', onHide);
     };
-  }, []);
+  }, [interrupt]);
+
+  // MO-05 — NATIVE: the app going to the background is the same interruption
+  // as a hidden tab (`hidden`); being only inactive is the blur rule and does
+  // not pause. Returning does not resume: the round waits, says why
+  // (INTERRUPTED_NOTICE), and Resume picks it up. Attached once; reads the
+  // clock through its ref like the web listener.
+  useEffect(() => {
+    if (Platform.OS === 'web') return undefined;
+    let lifecycle = ACTIVE_LIFECYCLE;
+    const sub = AppState.addEventListener('change', (next) => {
+      const step = appLifecycleStep(lifecycle, next, Date.now(), lastTickRef.current, TICK_MS);
+      lifecycle = step.lifecycle;
+      if (step.pauseAt !== null) interrupt('hidden', step.pauseAt);
+    });
+    return () => sub?.remove?.();
+  }, [interrupt]);
 
   const kind = figureKindFor(unit);
   const media = mediaPresentation(plan.media);
