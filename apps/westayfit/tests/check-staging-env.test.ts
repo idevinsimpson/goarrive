@@ -510,10 +510,34 @@ describe('RV9-641-I11: files in other work trees, and the env files Expo loads',
     ~, $ or backquote), except node running this script, its copy or its
     link. process.chdir always offends.
 
+    RV16-641-1 (heads-14) closes the ways around that:
+      · A watched name used as anything but the callee of a scanned call
+        offends: passed as an argument (a callback, setTimeout,
+        Function.prototype.call.call), put in an object or array, or returned
+        through a property. Only a const alias or a .bind copy may hold one,
+        and every call through those is scanned.
+      · `new` is scanned too: new fs.WriteStream(path) like createWriteStream,
+        and new Worker always offends.
+      · A child's options are all known (cwd, encoding, env, input, stdio,
+        timeout). Its env is absent, process.env, fixtureGitEnv(process.env)
+        (this file's own scrubbed one, matched by its text) or a literal of
+        plain words or roots with no GIT_* key; its input is a word or a root.
+        Node running this script may be given any variables: the script's own
+        git runs with gitEnv() (checked below), and the script is what is
+        under test.
+      · An element-access key is followed to its constant string, and a call
+        through a key that cannot be (fs[k] with k computed, [f][0]) offends.
+      · A call to a function imported from anything but a node built-in,
+        vitest, typescript or the script under test offends (the script only
+        reads: checked below).
+      · A link this file makes to something outside its roots is read-only:
+        a path through it, or the link itself for anything but removing,
+        renaming or an l* call, offends (by the path's own shape).
+
     Not modelled: what a child process or the script under test does, code
-    built from strings, and a write that follows a link this file made into
-    the app directory (it makes those only to read through them; the afterAll
-    snapshot, which now records modes, sees a change after the fact).
+    built from strings, and a link reached by a path spelled differently from
+    the one that made it (the afterAll snapshot, which records modes, sees a
+    change after the fact). The scan reads this file only.
   */
   const PATH_ARGS: Record<string, number[]> = {
     writeFileSync: [0], appendFileSync: [0], unlinkSync: [0], mkdirSync: [0], rmdirSync: [0], rmSync: [0], truncateSync: [0],
@@ -521,9 +545,18 @@ describe('RV9-641-I11: files in other work trees, and the env files Expo loads',
     symlinkSync: [1], linkSync: [0, 1], renameSync: [0, 1], copyFileSync: [1], cpSync: [1], mkdtempSync: [0],
     writeFile: [0], appendFile: [0], unlink: [0], mkdir: [0], rmdir: [0], rm: [0], truncate: [0], open: [0], chmod: [0], chown: [0],
     utimes: [0], lchown: [0], lutimes: [0], lchmod: [0], symlink: [1], link: [0, 1], rename: [0, 1], copyFile: [1], cp: [1], mkdtemp: [0],
+    // RV16-641-1: the stream class itself, as `new fs.WriteStream(path)`.
+    WriteStream: [0],
   };
   const CHILD = new Set(['spawn', 'spawnSync', 'exec', 'execSync', 'execFile', 'execFileSync', 'fork']);
-  const watched = (name: string) => Object.prototype.hasOwnProperty.call(PATH_ARGS, name) || CHILD.has(name) || name === 'chdir';
+  // RV16-641-1: runs code this scan cannot read: always offends.
+  const ALWAYS = new Set(['chdir', 'Worker']);
+  const watched = (name: string) => Object.prototype.hasOwnProperty.call(PATH_ARGS, name) || CHILD.has(name) || ALWAYS.has(name);
+  // RV16-641-1: what a link this file made may still have done to it (it acts on the link, not on what it points at).
+  const ON_THE_LINK = new Set(['unlinkSync', 'unlink', 'renameSync', 'rename', 'rmSync', 'rm', 'lchownSync', 'lchown', 'lutimesSync', 'lutimes', 'lchmodSync', 'lchmod']);
+  const OPTION_KEYS = new Set(['cwd', 'encoding', 'env', 'input', 'stdio', 'timeout']);
+  // The script under test (it only reads; checked below), node's own modules, the test runner and the parser.
+  const moduleOk = (spec: string) => spec.startsWith('node:') || ['typescript', 'vitest', '../scripts/check-staging-env.mjs'].includes(spec);
   type Mode = 'path' | 'segment' | 'number';
   type Watched = { name: string; args: readonly ts.Expression[] | null };
 
@@ -750,7 +783,8 @@ describe('RV9-641-I11: files in other work trees, and the env files Expo loads',
       const e = strip(raw);
       if (ts.isArrayLiteralExpression(e)) return e.elements.every((el) => (ts.isSpreadElement(el) ? restOk(el.expression) : wordOk(el)));
       if (ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e)) return word(e.text);
-      return isPath(e);
+      // RV16-641-1: a root, but not a path through a link out of the roots.
+      return isPath(e) && linkUse(e) !== 'beneath';
     };
     /** A spread list of words: a constant list, or a rest parameter, through every call site. */
     const restOk = (raw: ts.Expression): boolean => {
@@ -797,22 +831,27 @@ describe('RV9-641-I11: files in other work trees, and the env files Expo loads',
       ts.forEachChild(node, findCopies);
     };
     findCopies(sf);
-    const childOk = (args: readonly ts.Expression[]): boolean => {
-      if (args.some(ts.isSpreadElement)) return false;
-      const [command, list] = args.map(strip);
-      if (command && ts.isPropertyAccessExpression(command) && command.getText() === 'process.execPath' && list && ts.isArrayLiteralExpression(list) && isScript(list.elements[0])) return true;
-      const options = args.map(strip).filter(ts.isObjectLiteralExpression);
-      if (options.length !== 1 || options[0]!.properties.some(ts.isSpreadAssignment)) return false;
-      const cwd = options[0]!.properties.find((p) => p.name !== undefined && ts.isIdentifier(p.name) && p.name.text === 'cwd');
-      const cwdOk = cwd !== undefined && (ts.isShorthandPropertyAssignment(cwd) ? isPath(cwd.name) : ts.isPropertyAssignment(cwd) && isPath(cwd.initializer));
-      return cwdOk && args.filter((a) => !ts.isObjectLiteralExpression(strip(a))).every((a) => wordOk(a));
-    };
-
     // The watched name a callee stands for: by its own name, a key, an import or destructuring rename, an alias, a bound copy, a parameter's arguments.
     const keyOf = (n: ts.PropertyName | undefined): string | null => {
       if (n && (ts.isIdentifier(n) || ts.isStringLiteral(n))) return n.text;
       const k = n && ts.isComputedPropertyName(n) ? strip(n.expression) : undefined;
       return k && (ts.isStringLiteral(k) || ts.isNoSubstitutionTemplateLiteral(k)) ? k.text : null;
+    };
+    /** RV16-641-1: an element-access key as the string it is: a literal, or a const that holds one; null when it cannot be known. */
+    const keyText = (raw: ts.Expression): string | null => {
+      const k = strip(raw);
+      if (ts.isStringLiteral(k) || ts.isNoSubstitutionTemplateLiteral(k)) return k.text;
+      if (!ts.isIdentifier(k)) return null;
+      const sym = symbolOf(k);
+      const d = sym?.declarations;
+      if (!sym || !d || d.length !== 1 || opaque.has(sym) || assignments.has(sym)) return null;
+      const decl = d[0]!;
+      const init = ts.isVariableDeclaration(decl) && ts.isVariableDeclarationList(decl.parent) && decl.parent.flags & ts.NodeFlags.Const ? decl.initializer && strip(decl.initializer) : undefined;
+      return init && (ts.isStringLiteral(init) || ts.isNoSubstitutionTemplateLiteral(init)) ? init.text : null;
+    };
+    const unknownKey = (raw: ts.Expression | undefined): boolean => {
+      const e = raw && strip(raw);
+      return !!e && ts.isElementAccessExpression(e) && keyText(e.argumentExpression) === null;
     };
     const naming = new Set<ts.Symbol>();
     const nameOf = (raw: ts.Expression): string | null => {
@@ -841,20 +880,116 @@ describe('RV9-641-I11: files in other work trees, and the env files Expo loads',
       }
       if (ts.isPropertyAccessExpression(e)) return watched(e.name.text) ? e.name.text : null;
       if (ts.isElementAccessExpression(e)) {
-        const k = strip(e.argumentExpression);
-        return (ts.isStringLiteral(k) || ts.isNoSubstitutionTemplateLiteral(k)) && watched(k.text) ? k.text : null;
+        const k = keyText(e.argumentExpression);
+        return k !== null && watched(k) ? k : null;
       }
       if (ts.isCallExpression(e) && ts.isPropertyAccessExpression(e.expression) && e.expression.name.text === 'bind') return nameOf(e.expression.expression);
       if (ts.isBinaryExpression(e) && e.operatorToken.kind === ts.SyntaxKind.CommaToken) return nameOf(e.right);
       if (ts.isConditionalExpression(e)) return nameOf(e.whenTrue) ?? nameOf(e.whenFalse);
       return null;
     };
+
+    /*
+      RV16-641-1. LINKS OUT ARE READ-ONLY. A link this file makes (symlink or
+      link) to something outside its roots sits inside a root, so a path
+      through it looks like a root's. Each one is recorded by the shape of the
+      path that made it (a const followed to its value), and a path is compared
+      by the same shape.
+    */
+    const shape = (raw: ts.Expression, depth = 0): string => {
+      const e = strip(raw);
+      if (depth > 20) return e.getText();
+      if (ts.isIdentifier(e)) {
+        const sym = symbolOf(e);
+        const d = sym?.declarations;
+        if (sym && d && d.length === 1 && !assignments.has(sym) && !opaque.has(sym) && ts.isVariableDeclaration(d[0]!) && d[0]!.initializer) return shape(d[0]!.initializer, depth + 1);
+        return `#${e.text}`;
+      }
+      if (ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e)) return e.text;
+      if (ts.isTemplateExpression(e)) return e.head.text + e.templateSpans.map((sp) => `${shape(sp.expression, depth + 1)}${sp.literal.text}`).join('');
+      if (ts.isCallExpression(e) && ['join', 'resolve'].includes(moduleFn(e.expression) ?? '')) return e.arguments.map((a) => shape(a, depth + 1)).join('/');
+      return e.getText();
+    };
+    const linksOut: string[] = [];
+    /** 'beneath': a path through a link out; 'at': the link itself; null: neither. */
+    const linkUse = (raw: ts.Expression): 'beneath' | 'at' | null => {
+      const k = shape(raw);
+      if (linksOut.some((l) => k.startsWith(`${l}/`))) return 'beneath';
+      return linksOut.includes(k) ? 'at' : null;
+    };
+
+    // RV16-641-1: a child's options, every one of them.
+    const isProcessEnv = (raw: ts.Expression) => strip(raw).getText().replace(/\s/g, '') === 'process.env';
+    const FIXTURE_ENV = "(env:Env):Env=>({...gitEnv(env),GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null'})";
+    const isFixtureEnv = (raw: ts.Expression) => {
+      const e = strip(raw);
+      if (!ts.isIdentifier(e) || e.text !== 'fixtureGitEnv') return false;
+      const sym = symbolOf(e);
+      const d = sym?.declarations;
+      return !!sym && !!d && d.length === 1 && !assignments.has(sym) && ts.isVariableDeclaration(d[0]!) && d[0]!.initializer?.getText().replace(/\s/g, '') === FIXTURE_ENV;
+    };
+    const envOk = (raw: ts.Expression, script: boolean): boolean => {
+      const e = strip(raw);
+      if (isProcessEnv(e)) return true;
+      if (ts.isCallExpression(e) && isFixtureEnv(e.expression) && e.arguments.length === 1 && isProcessEnv(e.arguments[0]!)) return true;
+      if (!ts.isObjectLiteralExpression(e)) return false;
+      return e.properties.every((prop) => {
+        if (ts.isSpreadAssignment(prop)) return isProcessEnv(prop.expression) || (script && ts.isIdentifier(strip(prop.expression)));
+        if (!ts.isPropertyAssignment(prop)) return false;
+        const k = keyOf(prop.name);
+        if (k === null) return false;
+        // The script under test is given test variables on purpose; its own git runs with gitEnv() (checked below).
+        return script || (!/^GIT_/i.test(k) && wordOk(prop.initializer));
+      });
+    };
+    const constantOk = (raw: ts.Expression): boolean => {
+      const e = strip(raw);
+      if (ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e)) return true;
+      return ts.isArrayLiteralExpression(e) && e.elements.every((el) => !ts.isSpreadElement(el) && constantOk(el));
+    };
+    const optionsOk = (o: ts.ObjectLiteralExpression, script: boolean): boolean =>
+      o.properties.every((prop) => {
+        if (ts.isSpreadAssignment(prop) || prop.name === undefined) return false;
+        const k = keyOf(prop.name);
+        if (k === null || !OPTION_KEYS.has(k)) return false;
+        const value = ts.isShorthandPropertyAssignment(prop) ? prop.name : ts.isPropertyAssignment(prop) ? prop.initializer : null;
+        if (!value) return false;
+        switch (k) {
+          case 'cwd':
+            // A child working in a link out (or below one) works in what it points at.
+            return script || (isPath(value) && linkUse(value) === null);
+          case 'env':
+            return envOk(value, script);
+          case 'input':
+            return wordOk(value);
+          case 'timeout':
+            return isNumber(value);
+          default:
+            return constantOk(value);
+        }
+      });
+    const childOk = (args: readonly ts.Expression[]): boolean => {
+      if (args.some(ts.isSpreadElement)) return false;
+      const stripped = args.map(strip);
+      const [command, list] = stripped;
+      if (command && ts.isPropertyAccessExpression(command) && command.getText() === 'process.execPath' && list && ts.isArrayLiteralExpression(list) && isScript(list.elements[0])) {
+        // Node running this script, from any directory: whatever follows the list is a literal of known options.
+        return stripped.slice(2).every((o) => ts.isObjectLiteralExpression(o) && optionsOk(o, true));
+      }
+      const options = stripped.filter(ts.isObjectLiteralExpression);
+      if (options.length !== 1 || !optionsOk(options[0]!, false)) return false;
+      const hasCwd = options[0]!.properties.some((prop) => prop.name !== undefined && keyOf(prop.name) === 'cwd');
+      return hasCwd && stripped.filter((a) => !ts.isObjectLiteralExpression(a)).every((a) => wordOk(a));
+    };
+
     const watchedCall = (c: ts.CallExpression): Watched | null => {
       const callee = strip(c.expression);
       if (ts.isPropertyAccessExpression(callee) && (callee.name.text === 'call' || callee.name.text === 'apply')) {
         const base = strip(callee.expression);
         const reflect = callee.name.text === 'apply' && ts.isIdentifier(base) && base.text === 'Reflect';
         const target = reflect ? c.arguments[0] : base;
+        // RV16-641-1: through a key that cannot be known, the target could be anything.
+        if (unknownKey(target)) return { name: '?', args: null };
         const name = target ? nameOf(target) : null;
         if (name && callee.name.text === 'call') return { name, args: c.arguments.slice(1) };
         if (name) {
@@ -863,17 +998,140 @@ describe('RV9-641-I11: files in other work trees, and the env files Expo loads',
           return { name, args: arr && ts.isArrayLiteralExpression(arr) ? arr.elements : null };
         }
       }
+      if (unknownKey(callee)) return { name: '?', args: null };
       const name = nameOf(callee);
       return name ? { name, args: c.arguments } : null;
     };
     const callOk = ({ name, args }: Watched): boolean => {
-      if (args === null || name === 'chdir') return false;
+      if (args === null || ALWAYS.has(name)) return false;
       if (CHILD.has(name)) return childOk(args);
       return PATH_ARGS[name]!.every((i) => {
         const arg = args[i];
         if (!arg || args.slice(0, i + 1).some(ts.isSpreadElement)) return false;
+        const use = linkUse(arg);
+        // The link itself may be removed, renamed or l*-changed, and is made where it is made (a link's own path).
+        const making = i === 1 && ['symlinkSync', 'symlink', 'linkSync', 'link'].includes(name);
+        if (use === 'beneath' || (use === 'at' && !ON_THE_LINK.has(name) && !making)) return false;
         return name.startsWith('mkdtemp') ? inTmp(arg) : isPath(arg);
       });
+    };
+
+    // The links out, recorded before anything is judged.
+    const findLinks = (node: ts.Node): void => {
+      const call = ts.isCallExpression(node) ? watchedCall(node) : null;
+      if (call?.args && ['symlinkSync', 'symlink', 'linkSync', 'link'].includes(call.name)) {
+        const [target, at] = call.args;
+        if (target && at && !isPath(target)) linksOut.push(shape(at));
+      }
+      ts.forEachChild(node, findLinks);
+    };
+    findLinks(sf);
+
+    /*
+      RV16-641-1. A WATCHED NAME USED AS A VALUE. The name a reference stands
+      for, without guessing from a local's own name (a path named `link` is a
+      path): an import, a destructured key, an unbound global, or what a const
+      alias or an assignment holds.
+    */
+    const valuing = new Set<ts.Symbol>();
+    const valueName = (raw: ts.Expression): string | null => {
+      const e = strip(raw);
+      if (ts.isIdentifier(e)) {
+        const sym = symbolOf(e);
+        const decls = sym?.declarations ?? [];
+        if (!sym || decls.length === 0) return watched(e.text) ? e.text : null;
+        if (valuing.has(sym)) return null;
+        valuing.add(sym);
+        try {
+          const found: Array<string | null> = [];
+          for (const d of decls) {
+            if (ts.isImportSpecifier(d)) found.push((d.propertyName ?? d.name).text);
+            else if (ts.isBindingElement(d)) found.push(keyOf(d.propertyName) ?? (ts.isIdentifier(d.name) ? d.name.text : null));
+            else if (ts.isVariableDeclaration(d) && d.initializer) found.push(valueName(d.initializer));
+          }
+          for (const a of assignments.get(sym) ?? []) found.push(valueName(a.rhs));
+          return found.find((x): x is string => x !== null && watched(x)) ?? null;
+        } finally {
+          valuing.delete(sym);
+        }
+      }
+      if (ts.isPropertyAccessExpression(e)) return watched(e.name.text) ? e.name.text : null;
+      if (ts.isElementAccessExpression(e)) {
+        const k = keyText(e.argumentExpression);
+        return k !== null && watched(k) ? k : null;
+      }
+      if (ts.isCallExpression(e) && ts.isPropertyAccessExpression(e.expression) && e.expression.name.text === 'bind') return valueName(e.expression.expression);
+      return null;
+    };
+    const outer = (node: ts.Node): ts.Node => {
+      let n = node;
+      while (
+        (ts.isParenthesizedExpression(n.parent) || ts.isAsExpression(n.parent) || ts.isNonNullExpression(n.parent) || ts.isSatisfiesExpression(n.parent) || ts.isTypeAssertionExpression(n.parent)) &&
+        n.parent.expression === n
+      )
+        n = n.parent;
+      return n;
+    };
+    const inType = (node: ts.Node): boolean => {
+      for (let n: ts.Node | undefined = node.parent; n && !ts.isStatement(n); n = n.parent) if (ts.isTypeNode(n) || ts.isTypeQueryNode(n)) return true;
+      return false;
+    };
+    /** Whether a reference to a watched name sits where the scan follows it: a callee, a .call/.apply/.bind receiver, Reflect.apply's target, a const alias. */
+    const followed = (node: ts.Expression): boolean => {
+      const n = outer(node);
+      const p = n.parent;
+      if ((ts.isCallExpression(p) || ts.isNewExpression(p)) && p.expression === n) return true;
+      if (ts.isPropertyAccessExpression(p) && p.expression === n && ['call', 'apply', 'bind'].includes(p.name.text)) {
+        if (p.name.text === 'bind') return followed(p.parent as ts.Expression);
+        const c = outer(p).parent;
+        return ts.isCallExpression(c) && c.expression === outer(p);
+      }
+      if (ts.isCallExpression(p) && p.arguments[0] === n && strip(p.expression).getText().replace(/\s/g, '') === 'Reflect.apply') return true;
+      if (ts.isVariableDeclaration(p) && p.initializer === n && ts.isIdentifier(p.name)) return true;
+      if (ts.isBinaryExpression(p) && p.right === n && p.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isIdentifier(p.left)) return true;
+      return ts.isTypeOfExpression(p);
+    };
+    const isReference = (node: ts.Node): node is ts.Expression => {
+      if (!(ts.isIdentifier(node) || ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node))) return false;
+      const p = node.parent;
+      if (ts.isIdentifier(node)) {
+        if (ts.isPropertyAccessExpression(p) && p.name === node) return false;
+        if (ts.isImportSpecifier(p) || ts.isImportClause(p) || ts.isNamespaceImport(p) || ts.isExportSpecifier(p) || ts.isBindingElement(p)) return false;
+        if ((ts.isVariableDeclaration(p) || ts.isParameter(p) || ts.isFunctionDeclaration(p) || ts.isPropertyAssignment(p) || ts.isMethodDeclaration(p) || ts.isPropertyDeclaration(p)) && p.name === node) return false;
+        if (ts.isPropertyAccessExpression(p) && p.expression === node && valueName(p) !== null) return false; // the whole access is judged
+      }
+      if (ts.isPropertyAccessExpression(p) && p.expression === node && valueName(p) !== null) return false;
+      return !inType(node);
+    };
+
+    /*
+      RV16-641-1. A CALL INTO ANOTHER MODULE runs code this scan does not
+      read: only node's own modules, vitest, typescript and the script under
+      test (it only reads) are called.
+    */
+    const moduleOf = (raw: ts.Expression, depth = 0): string | null => {
+      let e = strip(raw);
+      while (ts.isPropertyAccessExpression(e) || ts.isElementAccessExpression(e)) e = strip(e.expression);
+      if (ts.isAwaitExpression(e)) e = strip(e.expression);
+      if (ts.isCallExpression(e) && (e.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(e.expression) && e.expression.text === 'require'))) {
+        const spec = e.arguments[0] && strip(e.arguments[0]);
+        return spec && ts.isStringLiteral(spec) ? spec.text : '?';
+      }
+      if (!ts.isIdentifier(e) || depth > 20) return null;
+      const sym = symbolOf(e);
+      for (const d of sym?.declarations ?? []) {
+        const decl = ts.isImportSpecifier(d) ? d.parent.parent.parent : ts.isImportClause(d) ? d.parent : ts.isNamespaceImport(d) ? d.parent.parent : undefined;
+        if (decl && ts.isStringLiteral(decl.moduleSpecifier)) return decl.moduleSpecifier.text;
+        if (ts.isVariableDeclaration(d) && d.initializer && sym && !assignments.has(sym)) {
+          const m = moduleOf(d.initializer, depth + 1);
+          if (m !== null) return m;
+        }
+      }
+      return null;
+    };
+    const foreign = (callee: ts.Expression) => {
+      const m = moduleOf(callee);
+      return m !== null && !moduleOk(m);
     };
 
     const offenders: string[] = [];
@@ -884,6 +1142,16 @@ describe('RV9-641-I11: files in other work trees, and the env files Expo loads',
         calls += 1;
         if (!callOk(call)) offenders.push(node.getText());
       }
+      // RV16-641-1: `new` is a call too.
+      if (ts.isNewExpression(node)) {
+        const name = nameOf(node.expression);
+        if (name) {
+          calls += 1;
+          if (!callOk({ name, args: node.arguments ?? [] })) offenders.push(node.getText());
+        }
+      }
+      if ((ts.isCallExpression(node) || ts.isNewExpression(node)) && foreign(node.expression)) offenders.push(`foreign: ${node.getText()}`);
+      if (isReference(node) && !followed(node) && valueName(node) !== null) offenders.push(`value: ${node.getText()}`);
       ts.forEachChild(node, visit);
     };
     visit(sf);
@@ -1003,6 +1271,82 @@ describe('RV9-641-I11: files in other work trees, and the env files Expo loads',
     ['a helper with a segment parameter', "const put = (name: string) => writeFileSync(join(DIR, name), 'x');\nput('a.env');\nput(`b-${n}.env`);"],
   ])('RV14-641-1: %s passes', (_what, code) => {
     expect(scan(code).offenders).toEqual([]);
+  });
+
+  it.each([
+    // RV16-641-1's survivors (heads-14 probe on e4501dd4), P01-P17, and the forms its fix names.
+    ['P01 a helper imported from another module', "import { zap } from './helpers';\nzap(join(APP_ROOT, '.env.local'));"],
+    ['P01 a helper required from another module', "require('./helpers').zap(join(APP_ROOT, '.env.local'));"],
+    ['P02 a watched function as a callback', "[join(APP_ROOT, '.env.local')].forEach(unlinkSync);"],
+    ['P03 setTimeout of a watched function', "setTimeout(rmSync, 0, join(APP_ROOT, '.env.local'));"],
+    ['P04 new fs.WriteStream', "new fs.WriteStream(join(APP_ROOT, '.env.development.local'));"],
+    ['P04 new Worker (runs code the scan cannot read)', "new Worker(join(DIR, 'w.mjs'));"],
+    ['P05 a watched function as an object member', "const tools = { zap: unlinkSync };\ntools.zap(join(APP_ROOT, '.env.local'));"],
+    ['P05 a watched function as a shorthand member', "const tools = { unlinkSync };\ntools.unlinkSync(join(DIR, 'a'));"],
+    ['P06 Function.prototype.call.call', "Function.prototype.call.call(writeFileSync, null, join(APP_ROOT, '.env'), 'x');"],
+    ['P07 a key held in a const', "const k = 'rmSync';\nfs[k](join(APP_ROOT, '.env.local'));"],
+    ['P07 a key that cannot be known', "let k = 'existsSync';\nk = 'rmSync';\nfs[k](join(DIR, 'a'));"],
+    ['P08 a write through a link to the app directory', "symlinkSync(APP_ROOT, join(DIR, 'app'));\nwriteFileSync(join(DIR, 'app', '.env.development.local'), 'x');"],
+    ['P09 a write onto a link to an app file', "symlinkSync(join(APP_ROOT, '.env.development.local'), join(DIR, 'l'));\nwriteFileSync(join(DIR, 'l'), 'x');"],
+    ['P09 an append through a const link', "const l = join(DIR, 'l');\nsymlinkSync(join(APP_ROOT, '.env.local'), l);\nappendFileSync(l, 'x');"],
+    ['P09 a child whose cwd is through a link', "symlinkSync(APP_ROOT, join(DIR, 'app'));\nspawnSync('git', ['clean', '-fdX'], { cwd: join(DIR, 'app') });"],
+    ['P10 git with GIT_WORK_TREE at the app', "spawnSync('git', ['clean', '-fdx'], { cwd: REPO, env: { ...process.env, GIT_WORK_TREE: APP_ROOT } });"],
+    ['P11 an app path on a child\'s stdin', "spawnSync('xargs', ['rm', '-f'], { cwd: DIR, input: join(APP_ROOT, '.env.local') });"],
+    ['P12 a child cwd reassigned to the app', "let c = DIR;\nc = APP_ROOT;\nspawnSync('git', ['status'], { cwd: c });"],
+    ['P13 a segment that climbs twice', "writeFileSync(join(DIR, '..', '..', 'x'), 'x');"],
+    ['P14 the promises rm', "await fs.promises.rm(join(APP_ROOT, '.env.local'));"],
+    ['P15 a promises function as a callback', "Promise.resolve(join(APP_ROOT, '.env')).then(fs.promises.unlink);"],
+    ['P16 an array member called', "[unlinkSync][0](join(APP_ROOT, '.env'));"],
+    ['P17 node with an app path in its env', "spawnSync('node', ['-e', 'x'], { cwd: DIR, env: { ...process.env, P: join(APP_ROOT, '.env') } });"],
+    ['P10 any GIT_* variable for a child, even naming a root', "spawnSync('git', ['clean', '-fdx'], { cwd: REPO, env: { GIT_WORK_TREE: REPOS } });"],
+    ['an unknown option', "spawnSync('git', ['status'], { cwd: DIR, shell: true });"],
+    ['an unknown option with a plain string', "spawnSync('git', ['status'], { cwd: DIR, shell: '/bin/sh' });"],
+    ['an env from elsewhere', "const e = { ...process.env };\nspawnSync('git', ['status'], { cwd: DIR, env: e });"],
+    ['the script run with options from elsewhere', "const o = { cwd: DIR };\nspawnSync(process.execPath, [SCRIPT], o);"],
+  ])('RV16-641-1: %s offends', (_what, code) => {
+    expect(scan(code).offenders).not.toEqual([]);
+  });
+
+  it.each([
+    ['node running this script with test variables (its own git is scrubbed)', "spawnSync(process.execPath, [SCRIPT, join(DIR, 'a.env')], { cwd: APP_ROOT, encoding: 'utf8', env: { ...process.env, GIT_DIR: '/elsewhere' } });"],
+    ['git with the fixture\'s scrubbed env', "const fixtureGitEnv = (env: Env): Env => ({ ...gitEnv(env), GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' });\nspawnSync('git', ['status'], { cwd: REPO, encoding: 'utf8', env: fixtureGitEnv(process.env) });"],
+    ['git with plain variables and known options', "spawnSync('git', ['status'], { cwd: REPO, env: { ...process.env, LC_ALL: 'C' }, stdio: ['ignore', 'pipe', 'pipe'], timeout: 5000 });"],
+    ['a link out, read and then removed', "const l = join(DIR, 'l');\nsymlinkSync(join(APP_ROOT, 'app.json'), l);\nreadFileSync(l, 'utf8');\nunlinkSync(l);"],
+    ['a stream into a root', "new fs.WriteStream(join(DIR, 'a'));"],
+    ['a call to the script under test (it only reads)', "import { placeFile } from '../scripts/check-staging-env.mjs';\nplaceFile(join(APP_ROOT, '.env.local'));"],
+    ['a key held in a const, into a root', "const k = 'rmSync';\nfs[k](join(DIR, 'a'));"],
+    ['a const alias called into a root', "const f = fs.rmSync;\nf(join(DIR, 'a'));"],
+    ['a local named like a watched function is not one', "const link = join(DIR, 'x');\nconst open = [link];\nconsole.log(open.length, link);"],
+  ])('RV16-641-1: %s passes', (_what, code) => {
+    expect(scan(code).offenders).toEqual([]);
+  });
+
+  it('RV16-641-1: the script under test only reads: read-only node:fs imports, spawnSync alone, and its git runs with gitEnv()', () => {
+    const sf = ts.createSourceFile('s.mjs', readFileSync(SCRIPT, 'utf8'), ts.ScriptTarget.Latest, true);
+    const READ = new Set(['readFileSync', 'realpathSync', 'statSync', 'lstatSync', 'existsSync', 'readdirSync', 'accessSync']);
+    const froms: string[] = [];
+    for (const d of sf.statements.filter(ts.isImportDeclaration)) {
+      const from = (d.moduleSpecifier as ts.StringLiteral).text;
+      froms.push(from);
+      const bound = d.importClause?.namedBindings;
+      const names = bound && ts.isNamedImports(bound) ? bound.elements.map((e) => (e.propertyName ?? e.name).text) : ['*'];
+      if (from === 'node:fs') expect(names.filter((x) => !READ.has(x)), from).toEqual([]);
+      if (from === 'node:child_process') expect(names, from).toEqual(['spawnSync']);
+    }
+    for (const bad of ['fs', 'fs/promises', 'node:fs/promises', 'child_process', 'worker_threads', 'node:worker_threads']) expect(froms).not.toContain(bad);
+    const spawns: ts.CallExpression[] = [];
+    const visit = (node: ts.Node) => {
+      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'spawnSync') spawns.push(node);
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+    expect(spawns.length).toBeGreaterThan(0);
+    for (const c of spawns) {
+      expect(c.arguments[0]!.getText()).toBe("'git'");
+      const opts = c.arguments[2];
+      const env = opts && ts.isObjectLiteralExpression(opts) ? opts.properties.find((x) => x.name?.getText() === 'env') : undefined;
+      expect(env && ts.isPropertyAssignment(env) ? env.initializer.getText() : null).toBe('gitEnv()');
+    }
   });
 
   it('SEC-F1: nothing in this file writes, links, renames or removes a path outside its own temporary roots', () => {
