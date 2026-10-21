@@ -345,6 +345,20 @@ function enterSelects(select: () => void): Record<string, unknown> {
 export const MEMBER_TAB_BAR_BODY = 6 + 48 + 10;
 export const MEMBER_TAB_MOVE_OVERHANG = 24;
 
+/**
+ * W12-16 (INT-30). WHAT A TAB SCREEN'S SCROLL CONTENT LEAVES FREE AT ITS END.
+ *
+ * On the web the bar covers the bottom of the scene, so the content clears
+ * the bar's body, the raised MOVE above it and the device inset: today's
+ * value, unchanged. On a phone the tab navigator lays the bar out BELOW the
+ * scene (it pads its own safe area), so only MOVE's overhang rises into the
+ * scene; reserving the whole bar there left 64 pt of dead space (Progress,
+ * and the Community tab when it adopts this; member, W16-12).
+ */
+export function tabContentBottomReserve(safeBottom: number, platform: string = Platform.OS): number {
+  return platform === 'web' ? MEMBER_TAB_BAR_BODY + MEMBER_TAB_MOVE_OVERHANG + safeBottom : MEMBER_TAB_MOVE_OVERHANG;
+}
+
 const styles = StyleSheet.create({
   /* The frozen reference's bar (Lovable `d4f60624`, measured): 75 tall with
      its rule, on the page's warm white; each glyph centred 33 under the rule
