@@ -435,10 +435,12 @@ export default function You() {
   const freshNext = useRef(false);
   /**
    * INT-12 case 4 (review 1343247d-N3): what the member page on screen was
-   * composed from, for this account only, so a failed revalidation that keeps
-   * the page can recompose it against NOW. A goal whose end passed while the
-   * app slept must stop offering "Start moving" even when the server could
-   * not be asked (hasWindowEnded is pure).
+   * composed from, when it came from a NETWORK read, for this account only,
+   * so a failed revalidation that keeps the page can recompose it against
+   * NOW. A goal whose end passed while the app slept must stop offering
+   * "Start moving" even when the server could not be asked (hasWindowEnded
+   * is pure). heads-10 F-1: a page drawn from the account's record clears
+   * it, so these older inputs can never replace a newer page.
    */
   const composedFrom = useRef<{ uid: string; args: Parameters<typeof composeMember> } | null>(null);
   const focusedOnce = useRef(false);
@@ -452,6 +454,7 @@ export default function You() {
       const uid = user.uid;
       const recorded = youFromRecord(uid);
       if (recorded) {
+        composedFrom.current = null;
         setScreen(uid, recorded);
         return;
       }
@@ -478,6 +481,7 @@ export default function You() {
     const recorded = fresh ? null : youFromRecord(uid);
     const keep = keepOnScreen.current;
     keepOnScreen.current = false;
+    if (recorded) composedFrom.current = null;
     setScreen(uid, (prev) => recorded ?? (keep && prev.kind !== 'loading' ? prev : { kind: 'loading' }));
     setStale(false);
     setChecking(false);
@@ -509,12 +513,18 @@ export default function You() {
           return;
         }
         if (keep) {
-          // Kept, but recomposed against now (N3): from what it was composed
-          // from, or from the account's record if that is where it came from.
+          // Kept, but recomposed against now (N3). heads-10 F-1: from the
+          // account's record first, which is never older than the page (a
+          // receipt, a focus and a switch all write or read it); only when it
+          // no longer holds every fact, from the network read the page was
+          // composed from. And only ever as the same community: a failed read
+          // never swaps the community on screen.
           const from = composedFrom.current?.uid === uid ? composedFrom.current.args : null;
-          const again = from ? composeMember(...from) : youFromRecord(uid);
-          if (again && again.kind === 'member') {
-            setScreen(uid, (prev) => (prev.kind === 'member' ? again : prev));
+          const again = youFromRecord(uid) ?? (from ? composeMember(...from) : null);
+          if (again?.kind === 'member') {
+            setScreen(uid, (prev) =>
+              prev.kind === 'member' && prev.community.groupId === again.community.groupId ? again : prev,
+            );
           }
           setStale(true);
           return;

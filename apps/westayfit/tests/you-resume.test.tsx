@@ -18,11 +18,29 @@ const AUTH = { ready: true, user: { uid: 'u1', email: 'alex@example.com' } };
 vi.mock('../src/auth', () => ({ useWsfAuth: () => AUTH }));
 vi.mock('../src/firebase', () => ({ getFirebaseAuth: () => ({}) }));
 vi.mock('firebase/auth', () => ({ signOut: () => Promise.resolve() }));
+// Every live focus effect (the route's own and useResumeRefresh's), so a test
+// can return to the tab: refocus() runs each one's blur cleanup, then the
+// callback again, as a real blur and focus do.
+type FocusEntry = { refire: () => void };
+const focus = { entries: new Set<FocusEntry>() };
 vi.mock('expo-router', () => ({
   router: { replace: vi.fn(), push: vi.fn() },
   useNavigation: () => ({ dispatch: vi.fn(), getParent: () => undefined }),
   useFocusEffect: (cb: () => void | (() => void)) => {
-    useEffect(() => cb(), [cb]);
+    useEffect(() => {
+      let cleanup = cb();
+      const entry: FocusEntry = {
+        refire: () => {
+          if (typeof cleanup === 'function') cleanup();
+          cleanup = cb();
+        },
+      };
+      focus.entries.add(entry);
+      return () => {
+        focus.entries.delete(entry);
+        if (typeof cleanup === 'function') cleanup();
+      };
+    }, [cb]);
   },
 }));
 
@@ -33,12 +51,20 @@ const readMemberProfile = vi.fn();
 const readMyCommunities = vi.fn();
 const readGoals = vi.fn();
 const readOwnCredit = vi.fn();
+// The account's record (src/memberReads.ts), empty unless a test fills it.
+type Rec = {
+  communities?: { items: unknown[] };
+  profile?: unknown;
+  goals: Record<string, { goals: unknown[] }>;
+  own: Record<string, { ownCredit: number; unit: string }>;
+};
+let record: Rec = { goals: {}, own: {} };
 vi.mock('../src/memberReads', () => ({
   SAME_LOAD_MS: 10_000,
-  peekGoals: () => undefined,
-  peekMemberProfile: () => undefined,
-  peekMyCommunities: () => undefined,
-  peekOwnCredit: () => undefined,
+  peekGoals: (_u: string, groupId: string) => record.goals[groupId],
+  peekMemberProfile: () => record.profile,
+  peekMyCommunities: () => record.communities,
+  peekOwnCredit: (_u: string, goalId: string) => record.own[goalId],
   wasRefused: () => false,
   readMemberProfile: (...a: unknown[]) => readMemberProfile(...a),
   readMyCommunities: (...a: unknown[]) => readMyCommunities(...a),
@@ -47,6 +73,7 @@ vi.mock('../src/memberReads', () => ({
 }));
 
 const { default: You } = await import('../app/(tabs)/you');
+const { rememberCurrentCommunity } = await import('../src/currentCommunity');
 const { RESUME_MIN_AWAY_MS, RESUME_SETTLE_MS } = await import('../src/useResumeRefresh');
 
 let container: HTMLDivElement;
@@ -65,6 +92,7 @@ beforeEach(() => {
   readGoals.mockResolvedValue({ goals: [goal('active')] });
   readOwnCredit.mockResolvedValue({ ownCredit: 0, unit: 'squats' });
   window.localStorage.clear();
+  record = { goals: {}, own: {} };
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -88,6 +116,8 @@ async function render(): Promise<void> {
   await flush();
 }
 const emit = (s: string) => act(() => handlers.forEach((h) => h(s)));
+/** Back to the You tab: the focus path recomposes from the account's record. */
+const refocus = () => act(() => focus.entries.forEach((e) => e.refire()));
 async function returnAfter(ms: number): Promise<void> {
   emit('background');
   act(() => vi.advanceTimersByTime(ms));
@@ -160,5 +190,97 @@ describe('W16-2 / INT-12: You revalidates on a return to the app', () => {
     await flush();
     expect(readMyCommunities).toHaveBeenCalledTimes(2);
     expect(byId('wsf-you-member')).not.toBeNull();
+  });
+});
+
+/*
+  heads-10 F-1. A failed resume read kept the page but recomposed it from the
+  inputs of the last NETWORK compose, even when the page on screen had since
+  been drawn from the account's record (the focus path, the recorded branch,
+  the first frame), so older inputs could replace a newer page. The record
+  is now preferred, the community on screen is never swapped, and a page
+  drawn from the record clears the network inputs.
+*/
+describe('heads-10 F-1: a failed resume never draws older inputs over the page', () => {
+  const OWN = (n: number) => ({ ownCredit: n, unit: 'squats' });
+  const ELM = { groupId: 'elm', displayName: 'Elm Park', role: 'member', memberCount: 9 };
+  const ELM_GOAL = { ...goal('active'), goalId: 'e1', title: '300 lunges', unit: 'lunges', target: 300 };
+  const failResume = async () => {
+    readMyCommunities.mockRejectedValueOnce(Object.assign(new Error('x'), { code: 'functions/unavailable' }));
+    await returnAfter(RESUME_MIN_AWAY_MS + 1_000);
+    await flush();
+    expect(byId('wsf-you-stale')).not.toBeNull();
+  };
+
+  it('case 1: own part 10 from the network, then 25 from the record on focus; a failed resume keeps 25', async () => {
+    readOwnCredit.mockResolvedValue(OWN(10));
+    await render();
+    expect(byId('wsf-you-lead-own')!.textContent).toBe('10 squats');
+    // A confirmed receipt wrote the new own part into the record.
+    record = { communities: { items: [COMMUNITY] }, profile: { displayName: 'Alex', createdAt: null }, goals: { oak: { goals: [goal('active')] } }, own: { g1: OWN(25) } };
+    refocus();
+    await flush();
+    expect(byId('wsf-you-lead-own')!.textContent).toBe('25 squats');
+    await failResume();
+    expect(byId('wsf-you-lead-own')!.textContent).toBe('25 squats');
+  });
+
+  it('case 2: Oak Grove from the network, a switch to Elm Park drawn from the record; a failed resume keeps Elm Park', async () => {
+    rememberCurrentCommunity('u1', 'oak');
+    readMyCommunities.mockResolvedValue({ items: [COMMUNITY, ELM] });
+    await render();
+    expect(byId('wsf-you-community')!.textContent).toContain('Oak Grove');
+    rememberCurrentCommunity('u1', 'elm');
+    record = {
+      communities: { items: [COMMUNITY, ELM] },
+      profile: { displayName: 'Alex', createdAt: null },
+      goals: { elm: { goals: [ELM_GOAL] } },
+      own: { e1: OWN(12) },
+    };
+    refocus();
+    await flush();
+    expect(byId('wsf-you-community')!.textContent).toContain('Elm Park');
+    await failResume();
+    expect(byId('wsf-you-community')!.textContent).toContain('Elm Park');
+    expect(byId('wsf-you-community')!.textContent).not.toContain('Oak Grove');
+  });
+
+  it('a failed resume never swaps the community on screen, even when the record now speaks for another', async () => {
+    rememberCurrentCommunity('u1', 'oak');
+    readMyCommunities.mockResolvedValue({ items: [COMMUNITY, ELM] });
+    await render();
+    // The member switched elsewhere; this tab has not been back to focus.
+    rememberCurrentCommunity('u1', 'elm');
+    record = {
+      communities: { items: [COMMUNITY, ELM] },
+      profile: { displayName: 'Alex', createdAt: null },
+      goals: { elm: { goals: [ELM_GOAL] } },
+      own: { e1: OWN(12) },
+    };
+    await failResume();
+    expect(byId('wsf-you-community')!.textContent).toContain('Oak Grove');
+  });
+
+  it('the record, when whole, comes before the network inputs: 25 recorded while You stayed on screen; a failed resume draws 25', async () => {
+    readOwnCredit.mockResolvedValue(OWN(10));
+    await render();
+    expect(byId('wsf-you-lead-own')!.textContent).toBe('10 squats');
+    // Written to the record with no focus in between (another surface's receipt).
+    record = { communities: { items: [COMMUNITY] }, profile: { displayName: 'Alex', createdAt: null }, goals: { oak: { goals: [goal('active')] } }, own: { g1: OWN(25) } };
+    await failResume();
+    expect(byId('wsf-you-lead-own')!.textContent).toBe('25 squats');
+  });
+
+  it('a page drawn from the record clears the network inputs: once the record is incomplete, a failed resume keeps the page as it is', async () => {
+    readOwnCredit.mockResolvedValue(OWN(10));
+    await render();
+    record = { communities: { items: [COMMUNITY] }, profile: { displayName: 'Alex', createdAt: null }, goals: { oak: { goals: [goal('active')] } }, own: { g1: OWN(25) } };
+    refocus();
+    await flush();
+    expect(byId('wsf-you-lead-own')!.textContent).toBe('25 squats');
+    // The record no longer holds the own part (youFromRecord is null).
+    record = { ...record, own: {} };
+    await failResume();
+    expect(byId('wsf-you-lead-own')!.textContent).toBe('25 squats');
   });
 });
