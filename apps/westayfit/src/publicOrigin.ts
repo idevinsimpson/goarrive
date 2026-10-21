@@ -11,6 +11,14 @@ import { isDevTunnelHost, isPublicHost } from './publicHost';
  * else is used. It stays unset until the owner names the host; until then a
  * phone builds no QR code or share link from an origin, as today.
  *
+ * ONE NAME, TWO CONSUMERS (heads-14 RV16-641-3). The same variable already
+ * sets the WEB build's share metadata (og:url, og:image, the canonical link):
+ * scripts/westayfit/inject_meta.py reads it first when `npm run build:web`
+ * runs. Its check there is looser (any dotted host name: an IP-shaped name or
+ * a tunnel host passes), so one owner decision sets both, and a value refused
+ * here can still reach the web's share cards. Name only the canonical public
+ * origin (NATIVE-BUILD-READINESS.md, "Public origin").
+ *
  * ACCEPTED: `https://<host>`, optionally with one trailing slash, where the
  * host is a public DNS name (`isPublicHost`) and not a development forwarder
  * (`isDevTunnelHost`). Refused (null): unset or blank, http, a port (`:8081`

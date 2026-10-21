@@ -158,7 +158,12 @@ import {
 // functions-westayfit — a shorter poll pays a Firestore round-trip on every
 // tick, a longer poll wastes the cache window.
 const POLL_INTERVAL_MS = 2_000;
-/** RV15-641-2: the poll has landed nothing for this long while it should be running, so the figures are the last confirmed ones. */
+/**
+ * RV15-641-2: the poll has landed nothing for this long while it should be
+ * running, so the figures are the last confirmed ones. The line is re-read on
+ * the 60 s tick (or any re-render), so it says so within about a minute of
+ * this, not at it (RV16-641-4).
+ */
 const CONFIRMED_STALE_AFTER_MS = 3 * POLL_INTERVAL_MS;
 // W12-2 (ST-06): how long a load waits for Auth to refresh a stale sign-in.
 const LOAD_SIGN_IN_REFRESH_MS = 8_000;
@@ -410,10 +415,12 @@ function enterActivates(go: () => void): Record<string, unknown> {
   RV15-641-2 (W12-6, INT-12). The anchor's "Confirmed <time>". It re-renders on
   the shared 60 s tick (useNowTick), so with the screen left open it names the
   day once midnight has passed, though no state changed. It reads "Last
-  confirmed" after a load that failed (W12-2, native), and also once the 2 s
-  poll has landed nothing for CONFIRMED_STALE_AFTER_MS while it should be
-  running: a failed or hung tick changes no state, so before this the line
-  kept saying "Confirmed". `pollSince` is when the poll last started (null
+  confirmed" after a load that failed (W12-2, native), and also, within about
+  a minute, once the 2 s poll has landed nothing for CONFIRMED_STALE_AFTER_MS
+  (6 s) while it should be running: staleness is judged when the line
+  renders, on the 60 s tick or any other re-render, not by a timer of its own
+  (RV16-641-4: the wording, not the timing, was corrected). A failed or hung
+  tick changes no state, so before this the line kept saying "Confirmed". `pollSince` is when the poll last started (null
   while it is stopped), so a return to the app does not read as stale before
   its first tick could land. It is a ref, read when the line renders: the
   poll starting or stopping re-renders nothing.
@@ -637,11 +644,19 @@ export default function ContributeToGoal() {
     requests since may go out without a token. While it is set, a heal tick's
     refusal is not a verdict (RV11-641-1); when it was never set (an ordinary
     failure with a good token) an authorized not-found stands. Set with that
-    failure; cleared only by an authorized answer (a load, a tick, a receipt)
-    or a new context. RV14-641-1: a later failure in transport (an internal
-    or deadline answer) says nothing about the token, so it does not clear it.
+    failure; cleared only by an authorized answer -- a full load (its
+    own-credit read, wsfMyContribution, refuses a request without a token) or
+    a receipt (wsfContribute likewise) -- or a new context. RV16-641-2: a
+    tick is NOT an authorized answer. wsfGoalPulse answers anyone, token or
+    not, when the goal is on a display (aggregateDisplayAuthorized), so a tick
+    that succeeds says nothing about the sign-in: it keeps the guard and asks
+    once for the full load (`tickAskedLoadRef`). RV14-641-1: a later failure
+    in transport (an internal or deadline answer) says nothing about the
+    token, so it does not clear it either.
   */
   const signInOfflineRef = useRef(false);
+  // RV16-641-2: a successful tick has already asked for the full load while the guard has been set.
+  const tickAskedLoadRef = useRef(false);
   // W12-2 (ST-06, native): this load has already refreshed the sign-in once.
   const signInRetriedRef = useRef(false);
   const [context, setContext] = useState<ScreenContext>({ kind: 'none' });
@@ -1087,6 +1102,8 @@ export default function ContributeToGoal() {
             }
             if (refreshed === 'offline') {
               // RV12-641-5: until an authorized answer, the heal ticks go out token-less.
+              // RV16-641-2: newly set, a successful tick may ask for one full load again.
+              if (!signInOfflineRef.current) tickAskedLoadRef.current = false;
               signInOfflineRef.current = true;
               failTransiently();
               return;
@@ -1205,7 +1222,23 @@ export default function ContributeToGoal() {
         const pulse = result.data;
         setPulseAt(new Date());
         setRefreshFailed(false);
-        signInOfflineRef.current = false;
+        /*
+          RV16-641-2 (native). A TICK IS NOT AN AUTHORIZED ANSWER. While the
+          sign-in could not be refreshed this tick may have gone out without a
+          token, and the public pulse answers that too when the goal is on a
+          display. So the guard stays: a later anonymous not-found (the display
+          turned off) must still evict nothing (RV11-641-1). The tick asks once
+          for the full load instead, whose own-credit read needs the sign-in;
+          that load is what clears the guard.
+        */
+        if (Platform.OS !== 'web' && signInOfflineRef.current) {
+          if (!tickAskedLoadRef.current) {
+            tickAskedLoadRef.current = true;
+            quietRetry();
+          }
+        } else {
+          signInOfflineRef.current = false;
+        }
         setState((prev) => {
           if (prev.kind === 'ready') {
             return pulse.status === 'active'
@@ -1265,7 +1298,7 @@ export default function ContributeToGoal() {
       if (timer) clearInterval(timer);
       pollSinceRef.current = null;
     };
-  }, [ready, user, goalId, shouldPoll]);
+  }, [ready, user, goalId, shouldPoll, quietRetry]);
 
   // Timer tick, only while running.
   useEffect(() => {

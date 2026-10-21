@@ -153,6 +153,10 @@ describe('W12-13: publicOriginOf, the one rule for a phone build\'s origin', () 
     ['https://wsf.example.com', NAMED],
     ['  https://WSF.Example.com/  ', NAMED],
     ['HTTPS://app.westayfit.com', 'https://app.westayfit.com'],
+    // Whole labels: a name that merely contains a special-use word is public.
+    ['https://test.westayfit.com', 'https://test.westayfit.com'],
+    ['https://wsf.example.org', 'https://wsf.example.org'],
+    ['https://alt.app', 'https://alt.app'],
   ])('accepts %j as %s', (value, origin) => {
     expect(publicOriginOf(value)).toBe(origin);
   });
@@ -181,6 +185,14 @@ describe('W12-13: publicOriginOf, the one rule for a phone build\'s origin', () 
     ['https://*.example.com'],
     ['wsf.example.com'],
     ['exp://192.168.1.20:8081'],
+    // RV16-641-2: the special-use names RFC 6761, 7686 and 9476 add (whole labels).
+    ['https://wsf.test'],
+    ['https://wsf.invalid'],
+    ['https://wsf.example'],
+    ['https://wsf.onion'],
+    ['https://abcdefghijklmnop.onion'],
+    ['https://wsf.alt'],
+    ['https://app.wsf.TEST'],
   ])('refuses %j', (value) => {
     expect(publicOriginOf(value)).toBeNull();
   });
@@ -189,6 +201,8 @@ describe('W12-13: publicOriginOf, the one rule for a phone build\'s origin', () 
     expect(isPublicHost('wsf.example.com')).toBe(true);
     expect(isPublicHost('localhost')).toBe(false);
     expect(isPublicHost('fritz.box')).toBe(false);
+    for (const tld of ['test', 'invalid', 'example', 'onion', 'alt']) expect(isPublicHost(`wsf.${tld}`), tld).toBe(false);
+    expect(isPublicHost('wsf.example.com')).toBe(true);
     expect(isDevTunnelHost('abc.trycloudflare.com')).toBe(true);
     expect(isDevTunnelHost('wsf.example.com')).toBe(false);
   });
@@ -297,5 +311,59 @@ describe('W12-13: MOVE and the station build their QR codes from currentOrigin',
     expect(byId('wsf-station-qr-join-image')).not.toBeNull();
     expect(encoded).toContain(join(PAGE));
     expect(encoded.filter((t) => t.startsWith(NAMED))).toEqual([]);
+  });
+});
+
+describe('RV16-641-1: the station never says a community is not joined from a link because the build names no origin', () => {
+  const NOT_FROM_LINK = 'isn’t joined from a link';
+  const station = async (platform: 'ios' | 'android' | 'web') => {
+    (Platform as { OS: string }).OS = platform;
+    act(() => root.render(<StationScreen />));
+    await settle();
+    expect(byId('wsf-station-qr')).not.toBeNull();
+  };
+
+  it.each(['ios', 'android'] as const)('%s: a join code and no origin: no join block, no false sentence, and no caption for codes that are not there', async (platform) => {
+    await station(platform);
+    expect(byId('wsf-station-qr-join')).toBeNull();
+    expect(byId('wsf-station-qr-join-unavailable')).toBeNull();
+    expect(container.textContent).not.toContain(NOT_FROM_LINK);
+    expect(byId('wsf-station-qr-member')).toBeNull();
+    expect(byId('wsf-station-qr-note')).toBeNull();
+  });
+
+  it('ios: a community that admits nobody by link (no code) still says so, origin or not; the caption goes with the codes', async () => {
+    answers.wsfStationState = async () => ({ stationId: 'st1', slot: 1, label: 'Station 1', goalId: 'g1', queueId: 'q1', joinCode: null, pulse: PULSE });
+    await station('ios');
+    expect(byId('wsf-station-qr-join-unavailable')!.textContent).toContain(NOT_FROM_LINK);
+    expect(byId('wsf-station-qr-note')).toBeNull();
+    act(() => root.unmount());
+    root = createRoot(container);
+    vi.stubEnv('EXPO_PUBLIC_WSF_PUBLIC_ORIGIN', NAMED);
+    await station('ios');
+    expect(byId('wsf-station-qr-join-unavailable')!.textContent).toContain(NOT_FROM_LINK);
+    expect(byId('wsf-station-qr-member-image')).not.toBeNull();
+    expect(byId('wsf-station-qr-note')).not.toBeNull();
+  });
+
+  it('ios: with an origin named, the join code is drawn with its caption, as before', async () => {
+    vi.stubEnv('EXPO_PUBLIC_WSF_PUBLIC_ORIGIN', NAMED);
+    await station('ios');
+    expect(byId('wsf-station-qr-join-image')).not.toBeNull();
+    expect(container.textContent).not.toContain(NOT_FROM_LINK);
+    expect(byId('wsf-station-qr-note')).not.toBeNull();
+  });
+
+  it('web, unchanged: both codes and the caption with a join code; the sentence and the caption without one', async () => {
+    await station('web');
+    expect(byId('wsf-station-qr-join-image')).not.toBeNull();
+    expect(byId('wsf-station-qr-member-image')).not.toBeNull();
+    expect(byId('wsf-station-qr-note')).not.toBeNull();
+    act(() => root.unmount());
+    root = createRoot(container);
+    answers.wsfStationState = async () => ({ stationId: 'st1', slot: 1, label: 'Station 1', goalId: 'g1', queueId: 'q1', joinCode: null, pulse: PULSE });
+    await station('web');
+    expect(byId('wsf-station-qr-join-unavailable')!.textContent).toContain(NOT_FROM_LINK);
+    expect(byId('wsf-station-qr-note')).not.toBeNull();
   });
 });
