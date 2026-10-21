@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
 import { memberCountLabel, roleCardLabel } from '../labels';
 import {
@@ -19,7 +19,7 @@ import {
 } from '../youParity';
 import { ACTION_GREEN, NAVY, PROGRESS_GREEN, SURFACE, elevation } from './kit';
 import { LivingWeProgress } from './LivingWeProgress';
-import { MEMBER_TAB_BAR_BODY, MEMBER_TAB_MOVE_OVERHANG } from './MemberTabBar';
+import { MEMBER_TAB_BAR_BODY, MEMBER_TAB_MOVE_OVERHANG, tabContentBottomReserve } from './MemberTabBar';
 import { RefreshNote, type RefreshState } from './RefreshNote';
 import { registerFocusTarget } from './focusTarget';
 import { fillRatio, percentLabel } from './progressFormat';
@@ -92,6 +92,16 @@ export function useYouCompact(): boolean {
   return hydrated && height > 0 && height <= YOU_COMPACT_MAX_HEIGHT;
 }
 
+/**
+ * W16-12 (INT-30). On a phone the tab bar is laid out below the scene, so the
+ * page reserves only MOVE's overhang (tabContentBottomReserve, W12-16), not
+ * the whole bar. The web keeps the stylesheet's padding: nothing is added
+ * there, so its DOM (a class, not an inline style) is unchanged.
+ */
+function nativeBodyReserve(): { paddingBottom: number } | null {
+  return Platform.OS === 'web' ? null : { paddingBottom: tabContentBottomReserve(0) };
+}
+
 export function YouParityView({ state, email, signingOut, actions, refresh }: YouParityViewProps) {
   const compact = useYouCompact();
   const account = <Account email={email} signingOut={signingOut} onSignOut={actions.onSignOut} />;
@@ -99,7 +109,7 @@ export function YouParityView({ state, email, signingOut, actions, refresh }: Yo
   const cardTitle = [s.stateTitle, compact && s.stateTitleCompact];
   return (
     <View style={s.screen} testID="wsf-you" {...({ dataSet: { compact: compact ? 'true' : 'false' } } as Record<string, unknown>)}>
-      <ScrollView contentContainerStyle={[s.body, compact && s.bodyCompact]}>
+      <ScrollView contentContainerStyle={[s.body, nativeBodyReserve(), compact && s.bodyCompact]}>
         {state.kind === 'loading' ? (
           <>
             <YouHead profile={null} onSettings={null} resolved={false} compact={compact} />

@@ -20,12 +20,15 @@ import {
 } from '../deviceMode';
 import {
   ACTION_GREEN,
+  ACTION_GREEN_DEEP,
   HAIRLINE,
   INK_QUIET,
   NAVY,
+  OPTION_SELECTED_TINT,
   SURFACE,
   elevation,
   kit,
+  pressableStyle,
 } from './kit';
 
 /**
@@ -109,7 +112,8 @@ export function DeviceChoice({
           </Text>
           <Pressable
             onPress={onChoosePersonal}
-            style={styles.sheetPrimary}
+            // W16-12 (INT-33): pressed feedback on a phone; the web's style is unchanged.
+            {...pressableStyle(styles.sheetPrimary, ACTION_GREEN_DEEP)}
             testID={`${testID}-personal`}
             accessibilityRole="button"
             {...choiceA11y(SHEET_PERSONAL_ACTION, DEVICE_CHOICE_PERSONAL_DESCRIPTION, `${DEVICE_CHOICE_PERSONAL_LABEL}. ${DEVICE_CHOICE_PERSONAL_DESCRIPTION}`)}
@@ -124,7 +128,7 @@ export function DeviceChoice({
           </Text>
           <Pressable
             onPress={onChooseShared}
-            style={styles.sheetSecondary}
+            {...pressableStyle(styles.sheetSecondary, OPTION_SELECTED_TINT)}
             testID={`${testID}-shared`}
             accessibilityRole="button"
             {...choiceA11y(SHEET_SHARED_ACTION, sharedDescription, `${DEVICE_CHOICE_SHARED_LABEL}. ${sharedDescription}`)}
@@ -199,7 +203,8 @@ function ChoiceCard({
   return (
     <Pressable
       onPress={onPress}
-      style={[kit.card, styles.choiceCard]}
+      // W16-12 (INT-33): pressed feedback on a phone; the web's style is unchanged.
+      {...pressableStyle([kit.card, styles.choiceCard], OPTION_SELECTED_TINT)}
       testID={testID}
       accessibilityRole="button"
       {...choiceA11y(label, description, `${label}. ${description}`)}

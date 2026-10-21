@@ -34,7 +34,7 @@ import {
   display,
   elevation,
 } from '../../../src/ui/kit';
-import { MEMBER_TAB_BAR_BODY, MEMBER_TAB_MOVE_OVERHANG } from '../../../src/ui/MemberTabBar';
+import { tabContentBottomReserve } from '../../../src/ui/MemberTabBar';
 import {
   fillRatio,
   formatCount,
@@ -238,8 +238,13 @@ export default function CommunityIndexScreen() {
     THE SHELL'S OWN FOOTPRINT, measured rather than guessed. The raised MOVE
     control lifts above the bar's body, so content that stops at its own
     padding sits under it no matter how far the page scrolls.
+
+    W16-12 (INT-30): through the integrator's tabContentBottomReserve (W12-16).
+    The web keeps today's value (the bar's body, MOVE's overhang and the
+    inset); on a phone the bar is laid out below the scene, so only MOVE's
+    24 pt overhang is reserved, not 64 pt of dead space.
   */
-  const barInset = MEMBER_TAB_BAR_BODY + MEMBER_TAB_MOVE_OVERHANG + safeArea.bottom;
+  const barInset = tabContentBottomReserve(safeArea.bottom);
 
   // The request that is allowed to publish. A retry, a sign-out or an unmount
   // while a slow read is in flight must not let a stale answer land.

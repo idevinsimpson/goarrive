@@ -311,17 +311,21 @@ function composeMember(
   };
 }
 
+type ComposeArgs = Parameters<typeof composeMember>;
+
 /**
- * The page from this account's record alone, or `null` when the record does
- * not hold every fact the page needs (src/memberReads.ts).
+ * The page from this account's record alone, with the inputs a member page
+ * was composed from (heads-11 NB-3: kept, so a later failed revalidation can
+ * recompose THAT page against now), or `null` when the record does not hold
+ * every fact the page needs (src/memberReads.ts).
  */
-function youFromRecord(uid: string): Screen | null {
+function recordedYou(uid: string): { screen: Screen; args: ComposeArgs | null } | null {
   const mine = peekMyCommunities(uid);
   if (!mine) return null;
   const known = peekMemberProfile(uid);
   const profile: Profile = known ? toProfile(known) : { displayName: null, memberSince: null, pending: true };
   const communities = mine.items as unknown as Community[];
-  if (communities.length === 0) return { kind: 'noCommunity', profile };
+  if (communities.length === 0) return { screen: { kind: 'noCommunity', profile }, args: null };
   // Not before the phone's remembered choice is read, where it can change the
   // answer: with several communities "none chosen" would be a guess. With one,
   // the answer is that one either way.
@@ -331,7 +335,7 @@ function youFromRecord(uid: string): Screen | null {
     communities.map((c) => c.groupId),
   );
   const community = communities.find((c) => c.groupId === currentId) ?? null;
-  if (!community) return { kind: 'pickCommunity', profile, count: communities.length };
+  if (!community) return { screen: { kind: 'pickCommunity', profile, count: communities.length }, args: null };
   const goals = peekGoals<Goal>(uid, community.groupId)?.goals;
   if (!goals) return null;
   const owned: Array<{ goal: Goal; own: Own }> = [];
@@ -340,7 +344,8 @@ function youFromRecord(uid: string): Screen | null {
     if (!own) return null;
     owned.push({ goal, own });
   }
-  return composeMember(profile, community, goals, owned, elsewhereFromRecord(uid, communities, community.groupId));
+  const args: ComposeArgs = [profile, community, goals, owned, elsewhereFromRecord(uid, communities, community.groupId)];
+  return { screen: composeMember(...args), args };
 }
 
 /*
@@ -371,9 +376,10 @@ export default function You() {
   const { ready, user } = useWsfAuth();
   // The first frame already stands on the account's record when it can: a
   // loading state painted for one frame and then replaced is still a flash.
+  const [firstRecord] = useState(() => (ready && user ? recordedYou(user.uid) : null));
   const [held, setHeld] = useState<Owned>(() => ({
     uid: ready && user ? user.uid : null,
-    screen: (ready && user ? youFromRecord(user.uid) : null) ?? LOADING,
+    screen: firstRecord?.screen ?? LOADING,
   }));
   /** Sets the screen for `uid`; an updater sees another account's screen as loading. */
   const setScreen = useCallback((uid: string | null, next: Screen | ((prev: Screen) => Screen)) => {
@@ -385,7 +391,7 @@ export default function You() {
   const [signingOut, setSigningOut] = useState(false);
   const [reloads, setReloads] = useState(0);
   // A page that came up before the phone's remembered community was read
-  // shows loading (youFromRecord above); once the read lands, the frame the
+  // shows loading (recordedYou above); once the read lands, the frame the
   // record could not give then is given now. Not after a Retry, which reads
   // everything fresh. The load below still replaces it.
   const communityReady = useCurrentCommunityReady();
@@ -394,10 +400,10 @@ export default function You() {
   const repainted = useRef<{ uid: string; screen: Screen } | null>(null);
   useEffect(() => {
     if (!communityReady || !ready || !user || reloads > 0) return;
-    const warmNow = youFromRecord(user.uid);
+    const warmNow = recordedYou(user.uid)?.screen ?? null;
     repainted.current = warmNow ? { uid: user.uid, screen: warmNow } : null;
     const uid = user.uid;
-    setScreen(uid, (prev) => (prev.kind === 'loading' ? youFromRecord(uid) ?? prev : prev));
+    setScreen(uid, (prev) => (prev.kind === 'loading' ? recordedYou(uid)?.screen ?? prev : prev));
   }, [communityReady, ready, user, reloads, setScreen]);
   /** Guards a landed read against a newer one, and against an unmounted tree. */
   const live = useRef(0);
@@ -411,7 +417,7 @@ export default function You() {
     moment before. Now:
       · when this account's record (src/memberReads.ts) holds the member's
         communities, the current community's goals and the own part in each,
-        the page opens on them at once (`youFromRecord`); the name waits in
+        the page opens on them at once (`recordedYou`); the name waits in
         its place until the profile is read, it is never guessed;
       · every read runs through the same record, the profile alongside the
         rest instead of before it, and an answer from this load is reused;
@@ -444,10 +450,19 @@ export default function You() {
    * so a failed revalidation that keeps the page can recompose it against
    * NOW. A goal whose end passed while the app slept must stop offering
    * "Start moving" even when the server could not be asked (hasWindowEnded
-   * is pure). heads-10 F-1: a page drawn from the account's record clears
-   * it, so these older inputs can never replace a newer page.
+   * is pure). heads-10 F-1 and heads-11 NB-3: these are ALWAYS the inputs of
+   * the page on screen, whatever drew it: a network read, or the account's
+   * record (the focus path, the effect's recorded branch, which also covers
+   * the first frame's record page on the same mount, and a kept page
+   * recomposed from the record). So they are never older than the page, and
+   * a page drawn from the record can still be recomposed against now after
+   * the record has lost a fact.
    */
-  const composedFrom = useRef<{ uid: string; args: Parameters<typeof composeMember> } | null>(null);
+  const composedFrom = useRef<{ uid: string; args: ComposeArgs } | null>(null);
+  /** The page on screen was drawn from the record: its inputs become the record's. */
+  const drawnFromRecord = (uid: string, rec: { args: ComposeArgs | null }) => {
+    composedFrom.current = rec.args ? { uid, args: rec.args } : null;
+  };
   const focusedOnce = useRef(false);
   useFocusEffect(
     useCallback(() => {
@@ -457,10 +472,10 @@ export default function You() {
       }
       if (!ready || !user) return;
       const uid = user.uid;
-      const recorded = youFromRecord(uid);
-      if (recorded) {
-        composedFrom.current = null;
-        setScreen(uid, recorded);
+      const rec = recordedYou(uid);
+      if (rec) {
+        drawnFromRecord(uid, rec);
+        setScreen(uid, rec.screen);
         return;
       }
       setScreen(uid, (prev) =>
@@ -484,10 +499,11 @@ export default function You() {
     const fresh = reloads > 0 || freshNext.current;
     freshNext.current = false;
     const reuse = fresh ? 0 : SAME_LOAD_MS;
-    const recorded = fresh ? null : youFromRecord(uid);
+    const rec = fresh ? null : recordedYou(uid);
+    const recorded = rec?.screen ?? null;
     const keep = keepOnScreen.current;
     keepOnScreen.current = false;
-    if (recorded) composedFrom.current = null;
+    if (rec) drawnFromRecord(uid, rec);
     setScreen(uid, (prev) => recorded ?? (keep && prev.kind !== 'loading' ? prev : { kind: 'loading' }));
     setStale(false);
     setChecking(false);
@@ -505,10 +521,16 @@ export default function You() {
       // THE PROFILE ALONGSIDE THE REST. It is the member's own document and
       // needs no callable, so an identity is on screen even when every goal
       // read fails -- but nothing else has to wait for it.
-      const profileRead: Promise<Profile> = readMemberProfile(uid, reuse).then(toProfile, () => ({
-        displayName: null,
-        memberSince: null,
-      }));
+      // NB-4: whether this load's profile read answered (its failure fallback
+      // is not a profile, so a kept page does not take it for one).
+      let profileAnswered = false;
+      const profileRead: Promise<Profile> = readMemberProfile(uid, reuse).then(
+        (answer) => {
+          profileAnswered = true;
+          return toProfile(answer);
+        },
+        () => ({ displayName: null, memberSince: null }),
+      );
       const fail = async (community?: Community) => {
         const profile = await profileRead;
         if (live.current !== token) return;
@@ -531,15 +553,23 @@ export default function You() {
           // Kept, but recomposed against now (N3). heads-10 F-1: from the
           // account's record first, which is never older than the page (a
           // receipt, a focus and a switch all write or read it); only when it
-          // no longer holds every fact, from the network read the page was
-          // composed from. And only ever as the same community: a failed read
-          // never swaps the community on screen.
+          // no longer holds every fact, from the inputs the page on screen was
+          // composed from (NB-3: never older than it). And only ever as the
+          // same community: a failed read never swaps the community on screen.
           const from = composedFrom.current?.uid === uid ? composedFrom.current.args : null;
-          const again = youFromRecord(uid) ?? (from ? composeMember(...from) : null);
+          const rec = recordedYou(uid);
+          const again = rec?.screen ?? (from ? composeMember(...from) : null);
           if (again?.kind === 'member') {
-            setScreen(uid, (prev) =>
-              prev.kind === 'member' && prev.community.groupId === again.community.groupId ? again : prev,
-            );
+            setScreen(uid, (prev) => {
+              if (prev.kind !== 'member' || prev.community.groupId !== again.community.groupId) return prev;
+              if (rec) drawnFromRecord(uid, rec);
+              // NB-4: the head is the freshest profile there is: this load's
+              // read if it answered, else the record's, else the one the page
+              // already shows. Never a pending bar over a name, or over the
+              // "You" header, on a page kept as last read.
+              const head = profileAnswered ? profile : again.profile.pending ? prev.profile : again.profile;
+              return { ...again, profile: head };
+            });
           }
           setStale(true);
           return;

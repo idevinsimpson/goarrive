@@ -18,21 +18,19 @@ export function nativeA11yHidden(): { accessible?: false; importantForAccessibil
 
 /**
  * NATIVE-MEMBER-1 W16-3 (INT-18). On a phone, speaks the stale-figure sentence
- * once each time `failed` turns true (src/ui/announce: iOS ignores live
- * regions, and Android's would speak twice beside an announcement). On the web
- * this does nothing; the polite region beside each figure speaks.
+ * once per failure WAVE (src/ui/announce: iOS ignores live regions, and
+ * Android's would speak twice beside an announcement). On the web this does
+ * nothing; the polite region beside each figure speaks.
  *
- * heads-9 N-3: Community Home renders ONE of these for the page, fed whether
- * any figure on it is stale, so a refresh round that fails every goal speaks
- * once. A failure that predates the mount is not a new failure here and is
- * not spoken: `wasFailed` starts from the first render.
+ * `wave` names the failure that is showing: null while nothing is stale, and
+ * otherwise an id that changes only when a NEW failure makes something stale
+ * (Community Home passes the latest refresh round that did; heads-9 N-3 and
+ * heads-11 NB-2). Each distinct wave is spoken once. The wave already showing
+ * when this mounts is not a new failure here and is not spoken.
  */
-export function StaleAnnouncer({ failed }: { failed: boolean }) {
-  const failures = useRef(0);
-  const wasFailed = useRef(failed);
-  if (failed && !wasFailed.current) failures.current += 1;
-  wasFailed.current = failed;
-  const owed = failed && failures.current > 0;
-  useAnnounce(owed ? STALE_FIGURE_SENTENCE : null, owed ? failures.current : null);
+export function StaleAnnouncer({ wave }: { wave: number | null }) {
+  const atMount = useRef(wave);
+  const owed = wave !== null && wave !== atMount.current;
+  useAnnounce(owed ? STALE_FIGURE_SENTENCE : null, owed ? wave : null);
   return null;
 }

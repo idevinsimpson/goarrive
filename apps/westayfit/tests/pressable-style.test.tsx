@@ -201,6 +201,7 @@ describe('never on a ButtonLink or a <Link asChild> child', () => {
     expect(found).toEqual([]);
     // The sites that do use it are where they should be.
     const users = files.filter((f) => /\bpressableStyle\s*\(/.test(readFileSync(f, 'utf8'))).map((f) => relative(APP_ROOT, f)).sort();
-    expect(users).toEqual(['src/ui/MemberTabBar.tsx', 'src/ui/MemberTopBar.tsx', 'src/ui/OptionRow.tsx']);
+    // W16-12 (INT-33, member): DeviceChoice's buttons adopt it, as W12-17 routes.
+    expect(users).toEqual(['src/ui/DeviceChoice.tsx', 'src/ui/MemberTabBar.tsx', 'src/ui/MemberTopBar.tsx', 'src/ui/OptionRow.tsx']);
   }, 60_000);
 });
