@@ -376,6 +376,33 @@ function screenForAccount(ready: boolean, uid: string | null, held: Owned): Scre
 /** NATIVE-MEMBER-1 W16-13 (INT-01 CS-4). On a phone a throw in You is contained inside the You tab, as Progress's is; undefined on the web. */
 export const ErrorBoundary = nativeErrorBoundary('tab');
 
+/**
+ * RV15-639-N2. WHETHER A PAGE A FAILED LOAD WOULD KEEP IS ONE ITS FRESH READ
+ * STILL SHOWS. A load that fails keeps a member page already on screen (one
+ * drawn at mount from the record, or by the readiness repaint) and marks it
+ * stale, rather than replacing it with the failed page. That is right only
+ * while nothing the load did read contradicts the page:
+ *   - `resolved` absent: the membership read itself failed, no fresh list was
+ *     read, and nothing contradicts the page: keep it;
+ *   - otherwise the list was read (`listed`) and resolved a community whose
+ *     goals then failed: keep the page only if that list still holds its
+ *     community AND it is the community resolved. A page for a community the
+ *     list no longer holds, or for another one, is not kept; the caller draws
+ *     the failed page for the resolved community.
+ * (`resolved` is taken from `listed`, so today the second condition implies
+ * the first.) Anything but a member page is never kept by this rule.
+ */
+function keptPageStillShown(
+  page: Screen | null,
+  resolved: Community | undefined,
+  listed: readonly Community[],
+): page is Extract<Screen, { kind: 'member' }> {
+  if (!page || page.kind !== 'member') return false;
+  if (!resolved) return true;
+  const groupId = page.community.groupId;
+  return listed.some((c) => c.groupId === groupId) && groupId === resolved.groupId;
+}
+
 export default function You() {
   const { ready, user } = useWsfAuth();
   // The first frame already stands on the account's record when it can: a
@@ -543,7 +570,10 @@ export default function You() {
         // in flight (it began on loading) is kept and marked stale, exactly
         // like one drawn at mount, rather than replaced by the failed page.
         const painted = !recorded && !keep && repainted.current?.uid === uid ? repainted.current.screen : null;
-        if (painted && painted.kind === 'member') {
+        // RV15-639-N2: the painted page and the recorded one are each kept
+        // only while the fresh read still shows it (`keptPageStillShown`);
+        // otherwise the failed page below.
+        if (keptPageStillShown(painted, community, communities)) {
           setScreen(uid, { ...painted, profile });
           setStale(true);
           return;
@@ -553,7 +583,7 @@ export default function You() {
         // drew when it STARTED, so a focus that had since drawn a newer page
         // or another community (a switch, a receipt) was undone, and a failed
         // profile read replaced the recorded name with "You".
-        if (keep || (recorded && recorded.kind === 'member')) {
+        if (keep || keptPageStillShown(recorded, community, communities)) {
           // Kept, but recomposed against now (N3). heads-10 F-1: from the
           // account's record first, which is never older than the page (a
           // receipt, a focus and a switch all write or read it); only when it

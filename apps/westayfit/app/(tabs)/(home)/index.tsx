@@ -606,6 +606,29 @@ function SignedInHome({
       </View>
     );
   }
+  // ST-03 (heads-13 N3). The stack below IS the chooser ("Choose a community"
+  // over the list), so it waits for the same read the decision waits for:
+  // until the remembered community has been read, a member whose list is
+  // loading or has communities in it sees the list still loading, never a
+  // chooser the decision may replace a moment later. An error or an empty
+  // list is shown as before (nothing to decide). Not when the list itself was
+  // asked for: nothing is decided then. Never on web, where the read is
+  // always answered.
+  const awaitingRemembered =
+    !communityReady &&
+    !listRequested &&
+    (state.kind === 'idle' || state.kind === 'loading' || (state.kind === 'ready' && state.items.length > 0));
+  if (awaitingRemembered) {
+    return (
+      <View
+        style={styles.stack}
+        testID="wsf-home-awaiting-community"
+        {...({ 'data-state': 'loading' } as Record<string, unknown>)}
+      >
+        <MyCommunitiesList state={{ kind: 'loading' }} goalsByGroup={goalsByGroup} onRetry={onRetry} />
+      </View>
+    );
+  }
   const joinField = (
     <JoinWithCodeField
       title={noCommunityYet ? 'Join with a code' : 'Join another community'}
