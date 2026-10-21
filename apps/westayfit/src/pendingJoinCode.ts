@@ -1,5 +1,5 @@
 /**
- * Pending join code — sessionStorage-backed handoff for the QR-scan flow.
+ * Pending join code — the post-auth handoff for the QR-scan flow.
  *
  * The moment that matters: a signed-out visitor scans a QR, lands on
  * /join/<code>, and taps "Sign up to join". The signup flow that follows
@@ -8,61 +8,76 @@
  * every one of those hops is fragile and easy to drop; a page reload during
  * verify would lose it either way.
  *
- * sessionStorage is exactly the right lifetime: survives client-side navigation
- * and a same-tab reload, clears on tab close so a stale code cannot linger for
- * the next visitor. Web-only: WSF ships web-only for now, and the write is
- * guarded against SSR / RN with a `typeof window` check that also masks a
- * private-browsing quota reject.
+ * LIFETIME AND OWNERSHIP are the family's (src/postAuthDestination.ts):
+ * sessionStorage on web exactly as before; AsyncStorage with a two-hour
+ * expiry on a phone, read at launch and waited for by the terminal hop; a code
+ * stashed while an account is signed in is that account's alone and goes when
+ * its session ends; a code stashed signed out is the handoff for whoever signs
+ * in next.
+ *
+ * FORMAT. An anonymous code is stored as the bare code string, as it always
+ * was (the browser tests seed and read exactly that). An owned code is stored
+ * as `{"code":…,"owner":…}`, which the old reader's shape check rejects, so
+ * it can never be read as anonymous.
  */
 
 import { eventRoute, readEventReturn } from './eventReturn';
 import { kioskContributeRoute, readKioskReturnGoal } from './kioskSession';
 import { markerRoute, readMarkerReturn } from './markerEntry';
-
-const KEY = 'wsf.pendingJoinCode';
+import {
+  definePostAuthDestination,
+  dropForeignDestinations,
+  postAuthDestinationsReady,
+} from './postAuthDestination';
 
 /**
  * Whether a value looks like a plausible join code — matches the server's
  * normalizer so we do not stash garbage that the callables will reject.
  */
-function isValidShape(code: string): boolean {
+export function isJoinCodeShape(code: string): boolean {
   return /^[A-Za-z0-9_-]{16,128}$/.test(code);
 }
 
-export function setPendingJoinCode(code: string): void {
-  try {
-    if (typeof window === 'undefined') return;
-    const storage = window.sessionStorage;
-    if (!storage) return;
-    if (!isValidShape(code)) return;
-    storage.setItem(KEY, code);
-  } catch {
-    // Private-browsing quota reject or a locked-down UA. Losing the handoff
-    // is annoying but not catastrophic — the /join route still works; the
-    // member just has to re-scan.
-  }
-}
-
-export function readPendingJoinCode(): string | null {
-  try {
-    if (typeof window === 'undefined') return null;
-    const storage = window.sessionStorage;
-    if (!storage) return null;
-    const raw = storage.getItem(KEY);
-    if (raw == null) return null;
-    return isValidShape(raw) ? raw : null;
-  } catch {
+const joinCode = definePostAuthDestination<string>({
+  key: 'wsf.pendingJoinCode',
+  decode(raw) {
+    if (isJoinCodeShape(raw)) return { value: raw, owner: null };
+    try {
+      const v = JSON.parse(raw) as { code?: unknown; owner?: unknown } | null;
+      if (v && typeof v.code === 'string' && isJoinCodeShape(v.code) && typeof v.owner === 'string' && v.owner) {
+        return { value: v.code, owner: v.owner };
+      }
+    } catch {
+      // fall through
+    }
     return null;
-  }
+  },
+  encode(code, owner) {
+    return owner ? JSON.stringify({ code, owner }) : code;
+  },
+});
+
+/**
+ * Stash the code. `ownerUid` is the account signed in at this moment, or null
+ * for a signed-out visitor. Resolves whether the device accepted it; losing
+ * the handoff is annoying but not catastrophic — the /join route still works,
+ * the member just has to re-scan.
+ */
+export function setPendingJoinCode(code: string, ownerUid: string | null = null): Promise<boolean> {
+  if (!isJoinCodeShape(code)) return Promise.resolve(false);
+  return joinCode.write(code, ownerUid);
 }
 
-export function clearPendingJoinCode(): void {
-  try {
-    if (typeof window === 'undefined') return;
-    window.sessionStorage?.removeItem(KEY);
-  } catch {
-    // ignore
-  }
+/**
+ * The code waiting for `uid` (null: a signed-out reader), or null. A code
+ * stashed under another account is never returned.
+ */
+export function readPendingJoinCode(uid: string | null = null): string | null {
+  return joinCode.read(uid);
+}
+
+export function clearPendingJoinCode(): Promise<boolean> {
+  return joinCode.clear();
 }
 
 /**
@@ -73,8 +88,13 @@ export function clearPendingJoinCode(): void {
  * Only invoke on the terminal hop — after the member is verified AND has a
  * profile. Interim gates (verify-email, profile-setup) MUST route directly to
  * the next gate; otherwise `wsfJoinCommunity` fires before the profile exists
- * and the visitor dead-ends. The pending code survives sessionStorage across
- * the gate hops and is consumed here on the last step.
+ * and the visitor dead-ends. The pending code survives the gate hops (session
+ * storage on web, the bounded native store on a phone) and is consumed here
+ * on the last step. `uid` is the account completing the hop: no destination
+ * stashed under a different account claims it.
+ *
+ * Synchronous, for callers that already know the store has been read; the
+ * terminal hops use `routeAfterAuth`, which waits for it.
  *
  * FOUR DESTINATIONS CAN CLAIM THIS HOP, in this order:
  *
@@ -99,14 +119,30 @@ export function clearPendingJoinCode(): void {
  * the kiosk and never offered a personal sign-in. The order is written down
  * anyway, because "should not happen" is not a rule.
  */
-export function nextRouteAfterAuth(fallback: string): string {
-  const pending = readPendingJoinCode();
+export function nextRouteAfterAuth(fallback: string, uid: string | null = null): string {
+  const pending = readPendingJoinCode(uid);
   if (pending) return `/join/${pending}`;
-  const eventGoalId = readEventReturn();
+  const eventGoalId = readEventReturn(Date.now(), uid);
   if (eventGoalId) return eventRoute(eventGoalId);
-  const kioskGoalId = readKioskReturnGoal();
+  const kioskGoalId = readKioskReturnGoal(uid);
   if (kioskGoalId) return kioskContributeRoute(kioskGoalId);
-  const markerSlug = readMarkerReturn();
+  const markerSlug = readMarkerReturn(Date.now(), uid);
   if (markerSlug) return markerRoute(markerSlug);
   return fallback;
+}
+
+/**
+ * `nextRouteAfterAuth`, after the stored destinations have been read — the
+ * form every terminal auth hop uses. Immediate on web. On a phone it waits for
+ * the launch-time read, so a hop taken moments after a cold start cannot route
+ * past a destination that is still being loaded.
+ *
+ * Every destination that belongs to a DIFFERENT account is dropped here, at
+ * the first terminal hop somebody else completes: it was never going to be
+ * theirs, and it must not wait on the device for its owner's return either.
+ */
+export async function routeAfterAuth(fallback: string, uid: string | null): Promise<string> {
+  await postAuthDestinationsReady();
+  await dropForeignDestinations(uid);
+  return nextRouteAfterAuth(fallback, uid);
 }

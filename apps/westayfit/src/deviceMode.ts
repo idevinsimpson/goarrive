@@ -35,9 +35,32 @@
  * and an expo is a long day. A shared device that forgot its own answer would
  * ask the next walk-up all over again; worse, a tab restored on a shared
  * device would default to the personal path.
+ *
+ * A DEVICE PREFERENCE, NOT AN ACCOUNT'S (NATIVE-STATE-3). It is kept through
+ * the device storage boundary (src/storage/kv.ts): localStorage on web, under
+ * the same key, read synchronously exactly as before; AsyncStorage on iOS and
+ * Android, read at launch, so a phone remembers its answer across restarts.
+ * It is deliberately NOT scoped to an account and NOT cleared on sign-out,
+ * which is the account-safe choice here rather than the opposite of one:
+ *   - it is asked BEFORE anybody signs in or an account is made, so there is
+ *     no account to scope it to at the moment it matters;
+ *   - a shared screen signs out EVERY visitor (app/kiosk/[goalId].tsx); an
+ *     answer cleared on sign-out, or held per account, would make a shared
+ *     screen forget it is shared and offer the next walk-up the personal path
+ *     — the one outcome this question exists to prevent;
+ *   - it carries no identity (one of two words), so remembering it across
+ *     accounts hands nobody anything about anybody.
+ * Until the native launch read has answered, the screens that ask treat the
+ * answer as not read yet (`isDeviceModeReady`), which is the loading state
+ * they already show — never a default of "personal".
  */
 
+import { useEffect, useState } from 'react';
+
 import { kioskStartRoute } from './kioskSession';
+import { deviceKv } from './storage/kv';
+import { createKeyMirror } from './storage/mirror';
+import { HAS_SYNC_STORAGE, readDeviceSync } from './storage/syncRead';
 
 export type DeviceMode = 'personal' | 'shared';
 
@@ -51,57 +74,102 @@ export function isDeviceMode(value: unknown): value is DeviceMode {
   return value === 'personal' || value === 'shared';
 }
 
-function store(): Storage | null {
-  try {
-    if (typeof window === 'undefined') return null;
-    return window.localStorage ?? null;
-  } catch {
-    // Private browsing, a locked-down UA, or storage disabled entirely. The
-    // question is simply asked again, which is the honest state for a device
-    // that cannot remember its own answer.
-    return null;
-  }
+/*
+  Private browsing, a locked-down UA, or storage disabled entirely: the
+  question is simply asked again, which is the honest state for a device that
+  cannot remember its own answer. The store reports a refused write as such.
+*/
+const store = createKeyMirror(deviceKv, readDeviceSync);
+const hydrated: Promise<void> = HAS_SYNC_STORAGE ? Promise.resolve() : store.load(DEVICE_MODE_KEY);
+
+/** Resolves once this device's answer has been read. Immediate on web. */
+export function deviceModeReady(): Promise<void> {
+  return hydrated;
+}
+
+/** Whether `readDeviceMode` reflects what the device remembers yet (always, on web). */
+export function isDeviceModeReady(): boolean {
+  return store.loaded(DEVICE_MODE_KEY);
 }
 
 /**
  * The answer this device has given, or null if it has not been asked — or
  * gave an answer this build no longer recognises, which is treated as no
- * answer rather than guessed at.
+ * answer rather than guessed at. On a phone, null also before the launch read
+ * has answered; a screen that must not act on that checks `isDeviceModeReady`.
  */
 export function readDeviceMode(): DeviceMode | null {
-  try {
-    const raw = store()?.getItem(DEVICE_MODE_KEY);
-    return isDeviceMode(raw) ? raw : null;
-  } catch {
-    return null;
-  }
+  const raw = store.read(DEVICE_MODE_KEY);
+  return isDeviceMode(raw) ? raw : null;
 }
 
 /**
- * Remember the answer. Returns whether it was actually remembered, because a
- * browser that refuses storage must not be told it succeeded: the caller still
+ * Remember the answer. Resolves whether it was actually remembered, because a
+ * device that refuses storage must not be told it succeeded: the caller still
  * acts on the answer it was just given, it simply has to ask again next time.
  */
-export function saveDeviceMode(mode: DeviceMode): boolean {
-  if (!isDeviceMode(mode)) return false;
-  try {
-    const storage = store();
-    if (!storage) return false;
-    storage.setItem(DEVICE_MODE_KEY, mode);
-    return true;
-  } catch {
-    return false;
-  }
+export function saveDeviceMode(mode: DeviceMode): Promise<boolean> {
+  if (!isDeviceMode(mode)) return Promise.resolve(false);
+  return store.write(DEVICE_MODE_KEY, mode);
 }
 
-/** Forget it, so the question is asked again. The one way back for a phone
- * that answered "shared" by mistake. */
-export function clearDeviceMode(): void {
-  try {
-    store()?.removeItem(DEVICE_MODE_KEY);
-  } catch {
-    // ignore: nothing else reads this key.
-  }
+/** What a device answer that could not be removed is overwritten with: not
+ * an answer, so it reads as "not asked". */
+const FORGOTTEN = 'forgotten';
+
+/**
+ * Forget it, so the question is asked again. The one way back for a phone
+ * that answered "shared" by mistake — so the forgetting must actually stick:
+ * a removal the device refuses is retried once, and if it still refuses, the
+ * answer is overwritten with a value that is not an answer. Otherwise a phone
+ * that took the way back would be sent to the kiosk again after a restart.
+ * Resolves whether any of the three was kept; false means the device could
+ * not forget it (this session still reads it as forgotten).
+ */
+export async function clearDeviceMode(): Promise<boolean> {
+  // An answer given while a removal is outstanding is newer than the one
+  // being forgotten; the retry and the overwrite stop rather than erase it.
+  // (Compared with the forgotten value, not with null: on web the read is
+  // localStorage itself, which still holds the old answer after a refusal.)
+  const forgetting = store.read(DEVICE_MODE_KEY);
+  const newerLanded = () => {
+    const now = store.read(DEVICE_MODE_KEY);
+    return now !== null && now !== forgetting;
+  };
+  if (await store.remove(DEVICE_MODE_KEY)) return true;
+  if (newerLanded()) return true;
+  if (await store.remove(DEVICE_MODE_KEY)) return true;
+  if (newerLanded()) return true;
+  const kept = await store.write(DEVICE_MODE_KEY, FORGOTTEN);
+  return kept;
+}
+
+/**
+ * The answer as a screen holds it: `undefined` until it has been read, then
+ * the answer or null. The static export renders with no storage, so the read
+ * happens after mount (the #418 hydration rule the event, join, kiosk and
+ * station screens keep); on web it is synchronous in that first effect, as it
+ * always was, and on a phone it lands when the launch read does.
+ */
+export function useStoredDeviceMode(): [
+  DeviceMode | null | undefined,
+  (mode: DeviceMode | null | undefined) => void,
+] {
+  const [mode, setMode] = useState<DeviceMode | null | undefined>(undefined);
+  useEffect(() => {
+    if (isDeviceModeReady()) {
+      setMode(readDeviceMode());
+      return;
+    }
+    let live = true;
+    void deviceModeReady().then(() => {
+      if (live) setMode(readDeviceMode());
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+  return [mode, setMode];
 }
 
 /** The shapes goal ids take here, and the same refusal, as every other stored

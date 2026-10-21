@@ -12,9 +12,8 @@ import { SecondaryLink, StatusText } from '../../src/AuthFormPrimitives';
 import {
   clearDeviceMode,
   decideDeviceEntry,
-  readDeviceMode,
   saveDeviceMode,
-  type DeviceMode,
+  useStoredDeviceMode,
 } from '../../src/deviceMode';
 import type { GoalPulse } from '../../src/displayPulse';
 import {
@@ -271,12 +270,11 @@ export default function EventScreen() {
    * cannot be read during render without the first client render disagreeing
    * with the served HTML (#418, the same hydration rule the kiosk and station
    * screens keep). Until it has been read the screen shows its ordinary
-   * loading state, which is what it showed at this moment anyway.
+   * loading state, which is what it showed at this moment anyway. On a phone
+   * the answer is read from device storage at launch, and this waits for that
+   * read rather than defaulting a shared screen to the personal path.
    */
-  const [deviceMode, setDeviceMode] = useState<DeviceMode | null | undefined>(undefined);
-  useEffect(() => {
-    setDeviceMode(readDeviceMode());
-  }, []);
+  const [deviceMode, setDeviceMode] = useStoredDeviceMode();
 
   const entry = deviceMode === undefined ? null : decideDeviceEntry({ mode: deviceMode, goalId });
   // The ordinary path runs only once the device has said it is somebody's own.
@@ -285,9 +283,9 @@ export default function EventScreen() {
   const onChoosePersonal = useCallback(() => {
     // A browser that refuses storage still gets the path it just chose; it is
     // simply asked again next time.
-    saveDeviceMode('personal');
+    void saveDeviceMode('personal');
     setDeviceMode('personal');
-  }, []);
+  }, [setDeviceMode]);
 
   const onChooseShared = useCallback(() => {
     // One derivation of the hand-off address, and the same one the standing
@@ -295,7 +293,7 @@ export default function EventScreen() {
     // decision function's to make, not this handler's.
     const decided = decideDeviceEntry({ mode: 'shared', goalId });
     if (decided.kind !== 'shared') return;
-    saveDeviceMode('shared');
+    void saveDeviceMode('shared');
     // Straight into the EXISTING shared session. `replace`, not push: a shared
     // device must not have a personal signpost sitting under its back button.
     // `deviceMode` is deliberately not set here — this screen is leaving, and
@@ -305,9 +303,9 @@ export default function EventScreen() {
   }, [goalId]);
 
   const onUseOwnPhoneInstead = useCallback(() => {
-    clearDeviceMode();
+    void clearDeviceMode();
     setDeviceMode(null);
-  }, []);
+  }, [setDeviceMode]);
 
   const onOpenNameChoice = useCallback(() => {
     setQueueError(null);
@@ -332,7 +330,10 @@ export default function EventScreen() {
   const onUseDifferentAccount = useCallback(async () => {
     if (switchingAccount) return;
     setSwitchingAccount(true);
-    setEventReturn(goalId);
+    // Stashed with NO owner, deliberately: this return is for whoever signs in
+    // next, not for the account signing out now. An owned record would be
+    // dropped by that very sign-out (src/postAuthDestination.ts).
+    setEventReturn(goalId, Date.now(), null);
     try {
       await signOut(getFirebaseAuth());
     } catch {

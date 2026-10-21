@@ -8,13 +8,8 @@ import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-na
 import { useWsfAuth } from '../../src/auth';
 import { samePulse, type GoalPulse } from '../../src/displayPulse';
 import { getFirebaseAuth, getFirebaseFunctions, wsfUsingEmulators } from '../../src/firebase';
-import {
-  KIOSK_REFUSAL_BODY,
-  KIOSK_REFUSAL_HEADLINE,
-  clearKioskReturnGoal,
-  kioskContributeRoute,
-  setKioskReturnGoal,
-} from '../../src/kioskSession';
+import { armKioskReturn, resetSharedScreenHandoffs } from '../../src/handoffArming';
+import { KIOSK_REFUSAL_BODY, KIOSK_REFUSAL_HEADLINE, kioskContributeRoute } from '../../src/kioskSession';
 import { wsfTheme } from '../../src/theme';
 import { PROGRESS_GREEN } from '../../src/ui/brandAssets';
 import { formatActiveWindowLabel, formatClock, formatPeriod } from '../../src/ui/dates';
@@ -82,8 +77,11 @@ export default function KioskGoal() {
   // and the next one must not inherit them, so the account goes. This is the
   // reset half of Finish, applied wherever the kiosk comes to rest.
   //
-  // Only the kiosk's own storage key is removed. An unresolved attempt
-  // belongs to the account that made it and stays reconcilable.
+  // Every post-auth destination an earlier visitor armed is removed (the
+  // kiosk return, and the join code, event and marker returns that would
+  // outrank or shadow the next visitor's — src/handoffArming.ts). An
+  // unresolved attempt belongs to the account that made it and stays
+  // reconcilable.
   //
   // ONLY WHILE THIS SCREEN IS THE ONE IN FRONT OF SOMEBODY. As a plain
   // useEffect keyed on `user` this fired at the worst possible moment: the
@@ -96,7 +94,7 @@ export default function KioskGoal() {
   // come to rest on its start screen.
   useFocusEffect(
     useCallback(() => {
-      clearKioskReturnGoal();
+      void resetSharedScreenHandoffs();
       if (!user) return;
       void signOut(getFirebaseAuth()).catch(() => {
         // Nothing useful to do here and nothing to claim: the start screen
@@ -186,7 +184,12 @@ export default function KioskGoal() {
   // too) exactly the way a scanned join code already does.
   const onContribute = useCallback(() => {
     if (!goalId) return;
-    setKioskReturnGoal(goalId);
+    // No owner, deliberately: this start screen is signed out by design (it
+    // signs out whoever it finds), so the return is the handoff for the
+    // visitor about to sign in (src/postAuthDestination.ts). Anything stale
+    // that would outrank it on the terminal hop is cleared with it
+    // (src/handoffArming.ts).
+    void armKioskReturn(goalId);
     router.push(kioskContributeRoute(goalId) as never);
   }, [goalId]);
 

@@ -5,7 +5,7 @@ import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } fr
 
 import { useWsfAuth } from '../../../src/auth';
 import { describeCallableError } from '../../../src/callableErrors';
-import { resolveCurrentCommunity } from '../../../src/currentCommunity';
+import { resolveCurrentCommunity, useCurrentCommunityReady } from '../../../src/currentCommunity';
 import { wsfAuthEnabled } from '../../../src/featureFlags';
 import { getFirebaseAuth } from '../../../src/firebase';
 import {
@@ -532,9 +532,18 @@ function SignedInHome({
   // mid-flight and came Home stays on Home when it lands (M5), and a member
   // who pressed Back from a community to see the list gets the list, not the
   // community again. A different account decides afresh.
+  //
+  // ON A PHONE the remembered community is read from storage at launch, and a
+  // decision taken once must not be taken on "not read yet": it waits for
+  // that read (`useCurrentCommunityReady`, always true on web).
   const uid = user?.uid ?? null;
+  const communityReady = useCurrentCommunityReady();
   const decided = useRef<{ uid: string | null; openable: string | null } | null>(null);
-  if (state.kind === 'ready' && (decided.current === null || decided.current.uid !== uid)) {
+  if (
+    state.kind === 'ready' &&
+    communityReady &&
+    (decided.current === null || decided.current.uid !== uid)
+  ) {
     decided.current = {
       uid,
       openable: resolveCurrentCommunity(uid, state.items.map((item) => item.groupId)),

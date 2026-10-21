@@ -230,7 +230,7 @@ describe('runKioskFinish', () => {
       ts: Date.now(),
       state: 'unknown',
     };
-    savePendingNew(row, UID);
+    await savePendingNew(row, UID);
     // The real helper, not a stub: this is the end-to-end storage claim.
     const { clearPendingIfAttempt } = await import('../src/pendingContribution');
     await runKioskFinish(
@@ -252,7 +252,7 @@ describe('runKioskFinish', () => {
       ts: Date.now(),
       state: 'unknown',
     };
-    savePendingNew(row, OTHER_UID);
+    await savePendingNew(row, OTHER_UID);
     const { clearPendingIfAttempt } = await import('../src/pendingContribution');
     const result = await runKioskFinish(
       // A confirmed session for UID, finishing on a device where OTHER_UID
@@ -328,5 +328,36 @@ describe('post-auth routing', () => {
   it('is unchanged when no kiosk is in play', async () => {
     const { nextRouteAfterAuth } = await import('../src/pendingJoinCode');
     expect(nextRouteAfterAuth('/')).toBe('/');
+  });
+});
+
+describe('NATIVE-STATE-2 review: the kiosk guards that had no test', () => {
+  it('Finish signs out only after the kiosk keys are cleared, not while the clear is pending', async () => {
+    let release!: () => void;
+    const clearing = new Promise<void>((r) => (release = r));
+    const signOut = vi.fn(async () => {});
+    const finishing = runKioskFinish(
+      { goalId: GOAL, outcome: 'confirmed', uid: UID, attemptId: null },
+      { signOut, clearPendingIfAttempt: () => true, clearKioskKeys: () => clearing }
+    );
+    for (let i = 0; i < 5; i += 1) await Promise.resolve();
+    expect(signOut).not.toHaveBeenCalled();
+    release();
+    expect((await finishing).signedOut).toBe(true);
+    expect(signOut).toHaveBeenCalledTimes(1);
+  });
+
+  it('an owned kiosk return whose goal id is not a goal id is refused and routes nowhere', async () => {
+    const { nextRouteAfterAuth } = await import('../src/pendingJoinCode');
+    for (const goalId of ['..', 'a/b?x=1', '../admin', '']) {
+      window.sessionStorage.clear();
+      window.sessionStorage.setItem('wsf.kioskReturnGoalId', JSON.stringify({ goalId, owner: 'a' }));
+      expect(readKioskReturnGoal('a'), goalId).toBeNull();
+      expect(nextRouteAfterAuth('/', 'a'), goalId).toBe('/');
+    }
+    window.sessionStorage.clear();
+    window.sessionStorage.setItem('wsf.kioskReturnGoalId', JSON.stringify({ goalId: GOAL, owner: 'a' }));
+    expect(readKioskReturnGoal('a')).toBe(GOAL);
+    window.sessionStorage.clear();
   });
 });

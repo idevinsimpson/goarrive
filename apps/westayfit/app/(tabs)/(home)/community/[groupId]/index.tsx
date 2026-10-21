@@ -63,7 +63,7 @@ import { ButtonLink } from '../../../../../src/ui/ButtonLink';
 import { TabGlyph } from '../../../../../src/ui/TabGlyph';
 import { JoinQrCode } from '../../../../../src/ui/JoinQrCode';
 import { buildJoinUrl, isLinkJoinable } from '../../../../../src/ui/joinLink';
-import { buildKioskUrl, currentOrigin } from '../../../../../src/ui/kioskLink';
+import { buildKioskUrl } from '../../../../../src/ui/kioskLink';
 import { buildStationUrl } from '../../../../../src/ui/eventLinks';
 import { buildCombinedUrl } from '../../../../../src/ui/combinedLink';
 import {
@@ -134,6 +134,25 @@ import {
 } from '../../../../../src/ui/progressFormat';
 import { injectedRenderFault } from '../../../../../src/crashHarness';
 import { RESUME_MIN_AWAY_MS, useResumeRefresh } from '../../../../../src/useResumeRefresh';
+
+/**
+ * THE ORIGIN EVERY LINK ON THIS SCREEN IS BUILT ON — the invite link and its
+ * QR, the display share link, the kiosk, station and combined-setup addresses.
+ *
+ * On web it is the origin this build is served from, as it always was. On iOS
+ * and Android there is no served origin, and this app has no configured app
+ * link base, so there is NONE: each builder returns null without an origin and
+ * the link is simply not offered, rather than built on something invented.
+ * Reading `window.location.origin` there was not merely wrong but fatal — a
+ * React Native production bundle has no `window.location`, so it threw during
+ * render — and a development build's `window.location` is the Metro dev
+ * server, which is not an address anybody else can open. Decided by the
+ * platform, not by probing for a location.
+ */
+function linkOrigin(): string | null {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return null;
+  return window.location?.origin ?? null;
+}
 
 type GroupDoc = {
   displayName: string;
@@ -506,7 +525,7 @@ export default function CommunityPage() {
   // it is a fact (they are on this community's screen) rather than in the
   // navigation, where it would only be an intention.
   useEffect(() => {
-    if (groupId) rememberCurrentCommunity(user?.uid ?? null, groupId);
+    if (groupId) void rememberCurrentCommunity(user?.uid ?? null, groupId);
   }, [groupId, user?.uid]);
   /*
     APP-FEEL-PARITY-1 CHECKPOINT 3. HOME FOLLOWS THE MEMBER'S CHOICE.
@@ -653,7 +672,7 @@ export default function CommunityPage() {
   const [combinedZone] = useState(deviceTimeZone);
 
   const combinedUrl = combinedCreated
-    ? buildCombinedUrl({ origin: currentOrigin(), setupId: combinedCreated.setupId })
+    ? buildCombinedUrl({ origin: linkOrigin(), setupId: combinedCreated.setupId })
     : null;
 
   const onCopyCombined = useCallback(async () => {
@@ -1489,7 +1508,7 @@ export default function CommunityPage() {
   const inviteUrl =
     state.kind === 'ready'
       ? buildJoinUrl({
-          origin: typeof window === 'undefined' ? null : window.location.origin,
+          origin: linkOrigin(),
           joinCode: resetJoinCode ?? state.group.joinCode,
           joinPolicy: state.group.joinPolicy,
         })
@@ -1501,13 +1520,13 @@ export default function CommunityPage() {
    * in production without anyone editing it.
    */
   const kioskUrlFor = useCallback(
-    (goalId: string) => buildKioskUrl({ origin: currentOrigin(), goalId }),
+    (goalId: string) => buildKioskUrl({ origin: linkOrigin(), goalId }),
     []
   );
 
   const onCopyKiosk = useCallback(
     async (goalId: string) => {
-      const url = buildKioskUrl({ origin: currentOrigin(), goalId });
+      const url = buildKioskUrl({ origin: linkOrigin(), goalId });
       if (!url || typeof navigator === 'undefined') return;
       clearKioskCopyReset();
       try {
@@ -1530,13 +1549,13 @@ export default function CommunityPage() {
    * else: opening it enrols nobody, because that device still has to show a
    * code and wait for this Champion to approve it. */
   const stationUrlFor = useCallback(
-    (goalId: string) => buildStationUrl({ origin: currentOrigin(), goalId }),
+    (goalId: string) => buildStationUrl({ origin: linkOrigin(), goalId }),
     []
   );
 
   const onCopyStation = useCallback(
     async (goalId: string) => {
-      const url = buildStationUrl({ origin: currentOrigin(), goalId });
+      const url = buildStationUrl({ origin: linkOrigin(), goalId });
       if (!url || typeof navigator === 'undefined') return;
       clearStationCopyReset();
       try {
@@ -2276,7 +2295,7 @@ export default function CommunityPage() {
   const goalShareRoute = shareRoute(typeof navigator === 'undefined' ? null : navigator);
   const featuredShareUrl =
     featured && canShareGoalDisplay(featured, { isSample }) && goalShareRoute !== 'unavailable'
-      ? displayShareUrl(typeof window === 'undefined' ? null : window.location.origin, featured.goalId)
+      ? displayShareUrl(linkOrigin(), featured.goalId)
       : null;
 
   // W7. One roll-up across the community's open goals, from pulses already on

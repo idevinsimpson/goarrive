@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useWsfAuth } from '../../src/auth';
 import { mapWithLimit } from '../../src/concurrency';
-import { resolveCurrentCommunity } from '../../src/currentCommunity';
+import { currentCommunityReady, resolveCurrentCommunity } from '../../src/currentCommunity';
 import { getFirebaseAuth } from '../../src/firebase';
 import { UNKNOWN_SHARED, knownShared } from '../../src/goalTruth';
 import {
@@ -465,7 +465,12 @@ export default function You() {
 
       // NEVER SILENTLY THE FIRST. `resolveCurrentCommunity` returns null when
       // there are several and none is remembered; this page then has no single
-      // community to speak for and says so rather than choosing one.
+      // community to speak for and says so rather than choosing one. On a
+      // phone the remembered choice is read from storage at launch; wait for
+      // that read (immediate on web) rather than mistake "not read yet" for
+      // "none remembered".
+      await currentCommunityReady();
+      if (live.current !== token) return;
       const currentId = resolveCurrentCommunity(
         uid,
         communities.map((c) => c.groupId),

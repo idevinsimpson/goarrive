@@ -3,13 +3,15 @@
  *
  * Same contract as `kv.ts`, backed by AsyncStorage, which persists across
  * process termination. Failures resolve to null / false / [] rather than
- * throwing, so a caller can tell "not saved" apart from "saved".
+ * throwing, so a caller can tell "not saved" apart from "saved" — and
+ * `readItem` resolves `{ ok: false }`, so "unreadable" is not mistaken for
+ * "nothing stored".
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import type { DeviceKv } from './kv';
 
-export type { DeviceKv } from './kv';
+export type { DeviceKv, KvRead } from './kv';
 
 export const deviceKv: DeviceKv = {
   async getItem(key) {
@@ -17,6 +19,13 @@ export const deviceKv: DeviceKv = {
       return await AsyncStorage.getItem(key);
     } catch {
       return null;
+    }
+  },
+  async readItem(key) {
+    try {
+      return { ok: true, value: await AsyncStorage.getItem(key) };
+    } catch {
+      return { ok: false };
     }
   },
   async setItem(key, value) {
