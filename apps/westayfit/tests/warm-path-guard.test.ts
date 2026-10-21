@@ -188,9 +188,13 @@ beforeEach(() => {
   h.youRetry = null;
 });
 
-afterEach(() => {
+afterEach(async () => {
   for (const c of cleanup.splice(0)) c();
   vi.useRealTimers();
+  // Let whatever this test started run out (with every screen unmounted) before
+  // the next test boots a fresh process and re-mocks its modules: no late
+  // continuation from this test may run against the next test's mocks.
+  for (let i = 0; i < 20; i += 1) await new Promise<void>((resolve) => setImmediate(resolve));
 });
 
 /**
