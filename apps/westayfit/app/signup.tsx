@@ -130,10 +130,14 @@ export default function SignUp() {
       // send round trip). A second replace at this point would pull a member
       // who has since tapped "I have verified" back off profile-setup.
     } catch (e) {
+      // MF-13 review N-1: the latch reopens only for an outcome the member can
+      // retry. A terminal one keeps it shut, so a Go/Enter that lands before
+      // the re-render (while the old closure still reads the old state) cannot
+      // submit again. The account exists once create resolves: success is terminal.
+      inFlight.current = false;
       setError(authErrorMessage(e, 'Sign-up failed.'));
       setOfferSignIn(isEmailAlreadyInUse(e));
     } finally {
-      inFlight.current = false;
       setSubmitting(false);
     }
   }
