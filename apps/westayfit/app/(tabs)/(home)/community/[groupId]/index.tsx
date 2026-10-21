@@ -5117,7 +5117,9 @@ function GlyphButtonLink({
  */
 function HomeMomentumRow({ row }: { row: ActivityRow }) {
   const named = row.displayName !== null && row.displayName.trim() !== '';
-  const amount = `${row.amount.toLocaleString()}${row.unit ? ` ${row.unit}` : ''}`;
+  // W16-12 (INT-36): grouped by the one count format (W12-18): en-US on a phone
+  // (a German phone printed "4.999"), the browser's own locale on the web.
+  const amount = `${formatCount(row.amount)}${row.unit ? ` ${row.unit}` : ''}`;
   return (
     <View style={rowStyles.row} testID="wsf-momentum-row">
       <View style={[rowStyles.avatar, named ? null : rowStyles.avatarAnon]}>
