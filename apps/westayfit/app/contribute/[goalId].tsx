@@ -101,6 +101,7 @@ import {
 import { wsfTheme } from '../../src/theme';
 import { PROGRESS_GREEN } from '../../src/ui/brandAssets';
 import { SignInLink } from '../../src/ui/SignInLink';
+import { useNowTick } from '../../src/ui/CommunityPresence';
 import { formatConfirmedAt } from '../../src/ui/dates';
 import { LivingWeProgress } from '../../src/ui/LivingWeProgress';
 import { TogetherCompletion } from '../../src/ui/TogetherCompletion';
@@ -153,6 +154,8 @@ import {
 // functions-westayfit — a shorter poll pays a Firestore round-trip on every
 // tick, a longer poll wastes the cache window.
 const POLL_INTERVAL_MS = 2_000;
+/** RV15-641-2: the poll has landed nothing for this long while it should be running, so the figures are the last confirmed ones. */
+const CONFIRMED_STALE_AFTER_MS = 3 * POLL_INTERVAL_MS;
 // W12-2 (ST-06): how long a load waits for Auth to refresh a stale sign-in.
 const LOAD_SIGN_IN_REFRESH_MS = 8_000;
 
@@ -399,6 +402,30 @@ function enterActivates(go: () => void): Record<string, unknown> {
 }
 
 /** Looks like `ButtonLink`; lands on the member's mounted tabs. */
+/*
+  RV15-641-2 (W12-6, INT-12). The anchor's "Confirmed <time>". It re-renders on
+  the shared 60 s tick (useNowTick), so with the screen left open it names the
+  day once midnight has passed, though no state changed. It reads "Last
+  confirmed" after a load that failed (W12-2, native), and also once the 2 s
+  poll has landed nothing for CONFIRMED_STALE_AFTER_MS while it should be
+  running: a failed or hung tick changes no state, so before this the line
+  kept saying "Confirmed". `pollSince` is when the poll last started (null
+  while it is stopped), so a return to the app does not read as stale before
+  its first tick could land. It is a ref, read when the line renders: the
+  poll starting or stopping re-renders nothing.
+*/
+function ConfirmedLine({ at, refreshFailed, pollSince }: { at: Date; refreshFailed: boolean; pollSince: { current: number | null } }) {
+  useNowTick();
+  const nowMs = Date.now();
+  const since = pollSince.current;
+  const stale = since !== null && nowMs - Math.max(at.getTime(), since) > CONFIRMED_STALE_AFTER_MS;
+  return (
+    <Text style={styles.anchorUpdated} testID="wsf-contribute-context-updated">
+      {formatConfirmedAt(at, new Date(nowMs), { failed: refreshFailed || stale })}
+    </Text>
+  );
+}
+
 function ReturnButton({
   href,
   style,
@@ -572,6 +599,8 @@ export default function ContributeToGoal() {
   const [pulseAt, setPulseAt] = useState<Date | null>(null);
   // W12-2 (INT-25, native): the last load failed while the screen was warm.
   const [refreshFailed, setRefreshFailed] = useState(false);
+  // RV15-641-2: when the poll last started (null while it is not running), for the anchor's "Last confirmed".
+  const pollSinceRef = useRef<number | null>(null);
   /*
     RV12-641-5 (native): a load's sign-in refresh could not reach Auth, so the
     requests since may go out without a token. While it is set, a heal tick's
@@ -1181,9 +1210,11 @@ export default function ContributeToGoal() {
       }
     };
     timer = setInterval(tick, POLL_INTERVAL_MS);
+    pollSinceRef.current = Date.now();
     return () => {
       cancelled = true;
       if (timer) clearInterval(timer);
+      pollSinceRef.current = null;
     };
   }, [ready, user, goalId, shouldPoll]);
 
@@ -2437,15 +2468,12 @@ export default function ContributeToGoal() {
           </View>
         ) : null}
         {/*
-          W12-6 (INT-12): the confirmed time names its day when it is not
-          today, and after a refresh that did not land it reads "Last
-          confirmed" beside the note above.
+          W12-6 (INT-12), RV15-641-2: the confirmed time names its day when it
+          is not today, re-read every minute, and reads "Last confirmed" after a
+          load that failed (beside the note above) or once the poll has landed
+          nothing for a while (ConfirmedLine).
         */}
-        {pulseAt && !anchorShort ? (
-          <Text style={styles.anchorUpdated} testID="wsf-contribute-context-updated">
-            {formatConfirmedAt(pulseAt, new Date(), { failed: refreshFailed })}
-          </Text>
-        ) : null}
+        {pulseAt && !anchorShort ? <ConfirmedLine at={pulseAt} refreshFailed={refreshFailed} pollSince={pollSinceRef} /> : null}
       </View>
     </View>
     );
