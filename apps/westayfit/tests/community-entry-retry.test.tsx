@@ -186,6 +186,23 @@ describe('Community Home entry (INT-04)', () => {
     expect(byId('wsf-community-not-member')).not.toBeNull();
   });
 
+  it('an entry stuck loading (a read hung under packet loss) is retried on any return to the app (#641 SH-5c)', async () => {
+    getDoc.mockReturnValueOnce(new Promise(() => undefined));
+    vi.useFakeTimers({ now: 1_000_000, toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    act(() => root.render(<CommunityPage />));
+    await settle();
+    expect(container.textContent).not.toContain('Oak Grove Together');
+    getDoc.mockImplementation(async (path: string) => (path.startsWith('wsfMemberships/') ? MEMBERSHIP : GROUP));
+    act(() => appStateHandlers.forEach((h) => h('background')));
+    act(() => vi.advanceTimersByTime(2_000));
+    act(() => appStateHandlers.forEach((h) => h('active')));
+    await act(async () => vi.advanceTimersByTime(1_000));
+    vi.useRealTimers();
+    await settle();
+    expect(byId('wsf-community-error')).toBeNull();
+    expect(container.textContent).toContain('Oak Grove Together');
+  });
+
   it('INT-04 with INT-12: an entry error is retried when the member comes back to the app', async () => {
     getDoc.mockRejectedValueOnce(OFFLINE);
     readGoals.mockRejectedValueOnce(Object.assign(new Error('internal'), { code: 'functions/unavailable' }));

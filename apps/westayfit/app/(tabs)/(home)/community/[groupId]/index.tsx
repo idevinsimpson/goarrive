@@ -1445,14 +1445,17 @@ export default function CommunityPage() {
     the same return token a focus does: the goal list and progress re-read
     quietly (no skeleton, scroll kept) and the membership is re-checked, so a
     member removed meanwhile lands on the not-member state. An entry error on
-    screen is retried on any return.
+    screen is retried on any return, and so is an entry still loading: a read
+    stuck under packet loss would otherwise hold Loading until its timeout
+    (#641 SH-5c).
   */
+  const retryEntryOnReturn = state.kind === 'error' || state.kind === 'loading';
   useResumeRefresh(
     () => {
-      if (state.kind === 'error') retryEntry();
+      if (retryEntryOnReturn) retryEntry();
       else if (state.kind === 'ready') setReturnToken((n) => n + 1);
     },
-    { minAwayMs: state.kind === 'error' ? 0 : RESUME_MIN_AWAY_MS },
+    { minAwayMs: retryEntryOnReturn ? 0 : RESUME_MIN_AWAY_MS },
   );
 
   useFocusEffect(
