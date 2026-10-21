@@ -61,6 +61,7 @@ import {
   clearKioskReturnGoal,
   isKioskFlag,
   kioskMayFinishUnattended,
+  markKioskSession,
   kioskScreenSettled,
   kioskCountdownExpired,
   kioskCountdownText,
@@ -429,6 +430,16 @@ export default function ContributeToGoal() {
   // starts at result entry, the most direct path.
   const initialStep: Step = params.mode === 'move' ? 'move' : 'enter';
   const { ready, user } = useWsfAuth();
+  // ST-05 (W12-1): on a phone, a signed-in kiosk session records that it is
+  // open (idempotent), so a relaunch after the OS kills it mid-session goes
+  // back to this kiosk's start screen (src/kioskLaunchGuard.ts). Finish clears
+  // it only after its sign-out succeeds (runKioskFinish). Web: nothing; a
+  // closed tab ends its session.
+  const kioskUid = user?.uid ?? null;
+  useEffect(() => {
+    if (Platform.OS === 'web' || !kiosk || !kioskUid || typeof goalId !== 'string' || !goalId) return;
+    void markKioskSession(goalId).catch(() => false);
+  }, [kiosk, kioskUid, goalId]);
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   /*
     THE SHELL'S BAR IS BELOW THIS SCREEN, NOT OVER IT -- EXCEPT FOR THE RAISED
