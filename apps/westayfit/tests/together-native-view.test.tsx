@@ -322,14 +322,17 @@ describe('native Together: close, background and remount never celebrate again',
     expect(layer()).toBeNull();
   });
 
-  it('no trusted before total: static, and the before is not invented', () => {
+  it('no trusted before total: it still plays (MO-01), the before is not invented, and the fill holds at after/target', () => {
     ctl.pref = { reduced: false, known: true, failed: false };
     const { p } = render({ sharedBefore: null });
     expect(p.before).toBeNull();
-    expect(phase()).toBe('settled');
-    expect(together().getAttribute('data-together-animate')).toBe('static');
-    expect(layer()).toBeNull();
+    expect(p.fromRatio).toBe(p.toRatio);
+    expect(phase()).toBe('playing');
+    expect(together().getAttribute('data-together-animate')).toBe('eligible');
+    expect(layer()).not.toBeNull();
     expect(text('wsf-contribute-shared-total')).toContain('3,720');
+    advance(TOGETHER_TIMING.settleMs);
+    expect(phase()).toBe('settled');
   });
 
   it('unmount mid-play stops every animation, timer and frame', () => {

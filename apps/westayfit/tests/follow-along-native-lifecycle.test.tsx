@@ -17,7 +17,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const ctl = vi.hoisted(() => ({
   os: 'android' as string,
   appListeners: new Set<(state: string) => void>(),
+  reduced: false,
 }));
+
+// MO-08: the session reads the live preference hook; the test flips it.
+vi.mock('../src/ui/useReducedMotion', () => ({ useReducedMotion: () => ctl.reduced }));
 
 vi.mock('react-native', async () => {
   const actual = (await vi.importActual('react-native-web')) as Record<string, any>;
@@ -61,6 +65,7 @@ beforeEach(() => {
   vi.setSystemTime(new Date('2026-10-21T10:00:00Z'));
   ctl.os = 'android';
   ctl.appListeners.clear();
+  ctl.reduced = false;
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -265,6 +270,33 @@ describe('iOS', () => {
     expect(status()).toBe('Starting in 2');
     expect(notice()).toBe(INTERRUPTED_NOTICE);
     expect(el('fa-start')?.textContent).toBe('Resume');
+  });
+});
+
+describe('MO-08: reduced motion is live, not read once', () => {
+  it('turning Reduce Motion on mid-round stops the alternation and shows both poses still — same instance, no remount', () => {
+    startAndRunTo50();
+    const figure = () => el('fa-figure-image')?.getAttribute('aria-label');
+    const stage = el('fa-stage');
+    // Moving: the figure alternates between its two poses.
+    const seen = new Set<string | null | undefined>();
+    for (let i = 0; i < 4; i += 1) {
+      seen.add(figure());
+      advance(600);
+    }
+    expect(seen.size).toBe(2);
+    expect(el('fa-reduced-motion')).toBeNull();
+    // The person turns on Reduce Motion (on a phone: leaving the app and coming back).
+    ctl.reduced = true;
+    advance(250); // the next tick re-reads the hook
+    expect(el('fa-reduced-motion')).not.toBeNull(); // both poses, side by side
+    const still = figure();
+    for (let i = 0; i < 4; i += 1) {
+      advance(600);
+      expect(figure()).toBe(still);
+    }
+    expect(el('fa-stage')).toBe(stage); // the same mounted card
+    expect(status()).toMatch(/left in this round$/); // and the round runs on
   });
 });
 

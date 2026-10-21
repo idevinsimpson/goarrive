@@ -29,7 +29,7 @@
  * when somebody presses Start.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AccessibilityInfo, AppState, Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 
 import {
   ACTIVE_LIFECYCLE,
@@ -54,6 +54,7 @@ import {
 } from './followAlong';
 import { demoMediaFor } from './movementDemoMedia';
 import { figureKindFor, type MoveFigureKind, type MovePose } from './ui/moveFigure';
+import { useReducedMotion } from './ui/useReducedMotion';
 
 /** How often the screen re-reads the clock. Fine enough to look alive. */
 export const TICK_MS = 250;
@@ -122,7 +123,12 @@ export function useFollowAlongSession(input: {
   const [stopped, setStopped] = useState(false);
   const [interrupted, setInterrupted] = useState(false);
   const [now, setNow] = useState(() => Date.now());
-  const [reducedMotion, setReducedMotion] = useState(false);
+  // MO-08: LIVE, not read once. A person who turns on Reduce Motion (or Android
+  // "Remove animations") mid-round — which on a phone means leaving the app —
+  // finds the figure still and both poses shown when they come back, with no
+  // remount. On the web this is now the media query's live subscription
+  // (before: one read at mount), a deliberate web change.
+  const reducedMotion = useReducedMotion();
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   /** When the clock was last read while running (native lifecycle uses it to cap a late background event). */
   const lastTickRef = useRef<number | null>(null);
@@ -132,18 +138,6 @@ export function useFollowAlongSession(input: {
    * when the app comes back.
    */
   const [inactiveSince, setInactiveSince] = useState<number | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    AccessibilityInfo.isReduceMotionEnabled?.()
-      .then((on) => {
-        if (!cancelled) setReducedMotion(Boolean(on));
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const running = clockRunning(clock);
 

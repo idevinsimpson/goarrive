@@ -269,9 +269,9 @@ for (const os of ['ios', 'android']) {
         expect(count()).toBe(1);
       });
 
-      it('no trusted before total', () => {
+      it('no trusted before total (it plays now, MO-01; announced the same)', () => {
         show({ r: receipt(), sharedBefore: null });
-        expect(phase()).toBe('settled');
+        expect(phase()).toBe('playing');
         expect(count()).toBe(1);
       });
 

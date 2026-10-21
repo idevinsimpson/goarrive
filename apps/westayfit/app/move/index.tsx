@@ -14,10 +14,12 @@ import {
   SCRIM_PROPS,
   markSheetHandoff,
   sheetData,
+  sheetHoldsStill,
   useSheetExit,
   useSheetFocusContainment,
 } from '../../src/ui/sheetMotion';
-import { useReducedMotion } from '../../src/ui/useReducedMotion';
+import { SheetPanel, SheetScrim } from '../../src/ui/sheetMotionNative';
+import { useReducedMotionPreference } from '../../src/ui/useReducedMotion';
 import {
   ACTION_GREEN,
   CARD_BORDER,
@@ -161,8 +163,11 @@ export default function MoveResolver() {
     APP-FEEL-PARITY-1. THE SHEET TRAVELS OUT BEFORE IT GOES: the reference's
     180 ms exit, then the same Close as before (`useSheetExit`: one exit, and
     none once something else is in front). Reduced motion goes straight there.
+    MO-02: on iOS and Android too (src/ui/sheetMotionNative.tsx), where a
+    preference not yet heard also means no travel and no wait.
   */
-  const reducedMotion = useReducedMotion();
+  const motionPreference = useReducedMotionPreference();
+  const reducedMotion = sheetHoldsStill(motionPreference);
   const { phase, exit, leaving } = useSheetExit(reducedMotion);
   // NATIVE-INTEGRATOR-1 (INT-04 case 4): bumped by the error's Try again; the
   // resolver reads again in place, fresh (INT-26: never joining a hung read).
@@ -348,10 +353,16 @@ export default function MoveResolver() {
     own safe area. It used to reserve MEMBER_TAB_BAR_BODY plus the raised
     control's overhang: chrome belonging to a screen this one is no longer part
     of, and the empty lower field that reservation left behind.
+
+    MO-02: the scrim and the panel are SheetScrim and SheetPanel -- on the web
+    the same Pressable and View with the same props (the CSS motion keys on
+    their `dataSet`); on iOS and Android they fade and rise themselves. The
+    grabber is drawn on the web only: on a phone it looked draggable and was
+    not, so it is gone there rather than a promise the sheet does not keep.
   */
   const sheet = (children: ReactNode) => (
     <View ref={sheetRef} style={s.sheetRoot} testID="wsf-move-screen">
-      <Pressable
+      <SheetScrim
         style={s.scrim}
         onPress={close}
         testID="wsf-move-scrim"
@@ -359,15 +370,19 @@ export default function MoveResolver() {
         // is the pointer's only (F2: it was a Tab stop named "Close").
         {...SCRIM_PROPS}
         {...(sheetData('scrim', phase) as object)}
+        phase={phase}
+        preference={motionPreference}
       />
-      <View
+      <SheetPanel
         ref={panelRef}
         style={[s.sheet, { paddingBottom: safeArea.bottom + 16 }]}
         testID="wsf-move-sheet"
         {...(sheetData('panel', phase) as object)}
+        phase={phase}
+        preference={motionPreference}
       >
         <View style={s.sheetHead}>
-          <View pointerEvents="none" style={s.grabber} />
+          {Platform.OS === 'web' ? <View pointerEvents="none" style={s.grabber} /> : null}
           <Pressable
             onPress={close}
             style={s.close}
@@ -379,7 +394,7 @@ export default function MoveResolver() {
           </Pressable>
         </View>
         <ScrollView contentContainerStyle={s.body}>{children}</ScrollView>
-      </View>
+      </SheetPanel>
     </View>
   );
 
