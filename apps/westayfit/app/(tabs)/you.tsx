@@ -412,6 +412,14 @@ export default function You() {
   const keepOnScreen = useRef(false);
   /** INT-12 (W16-2): the next revalidation reads fresh (a return to the app), not from the record. */
   const freshNext = useRef(false);
+  /**
+   * INT-12 case 4 (review 1343247d-N3): what the member page on screen was
+   * composed from, for this account only, so a failed revalidation that keeps
+   * the page can recompose it against NOW. A goal whose end passed while the
+   * app slept must stop offering "Start moving" even when the server could
+   * not be asked (hasWindowEnded is pure).
+   */
+  const composedFrom = useRef<{ uid: string; args: Parameters<typeof composeMember> } | null>(null);
   const focusedOnce = useRef(false);
   useFocusEffect(
     useCallback(() => {
@@ -437,6 +445,7 @@ export default function You() {
   useEffect(() => {
     if (!ready) return;
     if (!user) {
+      composedFrom.current = null;
       setScreen(null, SIGNED_OUT);
       return;
     }
@@ -479,6 +488,13 @@ export default function You() {
           return;
         }
         if (keep) {
+          // Kept, but recomposed against now (N3): from what it was composed
+          // from, or from the account's record if that is where it came from.
+          const from = composedFrom.current?.uid === uid ? composedFrom.current.args : null;
+          const again = from ? composeMember(...from) : youFromRecord(uid);
+          if (again && again.kind === 'member') {
+            setScreen(uid, (prev) => (prev.kind === 'member' ? again : prev));
+          }
           setStale(true);
           return;
         }
@@ -537,16 +553,15 @@ export default function You() {
       const profile = await profileRead;
       if (live.current !== token) return;
       settle();
-      setScreen(
-        uid,
-        composeMember(
-          profile,
-          community,
-          goals,
-          owned.map((o) => (o.ok ? o.value : null)),
-          elsewhereFromRecord(uid, communities, community.groupId),
-        ),
-      );
+      const args: Parameters<typeof composeMember> = [
+        profile,
+        community,
+        goals,
+        owned.map((o) => (o.ok ? o.value : null)),
+        elsewhereFromRecord(uid, communities, community.groupId),
+      ];
+      composedFrom.current = { uid, args };
+      setScreen(uid, composeMember(...args));
     })();
     return () => {
       // MF-03: whatever this run still has in flight belongs to a session or

@@ -137,6 +137,21 @@ describe('W16-2 / INT-12: You revalidates on a return to the app', () => {
     expect(byId('wsf-you-start-moving')).not.toBeNull();
   });
 
+  // INT-12 case 4 (review 1343247d-N3): the goal ended while the app slept and
+  // the revalidation failed. The page is kept, but recomposed against now.
+  it('a goal whose end passed during the suspend stops offering Start moving even when the read fails', async () => {
+    const endsSoon = new Date(Date.now() + 30_000).toISOString();
+    readGoals.mockResolvedValue({ goals: [{ ...goal('active'), endsAt: endsSoon }] });
+    await render();
+    expect(byId('wsf-you-start-moving')).not.toBeNull();
+    readMyCommunities.mockRejectedValueOnce(Object.assign(new Error('x'), { code: 'functions/unavailable' }));
+    await returnAfter(RESUME_MIN_AWAY_MS + 15_000);
+    await flush();
+    expect(byId('wsf-you-member')).not.toBeNull();
+    expect(byId('wsf-you-stale')).not.toBeNull();
+    expect(byId('wsf-you-start-moving')).toBeNull();
+  });
+
   it('a failed page is retried on any return, however short', async () => {
     readMyCommunities.mockRejectedValueOnce(Object.assign(new Error('x'), { code: 'functions/unavailable' }));
     await render();
