@@ -66,11 +66,11 @@ vi.mock('react-native', async () => {
 vi.mock('../src/ui/textScale', async () => {
   const web = await vi.importActual<typeof import('../src/ui/textScale')>('../src/ui/textScale');
   const native = await vi.importActual<typeof import('../src/ui/textScale.native')>('../src/ui/textScale.native');
-  return {
-    get numeralTextProps() {
-      return rn.os === 'web' ? web.numeralTextProps : native.numeralTextProps;
-    },
-  };
+  // Every export, read from the twin for rn.os (kit re-exports them all on integrated trees).
+  return Object.defineProperties(
+    {},
+    Object.fromEntries(Object.keys(web).map((k) => [k, { enumerable: true, get: () => (rn.os === 'web' ? web : native)[k as keyof typeof web] }])),
+  );
 });
 vi.mock('../src/ui/stepHeadingFocus', async () => {
   const web = await vi.importActual<typeof import('../src/ui/stepHeadingFocus')>('../src/ui/stepHeadingFocus');
@@ -251,7 +251,11 @@ describe('the adoption sites in the source', () => {
   const code = readFileSync(nodePath.resolve(__dirname, '..', 'app/contribute/[goalId].tsx'), 'utf8');
   it('adjustValue spreads numeralTextProps; the Adjust heading carries the ref useStepHeadingFocus moves to', () => {
     expect(code).toContain("import { useStepHeadingFocus } from '../../src/ui/stepHeadingFocus';");
-    expect(code).toContain("import { numeralTextProps } from '../../src/ui/textScale';");
+    // numeralTextProps is imported once: from textScale, or from kit, which re-exports it (integrated
+    // trees, W12-8). Never from a platform twin directly.
+    const numeralImports = code.match(/^import \{[^}]*\bnumeralTextProps\b[^}]*\} from '[^']+';$/gm) ?? [];
+    expect(numeralImports).toHaveLength(1);
+    expect(numeralImports[0]).toMatch(/ from '\.\.\/\.\.\/src\/ui\/(?:textScale|kit)';$/);
     expect(code.match(/<Text style=\{styles\.adjustValue\}[^>]*>/g)).toEqual([
       '<Text style={styles.adjustValue} {...numeralTextProps} testID="wsf-contribute-adjust-value" aria-live="polite">',
     ]);
