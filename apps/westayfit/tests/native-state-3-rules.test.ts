@@ -538,3 +538,63 @@ describe('#639 delta-3 N1: a context that is USED is consumed, even one written 
     expect(await m.je.takeJoinEventContext(A, CODE)).toEqual({ goalId: null, activity: null });
   });
 });
+
+describe('#639 follow-up NB-1/NB-3: a take that uses nothing leaves newer scans alone', () => {
+  const OTHER_CODE = 'OtherCommunityCode_02';
+
+  async function slowReads(ms: number) {
+    const realGet = disk.api.getItem;
+    disk.api.getItem = async (key: string) => {
+      await new Promise((r) => setTimeout(r, ms));
+      return realGet(key);
+    };
+    return () => {
+      disk.api.getItem = realGet;
+    };
+  }
+
+  for (const bounded of [true, false]) {
+    it(`${bounded ? 'bounded' : 'unbounded'} take finds nothing for its code: a different-code scan landing mid-read survives`, async () => {
+      let m = await launch();
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const restore = await slowReads(1_000);
+      let answer: unknown = 'waiting';
+      try {
+        m = await launch();
+        const take = bounded ? m.je.takeJoinEventContextWithin(A, CODE) : m.je.takeJoinEventContext(A, CODE);
+        void take.then((c) => (answer = c));
+        await vi.advanceTimersByTimeAsync(400);
+        void m.je.setPendingEventGoal(G2, OTHER_CODE, null); // a scan for another community
+        await vi.advanceTimersByTimeAsync(12_000);
+      } finally {
+        restore();
+      }
+      vi.useRealTimers();
+      expect(answer).toEqual({ goalId: null, activity: null });
+      m = await launch();
+      expect(await m.je.takeJoinEventContext(A, OTHER_CODE)).toEqual({ goalId: G2, activity: null });
+    });
+  }
+
+  it('NB-3: a scan at ~800 ms, a 3 s read: the bound fires first, the read answers late, and the scan survives a relaunch', async () => {
+    let m = await launch();
+    await scan(m, G1, 'Squats');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const restore = await slowReads(3_000);
+    let answer: unknown = 'waiting';
+    try {
+      m = await launch();
+      void m.je.takeJoinEventContextWithin(A, CODE).then((c) => (answer = c));
+      await vi.advanceTimersByTimeAsync(800);
+      void m.je.setPendingEventGoal(G2, CODE, null); // before the bound fires
+      await vi.advanceTimersByTimeAsync(m.je.JOIN_CONTEXT_WAIT_MS);
+      expect(answer).toEqual({ goalId: null, activity: null });
+      await vi.advanceTimersByTimeAsync(12_000);
+    } finally {
+      restore();
+    }
+    vi.useRealTimers();
+    m = await launch();
+    expect((await m.je.takeJoinEventContext(A, CODE)).goalId).toBe(G2);
+  });
+});

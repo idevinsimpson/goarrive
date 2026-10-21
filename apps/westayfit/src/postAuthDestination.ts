@@ -70,6 +70,11 @@ export type PostAuthDestination<V> = {
    * which no destination decodes — so a record that must be consumed once
    * cannot apply again after a relaunch. Resolves whether any of the three
    * steps was kept.
+   *
+   * It stops — leaving the key to the newer write — once a write has been
+   * issued since `since` (default: now). If the device then refuses that
+   * newer write, the record being discarded stays on the device and can
+   * return after a relaunch; see the RESIDUAL note in the implementation.
    */
   discard(opts?: { since?: number }): Promise<boolean>;
   /**
@@ -136,8 +141,11 @@ export function definePostAuthDestination<V>(codec: DestinationCodec<V>): PostAu
       // from here (another writer) counts as newer as well.
       //
       // RESIDUAL: a newer write that the device ALSO refuses still counts as
-      // newer, so the discard stops after one refused removal and the stale
-      // record can apply once more after a relaunch (src/joinEventHandoff.ts,
+      // newer — it is counted when it is issued, not when the device accepts
+      // it — so the discard leaves the key to it: after one refused removal,
+      // or before any removal when the caller's baseline is earlier (a
+      // timed-out take), the record being discarded is still on the device
+      // and can apply once more after a relaunch (src/joinEventHandoff.ts,
       // ACCEPTED LIMITS).
       const since = opts?.since ?? store.writeCount(codec.key);
       const discarding = store.read(codec.key);

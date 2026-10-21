@@ -58,8 +58,11 @@
  * joined rather than the event. (3) A consumed context survives if the
  * device refuses its removal twice and the overwrite — or refuses one removal
  * while a newer write lands that the device also refuses (that write counts
- * as newer, so the discard stops). It can then apply once more to a later
- * join of the same code, within the expiry.
+ * as newer, so the discard stops) — or a bounded take times out and a newer
+ * write then lands that the device REFUSES: the discard leaves the key to
+ * that write, so the record the take started with is still on the device and
+ * can return after a relaunch. In each case it can then apply once more to a
+ * later join of the same code, within the expiry.
  *
  * FORMAT: `{"goalId":…,"joinCode":…}` and
  * `{"activity":…,"goalId":…,"joinCode":…}`, plus `"owner":…` when an account
@@ -237,10 +240,26 @@ const NO_CONTEXT: JoinEventContext = { goalId: null, activity: null };
  * code, within the expiry.
  */
 export async function takeJoinEventContext(uid: string | null, joinCode: string): Promise<JoinEventContext> {
+  const started = contextWriteCounts();
   const { context, counts } = await readJoinEventContext(uid, joinCode);
-  // The context is used, so what the read saw is consumed.
-  await discardJoinEventContext(counts);
+  await discardJoinEventContext(discardBaseline(context, counts, started));
   return context;
+}
+
+/**
+ * Which baseline the discard ending a take uses (`ContextWriteCounts`): the
+ * counts the read saw only when it found a context to USE — that one is
+ * consumed, even if it was written mid-read. Otherwise the counts at the start
+ * of the take: what was there then (another code's context, a leftover) is
+ * still discarded, but a scan that landed while the read was outstanding —
+ * for this code or another — is not this take's, and survives.
+ */
+function discardBaseline(
+  context: JoinEventContext,
+  counts: ContextWriteCounts,
+  started: ContextWriteCounts
+): ContextWriteCounts {
+  return context.goalId !== null ? counts : started;
 }
 
 /**
@@ -249,9 +268,10 @@ export async function takeJoinEventContext(uid: string | null, joinCode: string)
  * (`discard({ since })`): anything written after it is newer and survives.
  *   - A take whose context is USED discards what its read saw (the counts are
  *     taken synchronously with the read), so a used context is consumed.
- *   - A bounded take that gave up WITHOUT using it discards what was there
- *     when the take started: a context stashed while the read was still
- *     outstanding (a fresh scan) is not this take's, and survives.
+ *   - A take that found NOTHING to use, or a bounded take that gave up first,
+ *     discards what was there when the take started: a context stashed while
+ *     the read was still outstanding (a fresh scan, for this code or another)
+ *     is not this take's, and survives.
  */
 type ContextWriteCounts = { event: number; activity: number };
 function contextWriteCounts(): ContextWriteCounts {
@@ -304,14 +324,14 @@ export function takeJoinEventContextWithin(
       resolve(context);
     };
     const timer = setTimeout(() => finish(NO_CONTEXT), ms);
-    // Baselines (see `ContextWriteCounts`): what the read saw if its context
-    // is used; what was there at the start if the wait gave up first.
+    // Baselines (see `discardBaseline`): what the read saw if it found a
+    // context in time and it is used; what was there at the start otherwise.
     const started = contextWriteCounts();
     let used: ContextWriteCounts | null = null;
     readJoinEventContext(uid, joinCode)
       .then(
         ({ context, counts }) => {
-          if (!settled) used = counts;
+          if (!settled) used = discardBaseline(context, counts, started);
           finish(context);
         },
         () => finish(NO_CONTEXT)
