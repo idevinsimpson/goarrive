@@ -22,6 +22,8 @@ const state = {
   /** Use the real readKioskSession (null on web) instead of the stub marker. */
   realMarker: false,
   ready: true,
+  /** INT-27: the first auth answer is slow (set only on a phone). */
+  slow: false,
   /** false: a phone's device storage (the launch read is asynchronous, so the guard holds). */
   syncStorage: true,
   /** What the root Stack renders: nothing, or the member tabs layout (ESC-2 cases). */
@@ -106,10 +108,14 @@ vi.mock('../src/firebase', () => ({
 vi.mock('firebase/auth', () => ({ signOut: vi.fn(), onAuthStateChanged: () => () => undefined }));
 const USER = { uid: 'u1', email: 'visitor@example.com', displayName: 'Visitor', emailVerified: true };
 const auth = { user: USER as typeof USER | null };
-vi.mock('../src/auth', () => ({
-  WsfAuthProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
-  useWsfAuth: () => ({ ready: state.ready, user: auth.user }),
-}));
+vi.mock('../src/auth', async () => {
+  const actual = await vi.importActual<typeof import('../src/auth')>('../src/auth');
+  return {
+    AuthConnectingNote: actual.AuthConnectingNote,
+    WsfAuthProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
+    useWsfAuth: () => ({ ready: state.ready, user: auth.user, slow: state.slow }),
+  };
+});
 vi.mock('firebase/functions', () => ({
   httpsCallable: (_f: unknown, name: string) => async () => {
     if (name === 'wsfGoalPulse') return { data: { sharedTotal: 40, target: 100, unit: 'squats', status: 'active' } };
@@ -150,6 +156,7 @@ beforeEach(() => {
   state.marker = null;
   state.realMarker = false;
   state.ready = true;
+  state.slow = false;
   state.syncStorage = true;
   state.stackChild = null;
   state.tabsRenders = [];
@@ -279,6 +286,52 @@ describe('ESC-2: the member tabs hold back until the launch decision; the Stack 
     await settle();
     expect(holdingGround()).not.toBeNull();
     expect(tabs()).toBeNull();
+  });
+
+  it('RV12-641-F2: auth slow on a cold start: the ground says Connecting…, with no tab, top bar or member content', async () => {
+    for (const os of ['ios', 'android'] as const) {
+      phone(os);
+      state.ready = false;
+      state.slow = false;
+      state.stackChild = <MemberTabsLayout />;
+      act(() => root.render(<RootLayout key={`${os}-quiet`} />));
+      await settle();
+      // Not slow yet: the plain ground, as before.
+      expect(holdingGround()).not.toBeNull();
+      expect(holdingGround()!.childElementCount).toBe(0);
+      // Slow: the note, inside the ground.
+      state.slow = true;
+      act(() => root.render(<RootLayout key={`${os}-slow`} />));
+      await settle();
+      const note = container.querySelector('[data-testid="wsf-member-tabs-connecting"]');
+      expect(note).not.toBeNull();
+      expect(holdingGround()!.contains(note)).toBe(true);
+      expect(note!.textContent).toBe('Connecting…We’re still reaching We Stay Fit. Check your connection.');
+      expect(tabs()).toBeNull();
+      expect(container.querySelector('[data-testid="wsf-member-topbar"]')).toBeNull();
+      expect(router.replace).not.toHaveBeenCalled();
+      // Auth answers (no marker): the note goes with the ground, and the tabs render.
+      state.ready = true;
+      state.slow = false;
+      act(() => root.render(<RootLayout key={`${os}-slow`} />));
+      await settle();
+      expect(container.querySelector('[data-testid="wsf-member-tabs-connecting"]')).toBeNull();
+      expect(tabs()).not.toBeNull();
+    }
+  });
+
+  it('RV12-641-F2, web: never held, so the ground never says Connecting… (Home keeps its own loading line)', async () => {
+    setOs('web');
+    state.syncStorage = true;
+    resetKioskLaunchGuardForTests();
+    state.ready = false;
+    state.slow = true;
+    state.stackChild = <MemberTabsLayout />;
+    act(() => root.render(<RootLayout />));
+    await settle();
+    expect(holdingGround()).toBeNull();
+    expect(container.querySelector('[data-testid="wsf-member-tabs-connecting"]')).toBeNull();
+    expect(tabs()).not.toBeNull();
   });
 
   it('web: never holds; the member tabs are there from the first render, and nothing is replaced', async () => {
