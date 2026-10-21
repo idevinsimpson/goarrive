@@ -1642,16 +1642,26 @@ describe('privacy: the module records, stores and sends nothing itself; the SDK 
     }
     // What the stripper does not model is absent from what it scans: no Swift raw strings or
     // regex literals (`#"`, `#/`), and no Groovy slashy (`/…/`) or dollar-slashy (`$/…/$`) strings
-    // in build.gradle. A slashy opener is a `/` that starts a line, or follows an operator or an
-    // opening bracket, and is not a comment (`//`, `/*`, removed first) or a spaced division.
+    // in build.gradle. In comment-stripped code, a slashy opener is a `/` not followed by `/` or `*`,
+    // after optional whitespace (newlines included), at a line start, after an operator or opening
+    // bracket (= ( , : [ { + - * % ~ ! & | ? ; < > ^), or after a keyword that allows a regex there
+    // (return assert case throw in else yield). A slashy body can hold `\//`, which strip() reads
+    // as a comment start, so one that got past this check could hide the rest of its line.
     for (const f of code.filter((x) => x.endsWith('.swift'))) expect(read(f), f).not.toMatch(/#"|#\//);
-    const SLASHY = /(?:^|[=(,:[{+\-*%~!&|?;<>])\s*\/[^/*\s]/m;
+    const SLASHY = /(?:^|[=(,:[{+\-*%~!&|?;<>^]|\b(?:return|assert|case|throw|in|else|yield)\b)\s*\/(?![/*])/m;
     expect(strip(read(`${MOD}/android/build.gradle`), 'groovy')).not.toMatch(SLASHY);
     expect(read(`${MOD}/android/build.gradle`)).not.toMatch(/\$\//);
     for (const [src, slashy] of [
       ['def p = /a.b/', true], ['assert s ==~ /x/', true], ['f(/x/)', true], ['def l = [\n  /x/\n]', true], ['def c = { a -> /x/ }', true],
+      // Review NB-D1a: a body that starts with a space, one that starts at a line end, one after a keyword (each with `\//`), and `^`.
+      ['def a = / \\//; exclude group: "x"', true], ['def a = /\nx\\//', true], ['def x = a ^ /b/', true], ['def a = 1\n/x/.size()', true],
+      ...['return', 'assert', 'case', 'throw', 'in', 'else', 'yield'].map((k) => [`${k} /x\\//`, true] as const),
       ['def u = "https://x"', false], ['def h = w / 2 // half of /x', false], ['x /= 2', false], ['def r = (a) / (b)', false], ['/* a */ def q = 1', false],
+      ['def h = w/2', false], ['def h = (w)/2', false], ["def s = 'a/b'", false], ['def index = w / 2', false], ['def inside = x/2', false],
+      ['def h = margin / 2', false], ['def h = origin/2', false], // a keyword at the end of a longer name is not the keyword
     ] as const) expect(SLASHY.test(strip(src, 'groovy')), src).toBe(slashy);
+    // No false positive on any module source, stripped by its own kind (the check itself applies to build.gradle).
+    for (const f of filesUnder(MOD).filter((x) => /\.(swift|kt|ts|tsx|gradle)$/.test(x))) expect(codeOf(f), f).not.toMatch(SLASHY);
     // A '//' inside a string no longer hides the rest of the line from the scan.
     expect(strip('let s = "a//b"; let x = AVCaptureMovieFileOutput()', 'swift')).toMatch(NATIVE_FORBIDDEN);
     expect(strip('// AVCaptureMovieFileOutput in a comment', 'swift')).not.toMatch(NATIVE_FORBIDDEN);
@@ -1851,6 +1861,55 @@ describe('privacy: the module records, stores and sends nothing itself; the SDK 
         expect(line, f).toMatch(/^} from|^import type/);
       }
       expect(read(f), f).toMatch(/^import type \{[^}]*\} from '\.\.\/\.\.\/modules\/wsf-pose-camera\/src\/WsfPoseCamera\.types';/m);
+    }
+  });
+});
+
+// ── 8. Platform files never import their own base (CAM-TSC-1) ───────────────
+
+describe('platform files never import their own base specifier (CAM-TSC-1)', () => {
+  /** Relative specifiers in code: `import … from`, `export … from`, side-effect `import '…'`, `import(…)`, `require(…)`. */
+  const relativeSpecifiers = (code: string) =>
+    [...code.matchAll(/(?:\bfrom|\bimport|\brequire)\s*\(?\s*(['"])(\.{1,2}\/[^'"\n]+)\1/g)].map((m) => m[2]);
+  /**
+   * The specifiers in a `<base>.native|ios|android|web.ts(x)` file that resolve to `<base>` itself.
+   * Under Metro's platform resolution (and tsc with moduleSuffixes) that is the file importing
+   * itself: a type import becomes circular (TS2303) and the file loses the real type.
+   */
+  const selfImports = (file: string, code: string): string[] => {
+    const m = /^(.*)\.(?:native|ios|android|web)\.tsx?$/.exec(file);
+    if (!m) return [];
+    const dir = nodePath.posix.dirname(file);
+    return relativeSpecifiers(code).filter((s) => nodePath.posix.join(dir, s).replace(/\.[jt]sx?$/, '') === m[1]);
+  };
+  const PLATFORM = /\.(?:native|ios|android|web)\.tsx?$/;
+
+  it('no camera-lane platform file imports, type or value, from its own base (on native that is itself: TS2303)', () => {
+    const files = [...filesUnder('src/movement-camera'), ...filesUnder(MOD), ...filesUnder('src/ui')].filter(
+      (f) => PLATFORM.test(f) && (!f.startsWith('src/ui/') || /^src\/ui\/(CameraSkeletonOverlay|NativeCameraPreview)\./.test(f)),
+    );
+    expect(files).toEqual(expect.arrayContaining([
+      'src/movement-camera/controller.native.ts',
+      'src/movement-camera/support.native.ts',
+      'src/ui/CameraSkeletonOverlay.native.tsx',
+      'src/ui/NativeCameraPreview.native.tsx',
+    ]));
+    for (const f of files) expect(selfImports(f, codeOf(f)), f).toEqual([]);
+    // The hook's shape lives in one suffix-free, type-only file; support.ts re-exports it, so its importers are unchanged.
+    expect(filesUnder('src/movement-camera').filter((f) => f.includes('/testPoseHookType.'))).toEqual(['src/movement-camera/testPoseHookType.ts']);
+    expect(codeOf('src/movement-camera/testPoseHookType.ts')).not.toMatch(/^\s*import (?!type\b)/m);
+    expect(read('src/movement-camera/support.native.ts')).toContain("import type { TestPoseHook } from './testPoseHookType';");
+    expect(read('src/movement-camera/support.ts')).toContain("export type { TestPoseHook } from './testPoseHookType';");
+    // Self-tests of the scan, as support.native.ts.
+    const f = 'src/movement-camera/support.native.ts';
+    for (const code of ["import type { TestPoseHook } from './support';", "export type { TestPoseHook } from './support';", "import './support';",
+      "const s = require('./support');", "const s = await import('./support');", "import { x } from '../movement-camera/support';",
+      'import type { T } from "./support.ts";', "import {\n  type T,\n} from './support';"]) {
+      expect(selfImports(f, strip(code, 'ts')), code).toHaveLength(1);
+    }
+    for (const code of ["import type { TestPoseHook } from './testPoseHookType';", "import { a } from './supportive';", "import { s } from '../support';",
+      "// import type { T } from './support';", "/* export * from './support'; */", "const s = 'from ./support';"]) {
+      expect(selfImports(f, strip(code, 'ts')), code).toEqual([]);
     }
   });
 });
