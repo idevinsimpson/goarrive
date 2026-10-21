@@ -122,11 +122,14 @@ function AppShell() {
             options={{
               presentation: 'transparentModal',
               contentStyle: { backgroundColor: 'transparent' },
-              // Restrained, native-feeling and short. A sheet that slides is
-              // legible as "this came up over what I was doing"; anything more
-              // decorative is motion for its own sake. A member who has asked
-              // for reduced motion gets the sheet with none of the travel.
-              animation: reduced ? 'none' : 'slide_from_bottom',
+              // MO-02. Presented without the stack's travel: its slide moved
+              // the whole screen, the scrim with it as one dark block. The
+              // sheet moves itself instead (src/ui/sheetMotionNative.tsx): the
+              // scrim fades in place, the panel rises 28 pt over 240 ms and
+              // leaves in 180 ms, and a member who asked for reduced motion
+              // gets none of the travel. The web ignores this option and plays
+              // the same motion in CSS (src/ui/sheetMotion.ts).
+              animation: 'none',
             }}
           />
           {/*

@@ -574,6 +574,7 @@ export default function ContributeToGoal() {
   const [guideOpen, setGuideOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [lastResult, setLastResult] = useState<ContributeResult | null>(null);
+  const announcedReceiptRef = useRef<ContributeResult | null>(null); // NATIVE-MOTION-1: receipt already announced
   // The goal's repeat policy, from the member-authorized read. 'once' until
   // the server answers — not the resolved default, because before the answer
   // arrives the screen knows nothing. Nothing that depends on it renders
@@ -2402,7 +2403,9 @@ export default function ContributeToGoal() {
             <View
               style={styles.togetherBody}
               testID="wsf-contribute-receipt"
-              aria-live="polite"
+              // Web: a polite live region. Native: off — TogetherCompletion
+              // announces the confirmed receipt once itself (NATIVE-MOTION-1).
+              aria-live={Platform.OS === 'web' ? 'polite' : undefined}
               {...({ dataSet: { variant } } as Record<string, unknown>)}
             >
               <TogetherCompletion
@@ -2461,6 +2464,8 @@ export default function ContributeToGoal() {
                 }
                 fresh={freshAttempt != null}
                 onFreshConsumed={() => setFreshAttempt(null)}
+                announce={announcedReceiptRef.current !== r}
+                onAnnounced={() => (announcedReceiptRef.current = r)}
                 windowWidth={windowWidth}
                 windowHeight={windowHeight}
               />
