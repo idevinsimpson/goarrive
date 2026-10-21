@@ -48,5 +48,14 @@
     "jsdom": "^29.0.1",
     "typescript": "~5.9.2",
     "vitest": "^4.1.2"
+  },
+  "expo": {
+    "autolinking": {
+      "ios": {
+        "exclude": [
+          "wsf-pose-camera"
+        ]
+      }
+    }
   }
 }
