@@ -1,7 +1,7 @@
 import { router } from 'expo-router';
-import { useEffect, useState, type ComponentType } from 'react';
+import { useContext, useEffect, useState, type ComponentType } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
-import { initialWindowMetrics } from 'react-native-safe-area-context';
+import { SafeAreaInsetsContext, initialWindowMetrics } from 'react-native-safe-area-context';
 
 import { crashHarnessEnabled, disarmAllCrashSites } from '../crashHarness.native';
 import { noteCaughtError } from '../crashRecords';
@@ -93,9 +93,20 @@ export function RouteErrorFallback({ error, retry, variant }: Props) {
   useEffect(() => {
     void noteCaughtError(error);
   }, [error]);
-  // A tab's fallback sits below the shell's top bar, which already clears the
-  // status bar; everything else is drawn from the top of the window.
-  const topInset = variant === 'tab' || variant === 'homeTab' ? 0 : (initialWindowMetrics?.insets.top ?? 0);
+  /*
+    THE TOP INSET, PER VARIANT (#641 NB-4).
+    - tab, homeTab: below the shell's top bar, which already clears the status bar.
+    - root: the providers are gone with the layout it replaces, so the
+      window's own first metrics (a constant, no provider).
+    - shell, screen, contribute: the nearest safe-area provider is still
+      mounted above them, so its inset, which is 0 below a staging strip and
+      right inside an iOS modal. Read without a hook that throws, so a missing
+      provider falls back to the window's metrics.
+  */
+  const providedInsets = useContext(SafeAreaInsetsContext);
+  const windowTop = initialWindowMetrics?.insets.top ?? 0;
+  const topInset =
+    variant === 'tab' || variant === 'homeTab' ? 0 : variant === 'root' ? windowTop : (providedInsets?.top ?? windowTop);
   return (
     <View
       style={[styles.screen, { paddingTop: 24 + topInset }]}

@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react';
+
 import type { ScreenTone } from './statusBarPolicy';
 
 /**
@@ -8,6 +10,11 @@ import type { ScreenTone } from './statusBarPolicy';
  * exactly what it was. iOS and Android get src/ui/useScreenTopInset.native.tsx.
  */
 export type { ScreenTone };
+
+/** Scenes below a bar that already clears the status bar: on web, just its children (no element). */
+export function TopCleared({ children }: { cleared: boolean; children: ReactNode }): ReactNode {
+  return children;
+}
 
 /** The top safe-area inset a root-stack screen must clear: always 0 on web. */
 export function useScreenTopInset(): number {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { BackHandler, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { BackHandler, Dimensions, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CARD_BORDER, CREAM, INK_QUIET, NAVY, TEXT_MUTED } from './kit';
@@ -95,6 +95,14 @@ export function MemberTopBar({
   */
   const native = Platform.OS !== 'web';
   const { height: windowHeight } = useWindowDimensions();
+  /*
+    #641 NB-6: the layer is oversized so nothing below it can take the tap.
+    On Android edge-to-edge the window can be shorter than the screen it is
+    drawn on, and the tab bar sits in the difference; the layer starts at the
+    bar's top, so it reaches past the screen's bottom edge whatever the window
+    reports.
+  */
+  const layerHeight = Math.max(Dimensions.get('screen').height, windowHeight) + insets.top + insets.bottom;
   useEffect(() => {
     if (!menuOpen || Platform.OS !== 'android') return undefined;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -162,7 +170,7 @@ export function MemberTopBar({
       {menuOpen && native ? (
         <Pressable
           onPress={() => onMenuToggle(false)}
-          style={[styles.dismiss, { height: windowHeight }]}
+          style={[styles.dismiss, { height: layerHeight }]}
           accessible={false}
           importantForAccessibility="no"
           testID="wsf-member-topbar-menu-dismiss"

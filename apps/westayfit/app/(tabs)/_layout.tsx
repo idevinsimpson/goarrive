@@ -17,6 +17,7 @@ import { MemberTopBar, type MemberMenuItem } from '../../src/ui/MemberTopBar';
 import { TabSceneFade } from '../../src/ui/TabSceneFade';
 import { nativeErrorBoundary } from '../../src/ui/RouteErrorFallback';
 import { signOutToSignedOutHome } from '../../src/ui/signOutReset';
+import { TopCleared } from '../../src/ui/useScreenTopInset';
 
 /**
  * THE MEMBER SHELL: one persistent top bar, four real tabs, and MOVE as an
@@ -202,6 +203,8 @@ function MemberShell() {
           onHome={goHome}
         />
       ) : null}
+      {/* #641 F1: the top bar has cleared the status bar for every scene below it. */}
+      <TopCleared cleared={signedIn}>
       <View style={{ flex: 1 }}>
         <Tabs
           backBehavior="history"
@@ -250,6 +253,7 @@ function MemberShell() {
           <Tabs.Screen name="you" />
         </Tabs>
       </View>
+      </TopCleared>
     </View>
   );
 }
