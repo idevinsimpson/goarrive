@@ -3,7 +3,7 @@ import { signOut } from 'firebase/auth';
 import { useEffect, useRef, useState } from 'react';
 import { Platform, View } from 'react-native';
 
-import { useWsfAuth } from '../../src/auth';
+import { AuthConnectingNote, useWsfAuth } from '../../src/auth';
 import { useKioskLaunchHolding } from '../../src/kioskLaunchGuard';
 import { getFirebaseAuth } from '../../src/firebase';
 import { wsfTheme } from '../../src/theme';
@@ -19,7 +19,8 @@ import { MemberTopBar, type MemberMenuItem } from '../../src/ui/MemberTopBar';
 import { TabSceneFade } from '../../src/ui/TabSceneFade';
 import { nativeErrorBoundary } from '../../src/ui/RouteErrorFallback';
 import { signOutToSignedOutHome } from '../../src/ui/signOutReset';
-import { TopCleared } from '../../src/ui/useScreenTopInset';
+import { kit } from '../../src/ui/kit';
+import { ScreenTopSpacer, TopCleared } from '../../src/ui/useScreenTopInset';
 
 /**
  * THE MEMBER SHELL: one persistent top bar, four real tabs, and MOVE as an
@@ -67,7 +68,7 @@ export default function MemberTabsLayout() {
     account changes, so one person's Champion action can never be offered to
     the next person to sign in on the same device.
   */
-  const { user } = useWsfAuth();
+  const { user, slow } = useWsfAuth();
   /*
     ST-05 (ESC-2). NEVER HOME FIRST ON A KIOSK RELAUNCH. Until the launch
     guard (app/_layout.tsx, src/kioskLaunchGuard.ts) has decided whether this
@@ -78,7 +79,27 @@ export default function MemberTabsLayout() {
   */
   const holding = useKioskLaunchHolding();
   if (holding) {
-    return <View style={{ flex: 1, backgroundColor: wsfTheme.colors.background }} testID="wsf-member-tabs-holding" />;
+    /*
+      RV12-641-F2 (INT-27 on a phone). The guard decides only after auth has
+      answered, so a stalled first auth answer holds here, and Home (inside
+      these tabs) never mounts to say so. Once auth is slow the ground says
+      "Connecting…" itself, below the status bar: still no member content, no
+      top bar and no tab. `slow` is never set on the web, which never holds.
+    */
+    return (
+      <View style={{ flex: 1, backgroundColor: wsfTheme.colors.background }} testID="wsf-member-tabs-holding">
+        {slow ? (
+          <>
+            <ScreenTopSpacer />
+            <View style={kit.page}>
+              <View style={kit.column}>
+                <AuthConnectingNote testID="wsf-member-tabs-connecting" />
+              </View>
+            </View>
+          </>
+        ) : null}
+      </View>
+    );
   }
   return (
     <MemberShellActionsProvider ownerUid={user?.uid ?? null}>
