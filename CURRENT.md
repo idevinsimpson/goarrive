@@ -1,15 +1,15 @@
-<!-- wsf-control ledgerHead=221216ba7f141d379e354483b7abf93695a134e82ae376ec86d90bd7b7f57c83 events=1387 rendered by tools/wsf-control/render-current.mjs; do not edit -->
+<!-- wsf-control ledgerHead=bd875cdec4ad34cf6bb45379bafa0c6dc1129bc94e47bdf188f22dcd78b8977e events=1388 rendered by tools/wsf-control/render-current.mjs; do not edit -->
 # WSF control state: CURRENT
 
 Derived from `events.jsonl` on the `wsf-control-state-2` branch. Do not edit; record a decision with `append.mjs`, then re-render.
 GitHub is the authority for facts (PR state, heads, CI, comments). This page records decisions and pointers only.
 
 - Repository: `idevinsimpson/goarrive`
-- Ledger head: `221216ba7f141d379e354483b7abf93695a134e82ae376ec86d90bd7b7f57c83` (1387 events)
+- Ledger head: `bd875cdec4ad34cf6bb45379bafa0c6dc1129bc94e47bdf188f22dcd78b8977e` (1388 events)
 - Genesis: bootstrap as of 2026-09-29T01:03:19Z. Packets whose origin is `bootstrap` were imported in their phase at that instant; the ledger did not observe their earlier transitions.
 - Supersedes: `wsf-control-state` at commit `92c3744752d21569e9a31451708366d7f3db8978` (ledger head `f48d256eeea36639d991d1391e82558141d50fbc5558333b0df9a345941ea1eb`), a wrong bootstrap with no program history. It is kept unchanged as the audit record; nothing from it is replayed.
 - Surfaces: control inbox #365; CURRENT is comment 5847443607 on #365
-- Canonical: development `claude/wsf-app-shell` at `8a067b29420563408e16cff5d91cc77b2ad0fbd8`; operational main `be45236ea92771319e45e0f84199cfc849f9b5f5`
+- Canonical: development `claude/wsf-app-shell` at `a6eaf0be95cb0a81de4f24bc6d7f30ac82ce922f`; operational main `be45236ea92771319e45e0f84199cfc849f9b5f5`
 - Staging: serves `ec162d17a0540e936741027f9b8f90dd372cfaf4` (run 37912780869, #61); rollback `ab77fbfce97e60c1c22492397b2ab6b491f9e0db`; pin PR #597
 - Unattended fast-path dispatch: ENABLED (set-fastpath)
 - Staging target (fast path): `ab77fbfce97e60c1c22492397b2ab6b491f9e0db` (KIOSK-PAIRING-CLARITY-PROOF-1), checked against the full-path pin `a31276516e786ac8f848269de4c839b3b9e13123`

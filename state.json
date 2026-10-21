@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "221216ba7f141d379e354483b7abf93695a134e82ae376ec86d90bd7b7f57c83",
-  "eventCount": 1387,
+  "ledgerHead": "bd875cdec4ad34cf6bb45379bafa0c6dc1129bc94e47bdf188f22dcd78b8977e",
+  "eventCount": 1388,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -19,7 +19,7 @@
   },
   "canonical": {
     "developmentBranch": "claude/wsf-app-shell",
-    "developmentSha": "8a067b29420563408e16cff5d91cc77b2ad0fbd8",
+    "developmentSha": "a6eaf0be95cb0a81de4f24bc6d7f30ac82ce922f",
     "operationalMain": "be45236ea92771319e45e0f84199cfc849f9b5f5"
   },
   "staging": {
