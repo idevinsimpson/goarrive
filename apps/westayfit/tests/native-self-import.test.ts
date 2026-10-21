@@ -27,8 +27,7 @@ import { TSC_MAX_BUFFER, checkPlatform, nativeFileList, outcomeOf, splitSuffix, 
  * entry then.
  */
 const KNOWN_OFFENDERS: Record<string, string> = {
-  // TODO(ST-TSC-1): W13 moves DeviceKv/KvRead to src/storage/kvTypes.ts.
-  'src/storage/kv.native.ts': 'ST-TSC-1',
+  // ST-TSC-1 landed with NATIVE-STATE-3 @ 683984a4 (src/storage/kvTypes.ts): no longer tolerated.
   // TODO(CAM-TSC-1): W15 moves TestPoseHook to src/movement-camera/testPoseHookType.ts.
   'src/movement-camera/support.native.ts': 'CAM-TSC-1',
 };
@@ -186,12 +185,13 @@ describe('NATIVE-TSC-1: no .native file imports its own base specifier', () => {
     expect(unexpectedOffenders(OFFENDERS)).toEqual([]);
   });
 
-  it('a new self-importing .native file fails the guard; only the ticketed two are tolerated', () => {
+  it('a new self-importing .native file fails the guard; only the ticketed camera file is tolerated', () => {
     const fresh = { file: 'src/ui/Pane.native.tsx', specs: ['./Pane'] };
-    const known = { file: 'src/storage/kv.native.ts', specs: ['./kv'] };
+    // ST-TSC-1 has landed: kv.native.ts importing './kv' again would fail.
+    const storage = { file: 'src/storage/kv.native.ts', specs: ['./kv'] };
     const camera = { file: 'src/movement-camera/support.native.ts', specs: ['./support'] };
-    expect(unexpectedOffenders([fresh, known, camera])).toEqual([fresh]);
-    expect(Object.values(KNOWN_OFFENDERS).sort()).toEqual(['CAM-TSC-1', 'ST-TSC-1']);
+    expect(unexpectedOffenders([fresh, storage, camera])).toEqual([fresh, storage]);
+    expect(Object.values(KNOWN_OFFENDERS)).toEqual(['CAM-TSC-1']);
   });
 
   for (const o of OFFENDERS.filter((x) => x.file in KNOWN_OFFENDERS)) {

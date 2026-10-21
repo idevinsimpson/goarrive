@@ -12,6 +12,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { WsfAuthProvider } from '../src/auth';
 import { getFirebaseApp } from '../src/firebase';
 import { InAppBrowserBanner } from '../src/InAppBrowserBanner';
+import { useKioskLaunchGuard } from '../src/kioskLaunchGuard';
 import { StagingBanner } from '../src/StagingBanner';
 import { STAGING_STRIP_UNDER_STATUS_BAR } from '../src/stagingStrip';
 import { StagingStackFrame, stagingScreenLayout } from '../src/stagingShell';
@@ -91,6 +92,10 @@ export default function RootLayout() {
  * tree, not because a predicate said so.
  */
 function AppShell() {
+  // ST-05 (W12-1): a phone the OS killed mid kiosk session relaunches to that
+  // kiosk's start screen, not member Home signed in as the visitor. Once,
+  // here, inside the auth provider; a no-op on web (src/kioskLaunchGuard.ts).
+  useKioskLaunchGuard();
   // Asked once, here, because both presented screens below answer to it.
   const reduced = useReducedMotion();
   // A test build's root-shell fault (src/crashHarness.ts); inert otherwise.
