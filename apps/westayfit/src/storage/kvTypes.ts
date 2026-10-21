@@ -26,7 +26,8 @@ export type DeviceKv = {
   setItem(key: string, value: string): Promise<boolean>;
   removeItem(key: string): Promise<boolean>;
   /**
-   * Keys starting with the prefix. Used to clear account-scoped records.
+   * Keys starting with the prefix. Used to hydrate account-scoped records
+   * (the selected-community mirror, `mirror.loadPrefix`); nothing clears by prefix.
    * Only ever within the app's own namespace (`APP_KEY_NAMESPACE`): a prefix
    * outside it lists nothing, so no caller can enumerate (and then remove)
    * keys this app does not own — Firebase Auth keeps its session under
