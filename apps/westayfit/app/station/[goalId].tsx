@@ -58,6 +58,7 @@ import { PROGRESS_GREEN } from '../../src/ui/brandAssets';
 import { formatActiveWindowLabel, formatClock, formatPeriod } from '../../src/ui/dates';
 import { buildEventJoinUrlFromScreenedCode, buildEventUrl } from '../../src/ui/eventLinks';
 import { FollowAlongCard } from '../../src/ui/FollowAlongCard';
+import { currentOrigin } from '../../src/ui/kioskLink';
 import { kit } from '../../src/ui/kit';
 import { LivingWeProgress } from '../../src/ui/LivingWeProgress';
 import { formatCount, percentLabel, statusLine } from '../../src/ui/progressFormat';
@@ -861,7 +862,8 @@ export default function StationScreen() {
   const callSentence = announceHallTurn(queue, label);
   const resultSentence = describeHallResult(turnResult);
 
-  const origin = typeof window === 'undefined' ? null : (window.location?.origin ?? null);
+  // The web's address; on a phone the origin the build names, or none (W12-13, INT-08).
+  const origin = currentOrigin();
   // The newcomer link exists only when the server handed this screen a code,
   // and it only does that for a community whose policy admits by link at all.
   //

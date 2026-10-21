@@ -59,6 +59,7 @@ import { wsfTheme } from '../../src/theme';
 import { ButtonLink } from '../../src/ui/ButtonLink';
 import { readEventParam } from '../../src/ui/eventLinks';
 import { FollowAlongCard } from '../../src/ui/FollowAlongCard';
+import { currentOrigin } from '../../src/ui/kioskLink';
 import { kit } from '../../src/ui/kit';
 import { encodeQr, renderQrSvg } from '../../src/ui/qr';
 import { SvgMarkup } from '../../src/ui/SvgMarkup';
@@ -171,10 +172,11 @@ export default function MoveScreen() {
   }, [goalId]);
 
   // The served origin, read once on the client. The static export has none at
-  // build time, so the QR is drawn from the address the page actually has.
+  // build time, so the QR is drawn from the address the page actually has. On a
+  // phone it is the origin the build names, or none (W12-13, INT-08): never
+  // `window.location`, which a development build points at Metro.
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    setOrigin(window.location?.origin ?? null);
+    setOrigin(currentOrigin());
   }, []);
 
   const unit = screen.kind === 'ready' ? screen.unit : '';

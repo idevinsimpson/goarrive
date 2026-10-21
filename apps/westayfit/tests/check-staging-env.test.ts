@@ -10,6 +10,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 
 import {
   APP_CONFIG_RULES,
+  APP_CONFIG_WARNINGS,
   GIT_REPLY,
   GIT_SAFETY_ARGS,
   REFUSALS,
@@ -25,6 +26,7 @@ import {
   internalErrorLine,
   parseArgs,
   redact,
+  redactWarning,
 } from '../scripts/check-staging-env.mjs';
 
 /**
@@ -1542,6 +1544,48 @@ describe('check:staging-env rules match every current refusal, and a value canno
     expect(failures(r.stdout)).toEqual([
       '- AUTH_DOMAIN must equal <PROJECT_ID>.firebaseapp.com [EXPO_PUBLIC_WSF_STAGING_AUTH_DOMAIN, EXPO_PUBLIC_WSF_STAGING_PROJECT_ID]',
     ]);
+  });
+
+  it('W12-13: every warning app.config.js can give maps to a specific warning rule, and every warning rule is used', () => {
+    const warnings: string[][] = [];
+    const visit = (node: ts.Node) => {
+      if (ts.isCallExpression(node) && node.expression.getText() === 'console.warn') {
+        // Every warning is `console.warn(<message>)`, or this test has to learn the new shape.
+        expect(node.arguments.length, node.getText()).toBe(1);
+        warnings.push(render(node.arguments[0]!, NEUTRAL, appConfigOwn));
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(APP_CONFIG);
+    expect(warnings.length).toBeGreaterThanOrEqual(1);
+    const used = new Set<number>();
+    for (const messages of warnings) {
+      for (const m of messages) {
+        expect(redactWarning(m).map((f: { label: string }) => f.label), m).not.toContain('a warning (an unrecognised rule)');
+        const i = APP_CONFIG_WARNINGS.findIndex((r: { test: RegExp }) => r.test.test(m));
+        if (i >= 0) used.add(i);
+      }
+    }
+    expect([...used].sort()).toEqual(APP_CONFIG_WARNINGS.map((_: unknown, i: number) => i));
+  });
+
+  it('W12-13: a warning no rule knows gives a fixed label and no piece of its text', () => {
+    const found = redactWarning('WSF native build warning: something new about qv7zSECRETw3k and EXPO_PUBLIC_WSF_PUBLIC_ORIGIN');
+    expect(found).toEqual([{ label: 'a warning (an unrecognised rule)', names: ['EXPO_PUBLIC_WSF_PUBLIC_ORIGIN'] }]);
+    expect(JSON.stringify(found)).not.toContain('SECRET');
+  });
+
+  it('W12-13 end to end: a staging file without a public origin passes, with a note by name; a host outside the invite hosts fails', () => {
+    const r = run(GOOD);
+    expect(r.code).toBe(0);
+    expect(r.stderr).toBe('');
+    expect(r.stdout).toContain('PASS  app.config.js (EAS ios preview)\n        note: not set: this staging build has no MOVE handoff or station QR codes yet (a warning) [EXPO_PUBLIC_WSF_PUBLIC_ORIGIN]');
+    const named = run({ ...GOOD, EXPO_PUBLIC_WSF_PUBLIC_ORIGIN: 'https://wsf.example.com' }, '--platform', 'ios');
+    expect(named.code).toBe(0);
+    expect(named.stdout).not.toContain('note:');
+    const outside = run({ ...GOOD, EXPO_PUBLIC_WSF_PUBLIC_ORIGIN: 'https://wsf.example.com', EXPO_PUBLIC_WSF_INVITE_HOSTS: 'other.example.com' }, '--platform', 'ios');
+    expect(outside.code).toBe(1);
+    expect(failures(outside.stdout)).toEqual(["- the origin's host must be one of the invite hosts [EXPO_PUBLIC_WSF_PUBLIC_ORIGIN, EXPO_PUBLIC_WSF_INVITE_HOSTS]"]);
   });
 
   it('end to end: a sign-in flag holding the selector refusal\'s words is still a sign-in refusal', () => {
