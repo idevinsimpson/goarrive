@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  *   · The web gets the base style itself, the same object: its DOM is
  *     unchanged (the tab bar's web DOM is also pinned to its pre-W12-8
  *     snapshot in member-tab-bar-text-scale).
- *   · A phone gets a style function that adds kit.pressed only while
+ *   · A phone gets a style function that adds PRESSED only while
  *     pressed; Android adds a ripple in the given tint, iOS does not.
  *   · The integrator's controls use it: OptionRow, the tab destinations,
  *     MOVE, the hamburger and the menu rows.
@@ -23,7 +23,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../src/firebase', () => ({ wsfIsStaging: false, getFirebaseAuth: () => ({}) }));
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 
-const { kit, pressableStyle, ACTION_GREEN_DEEP, OPTION_SELECTED_TINT } = await import('../src/ui/kit');
+const { PRESSED, pressableStyle, ACTION_GREEN_DEEP, OPTION_SELECTED_TINT } = await import('../src/ui/kit');
 const { OptionRow } = await import('../src/ui/OptionRow');
 const { MemberTabBar } = await import('../src/ui/MemberTabBar');
 const { MemberTopBar } = await import('../src/ui/MemberTopBar');
@@ -66,8 +66,8 @@ describe('pressableStyle', () => {
     const at = (pressed: boolean) =>
       StyleSheet.flatten((out.style as (s: { pressed: boolean; hovered?: boolean }) => never)({ pressed })) as Record<string, unknown>;
     expect(at(false)).toEqual({ padding: 4, backgroundColor: '#fff' });
-    expect(at(true)).toEqual({ padding: 4, backgroundColor: '#fff', ...StyleSheet.flatten(kit.pressed) });
-    expect(StyleSheet.flatten(kit.pressed)).toEqual({ opacity: 0.72 });
+    expect(at(true)).toEqual({ padding: 4, backgroundColor: '#fff', opacity: 0.72 });
+    expect(PRESSED).toEqual({ opacity: 0.72 });
   });
 
   it('Android: the same, plus a ripple in the tint', () => {
