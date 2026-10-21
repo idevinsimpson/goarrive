@@ -283,6 +283,31 @@ describe('RV12-641-F1: a kiosk destination is never reset to Home', () => {
     }
   });
 
+  it('RV15-641-N1, native: a member destination with a kiosk start screen anywhere beneath is replaced, never reset; an unreadable stack fails closed the same way', () => {
+    const KIOSK_STACK = [{ name: '(tabs)' }, { name: 'kiosk/[goalId]', params: { goalId: 'g1' } }, { name: 'contribute/[goalId]' }, { name: 'join/[joinCode]' }];
+    for (const platform of ['ios', 'android']) {
+      ctl.calls = [];
+      landAfterAuth('/community/oak', { ...deps(), routes: () => KIOSK_STACK, platform });
+      expect([platform, ctl.calls]).toEqual([platform, [['replace', '/community/oak']]]);
+      ctl.calls = [];
+      landAfterAuth('/community/oak', {
+        ...deps(),
+        routes: () => {
+          throw new Error('no state');
+        },
+        platform,
+      });
+      expect(ctl.calls).toEqual([['replace', '/community/oak']]);
+      // No kiosk beneath: the Home reset, as before.
+      ctl.calls = [];
+      landAfterAuth('/community/oak', { ...deps(), routes: () => [{ name: '(tabs)' }, { name: 'join/[joinCode]' }], platform });
+      expect(ctl.calls).toEqual([
+        ['dispatch', HOME_ONLY_RESET],
+        ['push', '/community/oak'],
+      ]);
+    }
+  });
+
   // The root Stack, run by React Navigation's own StackRouter. `replace`,
   // `push` and `dismissTo` are what expo-router dispatches to it for these
   // hrefs: REPLACE, PUSH and POP_TO addressed to the root Stack, with the

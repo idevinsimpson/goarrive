@@ -48,7 +48,11 @@ vi.mock('react-native', async () => {
 
 vi.mock('expo-router', async () => {
   const React = await import('react');
-  const navigation = { dispatch: (a: unknown) => ctl.calls.push(['dispatch', a]) };
+  // The root stack as the join screen's navigation object reports it: Home's tabs, then the join.
+  const navigation = {
+    dispatch: (a: unknown) => ctl.calls.push(['dispatch', a]),
+    getState: () => ({ routes: [{ name: '(tabs)' }, { name: 'join/[joinCode]' }] }),
+  };
   return {
     router: {
       replace: (href: string) => ctl.calls.push(['replace', href]),
@@ -204,7 +208,9 @@ describe('the join screen’s terminal hop', () => {
     expect(src).toContain('onContinue={() => router.replace(deviceEntry.route as never)}');
     const onJoin = src.slice(src.indexOf('const onJoin = useCallback'), src.indexOf('}, [joinCode, navigation, user]);'));
     expect(onJoin.length).toBeGreaterThan(100);
-    expect(onJoin).toMatch(/landAfterAuth\(destination, \{\s*dispatch: \(action\) => navigation\.dispatch\(action as never\),\s*push: \(href\) => router\.push\(href as never\),\s*replace: \(href\) => router\.replace\(href as never\),\s*platform: Platform\.OS,\s*\}\);/);
+    expect(onJoin).toMatch(/landAfterAuth\(destination, \{\s*dispatch: \(action\) => navigation\.dispatch\(action as never\),\s*push: \(href\) => router\.push\(href as never\),\s*replace: \(href\) => router\.replace\(href as never\),\s*platform: Platform\.OS,/);
+    // RV15-641-N1: the root stack's routes, so a kiosk beneath is never reset away.
+    expect(onJoin).toMatch(/routes: \(\) => \(navigation\.getState\(\) as [^)]*\)\?\.routes,\s*\}\);/);
     expect(onJoin).not.toMatch(/router\.replace\(destination/);
   });
 

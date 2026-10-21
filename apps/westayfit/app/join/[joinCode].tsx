@@ -343,6 +343,8 @@ export default function JoinPage() {
       push: (href) => router.push(href as never),
       replace: (href) => router.replace(href as never),
       platform: Platform.OS,
+      // RV15-641-N1: a kiosk beneath (a join link opened over a kiosk session) is never reset away.
+      routes: () => (navigation.getState() as { routes?: ReadonlyArray<{ name: string; params?: object }> } | undefined)?.routes,
     });
   }, [joinCode, navigation, user]);
 
