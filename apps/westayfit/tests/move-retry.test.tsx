@@ -24,7 +24,12 @@ vi.mock('react-native-safe-area-context', () => ({
 }));
 vi.mock('../src/featureFlags', () => ({ wsfAuthEnabled: true }));
 // Reduced motion: the sheet takes no animated path (jsdom has no AccessibilityInfo events).
-vi.mock('../src/ui/useReducedMotion', () => ({ useReducedMotion: () => true }));
+// `useReducedMotionPreference` is what MOVE reads since the motion lane's MO-02
+// (wsf-native-motion-1 bc3da80f); listed so this mock serves that merge too.
+vi.mock('../src/ui/useReducedMotion', () => ({
+  useReducedMotion: () => true,
+  useReducedMotionPreference: () => ({ reduced: true, known: true, failed: false }),
+}));
 const USER = { uid: 'u1', email: 'member@example.com', displayName: 'Member' };
 vi.mock('../src/auth', () => ({ useWsfAuth: () => ({ ready: true, user: USER }) }));
 // `currentCommunityReady` is the state lane's (wsf-native-state-3): resolved
