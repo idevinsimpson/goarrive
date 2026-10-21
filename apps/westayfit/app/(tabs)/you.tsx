@@ -518,8 +518,24 @@ export default function You() {
       const rec = recordedYou(uid);
       if (rec) {
         drawnFromRecord(uid, rec);
-        setScreen(uid, rec.screen);
-        return;
+        // W16-25 (heads-16 RV18-642-M1): a record with no profile composes a
+        // pending head (the name waits for the profile read), and this path
+        // issues no read; drawn as is, the bar stood in place of the "You"
+        // header for good. A page with a head keeps it (the kept inputs take
+        // it too, NB-3); with none to keep (loading), the record counts as
+        // incomplete and is revalidated below, which reads the profile, so a
+        // read is behind the bar.
+        if (!('profile' in rec.screen) || rec.screen.profile.pending !== true) {
+          setScreen(uid, rec.screen);
+          return;
+        }
+        const shown = shownRef.current.uid === uid ? shownRef.current.screen : LOADING;
+        if ('profile' in shown && !shown.profile.pending) {
+          const head = shown.profile;
+          if (rec.args) composedFrom.current = { uid, args: [head, ...rec.args.slice(1)] as ComposeArgs };
+          setScreen(uid, { ...rec.screen, profile: head } as Screen);
+          return;
+        }
       }
       setScreen(uid, (prev) =>
         prev.kind === 'member' && wasRefused(uid, prev.community.groupId) ? { kind: 'loading' } : prev,
@@ -670,6 +686,21 @@ export default function You() {
               if (!rec && from) composedFrom.current = { uid, args: [head, ...from.slice(1)] as ComposeArgs };
               return { ...again, profile: head };
             });
+          } else {
+            // W16-25 (heads-16 RV18-642-M1): a kept pick, none or failed page
+            // keeps no pending head either (it draws no stale mark and no
+            // Retry, so nothing would ever replace the bar): this load's
+            // profile if it answered, else the account's recorded profile,
+            // else this load's fallback, the "You" header. A name on screen
+            // is never replaced by the fallback.
+            const known = peekMemberProfile(uid);
+            setScreen(uid, (prev) =>
+              prev.kind === 'member' || prev.kind === 'loading' || prev.kind === 'signedOut'
+                ? prev
+                : profileAnswered || prev.profile.pending
+                  ? { ...prev, profile: profileAnswered ? profile : known ? toProfile(known) : profile }
+                  : prev,
+            );
           }
           setStale(true);
           return;
