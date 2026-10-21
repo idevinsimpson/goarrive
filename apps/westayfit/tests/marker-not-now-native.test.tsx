@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { ResolvedMarker } from '../src/markerEntry';
+import type { MarkerResolver, ResolvedMarker } from '../src/markerEntry';
 import { bootNative, createFakeAsyncStorage, flush, type FakeAsyncStorage } from './nativeStorageHarness';
 
 /**
@@ -88,7 +88,13 @@ async function renderSignedOut() {
   const container = document.createElement('div');
   document.body.appendChild(container);
   const root = createRoot(container);
-  const resolver = { resolve: vi.fn(async () => MARKER), join: vi.fn(async () => undefined) };
+  const resolve = vi.fn(async (_slug: string) => MARKER);
+  const resolver: MarkerResolver = {
+    resolve,
+    join: async () => {
+      throw new Error('join is not pressed on the signed-out step');
+    },
+  };
   await React.act(async () => {
     root.render(React.createElement(MarkerEntryScreen, { slug: SLUG, resolver }));
   });
@@ -106,7 +112,7 @@ async function renderSignedOut() {
     );
   return {
     container,
-    resolver,
+    resolve,
     byText,
     press: async (el: HTMLElement) => {
       await React.act(async () => {
@@ -128,7 +134,7 @@ describe('W13-13: "Not now — back to home" on the marker screen spends the ret
     expect(disk.map.has(KEY)).toBe(true);
 
     const screen = await renderSignedOut();
-    expect(screen.resolver.resolve).toHaveBeenCalledWith(SLUG);
+    expect(screen.resolve).toHaveBeenCalledWith(SLUG);
     expect(screen.container.querySelector('[data-testid="wsf-marker-signed-out"]')).not.toBeNull();
     const notNow = screen.byText(NOT_NOW);
     expect(notNow).toHaveLength(1);
