@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { wsfTheme } from '../src/theme';
 
@@ -27,11 +27,16 @@ const ENV_KEYS = [
   'EXPO_PUBLIC_WSF_CRASH_HARNESS',
   'EXPO_PUBLIC_WSF_AUTH_ENABLED',
   'EAS_BUILD_GIT_COMMIT_HASH',
+  'EXPO_PUBLIC_WSF_PUBLIC_ORIGIN',
+  'EXPO_PUBLIC_WSF_INVITE_HOSTS',
   ...STAGING_KEYS,
 ];
 const COMPLETE_STAGING = Object.fromEntries(STAGING_KEYS.map((k) => [k, 'dummy-value']));
 // INT-11: every build that embeds its JS must say whether sign-in is on.
 const SIGN_IN_ON = { EXPO_PUBLIC_WSF_AUTH_ENABLED: '1' };
+// W12-13 (INT-08): a production build that embeds its JS names its public origin.
+// (Changed deliberately: the production cases below now carry one.)
+const PUBLIC_ORIGIN = { EXPO_PUBLIC_WSF_PUBLIC_ORIGIN: 'https://wsf.example.com' };
 
 // An EAS build that passes its checks: the same config, plus the binary's own
 // build stamp (INT-10, extra.wsfBuild).
@@ -154,14 +159,70 @@ describe('NATIVE-BUILD-1: app.config.js build-time backend refusals', () => {
         EXPO_PUBLIC_WSF_ENV: 'production',
         EXPO_PUBLIC_WSF_CRASH_HARNESS: '  ',
         ...SIGN_IN_ON,
+        ...PUBLIC_ORIGIN,
       })()
     ).toEqual(BUILT);
   });
 
   it('leaves an explicit production build unchanged (but for its build stamp, INT-10)', () => {
     expect(
-      run({ EAS_BUILD_PLATFORM: 'ios', EAS_BUILD_PROFILE: 'preview', EXPO_PUBLIC_WSF_ENV: 'production', ...SIGN_IN_ON })()
+      run({ EAS_BUILD_PLATFORM: 'ios', EAS_BUILD_PROFILE: 'preview', EXPO_PUBLIC_WSF_ENV: 'production', ...SIGN_IN_ON, ...PUBLIC_ORIGIN })()
     ).toEqual(BUILT);
+  });
+
+  describe('NATIVE-INTEGRATOR-1 (W12-13, INT-08): the public origin a phone build names', () => {
+    const build = (env: Record<string, string>) => run({ EAS_BUILD_PROFILE: 'preview', ...SIGN_IN_ON, ...env });
+    const production = (env: Record<string, string> = {}) => build({ EAS_BUILD_PLATFORM: 'ios', EXPO_PUBLIC_WSF_ENV: 'production', ...env });
+    const staging = (env: Record<string, string> = {}) => build({ EAS_BUILD_PLATFORM: 'android', EXPO_PUBLIC_WSF_ENV: 'staging', ...COMPLETE_STAGING, ...env });
+    const warnings = () => {
+      const spy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      return { lines: () => spy.mock.calls.map((c) => c.join(' ')), restore: () => spy.mockRestore() };
+    };
+
+    it('a production build refuses without an origin, or with an unusable one; a public https origin builds', () => {
+      expect(production()).toThrow(/a production ios build needs EXPO_PUBLIC_WSF_PUBLIC_ORIGIN, the public https origin/);
+      for (const bad of ['http://wsf.example.com', 'https://wsf.example.com:8081', 'https://10.0.2.2', 'https://laptop.local', 'https://wsf', 'https://abc.ngrok-free.app', 'https://wsf.example.com/app']) {
+        expect(production({ EXPO_PUBLIC_WSF_PUBLIC_ORIGIN: bad }), bad).toThrow(/EXPO_PUBLIC_WSF_PUBLIC_ORIGIN is not an https origin on a public host/);
+      }
+      expect(production(PUBLIC_ORIGIN)()).toEqual(BUILT);
+      expect(production({ EXPO_PUBLIC_WSF_PUBLIC_ORIGIN: ' https://WSF.example.com/ ' })()).toEqual(BUILT);
+    });
+
+    it('with both set, the origin\'s host must be one of the invite hosts', () => {
+      expect(production({ ...PUBLIC_ORIGIN, EXPO_PUBLIC_WSF_INVITE_HOSTS: 'staging.example.com' })).toThrow(
+        /the host of EXPO_PUBLIC_WSF_PUBLIC_ORIGIN is not in EXPO_PUBLIC_WSF_INVITE_HOSTS/
+      );
+      expect(staging({ ...PUBLIC_ORIGIN, EXPO_PUBLIC_WSF_INVITE_HOSTS: 'staging.example.com' })).toThrow(/is not in EXPO_PUBLIC_WSF_INVITE_HOSTS/);
+      expect(production({ ...PUBLIC_ORIGIN, EXPO_PUBLIC_WSF_INVITE_HOSTS: 'staging.example.com, WSF.example.com' })()).toEqual(BUILT);
+      // Either one alone sets no rule between them.
+      expect(production(PUBLIC_ORIGIN)()).toEqual(BUILT);
+      const w = warnings();
+      expect(staging({ EXPO_PUBLIC_WSF_INVITE_HOSTS: 'staging.example.com' })()).toEqual(BUILT);
+      w.restore();
+    });
+
+    it('a staging build without an origin only warns, by name: the owner\'s preview builds still pass', () => {
+      const w = warnings();
+      expect(staging()()).toEqual(BUILT);
+      expect(w.lines()).toEqual([
+        'WSF native build warning: EXPO_PUBLIC_WSF_PUBLIC_ORIGIN is not set for this staging android build, so its MOVE handoff and station QR codes stay off (INT-08).',
+      ]);
+      w.restore();
+      const quiet = warnings();
+      expect(staging(PUBLIC_ORIGIN)()).toEqual(BUILT);
+      expect(quiet.lines()).toEqual([]);
+      quiet.restore();
+      // A set but unusable origin is refused on staging too.
+      expect(staging({ EXPO_PUBLIC_WSF_PUBLIC_ORIGIN: 'http://192.168.1.20:8081' })).toThrow(/is not an https origin on a public host/);
+    });
+
+    it('a development client takes its origin from the dev server, and outside EAS nothing is checked', () => {
+      const w = warnings();
+      expect(run({ EAS_BUILD_PLATFORM: 'ios', EAS_BUILD_PROFILE: 'development', EXPO_PUBLIC_WSF_ENV: 'production', EXPO_PUBLIC_WSF_PUBLIC_ORIGIN: 'http://localhost:8081' })()).toEqual(BUILT);
+      expect(run({ EXPO_PUBLIC_WSF_ENV: 'production', EXPO_PUBLIC_WSF_PUBLIC_ORIGIN: 'nonsense' })()).toEqual({ name: 'We Stay Fit' });
+      expect(w.lines()).toEqual([]);
+      w.restore();
+    });
   });
 
   describe('NATIVE-INTEGRATOR-1 (INT-11): a native build cannot ship with sign-in switched off by accident', () => {
@@ -202,7 +263,7 @@ describe('NATIVE-BUILD-1: app.config.js build-time backend refusals', () => {
 
     it('production may switch sign-in off, but only by saying 0 (the launch switch stays the owner\'s)', () => {
       const prod = (auth: string) =>
-        run({ EAS_BUILD_PLATFORM: 'android', EAS_BUILD_PROFILE: 'preview', EXPO_PUBLIC_WSF_ENV: 'production', EXPO_PUBLIC_WSF_AUTH_ENABLED: auth });
+        run({ EAS_BUILD_PLATFORM: 'android', EAS_BUILD_PROFILE: 'preview', EXPO_PUBLIC_WSF_ENV: 'production', EXPO_PUBLIC_WSF_AUTH_ENABLED: auth, ...PUBLIC_ORIGIN });
       expect(prod('0')()).toEqual(BUILT);
       expect(prod('1')()).toEqual(BUILT);
     });

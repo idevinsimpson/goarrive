@@ -12,6 +12,9 @@
  * the staging-values check below applies only to builds that embed their JS,
  * and only a development client may rely on the emulator flag alone.
  */
+const fs = require('fs');
+const path = require('path');
+
 const STAGING_KEYS = [
   'EXPO_PUBLIC_WSF_STAGING_API_KEY',
   'EXPO_PUBLIC_WSF_STAGING_AUTH_DOMAIN',
@@ -53,6 +56,37 @@ function authFlagOf(raw) {
   if (v === '1' || v === 'true') return 'on';
   if (v === '0' || v === 'false') return 'off';
   return 'unset';
+}
+
+// NATIVE-INTEGRATOR-1 (W12-13, INT-08 preparation). A phone build names its
+// public origin in EXPO_PUBLIC_WSF_PUBLIC_ORIGIN (src/publicOrigin.ts); the app
+// reads that, never window.location, for its QR codes and share links. The
+// rules live once, in src/publicOrigin.ts and src/publicHost.ts. This file runs
+// in plain Node, so it compiles those two modules in memory with the TypeScript
+// already in node_modules (as scripts/check-staging-env.mjs does for
+// src/stagingEnv.ts): never a second copy of the rules.
+function loadSrcModule(name, cache = {}) {
+  const file = path.join(__dirname, 'src', `${name}.ts`);
+  if (cache[file]) return cache[file].exports;
+  const ts = require('typescript');
+  const js = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2019 },
+    fileName: file,
+  }).outputText;
+  const mod = { exports: {} };
+  cache[file] = mod;
+  const localRequire = (spec) => (spec.startsWith('./') ? loadSrcModule(spec.slice(2), cache) : require(spec));
+  new Function('exports', 'module', 'require', js)(mod.exports, mod, localRequire);
+  return mod.exports;
+}
+
+// The hosts an EXPO_PUBLIC_WSF_INVITE_HOSTS value lists, as the app splits it
+// (comma- or space-separated, case-folded).
+function inviteHostsOf(raw) {
+  return (raw || '')
+    .split(/[\s,]+/)
+    .filter((e) => e !== '')
+    .map((e) => e.toLowerCase());
 }
 
 module.exports = ({ config }) => {
@@ -118,6 +152,39 @@ module.exports = ({ config }) => {
         throw new Error(
           `WSF native build refused: EXPO_PUBLIC_WSF_AUTH_ENABLED is off for a ${env} ${platform} build, which would ship ` +
             `with sign-in switched off and could not be tested. Set it to 1.`
+        );
+      }
+    }
+    // NATIVE-INTEGRATOR-1 (W12-13, INT-08): the origin a build that embeds its
+    // JS names. A development client takes its JS, and so its origin, from the
+    // local dev server instead.
+    if (embedsJs) {
+      const originSet = (process.env.EXPO_PUBLIC_WSF_PUBLIC_ORIGIN || '').trim() !== '';
+      const origin = originSet || env === 'production' ? loadSrcModule('publicOrigin').configuredPublicOrigin() : null;
+      if (originSet && !origin) {
+        throw new Error(
+          `WSF native build refused: EXPO_PUBLIC_WSF_PUBLIC_ORIGIN is not an https origin on a public host ` +
+            `(no port, path, IP address, local name or development tunnel).`
+        );
+      }
+      if (!origin && env === 'production') {
+        throw new Error(
+          `WSF native build refused: a production ${platform} build needs EXPO_PUBLIC_WSF_PUBLIC_ORIGIN, the public ` +
+            `https origin its QR codes and share links name.`
+        );
+      }
+      const hosts = inviteHostsOf(process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS);
+      if (origin && hosts.length > 0 && !hosts.includes(origin.slice('https://'.length))) {
+        throw new Error(
+          `WSF native build refused: the host of EXPO_PUBLIC_WSF_PUBLIC_ORIGIN is not in EXPO_PUBLIC_WSF_INVITE_HOSTS, ` +
+            `so this build would hand out links it does not read as its own.`
+        );
+      }
+      if (!origin && env === 'staging') {
+        // Staging only warns: the owner's preview builds run before the host is named (E#1).
+        console.warn(
+          `WSF native build warning: EXPO_PUBLIC_WSF_PUBLIC_ORIGIN is not set for this staging ${platform} build, so its ` +
+            `MOVE handoff and station QR codes stay off (INT-08).`
         );
       }
     }

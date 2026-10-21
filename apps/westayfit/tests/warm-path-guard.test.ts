@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { bootNative, createFakeAsyncStorage, type FakeAsyncStorage } from './nativeStorageHarness';
 
@@ -138,6 +138,27 @@ const LOADING = 'wsf-community-index-loading';
 let disk: FakeAsyncStorage;
 let cleanup: Array<() => void> = [];
 
+/*
+  NO PROMISE OUTLIVES ITS TEST UNSEEN (ported from state's 2df0390f). A
+  rejection nobody handles (a screen's load bound to a mock without the call
+  it makes, say) used to surface only as a run-level "Unhandled Rejection"
+  after every test had passed, naming no test. Each one raised while a test
+  runs is collected here and fails that test, after its pending work has been
+  drained (afterEach).
+*/
+const unhandled: unknown[] = [];
+const onUnhandled = (reason: unknown) => {
+  unhandled.push(reason);
+};
+
+beforeAll(() => {
+  process.on('unhandledRejection', onUnhandled);
+});
+
+afterAll(() => {
+  process.off('unhandledRejection', onUnhandled);
+});
+
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   disk = createFakeAsyncStorage();
@@ -151,9 +172,16 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => {
+afterEach(async () => {
   for (const c of cleanup.splice(0)) c();
   vi.useRealTimers();
+  // (state's eb13f1ef) Let whatever this test started run out, with every
+  // screen unmounted, before the next test boots a fresh process and re-mocks
+  // its modules: no late continuation from this test may run against the next
+  // test's mocks.
+  for (let i = 0; i < 20; i += 1) await new Promise<void>((resolve) => setImmediate(resolve));
+  const seen = unhandled.splice(0).map((r) => (r instanceof Error ? r.message : String(r)));
+  expect(seen, 'unhandled rejections raised during this test').toEqual([]);
 });
 
 /**
@@ -174,14 +202,15 @@ const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 /**
  * A fresh process over `disk`: the app was opened. Returns its currentCommunity
- * module. Firebase is mocked AFTER the boot, because a harness boot may mock
- * it for its own needs (the session watch's `getFirebaseAuth` only).
+ * module. Firebase is mocked AFTER the boot, because a harness boot mocks it
+ * for its own needs too (the session watch; since state's b33c6475 that mock
+ * carries every getter, whichever of the two a module ends up with).
  */
 async function boot() {
   bootNative(disk);
-  // Let the harness's own mocks land first. Queued mocks are resolved
-  // concurrently at the next import, so a harness mock of the same module
-  // (its narrower Firebase one) could otherwise land after the one below.
+  // (state's 771a4011) Let the harness's own mocks land first. Queued mocks
+  // are resolved concurrently at the next import, so a harness mock of the
+  // same module could otherwise land after the one below.
   await import('../src/storage/syncRead');
   vi.doMock('../src/firebase', () => ({
     getFirebaseApp: () => ({}),

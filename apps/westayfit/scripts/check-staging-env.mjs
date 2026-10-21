@@ -63,7 +63,9 @@ const SELECTOR = 'EXPO_PUBLIC_WSF_ENV';
 const AUTH = 'EXPO_PUBLIC_WSF_AUTH_ENABLED';
 const EMULATORS = 'EXPO_PUBLIC_WSF_USE_EMULATORS';
 const HARNESS = 'EXPO_PUBLIC_WSF_CRASH_HARNESS';
-const KNOWN_NAMES = [...STAGING_NAMES, SELECTOR, AUTH, EMULATORS, HARNESS];
+const ORIGIN = 'EXPO_PUBLIC_WSF_PUBLIC_ORIGIN';
+const INVITE_HOSTS = 'EXPO_PUBLIC_WSF_INVITE_HOSTS';
+const KNOWN_NAMES = [...STAGING_NAMES, SELECTOR, AUTH, EMULATORS, HARNESS, ORIGIN, INVITE_HOSTS];
 const [API_KEY, AUTH_DOMAIN, PROJECT_ID, STORAGE_BUCKET, SENDER_ID, APP_ID] = STAGING_NAMES;
 
 /** KEY=VALUE lines; `#` comments and blank lines skipped; an optional `export `; matching quotes removed. */
@@ -152,6 +154,28 @@ export const APP_CONFIG_RULES = [
     names: [AUTH],
   },
   { test: new RegExp(`^\\s*${REFUSED}${AUTH} is off for an? `), label: 'is off for a non-production build', names: [AUTH] },
+  // W12-13 (INT-08): the origin a phone build names.
+  { test: new RegExp(`^\\s*${REFUSED}${ORIGIN} is not an https origin on a public host `), label: 'must be an https origin on a public host', names: [ORIGIN] },
+  { test: new RegExp(`^\\s*${REFUSED}a production (ios|android) build needs ${ORIGIN}, `), label: 'a production build needs a public origin', names: [ORIGIN] },
+  {
+    test: new RegExp(`^\\s*${REFUSED}the host of ${ORIGIN} is not in ${INVITE_HOSTS}, `),
+    label: 'the origin\'s host must be one of the invite hosts',
+    names: [ORIGIN, INVITE_HOSTS],
+  },
+];
+
+/*
+  W12-13. app.config.js WARNS (console.warn) where a build may go ahead: a
+  staging build that names no public origin yet. A warning is shown as a note
+  under its check, by fixed label and names, and never fails it.
+*/
+const WARNED = 'WSF native build warning: ';
+export const APP_CONFIG_WARNINGS = [
+  {
+    test: new RegExp(`^\\s*${WARNED}${ORIGIN} is not set for this staging (ios|android) build, `),
+    label: 'not set: this staging build has no MOVE handoff or station QR codes yet (a warning)',
+    names: [ORIGIN],
+  },
 ];
 
 export const UNRECOGNISED = 'refused (an unrecognised rule)';
@@ -477,23 +501,37 @@ function appConfigFindings(env, platform) {
   const saved = { ...process.env };
   for (const k of Object.keys(process.env)) if (k.startsWith('EXPO_PUBLIC_') || k.startsWith('EAS_BUILD_')) delete process.env[k];
   Object.assign(process.env, env, { EAS_BUILD_PLATFORM: platform, EAS_BUILD_PROFILE: 'preview' });
+  // A warning is collected, never written: its text is mapped to a fixed label like a refusal (W12-13).
+  const warn = console.warn;
+  const warnings = [];
+  console.warn = (...parts) => {
+    warnings.push(parts.map(String).join(' '));
+  };
   try {
     appConfig({ config: expo });
-    return [];
+    return { findings: [], notes: warnings.flatMap((w) => redactWarning(w)) };
   } catch (e) {
-    return redact(e instanceof Error ? e.message : String(e), APP_CONFIG_RULES);
+    return { findings: redact(e instanceof Error ? e.message : String(e), APP_CONFIG_RULES), notes: warnings.flatMap((w) => redactWarning(w)) };
   } finally {
+    console.warn = warn;
     for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
     Object.assign(process.env, saved);
   }
+}
+
+/** A warning mapped to [{ label, names }] by APP_CONFIG_WARNINGS; its text is never returned or printed. */
+export function redactWarning(message) {
+  const found = redact(message, APP_CONFIG_WARNINGS);
+  return found.map((f) => (f.label === UNRECOGNISED ? { label: 'a warning (an unrecognised rule)', names: f.names } : f));
 }
 
 // TODO(RV8-642-N3): refuse a SET EXPO_PUBLIC_WSF_INVITE_HOSTS whose
 // configuredInviteHosts() is [] (configured but empty: native Copy and Share
 // would disappear). Import the member lane's parser from src/joinInput.ts once
 // this branch has it (it lands with candidate-5); never a copy of its rules.
-// TODO(RV8-642-N4, with W12-13): assert host(EXPO_PUBLIC_WSF_PUBLIC_ORIGIN)
-// is in configuredInviteHosts() when both are set.
+// RV8-642-N4 (W12-13): app.config.js now refuses a build whose
+// EXPO_PUBLIC_WSF_PUBLIC_ORIGIN host is not in EXPO_PUBLIC_WSF_INVITE_HOSTS
+// when both are set, and this check maps that refusal like the others.
 export async function check(fileEnv, platforms) {
   const env = { ...fileEnv };
   const added = [];
@@ -533,7 +571,8 @@ export async function check(fileEnv, platforms) {
       name: `stagingEnv nativeTargetProblem (${platform}, release)`,
       findings: problem ? [{ label: 'a phone build must name its backend: staging or production', names: [SELECTOR] }] : [],
     });
-    checks.push({ name: `app.config.js (EAS ${platform} preview)`, findings: appConfigFindings(env, platform) });
+    const { findings, notes } = appConfigFindings(env, platform);
+    checks.push({ name: `app.config.js (EAS ${platform} preview)`, findings, notes });
   }
   return { present: STAGING_NAMES.map((n) => [n, (env[n] ?? '').trim() !== '']), added, checks };
 }
@@ -546,6 +585,7 @@ function print(result) {
   for (const c of result.checks) {
     out.push(`${c.findings.length ? 'FAIL' : 'PASS'}  ${c.name}`);
     for (const f of c.findings) out.push(`        - ${f.label} [${f.names.join(', ')}]`);
+    for (const f of c.notes ?? []) out.push(`        note: ${f.label} [${f.names.join(', ')}]`);
   }
   const ok = result.checks.every((c) => c.findings.length === 0);
   out.push(ok ? 'PASS' : 'FAIL');
