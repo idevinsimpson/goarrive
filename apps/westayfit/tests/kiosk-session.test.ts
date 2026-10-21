@@ -366,3 +366,39 @@ describe('#635 follow-up: a kiosk on the "couldn’t read this device’s saved 
     expect(terminal).toContain('restoreSettled &&');
   });
 });
+
+describe('#635 delta-3: the kiosk clock on the paused screen', () => {
+  it('NB-1: no countdown line while the clock is not running (it used to read "Finishing now…")', async () => {
+    const { kioskCountdownText, kioskCountdownLabel, kioskRemainingSeconds } = await import('../src/kioskSession');
+    // Why: an unstarted clock is +Infinity, which the seconds helper turns into 0.
+    expect(kioskCountdownLabel(kioskRemainingSeconds(Number.POSITIVE_INFINITY))).toBe('Finishing now…');
+    expect(kioskCountdownText(null, 1_000)).toBeNull();
+    expect(kioskCountdownText(1_000, 1_000)).toBe('Finishing in 90 seconds');
+    expect(kioskCountdownText(1_000, 1_000 + KIOSK_IDLE_MS)).toBe('Finishing now…');
+    const { readFileSync } = await import('node:fs');
+    const route = readFileSync('app/contribute/[goalId].tsx', 'utf8');
+    expect(route).toContain('const kioskCountdown = kioskCountdownText(kioskStartedAt, kioskNow);');
+    const bar = route.slice(route.indexOf('{kioskCountdown != null ? ('), route.indexOf(') : null}', route.indexOf('{kioskCountdown != null ? (')));
+    expect(bar).toContain('testID="wsf-kiosk-countdown"');
+    expect(bar).toContain('testID="wsf-kiosk-stay"');
+    expect(bar).toContain('{kioskCountdown}');
+  });
+
+  it('NB-3: the restore clause counts only over a ready goal; in flight still beats settled', async () => {
+    const { kioskScreenSettled, kioskMayFinishUnattended } = await import('../src/kioskSession');
+    for (const stateKind of ['loading', 'notSignedIn']) {
+      expect(kioskScreenSettled({ stateKind, restoreFailed: true, beforeWrite: true }), stateKind).toBe(false);
+    }
+    expect(kioskScreenSettled({ stateKind: 'ready', restoreFailed: true, beforeWrite: true })).toBe(true);
+    for (const stateKind of ['closed', 'notFound', 'error']) {
+      expect(kioskScreenSettled({ stateKind, restoreFailed: false, beforeWrite: false }), stateKind).toBe(true);
+    }
+    expect(
+      kioskMayFinishUnattended({
+        outcome: 'none',
+        attemptInFlight: true,
+        loadSettled: kioskScreenSettled({ stateKind: 'ready', restoreFailed: true, beforeWrite: true }),
+      })
+    ).toBe(false);
+  });
+});
