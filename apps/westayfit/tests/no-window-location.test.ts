@@ -27,14 +27,14 @@ import { describe, expect, it } from 'vitest';
  * nothing, and is removed then.
  */
 const ALLOWED: Record<string, string> = {
+  // RV16-641-5: the INT-01 crash harness performs ST-01's read on purpose, only while its site is armed (staging only).
+  'src/crashHarness.native.ts': 'INT-01 harness: the deliberate ST-01 read, armed only',
   // The hostname helper: it reads a location only where one exists, and says the platform must be decided with Platform.OS.
   'src/platformHost.ts': 'platform-checked',
   // The in-app-browser banner returns before reading it unless Platform.OS is 'web'.
   'src/InAppBrowserBanner.tsx': 'web-gated',
   // The member lane's community page builds its own share origin until W16 delegates it to currentOrigin.
   'app/(tabs)/(home)/community/[groupId]/index.tsx': 'W16 (delegates to currentOrigin)',
-  // RV16-641-5: the INT-01 crash harness performs ST-01's read on purpose, only while its site is armed (staging only).
-  'src/crashHarness.native.ts': 'INT-01 harness: the deliberate ST-01 read, armed only',
 };
 
 const APP_ROOT = join(__dirname, '..');
