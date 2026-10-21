@@ -1,0 +1,167 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { beforeEach, describe, expect, it } from 'vitest';
+
+import { decideKioskStart, KIOSK_HANDOFF_TTL_MS, noteKioskHandoff } from '../src/kioskSignOutGuard';
+import { linkAvailabilityCopy } from '../src/ui/linkAvailabilityCopy';
+
+/**
+ * NATIVE-MEMBER-1 F-4: MF-06 (copy that can never be true in the app; the
+ * relative "Open …" actions outside the URL branches) and MF-08's interim
+ * (no "Open kiosk" in the app; the kiosk start screen asks before signing a
+ * phone's owner out).
+ */
+
+// What the web build rendered at c704b25a, byte for byte (JSX whitespace
+// collapsed, `&apos;` as an ASCII apostrophe).
+const WEB_AT_BASE = {
+  kioskUnavailable: 'The kiosk link isn’t ready yet. Reload the page to try again.',
+  stationUnavailable: 'The station link isn’t ready yet. Reload the page to try again.',
+  combinedUnavailable: 'The combined link isn’t ready yet. Reload the page to try again.',
+  inviteUnavailable: "Your invite link isn't ready yet. Reload the page to try again.",
+  qrUnavailable:
+    "This community's invite link is not ready yet, so there is nothing to encode. Close this and open it again.",
+  kioskGoalsFailed:
+    "This community's goals could not be loaded, so there is no kiosk address to give you. Close this and open it again.",
+  kioskCopyFailed: 'Copy didn’t work on this device. Open the kiosk here, or type this address on the screen: ',
+};
+const NEVER_TRUE_IN_APP = [/reload the page/i, /close this and open it again/i];
+
+describe('linkAvailabilityCopy (MF-06)', () => {
+  it('web copy is unchanged, and the web still offers Open kiosk', () => {
+    const web = linkAvailabilityCopy('web');
+    expect(web).toEqual({ offersOpenKiosk: true, ...WEB_AT_BASE });
+  });
+
+  it.each(['ios', 'android'])('%s never says "Reload the page" or "Close this and open it again"', (os) => {
+    const app = linkAvailabilityCopy(os);
+    for (const [key, value] of Object.entries(app)) {
+      if (typeof value !== 'string') continue;
+      for (const claim of NEVER_TRUE_IN_APP) expect(value, key).not.toMatch(claim);
+      // Every app sentence is its own, never the web's.
+      expect(value, key).not.toBe(WEB_AT_BASE[key as keyof typeof WEB_AT_BASE]);
+    }
+    // MF-08 interim: no in-app kiosk.
+    expect(app.offersOpenKiosk).toBe(false);
+    // Nothing in-app tells the Champion to open the kiosk here.
+    expect(app.kioskCopyFailed).not.toMatch(/open the kiosk/i);
+  });
+
+  it('the app copy says what is true there', () => {
+    const app = linkAvailabilityCopy('ios');
+    expect(app.kioskUnavailable).toMatch(/isn’t available in the app yet/);
+    expect(app.stationUnavailable).toMatch(/isn’t available in the app yet/);
+    expect(app.inviteUnavailable).toMatch(/isn’t available in the app yet/);
+    expect(app.qrUnavailable).toMatch(/isn’t available in the app yet/);
+    // The combined screen's Open stays on screen in the app, so it points there.
+    expect(app.combinedUnavailable).toMatch(/Open the combined screen here/);
+  });
+});
+
+describe('community detail uses it, and the relative Open actions are outside the URL branches', () => {
+  const src = readFileSync(resolve(__dirname, '../app/(tabs)/(home)/community/[groupId]/index.tsx'), 'utf8');
+
+  it('no never-true sentence is left inline in the route', () => {
+    for (const claim of NEVER_TRUE_IN_APP) expect(src).not.toMatch(claim);
+    expect(src).toContain('const LINK_COPY = linkAvailabilityCopy(Platform.OS);');
+    for (const key of ['kioskUnavailable', 'stationUnavailable', 'combinedUnavailable', 'inviteUnavailable', 'qrUnavailable', 'kioskGoalsFailed', 'kioskCopyFailed']) {
+      expect(src, key).toContain(`{LINK_COPY.${key}}`);
+    }
+  });
+
+  it('Open kiosk is offered only where LINK_COPY says so', () => {
+    const at = src.indexOf('label="Open kiosk"');
+    const gate = src.lastIndexOf('{LINK_COPY.offersOpenKiosk ? (', at);
+    expect(gate).toBeGreaterThan(0);
+    expect(src.slice(gate, at)).not.toContain(')}');
+  });
+
+  it('Open station screen renders whether or not the station URL exists', () => {
+    const open = src.indexOf('label="Open station screen"');
+    const block = src.slice(src.lastIndexOf('<View', open), open);
+    expect(block).toContain('dataSet={{ stationUrl: stationUrlFor(goal.goalId) ?? \'\' }}');
+    // The only URL conditional around the station actions comes after Open.
+    const blockStart = src.lastIndexOf('testID={`wsf-kiosk-stations-intro-', open);
+    // The Copy conditional, plain or behind offerableLink (F-3), comes after Open.
+    const copyGate = /\{(?:offerableLink\()?stationUrlFor\(goal\.goalId\)\)? \? \(/;
+    expect(src.slice(blockStart, open)).not.toMatch(copyGate);
+    expect(src.slice(open, open + 2000)).toMatch(copyGate);
+  });
+
+  it('Open combined screen renders whether or not the combined URL exists', () => {
+    const open = src.indexOf('label="Open combined screen"');
+    const blockStart = src.lastIndexOf('testID="wsf-combined-created"', open);
+    expect(blockStart).toBeGreaterThan(0);
+    const copyGate = /\{(?:offerableLink\()?combinedUrl\)? \? \(/;
+    expect(src.slice(blockStart, open)).not.toMatch(copyGate);
+    expect(src.slice(open, open + 2000)).toMatch(copyGate);
+  });
+});
+
+describe('kioskSignOutGuard (MF-08 interim)', () => {
+  const T0 = 1_800_000_000_000;
+  beforeEach(() => {
+    decideKioskStart('web', false, null); // spend any note a previous test left
+  });
+
+  it('the web signs out whoever is attached, as before', () => {
+    expect(decideKioskStart('web', true, 'goal-1')).toBe('signOut');
+    expect(decideKioskStart('web', true, null)).toBe('signOut');
+    expect(decideKioskStart('web', false, 'goal-1')).toBe('none');
+  });
+
+  it("the app asks before signing out an account that did not come through this kiosk", () => {
+    expect(decideKioskStart('ios', true, 'goal-1')).toBe('ask');
+    expect(decideKioskStart('android', true, 'goal-1')).toBe('ask');
+    expect(decideKioskStart('ios', false, 'goal-1')).toBe('none');
+  });
+
+  it("a visitor back at the same goal's start screen in time is signed out without asking, once", () => {
+    noteKioskHandoff('goal-1', T0);
+    expect(decideKioskStart('ios', true, 'goal-1', T0 + 60_000)).toBe('signOut');
+    // The note is spent: the next account to arrive is asked.
+    expect(decideKioskStart('ios', true, 'goal-1', T0 + 61_000)).toBe('ask');
+  });
+
+  it('the window is KIOSK_HANDOFF_TTL_MS (15 minutes), inclusive', () => {
+    expect(KIOSK_HANDOFF_TTL_MS).toBe(15 * 60 * 1000);
+    noteKioskHandoff('goal-1', T0);
+    expect(decideKioskStart('android', true, 'goal-1', T0 + KIOSK_HANDOFF_TTL_MS)).toBe('signOut');
+    noteKioskHandoff('goal-1', T0);
+    expect(decideKioskStart('android', true, 'goal-1', T0 + KIOSK_HANDOFF_TTL_MS + 1)).toBe('ask');
+  });
+
+  it("another goal's kiosk never counts as this hand-off (N1)", () => {
+    noteKioskHandoff('goal-1', T0);
+    expect(decideKioskStart('ios', true, 'goal-2', T0 + 1_000)).toBe('ask');
+    noteKioskHandoff('goal-1', T0);
+    expect(decideKioskStart('ios', true, null, T0 + 1_000)).toBe('ask');
+    noteKioskHandoff('goal-1', T0);
+    expect(decideKioskStart('ios', true, undefined, T0 + 1_000)).toBe('ask');
+  });
+
+  it('a clock that went backwards does not count either', () => {
+    noteKioskHandoff('goal-1', T0);
+    expect(decideKioskStart('ios', true, 'goal-1', T0 - 1)).toBe('ask');
+  });
+
+  it('a later Contribute replaces the earlier note', () => {
+    noteKioskHandoff('goal-1', T0);
+    noteKioskHandoff('goal-2', T0 + 5_000);
+    expect(decideKioskStart('ios', true, 'goal-1', T0 + 6_000)).toBe('ask');
+    noteKioskHandoff('goal-1', T0);
+    noteKioskHandoff('goal-2', T0 + 5_000);
+    expect(decideKioskStart('ios', true, 'goal-2', T0 + 6_000)).toBe('signOut');
+  });
+
+  it('arriving signed out spends the note too', () => {
+    noteKioskHandoff('goal-1', T0);
+    expect(decideKioskStart('android', false, 'goal-1', T0 + 1_000)).toBe('none');
+    expect(decideKioskStart('android', true, 'goal-1', T0 + 2_000)).toBe('ask');
+  });
+
+  it('the default clock is Date.now()', () => {
+    noteKioskHandoff('goal-1');
+    expect(decideKioskStart('ios', true, 'goal-1')).toBe('signOut');
+  });
+});

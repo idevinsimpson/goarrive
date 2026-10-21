@@ -2,14 +2,15 @@ import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { FirebaseError } from 'firebase/app';
 import { signOut } from 'firebase/auth';
 import { httpsCallable } from 'firebase/functions';
-import { useCallback, useEffect, useState, type SetStateAction } from 'react';
-import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState, type SetStateAction } from 'react';
+import { Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 import { useWsfAuth } from '../../src/auth';
 import { samePulse, type GoalPulse } from '../../src/displayPulse';
 import { getFirebaseAuth, getFirebaseFunctions, wsfUsingEmulators } from '../../src/firebase';
 import { armKioskReturn, resetSharedScreenHandoffs } from '../../src/handoffArming';
 import { KIOSK_REFUSAL_BODY, KIOSK_REFUSAL_HEADLINE, kioskContributeRoute } from '../../src/kioskSession';
+import { decideKioskStart, noteKioskHandoff } from '../../src/kioskSignOutGuard';
 import { wsfTheme } from '../../src/theme';
 import { PROGRESS_GREEN } from '../../src/ui/brandAssets';
 import { formatActiveWindowLabel, formatClock, formatPeriod } from '../../src/ui/dates';
@@ -54,6 +55,10 @@ const POLL_INTERVAL_MS = 2_000;
 export default function KioskGoal() {
   const params = useLocalSearchParams<{ goalId: string }>();
   const goalId = params.goalId;
+  // Read by the start-screen focus effect without re-running it on a new id
+  // (its timing on the web is unchanged).
+  const goalIdRef = useRef(goalId);
+  goalIdRef.current = goalId;
   const { width: windowWidth } = useWindowDimensions();
   const { user } = useWsfAuth();
 
@@ -68,6 +73,8 @@ export default function KioskGoal() {
 
   const [state, setState] = useState<KioskState>({ kind: 'loading' });
   const [pollSession, setPollSession] = useState(0);
+  /** MF-08 (app only): an account that did not come through this kiosk is asked first. */
+  const [askSignOut, setAskSignOut] = useState(false);
 
   // THE START SCREEN IS A SIGNED-OUT SCREEN.
   //
@@ -92,10 +99,16 @@ export default function KioskGoal() {
   // signing the visitor out of the account they had just signed in to.
   // useFocusEffect ties the reset to the fact it is about: this device has
   // come to rest on its start screen.
+  //
+  // NATIVE-MEMBER-1 F-4 (MF-08 interim). In the app this route can open on
+  // somebody's own phone; there the account goes only after they say so
+  // (src/kioskSignOutGuard.ts). On the web nothing changes.
   useFocusEffect(
     useCallback(() => {
       void resetSharedScreenHandoffs();
-      if (!user) return;
+      const decision = decideKioskStart(Platform.OS, !!user, goalIdRef.current);
+      setAskSignOut(decision === 'ask');
+      if (decision !== 'signOut') return;
       void signOut(getFirebaseAuth()).catch(() => {
         // Nothing useful to do here and nothing to claim: the start screen
         // shows no identity either way, and the next Contribute press lands on
@@ -190,6 +203,7 @@ export default function KioskGoal() {
     // that would outrank it on the terminal hop is cleared with it
     // (src/handoffArming.ts).
     void armKioskReturn(goalId);
+    noteKioskHandoff(goalId);
     router.push(kioskContributeRoute(goalId) as never);
   }, [goalId]);
 
@@ -198,6 +212,54 @@ export default function KioskGoal() {
       Sample data
     </Text>
   ) : null;
+
+  if (askSignOut && user) {
+    // No name, email or anything else about the account: only what opening
+    // the kiosk here will do, and the way back.
+    return (
+      <View
+        key={`ask-${wide ? 'wide' : 'phone'}`}
+        style={[styles.canvas, styles.canvasNavy]}
+        testID="wsf-kiosk-confirm-signout"
+      >
+        <View style={styles.genericBlock}>
+          <WsfWordmark variant="white" height={wide ? 44 : 22} testID="wsf-kiosk-wordmark" />
+          <Text
+            style={[styles.genericHeadline, wide ? styles.genericHeadlineWide : null]}
+            accessibilityRole="header"
+            {...({ 'aria-level': 1 } as Record<string, unknown>)}
+          >
+            This is a venue kiosk
+          </Text>
+          <Text style={[styles.genericBody, wide ? styles.genericBodyWide : null]}>
+            A kiosk is for a shared screen at your event. Opening it on this phone signs you out of
+            your account here.
+          </Text>
+          <View style={styles.actions}>
+            <Pressable
+              onPress={() => {
+                setAskSignOut(false);
+                void signOut(getFirebaseAuth()).catch(() => {});
+              }}
+              style={styles.secondaryButton}
+              testID="wsf-kiosk-confirm-signout-yes"
+              accessibilityRole="button"
+            >
+              <Text style={styles.secondaryButtonText}>Sign out and open the kiosk</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))}
+              style={styles.secondaryButton}
+              testID="wsf-kiosk-confirm-signout-back"
+              accessibilityRole="button"
+            >
+              <Text style={styles.secondaryButtonText}>Stay signed in</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    );
+  }
 
   if (state.kind !== 'ready') {
     const copy =

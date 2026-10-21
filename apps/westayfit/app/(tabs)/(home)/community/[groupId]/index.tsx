@@ -64,6 +64,15 @@ import { TabGlyph } from '../../../../../src/ui/TabGlyph';
 import { JoinQrCode } from '../../../../../src/ui/JoinQrCode';
 import { buildJoinUrl, isLinkJoinable } from '../../../../../src/ui/joinLink';
 import { buildKioskUrl } from '../../../../../src/ui/kioskLink';
+import { linkAvailabilityCopy } from '../../../../../src/ui/linkAvailabilityCopy';
+import {
+  canAttemptCopy,
+  copyLink,
+  hasShareSheet,
+  linkShareRoute,
+  offerableLink,
+  shareLinkSheet,
+} from '../../../../../src/ui/shareLink';
 import { buildStationUrl } from '../../../../../src/ui/eventLinks';
 import { buildCombinedUrl } from '../../../../../src/ui/combinedLink';
 import {
@@ -675,17 +684,19 @@ export default function CommunityPage() {
     ? buildCombinedUrl({ origin: linkOrigin(), setupId: combinedCreated.setupId })
     : null;
 
+  // NATIVE-MEMBER-1 F-3 (MF-01): every copy and share goes through
+  // src/ui/shareLink (the web's navigator APIs; the app's expo-clipboard and
+  // OS share sheet, for an absolute https link only).
   const onCopyCombined = useCallback(async () => {
-    if (!combinedUrl || typeof navigator === 'undefined') return;
+    if (!offerableLink(combinedUrl) || !canAttemptCopy()) return;
     clearCombinedCopyReset();
-    try {
-      await navigator.clipboard.writeText(combinedUrl);
+    if ((await copyLink(combinedUrl)) === 'copied') {
       setCombinedCopy('copied');
       combinedCopyResetRef.current = setTimeout(() => {
         combinedCopyResetRef.current = null;
         setCombinedCopy('idle');
       }, 2_000);
-    } catch {
+    } else {
       // Not timed out: a failure has to stay on screen, because the address
       // shown beside it is the Champion's way forward.
       setCombinedCopy('failed');
@@ -1527,16 +1538,15 @@ export default function CommunityPage() {
   const onCopyKiosk = useCallback(
     async (goalId: string) => {
       const url = buildKioskUrl({ origin: linkOrigin(), goalId });
-      if (!url || typeof navigator === 'undefined') return;
+      if (!offerableLink(url) || !canAttemptCopy()) return;
       clearKioskCopyReset();
-      try {
-        await navigator.clipboard.writeText(url);
+      if ((await copyLink(url)) === 'copied') {
         setKioskCopy({ goalId, state: 'copied' });
         kioskCopyResetRef.current = setTimeout(() => {
           kioskCopyResetRef.current = null;
           setKioskCopy({ goalId: null, state: 'idle' });
         }, 2_000);
-      } catch {
+      } else {
         // Not timed out: a failure has to stay on screen, because the address
         // shown beside it is the Champion's way forward.
         setKioskCopy({ goalId, state: 'failed' });
@@ -1556,16 +1566,15 @@ export default function CommunityPage() {
   const onCopyStation = useCallback(
     async (goalId: string) => {
       const url = buildStationUrl({ origin: linkOrigin(), goalId });
-      if (!url || typeof navigator === 'undefined') return;
+      if (!offerableLink(url) || !canAttemptCopy()) return;
       clearStationCopyReset();
-      try {
-        await navigator.clipboard.writeText(url);
+      if ((await copyLink(url)) === 'copied') {
         setStationCopy({ goalId, state: 'copied' });
         stationCopyResetRef.current = setTimeout(() => {
           stationCopyResetRef.current = null;
           setStationCopy({ goalId: null, state: 'idle' });
         }, 2_000);
-      } catch {
+      } else {
         setStationCopy({ goalId, state: 'failed' });
       }
     },
@@ -1713,19 +1722,18 @@ export default function CommunityPage() {
   );
 
   const onCopyInvite = useCallback(async () => {
-    if (!inviteUrl || typeof navigator === 'undefined') return;
+    if (!offerableLink(inviteUrl) || !canAttemptCopy()) return;
     // This tap owns the label from here on. Whatever the previous tap armed
     // is cancelled first, so it cannot clear a confirmation this tap is about
     // to show — or a failure, which must not be timed out at all.
     clearCopyReset();
-    try {
-      await navigator.clipboard.writeText(inviteUrl);
+    if ((await copyLink(inviteUrl)) === 'copied') {
       setCopyStatus('copied');
       copyResetRef.current = setTimeout(() => {
         copyResetRef.current = null;
         setCopyStatus('idle');
       }, 2_000);
-    } catch {
+    } else {
       setCopyStatus('failed');
     }
   }, [inviteUrl, clearCopyReset]);
@@ -1910,18 +1918,9 @@ export default function CommunityPage() {
   }, []);
 
   const onShareInvite = useCallback(async () => {
-    if (!inviteUrl) return;
-    if (typeof navigator === 'undefined' || !('share' in navigator)) return;
-    try {
-      await (navigator as Navigator & {
-        share: (data: ShareData) => Promise<void>;
-      }).share({
-        title: 'Join our We Stay Fit community',
-        url: inviteUrl,
-      });
-    } catch {
-      // User dismissed the share sheet or the browser blocked it — no-op.
-    }
+    if (!offerableLink(inviteUrl)) return;
+    // A dismissed sheet, or one the browser blocked, is a no-op (shareLink).
+    await shareLinkSheet({ title: 'Join our We Stay Fit community', url: inviteUrl });
   }, [inviteUrl]);
 
   /**
@@ -1940,27 +1939,21 @@ export default function CommunityPage() {
    */
   const onShareGoalDisplay = useCallback(
     async (url: string) => {
-      const route = shareRoute(typeof navigator === 'undefined' ? null : navigator);
+      const route = linkShareRoute();
       if (route === 'unavailable') return;
       clearShareReset();
-      if (route === 'webShare') {
-        try {
-          await (navigator as Navigator & {
-            share: (data: ShareData) => Promise<void>;
-          }).share({ url });
-        } catch {
-          /* dismissed or blocked — no claim either way */
-        }
+      if (route === 'webShare' || route === 'nativeShare') {
+        // Dismissed or blocked: no claim either way (shareLink).
+        await shareLinkSheet({ url });
         return;
       }
-      try {
-        await navigator.clipboard.writeText(url);
+      if ((await copyLink(url)) === 'copied') {
         setShareStatus('copied');
         shareResetRef.current = setTimeout(() => {
           shareResetRef.current = null;
           setShareStatus('idle');
         }, 2_000);
-      } catch {
+      } else {
         setShareStatus('failed');
       }
     },
@@ -2095,7 +2088,7 @@ export default function CommunityPage() {
 
   const { group, role, memberCount, otherCommunityCount, isSample, activeChallenge } = state;
   const isChampion = role === 'foundingChampion';
-  const hasShareApi = typeof navigator !== 'undefined' && 'share' in navigator;
+  const hasShareApi = hasShareSheet();
 
   // One featured goal, explicitly: the open goal that ends soonest (the
   // server lists by endsAt). Others keep their own separately labelled mark;
@@ -2244,7 +2237,7 @@ export default function CommunityPage() {
   const linkJoinable = isLinkJoinable(group.joinPolicy);
   // Champions always get the Invite card (on a private community it carries
   // the honest no-link sentence); members get it only with a working link.
-  const showInviteCard = isChampion || (linkJoinable && inviteUrl != null);
+  const showInviteCard = isChampion || (linkJoinable && offerableLink(inviteUrl));
   // One human line under the name, and only once the goal list has answered:
   // a claim about what the community is doing waits for the facts.
   // SLICE 1. When a goal IS running the hero says so in its own words, and a
@@ -2464,7 +2457,7 @@ export default function CommunityPage() {
               ? 'Open this on the screen at your event.'
               : 'Authorize public display under Goals below, or that screen will say the goal is not available.'}
           </Text>
-          {kioskUrlFor(goal.goalId) ? (
+          {offerableLink(kioskUrlFor(goal.goalId)) ? (
             /*
               ONE ACTION, THEN THE UTILITY. Opening the kiosk is the thing a
               Champion came here to do, so it carries the one green primary
@@ -2479,13 +2472,15 @@ export default function CommunityPage() {
               // without being printed for a person.
               dataSet={{ kioskUrl: kioskUrlFor(goal.goalId) ?? '' }}
             >
-              <ButtonLink
-                href={`/kiosk/${goal.goalId}`}
-                label="Open kiosk"
-                style={styles.primaryButton}
-                textStyle={styles.primaryButtonText}
-                testID={`wsf-kiosk-setup-open-${goal.goalId}`}
-              />
+              {LINK_COPY.offersOpenKiosk ? (
+                <ButtonLink
+                  href={`/kiosk/${goal.goalId}`}
+                  label="Open kiosk"
+                  style={styles.primaryButton}
+                  textStyle={styles.primaryButtonText}
+                  testID={`wsf-kiosk-setup-open-${goal.goalId}`}
+                />
+              ) : null}
               <Pressable
                 onPress={() => onCopyKiosk(goal.goalId)}
                 style={styles.tertiaryButton}
@@ -2502,7 +2497,7 @@ export default function CommunityPage() {
             </View>
           ) : (
             <Text style={styles.body} testID={`wsf-kiosk-setup-unavailable-${goal.goalId}`}>
-              The kiosk link isn’t ready yet. Reload the page to try again.
+              {LINK_COPY.kioskUnavailable}
             </Text>
           )}
           {/*
@@ -2516,8 +2511,8 @@ export default function CommunityPage() {
           */}
           {kioskCopy.goalId === goal.goalId && kioskCopy.state === 'failed' ? (
             <Text style={styles.body} testID={`wsf-kiosk-setup-copy-failed-${goal.goalId}`}>
-              Copy didn’t work on this device. Open the kiosk here, or type this address on the
-              screen: {kioskUrlFor(goal.goalId)}
+              {LINK_COPY.kioskCopyFailed}
+              {kioskUrlFor(goal.goalId)}
             </Text>
           ) : null}
         </View>
@@ -2572,24 +2567,26 @@ export default function CommunityPage() {
           Open this address on each venue screen. Every unpaired screen shows its own code, and you
           approve it here, on your own phone. You can revoke a screen from here at any time.
         </Text>
-        {stationUrlFor(goal.goalId) ? (
-          /*
-            UTILITIES, NOT THE POINT. Getting the address onto a screen is a
-            step on the way; the action on this card is approving the screen
-            that is standing there showing a code. So these two are quiet
-            text controls and the card keeps no second button weight.
-          */
-          <View
-            style={styles.utilityRow}
-            dataSet={{ stationUrl: stationUrlFor(goal.goalId) ?? '' }}
-          >
-            <ButtonLink
-              href={`/station/${goal.goalId}`}
-              label="Open station screen"
-              style={UTILITY_LINK}
-              textStyle={UTILITY_LINK_TEXT}
-              testID={`wsf-kiosk-stations-open-${goal.goalId}`}
-            />
+        {/*
+          UTILITIES, NOT THE POINT. Getting the address onto a screen is a
+          step on the way; the action on this card is approving the screen
+          that is standing there showing a code. So these two are quiet
+          text controls and the card keeps no second button weight. Opening
+          the screen is a route in this app and needs no absolute address
+          (MF-06); only Copy waits for one.
+        */}
+        <View
+          style={styles.utilityRow}
+          dataSet={{ stationUrl: stationUrlFor(goal.goalId) ?? '' }}
+        >
+          <ButtonLink
+            href={`/station/${goal.goalId}`}
+            label="Open station screen"
+            style={UTILITY_LINK}
+            textStyle={UTILITY_LINK_TEXT}
+            testID={`wsf-kiosk-stations-open-${goal.goalId}`}
+          />
+          {offerableLink(stationUrlFor(goal.goalId)) ? (
             <Pressable
               onPress={() => onCopyStation(goal.goalId)}
               style={[styles.tertiaryButton, styles.rowButton]}
@@ -2603,10 +2600,11 @@ export default function CommunityPage() {
                   : 'Copy station link'}
               </Text>
             </Pressable>
-          </View>
-        ) : (
+          ) : null}
+        </View>
+        {offerableLink(stationUrlFor(goal.goalId)) ? null : (
           <Text style={styles.body} testID={`wsf-kiosk-stations-unavailable-${goal.goalId}`}>
-            The station link isn’t ready yet. Reload the page to try again.
+            {LINK_COPY.stationUnavailable}
           </Text>
         )}
         {stationCopy.goalId === goal.goalId && stationCopy.state === 'failed' ? (
@@ -3177,8 +3175,7 @@ export default function CommunityPage() {
                     </Text>
                   ) : goalsState.kind === 'failed' ? (
                     <Text style={styles.body} testID="wsf-kiosk-setup-failed">
-                      This community&apos;s goals could not be loaded, so there is no kiosk address
-                      to give you. Close this and open it again.
+                      {LINK_COPY.kioskGoalsFailed}
                     </Text>
                   ) : activeGoals.length === 0 ? (
                     <Text style={styles.body} testID="wsf-kiosk-setup-empty">
@@ -3215,25 +3212,27 @@ export default function CommunityPage() {
                         Open this on the screen at your event. It shows the shared total and each
                         activity — never a member or a contribution.
                       </Text>
-                      {combinedUrl ? (
-                        /*
-                          The same weighting as a single goal's kiosk: opening
-                          the screen is the action, copying the address is the
-                          way to do it on another device.
-                        */
-                        <View
-                          style={styles.actionStack}
-                          // The address the controls beside it act on, readable
-                          // by a test without being printed at a person.
-                          dataSet={{ combinedUrl }}
-                        >
-                          <ButtonLink
-                            href={`/combined/${combinedCreated.setupId}`}
-                            label="Open combined screen"
-                            style={styles.primaryButton}
-                            textStyle={styles.primaryButtonText}
-                            testID="wsf-combined-open"
-                          />
+                      {/*
+                        The same weighting as a single goal's kiosk: opening
+                        the screen is the action, copying the address is the
+                        way to do it on another device. Opening is a route in
+                        this app and needs no absolute address (MF-06); only
+                        Copy waits for one.
+                      */}
+                      <View
+                        style={styles.actionStack}
+                        // The address the controls beside it act on, readable
+                        // by a test without being printed at a person.
+                        dataSet={{ combinedUrl: combinedUrl ?? '' }}
+                      >
+                        <ButtonLink
+                          href={`/combined/${combinedCreated.setupId}`}
+                          label="Open combined screen"
+                          style={styles.primaryButton}
+                          textStyle={styles.primaryButtonText}
+                          testID="wsf-combined-open"
+                        />
+                        {offerableLink(combinedUrl) ? (
                           <Pressable
                             onPress={() => void onCopyCombined()}
                             style={styles.tertiaryButton}
@@ -3245,10 +3244,11 @@ export default function CommunityPage() {
                               {combinedCopy === 'copied' ? 'Copied' : 'Copy link'}
                             </Text>
                           </Pressable>
-                        </View>
-                      ) : (
+                        ) : null}
+                      </View>
+                      {offerableLink(combinedUrl) ? null : (
                         <Text style={styles.body} testID="wsf-combined-unavailable">
-                          The combined link isn’t ready yet. Reload the page to try again.
+                          {LINK_COPY.combinedUnavailable}
                         </Text>
                       )}
                       {/*
@@ -3708,12 +3708,11 @@ export default function CommunityPage() {
             <View style={styles.sheetSubsection} testID="wsf-community-qr-section">
               <Text style={styles.sheetSubsectionTitle}>Invite QR</Text>
               {linkJoinable ? (
-                inviteUrl ? (
+                offerableLink(inviteUrl) ? (
                   <JoinQrCode url={inviteUrl} caveat={MANAGE_QR_CAVEAT} />
                 ) : (
                   <Text style={styles.manageIntro} testID="wsf-community-qr-pending">
-                    This community&apos;s invite link is not ready yet, so there is nothing to
-                    encode. Close this and open it again.
+                    {LINK_COPY.qrUnavailable}
                   </Text>
                 )
               ) : (
@@ -4577,7 +4576,7 @@ export default function CommunityPage() {
           >
             <Text style={styles.cardTitle} {...HEADING_2}>Invite people</Text>
             {linkJoinable ? (
-              inviteUrl ? (
+              offerableLink(inviteUrl) ? (
                 <>
                   <Text style={styles.body}>
                     Share this community with people you want to move with.
@@ -4626,7 +4625,7 @@ export default function CommunityPage() {
                 </>
               ) : (
                 <Text style={styles.cardMeta} testID="wsf-community-invite-pending">
-                  Your invite link isn&apos;t ready yet. Reload the page to try again.
+                  {LINK_COPY.inviteUnavailable}
                 </Text>
               )
             ) : (
@@ -5007,6 +5006,16 @@ const MANAGE_QR_CAVEAT =
   'Scanning opens the join page — whoever scans it still has to sign in and finish setting up an account before they can join. Create a new invite link below and this code stops working; show this one again for the new link.';
 const INVITE_QR_CAVEAT =
   'Scanning opens the join page — whoever scans it still has to sign in and finish setting up an account before they can join.';
+
+/*
+  NATIVE-MEMBER-1 F-4 (MF-06, MF-08 interim). What a missing link says is
+  per platform (src/ui/linkAvailabilityCopy.ts): web copy is unchanged, the
+  app never asks for a page reload, and "Open kiosk" is web-only for now --
+  opened inside a Champion's own app the signed-out kiosk would end their
+  session. The station and combined screens sign nobody out, so their
+  relative "Open …" actions no longer wait for an absolute link to exist.
+*/
+const LINK_COPY = linkAvailabilityCopy(Platform.OS);
 
 const CARD_BORDER = '#E3E7E1';
 const SURFACE_WHITE = wsfTheme.colors.surface;
