@@ -165,11 +165,13 @@ export function clearKioskReturnGoal(): Promise<boolean> {
     - written when the kiosk's Contribute arms a session
       (src/handoffArming.ts `armKioskReturn`; the contribute screen may write
       it too);
-    - cleared only when the session is over: after Finish's sign-out has
-      SUCCEEDED (kept if the sign-out failed — the visitor may still be
-      signed in), and when the kiosk start screen comes to rest;
+    - cleared only when the session is over, that is once nobody is signed
+      in: after Finish's sign-out has SUCCEEDED (kept if the sign-out failed —
+      the visitor may still be signed in), and by the kiosk start screen at
+      rest once auth answers with no user (app/kiosk/[goalId].tsx; never
+      before its own sign-out has landed);
     - read at launch by src/kioskLaunchGuard.ts, which sends the device back
-      to the kiosk start screen (which signs out and resets).
+      to the kiosk start screen (which resets, signs out, then clears it).
 
   WEB: none of this. A tab that closes ends its session already, and nothing
   here reads or writes browser storage.
@@ -496,7 +498,7 @@ export async function runKioskFinish(
     try {
       await clearKioskSession();
     } catch {
-      // best-effort; the start screen clears it again when it comes to rest.
+      // best-effort; the start screen clears it at rest once nobody is signed in.
     }
   }
   return { ...plan, clearedPendingDraft, signedOut };

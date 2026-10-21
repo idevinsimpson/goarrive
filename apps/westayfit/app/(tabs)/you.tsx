@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useWsfAuth } from '../../src/auth';
 import { mapWithLimit } from '../../src/concurrency';
-import { currentCommunityReady, resolveCurrentCommunity } from '../../src/currentCommunity';
+import { currentCommunityReady, isCurrentCommunityReady, resolveCurrentCommunity } from '../../src/currentCommunity';
 import { getFirebaseAuth } from '../../src/firebase';
 import { UNKNOWN_SHARED, knownShared } from '../../src/goalTruth';
 import {
@@ -312,6 +312,8 @@ function youFromRecord(uid: string): Screen | null {
   const profile: Profile = known ? toProfile(known) : { displayName: null, memberSince: null, pending: true };
   const communities = mine.items as unknown as Community[];
   if (communities.length === 0) return { kind: 'noCommunity', profile };
+  // Not before the phone's remembered choice is read: "none chosen" would be a guess.
+  if (!isCurrentCommunityReady()) return null;
   const currentId = resolveCurrentCommunity(
     uid,
     communities.map((c) => c.groupId),
