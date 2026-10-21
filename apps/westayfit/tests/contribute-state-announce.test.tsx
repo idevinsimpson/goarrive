@@ -30,7 +30,11 @@ import {
  * The site scan for these screens lives here (W12-7 owns the shared one).
  */
 
-const mode = vi.hoisted(() => ({ native: true }));
+const mode = vi.hoisted(() => ({
+  native: true,
+  /** Every key `useAnnounce` was called with, in order (each render). */
+  keys: [] as unknown[],
+}));
 vi.mock('../src/ui/announce', async () => {
   const native = await vi.importActual<typeof import('../src/ui/announce.native')>('../src/ui/announce.native');
   const web = await vi.importActual<typeof import('../src/ui/announce')>('../src/ui/announce');
@@ -38,8 +42,10 @@ vi.mock('../src/ui/announce', async () => {
     get liveRegion() {
       return mode.native ? native.liveRegion : web.liveRegion;
     },
-    useAnnounce: (...args: Parameters<typeof web.useAnnounce>) =>
-      (mode.native ? native.useAnnounce : web.useAnnounce)(...args),
+    useAnnounce: (...args: Parameters<typeof web.useAnnounce>) => {
+      mode.keys.push(args[1]);
+      return (mode.native ? native.useAnnounce : web.useAnnounce)(...args);
+    },
   };
 });
 
@@ -96,6 +102,7 @@ vi.mock('firebase/functions', () => ({
 const { clearMemberReads } = await import('../src/memberReads');
 const { signOut } = await import('firebase/auth');
 const { default: ContributeToGoal } = await import('../app/contribute/[goalId]');
+const { SpokenOnce } = await import('../src/ui/SpokenOnce');
 
 const PULSE = { sharedTotal: 40, target: 100, unit: 'squats', status: 'active' };
 const MINE = { ownCredit: 5, unit: 'squats', repeatPolicy: 'multiple' };
@@ -119,6 +126,7 @@ let contribute: { resolve: (v: unknown) => void; reject: (e: unknown) => void } 
 
 beforeEach(() => {
   mode.native = true;
+  mode.keys.length = 0;
   params.value = { goalId: 'g1' };
   clearMemberReads();
   localStorage.clear();
@@ -351,6 +359,10 @@ describe('W13-8 (INT-18): the kiosk receipt is said once per attempt on a phone'
     addedCount: 6,
     ownCredit: 11,
   };
+  /** The receipt announcements' keys, each once, in the order first asked for. */
+  const receiptKeys = () => [
+    ...new Set(mode.keys.filter((k): k is string => typeof k === 'string' && /:(recorded|already)$/.test(k))),
+  ];
   /** The receipt's own two sentences, as drawn. */
   const drawnSentence = () =>
     `${byId('wsf-contribute-result-headline')!.textContent} ${byId('wsf-contribute-result-subline')!.textContent}`;
@@ -405,6 +417,54 @@ describe('W13-8 (INT-18): the kiosk receipt is said once per attempt on a phone'
     expect(second).not.toBe(first);
     expect(spoken.filter((m) => m === first)).toHaveLength(1);
     expect(spoken.filter((m) => m === second)).toHaveLength(1);
+  });
+
+  it('two attempts in the SAME route instance (no unmount): each receipt is keyed by its own attempt and said once', async () => {
+    params.value = { goalId: 'g1', kiosk: '1' };
+    seedUnknown('att-a');
+    render();
+    await settle();
+    await act(async () => byId('wsf-contribute-reconcile')!.click());
+    await settle();
+    await act(async () => contribute!.resolve(RECEIPT));
+    await settle();
+    const first = drawnSentence();
+    expect(receiptKeys()).toEqual(['att-a:recorded']);
+
+    // The same mounted route moves to another goal (an Expo Router params
+    // update, not a new screen): the receipt is cleared with the old context,
+    // that goal's unconfirmed attempt is restored and confirmed. The ref that
+    // keys the receipt lives across both attempts here; nothing remounts it.
+    localStorage.setItem(
+      `wsf.pendingContribution.g2.${USER.uid}`,
+      JSON.stringify({ goalId: 'g2', attemptId: 'att-b', count: 6, ts: Date.now(), state: 'unknown' }),
+    );
+    params.value = { goalId: 'g2', kiosk: '1' };
+    render();
+    await settle();
+    await act(async () => byId('wsf-contribute-reconcile')!.click());
+    await settle();
+    // The same outcome and the same figures: the same two sentences. Only the
+    // attempt tells the two announcements apart.
+    await act(async () => contribute!.resolve(RECEIPT));
+    await settle();
+    expect(drawnSentence()).toBe(first);
+    expect(receiptKeys()).toEqual(['att-a:recorded', 'att-b:recorded']);
+    expect(spoken.filter((m) => m === first)).toHaveLength(2);
+  });
+
+  it('one SpokenOnce kept mounted across two attempts with the same sentence says it for each attempt, once', () => {
+    const sentence = 'You added 6 squats. Thanks for adding to the shared total.';
+    const draw = (attemptId: string) =>
+      act(() => {
+        root.render(<SpokenOnce message={sentence} announceKey={`${attemptId}:recorded`} />);
+      });
+    draw('att-a');
+    draw('att-a');
+    expect(spoken.filter((m) => m === sentence)).toHaveLength(1);
+    draw('att-b');
+    draw('att-b');
+    expect(spoken.filter((m) => m === sentence)).toHaveLength(2);
   });
 
   it('the member’s own (Together) receipt is never doubled by it', async () => {
