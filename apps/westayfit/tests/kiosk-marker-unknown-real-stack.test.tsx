@@ -292,6 +292,22 @@ function App({ initial }: { initial: object[] }) {
 const KIOSK = 'kiosk/[goalId]';
 const KIOSK_G1 = { name: KIOSK, params: { goalId: 'goal-1' } };
 
+/**
+ * Who is signed in once the kiosk start screen is focused: THAT SCREEN'S OWN
+ * DECISION, which differs by lane. On integrator-2 it signs whoever it finds
+ * out (app/kiosk/[goalId].tsx:95-104). On member-1 (MF-08) it signs out only
+ * on kiosk evidence, the marker naming this goal or a fresh hand-off, and
+ * otherwise ASKS: "Sign out" or "Stay signed in" (src/kioskSignOutGuard.ts
+ * decideKioskStart), and an unknown marker is no evidence there. Either way
+ * the visitor is at the kiosk start screen, never on member Home: asserted.
+ */
+function kioskStartUser(): string | null {
+  expect(focusedEl().getAttribute('data-route')).toBe(KIOSK);
+  expect(memberHomeRenders).toBe(0);
+  const asks = (focusedEl().textContent ?? '').includes('Stay signed in');
+  return asks ? 'visitor-1' : null;
+}
+
 describe('the launch read of the marker failed', () => {
   it('the precondition: the disk holds an open kiosk session, and readKioskSession() answers null without throwing', () => {
     expect(disk.map.get(MARKER_KEY)).toBe('goal-1');
@@ -315,7 +331,7 @@ describe.each(['ios', 'android'] as const)('RV17-641-N3 on %s: the marker unknow
     expect(stacks.every((s) => s.includes(KIOSK))).toBe(true);
     act(() => (ref as unknown as { goBack: () => void }).goBack());
     await flush();
-    expectState('after Back', { stack: [KIOSK], user: null });
+    expectState('after Back', { stack: [KIOSK], user: kioskStartUser() });
     expect(memberHomeRenders).toBe(0);
   });
 
@@ -326,7 +342,7 @@ describe.each(['ios', 'android'] as const)('RV17-641-N3 on %s: the marker unknow
     await flush();
     await press('probe-signin-submit');
     await flush();
-    expectState('after Sign in', { stack: [KIOSK], user: null });
+    expectState('after Sign in', { stack: [KIOSK], user: kioskStartUser() });
     expect(nav.log).toEqual(['dismissTo /kiosk/goal-1']);
     expect(stacks.some((s) => s.includes('(tabs)'))).toBe(false);
     expect(memberHomeRenders).toBe(0);
@@ -356,7 +372,7 @@ describe.each(['ios', 'android'] as const)('RV17-641-N3 on %s: the marker unknow
     await flush();
     act(() => (ref as unknown as { goBack: () => void }).goBack());
     await flush();
-    expectState('after Back, Back', { stack: [KIOSK], user: null });
+    expectState('after Back, Back', { stack: [KIOSK], user: kioskStartUser() });
   });
 });
 
