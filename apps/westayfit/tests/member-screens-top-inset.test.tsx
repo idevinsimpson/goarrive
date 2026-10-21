@@ -70,7 +70,15 @@ vi.mock('react-native-safe-area-context', () => ({
 }));
 vi.mock('../src/ui/CommunityPrivacyControls', () => ({ CommunityPrivacyControls: () => null }));
 vi.mock('../src/movement-camera/MoveCameraSettingsSection', () => ({ MoveCameraSettingsSection: () => null }));
-vi.mock('../src/ui/useReducedMotion', () => ({ useReducedMotion: () => true }));
+// Both reduced-motion hooks are pinned (reduced, known), and any other export
+// is the real one. On the integrated tree Settings' sheet (motion W14-5,
+// SheetScrim/SheetPanel) reads useReducedMotionPreference, which this branch
+// does not have yet: the mock must not assume the module's export list.
+vi.mock('../src/ui/useReducedMotion', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useReducedMotion: () => true,
+  useReducedMotionPreference: () => ({ reduced: true, known: true, failed: false }),
+}));
 vi.mock('../src/ui/WsfWordmark', () => ({ WsfWordmark: () => null }));
 
 const { default: Settings } = await import('../app/settings');
