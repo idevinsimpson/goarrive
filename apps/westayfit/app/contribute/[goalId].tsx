@@ -558,6 +558,9 @@ export default function ContributeToGoal() {
   const [pulseAt, setPulseAt] = useState<Date | null>(null);
   // W12-2 (INT-25, native): the last load failed while the screen was warm.
   const [refreshFailed, setRefreshFailed] = useState(false);
+  // The poll's catch reads it (RV11-641-1).
+  const refreshFailedRef = useRef(false);
+  refreshFailedRef.current = refreshFailed;
   // W12-2 (ST-06, native): this load has already refreshed the sign-in once.
   const signInRetriedRef = useRef(false);
   const [context, setContext] = useState<ScreenContext>({ kind: 'none' });
@@ -1099,6 +1102,16 @@ export default function ContributeToGoal() {
         });
       } catch (e) {
         if (cancelled) return;
+        /*
+          RV11-641-1 (native). WHILE THE LAST LOAD FAILED, A TICK'S REFUSAL IS
+          NOT A VERDICT. After a sign-in refresh that could not reach Auth, the
+          SDK sends these ticks with no Authorization, and the public pulse
+          answers the anonymous "not found": evicting the warm screen and
+          forgetting the community on that would be ST-06's own scenario made
+          worse. No authorized read has landed since the failure, so the kept
+          figures and their note stay, and a Retry's full load decides.
+        */
+        if (Platform.OS !== 'web' && refreshFailedRef.current) return;
         // A refusal is not transient: the server has decided this member no
         // longer has a route to the goal (membership lost, goal gone). The
         // screen must not keep painting a total it is no longer entitled to,
