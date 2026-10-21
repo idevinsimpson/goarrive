@@ -35,6 +35,8 @@ const fx = vi.hoisted(() => ({
   values: [] as Array<{ v: number }>,
   timings: [] as FakeTiming[],
   animated: {} as Record<string, Record<string, any>>,
+  /** Every render's props, per animated host (RV15-634-N2: the first frame counts too). */
+  renders: {} as Record<string, Array<Record<string, any>>>,
   plain: {} as Record<string, Record<string, any>>,
   pan: null as null | Record<string, (...args: any[]) => any>,
   pref: { reduced: false, known: true, failed: false },
@@ -90,6 +92,7 @@ vi.mock('react-native', async () => {
   const host = (kind: string) =>
     React.forwardRef(function AnimatedHost(props: Record<string, any>, ref: React.Ref<HTMLDivElement>) {
       fx.animated[props.testID ?? kind] = props;
+      (fx.renders[props.testID ?? kind] ??= []).push(props);
       return React.createElement(
         'div',
         { ref, 'data-testid': props.testID, 'data-animated': kind, onClick: () => props.onPress?.() },
@@ -211,6 +214,7 @@ beforeEach(() => {
   fx.values.length = 0;
   fx.timings.length = 0;
   fx.animated = {};
+  fx.renders = {};
   fx.plain = {};
   fx.pan = null;
   fx.pref = { reduced: false, known: true, failed: false };
@@ -461,6 +465,23 @@ describe('lift and containment', () => {
     expect(fx.animated['wsf-settings-panel']).not.toHaveProperty('accessibilityViewIsModal');
     navEvent('focus');
     expect(fx.animated['wsf-settings-panel']).toMatchObject({ accessibilityViewIsModal: true });
+  });
+
+  it('iOS: mounted while covered, not even the first rendered frame claims VoiceOver (RV15-634-N2)', () => {
+    nav.focused = false;
+    show();
+    const frames = fx.renders['wsf-settings-panel']!;
+    expect(frames.length).toBeGreaterThan(0);
+    for (const props of frames) expect(props).not.toHaveProperty('accessibilityViewIsModal');
+  });
+
+  it('unmounting removes its focus and blur listeners (RV15-634-N2)', () => {
+    show();
+    expect((nav.listeners.focus ?? []).length).toBeGreaterThan(0);
+    act(() => root.unmount());
+    root = createRoot(container);
+    expect(nav.listeners.focus ?? []).toEqual([]);
+    expect(nav.listeners.blur ?? []).toEqual([]);
   });
 
   it('Android: unchanged, never a modal claim, in front or covered', () => {
