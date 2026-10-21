@@ -1,6 +1,6 @@
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { Fragment, useEffect, useRef } from 'react';
-import { Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, useWindowDimensions, View, type AccessibilityRole } from 'react-native';
 
 import { isKioskFlag } from '../kioskSession';
 import { registerFocusTarget } from './focusTarget';
@@ -217,7 +217,14 @@ export function MemberTabBar({ state, navigation, insets, onMove }: BottomTabBar
     <View
       style={[styles.bar, { paddingBottom: 10 + insets.bottom }, narrow ? styles.barWrapped : null]}
       testID="wsf-member-tabs"
-      accessibilityRole={Platform.OS === 'web' ? ('navigation' as 'none') : undefined}
+      /*
+        W12-10 (INT-32). The web's landmark is a navigation. A phone's tab bar
+        is a tab bar: iOS's own 'tabbar' role, and Android's 'tablist' (its
+        accessibility enum has no 'tabbar' and throws on it).
+      */
+      accessibilityRole={
+        Platform.OS === 'web' ? ('navigation' as 'none') : Platform.select<AccessibilityRole>({ ios: 'tabbar', android: 'tablist' })
+      }
       accessibilityLabel="Main"
     >
       {narrow && native ? (
@@ -257,11 +264,14 @@ export function MemberTabBar({ state, navigation, insets, onMove }: BottomTabBar
             {...enterSelects(select)}
             style={[styles.tab, narrow ? styles.tabHalf : null]}
             testID={`wsf-member-tab-${tab.key}`}
-            accessibilityRole="link"
+            // W12-10 (INT-32): a tab on a phone, whose selected state the
+            // screen reader says itself; the web keeps its link and names the
+            // current destination in the label.
+            accessibilityRole={native ? 'tab' : 'link'}
             // The current destination is named as current for a screen
             // reader, not only coloured for a sighted one.
             accessibilityState={{ selected: active }}
-            accessibilityLabel={active ? `${tab.label}, current` : tab.label}
+            accessibilityLabel={!native && active ? `${tab.label}, current` : tab.label}
             // React Native Web renders `dataSet` as data-* attributes; a bare
             // `data-current` prop is dropped on a Pressable, which is how the
             // first version of this shipped an attribute the tests could not
