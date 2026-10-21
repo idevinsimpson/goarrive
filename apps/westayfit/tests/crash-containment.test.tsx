@@ -7,7 +7,12 @@ import { Platform, Text } from 'react-native';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const navigate = vi.fn();
-vi.mock('expo-router', () => ({ router: { navigate: (...a: unknown[]) => navigate(...a) } }));
+// RV15-634-N1 (W14, by L0's decision): the screen and contribute fallbacks pop back to the tabs with
+// router.dismissTo('/'), so the mock offers it; navigate stays the fallback.
+const dismissTo = vi.fn();
+vi.mock('expo-router', () => ({
+  router: { navigate: (...a: unknown[]) => navigate(...a), dismissTo: (...a: unknown[]) => dismissTo(...a) },
+}));
 // The real module imports React Native internals jsdom cannot load. The
 // fallback reads the window's first metrics (root) and the nearest provider's
 // insets through its context (the other variants, #641 NB-4).
@@ -450,6 +455,7 @@ describe('route boundaries and their fallback', () => {
     root = createRoot(container);
     localStorage.clear();
     navigate.mockClear();
+    dismissTo.mockReset();
     // React logs every caught render error; the throws here are deliberate.
     consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     (Platform as { OS: string }).OS = 'ios';
@@ -632,18 +638,55 @@ describe('route boundaries and their fallback', () => {
     }
   });
 
-  it('CS-4: inside a live navigator (tab, screen, contribute) Go to Home only navigates; it never remounts the failed route', async () => {
+  it('CS-4: inside a live navigator (tab, screen, contribute) Go to Home only moves to Home; it never remounts the failed route', async () => {
     vi.useFakeTimers();
     try {
-      for (const variant of ['tab', 'screen', 'contribute'] as FallbackVariant[]) {
+      // A tab's fallback navigates its tab; a screen's or the contribution's sits on the root stack
+      // (often a modal over the tabs) and pops back to the tabs: dismissTo('/'), POP_TO (RV15-634-N1).
+      for (const [variant, expected] of [
+        ['tab', 'navigate'],
+        ['screen', 'dismissTo'],
+        ['contribute', 'dismissTo'],
+      ] as Array<[FallbackVariant, 'navigate' | 'dismissTo']>) {
         const retry = vi.fn();
         act(() => root.render(<RouteErrorFallback error={new Error('x')} retry={retry} variant={variant} />));
         navigate.mockClear();
+        dismissTo.mockClear();
         act(() => byId('wsf-route-error-home')!.click());
         await act(async () => {
           vi.runAllTimers();
         });
-        expect(navigate).toHaveBeenCalledWith('/');
+        if (expected === 'dismissTo') {
+          expect(dismissTo, variant).toHaveBeenCalledWith('/');
+          expect(navigate, variant).not.toHaveBeenCalled();
+        } else {
+          expect(navigate, variant).toHaveBeenCalledWith('/');
+          expect(dismissTo, variant).not.toHaveBeenCalled();
+        }
+        expect(retry).not.toHaveBeenCalled();
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('CS-4: when dismissTo is unavailable (it throws), the screen and contribute fallbacks navigate to Home instead', async () => {
+    vi.useFakeTimers();
+    try {
+      dismissTo.mockImplementation(() => {
+        throw new Error('dismissTo is not available');
+      });
+      for (const variant of ['screen', 'contribute'] as FallbackVariant[]) {
+        const retry = vi.fn();
+        act(() => root.render(<RouteErrorFallback error={new Error('x')} retry={retry} variant={variant} />));
+        navigate.mockClear();
+        dismissTo.mockClear();
+        expect(() => act(() => byId('wsf-route-error-home')!.click())).not.toThrow();
+        await act(async () => {
+          vi.runAllTimers();
+        });
+        expect(dismissTo, variant).toHaveBeenCalledWith('/');
+        expect(navigate, variant).toHaveBeenCalledWith('/');
         expect(retry).not.toHaveBeenCalled();
       }
     } finally {

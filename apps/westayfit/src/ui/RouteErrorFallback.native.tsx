@@ -87,7 +87,11 @@ const COPY: Record<FallbackVariant, string> = {
 
 /**
  * Variants that stand in for a whole navigator: Go to Home also remounts it.
- * The others sit inside a live navigator, which simply moves to Home.
+ * The others sit inside a live navigator. A tab's fallback moves its tab to
+ * Home. A screen's or the contribution's sits on the ROOT stack, often
+ * presented as a modal over the tabs (Settings, MOVE, the contribution
+ * sheet), where navigate('/') pushed a SECOND (tabs) above the fallback; so
+ * those pop back to the tabs instead (RV15-634-N1).
  */
 const REMOUNTS_ON_HOME: Record<FallbackVariant, boolean> = {
   root: true,
@@ -123,8 +127,28 @@ export function openKioskGoalForFallback(): string | null {
   }
 }
 
+/** Root-stack variants: Home is the tabs beneath, popped back to. */
+const POPS_TO_HOME: Record<FallbackVariant, boolean> = {
+  root: false,
+  shell: false,
+  homeTab: false,
+  tab: false,
+  screen: true,
+  contribute: true,
+};
+
 /** Asks for Home; never throws (a throw in a press handler is fatal on a phone). */
-function requestHome(): void {
+function requestHome(variant: FallbackVariant): void {
+  if (POPS_TO_HOME[variant]) {
+    // POP_TO the tabs (they replace this route when nothing is beneath, as on
+    // a cold link); navigate stays the fallback.
+    try {
+      router.dismissTo('/' as never);
+      return;
+    } catch {
+      // fall through to navigate
+    }
+  }
   try {
     router.navigate('/');
   } catch {
@@ -193,7 +217,7 @@ export function RouteErrorFallback({ error, retry, variant }: Props) {
             // Read again at the press; fails closed to the kiosk this screen showed.
             const kioskGoal = openKioskGoalForFallback() ?? shownKioskGoal;
             if (kioskGoal) requestKiosk(kioskGoal);
-            else requestHome();
+            else requestHome(variant);
             // After the queued navigation is dispatched (a discrete press
             // flushes its effects first), so the remount reads the new route.
             if (REMOUNTS_ON_HOME[variant]) {

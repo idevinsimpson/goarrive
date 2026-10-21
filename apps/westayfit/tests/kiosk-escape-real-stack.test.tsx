@@ -522,16 +522,28 @@ describe.each(['ios', 'android'] as const)('1. RV15-642-F1 on %s: a crash fallba
     expectBackAtTheKioskSignedOut();
   });
 
-  it('control, no kiosk session: Sign in opened from Home, the same throw → "Go to Home", as today', async () => {
+  it('control, no kiosk session: Sign in opened from Home, the same throw → "Go to Home": popped back to the one (tabs) (RV15-634-N1)', async () => {
     act(() => root.render(<App initial={[{ name: '(tabs)' }, { name: 'signin' }]} />));
     await flush();
     fault.throwWhenSignedIn = true;
     await submitSignIn();
     const label = await pressFocusedWayOut();
     expect(label).toBe('Go to Home');
-    expect(nav.log).toContain('navigate /');
-    expect(nav.log.some((l) => l.startsWith('dismissTo'))).toBe(false);
+    expect(nav.log).toContain('dismissTo /');
+    expect(nav.log.some((l) => l.startsWith('dismissTo /kiosk'))).toBe(false);
+    // Popped back to the tabs beneath: never a second (tabs) above the fallback.
+    expect(names()).toEqual(['(tabs)']);
     expect(focusedRoute()).toBe('(tabs)');
+    expect(byId('member-home')).not.toBeNull();
+  });
+
+  it('control, no kiosk session, a cold Sign in with nothing beneath: Go to Home replaces it with the tabs', async () => {
+    act(() => root.render(<App initial={[{ name: 'signin' }]} />));
+    await flush();
+    fault.throwWhenSignedIn = true;
+    await submitSignIn();
+    await pressFocusedWayOut();
+    expect(names()).toEqual(['(tabs)']);
     expect(byId('member-home')).not.toBeNull();
   });
 });

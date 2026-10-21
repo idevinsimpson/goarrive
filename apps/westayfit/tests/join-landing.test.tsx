@@ -20,9 +20,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * switchable, recording what it asks the router for. Then the landing is run
  * through React Navigation's own routers, nested as the app nests them (root
  * Stack → (tabs) → (home) Stack), with each href turned into the action
- * expo-router 6 dispatches for it: its own findDivergentState and
- * getPayloadFromStateRoute (build/global-state/routing.js) pick the navigator
- * the action is addressed to, as its getNavigateAction does.
+ * expo-router 6 dispatches for it by its own getNavigateAction
+ * (build/global-state/routing.js), computed against the root state AS IT IS
+ * at that moment (RV15-641-N3): after the RESET only the navigator that
+ * handled it, the app Stack, is rehydrated (@react-navigation/core
+ * useOnAction); the nested (tabs) and (home) states stay partial until they
+ * render. So the push to the community comes out as an untargeted NAVIGATE.
+ * The queued actions then run as the container's effect runs them, after the
+ * remounted navigators have rendered: an untargeted action goes to the root
+ * navigator first, then down the focused children until one handles it.
  */
 
 const ctl = vi.hoisted(() => ({
@@ -116,12 +122,13 @@ const routing = (() => {
     '../domComponents/emitDomEvent': {},
     '../getRoutesRedirects': {},
     '../link/href': {},
-    '../navigationParams': {},
     '../utils/url': {},
   };
   const mod = { exports: {} as Record<string, unknown> };
   // eslint-disable-next-line no-new-func
-  new Function('exports', 'require', 'module', '__filename', '__dirname', readFileSync(ROUTING, 'utf8'))(
+  // getNavigateAction is module-private: exported here for the probe.
+  const source = `${readFileSync(ROUTING, 'utf8')}\nmodule.exports.__getNavigateAction = getNavigateAction;`;
+  new Function('exports', 'require', 'module', '__filename', '__dirname', source)(
     mod.exports,
     (id: string) => (id in stubs ? stubs[id] : realRequire(id)),
     mod,
@@ -131,9 +138,11 @@ const routing = (() => {
   return mod.exports as {
     findDivergentState: (actionState: unknown, navigationState: unknown) => { actionStateRoute: object; navigationState: { key: string; type: string } };
     getPayloadFromStateRoute: (route: unknown) => { screen: string; params: object };
+    __getNavigateAction: (actionState: unknown, navigationState: unknown, type: string) => Queued;
   };
 })();
-const { findDivergentState, getPayloadFromStateRoute } = routing;
+const getNavigateAction = routing.__getNavigateAction;
+type Queued = { type: string; target?: string; payload?: { name?: string; params?: object } };
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -292,12 +301,15 @@ function actionStateFor(href: string): object {
   throw new Error(`no route for ${href}`);
 }
 
-/** expo-router 6's getNavigateAction, from its own divergence and payload helpers. */
-function expoRouterAction(href: string, state: NavState, type: 'PUSH' | 'REPLACE') {
-  const { actionStateRoute, navigationState } = findDivergentState(actionStateFor(href), state);
-  const payload = getPayloadFromStateRoute(actionStateRoute);
-  const t = type === 'PUSH' && navigationState.type !== 'stack' ? 'NAVIGATE' : type;
-  return { type: t, target: navigationState.key, payload: { name: payload.screen, params: payload.params } };
+/** An action dispatched from the container: the root navigator first, then down the focused children. */
+function dispatchUntargeted(state: NavState, action: Queued, parentRouteName: string | null = null): NavState | null {
+  const level = levelOf(parentRouteName);
+  const next = level.router.getStateForAction(state as never, action as never, opts(level.routeNames) as never);
+  if (next) return hydrate(next, parentRouteName);
+  const focused = state.routes[state.index]!;
+  if (!focused.state) return null;
+  const child = dispatchUntargeted(focused.state, action, focused.name);
+  return child ? { ...state, routes: state.routes.map((r, i) => (i === state.index ? { ...r, state: child } : r)) } : null;
 }
 
 /** The tabs mounted (Home's index), with the join screen over them: where a join is finished. */
@@ -309,23 +321,54 @@ const AT_JOIN = () =>
       { name: 'join/[joinCode]', params: { joinCode: 'OakGrove01' } },
     ],
   });
+/** A join link opened over an open kiosk session (RV15-641-N1). */
+const AT_JOIN_OVER_KIOSK = () =>
+  hydrate({
+    index: 3,
+    routes: [
+      { name: '(tabs)', state: { index: 0, routes: [{ name: '(home)', state: { index: 0, routes: [{ name: 'index' }] } }] } },
+      { name: 'kiosk/[goalId]', params: { goalId: 'g1' } },
+      { name: 'contribute/[goalId]', params: { goalId: 'g1', kiosk: '1' } },
+      { name: 'join/[joinCode]', params: { joinCode: 'OakGrove01' } },
+    ],
+  });
 
-function land(href: string, platform: string, viaReplaceOnly = false): NavState {
-  let state = AT_JOIN();
+function land(
+  href: string,
+  platform: string,
+  { viaReplaceOnly = false, start = AT_JOIN, passRoutes = false }: { viaReplaceOnly?: boolean; start?: () => NavState; passRoutes?: boolean } = {},
+): { state: NavState; computed: Queued[] } {
+  let state: NavState | (Omit<NavState, 'routes'> & { routes: Array<Omit<Route, 'state'> & { state?: unknown }> }) = start();
+  const queue: Queued[] = [];
+  const root = LEVELS.root!;
   const deps = {
+    // The join screen's navigation.dispatch: handled now, and (useOnAction)
+    // only the handling navigator, the app Stack, is rehydrated.
     dispatch: (a: unknown) => {
-      state = apply(state, a as never);
+      const next = root.router.getStateForAction(state as never, a as never, opts(root.routeNames) as never);
+      expect(next).not.toBeNull();
+      state = root.router.getRehydratedState(next as never, opts(root.routeNames)) as never;
     },
+    // router.push / replace: expo-router computes the action against the root state now, and queues it.
     push: (h: string) => {
-      state = apply(state, expoRouterAction(h, state, 'PUSH'));
+      queue.push(getNavigateAction(actionStateFor(h), state, 'PUSH'));
     },
     replace: (h: string) => {
-      state = apply(state, expoRouterAction(h, state, 'REPLACE'));
+      queue.push(getNavigateAction(actionStateFor(h), state, 'REPLACE'));
     },
+    ...(passRoutes ? { routes: () => (state as NavState).routes } : {}),
   };
   if (viaReplaceOnly) deps.replace(href);
   else landAfterAuth(href, { ...deps, platform });
-  return state;
+  const computed = queue.map((a) => ({ ...a }));
+  // The container's effect runs the queue once the remounted navigators have rendered.
+  let settled = hydrate(state);
+  for (const action of queue) {
+    const next = action.target ? apply(settled, action) : dispatchUntargeted(settled, action);
+    expect(next, `${action.type} ${action.payload?.name} was handled`).not.toBeNull();
+    settled = next!;
+  }
+  return { state: settled, computed };
 }
 
 const names = (s: NavState) => s.routes.map((r) => r.name);
@@ -336,13 +379,19 @@ const homeStack = (s: NavState) => {
 
 describe('the landing, through React Navigation’s routers and expo-router’s own action targeting', () => {
   it('the probe sees the bug it guards: a plain replace from the join screen to the community builds a SECOND (tabs)', () => {
-    const state = land('/community/oak', 'ios', true);
+    const { state, computed } = land('/community/oak', 'ios', { viaReplaceOnly: true });
+    expect(computed).toMatchObject([{ type: 'REPLACE', payload: { name: '(tabs)' } }]);
+    expect(computed[0]!.target).toMatch(/^stack-/); // addressed to the app Stack
     expect(names(state)).toEqual(['(tabs)', '(tabs)']);
   });
 
   for (const platform of ['ios', 'android']) {
     it(`${platform}: the community lands inside the one (tabs) (Home, then the community); Back goes to Home`, () => {
-      const state = land('/community/oak', platform);
+      const { state, computed } = land('/community/oak', platform);
+      // Against the partial state after the RESET, expo-router's own push is an untargeted NAVIGATE (RV15-641-N3).
+      expect(computed).toHaveLength(1);
+      expect(computed[0]).toMatchObject({ type: 'NAVIGATE', payload: { name: 'community/[groupId]/index' } });
+      expect(computed[0]!.target).toBeUndefined();
       expect(names(state)).toEqual(['(tabs)']);
       expect(homeStack(state).routes.map((r) => r.name)).toEqual(['index', 'community/[groupId]/index']);
       expect(homeStack(state).routes[1]!.params).toMatchObject({ groupId: 'oak' });
@@ -352,7 +401,10 @@ describe('the landing, through React Navigation’s routers and expo-router’s 
     });
 
     it(`${platform}: an event lands [(tabs), event], never two (tabs); Back goes to (tabs)`, () => {
-      const state = land('/event/g1', platform);
+      const { state, computed } = land('/event/g1', platform);
+      // The event is a root route: a PUSH addressed to the app Stack, rehydrated by the RESET.
+      expect(computed).toMatchObject([{ type: 'PUSH', payload: { name: 'event/[goalId]' } }]);
+      expect(computed[0]!.target).toBeDefined();
       expect(names(state)).toEqual(['(tabs)', 'event/[goalId]']);
       const back = goBack(state)!;
       expect(names(back)).toEqual(['(tabs)']);
@@ -360,9 +412,24 @@ describe('the landing, through React Navigation’s routers and expo-router’s 
     });
 
     it(`${platform}: a kiosk destination is replaced (the join screen’s place), never reset under`, () => {
-      const state = land('/contribute/g1?kiosk=1', platform);
+      const { state } = land('/contribute/g1?kiosk=1', platform);
       expect(names(state)).toEqual(['(tabs)', 'contribute/[goalId]']);
       expect(state.routes[1]!.params).toMatchObject({ goalId: 'g1', kiosk: '1' });
+    });
+
+    it(`${platform}: a join over an open kiosk, [(tabs), kiosk, contribute?kiosk=1, join] → replaced, the kiosk kept beneath; Back reaches it (RV15-641-N1)`, () => {
+      const { state, computed } = land('/community/oak', platform, { start: AT_JOIN_OVER_KIOSK, passRoutes: true });
+      expect(computed).toMatchObject([{ type: 'REPLACE', payload: { name: '(tabs)' } }]);
+      expect(names(state)).toEqual(['(tabs)', 'kiosk/[goalId]', 'contribute/[goalId]', '(tabs)']);
+      let back: NavState | null = state;
+      const shown: string[] = [];
+      while (back && names(back).length > 1) {
+        back = goBack(back);
+        if (back) shown.push(back.routes[back.index]!.name);
+        if (shown.at(-1) === 'kiosk/[goalId]') break;
+      }
+      expect(shown).toContain('kiosk/[goalId]');
+      expect(shown.indexOf('kiosk/[goalId]')).toBe(shown.length - 1);
     });
   }
 });
