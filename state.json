@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "repository": "idevinsimpson/goarrive",
   "asOf": "2026-09-29T01:03:19Z",
-  "ledgerHead": "032a1925e84a6625bdaddda84f459410db31eee4beeaebdf2eef63f0e967c7c4",
-  "eventCount": 1377,
+  "ledgerHead": "221216ba7f141d379e354483b7abf93695a134e82ae376ec86d90bd7b7f57c83",
+  "eventCount": 1387,
   "surfaces": {
     "controlInbox": {
       "pr": 365
@@ -3999,7 +3999,7 @@
       },
       "label": "Native-safe Firebase boot (no window.location at import), explicit native backend, RN auth persistence, device storage boundary (PR #632)",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 631,
@@ -4013,7 +4013,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         "apps/westayfit/app.config.js",
@@ -4044,7 +4044,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6302210014
+          "id": 6304212829
         }
       },
       "review": {
@@ -4138,7 +4138,7 @@
       },
       "label": "Native pose camera module (MediaPipe) feeding the unchanged frozen counter; JS tested, native uncompiled (PR #638)",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 631,
@@ -4152,7 +4152,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         "apps/westayfit/modules/wsf-pose-camera/WsfPoseCamera.podspec",
@@ -4195,7 +4195,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6302216132
+          "id": 6304213551
         }
       },
       "review": {
@@ -4280,7 +4280,7 @@
       },
       "label": "Member-feature native truth (NATIVE-PARITY-TARGET-1 5.5): You sign-out race, invite URL in Home join, native copy/share, privacy refusal hardening, truthful native copy",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 631,
@@ -4294,7 +4294,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         "apps/westayfit/app/(tabs)/community",
@@ -4339,7 +4339,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6302221942
+          "id": 6304213831
         }
       },
       "review": {
@@ -4368,7 +4368,7 @@
       },
       "label": "Together completion motion on iOS/Android with shared web timing, reduced-motion safe (PR #634)",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 631,
@@ -4382,7 +4382,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         "apps/westayfit/src/ui/TogetherCompletion.tsx",
@@ -4407,7 +4407,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6302214041
+          "id": 6304213273
         }
       },
       "review": {
@@ -4432,7 +4432,7 @@
       },
       "label": "Continuity records on the device storage boundary: pending attempt, join code, community, camera prefs; six proof cases (PR #635)",
       "origin": "ledger",
-      "phase": "RELEASED",
+      "phase": "ACKED",
       "phaseBeforeBlock": null,
       "queueIndexBeforeBlock": null,
       "inbox": 631,
@@ -4446,7 +4446,7 @@
       },
       "proof": null,
       "served": null,
-      "releasedQueueIndex": 0,
+      "releasedQueueIndex": null,
       "reviewedBy": [],
       "subjectPaths": [
         "apps/westayfit/app/(tabs)/(home)/community/[groupId]/index.tsx",
@@ -4491,7 +4491,7 @@
         "accepted": null,
         "lastTransition": {
           "kind": "comment",
-          "id": 6302211942
+          "id": 6304213054
         }
       },
       "review": {
@@ -8692,56 +8692,71 @@
       "packet": "NATIVE-BOOT-1",
       "worker": "W12",
       "reason": "release",
-      "status": "redelivered",
+      "status": "acked",
       "comments": [
         6303072227,
         6303651117
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6304212829
+      }
     },
     "2c10b95549b54fc7d8fda84eb705ae25decab6fb0ed9066e751b5780771d6af3": {
       "packet": "NATIVE-CAMERA-1",
       "worker": "W15",
       "reason": "release",
-      "status": "redelivered",
+      "status": "acked",
       "comments": [
         6303072420,
         6303651327
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6304213551
+      }
     },
     "2caea7f27d6506c47c75b8c7840d37a7b83f61a11a8aa64385813db148910a47": {
       "packet": "NATIVE-MEMBER-1",
       "worker": "W16",
       "reason": "release",
-      "status": "redelivered",
+      "status": "acked",
       "comments": [
         6303072630,
         6303651500
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6304213831
+      }
     },
     "fbac724f5bab5e60f0ff603c579063e3baaebb4da3f605af5a6b9620efef6b3f": {
       "packet": "NATIVE-MOTION-1",
       "worker": "W14",
       "reason": "release",
-      "status": "redelivered",
+      "status": "acked",
       "comments": [
         6303072853,
         6303651689
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6304213273
+      }
     },
     "ec0eb4c92b4aec2091cafe6b14e11ac69500791b7b8a7f278916264bb16404fc": {
       "packet": "NATIVE-STATE-1",
       "worker": "W13",
       "reason": "release",
-      "status": "redelivered",
+      "status": "acked",
       "comments": [
         6303073115,
         6303651870
       ],
-      "ack": null
+      "ack": {
+        "kind": "comment",
+        "id": 6304213054
+      }
     }
   },
   "fastpath": {
