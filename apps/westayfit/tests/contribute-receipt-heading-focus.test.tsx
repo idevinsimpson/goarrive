@@ -223,13 +223,18 @@ describe('W12-20 on a phone: the member\'s receipt takes the focus on its headli
     await recordFromEntry();
     expect(byId('wsf-contribute-receipt')).not.toBeNull();
     expect(headline()).not.toBeNull();
-    expect(texts()).toEqual(['Review your contribution', headline()!.textContent]);
-    expect(fx.focused[1]).toBe(headline());
+    // Review's heading first; the headline last and once (composed with the
+    // state lane, its in-flight heading may be focused in between on Android).
+    expect(texts()[0]).toBe('Review your contribution');
+    expect(fx.focused[fx.focused.length - 1]).toBe(headline());
+    expect(fx.focused.filter((n) => n === headline())).toHaveLength(1);
+    expect(fx.focused.filter((n) => byId('wsf-contribute-receipt')!.contains(n as Node))).toEqual([headline()]);
+    const count = fx.focused.length;
     // Re-rendered, and the screen's later answers landing: no second focus, no second announcement.
     await render();
     await settle();
     expect(fx.focused.filter((n) => n === headline())).toHaveLength(1);
-    expect(fx.focused).toHaveLength(2);
+    expect(fx.focused).toHaveLength(count);
     expect(receiptSpoken()).toEqual(['Recorded: +35 squats. Shared total: 1,275 of 5,000 squats.']);
   });
 
@@ -272,7 +277,8 @@ describe('W12-20 on a phone: the member\'s receipt takes the focus on its headli
     const receipt = byId('wsf-contribute-receipt');
     expect(receipt).not.toBeNull();
     expect(byId('wsf-together')).toBeNull();
-    expect(texts()).toEqual(['Review your contribution']);
+    expect(texts()[0]).toBe('Review your contribution');
+    expect(fx.focused).not.toContain(headline());
     expect(fx.focused.some((n) => receipt!.contains(n as Node))).toBe(false);
   });
 });
@@ -287,7 +293,9 @@ describe('W12-20 on a phone: presented as the MOVE sheet, Close takes the focus 
     expect(fx.registered).toContain('wsf-contribute-close');
     await press('wsf-contribute-done');
     await recordFromEntry();
-    expect(texts()).toEqual(['Close', 'How many squats did you complete?', 'Review your contribution', headline()!.textContent]);
+    expect(texts().slice(0, 3)).toEqual(['Close', 'How many squats did you complete?', 'Review your contribution']);
+    expect(fx.focused[fx.focused.length - 1]).toBe(headline());
+    expect(fx.focused.filter((n) => n === headline())).toHaveLength(1);
     expect(fx.focused.filter((n) => n === close)).toHaveLength(1);
   });
 
