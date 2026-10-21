@@ -56,8 +56,15 @@ const h = vi.hoisted(() => ({
   goalsFail: new Set<string>(),
   /** Every community whose goals were asked for, in order. */
   goalsAsked: [] as string[],
-  /** The focus callback the screen registered last; calling it is a focus (the first call is the mount's own). */
-  focus: null as null | (() => void),
+  /**
+   * Every focus effect the rendered screens registered, by its source (the
+   * latest callback of each). A screen may register more than one: on the
+   * integrated tree You's resume watch (src/useResumeRefresh.ts) registers its
+   * own after You's, so "the last one" is not You's.
+   */
+  focus: new Map<string, () => void | (() => void)>(),
+  /** The focus effects already given their mount's focus (by source). */
+  focusMounted: new Set<string>(),
   /** Communities a fresh server answer refused (`wasRefused`). */
   refused: new Set<string>(),
   /** The member profile read: fails, or answers with this name. */
@@ -124,8 +131,8 @@ vi.mock('expo-router', () => {
     router,
     useRouter: () => router,
     useNavigation: () => navigation,
-    useFocusEffect: (callback: () => void) => {
-      h.focus = callback;
+    useFocusEffect: (callback: () => void | (() => void)) => {
+      h.focus.set(callback.toString(), callback);
     },
     usePathname: () => '/',
     useLocalSearchParams: () => ({}),
@@ -246,7 +253,8 @@ beforeEach(() => {
   h.user = { uid: h.uid, email: null };
   h.goalsFail.clear();
   h.goalsAsked.length = 0;
-  h.focus = null;
+  h.focus.clear();
+  h.focusMounted.clear();
   h.refused.clear();
   h.profileFail = false;
   h.profileName = 'Ann';
@@ -680,12 +688,24 @@ describe('RV16: a failed load judges the page on screen', () => {
     return { cc, you };
   }
 
-  /** A return to the mounted screen (the first call is the mount's own focus). */
+  /**
+   * A return to the mounted screen, as expo-router gives one: every focus
+   * effect of the screen is blurred (its cleanup runs) and focused again.
+   * Each one is first given the focus its mount had (the mock does not run
+   * focus effects on mount), so the screen sees a RETURN, not a first focus.
+   */
   async function returnTo(you: Awaited<ReturnType<typeof render>>) {
-    expect(h.focus).not.toBeNull();
+    expect(h.focus.size).toBeGreaterThan(0);
     await you.act(() => {
-      h.focus!();
-      h.focus!();
+      for (const [source, effect] of h.focus) {
+        if (!h.focusMounted.has(source)) {
+          h.focusMounted.add(source);
+          const blur = effect();
+          if (typeof blur === 'function') blur();
+        }
+        const blur = effect();
+        if (typeof blur === 'function') cleanup.push(blur);
+      }
     });
   }
 
