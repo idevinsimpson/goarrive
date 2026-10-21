@@ -74,7 +74,7 @@ import { ButtonLink } from '../../../../../src/ui/ButtonLink';
 import { TabGlyph } from '../../../../../src/ui/TabGlyph';
 import { JoinQrCode } from '../../../../../src/ui/JoinQrCode';
 import { buildJoinUrl, isLinkJoinable } from '../../../../../src/ui/joinLink';
-import { buildKioskUrl } from '../../../../../src/ui/kioskLink';
+import { buildKioskUrl, currentOrigin } from '../../../../../src/ui/kioskLink';
 import { linkAvailabilityCopy } from '../../../../../src/ui/linkAvailabilityCopy';
 import {
   canAttemptCopy,
@@ -160,19 +160,18 @@ import { RESUME_MIN_AWAY_MS, useResumeRefresh } from '../../../../../src/useResu
  * THE ORIGIN EVERY LINK ON THIS SCREEN IS BUILT ON — the invite link and its
  * QR, the display share link, the kiosk, station and combined-setup addresses.
  *
- * On web it is the origin this build is served from, as it always was. On iOS
- * and Android there is no served origin, and this app has no configured app
- * link base, so there is NONE: each builder returns null without an origin and
- * the link is simply not offered, rather than built on something invented.
- * Reading `window.location.origin` there was not merely wrong but fatal — a
- * React Native production bundle has no `window.location`, so it threw during
- * render — and a development build's `window.location` is the Metro dev
- * server, which is not an address anybody else can open. Decided by the
- * platform, not by probing for a location.
+ * W16-16 (ST-01, W12-13): it is `currentOrigin()`, the one origin helper.
+ * On web, the origin this build is served from, as it always was (its web
+ * twin reads the page's address). On iOS and Android, the origin the build
+ * names in EXPO_PUBLIC_WSF_PUBLIC_ORIGIN, or NONE while the owner has not set
+ * it (today): each builder returns null without an origin and the link and
+ * its QR are simply not offered, rather than built on something invented.
+ * The phone's twin never reads `window.location`: a production bundle has
+ * none (reading it threw during render once), and a development build's is
+ * the Metro dev server, which is not an address anybody else can open.
  */
 function linkOrigin(): string | null {
-  if (Platform.OS !== 'web' || typeof window === 'undefined') return null;
-  return window.location?.origin ?? null;
+  return currentOrigin();
 }
 
 type GroupDoc = {

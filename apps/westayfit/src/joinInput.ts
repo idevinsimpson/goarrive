@@ -55,7 +55,18 @@
  */
 import { Platform } from 'react-native';
 
+import { isDevTunnelHost, isPublicHost } from './publicHost';
 import { currentOrigin } from './ui/kioskLink';
+
+/*
+  W16-16 (W12-13). THE PUBLIC-HOST RULES HAVE ONE SOURCE: src/publicHost.ts
+  (PUBLIC_HOST, NON_PUBLIC_SUFFIXES, DEV_TUNNEL_DOMAINS, isDevTunnelHost,
+  isPublicHost), which the integrator copied verbatim from this module so the
+  build checks and currentOrigin's native twin read the same rules. They are
+  imported here, not copied; the three public names are re-exported for this
+  module's callers (src/shareGoalDisplay.ts, tests/join-input.test.ts).
+*/
+export { DEV_TUNNEL_DOMAINS, isDevTunnelHost, isPublicHost } from './publicHost';
 
 /** The longest input worth reading; an invite link is far shorter. */
 export const JOIN_INPUT_MAX = 2048;
@@ -66,56 +77,6 @@ const URL_SHAPE = /^([A-Za-z][A-Za-z0-9+.-]*):\/\/([^/?#]*)([^?#]*)(?:\?([^#]*))
 /** A DNS name or IPv4 literal, or a bracketed IPv6 literal, with an optional port. No userinfo. */
 const HOST = /^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\.?|\[[0-9A-Fa-f:.]{2,45}\])(?::\d{1,5})?$/;
 const JOIN_PATH = /^\/join\/([A-Za-z0-9_-]{16,128})\/?$/;
-/**
- * A plain public DNS name: at least two labels, the last starting with a
- * letter. No port, IP literal, wildcard, single label or trailing dot.
- */
-const PUBLIC_HOST = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
-/**
- * Names that never resolve on the public internet: special-use names (RFC
- * 6761, 6762, 8375; ICANN's .internal) and the undelegated names home and
- * office routers hand out (.localdomain, .lan, .home, fritz.box).
- */
-const NON_PUBLIC_SUFFIXES = ['localhost', 'local', 'internal', 'home.arpa', 'localdomain', 'lan', 'home', 'fritz.box'] as const;
-
-/**
- * Domains that put a development machine on a public-looking https name:
- * the ones `expo start --tunnel` uses (Expo's tunnel host and the ngrok
- * domains it has used), other tunnel and port-forwarding services
- * (Cloudflare quick tunnels, localtunnel, localhost.run, serveo, Microsoft
- * dev tunnels, GitHub Codespaces, Tailscale, Pinggy) and the DNS names that
- * point back at the caller or name an IP address (localtest.me, lvh.me,
- * nip.io, sslip.io). Never a canonical We Stay Fit host.
- */
-export const DEV_TUNNEL_DOMAINS = [
-  'exp.direct',
-  'exp.host',
-  'ngrok.io',
-  'ngrok.app',
-  'ngrok-free.app',
-  'ngrok.dev',
-  'ngrok-free.dev',
-  'trycloudflare.com',
-  'loca.lt',
-  'localtunnel.me',
-  'lhr.life',
-  'localhost.run',
-  'serveo.net',
-  'devtunnels.ms',
-  'app.github.dev',
-  'ts.net',
-  'pinggy.link',
-  'localtest.me',
-  'lvh.me',
-  'nip.io',
-  'sslip.io',
-] as const;
-
-/** Whether `host` is under a development forwarder's domain (whole labels). */
-export function isDevTunnelHost(host: string): boolean {
-  const h = host.toLowerCase();
-  return DEV_TUNNEL_DOMAINS.some((d) => h === d || h.endsWith(`.${d}`));
-}
 /** A page origin as `location.origin` gives it: http(s), a host, an optional port, nothing else. */
 const PAGE_ORIGIN = /^https?:\/\/[^/?#@\s]+$/;
 const KEPT_PARAMS = ['event', 'activity'] as const;
@@ -145,16 +106,6 @@ export function inviteOriginsFor(os: string, configuredHosts: string | undefined
     if (PAGE_ORIGIN.test(origin) && HOST.test(origin.slice(origin.indexOf('//') + 2))) origins.add(origin);
   }
   return [...origins];
-}
-
-/**
- * Whether `host` (no scheme or port) is a public DNS name: PUBLIC_HOST's
- * shape, and not under a special-use local name. `localhost`, `10.0.2.2`, a
- * LAN address or `laptop.local` are not.
- */
-export function isPublicHost(host: string): boolean {
-  const h = host.toLowerCase();
-  return PUBLIC_HOST.test(h) && !NON_PUBLIC_SUFFIXES.some((s) => h === s || h.endsWith(`.${s}`));
 }
 
 /**
