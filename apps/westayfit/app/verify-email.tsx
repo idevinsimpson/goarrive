@@ -118,6 +118,9 @@ export default function VerifyEmail() {
       push: (href) => router.push(href as never),
       replace: (href) => router.replace(href as never),
       platform: Platform.OS,
+      // RV13-641-N2: a kiosk return pops back to the kiosk's start screen.
+      routes: () => (navigation.getState() as { routes?: ReadonlyArray<{ name: string; params?: object }> } | undefined)?.routes,
+      dismissTo: (href) => router.dismissTo(href as never),
     });
     return true;
   }, [navigation]);

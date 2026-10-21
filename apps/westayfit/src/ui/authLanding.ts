@@ -1,4 +1,4 @@
-import { isKioskFlag } from '../kioskSession';
+import { isKioskFlag, kioskStartRoute } from '../kioskSession';
 import { SIGNED_OUT_HOME_RESET } from './signOutReset';
 
 /**
@@ -22,11 +22,20 @@ import { SIGNED_OUT_HOME_RESET } from './signOutReset';
  * the stack to Home there would wipe `/kiosk/<goal>` from beneath it, and
  * Back (or the iOS edge swipe) from the contribution would land on the
  * visitor's signed-in member Home on a shared device. So a kiosk destination
- * is REPLACED, as before this change on every platform: the last sign-in
- * screen's place is taken and the kiosk stays beneath. Back walks toward the
- * kiosk (through the sign-in screen only when the visitor went on to create
- * an account), never to member Home before it; and the kiosk's start screen
- * signs whoever it finds out.
+ * is never reset under, and never routed to member Home.
+ *
+ * BACK GOES STRAIGHT TO THE KIOSK (RV13-641-N2). After an account is created
+ * at a kiosk, a stale sign-in screen sat between the kiosk and the
+ * contribution: Back showed it, a 'Sign in · Loading…' shell, before the
+ * kiosk. So on a phone, when the caller can see the root stack (`routes`) and
+ * dismiss into it (`dismissTo`), and that kiosk's start screen is the nearest
+ * kiosk in the stack, the sign-in screens are popped back to it
+ * (`dismissTo('/kiosk/<goal>')`) and the contribution is pushed over it:
+ * `[…, kiosk, contribute?kiosk=1]`, and one Back reaches the kiosk. Otherwise
+ * (the kiosk not in the stack, another goal's kiosk nearer, a caller without
+ * those two, or the web) the destination is REPLACED, as before: the last
+ * sign-in screen's place is taken. The kiosk's start screen signs whoever it
+ * finds out.
  *
  * Published for the member and state lanes' own post-auth hops.
  */
@@ -40,7 +49,42 @@ export type AuthLandingDeps = {
   push: (href: string) => void;
   replace: (href: string) => void;
   platform: string;
+  /**
+   * The root stack's routes (that navigation object's getState().routes), to
+   * find a kiosk's start screen beneath. Optional: without it (or without
+   * `dismissTo`) a kiosk destination is replaced.
+   */
+  routes?: () => ReadonlyArray<{ name: string; params?: object }> | undefined;
+  /** expo-router's router.dismissTo: pops back to a screen already in the stack. */
+  dismissTo?: (href: string) => void;
 };
+
+/** The kiosk start screen's root route name (app/kiosk/[goalId].tsx). */
+const KIOSK_ROUTE = 'kiosk/[goalId]';
+
+/** The goal a kiosk destination belongs to: `/kiosk/<goal>` or `/contribute/<goal>?…kiosk…`; null for anything else. */
+function kioskGoalOf(next: string): { goalId: string; isStart: boolean } | null {
+  const m = /^\/(kiosk|contribute)\/([^/?#]+)(?:[?#]|$)/.exec(next);
+  if (!m) return null;
+  let goalId = m[2]!;
+  try {
+    goalId = decodeURIComponent(goalId);
+  } catch {
+    // Left as written: it then matches no route's goal, and the destination is replaced.
+  }
+  return { goalId, isStart: m[1] === 'kiosk' };
+}
+
+/** Whether the nearest kiosk start screen in the stack is this goal's. */
+function kioskStartIsBeneath(goalId: string, routes: ReadonlyArray<{ name: string; params?: object }> | undefined): boolean {
+  if (!routes) return false;
+  for (let i = routes.length - 1; i >= 0; i -= 1) {
+    const route = routes[i]!;
+    if (route.name !== KIOSK_ROUTE) continue;
+    return (route.params as { goalId?: unknown } | undefined)?.goalId === goalId;
+  }
+  return false;
+}
 
 /**
  * A kiosk's own destination: its start screen (`/kiosk/<goal>`), or a route
@@ -73,8 +117,20 @@ function decodeQueryPart(part: string): string {
   }
 }
 
-export function landAfterAuth(next: string, { dispatch, push, replace, platform }: AuthLandingDeps): void {
-  if (platform === 'web' || isKioskDestination(next)) {
+export function landAfterAuth(next: string, { dispatch, push, replace, platform, routes, dismissTo }: AuthLandingDeps): void {
+  if (platform === 'web') {
+    replace(next);
+    return;
+  }
+  if (isKioskDestination(next)) {
+    // Never a reset under a kiosk destination. Back to the kiosk's own start
+    // screen when it is the nearest kiosk beneath; otherwise replace.
+    const kiosk = kioskGoalOf(next);
+    if (kiosk && dismissTo && routes && kioskStartIsBeneath(kiosk.goalId, routes())) {
+      dismissTo(kioskStartRoute(kiosk.goalId));
+      if (!kiosk.isStart) push(next);
+      return;
+    }
     replace(next);
     return;
   }
