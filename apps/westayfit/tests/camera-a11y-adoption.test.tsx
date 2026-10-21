@@ -22,13 +22,25 @@ import * as nodePath from 'node:path';
  * the screen 12 squats, exactly as `CameraRepCounter`'s `onFinish` does. The
  * camera gate is not touched here (its property test is in
  * move-camera-native-adapter.test.ts).
+ *
+ * W15-3 (MF-18, INT-31) — the MOVE settings switches (MoveCameraSettingsSection):
+ * on iOS and Android each switch carries its hint as accessibilityHint (the web
+ * keeps aria-describedby, unchanged), and the knob spreads lift.knob (elevation
+ * 2 on Android, nothing on iOS or the web). This is LATENT: on a phone the
+ * section is drawn only where the counter can run, which support.native.ts
+ * refuses while the telemetry gate is off. The support check is mocked as
+ * supported in this file only.
  */
 
 const rn = vi.hoisted(() => ({
-  os: 'web' as 'ios' | 'web',
+  os: 'web' as 'ios' | 'android' | 'web',
   /** Each screen-reader focus move, with what the node was when focus moved (React may reuse a node across steps). */
   focused: [] as Array<{ node: unknown; testID: string | null; text: string | null }>,
   textProps: new Map<string, Record<string, unknown>>(),
+  /** The props each testID'd Pressable was given (react-native-web drops accessibilityHint). */
+  pressProps: new Map<string, Record<string, unknown>>(),
+  /** Each switch knob's flattened style, in render order (react-native-web turns styles into classes). */
+  knobStyles: [] as Record<string, unknown>[],
 }));
 
 vi.mock('react-native', async () => {
@@ -39,9 +51,21 @@ vi.mock('react-native', async () => {
     if (typeof props.testID === 'string') rn.textProps.set(props.testID, props);
     return h(actual.Text, { ...props, ref });
   });
+  const Pressable = fwd((props: Record<string, unknown>, ref: Ref<unknown>) => {
+    if (typeof props.testID === 'string') rn.pressProps.set(props.testID, props);
+    return h(actual.Pressable, { ...props, ref });
+  });
+  const View = fwd((props: Record<string, unknown>, ref: Ref<unknown>) => {
+    const flat = (actual.StyleSheet.flatten(props.style) ?? {}) as Record<string, unknown>;
+    // The knob: the switch's 20 pt disc.
+    if (flat.width === 20 && flat.height === 20 && flat.borderRadius === 10) rn.knobStyles.push(flat);
+    return h(actual.View, { ...props, ref });
+  });
   return {
     ...actual,
     Text,
+    Pressable,
+    View,
     Platform: {
       ...actual.Platform,
       get OS() {
@@ -152,6 +176,8 @@ beforeEach(() => {
   rn.os = 'web';
   rn.focused = [];
   rn.textProps.clear();
+  rn.pressProps.clear();
+  rn.knobStyles.length = 0;
   localStorage.clear();
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -265,5 +291,79 @@ describe('the adoption sites in the source', () => {
     const ADJUST_CALL = "useStepHeadingFocus(step === 'adjust' ? 'adjust' : null, adjustHeadingRef);";
     expect(code.split(ADJUST_CALL)).toHaveLength(2);
     expect(code.indexOf(ADJUST_CALL)).toBeLessThan(code.indexOf('return screen('));
+  });
+});
+
+describe('W15-3: the MOVE settings switches (MF-18, INT-31), latent while the section is hidden on a phone', () => {
+  const SWITCHES = [
+    ['wsf-settings-camera-counter', 'Automatically count squats with your camera.'],
+    ['wsf-settings-stick-figure', 'Show the body guide while you move.'],
+  ] as const;
+  /** The section, imported afresh with the platform set first: lift.ts picks its tokens at import. */
+  async function renderSection(os: 'ios' | 'android' | 'web'): Promise<void> {
+    rn.os = os;
+    vi.resetModules();
+    const { MoveCameraSettingsSection } = await import('../src/movement-camera/MoveCameraSettingsSection');
+    act(() => root.render(createElement(MoveCameraSettingsSection)));
+    expect(byTestId('wsf-settings-move'), os).not.toBeNull(); // supported (mocked in this file only)
+  }
+
+  for (const os of ['ios', 'android'] as const) {
+    it(`${os}: each switch carries its hint for VoiceOver / TalkBack, beside the unchanged aria-describedby`, async () => {
+      await renderSection(os);
+      for (const [id, hint] of SWITCHES) {
+        expect(rn.pressProps.get(id), id).toMatchObject({ accessibilityHint: hint, 'aria-describedby': `${id}-hint`, accessibilityLabel: expect.any(String) });
+      }
+    });
+  }
+
+  it('web: no accessibilityHint; aria-describedby still names the visible hint', async () => {
+    await renderSection('web');
+    for (const [id, hint] of SWITCHES) {
+      expect(rn.pressProps.get(id), id).not.toHaveProperty('accessibilityHint');
+      expect(rn.pressProps.get(id)?.['aria-describedby'], id).toBe(`${id}-hint`);
+      expect(byTestId(id)!.getAttribute('aria-describedby'), id).toBe(`${id}-hint`);
+      expect(container.querySelector(`[id="${id}-hint"]`)?.textContent, id).toBe(hint);
+    }
+  });
+
+  // Today's knob, as the stylesheet defines it (on adds marginLeft 24).
+  const KNOB = {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    marginLeft: 4,
+    backgroundColor: expect.any(String),
+    shadowColor: expect.any(String),
+    shadowOpacity: 0.2,
+    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 2 },
+  };
+  /** The last render's two knobs: the counter's (on) and, after one press, the stick figure's (off). */
+  async function knobsOn(os: 'ios' | 'android' | 'web'): Promise<[Record<string, unknown>, Record<string, unknown>]> {
+    await renderSection(os);
+    press('wsf-settings-stick-figure');
+    expect(rn.pressProps.get('wsf-settings-stick-figure')?.['aria-checked']).toBe(false);
+    const [on, off] = rn.knobStyles.slice(-2);
+    return [on, off];
+  }
+
+  it('Android: lift.knob, elevation 2, on both knobs, on and off', async () => {
+    const [on, off] = await knobsOn('android');
+    expect(on).toEqual({ ...KNOB, elevation: 2, marginLeft: 24 });
+    expect(off).toEqual({ ...KNOB, elevation: 2 });
+  });
+
+  it("iOS: the knob's own shadow, no elevation", async () => {
+    const [on, off] = await knobsOn('ios');
+    expect(on).toEqual({ ...KNOB, marginLeft: 24 });
+    expect(off).toEqual(KNOB);
+  });
+
+  it("web: today's knob exactly (lift.knob is {})", async () => {
+    const [on, off] = await knobsOn('web');
+    expect(on).toEqual({ ...KNOB, marginLeft: 24 });
+    expect(off).toEqual(KNOB);
+    expect('elevation' in on || 'elevation' in off).toBe(false);
   });
 });

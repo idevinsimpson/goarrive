@@ -15,6 +15,8 @@ import { useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ACTION_GREEN, NAVY, PROGRESS_GREEN, SURFACE } from '../ui/kit';
+// W15-3 (INT-31): the knob's lift, per platform (W12-15, kit-base).
+import { lift } from '../ui/lift';
 import { useMoveCameraSettings, writeMoveCameraSettings } from './settingsStore';
 import { cameraCounterSupported } from './support';
 
@@ -82,6 +84,8 @@ function Switch({
       aria-checked={on}
       aria-describedby={hintId}
       accessibilityLabel={label}
+      // W15-3 (MF-18): VoiceOver and TalkBack read the hint; the web keeps aria-describedby.
+      {...(Platform.OS !== 'web' ? { accessibilityHint: hint } : {})}
       style={s.row}
       testID={testID}
       {...({ onKeyDown, dataSet: { checked: on ? 'true' : 'false' } } as Record<string, unknown>)}
@@ -93,7 +97,8 @@ function Switch({
         </Text>
       </View>
       <View style={[s.track, on ? s.trackOn : null]}>
-        <View style={[s.knob, on ? s.knobOn : null]} />
+        {/* W15-3 (INT-31): Android draws no shadow from shadow*; lift.knob is elevation 2 there, {} elsewhere. */}
+        <View style={[s.knob, lift.knob, on ? s.knobOn : null]} />
       </View>
     </Pressable>
   );
