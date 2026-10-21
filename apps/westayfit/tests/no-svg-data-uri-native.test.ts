@@ -16,9 +16,8 @@ import { describe, expect, it } from 'vitest';
  * no longer offends fails nothing; remove it then.
  */
 const ALLOWED_FOR_NOW: Record<string, string> = {
-  // Venue and kiosk surfaces: the handoff and station QR are null on native until INT-08 (W12-13) names an origin.
-  'app/move/[goalId].tsx': 'INT-08',
-  'app/station/[goalId].tsx': 'INT-08',
+  // Every former entry has moved to SvgMarkup: the drawn figure (W14-3, MF-05 M-4), the invite QR (W16-10,
+  // MF-05 F-5), and the MOVE handoff and station QR codes (W12-19). Nothing is tolerated any more.
 };
 
 /** Where the markup is built, and the one web place it becomes a data URI. */
@@ -93,15 +92,16 @@ describe('MF-05: no SVG data URI reaches React Native\'s <Image> outside SvgMark
     expect(unexpected(USERS)).toEqual([]);
   });
 
-  it('a new data-URI <Image> site fails the scan; only the two ticketed files are tolerated', () => {
+  it('a new data-URI <Image> site fails the scan; no file is tolerated any more', () => {
     const fresh = { file: 'src/ui/NewQr.tsx', uses: svgDataUriUses('src/ui/NewQr.tsx', `<Image source={{ uri: qrSvgDataUriRaw(c) }} />`) };
     expect(fresh.uses).toEqual(['qrSvgDataUriRaw']);
-    const known = { file: 'app/move/[goalId].tsx', uses: ['qrSvgDataUriRaw'] };
-    expect(unexpected([fresh, known])).toEqual([fresh]);
-    // W14-3 (MF-05 M-4) moved the drawn figure and W16-10 (MF-05 F-5) moved the invite QR to SvgMarkup: neither is tolerated now.
-    expect(Object.keys(ALLOWED_FOR_NOW).sort()).toEqual(['app/move/[goalId].tsx', 'app/station/[goalId].tsx']);
+    expect(unexpected([fresh])).toEqual([fresh]);
+    // Composition of W16-10 (member) and W12-19 (integrator): the allowlist is empty, and every former entry offends.
+    expect(Object.keys(ALLOWED_FOR_NOW).sort()).toEqual([]);
     expect(unexpected([{ file: 'src/ui/JoinQrCode.tsx', uses: ['qrSvgDataUriRaw'] }])).toHaveLength(1);
     expect(unexpected([{ file: 'src/ui/FollowAlongCard.tsx', uses: ['moveFigureSvgDataUriRaw'] }])).toHaveLength(1);
+    expect(unexpected([{ file: 'app/move/[goalId].tsx', uses: ['qrSvgDataUriRaw'] }])).toHaveLength(1);
+    expect(unexpected([{ file: 'app/station/[goalId].tsx', uses: ['qrSvgDataUriRaw'] }])).toHaveLength(1);
   });
 
   for (const u of USERS.filter((x) => x.file in ALLOWED_FOR_NOW)) {
