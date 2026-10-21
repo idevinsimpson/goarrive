@@ -43,8 +43,8 @@ const MAX_FRAMES = 8;
 /** What of a raw message is looked at at all; cut before any pattern runs. */
 export const MAX_SCRUB_INPUT = 1000;
 /** What of a raw stack is looked at, and the longest line read as a frame. */
-const MAX_STACK_INPUT = 4000;
-const MAX_FRAME_LINE = 400;
+export const MAX_STACK_INPUT = 4000;
+export const MAX_FRAME_LINE = 400;
 
 export type CrashKind = 'fatal' | 'error' | 'rejection' | 'boundary';
 
