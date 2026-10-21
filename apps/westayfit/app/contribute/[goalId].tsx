@@ -129,6 +129,7 @@ import { useReducedMotion } from '../../src/ui/useReducedMotion';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { nativeErrorBoundary } from '../../src/ui/RouteErrorFallback';
 import { useAppInForeground } from '../../src/useResumeRefresh';
+import { ScreenStatusBar, useScreenTopInset } from '../../src/ui/useScreenTopInset';
 import {
   KEYBOARD_SCROLL_PROPS,
   KeyboardInsetView,
@@ -916,11 +917,14 @@ export default function ContributeToGoal() {
           `wsfListGoals` (which refuses a non-member, exactly as before) and
           its communities from `wsfMyCommunities` (which lists only this
           account's active memberships). A read from this load is reused; a
-          cold link reads them.
+          cold link reads them. The load error's Try again re-runs this too,
+          and fresh (#641 NB-1, INT-26): whatever failed the goal load usually
+          failed these as well.
         */
+        const reuse = loadToken > 0 ? 0 : SAME_LOAD_MS;
         const [listed, mine] = await Promise.all([
-          readGoals<ListedGoal>(user.uid, groupIdHint, SAME_LOAD_MS),
-          readMyCommunities(user.uid, SAME_LOAD_MS),
+          readGoals<ListedGoal>(user.uid, groupIdHint, reuse),
+          readMyCommunities(user.uid, reuse),
         ]);
         if (cancelled) return;
         const goal = listed.goals.find((g) => g.goalId === goalId);
@@ -935,7 +939,7 @@ export default function ContributeToGoal() {
     return () => {
       cancelled = true;
     };
-  }, [ready, user, goalId, groupIdHint]);
+  }, [ready, user, goalId, groupIdHint, loadToken]);
 
   // Poll wsfGoalPulse only while the member is still before the write. Once
   // an attempt is in flight, unknown, refused or confirmed, the screen shows
@@ -1825,6 +1829,9 @@ export default function ContributeToGoal() {
     (src/ui/keyboardAvoidance.tsx). All of it is inert on web.
   */
   const keyboardHeight = useKeyboardHeight();
+  // INT-09: the page mode is a root-stack screen with no header; on a phone it
+  // starts below the status bar (the sheet is bottom-anchored). 0 on web.
+  const topInset = useScreenTopInset();
 
   // The community/goal labels, shown together only when verified.
   /**
@@ -1925,6 +1932,9 @@ export default function ContributeToGoal() {
       bar's edge -- and only the overlap is gone.
     */
     <KeyboardInsetView style={[styles.screen, tone === 'dark' ? styles.screenDark : null, together]}>
+      {/* INT-09: light icons over the navy receipt while it is in front; dark
+          again on any cream screen. Nothing on web. */}
+      <ScreenStatusBar tone={tone === 'dark' ? 'navy' : 'cream'} />
       <ScrollView
         ref={scrollRef}
         style={[
@@ -1933,7 +1943,12 @@ export default function ContributeToGoal() {
           together,
           shellBarShown ? styles.scrollAboveMove : null,
         ]}
-        contentContainerStyle={[styles.container, tone === 'dark' ? styles.containerDark : null, together]}
+        contentContainerStyle={[
+          styles.container,
+          tone === 'dark' ? styles.containerDark : null,
+          together,
+          topInset > 0 ? { paddingTop: CONTAINER_TOP + topInset } : null,
+        ]}
         keyboardShouldPersistTaps="handled"
         {...KEYBOARD_SCROLL_PROPS}
         testID={testID}
@@ -1990,15 +2005,21 @@ export default function ContributeToGoal() {
         <View style={styles.card} testID="wsf-contribute-load-error">
           <Text style={styles.heading} {...HEADING_1}>Something went wrong</Text>
           <Text style={styles.body}>{state.message}</Text>
-          {/* INT-04 case 4: try again here, in place. */}
-          <Pressable
-            onPress={retryLoad}
-            accessibilityRole="button"
-            style={styles.primaryButton}
-            testID="wsf-contribute-load-retry"
-          >
-            <Text style={styles.primaryButtonText}>Try again</Text>
-          </Pressable>
+          {/* INT-04 case 4: try again here, in place. Not on a kiosk (#641
+              NB-2): there this error is a rest state with a 90-second Finish,
+              and a retry would pass through loading and clear that deadline
+              while it waited, leaving the shared device as the last visitor
+              left it. A kiosk gets Finish alone, as before. */}
+          {kiosk ? null : (
+            <Pressable
+              onPress={retryLoad}
+              accessibilityRole="button"
+              style={styles.primaryButton}
+              testID="wsf-contribute-load-retry"
+            >
+              <Text style={styles.primaryButtonText}>Try again</Text>
+            </Pressable>
+          )}
           {/* NOT ON A SHARED DEVICE. "Back to home" is the member home of the
               account signed in right now, so on a kiosk it is a door out of the
               session and into somebody's account for whoever walks up next.
@@ -3279,6 +3300,9 @@ const CREAM = wsfTheme.colors.background;
 const CARD_BORDER = '#E3E7E1';
 const HERO_MUTED = 'rgba(247,245,240,0.78)';
 
+// The page container's own top padding, under the status bar on a phone (INT-09).
+const CONTAINER_TOP = 16;
+
 const styles = StyleSheet.create({
   // ---- kiosk -----------------------------------------------------------
   kioskBar: { gap: 10 },
@@ -3374,7 +3398,7 @@ const styles = StyleSheet.create({
   container: {
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingTop: 16,
+    paddingTop: CONTAINER_TOP,
     // Ordinary end padding. The bar is below the scroll view, not over it,
     // so the content owes it nothing beyond its own rhythm.
     paddingBottom: 48,

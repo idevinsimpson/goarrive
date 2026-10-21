@@ -102,6 +102,13 @@ export const elevation = {
   },
 };
 
+/**
+ * NATIVE-INTEGRATOR-1 (INT-09). A text-glyph Back ("‹", about 10 pt wide)
+ * reaches the 44 pt minimum through its hit slop, without moving the row it
+ * sits in. A press target only: nothing is drawn, so web layout is unchanged.
+ */
+export const BACK_GLYPH_HIT_SLOP = { top: 8, bottom: 8, left: 17, right: 17 } as const;
+
 export const kit = StyleSheet.create({
   // ---- page ----
   scroll: { flex: 1, backgroundColor: CREAM },
