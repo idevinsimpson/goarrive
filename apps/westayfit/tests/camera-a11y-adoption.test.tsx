@@ -1,4 +1,4 @@
-import { act, createElement, type ReactNode, type Ref } from 'react';
+import { act, createElement, useEffect, type ReactNode, type Ref } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -26,7 +26,8 @@ import * as nodePath from 'node:path';
 
 const rn = vi.hoisted(() => ({
   os: 'web' as 'ios' | 'web',
-  focused: [] as unknown[],
+  /** Each screen-reader focus move, with what the node was when focus moved (React may reuse a node across steps). */
+  focused: [] as Array<{ node: unknown; testID: string | null; text: string | null }>,
   textProps: new Map<string, Record<string, unknown>>(),
 }));
 
@@ -51,7 +52,8 @@ vi.mock('react-native', async () => {
     AccessibilityInfo: {
       ...actual.AccessibilityInfo,
       setAccessibilityFocus: (node: unknown) => {
-        rn.focused.push(node);
+        const el = node as HTMLElement | null;
+        rn.focused.push({ node, testID: el?.getAttribute?.('data-testid') ?? null, text: el?.textContent ?? null });
       },
     },
     // The host node itself stands in for the native tag.
@@ -116,6 +118,9 @@ vi.mock('expo-router', () => ({
     dispatch: vi.fn(),
     canGoBack: () => false,
   }),
+  // The screen is always focused here: the effect runs on mount and again when it changes, and its
+  // cleanup runs before a re-run and on unmount (integrated trees register Android Back with it).
+  useFocusEffect: (effect: () => void | (() => void)) => useEffect(() => effect(), [effect]),
   Link: ({ href, children }: { href: string; children: ReactNode }) => createElement('a', { href }, children),
 }));
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }) }));
@@ -207,20 +212,22 @@ describe('native (Platform.OS ios, .native twins)', () => {
     press('stub-camera-finish');
     await until('wsf-contribute-adjust-heading');
     await settle(450); // iOS moves the focus ~400 ms after the change settles (timed in focus-return-native)
-    expect(rn.focused).toHaveLength(1);
-    expect(rn.focused[0]).toBe(byTestId('wsf-contribute-adjust-heading'));
-    expect((rn.focused[0] as HTMLElement).textContent).toBe('We counted 12 squats');
-    // Continue to the review (not this hook's heading), then Edit back to Adjust: focused again.
+    // Only moves to the Adjust heading count: other steps' headings may take focus with calls of their own.
+    const toAdjustHeading = () => rn.focused.filter((f) => f.testID === 'wsf-contribute-adjust-heading');
+    expect(toAdjustHeading()).toHaveLength(1);
+    expect(toAdjustHeading()[0].node).toBe(byTestId('wsf-contribute-adjust-heading'));
+    expect(toAdjustHeading()[0].text).toBe('We counted 12 squats');
+    // Continue to the review: no move to the Adjust heading. Edit back to Adjust: it takes focus again.
     press('wsf-contribute-adjust-continue');
     await until('wsf-contribute-review-screen');
     await settle(450);
-    expect(rn.focused).toHaveLength(1);
+    expect(toAdjustHeading()).toHaveLength(1);
     press('wsf-contribute-edit');
     await until('wsf-contribute-adjust-heading');
     await settle(450);
-    expect(rn.focused).toHaveLength(2);
-    expect(rn.focused[1]).toBe(byTestId('wsf-contribute-adjust-heading'));
-    expect((rn.focused[1] as HTMLElement).textContent).toBe('We counted 12 squats');
+    expect(toAdjustHeading()).toHaveLength(2);
+    expect(toAdjustHeading()[1].node).toBe(byTestId('wsf-contribute-adjust-heading'));
+    expect(toAdjustHeading()[1].text).toBe('We counted 12 squats');
   }, 20_000);
 });
 
@@ -249,9 +256,10 @@ describe('the adoption sites in the source', () => {
       '<Text style={styles.adjustValue} {...numeralTextProps} testID="wsf-contribute-adjust-value" aria-live="polite">',
     ]);
     expect(code).toContain('<Text ref={adjustHeadingRef} style={styles.stepHeading} {...HEADING_1} testID="wsf-contribute-adjust-heading">');
-    // One call, at the top level with the other hooks (before the first early return), keyed to the Adjust step.
-    expect(code.match(/useStepHeadingFocus\(/g)).toHaveLength(1);
-    expect(code).toContain("useStepHeadingFocus(step === 'adjust' ? 'adjust' : null, adjustHeadingRef);");
-    expect(code.indexOf('useStepHeadingFocus(step')).toBeLessThan(code.indexOf('return screen('));
+    // The Adjust call exactly once, at the top level with the other hooks (before the first early
+    // return), keyed to the Adjust step. Other steps' headings may have calls of their own.
+    const ADJUST_CALL = "useStepHeadingFocus(step === 'adjust' ? 'adjust' : null, adjustHeadingRef);";
+    expect(code.split(ADJUST_CALL)).toHaveLength(2);
+    expect(code.indexOf(ADJUST_CALL)).toBeLessThan(code.indexOf('return screen('));
   });
 });
