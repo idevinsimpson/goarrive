@@ -15,8 +15,10 @@
  *    `window.__WSF_TEST_POSE__`, readable ONLY on an emulator build served
  *    from loopback (testPoseHook). It opens no camera. It proves the flow;
  *    it is not evidence that counting works on a real body.
- * Native has neither, so the counter is unsupported there and the existing
- * manual flow is all a member sees (fail closed).
+ * Native does not use this file: Metro picks controller.native.ts there, and
+ * support.native.ts keeps the native counter off until the MediaPipe SDK
+ * telemetry gate is approved and the wsf-pose-camera module is linked (fail
+ * closed: the manual flow).
  */
 import { MovementCameraLifecycle, type CameraFailureStage, type PoseEstimator } from './frozen';
 import {

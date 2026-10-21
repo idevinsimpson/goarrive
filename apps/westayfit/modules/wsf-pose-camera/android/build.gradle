@@ -1,0 +1,67 @@
+// UNCOMPILED in sprint sandbox — first compile happens in an EAS development build
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.wsfposecamera'
+version = '0.1.0'
+
+// MediaPipe Tasks Vision for Android.
+// Web (engine.ts) and iOS (podspec) run 0.10.35. Maven presence of
+// com.google.mediapipe:tasks-vision:0.10.35 is UNVERIFIED from the sprint sandbox
+// (dl.google.com is blocked there), so Android pins the nearest CONFIRMED release,
+// 0.10.29: Google's own mediapipe-samples pose_landmarker Android app built against it
+// (google-ai-edge/mediapipe-samples 1daf138, 2025-09-25, until 1.0.0 on 2026-08-04).
+// The PoseLandmarker API used here is identical at v0.10.26 and v0.10.35 (source read).
+// Move to 0.10.35 once the EAS build log shows it resolves (one line).
+//
+// PRIVACY: unlike the web package, the native tasks-vision artifacts send Google usage telemetry,
+// in 0.10.29 and 0.10.35 alike. tasks-core's RemoteLoggingClient sends through
+// com.google.android.datatransport (transport-api, transport-backend-cct, transport-runtime): each
+// event is queued on the device (SQLite) and uploaded later via JobScheduler / AlarmManager.
+//  - MediaPipe's own fields (TasksStatsProtoLogger): package name, versionCode and platform; task
+//    name, event name and running mode; session start/clone/end with init latency; invocation counts
+//    by input type, dropped count, elapsed time, average/peak latency; error code. MediaPipe itself
+//    does not read the OS version.
+//  - DataTransport's CCT backend (CctTransportBackend.decorate, checked in transport-backend-cct
+//    4.0.0.5) adds to every queued event: device model, manufacturer, hardware, device and product
+//    names, build fingerprint, OS build id and SDK version, locale and country, SIM MCC/MNC, network
+//    type and mobile subtype, timezone offset, the app build number, and the event's wall-clock and
+//    uptime timestamps. Each upload reaches Google from the device's IP address.
+//  - No frames, images or landmarks.
+// DataTransport itself, with its manifest entries (ACCESS_NETWORK_STATE, the JobService, the
+// AlarmManager receiver), is already in every Android build of this app without this module:
+// expo-dev-launcher depends on ML Kit barcode-scanning, which pulls it (ML Kit's MlKitInitProvider has
+// no eager components, so nothing starts TransportRuntime there). What MediaPipe adds is a caller.
+// The app keeps the native counter off until the owner decides
+// (src/movement-camera/nativeCameraGate.ts NATIVE_CAMERA_TELEMETRY_APPROVED).
+// Do NOT add `exclude group: 'com.google.android.datatransport'`: RemoteLoggingClient would then
+// throw NoClassDefFoundError at landmarker creation.
+def mediapipeTasksVisionVersion = '0.10.29'
+// CameraX: the version Google's pose sample uses (camera-core/camera2/lifecycle/view).
+def cameraxVersion = '1.4.2'
+
+android {
+  namespace 'expo.modules.wsfposecamera'
+  defaultConfig {
+    versionCode 1
+    versionName '0.1.0'
+    // MediaPipe reaches its classes from JNI; keep them if a release build minifies.
+    consumerProguardFiles 'proguard-rules.pro'
+  }
+  sourceSets {
+    main {
+      // The ONE bundled model, shared with iOS: modules/wsf-pose-camera/assets/pose_landmarker_lite.task
+      assets.srcDirs += ['../assets']
+    }
+  }
+}
+
+dependencies {
+  implementation "com.google.mediapipe:tasks-vision:${mediapipeTasksVisionVersion}"
+  implementation "androidx.camera:camera-core:${cameraxVersion}"
+  implementation "androidx.camera:camera-camera2:${cameraxVersion}"
+  implementation "androidx.camera:camera-lifecycle:${cameraxVersion}"
+  implementation "androidx.camera:camera-view:${cameraxVersion}"
+}

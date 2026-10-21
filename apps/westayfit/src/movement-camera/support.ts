@@ -43,7 +43,7 @@ export function pageTestPoseHook(): TestPoseHook | null {
   return testPoseHook(process.env.EXPO_PUBLIC_WSF_USE_EMULATORS, win);
 }
 
-/** Whether this runtime can run the counter at all. Native: no (fail closed). */
+/** Whether this runtime can run the counter at all. Native uses support.native.ts instead (off until the telemetry gate is approved and the module is linked). */
 export function cameraCounterSupported(): boolean {
   if (pageTestPoseHook()) return true;
   return Platform.OS === 'web' && typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
