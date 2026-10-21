@@ -9,6 +9,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const setStringAsync = vi.fn<(text: string) => Promise<boolean>>();
 vi.mock('expo-clipboard', () => ({ setStringAsync: (t: string) => setStringAsync(t) }));
+// This binary has expo-clipboard's native module (the missing case is share-link-native-noclip.test.ts).
+const nativeModules = new Set(['ExpoClipboard']);
+vi.mock('expo', () => ({ requireOptionalNativeModule: (name: string) => (nativeModules.has(name) ? {} : null) }));
 const share = vi.fn<(content: unknown) => Promise<{ action: string }>>();
 const platform = { OS: 'ios' as string };
 vi.mock('react-native', () => ({
@@ -96,7 +99,8 @@ describe('shareLinkSheet (case 1)', () => {
 });
 
 describe('availability', () => {
-  it('the app can always attempt; offerableLink decides what is offered', () => {
+  it('with the clipboard module, Copy is offered; the share sheet always is; offerableLink decides for which links', () => {
+    expect(native.offersCopy()).toBe(true);
     expect(native.canAttemptCopy()).toBe(true);
     expect(native.hasShareSheet()).toBe(true);
   });
