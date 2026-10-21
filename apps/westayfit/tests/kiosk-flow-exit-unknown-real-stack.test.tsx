@@ -265,8 +265,9 @@ const { default: MarkerEntryRoute } = await import('../app/go/[markerSlug]');
 const { clearDeviceMode } = await import('../src/deviceMode');
 const { useWsfAuth } = await import('../src/auth');
 /** The guard under test, imported conditionally for the fail-first proof (see the open-marker suite). */
-const guardModule: { KioskFlowExitGuard: ComponentType } | null = await import('../src/kioskFlowExit').then(
-  (m) => m,
+const guardSpecifier = ['..', 'src', 'kioskFlowExit'].join('/');
+const guardModule: { KioskFlowExitGuard: ComponentType } | null = await import(/* @vite-ignore */ guardSpecifier).then(
+  (m: { KioskFlowExitGuard: ComponentType }) => m,
   () => null,
 );
 const KioskFlowExitGuard: ComponentType = guardModule?.KioskFlowExitGuard ?? (() => null);

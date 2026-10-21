@@ -299,10 +299,13 @@ const { useWsfAuth } = await import('../src/auth');
 /**
  * The guard under test, imported conditionally for the fail-first proof: on a
  * tree before W14-O the module does not exist, nothing is mounted in its
- * place, and the decided cases fail on what they assert.
+ * place, and the decided cases fail on what they assert. The specifier is
+ * built at run time so vite's import analysis cannot refuse the file at
+ * transform time on such a tree; vitest's mocks apply to it as to any import.
  */
-const guardModule: { KioskFlowExitGuard: ComponentType } | null = await import('../src/kioskFlowExit').then(
-  (m) => m,
+const guardSpecifier = ['..', 'src', 'kioskFlowExit'].join('/');
+const guardModule: { KioskFlowExitGuard: ComponentType } | null = await import(/* @vite-ignore */ guardSpecifier).then(
+  (m: { KioskFlowExitGuard: ComponentType }) => m,
   () => null,
 );
 const KioskFlowExitGuard: ComponentType = guardModule?.KioskFlowExitGuard ?? (() => null);
