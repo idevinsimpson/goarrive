@@ -522,14 +522,89 @@ describe('W12-2: a failed refresh keeps a warm screen (INT-25); a stale sign-in 
     act(() => root.render(<ContributeToGoal />));
     await settle();
     expect(byId('wsf-contribute-stale-note')).not.toBeNull();
-    // Auth is back: the heal tick is authorized and clears the note.
+    // Auth is back: the heal tick lands, and (RV16-641-2) asks for the full
+    // load, whose own-credit read is authorized: that load clears the guard.
+    const loadsBefore = count('wsfMyContribution');
     answers.wsfGoalPulse = async () => PULSE;
     await pollFor(2_000);
+    expect(count('wsfMyContribution')).toBe(loadsBefore + 1);
     expect(byId('wsf-contribute-stale-note')).toBeNull();
     answers.wsfGoalPulse = NOT_FOUND;
     await pollFor(2_000);
     expect(byId('wsf-contribute-not-found')).not.toBeNull();
     expect(peekGoals('u1', 'oak')).toBeUndefined();
+  });
+
+  it('RV16-641-2: Auth unreachable, a token-less tick answered by the public pulse (a display goal), then the display turned off: the anonymous not-found evicts nothing; the tick asked for one full load', async () => {
+    await warm('ios');
+    fakeAuth.currentUser = { uid: 'u1', getIdToken: async () => 't' };
+    refresh.result = 'offline';
+    answers.wsfGoalPulse = UNAUTHENTICATED;
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    expect(byId('wsf-contribute-stale-note')).not.toBeNull();
+    expect(refresh.calls).toHaveLength(1);
+    // Functions is back, Auth is not: the goal is on a display, so the token-less tick gets the public PULSE;
+    // the own-credit read still refuses without a token.
+    const loadsBefore = count('wsfMyContribution');
+    answers.wsfGoalPulse = async () => PULSE;
+    answers.wsfMyContribution = UNAUTHENTICATED;
+    await pollFor(2_000);
+    // The tick kept the guard and asked for the full load, once; that load could not refresh the sign-in either.
+    expect(count('wsfMyContribution')).toBe(loadsBefore + 1);
+    expect(refresh.calls).toHaveLength(2);
+    expect(byId('wsf-contribute-stale-note')).not.toBeNull();
+    // More public ticks ask for nothing more.
+    await pollFor(4_000);
+    expect(count('wsfMyContribution')).toBe(loadsBefore + 1);
+    // The Champion turns the display off: the next token-less tick gets the anonymous not-found.
+    answers.wsfGoalPulse = NOT_FOUND;
+    await pollFor(4_000);
+    expect(byId('wsf-contribute-not-found')).toBeNull();
+    expect(byId('wsf-contribute-entry-screen')).not.toBeNull();
+    expect(peekGoals('u1', 'oak')).toBeDefined();
+    // A landed public tick may clear the kept-figures note (its figures are fresh); the guard is what stays.
+  });
+
+  it('RV16-641-2: a new context is a new guard; its first public tick asks for its own full load', async () => {
+    await warm('ios');
+    // A second goal in the same community, also in this account's record (warm).
+    answers.wsfListGoals = async () => ({ goals: [...LISTED.goals, { ...LISTED.goals[0]!, goalId: 'g2', title: 'Second goal' }] });
+    await readGoals('u1', 'oak');
+    await readOwnCredit('u1', 'g2');
+    calls.length = 0;
+    fakeAuth.currentUser = { uid: 'u1', getIdToken: async () => 't' };
+    refresh.result = 'offline';
+    answers.wsfGoalPulse = UNAUTHENTICATED;
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    answers.wsfGoalPulse = async () => PULSE;
+    answers.wsfMyContribution = UNAUTHENTICATED;
+    await pollFor(2_000);
+    expect(count('wsfMyContribution')).toBe(2);
+    // The same screen moves to the other goal, whose load cannot refresh the sign-in either.
+    params.value = { goalId: 'g2', groupId: 'oak' };
+    answers.wsfGoalPulse = UNAUTHENTICATED;
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    expect(byId('wsf-contribute-stale-note')).not.toBeNull();
+    const before = count('wsfMyContribution');
+    answers.wsfGoalPulse = async () => PULSE;
+    await pollFor(2_000);
+    expect(count('wsfMyContribution')).toBe(before + 1);
+  });
+
+  it('RV16-641-2, web unchanged: a tick never asks for a load (the guard is never set there)', async () => {
+    await warm('web');
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    const loads = count('wsfMyContribution');
+    await pollFor(6_000);
+    expect(count('wsfGoalPulse')).toBeGreaterThanOrEqual(3);
+    expect(count('wsfMyContribution')).toBe(loads);
   });
 
   it('RV14-641-1 (probe PA): Auth unreachable, then a Retry while Functions is down too; a token-less not-found tick still evicts nothing', async () => {

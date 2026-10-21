@@ -634,11 +634,19 @@ export default function ContributeToGoal() {
     requests since may go out without a token. While it is set, a heal tick's
     refusal is not a verdict (RV11-641-1); when it was never set (an ordinary
     failure with a good token) an authorized not-found stands. Set with that
-    failure; cleared only by an authorized answer (a load, a tick, a receipt)
-    or a new context. RV14-641-1: a later failure in transport (an internal
-    or deadline answer) says nothing about the token, so it does not clear it.
+    failure; cleared only by an authorized answer -- a full load (its
+    own-credit read, wsfMyContribution, refuses a request without a token) or
+    a receipt (wsfContribute likewise) -- or a new context. RV16-641-2: a
+    tick is NOT an authorized answer. wsfGoalPulse answers anyone, token or
+    not, when the goal is on a display (aggregateDisplayAuthorized), so a tick
+    that succeeds says nothing about the sign-in: it keeps the guard and asks
+    once for the full load (`tickAskedLoadRef`). RV14-641-1: a later failure
+    in transport (an internal or deadline answer) says nothing about the
+    token, so it does not clear it either.
   */
   const signInOfflineRef = useRef(false);
+  // RV16-641-2: a successful tick has already asked for the full load while the guard has been set.
+  const tickAskedLoadRef = useRef(false);
   // W12-2 (ST-06, native): this load has already refreshed the sign-in once.
   const signInRetriedRef = useRef(false);
   const [context, setContext] = useState<ScreenContext>({ kind: 'none' });
@@ -1069,6 +1077,8 @@ export default function ContributeToGoal() {
             }
             if (refreshed === 'offline') {
               // RV12-641-5: until an authorized answer, the heal ticks go out token-less.
+              // RV16-641-2: newly set, a successful tick may ask for one full load again.
+              if (!signInOfflineRef.current) tickAskedLoadRef.current = false;
               signInOfflineRef.current = true;
               failTransiently();
               return;
@@ -1187,7 +1197,23 @@ export default function ContributeToGoal() {
         const pulse = result.data;
         setPulseAt(new Date());
         setRefreshFailed(false);
-        signInOfflineRef.current = false;
+        /*
+          RV16-641-2 (native). A TICK IS NOT AN AUTHORIZED ANSWER. While the
+          sign-in could not be refreshed this tick may have gone out without a
+          token, and the public pulse answers that too when the goal is on a
+          display. So the guard stays: a later anonymous not-found (the display
+          turned off) must still evict nothing (RV11-641-1). The tick asks once
+          for the full load instead, whose own-credit read needs the sign-in;
+          that load is what clears the guard.
+        */
+        if (Platform.OS !== 'web' && signInOfflineRef.current) {
+          if (!tickAskedLoadRef.current) {
+            tickAskedLoadRef.current = true;
+            quietRetry();
+          }
+        } else {
+          signInOfflineRef.current = false;
+        }
         setState((prev) => {
           if (prev.kind === 'ready') {
             return pulse.status === 'active'
@@ -1247,7 +1273,7 @@ export default function ContributeToGoal() {
       if (timer) clearInterval(timer);
       pollSinceRef.current = null;
     };
-  }, [ready, user, goalId, shouldPoll]);
+  }, [ready, user, goalId, shouldPoll, quietRetry]);
 
   // Timer tick, only while running.
   useEffect(() => {
