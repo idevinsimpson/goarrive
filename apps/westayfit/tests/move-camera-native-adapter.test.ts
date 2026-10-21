@@ -170,8 +170,13 @@ const STRING_FORMS: Record<Lang, StringForm[]> = {
  * Swift and TS regex literals, Groovy slashy and dollar-slashy strings, and JSX text. The scan test
  * checks that the scanned Swift files contain no raw-string or regex delimiters, and build.gradle
  * no slashy or dollar-slashy opener.
+ *
+ * With `blank` (review NB-D1b, PRE-1), each string literal's text is removed and only its quotes,
+ * its line breaks and any interpolation code are kept (`'../a'` → `''`, `"x:${v}"` → `"${v}"`). The
+ * same scanner decides where each string ends, so a quote inside an interpolation (`"${'"'}"`)
+ * cannot pair with the wrong quote and blank real code.
  */
-function strip(c: string, lang: Lang): string {
+function strip(c: string, lang: Lang, blank = false): string {
   const forms = STRING_FORMS[lang];
   let out = '';
   let i = 0;
@@ -222,10 +227,10 @@ function strip(c: string, lang: Lang): string {
           i += 1;
         }
       } else if (f.escapes && c[i] === '\\') {
-        out += c.slice(i, i + 2);
+        if (!blank) out += c.slice(i, i + 2);
         i += 2;
       } else {
-        out += c[i];
+        if (!blank || c[i] === '\n') out += c[i];
         i += 1;
       }
     }
@@ -238,6 +243,31 @@ function strip(c: string, lang: Lang): string {
 }
 /** A module or app source file, comments removed, by its own source kind. */
 const codeOf = (f: string) => strip(read(f), langOf(f));
+/** Configuration names that declare a Gradle dependency: main, test, variant, annotation-processor and buildscript scopes. */
+const GRADLE_CONFIG = /\b(\w*(?:[iI]mplementation|[aA]pi|[cC]ompileOnly|[rR]untimeOnly)|kapt|ksp|annotationProcessor|classpath)\b(?![ \t]*[=.])/g;
+/**
+ * Every dependency declaration in a build.gradle (review PRE-1), in any configuration and any
+ * placement (own line, inline `dependencies { … }`, parentheses). `declared` lists
+ * `<configuration> <coordinate>` for each `<configuration> 'coordinate'` / `<configuration>("…")`.
+ * `malformed` lists every configuration name (found with string text blanked, so a coordinate
+ * that contains "api" is not one; a name followed by `=` or `.` is an assignment or a member, not
+ * a call) that is not exactly one string literal ending the statement: map notation, project(),
+ * files(), platform(), a variable, or two coordinates in one call. A form this does not read
+ * therefore fails the test instead of passing unseen.
+ */
+const gradleDependencies = (gradle: string) => {
+  const code = strip(gradle, 'groovy');
+  const blanked = strip(gradle, 'groovy', true);
+  const declared = [...code.matchAll(new RegExp(`${GRADLE_CONFIG.source}[ \\t]*\\(?[ \\t]*(['"])([^'"\\n]+)\\2`, 'g'))].map((m) => `${m[1]} ${m[3]}`);
+  const malformed: string[] = [];
+  for (const m of blanked.matchAll(GRADLE_CONFIG)) {
+    const rest = blanked.slice(m.index! + m[0].length).split('\n')[0];
+    if (!/^[ \t]*(?:\([ \t]*(['"])(?:\$\{[^}\n]*\})*\1[ \t]*\)|(['"])(?:\$\{[^}\n]*\})*\2)[ \t]*(?:[;}]|$)/.test(rest)) malformed.push(`${m[1]}${rest}`);
+  }
+  const words = [...blanked.matchAll(GRADLE_CONFIG)].length;
+  if (words !== declared.length) malformed.push(`${words} configuration names, ${declared.length} declarations read`);
+  return { declared, malformed };
+};
 /** Swift imports, including indented, attributed (`@preconcurrency`), access-level and kind (`import struct M.T`) forms. */
 const SWIFT_IMPORT =
   /(?:^|;)[ \t]*(?:@\w+(?:\([^)\n]*\))?[ \t]+)*(?:(?:public|package|internal|fileprivate|private)[ \t]+)?import[ \t]+(?:(?:typealias|struct|class|enum|protocol|let|var|func)[ \t]+)?(\w+)/gm;
@@ -1568,14 +1598,47 @@ describe('native sources: header, settings, wiring and versions (static; the cod
   it('dependencies are exactly ExpoModulesCore + MediaPipe (iOS) and MediaPipe + CameraX core/camera2/lifecycle/view (Android)', () => {
     const deps = read(`${MOD}/WsfPoseCamera.podspec`).match(/s\.dependency [^\n]+/g);
     expect(deps).toEqual(["s.dependency 'ExpoModulesCore'", "s.dependency 'MediaPipeTasksVision', '0.10.35'"]);
-    const impl = read(`${MOD}/android/build.gradle`).match(/^\s*implementation [^\n]+/gm)!.map((l) => l.trim());
-    expect(impl).toEqual([
-      'implementation "com.google.mediapipe:tasks-vision:${mediapipeTasksVisionVersion}"',
-      'implementation "androidx.camera:camera-core:${cameraxVersion}"',
-      'implementation "androidx.camera:camera-camera2:${cameraxVersion}"',
-      'implementation "androidx.camera:camera-lifecycle:${cameraxVersion}"',
-      'implementation "androidx.camera:camera-view:${cameraxVersion}"',
+    // Review PRE-1: every declaration in every configuration and placement is read, not just lines
+    // that start with `implementation `. The main scope is exactly the reviewed five; no other scope
+    // (test, variant, kapt/ksp, annotationProcessor, buildscript classpath) declares anything today,
+    // and any form the reader cannot parse is reported as malformed.
+    const gradle = gradleDependencies(read(`${MOD}/android/build.gradle`));
+    expect(gradle.malformed).toEqual([]);
+    const isMain = (d: string) => !/^(?:test|androidTest|testFixtures|debug|release|kapt|ksp|annotationProcessor|classpath)/i.test(d);
+    expect(gradle.declared.filter(isMain)).toEqual([
+      'implementation com.google.mediapipe:tasks-vision:${mediapipeTasksVisionVersion}',
+      'implementation androidx.camera:camera-core:${cameraxVersion}',
+      'implementation androidx.camera:camera-camera2:${cameraxVersion}',
+      'implementation androidx.camera:camera-lifecycle:${cameraxVersion}',
+      'implementation androidx.camera:camera-view:${cameraxVersion}',
     ]);
+    expect(gradle.declared.filter((d) => !isMain(d))).toEqual([]);
+    // The plugins are pinned too: a plugin can add dependencies of its own.
+    expect(strip(read(`${MOD}/android/build.gradle`), 'groovy').match(/^\s*id\s+['"][^'"]+['"]/gm)?.map((l) => l.trim())).toEqual(["id 'com.android.library'", "id 'expo-module-gradle-plugin'"]);
+    // Self-tests of the reader: each of these declares something it must see.
+    const OK = 'com.squareup.okhttp3:okhttp:4.12.0';
+    for (const [src, seen] of [
+      [`api '${OK}'`, `api ${OK}`], [`dependencies { implementation '${OK}' }`, `implementation ${OK}`], [`implementation("${OK}")`, `implementation ${OK}`],
+      [`compileOnly '${OK}'`, `compileOnly ${OK}`], [`runtimeOnly("${OK}")`, `runtimeOnly ${OK}`], [`kapt '${OK}'`, `kapt ${OK}`],
+      [`annotationProcessor '${OK}'`, `annotationProcessor ${OK}`], [`testImplementation '${OK}'`, `testImplementation ${OK}`],
+      [`debugApi '${OK}'`, `debugApi ${OK}`], [`ksp '${OK}'`, `ksp ${OK}`], [`classpath '${OK}'`, `classpath ${OK}`],
+      [`dependencies {\n  implementation "${OK}"; api '${OK}'\n}`, `api ${OK}`],
+    ] as const) {
+      const r = gradleDependencies(src);
+      expect(r.declared, src).toContain(seen);
+      expect(r.malformed, src).toEqual([]);
+    }
+    // … and these are forms it does not read, so they must be reported, never passed.
+    for (const src of [`implementation group: 'com.squareup.okhttp3', name: 'okhttp', version: '4.12.0'`, `implementation project(':net')`,
+      `implementation files('libs/net.jar')`, `implementation platform('${OK}')`, `implementation '${OK}', 'a:b:1'`, 'implementation okhttpLib',
+      `implementation fileTree(dir: 'libs', include: ['*.jar'])`, `def note = 'implementation "${OK}"'`]) {
+      expect(gradleDependencies(src).malformed.length, src).toBeGreaterThan(0);
+    }
+    // Not declarations: a comment, a coordinate that contains "api", an assignment, a member.
+    for (const src of [`// implementation '${OK}'`, "consumerProguardFiles 'proguard-rules.pro'", "def wsfApi = 'x'", 'configurations.implementation.canBeResolved = true',
+      "def v = 'com.example:some-api:1'"]) {
+      expect(gradleDependencies(src), src).toEqual({ declared: [], malformed: [] });
+    }
   });
 });
 
@@ -1642,14 +1705,15 @@ describe('privacy: the module records, stores and sends nothing itself; the SDK 
     }
     // What the stripper does not model is absent from what it scans: no Swift raw strings or
     // regex literals (`#"`, `#/`), and no Groovy slashy (`/…/`) or dollar-slashy (`$/…/$`) strings
-    // in build.gradle. In comment-stripped code, a slashy opener is a `/` not followed by `/` or `*`,
-    // after optional whitespace (newlines included), at a line start, after an operator or opening
-    // bracket (= ( , : [ { + - * % ~ ! & | ? ; < > ^), or after a keyword that allows a regex there
-    // (return assert case throw in else yield). A slashy body can hold `\//`, which strip() reads
-    // as a comment start, so one that got past this check could hide the rest of its line.
+    // in build.gradle. In comment-stripped code with string text blanked (so `'../assets'` holds no
+    // `/`), a slashy opener is a `/` not followed by `/` or `*`, after optional whitespace (newlines
+    // included), at a line start, after an operator, opening bracket or member access (= ( , : [ {
+    // + - * % ~ ! & | ? ; < > ^ . @, so `?.` and `.@` too), or after a keyword that allows a regex
+    // there (return assert case throw in else yield). A slashy body can hold `\//`, which strip()
+    // reads as a comment start, so one that got past this check could hide the rest of its line.
     for (const f of code.filter((x) => x.endsWith('.swift'))) expect(read(f), f).not.toMatch(/#"|#\//);
-    const SLASHY = /(?:^|[=(,:[{+\-*%~!&|?;<>^]|\b(?:return|assert|case|throw|in|else|yield)\b)\s*\/(?![/*])/m;
-    expect(strip(read(`${MOD}/android/build.gradle`), 'groovy')).not.toMatch(SLASHY);
+    const SLASHY = /(?:^|[=(,:[{+\-*%~!&|?;<>^.@]|\b(?:return|assert|case|throw|in|else|yield)\b)\s*\/(?![/*])/m;
+    expect(strip(read(`${MOD}/android/build.gradle`), 'groovy', true)).not.toMatch(SLASHY);
     expect(read(`${MOD}/android/build.gradle`)).not.toMatch(/\$\//);
     for (const [src, slashy] of [
       ['def p = /a.b/', true], ['assert s ==~ /x/', true], ['f(/x/)', true], ['def l = [\n  /x/\n]', true], ['def c = { a -> /x/ }', true],
@@ -1659,9 +1723,18 @@ describe('privacy: the module records, stores and sends nothing itself; the SDK 
       ['def u = "https://x"', false], ['def h = w / 2 // half of /x', false], ['x /= 2', false], ['def r = (a) / (b)', false], ['/* a */ def q = 1', false],
       ['def h = w/2', false], ['def h = (w)/2', false], ["def s = 'a/b'", false], ['def index = w / 2', false], ['def inside = x/2', false],
       ['def h = margin / 2', false], ['def h = origin/2', false], // a keyword at the end of a longer name is not the keyword
-    ] as const) expect(SLASHY.test(strip(src, 'groovy')), src).toBe(slashy);
-    // No false positive on any module source, stripped by its own kind (the check itself applies to build.gradle).
-    for (const f of filesUnder(MOD).filter((x) => /\.(swift|kt|ts|tsx|gradle)$/.test(x))) expect(codeOf(f), f).not.toMatch(SLASHY);
+      // Review NB-D1b: a slashy member name after `.`, `?.` or `.@`, and two after a GString whose
+      // interpolation holds a quote. The second one defeats a quote-pairing blanking regex, which
+      // pairs the `"` inside `${'"'}` and then blanks `'}"; ext./x'` with the opener inside it.
+      ['ext./a\\//=1; exclude group: "x"', true], ['def v = wsfX?./a\\//', true], ['def v = wsfX.@/a\\//', true],
+      [`def a = "\${'"'}"; ext./x\\//; exclude group: 'x'`, true], [`def a = "\${'"'}"; ext./x'\\//; exclude group: 'x'`, true],
+      ["assets.srcDirs += ['../assets']", false], ['def u = "https://x/y"', false], ['def v = 1.0/2', false], ['def w = a.b/2', false],
+      ['def s = "a.${b}/c"', false], ["def t = '''./a/'''", false],
+    ] as const) expect(SLASHY.test(strip(src, 'groovy', true)), src).toBe(slashy);
+    // Blanking keeps quotes, line breaks and interpolation code; only string text goes.
+    expect(strip(`def s = "x:\${v}" + '../a' + """\nline\n"""`, 'groovy', true)).toBe(`def s = "\${v}" + '' + """\n"""`);
+    // No false positive on any module source, stripped and blanked by its own kind (the check itself applies to build.gradle).
+    for (const f of filesUnder(MOD).filter((x) => /\.(swift|kt|ts|tsx|gradle)$/.test(x))) expect(strip(read(f), langOf(f), true), f).not.toMatch(SLASHY);
     // A '//' inside a string no longer hides the rest of the line from the scan.
     expect(strip('let s = "a//b"; let x = AVCaptureMovieFileOutput()', 'swift')).toMatch(NATIVE_FORBIDDEN);
     expect(strip('// AVCaptureMovieFileOutput in a comment', 'swift')).not.toMatch(NATIVE_FORBIDDEN);
