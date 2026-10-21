@@ -1,7 +1,8 @@
-import { router } from 'expo-router';
+import { router, useNavigation } from 'expo-router';
 import { reload, signOut, type User } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { Platform } from 'react-native';
 
 import { useWsfAuth } from '../src/auth';
 import { AuthFlagOffPanel } from '../src/AuthFlagOffPanel';
@@ -22,6 +23,7 @@ import { authErrorCode, authErrorMessage } from '../src/authErrors';
 import { wsfAuthEnabled } from '../src/featureFlags';
 import { getFirebaseAuth, getFirebaseFirestore } from '../src/firebase';
 import { routeAfterAuth } from '../src/pendingJoinCode';
+import { landAfterAuth } from '../src/ui/authLanding';
 import { usePostAuthDestinationsReady } from '../src/postAuthDestination';
 import { requestVerificationEmail } from '../src/verificationEmail';
 import {
@@ -76,6 +78,9 @@ export default function VerifyEmail() {
     decides whether that is worth showing — the tap says so, the passive poll
     stays silent.
   */
+  // INT-20: the terminal hop lands through landAfterAuth (on a phone, Home
+  // only with the destination pushed over it; on the web, replace as before).
+  const navigation = useNavigation();
   const passThroughIfVerified = useCallback(async (who: User): Promise<boolean> => {
     // THE UID THIS ATTEMPT BELONGS TO, captured before any await. A refresh
     // started for one account must never route another: a sign-out and a new
@@ -105,9 +110,14 @@ export default function VerifyEmail() {
     // called; nextRouteAfterAuth is only safe on the terminal branch.
     const next = await routeAfterAuth('/', startedFor);
     if (getFirebaseAuth().currentUser?.uid !== startedFor) return false;
-    router.replace(next as never);
+    landAfterAuth(next, {
+      dispatch: (action) => navigation.dispatch(action as never),
+      push: (href) => router.push(href as never),
+      replace: (href) => router.replace(href as never),
+      platform: Platform.OS,
+    });
     return true;
-  }, []);
+  }, [navigation]);
 
   const onCheck = useCallback(async () => {
     if (!user) return;

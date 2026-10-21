@@ -15,7 +15,7 @@ function deviceIn(locale: string) {
   // The device's default for Number#toLocaleString too (what CommunityPresence used before).
   vi.spyOn(Number.prototype, 'toLocaleString').mockImplementation(function toLocaleStringIn(
     this: number,
-    locales?: string | string[],
+    locales?: Intl.LocalesArgument,
     options?: Intl.NumberFormatOptions,
   ) {
     return realToLocaleString.call(this, locales ?? locale, options);
