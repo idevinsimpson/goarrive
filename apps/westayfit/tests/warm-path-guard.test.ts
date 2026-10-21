@@ -177,6 +177,10 @@ const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
  */
 async function boot() {
   bootNative(disk);
+  // Let the harness's own mocks land first. Queued mocks are resolved
+  // concurrently at the next import, so a harness mock of the same module
+  // (its narrower Firebase one) could otherwise land after the one below.
+  await import('../src/storage/syncRead');
   vi.doMock('../src/firebase', () => ({
     getFirebaseApp: () => ({}),
     getFirebaseAuth: () => ({ currentUser: null }),
