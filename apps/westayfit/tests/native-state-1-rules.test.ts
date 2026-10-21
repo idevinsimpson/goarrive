@@ -1043,7 +1043,13 @@ describe('W13-2 (ST-06): a native replay refreshes the sign-in first', () => {
     // Record never refreshes; only a replay does.
     const record = ROUTE.slice(ROUTE.indexOf('const onRecord = useCallback'), ROUTE.indexOf('const onReconcile = useCallback'));
     expect(record).not.toContain('refreshSignIn');
-    expect(ROUTE.match(/refreshSignIn\(/g)).toHaveLength(1);
+    // W12-2 (integrator, ST-06's load half): the goal load's unauthenticated
+    // catch also refreshes a stale sign-in once, native only. That one and the
+    // replay's are the only two; Record still never refreshes.
+    const load = ROUTE.slice(ROUTE.indexOf("e.code === 'functions/unauthenticated'"), ROUTE.indexOf("// A1. The server's sentence"));
+    expect(load).toContain("const auth = Platform.OS === 'web' ? null : getFirebaseAuth();");
+    expect(load.match(/refreshSignIn\(/g)).toHaveLength(1);
+    expect(ROUTE.match(/refreshSignIn\(/g)).toHaveLength(2);
   });
 });
 
