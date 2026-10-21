@@ -38,7 +38,10 @@ const h = vi.hoisted(() => ({
   fresh: {
     mine: null as null | Promise<{ items: unknown[] }>,
     land: (_v: { items: unknown[] }) => {},
+    fail: (_e: Error) => {},
   },
+  /** You's Retry, as the view was handed it. */
+  youRetry: null as null | (() => void),
 }));
 
 vi.mock('../src/memberReads', () => ({
@@ -118,7 +121,11 @@ vi.mock('../src/ui/CommunityParityView', () => ({
   },
 }));
 vi.mock('../src/ui/YouParityView', () => ({
-  YouParityView: (props: { state: { kind: string; community?: { groupId: string } } }) => {
+  YouParityView: (props: {
+    state: { kind: string; community?: { groupId: string } };
+    actions?: { onRetry?: () => void };
+  }) => {
+    h.youRetry = props.actions?.onRetry ?? null;
     const s = props.state;
     h.youFrames.push(s.kind === 'member' ? `member:${s.community?.groupId}` : s.kind);
     return null;
@@ -135,6 +142,16 @@ const LOADING = 'wsf-community-index-loading';
 
 let disk: FakeAsyncStorage;
 let cleanup: Array<() => void> = [];
+
+/** A new membership read for the screens to wait on; the test lands or fails it. */
+function freshRead(): void {
+  h.fresh.mine = new Promise((resolve, reject) => {
+    h.fresh.land = resolve;
+    h.fresh.fail = reject;
+  });
+  // A failure the test causes is the screen's to handle, not an unhandled rejection here.
+  h.fresh.mine.catch(() => undefined);
+}
 
 /*
   TIMING. The repo's vitest config keeps the default 5 s per test. Each test
@@ -167,9 +184,8 @@ beforeEach(() => {
   h.record.mine = { items: TWO };
   h.record.goals = { g1: { goals: [] }, g2: { goals: [] } };
   h.record.profile = { displayName: 'Ann', createdAt: null };
-  h.fresh.mine = new Promise((resolve) => {
-    h.fresh.land = resolve;
-  });
+  freshRead();
+  h.youRetry = null;
 });
 
 afterEach(() => {
@@ -299,13 +315,14 @@ describe('ST-03: before the launch read answers, no warm frame says "none chosen
 
     releaseReads();
     await cc.currentCommunityReady();
-    await settle();
-    // The fresh membership read has not landed: still no chooser, no view.
+    // heads-9 N2: once the read lands, the warm frame is painted, before the
+    // fresh membership read has landed, on the remembered community.
+    await until(() => h.parityFrames.length > 0, 'the warm Community view was drawn');
+    expect(h.parityFrames).toEqual(['g2']);
     expect(testIds().has(CHOOSER)).toBe(false);
-    expect(h.parityFrames).toEqual([]);
 
     h.fresh.land({ items: TWO });
-    await until(() => h.parityFrames.length > 0, 'the Community view was drawn');
+    await settle();
     expect(h.parityFrames.at(-1)).toBe('g2');
     expect(testIds().has(CHOOSER)).toBe(false);
   });
@@ -322,11 +339,13 @@ describe('ST-03: before the launch read answers, no warm frame says "none chosen
 
     releaseReads();
     await cc.currentCommunityReady();
-    await settle();
+    // heads-9 N2: the warm frame is given once the read lands, before the fresh load.
+    await until(() => h.youFrames.at(-1) !== 'loading', 'You left loading');
+    expect(h.youFrames.at(-1)).toBe('member:g2');
     expect(h.youFrames).not.toContain('pickCommunity');
 
     h.fresh.land({ items: TWO });
-    await until(() => h.youFrames.at(-1) !== 'loading', 'You left loading');
+    await settle();
     expect(h.youFrames.at(-1)).toBe('member:g2');
     expect(h.youFrames).not.toContain('pickCommunity');
   });
@@ -339,7 +358,85 @@ describe('ST-03: before the launch read answers, no warm frame says "none chosen
     expect(cc.isCurrentCommunityReady()).toBe(false);
     expect(h.youFrames[0]).toBe('noCommunity');
   });
+
+  itTimed('heads-9 N1: a member of ONE community is painted warm at once, read or not (the read cannot change it)', async () => {
+    h.record.mine = { items: [TWO[0]] };
+    disk.map.set(REMEMBERED_KEY, 'g1');
+    holdLaunchRead();
+    const cc = await boot();
+    const community = await render('community');
+    expect(cc.isCurrentCommunityReady()).toBe(false);
+    expect(h.parityFrames[0]).toBe('g1');
+    expect(community.testIds().has(LOADING)).toBe(false);
+    await render('you');
+    expect(h.youFrames[0]).toBe('member:g1');
+  });
+
+  itTimed('heads-9 N2: after a Retry, the read landing does not bring back a warm frame (Community)', async () => {
+    disk.map.set(REMEMBERED_KEY, 'g2');
+    const releaseReads = holdLaunchRead();
+    const cc = await boot();
+    const { testIds, settle, until } = await render('community');
+    h.fresh.fail(new Error('offline'));
+    await until(() => testIds().has('wsf-community-index-retry'), 'the error screen');
+    freshRead();
+    const retry = document.querySelector('[data-testid="wsf-community-index-retry"]') as HTMLElement;
+    await settleAfter(retry, settle);
+    releaseReads();
+    await cc.currentCommunityReady();
+    await settle();
+    expect(h.parityFrames).toEqual([]);
+    h.fresh.land({ items: TWO });
+    await until(() => h.parityFrames.length > 0, 'the fresh Community view');
+    expect(h.parityFrames.at(-1)).toBe('g2');
+  });
+
+  itTimed('heads-9 N2: after a Retry, the read landing does not bring back a warm frame (You)', async () => {
+    disk.map.set(REMEMBERED_KEY, 'g2');
+    const releaseReads = holdLaunchRead();
+    const cc = await boot();
+    const { settle, until } = await render('you');
+    h.fresh.fail(new Error('offline'));
+    await until(() => h.youFrames.at(-1) === 'failed', 'the failed page');
+    freshRead();
+    const before = h.youFrames.length;
+    h.youRetry!();
+    await until(() => h.youFrames.length > before && h.youFrames.at(-1) === 'loading', 'loading again');
+    releaseReads();
+    await cc.currentCommunityReady();
+    await settle();
+    expect(h.youFrames.at(-1)).toBe('loading');
+    h.fresh.land({ items: TWO });
+    await until(() => h.youFrames.at(-1) !== 'loading', 'the fresh page');
+    expect(h.youFrames.at(-1)).toBe('member:g2');
+  });
 });
+
+describe('heads-9 N2: the read landing replaces only a loading frame', () => {
+  itTimed('an error already on screen stays (Community and You)', async () => {
+    disk.map.set(REMEMBERED_KEY, 'g2');
+    const releaseReads = holdLaunchRead();
+    const cc = await boot();
+    const community = await render('community');
+    const you = await render('you');
+    h.fresh.fail(new Error('offline'));
+    await community.until(() => community.testIds().has('wsf-community-index-retry'), 'the error screen');
+    await you.until(() => h.youFrames.at(-1) === 'failed', 'the failed page');
+    releaseReads();
+    await cc.currentCommunityReady();
+    await community.settle();
+    await you.settle();
+    expect(h.parityFrames).toEqual([]);
+    expect(document.querySelector('[data-testid="wsf-community-index-retry"]')).not.toBeNull();
+    expect(h.youFrames.at(-1)).toBe('failed');
+  });
+});
+
+/** Click a react-native-web control and let what it starts land. */
+async function settleAfter(el: HTMLElement, settle: () => Promise<void>): Promise<void> {
+  el.click();
+  await settle();
+}
 
 describe('ST-03 controls: once the read has answered, the warm frame is painted at once', () => {
   itTimed('Community and You open on the remembered community before any fresh read lands', async () => {
