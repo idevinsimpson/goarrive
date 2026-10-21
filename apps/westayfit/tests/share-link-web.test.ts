@@ -223,9 +223,10 @@ describe('F3-N2: a development tunnel is never a shareable origin', () => {
       process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS = `x.${d}`;
       expect(isShareableHttpsUrl(`https://x.${d}`), d).toBe(false);
     }
-    // A host that merely ends in the same letters is not a forwarder.
-    process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS = 'notexp.direct.example, myexp.direct';
-    expect(isShareableHttpsUrl('https://notexp.direct.example')).toBe(true);
+    // A host that merely ends in the same letters is not a forwarder. (W16-21:
+    // under example.com, not the bare reserved `example` TLD, which is not public.)
+    process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS = 'notexp.direct.example.com, myexp.direct';
+    expect(isShareableHttpsUrl('https://notexp.direct.example.com')).toBe(true);
     expect(isShareableHttpsUrl('https://myexp.direct')).toBe(true);
   });
 

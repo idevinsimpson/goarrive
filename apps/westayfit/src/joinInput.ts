@@ -33,12 +33,18 @@
  *     (INT-08). Until it is, the app reads only `westayfit:` links and bare
  *     codes, and an https invite link pasted into the app is "not a valid
  *     code". Set it with the hosts INT-08 settles on.
- *   · On the WEB the page's own origin is ours as well, exactly as
- *     `currentOrigin()` reports it: the invite link a deployment hands out is
- *     built on that origin (community detail's `${origin}/join/<code>`), so a
- *     member pasting it back into the same deployment is always read. The app
- *     has no origin of its own -- in a development build `window.location`
- *     is the Metro server -- so this never applies there.
+ *   · THE ORIGIN OUR INVITE LINKS ARE BUILT ON is ours as well, exactly as
+ *     `currentOrigin()` reports it: community detail's invite link and its QR
+ *     are `${currentOrigin()}/join/<code>`, so a member pasting one back into
+ *     the same build is always read. On the WEB that is the page's own
+ *     origin. On a PHONE (W16-20, heads-14 RV16-642-N4) it is the public
+ *     origin the build names in EXPO_PUBLIC_WSF_PUBLIC_ORIGIN
+ *     (`currentOrigin.native.ts`, through `publicOriginOf`), and read here
+ *     through the same rule, so it is ours only as that canonical
+ *     `https://<public host>`: never `window.location`, which in a
+ *     development build is the Metro server, and nothing while the owner has
+ *     not named the origin (today). Configured-but-empty (NB-B, above) still
+ *     refuses every https link, this origin included.
  *
  * FROM THE QUERY ONLY `event` AND `activity` ARE KEPT (the event QR's two
  * parameters), each decoded once and re-encoded with `encodeURIComponent`, so
@@ -56,6 +62,7 @@
 import { Platform } from 'react-native';
 
 import { isDevTunnelHost, isPublicHost } from './publicHost';
+import { publicOriginOf } from './publicOrigin';
 import { currentOrigin } from './ui/kioskLink';
 
 /*
@@ -92,7 +99,9 @@ export type JoinInput = {
 
 /**
  * Our origins, for `os`, the `EXPO_PUBLIC_WSF_INVITE_HOSTS` value and the
- * page's own origin. Lower-cased, de-duplicated; empty when nothing is ours.
+ * build's own origin (`currentOrigin()`: the page's on the web, the one the
+ * build names on a phone). Lower-cased, de-duplicated; empty when nothing is
+ * ours.
  */
 export function inviteOriginsFor(os: string, configuredHosts: string | undefined, ownOrigin: string | null): string[] {
   const hosts = configuredInviteHosts(configuredHosts);
@@ -101,11 +110,22 @@ export function inviteOriginsFor(os: string, configuredHosts: string | undefined
   if (hosts !== null && hosts.length === 0) return [];
   const origins = new Set<string>();
   for (const host of hosts ?? []) origins.add(`https://${host}`);
-  if (os === 'web' && typeof ownOrigin === 'string') {
-    const origin = ownOrigin.toLowerCase();
-    if (PAGE_ORIGIN.test(origin) && HOST.test(origin.slice(origin.indexOf('//') + 2))) origins.add(origin);
-  }
+  const own = ownOriginFor(os, ownOrigin);
+  if (own !== null) origins.add(own);
   return [...origins];
+}
+
+/**
+ * The build's own origin as one of ours, or null. The web: the page's origin,
+ * exactly. A phone (W16-20, RV16-642-N4): only the canonical public origin a
+ * build may name (`publicOriginOf`, the rule `currentOrigin.native.ts` reads
+ * it through), so a Metro or LAN address is never ours there.
+ */
+function ownOriginFor(os: string, ownOrigin: string | null): string | null {
+  if (typeof ownOrigin !== 'string') return null;
+  if (os !== 'web') return publicOriginOf(ownOrigin);
+  const origin = ownOrigin.toLowerCase();
+  return PAGE_ORIGIN.test(origin) && HOST.test(origin.slice(origin.indexOf('//') + 2)) ? origin : null;
 }
 
 /**

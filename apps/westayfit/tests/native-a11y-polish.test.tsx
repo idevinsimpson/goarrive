@@ -201,43 +201,99 @@ describe('W16-3 (f): DeviceChoice reads as its buttons say, natively', () => {
 });
 
 describe('W16-3 (INT-18): the stale-figure sentence is spoken once per failure wave, natively', () => {
+  // `waves`: each stale figure's wave (W16-20); [] while nothing is stale.
+  const at = (...waves: number[]) => <StaleAnnouncer waves={waves} />;
+
   it('a wave speaks once; a re-render does not repeat it; a new wave speaks again, after a recovery or not', async () => {
-    await render(<StaleAnnouncer wave={null} />);
+    await render(at());
     expect(spoken).toEqual([]);
-    await render(<StaleAnnouncer wave={100} />);
+    await render(at(100));
     expect(spoken).toEqual([STALE_FIGURE_SENTENCE]);
-    await render(<StaleAnnouncer wave={100} />);
+    await render(at(100));
     expect(spoken).toEqual([STALE_FIGURE_SENTENCE]);
-    await render(<StaleAnnouncer wave={null} />);
-    await render(<StaleAnnouncer wave={200} />);
+    await render(at());
+    await render(at(200));
     expect(spoken).toEqual([STALE_FIGURE_SENTENCE, STALE_FIGURE_SENTENCE]);
     // heads-11 NB-2: a newer failure while something is still stale.
-    await render(<StaleAnnouncer wave={300} />);
+    await render(at(200, 300));
     expect(spoken).toEqual([STALE_FIGURE_SENTENCE, STALE_FIGURE_SENTENCE, STALE_FIGURE_SENTENCE]);
   });
 
-  // heads-13 RV15-642-B1: the newest wave's goal recovers first, so the page's
-  // latest stale round falls back to an older wave already spoken.
-  it('a wave falling back to an older one says nothing (100, 300, 100 speaks twice); a newer one still speaks', async () => {
-    await render(<StaleAnnouncer wave={null} />);
-    await render(<StaleAnnouncer wave={100} />);
-    await render(<StaleAnnouncer wave={300} />);
+  it('one round failing several figures is one wave, spoken once', async () => {
+    await render(at());
+    await render(at(100, 100, 100));
+    await render(at(100, 100));
+    expect(spoken).toEqual([STALE_FIGURE_SENTENCE]);
+  });
+
+  // heads-13 RV15-642-B1: the newest wave's goal recovers first, so what is
+  // still stale is an older wave, already spoken.
+  it('a recovery that leaves an older wave says nothing (100, then 100 and 300, then 100 speaks twice); a new one still speaks', async () => {
+    await render(at());
+    await render(at(100));
+    await render(at(100, 300));
     expect(spoken).toEqual([STALE_FIGURE_SENTENCE, STALE_FIGURE_SENTENCE]);
-    await render(<StaleAnnouncer wave={100} />);
+    await render(at(100));
     expect(spoken).toEqual([STALE_FIGURE_SENTENCE, STALE_FIGURE_SENTENCE]);
-    await render(<StaleAnnouncer wave={null} />);
+    await render(at());
     expect(spoken).toEqual([STALE_FIGURE_SENTENCE, STALE_FIGURE_SENTENCE]);
-    await render(<StaleAnnouncer wave={400} />);
+    await render(at(400));
     expect(spoken).toEqual([STALE_FIGURE_SENTENCE, STALE_FIGURE_SENTENCE, STALE_FIGURE_SENTENCE]);
   });
 
   // heads-9 N-3: a failure that predates the mount is not a new one.
   it('mounting on a wave says nothing; a later wave then speaks', async () => {
-    await render(<StaleAnnouncer wave={100} />);
-    await render(<StaleAnnouncer wave={100} />);
+    await render(at(100));
+    await render(at(100));
     expect(spoken).toEqual([]);
-    await render(<StaleAnnouncer wave={null} />);
-    await render(<StaleAnnouncer wave={200} />);
+    await render(at());
+    await render(at(200));
+    expect(spoken).toEqual([STALE_FIGURE_SENTENCE]);
+  });
+
+  // W16-20 (heads-14 RV16-642-N2): a wave's value is its round's issue time,
+  // so a genuinely new failure can carry an OLDER value than one already
+  // spoken. The grow-only key of RV15-642-B1 left these silent.
+  it('a late settle read: 200 spoken, a full recovery, then a settle round issued at 150 fails late: spoken', async () => {
+    await render(at());
+    await render(at(200));
+    expect(spoken).toEqual([STALE_FIGURE_SENTENCE]);
+    await render(at());
+    await render(at(150));
+    expect(spoken).toEqual([STALE_FIGURE_SENTENCE, STALE_FIGURE_SENTENCE]);
+    // Once spoken, it is not spoken again while it stays, or after a recovery.
+    await render(at(150));
+    await render(at());
+    await render(at(150));
+    expect(spoken).toEqual([STALE_FIGURE_SENTENCE, STALE_FIGURE_SENTENCE]);
+  });
+
+  it('a late settle read while another figure is still stale: 200 showing, a figure fails with 150: spoken', async () => {
+    await render(at());
+    await render(at(200));
+    await render(at(200, 150));
+    expect(spoken).toEqual([STALE_FIGURE_SENTENCE, STALE_FIGURE_SENTENCE]);
+  });
+
+  it('the clock set back: 5000 spoken, a recovery, the clock corrected to 1000, a new failure at 1100: spoken', async () => {
+    await render(at());
+    await render(at(5_000));
+    await render(at());
+    await render(at(1_100));
+    expect(spoken).toEqual([STALE_FIGURE_SENTENCE, STALE_FIGURE_SENTENCE]);
+    // And forward again past it: still a new wave.
+    await render(at());
+    await render(at(5_200));
+    expect(spoken).toEqual([STALE_FIGURE_SENTENCE, STALE_FIGURE_SENTENCE, STALE_FIGURE_SENTENCE]);
+  });
+
+  it('mounting on waves seeds them: a value showing at mount is never spoken, a new one is', async () => {
+    await render(at(300, 100));
+    await render(at());
+    await render(at(100));
+    await render(at(300));
+    expect(spoken).toEqual([]);
+    await render(at(50));
     expect(spoken).toEqual([STALE_FIGURE_SENTENCE]);
   });
 });
@@ -263,13 +319,15 @@ describe('W16-3 (b), (c), INT-18 in Community Home (wiring)', () => {
     const nbsp = src.indexOf("{'\\u00A0'}");
     expect(src.slice(nbsp - 400, nbsp)).toContain('{...nativeA11yHidden()}');
   });
-  it('INT-18: the stale status region spreads liveRegion; the page has ONE StaleAnnouncer, keyed by the failure wave (heads-9 N-3, heads-11 NB-2)', () => {
+  it('INT-18: the stale status region spreads liveRegion; the page has ONE StaleAnnouncer, given the failure waves (heads-9 N-3, heads-11 NB-2, W16-20)', () => {
     const at = src.indexOf('testID={`wsf-community-goal-stale-status-${goal.goalId}`}');
     const block = src.slice(at, at + 500);
     expect(block).toContain('{...liveRegion}');
     expect(block).not.toContain('<StaleAnnouncer');
     expect(src.match(/<StaleAnnouncer /g)).toHaveLength(1);
-    expect(src).toContain('<StaleAnnouncer wave={staleWave} />');
+    expect(src).toContain('<StaleAnnouncer waves={staleWaves} />');
+    // W16-20 (RV16-642-N2): every stale goal's wave, not the latest one alone.
+    expect(src).toContain('staleWaves.push(gp.staleSince ?? 0);');
     expect(src).not.toMatch(/'aria-live': 'polite' \} as Record<string, unknown>\)\}\s*>\s*\{p\.refreshFailed/);
   });
   it('nativeA11yHidden is empty on the web and hides on a phone', () => {

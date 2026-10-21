@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { Platform } from 'react-native';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   configuredInviteHosts,
@@ -13,13 +14,25 @@ import {
 } from '../src/joinInput';
 import { readActivityLabel } from '../src/eventActivity';
 import { readEventParam } from '../src/ui/eventLinks';
+import { buildJoinUrl } from '../src/ui/joinLink';
+import { currentOrigin } from '../src/ui/kioskLink';
+
+// W16-20 (RV16-642-N4): `currentOrigin` is the web twin here, as it always
+// was, unless a case renders as a phone (`originTwin.native`): then it is the
+// twin Metro picks on iOS and Android (`currentOrigin.native.ts`).
+const originTwin = { native: false };
+vi.mock('../src/ui/currentOrigin', async (importOriginal) => {
+  const web = await importOriginal<typeof import('../src/ui/currentOrigin')>();
+  const native = await import('../src/ui/currentOrigin.native');
+  return { currentOrigin: () => (originTwin.native ? native.currentOrigin() : web.currentOrigin()) };
+});
 
 /**
  * NATIVE-MEMBER-1 F-2 (MF-02): Home's "Join with a code" field reads a bare
  * code or the invite link members are given, and nothing else. Cases 1-4 of
  * MF-02, then hostile input, then our origins (review N3): an http(s) link is
- * read only from a configured invite host or, on the web, the page's own
- * origin.
+ * read only from a configured invite host or the build's own origin (the
+ * page's on the web; on a phone, W16-20, the public origin the build names).
  */
 
 // The server mints 22-character base64url codes.
@@ -286,10 +299,10 @@ describe('N3: inviteOriginsFor', () => {
     expect(
       inviteOriginsFor(
         'android',
-        'https://westayfit.app,*.westayfit.app,westayfit.app:443,localhost,192.168.1.20,westayfit.app.,u@westayfit.app,wеstayfit.app,-x.app,ok.example',
+        'https://westayfit.app,*.westayfit.app,westayfit.app:443,localhost,192.168.1.20,westayfit.app.,u@westayfit.app,wеstayfit.app,-x.app,ok.example.org',
         null,
       ),
-    ).toEqual(['https://ok.example']);
+    ).toEqual(['https://ok.example.org']);
   });
   it('nothing configured and no page: nothing is ours', () => {
     expect(inviteOriginsFor('ios', undefined, null)).toEqual([]);
@@ -307,6 +320,31 @@ describe('N3: inviteOriginsFor', () => {
     expect(inviteOriginsFor('ios', undefined, 'http://192.168.1.20:8081')).toEqual([]);
     expect(inviteOriginsFor('android', undefined, 'http://localhost:8081')).toEqual([]);
     expect(inviteOriginsFor('android', 'westayfit.app', 'http://localhost:8081')).toEqual(['https://westayfit.app']);
+  });
+  // W16-20 (heads-14 RV16-642-N4): a phone builds its invite link and QR on
+  // the origin its build names, so that origin is ours there too.
+  it('in the app, the public origin the build names is ours, with or without invite hosts', () => {
+    for (const os of ['ios', 'android']) {
+      expect(inviteOriginsFor(os, undefined, 'https://invite.example.org'), os).toEqual(['https://invite.example.org']);
+      expect(inviteOriginsFor(os, 'westayfit.app', 'https://Invite.Example.org'), os).toEqual([
+        'https://westayfit.app',
+        'https://invite.example.org',
+      ]);
+    }
+  });
+  it('in the app, only as the canonical public origin: never http, a port, a path, a LAN, local or forwarder host', () => {
+    for (const bad of [
+      'http://invite.example.org',
+      'https://invite.example.org:8443',
+      'https://invite.example.org/app',
+      'https://192.168.1.20',
+      'https://my-laptop.local',
+      'https://abc-8081.exp.direct',
+      'https://u@invite.example.org',
+      '',
+    ]) {
+      expect(inviteOriginsFor('ios', undefined, bad), bad).toEqual([]);
+    }
   });
   it('a malformed page origin is not ours', () => {
     for (const bad of ['null', 'file://', 'https://a@b', 'https://host/path', 'javascript:alert(1)', 'https://', '']) {
@@ -339,7 +377,7 @@ describe('N3: the default origins here (vitest runs as the web)', () => {
 describe('NB-1: isPublicHost', () => {
   it('a plain public DNS name is public, in any case', () => {
     // `shop.glocal` only ends in the same letters as `local`: whole labels count.
-    for (const h of ['westayfit.app', 'staging.westayfit.app', 'GoArrive.Web.App', 'a.b.c.example', 'x1.io', 'shop.glocal']) {
+    for (const h of ['westayfit.app', 'staging.westayfit.app', 'GoArrive.Web.App', 'a.b.c.example.com', 'x1.io', 'shop.glocal']) {
       expect(isPublicHost(h), h).toBe(true);
     }
   });
@@ -367,7 +405,7 @@ describe('NB-1: isPublicHost', () => {
     expect(isPublicHost(h)).toBe(false);
   });
   it('a configured local name is ignored like any other non-public entry', () => {
-    expect(inviteOriginsFor('ios', 'my-laptop.local, wsf.internal, ok.example', null)).toEqual(['https://ok.example']);
+    expect(inviteOriginsFor('ios', 'my-laptop.local, wsf.internal, ok.example.org', null)).toEqual(['https://ok.example.org']);
   });
 });
 
@@ -393,6 +431,8 @@ describe('NB-B: configured, configured-but-empty, or not configured', () => {
     for (const os of ['web', 'ios', 'android']) {
       expect(inviteOriginsFor(os, 'https://westayfit.app', 'https://goarrive.web.app'), os).toEqual([]);
       expect(inviteOriginsFor(os, 'westayfit.app:443, *.x', 'http://localhost:8081'), os).toEqual([]);
+      // W16-20 (RV16-642-N4): nor a phone's named public origin.
+      expect(inviteOriginsFor(os, 'https://westayfit.app', 'https://invite.example.org'), os).toEqual([]);
     }
   });
 
@@ -421,5 +461,61 @@ describe('NB-B: configured, configured-but-empty, or not configured', () => {
       expect(parseJoinInput(`westayfit://join/${CODE}`)?.href).toBe(`/join/${CODE}`);
       expect(parseJoinInput(CODE)?.href).toBe(`/join/${CODE}`);
     });
+  });
+});
+
+/*
+  W16-20 (heads-14 RV16-642-N4). Since W16-16 a phone builds its invite link
+  and QR on currentOrigin(), the public origin its build names
+  (EXPO_PUBLIC_WSF_PUBLIC_ORIGIN), while "Join with a code" read an https
+  link on a phone only from EXPO_PUBLIC_WSF_INVITE_HOSTS. With the origin
+  named and the invite hosts unset, the app's own invite link was "not a
+  valid code" in its own field. The reserved test host invite.example.org
+  stands for the owner's; no real host is named.
+*/
+describe('RV16-642-N4: on a phone, the invite link the build hands out is read back', () => {
+  const NAMED = 'https://invite.example.org';
+  const OS = Platform.OS;
+  afterEach(() => {
+    originTwin.native = false;
+    (Platform as { OS: string }).OS = OS;
+    vi.unstubAllEnvs();
+  });
+  const asPhone = (os: 'ios' | 'android') => {
+    originTwin.native = true;
+    (Platform as { OS: string }).OS = os;
+  };
+
+  it.each(['ios', 'android'] as const)('%s: origin named, invite hosts unset: buildJoinUrl’s link parses back to its code', (os) => {
+    vi.stubEnv('EXPO_PUBLIC_WSF_PUBLIC_ORIGIN', NAMED);
+    vi.stubEnv('EXPO_PUBLIC_WSF_INVITE_HOSTS', '');
+    asPhone(os);
+    const url = buildJoinUrl({ origin: currentOrigin(), joinCode: CODE, joinPolicy: 'public' });
+    expect(url).toBe(`${NAMED}/join/${CODE}`);
+    expect(inviteOrigins()).toEqual([NAMED]);
+    expect(parseJoinInput(url)?.href).toBe(`/join/${CODE}`);
+    expect(parseJoinInput(`${url}?event=g1`)?.href).toBe(`/join/${CODE}?event=g1`);
+    // Still nobody else's host, and still not the page's address.
+    expect(parseJoinInput(`https://evil.example/join/${CODE}`)).toBeNull();
+    expect(parseJoinInput(`${window.location.origin}/join/${CODE}`)).toBeNull();
+  });
+
+  it('ios: nothing named (today): no link is built, and no https link is read', () => {
+    vi.stubEnv('EXPO_PUBLIC_WSF_PUBLIC_ORIGIN', '');
+    vi.stubEnv('EXPO_PUBLIC_WSF_INVITE_HOSTS', '');
+    asPhone('ios');
+    expect(buildJoinUrl({ origin: currentOrigin(), joinCode: CODE, joinPolicy: 'public' })).toBeNull();
+    expect(inviteOrigins()).toEqual([]);
+    expect(parseJoinInput(`${NAMED}/join/${CODE}`)).toBeNull();
+    expect(parseJoinInput(`westayfit://join/${CODE}`)?.href).toBe(`/join/${CODE}`);
+  });
+
+  it('ios: origin named but the invite hosts configured-but-empty (NB-B): no https link is read, not even its own', () => {
+    vi.stubEnv('EXPO_PUBLIC_WSF_PUBLIC_ORIGIN', NAMED);
+    vi.stubEnv('EXPO_PUBLIC_WSF_INVITE_HOSTS', 'https://westayfit.app');
+    asPhone('ios');
+    expect(inviteOrigins()).toEqual([]);
+    expect(parseJoinInput(`${NAMED}/join/${CODE}`)).toBeNull();
+    expect(parseJoinInput(CODE)?.href).toBe(`/join/${CODE}`);
   });
 });

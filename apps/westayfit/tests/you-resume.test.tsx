@@ -472,6 +472,49 @@ describe('heads-13 RV15-642-B2, N1: a load that drew the record fails like a kep
     expect(byId('wsf-you-name')?.textContent).toBe('Alex');
   });
 
+  // W16-20 (heads-14 RV16-642-N1, a regression from B2): the record's page
+  // and the page on screen both have a pending head (the record holds no
+  // profile); the kept head used to end the chain on one of them, so the
+  // pending bar stood where the "You" header belongs.
+  it("heads-14 N1: a record with no profile, and on mount both the profile and the communities reads fail: the 'You' header, never the pending bar", async () => {
+    record = { communities: { items: [COMMUNITY] }, goals: { oak: { goals: [goal('active')] } }, own: { g1: OWN(25) } };
+    readMemberProfile.mockRejectedValueOnce(OFFLINE());
+    readMyCommunities.mockRejectedValueOnce(OFFLINE());
+    await render();
+    expect(byId('wsf-you-stale')).not.toBeNull();
+    expect(byId('wsf-you-member')).not.toBeNull();
+    expect(byId('wsf-you-name-pending')).toBeNull();
+    expect(byId('wsf-you-name')?.textContent).toBe('You');
+    expect(byId('wsf-you-lead-own')!.textContent).toBe('25 squats');
+  });
+
+  it("heads-14 N1 with the W16-17 gate: the same record, the list read answers it and only the goals fail: kept with the 'You' header", async () => {
+    record = { communities: { items: [COMMUNITY] }, goals: { oak: { goals: [goal('active')] } }, own: { g1: OWN(25) } };
+    readMemberProfile.mockRejectedValueOnce(OFFLINE());
+    readGoals.mockRejectedValueOnce(OFFLINE());
+    await render();
+    expect(byId('wsf-you-stale')).not.toBeNull();
+    expect(byId('wsf-you-member')).not.toBeNull();
+    expect(byId('wsf-you-name-pending')).toBeNull();
+    expect(byId('wsf-you-name')?.textContent).toBe('You');
+  });
+
+  it('heads-14 N1 with the W16-17 gate (control): the same record, the list read no longer holds it and the goals fail: the failed page, no pending bar', async () => {
+    const ELM_ONLY = { items: [ELM] };
+    rememberCurrentCommunity('u1', 'oak');
+    record = { communities: { items: [COMMUNITY, ELM] }, goals: { oak: { goals: [goal('active')] } }, own: { g1: OWN(25) } };
+    readMemberProfile.mockRejectedValueOnce(OFFLINE());
+    readMyCommunities.mockResolvedValueOnce(ELM_ONLY);
+    readGoals.mockRejectedValueOnce(OFFLINE());
+    await render();
+    await flush();
+    expect(byId('wsf-you-member')).toBeNull();
+    expect(byId('wsf-you-failed')).not.toBeNull();
+    expect(byId('wsf-you-stale')).toBeNull();
+    expect(byId('wsf-you-name-pending')).toBeNull();
+    expect(container.textContent).not.toContain('Oak Grove');
+  });
+
   it('N1: recomposed from its inputs twice (the record cannot), after a resume read the new name; the second failed resume keeps it, never the older one', async () => {
     await render();
     expect(byId('wsf-you-name')?.textContent).toBe('Alex');
