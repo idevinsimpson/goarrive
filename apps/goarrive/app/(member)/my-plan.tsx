@@ -38,6 +38,7 @@ export default function MyPlan() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [plan, setPlan] = useState<MemberPlanData | null>(null);
+  const [intakeSubmitted, setIntakeSubmitted] = useState(false);
   const planDocIdRef = useRef<string>('');
   // Pass B live-view refs: raw base plan doc, the presented scenario doc, and
   // the scenario listener's teardown + the id it is currently pointed at.
@@ -48,8 +49,23 @@ export default function MyPlan() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
 
   useEffect(() => {
-    if (user) fetchNotifications();
+    if (user) {
+      fetchNotifications();
+      fetchIntakeStatus();
+    }
   }, [user]);
+
+  async function fetchIntakeStatus() {
+    if (!user) return;
+    try {
+      const snap = await getDoc(doc(db, 'members', user.uid));
+      if (snap.exists() && snap.data().intakeSubmissionId) {
+        setIntakeSubmitted(true);
+      }
+    } catch (err) {
+      console.warn('[MyPlan] Could not check intake status:', err);
+    }
+  }
 
   async function fetchNotifications() {
     if (!user) return;
@@ -306,11 +322,23 @@ export default function MyPlan() {
         <AppHeader />
         <View style={st.emptyContainer}>
           <Text style={{ fontSize: 48, marginBottom: 16 }}>{'\uD83D\uDCCB'}</Text>
-          <Text style={st.emptyTitle}>No Plan Yet</Text>
-          <Text style={st.emptyText}>
-            Your coach hasn't created your fitness plan yet.{'\n'}
-            Complete your intake to get started.
-          </Text>
+          {intakeSubmitted ? (
+            <>
+              <Text style={st.emptyTitle}>Plan on the Way</Text>
+              <Text style={st.emptyText}>
+                Your intake is complete! Your coach is building your plan.{'\n'}
+                You'll be notified when it's ready.
+              </Text>
+            </>
+          ) : (
+            <>
+              <Text style={st.emptyTitle}>No Plan Yet</Text>
+              <Text style={st.emptyText}>
+                Your coach hasn't created your fitness plan yet.{'\n'}
+                Complete your intake to get started.
+              </Text>
+            </>
+          )}
         </View>
       </View>
     );
