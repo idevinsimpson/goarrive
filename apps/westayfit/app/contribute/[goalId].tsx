@@ -155,7 +155,12 @@ import {
 // functions-westayfit — a shorter poll pays a Firestore round-trip on every
 // tick, a longer poll wastes the cache window.
 const POLL_INTERVAL_MS = 2_000;
-/** RV15-641-2: the poll has landed nothing for this long while it should be running, so the figures are the last confirmed ones. */
+/**
+ * RV15-641-2: the poll has landed nothing for this long while it should be
+ * running, so the figures are the last confirmed ones. The line is re-read on
+ * the 60 s tick (or any re-render), so it says so within about a minute of
+ * this, not at it (RV16-641-4).
+ */
 const CONFIRMED_STALE_AFTER_MS = 3 * POLL_INTERVAL_MS;
 // W12-2 (ST-06): how long a load waits for Auth to refresh a stale sign-in.
 const LOAD_SIGN_IN_REFRESH_MS = 8_000;
@@ -407,10 +412,12 @@ function enterActivates(go: () => void): Record<string, unknown> {
   RV15-641-2 (W12-6, INT-12). The anchor's "Confirmed <time>". It re-renders on
   the shared 60 s tick (useNowTick), so with the screen left open it names the
   day once midnight has passed, though no state changed. It reads "Last
-  confirmed" after a load that failed (W12-2, native), and also once the 2 s
-  poll has landed nothing for CONFIRMED_STALE_AFTER_MS while it should be
-  running: a failed or hung tick changes no state, so before this the line
-  kept saying "Confirmed". `pollSince` is when the poll last started (null
+  confirmed" after a load that failed (W12-2, native), and also, within about
+  a minute, once the 2 s poll has landed nothing for CONFIRMED_STALE_AFTER_MS
+  (6 s) while it should be running: staleness is judged when the line
+  renders, on the 60 s tick or any other re-render, not by a timer of its own
+  (RV16-641-4: the wording, not the timing, was corrected). A failed or hung
+  tick changes no state, so before this the line kept saying "Confirmed". `pollSince` is when the poll last started (null
   while it is stopped), so a return to the app does not read as stale before
   its first tick could land. It is a ref, read when the line renders: the
   poll starting or stopping re-renders nothing.
