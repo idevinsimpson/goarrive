@@ -1,7 +1,7 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { httpsCallable } from 'firebase/functions';
 import { useCallback, useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { useWsfAuth } from '../../../../../src/auth';
 import { describeCallableError } from '../../../../../src/callableErrors';
@@ -181,7 +181,13 @@ export default function MembersScreen() {
     <ScrollView style={st.screen} contentContainerStyle={st.body} testID="wsf-members-screen">
       <View style={st.chrome}>
         <Pressable
-          onPress={() => router.replace(`/community/${groupId}`)}
+          // NATIVE-MEMBER-1 W16-6 (MF-10): on a phone the community is the
+          // screen below this one; going back to it keeps its scroll and
+          // figures instead of building a second instance. With nothing to go
+          // back to (a cold deep link), or on the web, it opens the community.
+          onPress={() =>
+            Platform.OS !== 'web' && router.canGoBack() ? router.back() : router.replace(`/community/${groupId}`)
+          }
           accessibilityRole="link"
           accessibilityLabel="Back to the community"
           testID="wsf-members-back"

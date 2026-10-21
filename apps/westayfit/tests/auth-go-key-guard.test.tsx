@@ -249,3 +249,70 @@ describe('W16-1 / MF-13: reset-password', () => {
     expect(requestReset).toHaveBeenCalledTimes(1);
   });
 });
+
+/*
+  MF-13 review N-1. A request settles, the terminal state is set, and React
+  has not re-rendered yet: the handler on the input is still the old closure
+  (sent = false, unconfigured = false). An Enter landing in that gap must not
+  submit again, so a terminal outcome keeps the latch shut. Inside one act
+  scope React defers the re-render, which is exactly that gap.
+*/
+describe('W16-1 / MF-13 review N-1: a terminal outcome keeps the latch shut until the re-render', () => {
+  const settleThenEnter = (settle: () => void, testID: string) =>
+    act(async () => {
+      settle();
+      for (let i = 0; i < 20; i++) await Promise.resolve();
+      enter(testID);
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+    });
+
+  it('reset: Enter right after "sent" sends nothing more', async () => {
+    let finish!: () => void;
+    requestReset.mockImplementation(() => new Promise<void>((res) => (finish = res)));
+    await render(<ResetPassword />);
+    type('wsf-reset-email', 'alex@example.com');
+    act(() => enter('wsf-reset-email'));
+    await settleThenEnter(() => finish(), 'wsf-reset-email');
+    await flush();
+    expect(requestReset).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('[data-testid="wsf-reset-sent"]')).not.toBeNull();
+  });
+
+  it('reset: Enter right after "unconfigured" sends nothing more', async () => {
+    let fail!: (e: unknown) => void;
+    requestReset.mockImplementation(() => new Promise<void>((_res, rej) => (fail = rej)));
+    await render(<ResetPassword />);
+    type('wsf-reset-email', 'alex@example.com');
+    act(() => enter('wsf-reset-email'));
+    await settleThenEnter(() => fail(Object.assign(new Error('x'), { code: 'functions/failed-precondition' })), 'wsf-reset-email');
+    await flush();
+    expect(requestReset).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('[data-testid="wsf-reset-unconfigured"]')).not.toBeNull();
+  });
+
+  it('sign-up: Enter right after the account is created creates nothing more', async () => {
+    let finish!: (v: unknown) => void;
+    createUser.mockImplementation(() => new Promise((res) => (finish = res)));
+    await render(<SignUp />);
+    type('wsf-signup-displayName', 'Alex');
+    type('wsf-signup-email', 'alex@example.com');
+    type('wsf-signup-password', '12345678');
+    act(() => enter('wsf-signup-password'));
+    await settleThenEnter(() => finish({ user: { uid: 'u1' } }), 'wsf-signup-password');
+    await flush();
+    expect(createUser).toHaveBeenCalledTimes(1);
+  });
+
+  it('sign-in: Enter right after a successful sign-in signs in nothing more', async () => {
+    let finish!: (v: unknown) => void;
+    signIn.mockImplementation(() => new Promise((res) => (finish = res)));
+    await render(<SignIn />);
+    type('wsf-signin-email', 'alex@example.com');
+    type('wsf-signin-password', 'correct horse');
+    act(() => enter('wsf-signin-password'));
+    await settleThenEnter(() => finish({ user: { uid: 'u1', emailVerified: true } }), 'wsf-signin-password');
+    await flush();
+    expect(signIn).toHaveBeenCalledTimes(1);
+    expect(replace).toHaveBeenCalled();
+  });
+});

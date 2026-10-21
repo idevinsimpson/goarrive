@@ -5,6 +5,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useWsfAuth } from '../../../src/auth';
+import { isUnconfirmedRefusal } from '../../../src/callableRefusal';
 import { mapWithLimit } from '../../../src/concurrency';
 import {
   currentCommunityReady,
@@ -42,6 +43,8 @@ import { peekGoals, peekMyCommunities, readGoals, readMyCommunities, wasRefused 
 import { CommunityParityView } from '../../../src/ui/CommunityParityView';
 import type { CommunityParityProps, ParityGoal } from '../../../src/ui/communityParityTypes';
 import { onPrivacySettled } from '../../../src/ui/CommunityPrivacyControls';
+import { RefreshNote, type RefreshState } from '../../../src/ui/RefreshNote';
+import { RESUME_MIN_AWAY_MS, useResumeRefresh } from '../../../src/useResumeRefresh';
 
 /**
  * COMMUNITY — who "we" is, and which community Home opens.
@@ -110,7 +113,7 @@ type Goal = {
  */
 type Roster =
   | { groupId: string; people: { displayName: string; role: string }[]; complete: boolean }
-  | { groupId: string; failed: true }
+  | { groupId: string; failed: true; unavailable?: boolean }
   | 'pending';
 
 type Addition = { amount: number; unit: string; at: string };
@@ -147,10 +150,15 @@ async function readRoster(groupId: string): Promise<Roster> {
       people: Array.isArray(r.data?.members) ? r.data.members : [],
       complete: (r.data?.nextCursor ?? null) === null,
     };
-  } catch {
-    return { groupId, failed: true };
+  } catch (e) {
+    // W16-2 (HB-03): refused without the function's own sentence (the staging
+    // hold) -- the list is unavailable, not a glitch and not about the account.
+    return { groupId, failed: true, unavailable: isUnconfirmedRefusal(e) };
   }
 }
+
+/** How long a return-to-app revalidation may take before the tab says it is checking (as You and Progress). */
+const CHECKING_AFTER_MS = 400;
 
 function activeGoals(goals: Goal[] | 'failed' | 'pending'): Goal[] {
   return goals === 'failed' || goals === 'pending' ? [] : goals.filter((g) => g.status === 'active');
@@ -233,15 +241,48 @@ export default function CommunityIndexScreen() {
   const [rosterNonce, setRosterNonce] = useState(0);
   useEffect(() => onPrivacySettled(() => setRosterNonce((n) => n + 1)), []);
 
+  /*
+    NATIVE-MEMBER-1 W16-2 (INT-12). COMING BACK TO THE APP REVALIDATES.
+    This tab stays mounted and focus never fires on a return to the app, so
+    its membership, goals and roster kept whatever they last read. A return
+    after at least 30 s away (src/useResumeRefresh.ts) runs the same fresh
+    reads QUIETLY: what is on screen stays (no skeleton), "Checking for
+    updates…" after a moment, and a failed read keeps the rows, marked as
+    last read, with Retry. An error on screen is retried on any return.
+    Focus behaviour is unchanged.
+  */
+  const [revalidate, setRevalidate] = useState(0);
+  const quietNext = useRef(false);
+  const [checking, setChecking] = useState(false);
+  const [stale, setStale] = useState(false);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
   useEffect(() => {
     if (!ready || !user) return;
     const token = ++liveRef.current;
     const uid = user.uid;
+    const quiet = quietNext.current;
+    quietNext.current = false;
     // A retry, or an account with nothing already read, starts from loading;
     // a warm first frame for THIS account stays up while the fresh reads run.
     const warm = retrying.current ? null : warmState(uid);
     retrying.current = false;
-    setState(warm ?? { kind: 'loading' });
+    // A quiet revalidation keeps the rows already on screen.
+    const before = stateRef.current;
+    const keep = quiet && before.kind === 'ready' ? before : null;
+    if (!keep) setState(warm ?? { kind: 'loading' });
+    setStale(false);
+    setChecking(false);
+    const slow = keep
+      ? setTimeout(() => {
+          if (liveRef.current === token) setChecking(true);
+        }, CHECKING_AFTER_MS)
+      : null;
+    const settle = () => {
+      if (slow) clearTimeout(slow);
+      if (liveRef.current === token) setChecking(false);
+    };
 
     (async () => {
       const fns = getFirebaseFunctions();
@@ -250,12 +291,16 @@ export default function CommunityIndexScreen() {
         const result = await readMyCommunities(uid);
         items = result.items as unknown as Membership[];
       } catch {
-        if (liveRef.current === token) setState({ kind: 'error' });
+        if (liveRef.current !== token) return;
+        settle();
+        if (keep) setStale(true);
+        else setState({ kind: 'error' });
         return;
       }
 
       if (items.length === 0) {
         if (liveRef.current === token) {
+          settle();
           setState({ kind: 'ready', items: [], currentId: null, momentum: [], roster: 'pending' });
         }
         return;
@@ -268,9 +313,17 @@ export default function CommunityIndexScreen() {
         return r.goals;
       });
 
+      // A quiet revalidation whose goal read failed keeps what was last read for that row.
+      let keptStale = false;
       const enriched: Enriched[] = items.map((m, i) => {
         const s = settled[i];
-        return { ...m, goals: s && s.ok ? s.value : 'failed' };
+        if (s && s.ok) return { ...m, goals: s.value };
+        const shown = keep?.items.find((it) => it.groupId === m.groupId)?.goals;
+        if (shown !== undefined && shown !== 'failed' && shown !== 'pending') {
+          keptStale = true;
+          return { ...m, goals: shown };
+        }
+        return { ...m, goals: 'failed' };
       });
 
       // `memberOf` is the authority, and the resolver — not this screen —
@@ -320,10 +373,20 @@ export default function CommunityIndexScreen() {
       ]);
 
       if (liveRef.current === token) {
+        settle();
+        // A quiet revalidation whose roster read failed keeps the roster it showed.
+        const keepRoster =
+          keep !== null &&
+          fetched !== 'pending' &&
+          'failed' in fetched &&
+          keep.roster !== 'pending' &&
+          !('failed' in keep.roster) &&
+          keep.roster.groupId === fetched.groupId;
+        if (keptStale || keepRoster) setStale(true);
         setState((prev) => {
           // A roster re-read after a privacy change is newer than this one.
           const roster =
-            rosterGen.current !== rosterIssued &&
+            (rosterGen.current !== rosterIssued || keepRoster) &&
             prev.kind === 'ready' &&
             prev.roster !== 'pending' &&
             fetched !== 'pending' &&
@@ -337,8 +400,31 @@ export default function CommunityIndexScreen() {
 
     return () => {
       liveRef.current += 1;
+      if (slow) clearTimeout(slow);
     };
-  }, [ready, user, attempt, selection]);
+  }, [ready, user, attempt, selection, revalidate]);
+
+  useResumeRefresh(
+    () => {
+      if (!ready || !user) return;
+      if (state.kind === 'error') {
+        retrying.current = true;
+        setAttempt((n) => n + 1);
+        return;
+      }
+      quietNext.current = true;
+      setRevalidate((n) => n + 1);
+    },
+    { minAwayMs: state.kind === 'error' ? 0 : RESUME_MIN_AWAY_MS },
+  );
+  const refresh: RefreshState = {
+    checking,
+    stale,
+    onRetry: () => {
+      quietNext.current = true;
+      setRevalidate((n) => n + 1);
+    },
+  };
 
   // Back on this tab: if the member's current community moved while they
   // were elsewhere, the tab follows it.
@@ -437,6 +523,7 @@ export default function CommunityIndexScreen() {
         <EmptyBody />
       ) : (
         <>
+          <RefreshNote refresh={refresh} testIDPrefix="wsf-community-index" />
           <Chips state={state} onSelect={select} />
           <ReadyBody state={state} onOpen={open} />
         </>
@@ -480,6 +567,7 @@ export default function CommunityIndexScreen() {
             onShowMoreMembers: () => router.push(`/community/${ready_.currentId}/members` as never),
           })}
           footer={<SecondaryFooter state={ready_} onOpen={open} />}
+          refresh={refresh}
           testID="wsf-community-index-rows"
         />
         {announce}
@@ -812,7 +900,9 @@ function toParityProps(state: Extract<State, { kind: 'ready' }>, callbacks: Pari
       roster === null
         ? { state: 'loading' }
         : 'failed' in roster
-          ? { state: 'failed' }
+          ? roster.unavailable
+            ? { state: 'failed', unavailable: true }
+            : { state: 'failed' }
           : {
               state: 'loaded',
               value: {

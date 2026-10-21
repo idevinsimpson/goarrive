@@ -59,10 +59,14 @@ export default function ResetPassword() {
       if (code === 'functions/failed-precondition') {
         setUnconfigured(true);
       } else {
+        // MF-13 review N-1: the latch reopens only for an outcome the member can
+        // retry. A terminal one keeps it shut, so a Go/Enter that lands before
+        // the re-render (while the old closure still reads the old state) cannot
+        // submit again. "Sent" and "unconfigured" are terminal.
+        inFlight.current = false;
         setError(authErrorMessage(e, 'Reset request failed.'));
       }
     } finally {
-      inFlight.current = false;
       setSubmitting(false);
     }
   }

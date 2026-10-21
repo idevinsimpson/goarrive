@@ -22,6 +22,7 @@ import { initialsOf, isChampionRole } from './CommunityPresence';
 import { NAVY, PROGRESS_GREEN, SURFACE } from './kit';
 import { LivingWeProgress } from './LivingWeProgress';
 import { MEMBER_TAB_BAR_BODY, MEMBER_TAB_MOVE_OVERHANG } from './MemberTabBar';
+import { RefreshNote } from './RefreshNote';
 import { fillRatioAttribute, formatCount } from './progressFormat';
 
 /**
@@ -99,6 +100,9 @@ export function CommunityParityView(props: CommunityParityProps) {
             <Fact label="Goals" value={goalsCount === null ? null : formatCount(goalsCount)} testID="wsf-parity-fact-goals" />
           </View>
         </View>
+
+        {/* W16-2 (INT-12): checking, or what was last read when a return-to-app read failed. */}
+        {props.refresh ? <RefreshNote refresh={props.refresh} testIDPrefix="wsf-community-index" /> : null}
 
         {/* 3 · your communities */}
         <View style={s.switcher} testID="wsf-parity-switcher">
@@ -446,6 +450,18 @@ function RosterBody(props: CommunityParityProps) {
     );
   }
   if (roster.state === 'failed') {
+    // W16-2 (HB-03): a refusal without the function's own sentence is the
+    // staging hold, not a glitch "just now" and not a statement about the
+    // account (the Members page says the same, F-9).
+    if ('unavailable' in roster && roster.unavailable) {
+      return (
+        <ReadFailed
+          text="The member list is temporarily unavailable. Try again later."
+          onRetry={props.onRetryRoster}
+          testID="wsf-parity-roster-unavailable"
+        />
+      );
+    }
     return (
       <ReadFailed
         text="Members couldn’t be loaded just now."
