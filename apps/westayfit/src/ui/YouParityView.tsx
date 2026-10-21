@@ -22,6 +22,8 @@ import { LivingWeProgress } from './LivingWeProgress';
 import { MEMBER_TAB_BAR_BODY, MEMBER_TAB_MOVE_OVERHANG } from './MemberTabBar';
 import { RefreshNote, type RefreshState } from './RefreshNote';
 import { fillRatio, percentLabel } from './progressFormat';
+// W16-4 (MF-17): the one text-scale policy (W12-8) for the two large numerals.
+import { numeralTextProps } from './textScale';
 
 /**
  * YOU PARITY VIEW — the accepted Lovable You reference (`642f830b`,
@@ -402,7 +404,9 @@ function Lead({ row }: { row: YouGoal }) {
                   accessible
                   accessibilityLabel={line}
                 >
-                  <Text style={s.sharedNumber}>{`${n(total)} `}</Text>
+                  {/* W16-4 (MF-17): capped and kept on one line, shrinking to fit
+                      rather than clipping a digit at the largest text sizes. */}
+                  <Text style={s.sharedNumber} {...numeralTextProps}>{`${n(total)} `}</Text>
                   <Text style={s.sharedOf}>{line.slice(n(total).length + 1)}</Text>
                 </View>
               ) : (
@@ -434,7 +438,7 @@ function Lead({ row }: { row: YouGoal }) {
                 assistive tech and to text matching, while the unit sits 3 px
                 under the number as in the reference. */}
             <View testID="wsf-you-lead-own" accessible accessibilityLabel={`${n(row.yourPart)} ${row.unit}`}>
-              <Text style={s.ownNumber}>{`${n(row.yourPart)} `}</Text>
+              <Text style={s.ownNumber} {...numeralTextProps}>{`${n(row.yourPart)} `}</Text>
               <Text style={s.ownUnit}>{row.unit}</Text>
             </View>
           </View>
