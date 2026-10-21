@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { act, type ReactNode } from 'react';
@@ -218,20 +218,34 @@ async function kioskReceipt(): Promise<HTMLElement> {
   `<APP_ROOT>/assets/…`: the same in any checkout, CI or temporary merge. A
   URL with a scheme (https://…) is left as it is. Nothing else in the DOM is
   touched.
+
+  RV16-641-4 (heads-14): the root is this checkout's own, exactly (APP_ROOT,
+  and its real path where that differs, the longer first), not guessed from
+  the first '/assets/' in a path: under a directory named `assets`
+  (/Users/x/assets/goarrive/…) the guess kept the rest of the checkout path.
 */
-const ASSET_PATH = /(url\(&quot;|url\(|src="|srcset=")([^"&()\s]*?)\/assets\//g;
-const portable = (html: string) =>
-  html.replace(ASSET_PATH, (match, open: string, before: string) => (before.includes('://') ? match : `${open}<APP_ROOT>/assets/`));
+const portableFrom = (roots: readonly string[]) => (html: string) =>
+  [...roots]
+    .sort((a, b) => b.length - a.length)
+    .reduce((h, root) => h.split(`${root}/assets/`).join('<APP_ROOT>/assets/'), html);
+const portable = portableFrom([...new Set([APP_ROOT, realpathSync(APP_ROOT)])]);
 
 describe('INT-16: the web\'s screens are the DOM they were before', () => {
   const recorded: Record<string, string> = existsSync(FIXTURE) ? JSON.parse(readFileSync(FIXTURE, 'utf8')) : {};
   const record = process.env.WSF_RECORD_INT16 === '1' && !existsSync(FIXTURE);
   const fresh: Record<string, string> = {};
 
-  it('portable: an absolute asset path becomes <APP_ROOT>/assets/, and nothing else changes', () => {
+  it('portable: this checkout\'s own asset paths become <APP_ROOT>/assets/, and nothing else changes', () => {
     const at = (root: string) => `<div style="background-image: url(&quot;${root}/assets/brand/derived/monogram-fill-green.png&quot;);"></div><img src="${root}/assets/a.png">`;
-    expect(portable(at('/tmp/x/ga-int1/apps/westayfit'))).toBe(at('<APP_ROOT>'));
-    expect(portable(at('/home/runner/work/goarrive/apps/westayfit'))).toBe(portable(at('/dev/shm/cand-merge/apps/westayfit')));
+    expect(portable(at(APP_ROOT))).toBe(at('<APP_ROOT>'));
+    expect(portableFrom(['/home/runner/work/goarrive/apps/westayfit'])(at('/home/runner/work/goarrive/apps/westayfit'))).toBe(at('<APP_ROOT>'));
+    // RV16-641-4: a checkout under a directory named `assets`.
+    const inAssets = '/Users/x/assets/goarrive/apps/westayfit';
+    expect(portableFrom([inAssets])(at(inAssets))).toBe(at('<APP_ROOT>'));
+    // A root and its real path, one inside the other (macOS /var -> /private/var): the longer is taken first.
+    expect(portableFrom(['/var/x/apps/westayfit', '/private/var/x/apps/westayfit'])(at('/private/var/x/apps/westayfit'))).toBe(at('<APP_ROOT>'));
+    // Nothing is guessed: a path into another checkout is not this one's.
+    expect(portable(at('/elsewhere/apps/westayfit'))).toBe(at('/elsewhere/apps/westayfit'));
     const other = '<img src="https://example.com/assets/a.png"><p>assets/ 1,275 squats</p>';
     expect(portable(other)).toBe(other);
   });
