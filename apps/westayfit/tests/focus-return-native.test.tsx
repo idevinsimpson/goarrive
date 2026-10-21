@@ -1,4 +1,4 @@
-import { act, useRef } from 'react';
+import { act, StrictMode, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -357,6 +357,30 @@ describe('useStepHeadingFocus', () => {
     advance(1);
     expect(rn.focused).toEqual([31]);
     mount(<Step step="review" />); // a re-render is not a step change
+    interactionsDone();
+    advance(400);
+    expect(rn.focused).toEqual([31]);
+    mount(<Step step="count" />); // back to the earlier step: a change again
+    interactionsDone();
+    advance(400);
+    expect(rn.focused).toEqual([31, 31]);
+  });
+
+  it('React StrictMode’s development re-run of the mount is not a step change: nothing is focused on the first mount', () => {
+    mount(
+      <StrictMode>
+        <Step step="count" />
+      </StrictMode>,
+    );
+    interactionsDone();
+    advance(400);
+    expect(rn.interactionCalls).toBe(0);
+    expect(rn.focused).toEqual([]);
+    mount(
+      <StrictMode>
+        <Step step="review" />
+      </StrictMode>,
+    );
     interactionsDone();
     advance(400);
     expect(rn.focused).toEqual([31]);

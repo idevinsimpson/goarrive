@@ -7,9 +7,12 @@ import { Platform } from 'react-native';
  * `aria-modal` on a View does nothing on a phone (settled from source), so
  * VoiceOver could swipe from a sheet into the tab behind it. On iOS the panel
  * says so itself with `accessibilityViewIsModal`, and VoiceOver ignores its
- * siblings. Android has no such prop: there the screen behind is hidden from
- * TalkBack by the shell (`importantForAccessibility="no-hide-descendants"`,
- * the integrator's tabs layout), so this is empty. The web twin is empty too.
+ * siblings. Android has no such prop, so this is empty there: what keeps
+ * TalkBack off the tab behind is the member tabs shell itself, which hides
+ * its tree (`accessibilityElementsHidden` and `importantForAccessibility=
+ * "no-hide-descendants"`, native only) while a MOVE sheet or a route over the
+ * tabs covers it (app/(tabs)/_layout.tsx, W12-9). The web twin is empty too:
+ * there each panel keeps its own `aria-modal` and the shell is `inert`.
  *
  * Its own type: a `.native` file must not import its base specifier.
  */
