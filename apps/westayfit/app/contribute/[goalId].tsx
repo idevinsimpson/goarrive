@@ -115,7 +115,7 @@ import {
   totalOfTargetParts,
 } from '../../src/ui/progressFormat';
 
-import { ACTION_GREEN, ACTION_GREEN_DEEP, ON_ACTION, elevation } from '../../src/ui/kit';
+import { ACTION_GREEN, ACTION_GREEN_DEEP, ON_ACTION, elevation, numeralInputProps, numeralTextProps } from '../../src/ui/kit';
 import {
   MEMBER_TAB_MOVE_OVERHANG,
   shellAppliesTo,
@@ -1263,6 +1263,8 @@ export default function ContributeToGoal() {
         },
         ownCredit: data.ownCredit,
       });
+      // RV11-641-5: these figures are confirmed now; the kept-figures note is no longer true.
+      setRefreshFailed(false);
       // Ready for the next fresh attempt.
       attemptRef.current = null;
       setEntry('');
@@ -1710,6 +1712,9 @@ export default function ContributeToGoal() {
       step,
       initialStep: initialStep === 'move' ? 'move' : 'enter',
       asSheet,
+      // The closed, not-found, sign-in, error and loading screens, and the
+      // unreadable-attempt screen, all render in front of the step.
+      stepShown: state.kind === 'ready' && !(restoreFailed && beforeWrite),
     },
     edit: onEdit,
   };
@@ -3118,7 +3123,8 @@ export default function ContributeToGoal() {
           <View style={styles.sheetBody}>
             <Text ref={reviewHeadingRef} style={styles.stepHeading} {...HEADING_1}>Review your contribution</Text>
             <View style={styles.reviewBox}>
-              <Text style={styles.reviewQuantity} testID="wsf-contribute-review-quantity">
+              {/* W12-8 (INT-16): capped and shrinking to fit on a phone (state's range neighbours this line). */}
+              <Text style={styles.reviewQuantity} testID="wsf-contribute-review-quantity" {...numeralTextProps}>
                 {formatCount(reviewCount)}
                 <Text style={styles.reviewUnit}>{` ${unit}`}</Text>
               </Text>
@@ -3440,6 +3446,8 @@ export default function ContributeToGoal() {
               placeholderTextColor={wsfTheme.colors.textMuted}
               accessibilityLabel={`Number of ${unit} completed`}
               testID="wsf-contribute-entry"
+              // W12-8 (INT-16): the entry's numeral is capped on a phone; nothing on the web.
+              {...numeralInputProps}
             />
           );
           // On a very narrow screen (or at 200% zoom) the two round buttons

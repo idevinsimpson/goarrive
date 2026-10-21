@@ -20,6 +20,22 @@ export const CARD_BORDER = '#E3E7E1';
 export const HERO_MUTED = 'rgba(247,245,240,0.78)';
 export const HERO_RULE = 'rgba(247,245,240,0.35)';
 export { PROGRESS_GREEN };
+/*
+  W12-8 (INT-15, INT-16, MF-17). ONE TEXT-SCALE POLICY, from kit for every
+  lane (src/ui/textScale(.native).ts): chrome labels and large numerals are
+  capped at 1.3x on a phone, a numeral shrinks to fit its line, and a layout
+  decides by the width its text actually has. Empty on the web.
+*/
+export {
+  TEXT_SCALE_CAPS,
+  chromeTextProps,
+  effectiveWidth,
+  numeralInputProps,
+  numeralTextProps,
+  type ChromeTextProps,
+  type NumeralInputProps,
+  type NumeralTextProps,
+} from './textScale';
 // Contrast-checked at rgb(90,107,133); placeholders use it too. Do not change.
 export const TEXT_MUTED = wsfTheme.colors.textMuted;
 export const ERROR_RED = '#B4232C';

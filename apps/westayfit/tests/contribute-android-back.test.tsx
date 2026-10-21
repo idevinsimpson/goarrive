@@ -158,6 +158,7 @@ describe('W12-3: contributeBackAction, the decision', () => {
     step: 'enter',
     initialStep: 'enter',
     asSheet: true,
+    stepShown: true,
   };
   const cases: Array<[string, Partial<ContributeBackSnapshot>, ReturnType<typeof contributeBackAction>]> = [
     ['(a) submitting', { submitting: true, step: 'review' }, 'consume'],
@@ -176,6 +177,10 @@ describe('W12-3: contributeBackAction, the decision', () => {
     ['(e) entry opened directly, on a page', { step: 'enter', initialStep: 'enter', asSheet: false }, 'pass'],
     ['(f) the movement step, in a sheet', { step: 'move', initialStep: 'move' }, 'close'],
     ['(f) the movement step, on a page', { step: 'move', initialStep: 'move', asSheet: false }, 'pass'],
+    ['(b2) review hidden behind another screen (the goal closed), in a sheet', { step: 'review', stepShown: false }, 'close'],
+    ['(b2) the move-reached entry hidden, on a page', { step: 'enter', initialStep: 'move', stepShown: false, asSheet: false }, 'pass'],
+    ['(b2) does not outrank sending', { step: 'review', stepShown: false, submitting: true }, 'consume'],
+    ["(b2) does not outrank (b')", { stepShown: false, pending: row('unknown'), pendingDurable: false }, 'consume'],
   ];
   it.each(cases)('%s → %s', (_name, over, expected) => {
     expect(contributeBackAction({ ...base, ...over })).toBe(expected);
@@ -257,10 +262,27 @@ describe('W12-3: Android Back on the route', () => {
     await press('wsf-contribute-review');
     await press('wsf-contribute-submit');
     expect(byId('wsf-contribute-not-saved')).not.toBeNull();
-    expect(await back()).toBe(true);
+    // RV11-641-3: pressed again and again, Back never leaves the only copy.
+    for (let i = 0; i < 3; i += 1) expect(await back()).toBe(true);
     expect(byId('wsf-contribute-not-saved')).not.toBeNull();
     expect(router.back).not.toHaveBeenCalled();
     expect(router.replace).not.toHaveBeenCalled();
+  });
+
+  it('RV11-641-3: unknown and NOT kept, on a page opened at the entry: Back twice, still consumed, never handed to the navigator', async () => {
+    storage.refuses = true;
+    answers.wsfContribute = OFFLINE;
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    act(() => typeInto(byId('wsf-contribute-entry') as HTMLInputElement, '35'));
+    await press('wsf-contribute-review');
+    await press('wsf-contribute-submit');
+    expect(byId('wsf-contribute-not-saved')).not.toBeNull();
+    // Without (b') the second press would return false and the navigator would pop the only copy.
+    expect(await back()).toBe(true);
+    expect(await back()).toBe(true);
+    expect(byId('wsf-contribute-not-saved')).not.toBeNull();
+    expect(router.back).not.toHaveBeenCalled();
   });
 
   it('unknown and kept → Back closes the sheet (the attempt waits on the device)', async () => {
@@ -277,6 +299,26 @@ describe('W12-3: Android Back on the route', () => {
     expect(byId('wsf-contribute-not-saved')).toBeNull();
     expect(await back()).toBe(true);
     expect(router.back).toHaveBeenCalledTimes(1);
+  });
+
+  it('RV11-641-2: the goal closes mid-review in the sheet → one Back leaves (no walking the hidden steps)', async () => {
+    nav.sheet = true;
+    params.value = { goalId: 'g1', mode: 'move' };
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    await press('wsf-contribute-done');
+    act(() => typeInto(byId('wsf-contribute-entry') as HTMLInputElement, '35'));
+    await press('wsf-contribute-review');
+    expect(byId('wsf-contribute-review-screen')).not.toBeNull();
+    // The goal closes; the next poll tick says so.
+    answers.wsfGoalPulse = async () => ({ ...PULSE, status: 'closed' });
+    await act(async () => vi.advanceTimersByTime(2_000));
+    await settle();
+    expect(byId('wsf-contribute-closed')).not.toBeNull();
+    expect(await back()).toBe(true);
+    expect(router.back).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
   });
 
   it('a kiosk registers no Back listener (Finish is the way out)', async () => {
