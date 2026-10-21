@@ -1,6 +1,6 @@
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useRef } from 'react';
-import { AppState, type AppStateStatus } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AppState, Platform, type AppStateStatus } from 'react-native';
 
 /**
  * NATIVE-INTEGRATOR-1 (INT-12, INT-04). A MEMBER SURFACE RE-READS WHEN THE
@@ -103,4 +103,27 @@ export function useResumeRefresh(onResume: () => void, options: { minAwayMs?: nu
       };
     }, []),
   );
+}
+
+/**
+ * NATIVE-INTEGRATOR-1 (INT-12 case 5). WHETHER THE APP IS IN THE FOREGROUND
+ * ON A PHONE: false while it is in the `background`, true otherwise
+ * (`inactive`, Control Center or the app switcher, is still in front). A poll
+ * gated on it sends nothing while the member is away and starts again when
+ * they come back.
+ *
+ * Always true on web: a hidden tab keeps the behaviour it had (browsers
+ * already throttle its timers), so nothing about the web build changes.
+ */
+export function useAppInForeground(platform: string = Platform.OS): boolean {
+  const [foreground, setForeground] = useState(() => platform === 'web' || AppState.currentState !== 'background');
+  useEffect(() => {
+    if (platform === 'web') return undefined;
+    setForeground(AppState.currentState !== 'background');
+    const sub = AppState.addEventListener('change', (next: AppStateStatus) => setForeground(next !== 'background')) as
+      | { remove: () => void }
+      | undefined;
+    return () => sub?.remove();
+  }, [platform]);
+  return foreground;
 }

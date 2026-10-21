@@ -27,7 +27,9 @@ vi.mock('../src/firebase', () => ({ getFirebaseAuth: () => ({}) }));
 const USER = { uid: 'u1', email: 'member@example.com', displayName: 'Member' };
 vi.mock('../src/auth', () => ({ useWsfAuth: () => ({ ready: true, user: USER }) }));
 // Two communities and nothing chosen: Home shows the list rather than opening one.
-vi.mock('../src/currentCommunity', () => ({ resolveCurrentCommunity: () => null }));
+// `useCurrentCommunityReady` is the state lane's (wsf-native-state-3): always
+// true on web. Listed so this mock serves the merged tree as well as this one.
+vi.mock('../src/currentCommunity', () => ({ resolveCurrentCommunity: () => null, useCurrentCommunityReady: () => true }));
 const readMyCommunities = vi.fn();
 const readGoals = vi.fn();
 vi.mock('../src/memberReads', () => ({
