@@ -37,6 +37,15 @@ export default function SignIn() {
   const [mismatch, setMismatch] = useState(false);
   const passwordRef = useRef<TextInput>(null);
   /*
+    NATIVE-MEMBER-1 W16-1 (MF-13). THE KEYBOARD'S GO/ENTER IS A SUBMIT TOO.
+    The password field's Go (native) and Enter (web: react-native-web turns
+    Enter into onSubmitEditing) call onSubmit directly, past the button's
+    disabled state. So onSubmit carries the guards itself: the same rule the
+    button shows, and a synchronous in-flight latch (a ref, not state: two
+    key presses in one tick both see the old state).
+  */
+  const inFlight = useRef(false);
+  /*
     WHAT THIS SCREEN IS CARRYING, read once on mount.
 
     Session storage is not reactive, and re-reading it every render would let
@@ -93,7 +102,12 @@ export default function SignIn() {
     );
   }
 
+  // The button's own rule, now the one rule for every way of submitting.
+  const canSubmit = !!email && !!password;
+
   async function onSubmit() {
+    if (!canSubmit || inFlight.current) return;
+    inFlight.current = true;
     setError(null);
     setMismatch(false);
     setSubmitting(true);
@@ -133,6 +147,7 @@ export default function SignIn() {
       setError(authErrorMessage(e, 'Sign-in failed.'));
       setMismatch(isCredentialMismatch(e));
     } finally {
+      inFlight.current = false;
       setSubmitting(false);
     }
   }
@@ -220,7 +235,7 @@ export default function SignIn() {
         label={returning ? 'Sign in and continue' : 'Sign in'}
         onPress={onSubmit}
         submitting={submitting}
-        disabled={!email || !password}
+        disabled={!canSubmit}
         testID="wsf-signin-submit"
       />
     </FormShell>
