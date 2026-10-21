@@ -4,6 +4,7 @@
  *
  * Usage (from apps/westayfit):
  *   npm run check:staging-env -- <path-to-env-file> [--platform ios|android]
+ * (`--platform=ios` works too). Exactly one file; any other flag is refused.
  *
  * Reads a dotenv file (KEY=VALUE lines, `#` comments) and checks it with the
  * app's OWN rules, not a copy of them:
@@ -23,11 +24,16 @@
  * each one is mapped to a fixed label and the names it concerns; the message
  * itself is never written anywhere. Exit 0 on PASS, 1 on FAIL.
  *
- * It refuses to read a file that git tracks: a real value must never be in
- * the repository, and this is not a reason to put one there.
+ * The file must be one git can never commit by accident. It is refused when
+ * git tracks it (by the path given or by the path it resolves to), when it
+ * sits inside the repository without being ignored (a `git add -A` would
+ * commit it; use a `.env*.local` name or keep it outside), when it has more
+ * than one hard link (it could be a tracked file under another name), and
+ * whenever git cannot answer (no git, no work tree, an unexpected reply):
+ * the check never passes a file it could not place.
  */
-import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -73,40 +79,71 @@ function namesIn(text) {
 
 /*
   The app's refusals, line by line, mapped to a fixed label and fixed names.
-  A line that quotes a value is matched on the words around the value, and
-  only the label and names below are ever printed.
+  Only the label and names below are ever printed.
+
+  Every test is anchored at the start of the line (`^\s*`), on the fixed words
+  a refusal opens with. A value never opens a line (every refusal in
+  src/stagingEnv.ts and app.config.js starts with fixed text, and a dotenv
+  value cannot hold a newline), so a value that happens to contain another
+  rule's words cannot pick the rule. The specific `${NAME} is "` lines come
+  first, the generic any-name rule last.
 */
-const RESOLVER_RULES = [
-  { test: /These variables are set but empty:/, label: 'present but blank', names: 'listed' },
-  { test: /is not a recognised environment/, label: 'must be exactly "staging" or "production"', names: [SELECTOR] },
+export const RESOLVER_RULES = [
+  { test: new RegExp(`^\\s*${SELECTOR} is ".*", which is not a recognised environment\\.`), label: 'must be exactly "staging" or "production"', names: [SELECTOR] },
+  { test: new RegExp(`^\\s*${PROJECT_ID} is ".*", which names the production project`), label: 'PROJECT_ID must not name the production project', names: [PROJECT_ID] },
   {
-    test: /(A complete staging Firebase config was supplied|Staging values were supplied)/,
-    label: `staging values need ${SELECTOR}=staging`,
-    names: 'listed+selector',
+    test: new RegExp(`^\\s*${AUTH_DOMAIN} is ".*" but project ".*" means it must be "`),
+    label: 'AUTH_DOMAIN must equal <PROJECT_ID>.firebaseapp.com',
+    names: [AUTH_DOMAIN, PROJECT_ID],
   },
-  { test: /and the emulator flag are both set/, label: 'staging and the emulator flag are exclusive', names: [SELECTOR, EMULATORS] },
-  { test: /^\s*Missing: /, label: 'missing', names: 'listed' },
-  { test: /which names the production project/, label: 'PROJECT_ID must not name the production project', names: [PROJECT_ID] },
-  { test: /^\s*(EXPO_PUBLIC_WSF_STAGING_[A-Z_]+) is the PRODUCTION value\./, label: 'must not be a production value', names: 'leading' },
-  { test: new RegExp(`^\\s*${AUTH_DOMAIN} is "`), label: 'AUTH_DOMAIN must equal <PROJECT_ID>.firebaseapp.com', names: [AUTH_DOMAIN, PROJECT_ID] },
   {
-    test: new RegExp(`^\\s*${STORAGE_BUCKET} is "`),
+    test: new RegExp(`^\\s*${STORAGE_BUCKET} is ".*" but project ".*" means it must be one of `),
     label: 'STORAGE_BUCKET must be <PROJECT_ID>.firebasestorage.app or <PROJECT_ID>.appspot.com',
     names: [STORAGE_BUCKET, PROJECT_ID],
   },
-  { test: new RegExp(`^\\s*${SENDER_ID} must be all digits`), label: 'SENDER_ID must be all digits', names: [SENDER_ID] },
-  { test: new RegExp(`^\\s*${APP_ID} is "`), label: 'APP_ID must be a web app id, 1:<SENDER_ID>:web:<hex>', names: [APP_ID, SENDER_ID] },
-  { test: new RegExp(`^\\s*${API_KEY} is not the shape`), label: 'API_KEY must have the shape of a Firebase browser key', names: [API_KEY] },
+  { test: new RegExp(`^\\s*${APP_ID} is ".*", which does not have the shape 1:`), label: 'APP_ID must be a web app id, 1:<SENDER_ID>:web:<hex>', names: [APP_ID, SENDER_ID] },
+  { test: new RegExp(`^\\s*${SENDER_ID} must be all digits; got "`), label: 'SENDER_ID must be all digits', names: [SENDER_ID] },
+  { test: new RegExp(`^\\s*${API_KEY} is not the shape of a Firebase browser API key\\.`), label: 'API_KEY must have the shape of a Firebase browser key', names: [API_KEY] },
+  { test: /^\s*These variables are set but empty: /, label: 'present but blank', names: 'listed' },
+  {
+    test: new RegExp(`^\\s*A complete staging Firebase config was supplied, but ${SELECTOR} is `),
+    label: `staging values need ${SELECTOR}=staging`,
+    names: [SELECTOR, ...STAGING_NAMES],
+  },
+  {
+    // The list is the group: only the names inside the brackets, never what follows.
+    test: new RegExp(`^\\s*Staging values were supplied \\(([A-Z_, ]*)\\), but ${SELECTOR} is `),
+    label: `staging values need ${SELECTOR}=staging`,
+    names: 'selector+group',
+  },
+  { test: new RegExp(`^\\s*${SELECTOR}=staging and the emulator flag are both set\\.`), label: 'staging and the emulator flag are exclusive', names: [SELECTOR, EMULATORS] },
+  { test: /^\s*Missing: /, label: 'missing', names: 'listed' },
+  { test: /^\s*(EXPO_PUBLIC_WSF_STAGING_[A-Z_]+) is the PRODUCTION value\./, label: 'must not be a production value', names: 'group' },
 ];
 
-const APP_CONFIG_RULES = [
-  { test: /EXPO_PUBLIC_WSF_ENV must be "staging" or "production"/, label: 'must be "staging" or "production"', names: [SELECTOR] },
-  { test: /staging values are missing from the EAS environment:/, label: 'missing from the build environment', names: 'listed' },
-  { test: /EXPO_PUBLIC_WSF_AUTH_ENABLED is not set to 1 or 0/, label: 'must be 1 (only a production build may say 0)', names: [AUTH] },
-  { test: /EXPO_PUBLIC_WSF_AUTH_ENABLED is off for a/, label: 'is off for a non-production build', names: [AUTH] },
-  { test: /EXPO_PUBLIC_WSF_CRASH_HARNESS is set for a production/, label: 'the crash harness is refused in production', names: [HARNESS] },
-  { test: /EXPO_PUBLIC_WSF_USE_EMULATORS cannot\s+name its backend/, label: 'a release build cannot use the emulator', names: [EMULATORS, SELECTOR] },
+const REFUSED = 'WSF native build refused: ';
+export const APP_CONFIG_RULES = [
+  { test: new RegExp(`^\\s*${REFUSED}${SELECTOR} must be "staging" or "production" for an? `), label: 'must be "staging" or "production"', names: [SELECTOR] },
+  {
+    test: new RegExp(`^\\s*${REFUSED}profile "[^"]*" embeds its JavaScript, so ${EMULATORS} cannot name its backend`),
+    label: 'a release build cannot use the emulator',
+    names: [EMULATORS, SELECTOR],
+  },
+  { test: new RegExp(`^\\s*${REFUSED}${HARNESS} is set for a production `), label: 'the crash harness is refused in production', names: [HARNESS] },
+  {
+    test: new RegExp(`^\\s*${REFUSED}profile "[^"]*" embeds its JavaScript with ${SELECTOR}=staging, but these staging values are missing from the EAS environment: `),
+    label: 'missing from the build environment',
+    names: 'listed',
+  },
+  {
+    test: new RegExp(`^\\s*${REFUSED}profile "[^"]*" embeds its JavaScript, but ${AUTH} is not set to 1 or 0 \\(got "`),
+    label: 'must be 1 (only a production build may say 0)',
+    names: [AUTH],
+  },
+  { test: new RegExp(`^\\s*${REFUSED}${AUTH} is off for an? `), label: 'is off for a non-production build', names: [AUTH] },
 ];
+
+export const UNRECOGNISED = 'refused (an unrecognised rule)';
 
 /** A refusal message mapped to [{ label, names }]. The message is never returned or printed. */
 export function redact(message, rules) {
@@ -119,14 +156,12 @@ export function redact(message, rules) {
     const rest = line.slice(match.index + match[0].length);
     let names;
     if (rule.names === 'listed') names = namesIn(rest);
-    else if (rule.names === 'listed+selector') names = [SELECTOR, ...namesIn(rest).filter((n) => STAGING_NAMES.includes(n))];
-    else if (rule.names === 'leading') names = namesIn(match[1]);
+    else if (rule.names === 'selector+group') names = [SELECTOR, ...namesIn(match[1]).filter((n) => STAGING_NAMES.includes(n))];
+    else if (rule.names === 'group') names = namesIn(match[1]);
     else names = rule.names;
-    // A complete config with no selector lists no names: all six were supplied.
-    if (rule.names === 'listed+selector' && names.length === 1) names = [SELECTOR, ...STAGING_NAMES];
     findings.push({ label: rule.label, names });
   }
-  if (findings.length === 0) findings.push({ label: 'refused (an unrecognised rule)', names: namesIn(String(message)) });
+  if (findings.length === 0) findings.push({ label: UNRECOGNISED, names: namesIn(String(message)) });
   return findings;
 }
 
@@ -141,13 +176,96 @@ export async function loadStagingEnv() {
   return import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`);
 }
 
-function isTracked(path) {
-  try {
-    execFileSync('git', ['ls-files', '--error-unmatch', '--', path], { cwd: APP_ROOT, stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
+export const REFUSALS = {
+  unreadable: 'refused: the file cannot be read.',
+  notFile: 'refused: that is not a regular file.',
+  hardLinked: 'refused: the file has more than one hard link, so it could be a tracked file under another name; copy it to a file of its own.',
+  tracked: 'refused: that file is tracked by git; a staging value must never be in the repository.',
+  notIgnored: 'refused: the file is inside the repository and not ignored; move it out or use a .env*.local name.',
+  git: 'refused: git could not show that the file is outside the repository or ignored by it (no git, no work tree, or an unexpected answer); nothing was read.',
+};
+
+/**
+ * One git command, from the app's own work tree, in the C locale (so its
+ * replies can be read), and with no GIT_* variable that could point it at
+ * another repository or index. Returns { status, stderr }; status is null
+ * when git did not run at all.
+ */
+function runGit(args) {
+  const env = { ...process.env, LC_ALL: 'C', LANGUAGE: '' };
+  for (const k of Object.keys(env)) if (k.startsWith('GIT_')) delete env[k];
+  const r = spawnSync('git', args, { cwd: APP_ROOT, env, encoding: 'utf8', stdio: ['ignore', 'ignore', 'pipe'] });
+  return { status: r.error ? null : r.status, stderr: String(r.stderr ?? '') };
+}
+
+const UNTRACKED = /did not match any file/;
+const OUTSIDE = /is outside repository/;
+
+/**
+ * Why git says this file may not be read, or null. `given` is the path as
+ * typed (resolved), `real` its realpath; `git` runs one git command. Only
+ * three answers let a file through: "did not match" (not tracked),
+ * "is outside repository", and an ignored path. Anything else refuses.
+ */
+export function gitRefusal(given, real, git = runGit) {
+  for (const p of new Set([given, real])) {
+    const r = git(['ls-files', '--error-unmatch', '--', p]);
+    if (r.status === 0) return REFUSALS.tracked;
+    const untracked = r.status === 1 && UNTRACKED.test(r.stderr);
+    const outside = r.status === 128 && OUTSIDE.test(r.stderr);
+    if (!untracked && !outside) return REFUSALS.git;
   }
+  const r = git(['check-ignore', '-q', '--', real]);
+  if (r.status === 0) return null;
+  if (r.status === 1) return REFUSALS.notIgnored;
+  if (r.status === 128 && OUTSIDE.test(r.stderr)) return null;
+  return REFUSALS.git;
+}
+
+/** The file's realpath and null, or null and why it is refused, before anything is read. */
+export function placeFile(given, git = runGit) {
+  let real;
+  let st;
+  try {
+    real = realpathSync(given);
+    st = statSync(real);
+  } catch {
+    return { real: null, refusal: REFUSALS.unreadable };
+  }
+  if (!st.isFile()) return { real: null, refusal: REFUSALS.notFile };
+  if (st.nlink > 1) return { real: null, refusal: REFUSALS.hardLinked };
+  const refusal = gitRefusal(given, real, git);
+  return refusal ? { real: null, refusal } : { real, refusal: null };
+}
+
+const USAGE = 'usage: npm run check:staging-env -- <path-to-env-file> [--platform ios|android]';
+
+/** argv after the script: exactly one file, and at most one --platform (ios or android). Anything else is { error }. */
+export function parseArgs(argv) {
+  let platform;
+  const files = [];
+  for (let i = 0; i < argv.length; i += 1) {
+    const a = argv[i];
+    if (a === '--platform' || a.startsWith('--platform=')) {
+      if (platform !== undefined) return { error: USAGE };
+      if (a === '--platform') {
+        if (i + 1 >= argv.length) return { error: USAGE };
+        i += 1;
+        platform = argv[i];
+      } else platform = a.slice('--platform='.length);
+    } else if (a.startsWith('-')) return { error: USAGE };
+    else files.push(a);
+  }
+  if (files.length !== 1) return { error: USAGE };
+  if (platform !== undefined && !['ios', 'android'].includes(platform)) return { error: USAGE };
+  return { file: files[0], platform };
+}
+
+/** The internal-error line: only a standard error class name, never anything the error carries. */
+const STANDARD_ERRORS = ['Error', 'TypeError', 'RangeError', 'SyntaxError', 'ReferenceError', 'URIError', 'EvalError', 'AggregateError'];
+export function internalErrorLine(e) {
+  const name = e && typeof e.name === 'string' && STANDARD_ERRORS.includes(e.name) ? e.name : 'Error';
+  return `internal error (${name}); nothing was printed from the file.`;
 }
 
 /** Runs app.config.js as an EAS `preview` build of `platform` would, with exactly this env. */
@@ -229,27 +347,24 @@ function print(result) {
 }
 
 async function main() {
-  const args = process.argv.slice(2);
-  const pi = args.indexOf('--platform');
-  const platform = pi >= 0 ? args[pi + 1] : undefined;
-  const file = args.find((a, i) => !a.startsWith('--') && !(pi >= 0 && i === pi + 1));
-  if (!file || (platform !== undefined && !['ios', 'android'].includes(platform))) {
-    process.stdout.write('usage: npm run check:staging-env -- <path-to-env-file> [--platform ios|android]\nFAIL\n');
+  const args = parseArgs(process.argv.slice(2));
+  if (args.error) {
+    process.stdout.write(`${args.error}\nFAIL\n`);
     return 1;
   }
-  const path = resolve(process.cwd(), file);
-  if (isTracked(path)) {
-    process.stdout.write('refused: that file is tracked by git; a staging value must never be in the repository.\nFAIL\n');
+  const { real, refusal } = placeFile(resolve(process.cwd(), args.file));
+  if (refusal) {
+    process.stdout.write(`${refusal}\nFAIL\n`);
     return 1;
   }
   let text;
   try {
-    text = readFileSync(path, 'utf8');
+    text = readFileSync(real, 'utf8');
   } catch {
-    process.stdout.write('refused: the file cannot be read.\nFAIL\n');
+    process.stdout.write(`${REFUSALS.unreadable}\nFAIL\n`);
     return 1;
   }
-  const result = await check(parseDotenv(text), platform ? [platform] : ['ios', 'android']);
+  const result = await check(parseDotenv(text), args.platform ? [args.platform] : ['ios', 'android']);
   return print(result) ? 0 : 1;
 }
 
@@ -257,8 +372,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   main().then(
     (code) => process.exit(code),
     (e) => {
-      // Never the message: it could quote a value.
-      process.stdout.write(`internal error (${e && e.name ? e.name : 'Error'}); nothing was printed from the file.\nFAIL\n`);
+      // Never the message, nor a name the error chose: either could quote a value.
+      process.stdout.write(`${internalErrorLine(e)}\nFAIL\n`);
       process.exit(1);
     },
   );
