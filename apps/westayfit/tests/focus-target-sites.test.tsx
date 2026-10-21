@@ -1,4 +1,4 @@
-import { act, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { act, StrictMode, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Dimensions } from 'react-native';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -399,6 +399,52 @@ describe('W12-20 (INT-17): MOVE\'s Close is where the screen reader starts, and 
     expect(router.replace).toHaveBeenCalledWith('/contribute/g1?groupId=oak&mode=move');
     expect(fx.focusSoonCalls).toBe(0);
     expect(fx.focused).toHaveLength(0);
+  });
+
+  it('RV17-641-F2, Android: a cold read that hands off focuses nothing on MOVE, then or later', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    reads.mine = MINE;
+    reads.goals = { goals: [goal('g1', '2030-01-01')] };
+    act(() => root.render(<MoveResolver />));
+    await settle();
+    expect(router.replace).toHaveBeenCalledWith('/contribute/g1?groupId=oak&mode=move');
+    act(() => vi.advanceTimersByTime(5_000));
+    expect(fx.focusSoonCalls).toBe(0);
+    expect(fx.focused).toHaveLength(0);
+  });
+
+  it('RV17-641-F2, Android: a read still out after 1 s focuses Close anyway, once; its later answer does not focus it again', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    let answer!: (v: unknown) => void;
+    reads.mine = new Promise((r) => (answer = r));
+    reads.goals = TWO_GOALS;
+    act(() => root.render(<MoveResolver />));
+    await settle();
+    act(() => vi.advanceTimersByTime(999));
+    expect(fx.focused).toHaveLength(0);
+    act(() => vi.advanceTimersByTime(1));
+    expect(fx.focused).toEqual([close()]);
+    await act(async () => answer(MINE));
+    await settle();
+    expect(byId('wsf-move-choose')).not.toBeNull();
+    expect(fx.focused).toEqual([close()]);
+  });
+
+  it('RV17-641-F2, Android under StrictMode: a chooser decided from the record focuses Close once (the rehearsal remount does not repeat it)', async () => {
+    reads.peekMine = MINE;
+    reads.peekGoals = TWO_GOALS;
+    reads.mine = MINE;
+    reads.goals = TWO_GOALS;
+    act(() =>
+      root.render(
+        <StrictMode>
+          <MoveResolver />
+        </StrictMode>,
+      ),
+    );
+    await settle();
+    expect(byId('wsf-move-choose')).not.toBeNull();
+    expect(fx.focused).toEqual([close()]);
   });
 
   it('web: MOVE makes no registry or focus call, and the screen reader is never touched', async () => {

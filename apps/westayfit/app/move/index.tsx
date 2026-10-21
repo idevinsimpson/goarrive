@@ -74,6 +74,13 @@ import { nativeErrorBoundary } from '../../src/ui/RouteErrorFallback';
  * as another page.
  */
 
+/**
+ * W12-23 (RV17-641-F2): MOVE's Close takes the screen reader's focus when the
+ * sheet has something to show; a read still out after this long focuses it
+ * anyway, so a hung read does not leave the screen reader on the tab behind.
+ */
+const MOVE_FIRST_FOCUS_FALLBACK_MS = 1_000;
+
 type ListedGoal = {
   goalId: string;
   title: string;
@@ -174,6 +181,45 @@ export default function MoveResolver() {
   // NATIVE-INTEGRATOR-1 (INT-04 case 4): bumped by the error's Try again; the
   // resolver reads again in place, fresh (INT-26: never joining a hung read).
   const [reloadToken, setReloadToken] = useState(0);
+  /*
+    W12-23 (RV17-641-F2). MOVE'S FIRST FOCUS WAITS FOR THE RESOLUTION, AND A
+    HAND-OFF ENDS IT. It used to be moved at mount, so a cold read that then
+    handed to the one open goal's flow had already put the screen reader on
+    this sheet's Close (at once on Android; on iOS when the read took more than
+    about 400 ms), and the flow's own Close came second. Now it starts when
+    the sheet has something to show (the chooser, nothing open, an error), or
+    after MOVE_FIRST_FOCUS_FALLBACK_MS if the read is still out; a hand-off,
+    however it was decided (from the record on the first frame, or after a
+    read), ends it for good, and so does a blur. `fired` is set when the focus
+    is actually moved, so it is never repeated. Native only (the effects below
+    return at once on the web).
+  */
+  const closeRef = useRef<View>(null);
+  const firstFocus = useRef({
+    fired: false,
+    ended: false,
+    pending: null as null | (() => void),
+    timer: null as null | ReturnType<typeof setTimeout>,
+  }).current;
+  const stopFirstFocus = (forGood: boolean) => {
+    if (firstFocus.timer !== null) clearTimeout(firstFocus.timer);
+    firstFocus.timer = null;
+    firstFocus.pending?.();
+    firstFocus.pending = null;
+    if (forGood) firstFocus.ended = true;
+  };
+  const startFirstFocus = () => {
+    firstFocus.timer = null;
+    if (firstFocus.fired || firstFocus.ended || firstFocus.pending) return;
+    // Read only when the focus is moved: from then on it has happened.
+    const target = {
+      get current() {
+        firstFocus.fired = true;
+        return closeRef.current;
+      },
+    };
+    firstFocus.pending = focusSoon(target);
+  };
 
   useEffect(() => {
     if (!wsfAuthEnabled || !ready) return;
@@ -182,7 +228,8 @@ export default function MoveResolver() {
       return;
     }
     if (state.kind === 'handoff') {
-      // The sheet stays up across the hand-off (see below).
+      // The sheet stays up across the hand-off (see below). Its Close is not focused: the flow's is.
+      stopFirstFocus(true);
       markSheetHandoff();
       router.replace(state.href as never);
       return;
@@ -233,7 +280,8 @@ export default function MoveResolver() {
           const g = open[0];
           // The sheet stays up across the hand-off: the flow it hands to is
           // the same sheet (app/_layout.tsx), and must not fade the dim in
-          // again from nothing.
+          // again from nothing. Its Close is not focused: the flow's is (RV17-641-F2).
+          stopFirstFocus(true);
           markSheetHandoff();
           router.replace(
             `/contribute/${g.goalId}?groupId=${encodeURIComponent(groupId)}&mode=move`,
@@ -352,30 +400,39 @@ export default function MoveResolver() {
     stayed on whatever the tab behind had. On iOS and Android, Close is a
     registered focus target (src/ui/focusTarget.ts) -- the one
     useSheetFocusReturn falls back to when a goal's flow closes over this
-    sheet -- and it takes the screen reader's focus once, when the sheet first
-    appears: after the presentation settles, and about 400 ms later on iOS
-    (src/ui/accessibilityFocus.ts). A goal's flow covering the sheet first, or
-    the sheet going, cancels it. A sheet decided as a hand-off on its first
-    frame is replaced by its one goal's flow at once and focuses nothing here;
-    that flow's own Close does. Nothing on the web.
+    sheet -- and it takes the screen reader's focus once, when the sheet has
+    something to show (W12-23, `firstFocus` above): after the presentation
+    settles, and about 400 ms later on iOS (src/ui/accessibilityFocus.ts). A
+    goal's flow covering the sheet first, the sheet going, or a hand-off
+    cancels it; the flow's own Close is then the one focused. Nothing on the
+    web.
   */
-  const closeRef = useRef<View>(null);
-  const handoffAtMount = useRef(state.kind === 'handoff').current;
   useEffect(() => {
     if (Platform.OS === 'web') return undefined;
     return registerFocusTarget('wsf-move-close', closeRef);
   }, []);
   useEffect(() => {
-    if (Platform.OS === 'web' || handoffAtMount) return undefined;
-    const cancel = focusSoon(closeRef);
-    const offBlur = navigation.addListener('blur', cancel);
+    if (Platform.OS === 'web') return undefined;
+    const offBlur = navigation.addListener('blur', () => stopFirstFocus(true));
     return () => {
-      cancel();
+      // Unmounting cancels what is pending (a StrictMode rehearsal remounts and starts again).
+      stopFirstFocus(false);
       offBlur();
     };
-    // The first mount only: the return to Close is useSheetFocusReturn's.
+    // `stopFirstFocus` acts on the ref alone.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  useEffect(() => {
+    if (Platform.OS === 'web' || firstFocus.fired || firstFocus.ended || state.kind === 'handoff') return;
+    if (state.kind !== 'working') {
+      if (firstFocus.timer !== null) clearTimeout(firstFocus.timer);
+      startFirstFocus();
+    } else if (firstFocus.timer === null && !firstFocus.pending) {
+      firstFocus.timer = setTimeout(startFirstFocus, MOVE_FIRST_FOCUS_FALLBACK_MS);
+    }
+    // The resolution decides; the helpers act on the ref alone.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.kind]);
 
   /*
     THE SHEET. The scrim covers the whole viewport, which is what keeps the tab
