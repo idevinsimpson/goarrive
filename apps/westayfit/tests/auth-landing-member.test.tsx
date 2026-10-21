@@ -260,6 +260,43 @@ describe('W16-7 / INT-20: the sign-in and sign-up terminal hops land on a phone'
   });
 });
 
+// RV12-641-F1 (integrator 793821c9, merged at cab2e9ae): a visitor signing in
+// at a kiosk returns to /contribute/<goal>?kiosk=1 over the kiosk's start
+// screen. Resetting to Home there would put the visitor's member Home under
+// the contribution on a shared device, so the hop replaces.
+describe('W16-7 x RV12-641-F1: a kiosk destination is replaced on a phone, never reset to Home', () => {
+  const KIOSK_NEXT = '/contribute/g1?kiosk=1';
+  it.each([
+    ['Sign in', () => <SignIn />],
+    ['Create account', () => <SignUp />],
+  ])('%s, already signed in (iOS): the kiosk contribution is replaced, never HOME_ONLY_RESET', async (_n, el) => {
+    next.value = KIOSK_NEXT;
+    auth = { ready: true, user: MEMBER };
+    await render(el(), 'ios');
+    expect(router.replace).toHaveBeenCalledWith(KIOSK_NEXT);
+    expect(navigation.dispatch).not.toHaveBeenCalled();
+    expect(router.push).not.toHaveBeenCalled();
+  });
+
+  it('Sign in submitted at a kiosk (Android): one replace to the kiosk contribution, no reset, no push', async () => {
+    next.value = KIOSK_NEXT;
+    signIn.mockImplementation(async () => {
+      setUser(MEMBER);
+      return { user: MEMBER };
+    });
+    await render(<SignIn />, 'android');
+    type('wsf-signin-email', 'visitor@example.com');
+    type('wsf-signin-password', 'correct horse');
+    await click('wsf-signin-submit');
+    await flush();
+    expect(router.replace).toHaveBeenCalledTimes(1);
+    expect(router.replace).toHaveBeenCalledWith(KIOSK_NEXT);
+    expect(navigation.dispatch).not.toHaveBeenCalled();
+    expect(navigation.dispatch).not.toHaveBeenCalledWith(HOME_ONLY_RESET);
+    expect(router.push).not.toHaveBeenCalled();
+  });
+});
+
 describe('W16-7 / INT-20: Start a community, on a phone, opens over the tabs', () => {
   it.each([
     ['no memberships', false],
