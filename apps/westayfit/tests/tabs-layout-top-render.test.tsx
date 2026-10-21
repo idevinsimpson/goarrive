@@ -45,7 +45,10 @@ vi.mock('firebase/auth', () => ({ signOut: vi.fn() }));
 vi.mock('../src/firebase', () => ({ wsfIsStaging: false, getFirebaseAuth: () => ({}) }));
 vi.mock('../src/auth', () => ({ useWsfAuth: () => ({ user: state.user }) }));
 vi.mock('../src/ui/MemberTabBar', () => ({ MemberTabBar: () => <div data-testid="tab-bar" /> }));
-vi.mock('../src/ui/useReducedMotion', () => ({ useReducedMotion: () => false }));
+vi.mock('../src/ui/useReducedMotion', () => ({
+  useReducedMotion: () => false,
+  useReducedMotionPreference: () => ({ known: true, reduced: false, failed: false }),
+}));
 vi.mock('../src/ui/TabSceneFade', () => ({ TabSceneFade: ({ children }: { children: ReactNode }) => <>{children}</> }));
 vi.mock('../src/ui/RouteErrorFallback', () => ({ nativeErrorBoundary: () => undefined }));
 vi.mock('../src/ui/focusReturn', () => ({ armTabsFocusReturnTo: vi.fn(), useTabsFocusReturn: vi.fn() }));

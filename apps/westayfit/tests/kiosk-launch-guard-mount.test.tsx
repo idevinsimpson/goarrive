@@ -58,7 +58,10 @@ vi.mock('../src/StagingBanner', () => ({ StagingBanner: () => null }));
 vi.mock('../src/InAppBrowserBanner', () => ({ InAppBrowserBanner: () => null }));
 vi.mock('../src/ui/RouteErrorFallback', () => ({ nativeErrorBoundary: () => undefined }));
 vi.mock('../src/featureFlags', () => ({ wsfAuthEnabled: true }));
-vi.mock('../src/ui/useReducedMotion', () => ({ useReducedMotion: () => true }));
+vi.mock('../src/ui/useReducedMotion', () => ({
+  useReducedMotion: () => true,
+  useReducedMotionPreference: () => ({ known: true, reduced: true, failed: false }),
+}));
 vi.mock('../src/firebase', () => ({
   getFirebaseApp: () => ({}),
   getFirebaseAuth: () => ({}),
