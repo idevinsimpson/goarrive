@@ -99,9 +99,24 @@ export const fakeAuth = {
   },
 };
 
-/** Mocks for the session watch's Firebase imports. Call before importing the modules. */
+/**
+ * Mocks for the session watch's Firebase imports. Call before importing the modules.
+ *
+ * The Firebase module mock carries every getter and flag a screen reaches for,
+ * not only the session watch's `getFirebaseAuth`. A test that renders a route
+ * may mock it again after the boot, and queued mocks of one module can land
+ * in either order; whichever one a module ends up with, nothing it calls is
+ * missing.
+ */
 export function mockAuthForDestinations(): void {
-  vi.doMock('../src/firebase', () => ({ getFirebaseAuth: () => ({}) }));
+  vi.doMock('../src/firebase', () => ({
+    getFirebaseApp: () => ({}),
+    getFirebaseAuth: () => ({}),
+    getFirebaseFirestore: () => ({}),
+    getFirebaseFunctions: () => ({}),
+    wsfUsingEmulators: false,
+    wsfIsStaging: false,
+  }));
   vi.doMock('firebase/auth', () => ({
     onAuthStateChanged: (_auth: unknown, listener: (user: { uid: string } | null) => void) => {
       fakeAuth.listeners.push(listener);
