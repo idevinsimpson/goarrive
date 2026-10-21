@@ -21,6 +21,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
  * loads them afresh under a mocked Platform (as tests/lift-tokens.test.ts
  * does). No device.
  */
+// Each case loads kit, lift and the tab bar afresh (vi.resetModules), which takes seconds on a loaded machine.
+vi.setConfig({ testTimeout: 30_000 });
 const rn = vi.hoisted(() => ({ os: 'web' as 'ios' | 'android' | 'web' }));
 
 vi.mock('react-native', async () => {

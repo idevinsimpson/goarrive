@@ -12,6 +12,7 @@ import {
   OPTION_SELECTED_TINT,
   PROGRESS_GREEN,
   TEXT_MUTED,
+  TEXT_SCALE_CAPS,
   chromeTextProps,
   effectiveWidth,
   elevation,
@@ -201,7 +202,17 @@ export function MemberTabBar({ state, navigation, insets, onMove }: BottomTabBar
     web decides by its CSS width exactly as before (effectiveWidth is the
     width there), and its wrapped bar is unchanged.
   */
-  const narrow = effectiveWidth(width, fontScale) < 260;
+  /*
+    Heads-11 N2 (native). AND WHEN A QUARTER CANNOT HOLD ITS LABEL. The labels
+    draw at the capped text size, so a phone can keep its effective width
+    and still not fit "Community" (about 60 pt bold at 11 pt) in a quarter of
+    the bar (4 tabs share the width less the 72 pt MOVE slot and the 8 pt of
+    padding): Android 360 dp at 1.3x, an iPhone mini at 1.353. With one line
+    per label it would end in an ellipsis, so the bar wraps instead. At 1x
+    this only reaches widths under 320; the web is unchanged.
+  */
+  const labelScale = native ? Math.min(Math.max(1, Number.isFinite(fontScale) ? fontScale : 1), TEXT_SCALE_CAPS.chrome) : 1;
+  const narrow = effectiveWidth(width, fontScale) < 260 || (native && (width - 80) / 4 < 60 * labelScale);
   const moveButton = (
     <Pressable
       ref={moveRef}

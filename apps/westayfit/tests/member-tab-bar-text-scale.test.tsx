@@ -207,19 +207,38 @@ describe.each(['ios', 'android'] as const)('W12-8 %s: the tab bar decides by the
     expect(styleOf(byId('wsf-member-tab-move')!).marginTop).toBe(-24);
   });
 
-  it('the boundary: 390 pt at 1.3x (300) stays one row; 1.5x (260) too; just past it wraps', () => {
-    renderBar(390, 1.3);
-    expect(byId('wsf-member-tab-move-row')).toBeNull();
+  /** Whether the bar wraps at this width and text size (a fresh render each time). */
+  const wraps = (width: number, fontScale: number) => {
     act(() => root.unmount());
     root = createRoot(container);
     vi.restoreAllMocks();
-    renderBar(390, 1.5);
-    expect(byId('wsf-member-tab-move-row')).toBeNull();
-    act(() => root.unmount());
-    root = createRoot(container);
-    vi.restoreAllMocks();
-    renderBar(390, 1.51);
-    expect(byId('wsf-member-tab-move-row')).not.toBeNull();
+    renderBar(width, fontScale);
+    return byId('wsf-member-tab-move-row') !== null;
+  };
+
+  it('the boundary: one row while each quarter holds its capped label and the text has 260 pt; wrapped past either', () => {
+    // 390 pt: a quarter is 77.5 pt; "Community" needs 60 pt x the capped text size.
+    expect(wraps(390, 1)).toBe(false);
+    expect(wraps(390, 1.29)).toBe(false);
+    expect(wraps(390, 1.3)).toBe(true);
+    // Above the cap the label stops growing (400 pt at 1.5x: an 80 pt quarter holds the 78 pt label)...
+    expect(wraps(400, 1.5)).toBe(false);
+    // ...but the text's own width still decides (390 / 1.51 < 260).
+    expect(wraps(390, 1.51)).toBe(true);
+    // At 1x, under 320 pt a quarter is narrower than the label.
+    expect(wraps(320, 1)).toBe(false);
+    expect(wraps(319, 1)).toBe(true);
+  });
+
+  it('heads-11 N2: Android 360 dp at 1.3x and an iPhone mini (375 pt) at 1.353 wrap, keeping MOVE', () => {
+    for (const [width, fontScale] of [
+      [360, 1.3],
+      [375, 1.353],
+    ] as const) {
+      expect(wraps(width, fontScale)).toBe(true);
+      expect(all('wsf-member-tab-move')).toHaveLength(1);
+      expect(styleOf(byId('wsf-member-tab-community')!).flexBasis).toBe('50%');
+    }
   });
 
   it('a narrow phone at 1x wraps too, and keeps MOVE (the web\'s narrow bar has none)', () => {
