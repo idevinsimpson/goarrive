@@ -2466,7 +2466,7 @@ export default function ContributeToGoal() {
         {pending != null && pending > 0 ? (
           <>
             <Text style={styles.yoursArrow}>→</Text>
-            <Text style={styles.yoursNext} testID="wsf-contribute-your-part-next">
+            <Text style={styles.yoursNext} testID="wsf-contribute-your-part-next" {...numeralTextProps}>
               {formatCount(anchorOwnCredit + pending)}
             </Text>
           </>
@@ -2638,7 +2638,7 @@ export default function ContributeToGoal() {
               <View style={styles.tile}>
                 <Text style={styles.tileLabel}>Your addition</Text>
                 {/* The exact number recorded -- theirs, not the community's. */}
-                <Text style={styles.tileValue} testID="wsf-contribute-result-amount">
+                <Text style={styles.tileValue} testID="wsf-contribute-result-amount" {...numeralTextProps}>
                   {r.alreadyRecorded ? formatCount(r.addedCount) : `+${formatCount(r.addedCount)}`}
                 </Text>
               </View>
@@ -2646,7 +2646,7 @@ export default function ContributeToGoal() {
                   and the figure are one line for every reader and spec. */}
               <View style={styles.tile} testID="wsf-contribute-own-credit">
                 <Text style={styles.tileLabel}>{'Your total on this goal: '}</Text>
-                <Text style={styles.tileValue}>
+                <Text style={styles.tileValue} {...numeralTextProps}>
                   {formatCount(r.ownCredit)}
                   {ownUnit ? <Text style={styles.tileUnit}>{` ${ownUnit}`}</Text> : null}
                 </Text>
@@ -2670,7 +2670,7 @@ export default function ContributeToGoal() {
                       {context.kind === 'verified' ? `Shared total · ${context.goalTitle}` : 'Shared total'}
                     </Text>
                     <Text style={styles.sharedTotal} testID="wsf-contribute-shared-total">
-                      <Text style={styles.sharedCount}>
+                      <Text style={styles.sharedCount} {...numeralTextProps}>
                         {totalOfTargetParts(r.sharedTotal, r.target, r.unit).count}
                       </Text>
                       {' '}
@@ -3062,7 +3062,7 @@ export default function ContributeToGoal() {
             />
           </View>
           <View style={styles.heroFacts}>
-            <Text style={styles.heroTotal} testID="wsf-contribute-shared-total">
+            <Text style={styles.heroTotal} testID="wsf-contribute-shared-total" {...numeralTextProps}>
               {totalOfTargetLabel(pulse.sharedTotal, pulse.target, unit)}
             </Text>
             {/*
@@ -3398,6 +3398,8 @@ export default function ContributeToGoal() {
             <Text
               style={[styles.timerClock, windowHeight < 700 ? styles.timerClockShort : null]}
               testID="wsf-contribute-timer-clock"
+              // INT-16: the policy's cap and shrink-to-fit on a phone; nothing on the web.
+              {...numeralTextProps}
             >
               {formatElapsed(timerElapsed)}
             </Text>
