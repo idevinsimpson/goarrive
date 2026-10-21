@@ -1,7 +1,7 @@
 import { Link, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { doc, getDoc, type Timestamp } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Modal,
   Platform,
@@ -17,11 +17,19 @@ import {
   type ViewStyle,
 } from 'react-native';
 
+import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
+
 import { useWsfAuth } from '../../../../../src/auth';
 import { rememberCurrentCommunity, resolveCurrentCommunity } from '../../../../../src/currentCommunity';
 import { AuthFlagOffPanel } from '../../../../../src/AuthFlagOffPanel';
 import { describeCallableError } from '../../../../../src/callableErrors';
 import { FormShell } from '../../../../../src/AuthFormPrimitives';
+import {
+  KEYBOARD_SCROLL_PROPS,
+  SHEET_DISMISS_PROPS,
+  sheetBottomPadding,
+  useKeyboardHeight,
+} from '../../../../../src/ui/keyboardAvoidance';
 import { resolveRepeatPolicy, type RepeatPolicy } from '../../../../../src/contributionFlow';
 import { wsfAuthEnabled } from '../../../../../src/featureFlags';
 import { getFirebaseFirestore, getFirebaseFunctions } from '../../../../../src/firebase';
@@ -547,6 +555,10 @@ export default function CommunityPage() {
     }, [user?.uid, groupId, router]),
   );
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  // W16-9 (MF-09): the Manage sheet's safe area and keyboard, used on native
+  // only. The context (not the throwing hook) reads null with no provider.
+  const sheetInsets = useContext(SafeAreaInsetsContext);
+  const sheetKeyboard = useKeyboardHeight();
   const [resetting, setResetting] = useState(false);
   const [resetJoinCode, setResetJoinCode] = useState<string | null>(null);
   const [resetOutcome, setResetOutcome] = useState<'idle' | 'done' | 'failed'>('idle');
@@ -3046,6 +3058,33 @@ export default function CommunityPage() {
   // here with its existing testID, copy and outcome handling, and the
   // administrative facts (community details, the invite QR, link rotation,
   // leaving) live here too — out of the member journey, one tap away.
+  /*
+    NATIVE-MEMBER-1 W16-9 (MF-09). ON A PHONE THE SHEET RESPECTS THE SAFE AREA
+    AND THE KEYBOARD, AND THE SCRIM CLOSES IT. Native only: the panel pads
+    its bottom by the home indicator, or by the keyboard while it is up
+    (sheetBottomPadding, INT-07), so the pairing code and the combined-goal
+    fields rise above it. With the keyboard up the panel may grow to just below
+    the top inset, so what it shows is the window minus the top, the keyboard
+    and the margins. (The keyboard is already in the padding; subtracting it
+    from the cap as well would leave ~90 pt.) A drag puts the keyboard away.
+    The web is untouched: sheetBottomPadding is never called there, so its
+    padding stays 24 and its scrim stays the onClick view (D-3).
+  */
+  const nativeSheet = Platform.OS !== 'web';
+  const sheetMaxHeight =
+    nativeSheet && sheetKeyboard > 0
+      ? windowHeight - (sheetInsets?.top ?? 0) - SHEET_TOP_MARGIN
+      : Math.min(windowHeight * 0.88, 760);
+  const sheetPanelStyle = nativeSheet
+    ? [
+        styles.sheet,
+        {
+          maxHeight: sheetMaxHeight,
+          paddingBottom: sheetBottomPadding(sheetInsets?.bottom ?? 0, sheetKeyboard, Platform.OS, 24),
+        },
+      ]
+    : [styles.sheet, { maxHeight: sheetMaxHeight }];
+
   const renderManageSheet = () => (
     <Modal
       visible={isChampion && manageOpen}
@@ -3065,15 +3104,28 @@ export default function CommunityPage() {
           press would dismiss the sheet. The Close button (and Escape) is the
           accessible way out.
         */}
-        <View
-          style={styles.sheetScrim}
-          // `onClick` is a react-native-web prop that the RN typings omit.
-          {...({ onClick: () => setManageOpen(false) } as Record<string, unknown>)}
-          accessible={false}
-          aria-hidden
-          testID="wsf-community-manage-scrim"
-        />
-        <View style={[styles.sheet, { maxHeight: Math.min(windowHeight * 0.88, 760) }]} testID="wsf-community-manage-panel">
+        {nativeSheet ? (
+          // W16-9: a phone has no click events; the scrim is a press target
+          // there, still neither focusable nor announced.
+          <Pressable
+            style={styles.sheetScrim}
+            onPress={() => setManageOpen(false)}
+            accessible={false}
+            focusable={false}
+            importantForAccessibility="no-hide-descendants"
+            testID="wsf-community-manage-scrim"
+          />
+        ) : (
+          <View
+            style={styles.sheetScrim}
+            // `onClick` is a react-native-web prop that the RN typings omit.
+            {...({ onClick: () => setManageOpen(false) } as Record<string, unknown>)}
+            accessible={false}
+            aria-hidden
+            testID="wsf-community-manage-scrim"
+          />
+        )}
+        <View style={sheetPanelStyle} testID="wsf-community-manage-panel">
           <View style={styles.sheetHandle} />
           <View style={styles.sheetHeader}>
             {/*
@@ -3107,7 +3159,15 @@ export default function CommunityPage() {
           <Text style={styles.sheetStory} testID="wsf-manage-story">
             {manageStoryLine}
           </Text>
-          <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetContent}>
+          <ScrollView
+            style={styles.sheetScroll}
+            contentContainerStyle={styles.sheetContent}
+            // W16-9: iOS insets for the keyboard, a drag dismisses it, and a
+            // tap on a control lands with the keyboard up. All inert on web.
+            {...KEYBOARD_SCROLL_PROPS}
+            {...SHEET_DISMISS_PROPS}
+            {...(nativeSheet ? { keyboardShouldPersistTaps: 'handled' as const } : {})}
+          >
             {/*
               YOUR EVENT — the reason a Champion opens this sheet, and now the
               first and loudest thing in it. Setting up the screen at an event
@@ -5017,6 +5077,9 @@ const SURFACE_WHITE = wsfTheme.colors.surface;
 // Cream at reduced strength on the navy hero: still well above 4.5:1.
 const HERO_MUTED = 'rgba(247,245,240,0.78)';
 const HERO_RULE = 'rgba(247,245,240,0.35)';
+
+/** W16-9: with the keyboard up, the native Manage sheet stops this far below the top inset. */
+const SHEET_TOP_MARGIN = 12;
 
 const styles = StyleSheet.create({
   // HOME-NORTHSTAR-PARITY-1. The reference's page ground (#FBFAF4), the
