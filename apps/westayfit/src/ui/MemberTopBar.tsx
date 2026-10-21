@@ -75,6 +75,18 @@ export function MemberTopBar({
   */
   const menuButtonRef = useRef<{ focus?: () => void } | null>(null);
   const wasOpen = useRef(menuOpen);
+  /*
+    RV12-641-A1 (native). A ROW THAT OPENS ANOTHER SURFACE KEEPS THE SCREEN
+    READER WITH IT. The phone's focus move is deferred (after interactions,
+    and 400 ms more on iOS), so after a row that opens Settings, Build details
+    or the Manage sheet it would land on this button behind the new surface,
+    in a shell that is hidden from the screen reader. So the button takes the
+    focus back only when the menu is dismissed without a choice (the button,
+    the layer, Android Back); a surface opened from a row returns focus on
+    its own close (Settings through the tabs' focus return). The web still
+    moves keyboard focus to the button either way, as before.
+  */
+  const closedByRow = useRef(false);
   // W12-9 (INT-17, native): Settings, opened from this menu, returns the
   // screen reader's focus here when it closes (src/ui/focusTarget.ts).
   useEffect(() => registerFocusTarget('wsf-member-topbar-menu-button', menuButtonRef), []);
@@ -84,8 +96,10 @@ export function MemberTopBar({
       // The web moves keyboard focus; on a phone `.focus()` does nothing for
       // VoiceOver or TalkBack, so the screen reader's focus is moved instead.
       if (Platform.OS === 'web') menuButtonRef.current?.focus?.();
-      else cancel = focusSoon(menuButtonRef);
+      else if (!closedByRow.current) cancel = focusSoon(menuButtonRef);
     }
+    // Each opening starts undecided.
+    if (wasOpen.current !== menuOpen) closedByRow.current = false;
     wasOpen.current = menuOpen;
     return cancel;
   }, [menuOpen]);
@@ -206,6 +220,7 @@ export function MemberTopBar({
               <Pressable
                 key={item.key}
                 onPress={() => {
+                  closedByRow.current = true;
                   onMenuToggle(false);
                   onPress();
                 }}
