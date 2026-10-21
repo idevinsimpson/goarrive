@@ -787,6 +787,69 @@ describe('RV16: a failed load judges the page on screen', () => {
     expect(h.youFrames).not.toContain('failed');
   });
 
+  /*
+    W13-15 (heads-15 RV17-642-N1, member W16-22). A pick or no-community page
+    is kept only when NO community was resolved, i.e. the membership read
+    itself failed. Once the fresh list resolved a community whose goals then
+    failed, the page asking which community (or saying there is none) is the
+    wrong page to keep: the failed page for that community, with Retry.
+  */
+  itTimed('W13-15: no community on screen; a return reads [g1] and g1’s goals fail: the failed page for g1, not stale', async () => {
+    h.record.mine = { items: [] };
+    const cc = await boot();
+    await cc.currentCommunityReady();
+    const you = await render('you');
+    expect(h.youFrames[0]).toBe('noCommunity');
+    h.fresh.land({ items: [] });
+    await you.settle();
+    expect(h.youFrames.at(-1)).toBe('noCommunity');
+    // They joined g1 elsewhere; the record no longer holds the list, so the return revalidates.
+    h.record.mine = undefined;
+    h.goalsFail.add('g1');
+    freshRead();
+    await returnTo(you);
+    expect(h.youFrames.at(-1)).toBe('noCommunity');
+    h.fresh.land({ items: [TWO[0]] });
+    await expectFailedIn(you, 'g1');
+  });
+
+  itTimed('W13-15: the pick page on screen; a return reads [g1, g2], resolves g1 and its goals fail: the failed page for g1, not stale', async () => {
+    const cc = await boot();
+    await cc.currentCommunityReady();
+    const you = await render('you');
+    expect(h.youFrames[0]).toBe('pickCommunity');
+    h.fresh.land({ items: TWO });
+    await you.settle();
+    expect(h.youFrames.at(-1)).toBe('pickCommunity');
+    // g1 is chosen elsewhere; the record no longer holds the list, so the return revalidates.
+    expect(await cc.rememberCurrentCommunity(h.uid, 'g1')).toBe(true);
+    h.record.mine = undefined;
+    h.goalsFail.add('g1');
+    freshRead();
+    await returnTo(you);
+    expect(h.youFrames.at(-1)).toBe('pickCommunity');
+    h.fresh.land({ items: TWO });
+    await expectFailedIn(you, 'g1');
+  });
+
+  itTimed('W13-15 control: no community on screen and the return’s membership read fails: kept, stale (nothing was resolved)', async () => {
+    h.record.mine = { items: [] };
+    const cc = await boot();
+    await cc.currentCommunityReady();
+    const you = await render('you');
+    expect(h.youFrames[0]).toBe('noCommunity');
+    h.fresh.land({ items: [] });
+    await you.settle();
+    h.record.mine = undefined;
+    freshRead();
+    await returnTo(you);
+    h.fresh.fail(new Error('offline'));
+    await you.until(() => h.youStale === true, 'the stale note');
+    await you.settle();
+    expect(h.youFrames.at(-1)).toBe('noCommunity');
+    expect(h.youFrames).not.toContain('failed');
+  });
+
   itTimed('control: a return’s revalidation over a page that is not a member page (pickCommunity) keeps it, stale, as before', async () => {
     const cc = await boot();
     await cc.currentCommunityReady();
