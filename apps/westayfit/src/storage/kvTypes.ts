@@ -25,10 +25,24 @@ export type DeviceKv = {
   readItem(key: string): Promise<KvRead>;
   setItem(key: string, value: string): Promise<boolean>;
   removeItem(key: string): Promise<boolean>;
-  /** Keys starting with the prefix. Used to clear account-scoped records. */
+  /**
+   * Keys starting with the prefix. Used to clear account-scoped records.
+   * Only ever within the app's own namespace (`APP_KEY_NAMESPACE`): a prefix
+   * outside it lists nothing, so no caller can enumerate (and then remove)
+   * keys this app does not own — Firebase Auth keeps its session under
+   * `firebase:*` in the same storage.
+   */
   keysWithPrefix(prefix: string): Promise<string[]>;
   /** Set by a store whose writes expire after this long (the native session store). */
   readonly ttlMs?: number;
 };
 
 export type KvRead = { ok: true; value: string | null; expiresAt?: number } | { ok: false };
+
+/** Every key this app owns starts with this. Nothing outside it is ever listed (`keysWithPrefix`). */
+export const APP_KEY_NAMESPACE = 'wsf.';
+
+/** Whether `keysWithPrefix` may list keys for `prefix` at all. */
+export function isAppKeyPrefix(prefix: string): boolean {
+  return typeof prefix === 'string' && prefix.startsWith(APP_KEY_NAMESPACE);
+}
