@@ -1,6 +1,6 @@
 # GoArrive Known Issues & Lessons Learned
 
-_Last refreshed: 2026-08-14._
+_Last refreshed: 2026-08-18._
 
 ## Resolved Issues (Reference for Future Work)
 The following issues were encountered and resolved during development. They are documented here as institutional knowledge to prevent regression and inform future decisions.
@@ -184,6 +184,9 @@ Lesson: keeping a paused media element ready means maintaining a *buffer* around
 takeover position, not repeatedly assigning `currentTime`. Seeking on a timer defeats the
 buffering it is meant to produce. Verify warmth by reading `buffered`, never by inferring
 it from the absence of a symptom.
+
+### Plan Pricing: Explicit 0-Week Phases Were Silently Reinflated
+The plan pricing engine treated a phase with an explicit 0-week duration the same as missing input and defaulted it to the 25/50/25 week distribution. A coach who intentionally set a phase to 0 weeks (e.g. a free introductory phase or a deliberately skipped phase) would have their pricing recalculated against that default instead of their actual configuration. Fixed in PR #293 by preserving explicit 0 values throughout `lib/planTypes.ts` rather than collapsing them to the default. `apps/goarrive/__tests__/logic/payments.test.ts` adds direct coverage for the 0-week path. Lesson: when a numeric field has a meaningful 0 value, treat 0 as valid input and reserve default substitution for `undefined`/`null` only — conflating "not set" with "set to zero" produces silent mispricing that only surfaces for edge-case plan configurations.
 
 ## Known Performance Risks
 
