@@ -75,10 +75,11 @@ export const ErrorBoundary = nativeErrorBoundary('screen');
 // This screen is HARD-GATED to the emulator + loopback host and to a staging
 // build via `wsfUsingEmulators` / `wsfIsStaging` (double-gated inside
 // firebase.ts). A production build cannot reach the form even if someone
-// navigates the URL directly. The environment it writes into is carried as a
-// non-visual `data-environment` attribute on the form, never as text a
-// Champion reads; the community it belongs to travels the same way
-// (`data-group-id`), never as an id on the page.
+// navigates the URL directly. That it writes into a synthetic environment is
+// carried as a non-visual `data-environment` attribute on the form (naming no
+// environment: W16-24), never as text a Champion reads; the community it
+// belongs to travels the same way (`data-group-id`), never as an id on the
+// page.
 //
 // Uses `wsfCreateGoal` (E4-A1) for the goal itself — the same callable the
 // browser specs drive. The request shape is unchanged: ISO instants for the
@@ -118,9 +119,13 @@ const REPEAT_OPTIONS: ReadonlyArray<{ key: RepeatPolicy; label: string; descript
   },
 ];
 
-// Names the environment this screen is actually writing into. Machine-readable
-// only (a data attribute on the form); it never renders as text.
-const SYNTHETIC_LABEL = wsfIsStaging ? 'STAGING SYNTHETIC TEST' : 'LOCAL SYNTHETIC TEST';
+// Marks the form as a synthetic environment's. Machine-readable only (a data
+// attribute on the form); it never renders as text. NATIVE-MEMBER-1 W16-24
+// (owner UI-copy request): one neutral label with no environment word, so
+// nothing of this screen names an environment, not even in the DOM; which
+// synthetic environment this is stays with `wsfUsingEmulators` and
+// `wsfIsStaging` (the gate below), never with copy.
+const SYNTHETIC_LABEL = 'SYNTHETIC TEST';
 
 const FALLBACK_COMMUNITY_NAME = 'Your community';
 const FALLBACK_TIME_ZONE = 'America/New_York';

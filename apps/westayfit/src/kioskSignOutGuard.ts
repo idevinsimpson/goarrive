@@ -35,6 +35,18 @@
  * open here, so whoever is signed in is its visitor and goes, without asking.
  * A marker for another goal is no evidence (the screen asks), and the web
  * never has one (readKioskSession is null there).
+ *
+ * W16-23 (W14-N, RV17-641-N3). AN UNKNOWN MARKER IS KIOSK EVIDENCE TOO. When
+ * the device's marker could not be read (the store failed twice), or its
+ * launch read has not landed, `readKioskSession()` answers null, and that
+ * null used to count as "no kiosk session": the screen asked, and "Stay
+ * signed in" could keep a visitor's session on a shared device. The device
+ * cannot say whether a kiosk session is open here, so the screen fails
+ * closed, as landAfterAuth and the crash fallback do since W14-N
+ * (`kioskSessionUnknown()`): whoever is signed in goes, without asking. The
+ * cost falls on an owner opening a kiosk link on their own phone while its
+ * store cannot be read: they sign in again. (The launch read normally lands
+ * long before auth answers, and the launch guard waits for it.)
  */
 
 /**
@@ -58,10 +70,13 @@ export type KioskStartDecision = 'none' | 'signOut' | 'ask';
  * What the start screen for `goalId` does on arrival. Spends the hand-off note.
  *   none     nobody is signed in;
  *   signOut  the web; a visitor who came through this goal's kiosk hand-off
- *            within KIOSK_HANDOFF_TTL_MS; or (C7-1) a device whose open
+ *            within KIOSK_HANDOFF_TTL_MS; (C7-1) a device whose open
  *            kiosk-session marker, `openKioskSession` (src/kioskSession.ts
- *            `readKioskSession()`), names this goal;
- *   ask      the app, with any other account: confirm before signing out.
+ *            `readKioskSession()`), names this goal; or (W16-23) a device
+ *            whose marker is unknown, `markerUnknown`
+ *            (`kioskSessionUnknown()`);
+ *   ask      the app, with any other account and a marker it could read:
+ *            confirm before signing out.
  */
 export function decideKioskStart(
   os: string,
@@ -69,12 +84,14 @@ export function decideKioskStart(
   goalId: string | null | undefined,
   now: number = Date.now(),
   openKioskSession: string | null = null,
+  markerUnknown = false,
 ): KioskStartDecision {
   const note = handoff;
   handoff = null;
   if (!signedIn) return 'none';
   if (os === 'web') return 'signOut';
   if (typeof goalId === 'string' && openKioskSession === goalId) return 'signOut';
+  if (markerUnknown) return 'signOut';
   const age = note ? now - note.at : -1;
   const visitor = note !== null && typeof goalId === 'string' && note.goalId === goalId && age >= 0 && age <= KIOSK_HANDOFF_TTL_MS;
   return visitor ? 'signOut' : 'ask';
