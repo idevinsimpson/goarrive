@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
 
+import type { RefreshState } from './RefreshNote';
+
 import { groupTypeCardLabel, joinPolicyLabel, roleLabel } from '../labels';
 import {
   beyondTarget,
@@ -135,7 +137,13 @@ export type CommunityParityProps = {
    * which is never shown as "no goals yet".
    */
   history: Read<ParityGoal[]> | { state: 'unavailable' };
-  roster: Read<ParityRoster>;
+  /**
+   * `unavailable` (NATIVE-MEMBER-1 W16-2, HB-03): the read was refused without
+   * the function's own sentence -- the staging hold in front of
+   * `wsfCommunityMembers` (src/callableRefusal.ts). It says the list is
+   * unavailable, never that the account may not see it.
+   */
+  roster: Read<ParityRoster> | { state: 'failed'; unavailable: true };
   onSelectCommunity: (groupId: string) => void;
   onJoin: () => void;
   onStart: () => void;
@@ -151,6 +159,12 @@ export type CommunityParityProps = {
    * survives after the North-Star core). This view gives it no style.
    */
   footer?: ReactNode;
+  /**
+   * NATIVE-MEMBER-1 W16-2 (INT-12): a revalidation on return to the app that
+   * is taking a moment, or that failed and left what was last read on screen.
+   * Absent, or neither checking nor stale, draws nothing.
+   */
+  refresh?: RefreshState;
   testID?: string;
 };
 

@@ -25,6 +25,7 @@ import { formatEndedOn, formatEndsAt, hasWindowEnded } from '../../src/ui/dates'
 import { MOVE_HREF } from '../../src/ui/MemberTabBar';
 import { signOutToSignedOutHome } from '../../src/ui/signOutReset';
 import { YouParityView } from '../../src/ui/YouParityView';
+import { RESUME_MIN_AWAY_MS, useResumeRefresh } from '../../src/useResumeRefresh';
 import type { YouGoal } from '../../src/youParity';
 
 /**
@@ -409,6 +410,8 @@ export default function You() {
   */
   const [revalidate, setRevalidate] = useState(0);
   const keepOnScreen = useRef(false);
+  /** INT-12 (W16-2): the next revalidation reads fresh (a return to the app), not from the record. */
+  const freshNext = useRef(false);
   const focusedOnce = useRef(false);
   useFocusEffect(
     useCallback(() => {
@@ -439,8 +442,10 @@ export default function You() {
     }
     const token = ++live.current;
     const uid = user.uid;
-    const reuse = reloads > 0 ? 0 : SAME_LOAD_MS;
-    const recorded = reloads > 0 ? null : youFromRecord(uid);
+    const fresh = reloads > 0 || freshNext.current;
+    freshNext.current = false;
+    const reuse = fresh ? 0 : SAME_LOAD_MS;
+    const recorded = fresh ? null : youFromRecord(uid);
     const keep = keepOnScreen.current;
     keepOnScreen.current = false;
     setScreen(uid, (prev) => recorded ?? (keep && prev.kind !== 'loading' ? prev : { kind: 'loading' }));
@@ -575,6 +580,30 @@ export default function You() {
   const reload = useCallback(() => setReloads((v) => v + 1), []);
 
   const screen = screenForAccount(ready, user?.uid ?? null, held);
+
+  /*
+    NATIVE-MEMBER-1 W16-2 (INT-12). COMING BACK TO THE APP READS FRESH, as
+    Progress does (activity.tsx). A tab return recomposes from the account's
+    record; a return to the app after at least 30 s away
+    (src/useResumeRefresh.ts) asks the server, because a goal may have ended
+    while the app slept and You would otherwise keep offering "Start moving"
+    for it. What is on screen stays while it reads ("Checking…" after a
+    moment); a failed read keeps it, marked as last read, with Retry. A failed
+    screen is retried on any return.
+  */
+  useResumeRefresh(
+    () => {
+      if (!ready || !user) return;
+      if (screen.kind === 'failed') {
+        setReloads((n) => n + 1);
+        return;
+      }
+      freshNext.current = true;
+      keepOnScreen.current = true;
+      setRevalidate((n) => n + 1);
+    },
+    { minAwayMs: screen.kind === 'failed' ? 0 : RESUME_MIN_AWAY_MS },
+  );
 
   return (
     <YouParityView
