@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
 import {
   Animated,
   AppState,
@@ -108,6 +108,7 @@ export function TogetherCompletion({
   onAnnounced,
   windowWidth,
   windowHeight,
+  headingRef,
 }: {
   presentation: TogetherPresentation;
   /** "Recorded" / "Already recorded", directly above the amount. */
@@ -132,6 +133,14 @@ export function TogetherCompletion({
   onAnnounced: () => void;
   windowWidth: number;
   windowHeight: number;
+  /**
+   * W12-20 (INT-17, native): the headline, the receipt's level-1 heading, for
+   * the owner to move the screen reader to when this receipt replaces the
+   * step the member was on (contribute's `useStepHeadingFocus`). Only a ref:
+   * nothing here focuses, times or speaks differently because of it, and the
+   * web DOM is the same.
+   */
+  headingRef?: Ref<Text>;
 }) {
   const preference = useReducedMotionPreference();
   const reduced = preference.reduced;
@@ -418,7 +427,7 @@ export function TogetherCompletion({
             {amountText}
           </Text>
           {/* The receipt's heading, in words: the same sentence it has always been. */}
-          <Text style={styles.headline} testID="wsf-contribute-result-headline" {...HEADING_1}>
+          <Text ref={headingRef} style={styles.headline} testID="wsf-contribute-result-headline" {...HEADING_1}>
             {p.headline}
           </Text>
         </View>

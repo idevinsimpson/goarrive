@@ -184,7 +184,11 @@ describe('W13-5 on a phone: the state screen that replaces the last one takes th
     await act(async () => contribute!.resolve({ alreadyRecorded: false, sharedTotal: 46, addedCount: 6, ownCredit: 11 }));
     await settle();
     expect(byId('wsf-contribute-receipt')).not.toBeNull();
-    expect(focusedTexts()).toEqual([]);
+    // Candidate-16 composition: INT-17 (W12-20) focuses the member receipt's
+    // headline by design; this case is about state headings, so that one
+    // focus is set aside. Holds with or without the receipt focus.
+    const receiptHeadline = byId('wsf-contribute-result-headline')?.textContent;
+    expect(focusedTexts().filter((t) => t !== receiptHeadline)).toEqual([]);
   });
 });
 

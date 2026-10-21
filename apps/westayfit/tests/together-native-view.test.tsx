@@ -1,4 +1,4 @@
-import { act, type ReactNode } from 'react';
+import { act, createRef, type ReactNode, type Ref } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  */
 
 const ctl = vi.hoisted(() => ({
-  os: 'ios' as 'ios' | 'web',
+  os: 'ios' as 'ios' | 'android' | 'web',
   /** The last props each Text with a testID was given (W14-2: the amount's numeral policy). */
   textProps: {} as Record<string, Record<string, unknown>>,
   pref: { reduced: false, known: false, failed: false },
@@ -187,6 +187,7 @@ function render(
     sharedBefore?: number | null;
     onFreshConsumed?: () => void;
     actions?: ReactNode;
+    headingRef?: Ref<Text>;
   } = {}
 ) {
   const r = opts.r ?? receipt();
@@ -215,6 +216,7 @@ function render(
         onAnnounced={() => undefined}
         windowWidth={390}
         windowHeight={844}
+        headingRef={opts.headingRef}
       />
     );
   });
@@ -560,5 +562,32 @@ describe('W14-2 (INT-16): the receipt numeral is capped on a phone, untouched on
     );
     expect(container.querySelector(`[data-testid="${AMOUNT}"]`)!.outerHTML).toBe(reference.firstElementChild!.outerHTML);
     act(() => refRoot.unmount());
+  });
+});
+
+describe('W12-20 (INT-17): the headline is the heading the owner moves the screen reader to', () => {
+  const HEADLINE = 'wsf-contribute-result-headline';
+
+  it.each(['ios', 'android'] as const)('%s: headingRef resolves to the headline, the receipt\'s level-1 heading', (os) => {
+    ctl.os = os;
+    const ref = createRef<Text>();
+    const { p } = render({ headingRef: ref });
+    const headline = container.querySelector(`[data-testid="${HEADLINE}"]`);
+    expect(headline).not.toBeNull();
+    expect(ref.current as unknown).toBe(headline);
+    expect(headline!.textContent).toBe(p.headline);
+    expect(ctl.textProps[HEADLINE]).toMatchObject({ accessibilityRole: 'header', 'aria-level': 1 });
+    // Only a ref: the receipt's own announcement is still the one, at mount.
+    expect(ctl.announcements).toHaveLength(1);
+  });
+
+  it('the ref follows the headline through the motion to its settle (the element the focus lands on is the one on screen)', () => {
+    ctl.pref = { reduced: false, known: true, failed: false };
+    const ref = createRef<Text>();
+    render({ headingRef: ref });
+    expect(phase()).toBe('playing');
+    advance(TOGETHER_TIMING.settleMs + 100);
+    expect(phase()).toBe('settled');
+    expect(ref.current as unknown).toBe(container.querySelector(`[data-testid="${HEADLINE}"]`));
   });
 });
