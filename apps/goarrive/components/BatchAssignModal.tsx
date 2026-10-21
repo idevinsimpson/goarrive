@@ -32,6 +32,7 @@ import {
   doc,
   writeBatch,
   serverTimestamp,
+  Timestamp,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { FB, FH } from '../lib/theme';
@@ -184,9 +185,10 @@ export default function BatchAssignModal({
             memberId,
             memberName: member?.displayName || '',
             coachId,
-            scheduledFor: toDateString(selectedDate),
+            scheduledFor: Timestamp.fromDate(selectedDate),
             status: 'scheduled',
             assignedAt: serverTimestamp(),
+            createdAt: Timestamp.now(),
           };
           if (workoutSnapshot) {
             assignmentData.workoutSnapshot = workoutSnapshot;
