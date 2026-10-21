@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { AppState, Platform } from 'react-native';
@@ -34,6 +37,13 @@ vi.mock('react-native-safe-area-context', () => ({
   initialWindowMetrics: { insets: { top: 0, bottom: 0, left: 0, right: 0 }, frame: { x: 0, y: 0, width: 390, height: 844 } },
 }));
 vi.mock('../src/featureFlags', () => ({ wsfAuthEnabled: true }));
+// INT-09: "a phone with a 47 pt inset" or "web (0)", per case.
+const inset = { top: 0 };
+vi.mock('../src/ui/useScreenTopInset', () => ({
+  useScreenTopInset: () => inset.top,
+  ScreenTopSpacer: () => null,
+  ScreenStatusBar: ({ tone }: { tone: string }) => <span data-testid="screen-status-bar" data-tone={tone} />,
+}));
 vi.mock('../src/ui/useReducedMotion', () => ({ useReducedMotion: () => true }));
 vi.mock('../src/firebase', () => ({
   getFirebaseAuth: () => ({}),
@@ -80,6 +90,7 @@ const pollFor = async (ms: number) => {
 };
 
 beforeEach(() => {
+  inset.top = 0;
   clearMemberReads();
   calls.length = 0;
   answers.wsfGoalPulse = async () => PULSE;
@@ -173,5 +184,30 @@ describe('the pulse poll and the background (INT-12 case 5)', () => {
     await pollFor(4_000);
     expect(count('wsfGoalPulse')).toBe(3);
     expect(spy.mock.calls.filter((c) => c[0] === 'change')).toHaveLength(0);
+  });
+});
+
+describe('the page mode and the top of the screen (INT-09)', () => {
+  const paddedTo = (px: string) => Array.from(container.querySelectorAll<HTMLElement>('*')).filter((e) => e.style.paddingTop === px);
+
+  it('"Already moved?" (page mode) starts below the status bar on a phone, with cream icons', async () => {
+    inset.top = 47;
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    expect(byId('wsf-contribute-load-error')).toBeNull();
+    expect(paddedTo(`${16 + 47}px`)).toHaveLength(1);
+    expect(byId('screen-status-bar')!.dataset.tone).toBe('cream');
+  });
+
+  it('web (inset 0): no padding override', async () => {
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    expect(paddedTo(`${16 + 47}px`)).toHaveLength(0);
+    expect(paddedTo('16px')).toHaveLength(0);
+  });
+
+  it('the navy receipt (dark tone) asks for light icons', () => {
+    const src = readFileSync(join(__dirname, '..', 'app/contribute/[goalId].tsx'), 'utf8');
+    expect(src).toContain("<ScreenStatusBar tone={tone === 'dark' ? 'navy' : 'cream'} />");
   });
 });

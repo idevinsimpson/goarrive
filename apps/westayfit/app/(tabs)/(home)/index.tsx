@@ -20,6 +20,7 @@ import { CARD_BORDER, NAVY, kit } from '../../../src/ui/kit';
 import { formatCount, totalOfTargetLabel } from '../../../src/ui/progressFormat';
 import { SAME_LOAD_MS, readGoals, readMyCommunities } from '../../../src/memberReads';
 import { AndroidKeyboardInsetView, KEYBOARD_SCROLL_PROPS } from '../../../src/ui/keyboardAvoidance';
+import { useScreenTopInset } from '../../../src/ui/useScreenTopInset';
 import { RESUME_MIN_AWAY_MS, useResumeRefresh } from '../../../src/useResumeRefresh';
 
 type MyCommunityItem = {
@@ -282,11 +283,20 @@ export default function BrandShell() {
 
   // Signed-in branch: covers auth-enabled + settled + user present.
   const showSignedIn = wsfAuthEnabled && ready && !!user;
+  /*
+    INT-09. The member top bar clears the status bar for a signed-in member
+    (it renders whenever there is a user: app/(tabs)/_layout.tsx). Without it
+    -- signed out, auth still settling, the flag off -- this page is the top of
+    the screen on a phone, so the hero and "Loading…" start below the status
+    bar. 0 on web.
+  */
+  const topInset = useScreenTopInset();
+  const clearTop = !user && topInset > 0;
 
   const page = (
     <ScrollView
       style={kit.scroll}
-      contentContainerStyle={kit.page}
+      contentContainerStyle={clearTop ? [kit.page, { paddingTop: HOME_PAGE_TOP + topInset }] : kit.page}
       keyboardShouldPersistTaps="handled"
       // INT-06: the join field and Go stay above the keyboard (iOS insets;
       // Android pads the frame below). Inert on web.
@@ -378,6 +388,9 @@ export default function BrandShell() {
     page
   );
 }
+
+// kit.page's own top padding, under the inset when there is no top bar (INT-09).
+const HOME_PAGE_TOP = 16;
 
 /**
  * The open goal a card features: the one that ends soonest, as Community

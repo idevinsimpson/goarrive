@@ -27,6 +27,19 @@ const STAGING_KEYS = [
 // missing from this list is treated as embedding its JS, the stricter check.
 const DEV_CLIENT_PROFILES = ['development', 'development-simulator'];
 
+// NATIVE-INTEGRATOR-1 (INT-10). The binary's own build stamp, carried in its
+// app config (`extra.wsfBuild`) and read by src/nativeBuildInfo.native.ts, so
+// the staging strip and Build details stop reading "build dev". The commit is
+// the one EAS checked out; the time is when the config was evaluated during the
+// build. Shaped like the web build's stamp (package.json `build:web`).
+function buildStampOf(env, now) {
+  const sha = typeof env.EAS_BUILD_GIT_COMMIT_HASH === 'string' ? env.EAS_BUILD_GIT_COMMIT_HASH.trim().toLowerCase() : '';
+  return {
+    commit: /^[0-9a-f]{7,40}$/.test(sha) ? sha.slice(0, 7) : undefined,
+    builtAt: now.toISOString().replace(/\.\d{3}Z$/, 'Z'),
+  };
+}
+
 // Same rule as src/firebase.ts isEmulatorFlagOn.
 function isEmulatorFlagOn(raw) {
   return raw === '1' || (typeof raw === 'string' && raw.trim().toLowerCase() === 'true');
@@ -108,6 +121,7 @@ module.exports = ({ config }) => {
         );
       }
     }
+    return { ...config, extra: { ...(config.extra || {}), wsfBuild: buildStampOf(process.env, new Date()) } };
   }
   return config;
 };

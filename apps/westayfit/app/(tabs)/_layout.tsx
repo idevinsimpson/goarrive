@@ -205,6 +205,10 @@ function MemberShell() {
       <View style={{ flex: 1 }}>
         <Tabs
           backBehavior="history"
+          // INT-14: on a phone a tab change, however it happens, finds the
+          // menu closed (its dismiss layer already blocks the tab bar while it
+          // is open). Web keeps its own behaviour.
+          screenListeners={Platform.OS === 'web' ? undefined : { focus: () => setMenuOpen(false) }}
           screenOptions={{
             headerShown: false,
             sceneStyle: { backgroundColor: wsfTheme.colors.background },
