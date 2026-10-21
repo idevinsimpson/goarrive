@@ -302,9 +302,9 @@ describe('INT-02: accessibility roles Android accepts', () => {
     it('flags the original Progress partial (`accessibilityRole={\'status\' as never}`)', () => {
       const file = 'src/ui/ProgressParityView.tsx';
       const text = readFileSync(join(APP_ROOT, file), 'utf8');
-      const fixed = 'testID="wsf-activity-partial"\n      role="status"';
+      const fixed = 'testID="wsf-activity-partial" role="status"';
       expect(text).toContain(fixed);
-      const mutated = text.replace(fixed, 'testID="wsf-activity-partial"\n      accessibilityRole={\'status\' as never}');
+      const mutated = text.replace(fixed, 'testID="wsf-activity-partial" accessibilityRole={\'status\' as never}');
       const { findings } = scanSource(file, mutated);
       expect(findings).toEqual([
         expect.objectContaining({ file, prop: 'accessibilityRole', problem: expect.stringContaining('"status"') }),

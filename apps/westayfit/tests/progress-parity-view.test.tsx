@@ -234,7 +234,7 @@ describe('ProgressParityView — states', () => {
     expect(actions.onRetry).toHaveBeenCalledTimes(1);
   });
 
-  it('partial (INT-02): role="status" on web exactly as before, plus a polite live region only on Android', () => {
+  it('partial (INT-02, W12-7): role="status" on web exactly as before; no live region on Android either (it is announced instead)', () => {
     render(ready({ finished: [], partial: true }));
     expect(byId('wsf-activity-partial')!.getAttribute('role')).toBe('status');
     // The web DOM is unchanged: no aria-live of its own (role=status is already polite).
@@ -244,7 +244,8 @@ describe('ProgressParityView — states', () => {
       (Platform as { OS: string }).OS = 'android';
       render(ready({ finished: [], partial: true }));
       expect(byId('wsf-activity-partial')!.getAttribute('role')).toBe('status');
-      expect(byId('wsf-activity-partial')!.getAttribute('aria-live')).toBe('polite');
+      // W12-7: Android's polite region would speak twice beside useAnnounce (tests/announce-sites.test.ts).
+      expect(byId('wsf-activity-partial')!.hasAttribute('aria-live')).toBe(false);
     } finally {
       (Platform as { OS: string }).OS = os;
     }
