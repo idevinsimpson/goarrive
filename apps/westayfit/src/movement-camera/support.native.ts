@@ -14,13 +14,15 @@
  *
  * Kept tiny: the contribute screen imports it statically. It reaches the
  * module's index (types and a lazy view getter), the one-constant gate file,
- * and nothing of the camera screen, controller, frozen counter or engine.
+ * the type-only testPoseHookType.ts, and nothing of the camera screen,
+ * controller, frozen counter or engine.
  */
 import { Platform } from 'react-native';
 
 import { loadWsfPoseCameraModule, type WsfPoseCameraNativeModule } from '../../modules/wsf-pose-camera';
 import { NATIVE_CAMERA_TELEMETRY_APPROVED } from './nativeCameraGate';
-import type { TestPoseHook } from './support';
+// From the suffix-free type file, never './support': on native that specifier is this file (TS2303).
+import type { TestPoseHook } from './testPoseHookType';
 
 export type { TestPoseHook };
 

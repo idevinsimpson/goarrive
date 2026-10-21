@@ -1854,3 +1854,52 @@ describe('privacy: the module records, stores and sends nothing itself; the SDK 
     }
   });
 });
+
+// ── 8. Platform files never import their own base (CAM-TSC-1) ───────────────
+
+describe('platform files never import their own base specifier (CAM-TSC-1)', () => {
+  /** Relative specifiers in code: `import … from`, `export … from`, side-effect `import '…'`, `import(…)`, `require(…)`. */
+  const relativeSpecifiers = (code: string) =>
+    [...code.matchAll(/(?:\bfrom|\bimport|\brequire)\s*\(?\s*(['"])(\.{1,2}\/[^'"\n]+)\1/g)].map((m) => m[2]);
+  /**
+   * The specifiers in a `<base>.native|ios|android|web.ts(x)` file that resolve to `<base>` itself.
+   * Under Metro's platform resolution (and tsc with moduleSuffixes) that is the file importing
+   * itself: a type import becomes circular (TS2303) and the file loses the real type.
+   */
+  const selfImports = (file: string, code: string): string[] => {
+    const m = /^(.*)\.(?:native|ios|android|web)\.tsx?$/.exec(file);
+    if (!m) return [];
+    const dir = nodePath.posix.dirname(file);
+    return relativeSpecifiers(code).filter((s) => nodePath.posix.join(dir, s).replace(/\.[jt]sx?$/, '') === m[1]);
+  };
+  const PLATFORM = /\.(?:native|ios|android|web)\.tsx?$/;
+
+  it('no camera-lane platform file imports, type or value, from its own base (on native that is itself: TS2303)', () => {
+    const files = [...filesUnder('src/movement-camera'), ...filesUnder(MOD), ...filesUnder('src/ui')].filter(
+      (f) => PLATFORM.test(f) && (!f.startsWith('src/ui/') || /^src\/ui\/(CameraSkeletonOverlay|NativeCameraPreview)\./.test(f)),
+    );
+    expect(files).toEqual(expect.arrayContaining([
+      'src/movement-camera/controller.native.ts',
+      'src/movement-camera/support.native.ts',
+      'src/ui/CameraSkeletonOverlay.native.tsx',
+      'src/ui/NativeCameraPreview.native.tsx',
+    ]));
+    for (const f of files) expect(selfImports(f, codeOf(f)), f).toEqual([]);
+    // The hook's shape lives in one suffix-free, type-only file; support.ts re-exports it, so its importers are unchanged.
+    expect(filesUnder('src/movement-camera').filter((f) => f.includes('/testPoseHookType.'))).toEqual(['src/movement-camera/testPoseHookType.ts']);
+    expect(codeOf('src/movement-camera/testPoseHookType.ts')).not.toMatch(/^\s*import (?!type\b)/m);
+    expect(read('src/movement-camera/support.native.ts')).toContain("import type { TestPoseHook } from './testPoseHookType';");
+    expect(read('src/movement-camera/support.ts')).toContain("export type { TestPoseHook } from './testPoseHookType';");
+    // Self-tests of the scan, as support.native.ts.
+    const f = 'src/movement-camera/support.native.ts';
+    for (const code of ["import type { TestPoseHook } from './support';", "export type { TestPoseHook } from './support';", "import './support';",
+      "const s = require('./support');", "const s = await import('./support');", "import { x } from '../movement-camera/support';",
+      'import type { T } from "./support.ts";', "import {\n  type T,\n} from './support';"]) {
+      expect(selfImports(f, strip(code, 'ts')), code).toHaveLength(1);
+    }
+    for (const code of ["import type { TestPoseHook } from './testPoseHookType';", "import { a } from './supportive';", "import { s } from '../support';",
+      "// import type { T } from './support';", "/* export * from './support'; */", "const s = 'from ./support';"]) {
+      expect(selfImports(f, strip(code, 'ts')), code).toEqual([]);
+    }
+  });
+});

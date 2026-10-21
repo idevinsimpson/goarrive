@@ -35,7 +35,7 @@ Paths below are relative to `apps/westayfit/`.
 
 **Settings (CAM-02, second delta review NB-4):** `src/movement-camera/MoveCameraSettingsSection.tsx` (a camera-lane file, map §5.4) now draws the MOVE section on iOS/Android only when `cameraCounterSupported()` is true (`moveCameraSettingsShown`; `./support` resolves to `support.native.ts` there). With the gate off, native Settings shows no Camera rep counter. The stored values are kept. Web is unchanged: it always draws the section and never consults support. `app/settings.tsx` is not edited. The map's other C-2 items (INT-31 knob elevation, MF-18 describedby) are not in this change; on native the section is hidden until support ships.
 
-**Not touched:** `frozen/**`, `frozen.js`, `frozen.d.ts`, `orchestrator.ts`, `flow.ts`, `visual.ts`, `figure.ts` and `engine.ts`. The web `controller.ts` and `support.ts` got **comment-only** edits (review web-2: their "native: unsupported" comments were stale); comments are stripped from the bundle. Nor were `package.json`, the lockfile, `app.json`, `eas.json`, `src/firebase.ts`, `src/stagingEnv.ts`, `src/storage/*` or `settingsStore.ts`. No thresholds or counting changed. Metro picks the `.native.*` files on iOS/Android; the web export contains none of the module code (checked: 0 bundle files mention `requestCameraPermissionAsync`).
+**Not touched:** `frozen/**`, `frozen.js`, `frozen.d.ts`, `orchestrator.ts`, `flow.ts`, `visual.ts`, `figure.ts` and `engine.ts`. The web `controller.ts` and `support.ts` got **comment-only** edits (review web-2: their "native: unsupported" comments were stale); comments are stripped from the bundle. `support.ts` also moved its `TestPoseHook` interface to `testPoseHookType.ts` and re-exports it (CAM-TSC-1, types only; the web bundle is byte-identical). Nor were `package.json`, the lockfile, `app.json`, `eas.json`, `src/firebase.ts`, `src/stagingEnv.ts`, `src/storage/*` or `settingsStore.ts`. No thresholds or counting changed. Metro picks the `.native.*` files on iOS/Android; the web export contains none of the module code (checked: 0 bundle files mention `requestCameraPermissionAsync`).
 
 ### The event → PoseFrame contract (`nativeEngine.ts`)
 
@@ -51,8 +51,8 @@ Paths below are relative to `apps/westayfit/`.
 
 ## What is tested here
 
-Baseline before this change: **66 files, 1288 tests**. At `abe84f45`: **67 files, 1339 tests**. After the evidence pass and the NATIVE-BUILD-1 merge: **68 files, 1351 tests**. After the #638 review fixes: **68 files, 1361 tests**. After the delta-review follow-ups: **68 files, 1369 tests**. After the second delta review's items: **68 files, 1371 tests**, all passing (`npx vitest run --testTimeout=60000`). This lane's suites:
-- `tests/move-camera-native-adapter.test.ts`: 70 tests (68 after the delta-review follow-ups, 61 after the #638 review fixes, 51 before them);
+Baseline before this change: **66 files, 1288 tests**. At `abe84f45`: **67 files, 1339 tests**. After the evidence pass and the NATIVE-BUILD-1 merge: **68 files, 1351 tests**. After the #638 review fixes: **68 files, 1361 tests**. After the delta-review follow-ups: **68 files, 1369 tests**. After the second delta review's items: **68 files, 1371 tests**. After CAM-TSC-1: **68 files, 1372 tests**, all passing (`npx vitest run --testTimeout=60000`). This lane's suites:
+- `tests/move-camera-native-adapter.test.ts`: 71 tests (70 before CAM-TSC-1, 68 after the delta-review follow-ups, 61 after the #638 review fixes, 51 before them);
 - `tests/move-camera-native-contract.test.ts`: 7 tests (the new one ties the Kotlin output to the current Kotlin sources).
 
 The merged NATIVE-BUILD-1 commits brought the rest. The adapter suite covers:
@@ -441,6 +441,15 @@ A dev-only HUD is **not built**. `RepCounterController.frameStats` (accepted, du
 |---|---|
 | D1: this record said Groovy slashy strings are checked absent, but the test rejected only dollar-slashy (`$/`) | **Fixed (check added).** The scan test also rejects a plain slashy opener in `build.gradle`, after comments are removed: a `/` at a line start or after an operator or opening bracket, not followed by `/`, `*` or a space. Self-tested on five slashy and five non-slashy snippets (a URL in a string, a spaced division, `/=`, a comment). Mutation-checked: six plain slashy forms appended to `build.gradle` (assignment, call argument, line start, `==~`, closure, list) each fail it, and dollar-slashy still fails the `$/` check; the `b4663ce1` test missed all six. |
 
+## CAM-TSC-1: native type-check of the support probe
+
+A coordinator diagnostic type-checked the app with Metro's native resolution (`moduleSuffixes` `[".ios", ".native", ""]`, and the Android equivalent) and found `support.native.ts(23,15): TS2303 Circular definition of import alias 'TestPoseHook'`. Under native resolution, `import type { TestPoseHook } from './support'` is support.native.ts itself. The runtime was unaffected (type imports are erased), but the native file lost the hook's real type, and `controller.ts` got an implicit `any` from it (TS7006).
+
+- **Fix.** The interface moved to `src/movement-camera/testPoseHookType.ts`: suffix-free, no platform sibling, type-only imports of `CameraFailure` and `RawLandmark`. `support.ts` imports it and re-exports it (`export type { TestPoseHook } from './testPoseHookType'`), so `controller.ts` and the tests import it as before. `support.native.ts` imports it from the type file. The camera gate is unchanged (`false`), and no behaviour changed.
+- **Guard (tested, mutation-checked).** No camera-lane `.native`/`.ios`/`.android`/`.web` file (under `src/movement-camera`, `modules/wsf-pose-camera`, and the two camera files in `src/ui`) imports, type or value, from a specifier that resolves to its own base. That covers `import`, `export … from`, side-effect imports, `import()` and `require()`, after comments are removed, with self-tests. Five mutants each fail it: the old import put back, `export type … from './support'`, a dynamic `import('./support')`, `controller.native.ts` importing `./controller`, and `NativeCameraPreview.native.tsx` importing `./NativeCameraPreview`. With the old import put back, native `tsc` reports the TS2303 again.
+- **Native type-check.** With the full `include` (tests too): iOS and Android go from 9 errors to 7. Both camera source errors are gone, and none remain in camera source. The 7 left are 6 in `src/storage/kv.native.ts` (the same pattern, state lane) and 1 in this suite: it imports the web `controller` on purpose and runs only under vitest. On the native app graph (app, src and modules, with web siblings excluded, as in the diagnostic): 0 camera errors; only the 6 in `kv.native.ts`. Default `tsc`: 0.
+- **Bundles.** Web: byte-identical to the pre-change tree, all files, when both are exported with a warm Metro cache. The first pre-change export after the container restart (cold cache) numbered modules differently; a warm re-export of the same pre-change tree differed from it in the same way, so that was cache state, not this change. iOS: the JavaScript (`--no-bytecode`) is byte-identical. The Hermes `.hbc` is not byte-reproducible here: two exports of the same tree differ. Its file name (and so `metadata.json`) changed with this change. The likely cause, not confirmed, is debug or source-map input, because support.native.ts's lines moved.
+
 ## Deviations from the research report, and why
 
 - **Podspec at the module root**, not `ios/`. CocoaPods file patterns cannot climb out of the pod root with `..`, and the single shared model lives in `assets/`. `expo-module.config.json` `apple.podspecPath` points to it; autolinking resolves it (checked).
@@ -460,8 +469,8 @@ A dev-only HUD is **not built**. `RepCounterController.frameStats` (accepted, du
 ```sh
 cd apps/westayfit
 npx tsc --noEmit
-npx vitest run tests/move-camera-native-adapter.test.ts     # 70 tests
-npx vitest run --testTimeout=60000                          # 68 files, 1371 tests (after the second delta review's items)
+npx vitest run tests/move-camera-native-adapter.test.ts     # 71 tests
+npx vitest run --testTimeout=60000                          # 68 files, 1372 tests (after CAM-TSC-1)
 npx vitest run tests/move-camera-native-contract.test.ts    # 7 tests: Kotlin <-> JS contract, tied to the Kotlin sources
 docs/westayfit/qa/camera-evidence/run-kotlin-jvm.sh         # from the repo root; Kotlin JVM tests + module compile report
 npx expo export --platform ios --output-dir /tmp/exp-ios
