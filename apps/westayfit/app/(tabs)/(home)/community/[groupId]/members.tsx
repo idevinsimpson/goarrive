@@ -23,6 +23,7 @@ import {
   TEXT_MUTED,
 } from '../../../../../src/ui/kit';
 import { MEMBER_TAB_BAR_BODY } from '../../../../../src/ui/MemberTabBar';
+import { BACK_GLYPH_HIT_SLOP } from '../../../../../src/ui/kit';
 
 /**
  * MEMBERS — the people in one community.
@@ -190,6 +191,8 @@ export default function MembersScreen() {
           }
           accessibilityRole="link"
           accessibilityLabel="Back to the community"
+          // W16-3 (MF-18): the "‹" glyph reaches 44 pt through its hit slop.
+          hitSlop={BACK_GLYPH_HIT_SLOP}
           testID="wsf-members-back"
         >
           <Text style={st.back}>‹</Text>

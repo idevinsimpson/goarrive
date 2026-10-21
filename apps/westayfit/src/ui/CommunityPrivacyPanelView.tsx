@@ -1,4 +1,4 @@
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import {
   privacySaveErrorCopy,
@@ -247,6 +247,9 @@ function ToggleRow({
       aria-disabled={disabled}
       aria-busy={saving}
       aria-describedby={hintId}
+      // W16-3 (MF-18): a phone has no aria-describedby; the hint (or
+      // "Saving…") is the switch's own accessibility hint there.
+      {...(Platform.OS !== 'web' ? { accessibilityHint: saving ? 'Saving…' : hint } : {})}
       accessibilityLabel={accessibilityLabel}
       style={s.toggleRow}
       testID={testID}

@@ -29,6 +29,8 @@ import {
   useKeyboardHeight,
 } from '../../../../../src/ui/keyboardAvoidance';
 import { useSheetInsets } from '../../../../../src/ui/sheetInsets';
+import { liveRegion } from '../../../../../src/ui/announce';
+import { STALE_FIGURE_SENTENCE, StaleAnnouncer, nativeA11yHidden } from '../../../../../src/ui/staleFigure';
 import { resolveRepeatPolicy, type RepeatPolicy } from '../../../../../src/contributionFlow';
 import { wsfAuthEnabled } from '../../../../../src/featureFlags';
 import { getFirebaseFirestore, getFirebaseFunctions } from '../../../../../src/firebase';
@@ -2647,6 +2649,9 @@ export default function CommunityPage() {
                 testID={`wsf-kiosk-stations-slot-${slot}-${goal.goalId}`}
                 accessibilityRole="button"
                 aria-pressed={chosen}
+                // W16-3 (MF-18): a phone's screen reader does not read
+                // aria-pressed; the chosen slot is announced as selected there.
+                {...(Platform.OS !== 'web' ? { accessibilityState: { selected: chosen } } : {})}
                 accessibilityLabel={`${goal.title}: approve as Station ${slot}`}
               >
                 <Text
@@ -2914,10 +2919,13 @@ export default function CommunityPage() {
         <View
           style={styles.visuallyHidden}
           testID={`wsf-community-goal-stale-status-${goal.goalId}`}
-          {...({ 'aria-live': 'polite' } as Record<string, unknown>)}
+          // W16-3 (INT-18): aria-live="polite" on the web, as before; nothing
+          // on a phone, where StaleAnnouncer speaks the sentence instead.
+          {...liveRegion}
         >
-          {p.refreshFailed ? <Text>Couldn’t refresh. This is the last confirmed figure.</Text> : null}
+          {p.refreshFailed ? <Text>{STALE_FIGURE_SENTENCE}</Text> : null}
         </View>
+        <StaleAnnouncer failed={p.refreshFailed === true} />
         {p.refreshFailed ? (
           <View
             style={onDark ? styles.heroLastKnown : styles.cardLastKnown}
@@ -2926,8 +2934,10 @@ export default function CommunityPage() {
             <Text
               style={onDark ? styles.heroLastKnownText : styles.cardMeta}
               {...({ 'aria-hidden': true } as Record<string, unknown>)}
+              // W16-3 (MF-18): read once, by the announcement, not again here.
+              {...nativeA11yHidden()}
             >
-              Couldn’t refresh. This is the last confirmed figure.
+              {STALE_FIGURE_SENTENCE}
             </Text>
             <Pressable
               onPress={refreshProgress}
@@ -3972,7 +3982,12 @@ export default function CommunityPage() {
               {humanLine}
             </Text>
           ) : (
-            <Text style={styles.identityDescriptor} {...({ 'aria-hidden': true } as Record<string, unknown>)}>
+            <Text
+              style={styles.identityDescriptor}
+              {...({ 'aria-hidden': true } as Record<string, unknown>)}
+              // W16-3 (MF-18): a held slot, nothing to read on a phone either.
+              {...nativeA11yHidden()}
+            >
               {'\u00A0'}
             </Text>
           )}

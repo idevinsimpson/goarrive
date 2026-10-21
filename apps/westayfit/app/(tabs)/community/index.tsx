@@ -39,6 +39,7 @@ import { CommunityParityView } from '../../../src/ui/CommunityParityView';
 import type { CommunityParityProps, ParityGoal } from '../../../src/ui/communityParityTypes';
 import { onPrivacySettled } from '../../../src/ui/CommunityPrivacyControls';
 import { RefreshNote, type RefreshState } from '../../../src/ui/RefreshNote';
+import { liveRegion, useAnnounce } from '../../../src/ui/announce';
 import { RESUME_MIN_AWAY_MS, useResumeRefresh } from '../../../src/useResumeRefresh';
 
 /**
@@ -212,6 +213,11 @@ export default function CommunityIndexScreen() {
   const [selection, setSelection] = useState(0);
   const retrying = useRef(false);
   const [announcement, setAnnouncement] = useState('');
+  /** W16-3 (MF-18): each chip choice is its own announcement, even when the words repeat. */
+  const [announcementSeq, setAnnouncementSeq] = useState(0);
+  // On a phone the choice is spoken (iOS ignores live regions; Android's would
+  // double this); on the web the polite region below speaks, as before.
+  useAnnounce(announcement || null, announcement ? announcementSeq : null);
   const safeArea = useSafeAreaInsets();
 
   /*
@@ -468,6 +474,7 @@ export default function CommunityIndexScreen() {
       if (!user || groupId === currentIdNow) return;
       rememberCurrentCommunity(user.uid, groupId);
       setAnnouncement(`Now showing ${name}.`);
+      setAnnouncementSeq((n) => n + 1);
       setSelection((n) => n + 1);
     },
     [user, currentIdNow],
@@ -525,7 +532,7 @@ export default function CommunityIndexScreen() {
     <Text
       style={styles.visuallyHidden}
       testID="wsf-community-index-announce"
-      {...({ 'aria-live': 'polite' } as Record<string, unknown>)}
+      {...liveRegion}
     >
       {announcement}
     </Text>
