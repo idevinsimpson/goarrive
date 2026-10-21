@@ -51,7 +51,7 @@ This document is preparation only. No build ran from the sprint sandbox and no s
   - the git-tracked `app/`, `src/` and `modules/` sources, plus `expo-env.d.ts` and `.expo/types` when present;
   - minus tests, `*.web.*`, the other platform's files, `src/movement-camera/frozen`, and any file shadowed by a higher-priority sibling (a base `X.ts` beside `X.native.ts`).
 - **Output:** the errors with app-relative paths. It exits non-zero on any error.
-- **What it catches:** type errors as a phone resolves the code. That includes a `.native` file that imports its own base specifier: on a phone that resolves to the file itself, so its types become `any`. `tests/native-self-import.test.ts` guards that case statically on every vitest run.
+- **What it catches:** type errors as a phone resolves the code. That includes a `.native`, `.ios` or `.android` file that imports its own base specifier (by any spelling, including `.`, `./` or its own directory for an `index` file): on a phone that resolves to the file itself, so its types become `any`. `tests/native-self-import.test.ts` guards that case statically on every vitest run. If tsc cannot run at all, the script says "tsc did not run (<code>)" and fails.
 - **What it is not:** a Swift, Kotlin, Xcode or Gradle compile. Native module code (for example `modules/wsf-pose-camera`'s Swift and Kotlin) is not compiled here, and a clean result says nothing about the binary building.
 - **Known state:** until two lanes split their shared types into suffix-free modules, it reports the storage errors in `src/storage/kv.native.ts`, which imports `DeviceKv`/`KvRead` from `./kv` (ST-TSC-1, W13: `src/storage/kvTypes.ts`). With the camera lane merged it also reports `src/movement-camera/support.native.ts`, which takes `TestPoseHook` from `./support` (CAM-TSC-1, W15: `src/movement-camera/testPoseHookType.ts`). With both splits applied, iOS and Android report 0 errors.
 
@@ -64,13 +64,13 @@ This document is preparation only. No build ran from the sprint sandbox and no s
 1. **EAS project: done, by link.** The project exists under `devinsimpson` and `app.json` names it (see the top of this document). Do not run `eas init`. Before any account command, from `apps/westayfit`, run `[ACCOUNT] npx eas-cli@25.3.0 login` as `devinsimpson`. To confirm the link, run `[RO] npx eas-cli@25.3.0 project:info`, which needs that login.
 2. **EAS environment variables:** set the six `EXPO_PUBLIC_WSF_STAGING_*` values from the `westayfit-staging` Firebase Web App config in both the `preview` and `development` environments. Retrieve, verify and upload them as in "Staging values: retrieve, verify, upload" below. The owner verified on 21 Oct (03:39Z, read-only) that the project has **no environment variables in any environment** yet. Use **Plain text** or **Sensitive** visibility, **not Secret**: `eas env:pull` cannot read Secret values outside EAS servers and writes them only as comments (`# NAME=***** (secret)`; eas-cli 25.3.0 `build/commands/env/pull.js`), so the development client would be missing them and refuse to start. They are public client identifiers, so Plain text is fine. Also add `EXPO_PUBLIC_WSF_ENV=staging` and `EXPO_PUBLIC_WSF_AUTH_ENABLED=1` to the `development` environment, so `env:pull` writes the selector (step 2 above) and a development client can sign in.
 3. **Android internal test** `[ACCOUNT]`:
-   - First, `[RO] npx eas-cli@25.3.0 env:list preview --format short` must list all six `EXPO_PUBLIC_WSF_STAGING_*` names. eas-cli never runs the `app.config.js` refusal locally, so a missing value otherwise shows up only on the build worker, after the upload. Plaintext values print in clear; sensitive ones stay masked.
+   - First, `[RO] npx eas-cli@25.3.0 env:list preview --format short | cut -d= -f1` (names only) must list all six `EXPO_PUBLIC_WSF_STAGING_*` names. eas-cli never runs the `app.config.js` refusal locally, so a missing value otherwise shows up only on the build worker, after the upload. Without the `cut`, plaintext values print in clear (sensitive ones stay masked). Do not paste the output anywhere.
    - Then `[ACCOUNT] npx eas-cli@25.3.0 build -p android --profile preview`.
    - On the first build, accept the EAS-generated keystore. That is the Android signing credential, and EAS manages it.
    - Install the APK by link or QR, allowing "install unknown apps" for the browser that opens it.
 4. **iPhone** `[ACCOUNT]`: **BLOCKED until the Apple Developer Program membership shows Active; it is currently Pending (owner, 03:32Z).** A paid membership is required for both `preview` and `development` device builds, because both use internal (ad hoc) distribution. Once it is Active:
    - Register each test iPhone with `[ACCOUNT] npx eas-cli@25.3.0 device:create`.
-   - Check the values first, as in action 3: `[RO] npx eas-cli@25.3.0 env:list preview --format short`.
+   - Check the names first, as in action 3: `[RO] npx eas-cli@25.3.0 env:list preview --format short | cut -d= -f1`. Do not paste the output anywhere.
    - Run `[ACCOUNT] npx eas-cli@25.3.0 build -p ios --profile preview`.
    - On the phone, turn on Developer Mode (Settings › Privacy & Security › Developer Mode, iOS 16 and later) before the build will launch.
    - The bundle id `com.westayfit.app` must be free in that Apple team.
@@ -79,18 +79,18 @@ This document is preparation only. No build ran from the sprint sandbox and no s
 ## Staging values: retrieve, verify, upload (owner only)
 Agents never see, set or upload a value. The owner runs these steps on their own machine; the tags are as in the next section. Use a private temporary directory, for example `TMP=$(mktemp -d)`.
 1. **Retrieve** `[RO, the owner's Firebase login]`: `npx firebase-tools@15.30.1 apps:sdkconfig WEB --project westayfit-staging --json > "$TMP/sdkconfig.json"`.
-2. **Shape** `[LOCAL]`: `node .github/wsf-staging/prepare-staging.mjs "$TMP/sdkconfig.json" "$TMP/wsf-staging.env" westayfit-staging`. It writes the six names at mode 0600 and echoes nothing. That script lives on `main` and is reused from there, not copied into this branch, so run it from a checkout of `main`.
+2. **Shape** `[LOCAL]`: `node .github/wsf-staging/prepare-staging.mjs "$TMP/sdkconfig.json" "$TMP/wsf-staging.env" westayfit-staging`. It writes the six names at mode 0600 and echoes only the project id it resolved, never a config value. That script lives on `main` and is reused from there, not copied into this branch, so run it from a checkout of `main`.
 3. **Remove the raw config** `[LOCAL]`: `rm -f "$TMP/sdkconfig.json"`.
 4. **Verify before uploading** `[LOCAL]`: from `apps/westayfit`, run `npm run check:staging-env -- "$TMP/wsf-staging.env" --platform ios` (`scripts/check-staging-env.mjs`).
    - It checks the file with the app's own rules: `resolveStagingConfig` and `nativeTargetProblem` from `src/stagingEnv.ts` (a release build, so `__DEV__` is false), and `app.config.js` run as an EAS `preview` build would run it. It adds `EXPO_PUBLIC_WSF_ENV=staging` and `EXPO_PUBLIC_WSF_AUTH_ENABLED=1` unless the file sets them.
    - It prints **only names**: the six names as present or missing, PASS or FAIL per check, and for each failure a rule label (for example "AUTH_DOMAIN must equal <PROJECT_ID>.firebaseapp.com") with the names involved. It never prints a value, even though the app's own refusal messages quote values. Exit 0 means PASS, 1 means FAIL.
-   - It refuses a file that git tracks.
+   - It refuses a file git could commit: one git tracks (by the path given or its real path, so a symlink does not help), one inside the repository that git does not ignore (keep it outside, or use a `.env*.local` name), and one with a second hard link. It also refuses when git cannot answer (no git, no work tree), and it refuses unknown flags or more than one file.
    - Upload only on PASS.
 5. **Upload** `[ACCOUNT, owner only; never run by an agent]`, one of:
    - `npx eas-cli@25.3.0 env:push preview --path "$TMP/wsf-staging.env"`. Note: eas-cli 25.3.0 `env:push` gives every `EXPO_PUBLIC_*` name **plaintext ("Public")** visibility (`build/commands/env/push.js:185`), so `env:list` will show those values in clear.
    - Or one name at a time: `npx eas-cli@25.3.0 env:set preview --name <NAME> --type string --visibility sensitive --scope project`. Leave out `--value`: eas-cli then prompts for it, and nothing lands in shell history.
    - Repeat for the `development` environment if a development client will use EAS-pulled values.
-6. **Confirm** `[RO, the owner's EAS login]`: `npx eas-cli@25.3.0 env:list preview --format short`. Sensitive values stay masked unless `--include-sensitive` is given; plaintext ("Public") values are shown as they are.
+6. **Confirm** `[RO, the owner's EAS login]`: `npx eas-cli@25.3.0 env:list preview --format short | cut -d= -f1` lists the names only. Without the `cut`, plaintext ("Public") values are shown as they are, and sensitive values stay masked unless `--include-sensitive` is given. Do not paste the output anywhere.
 7. **For path A (Expo Go or the dev server)** `[LOCAL]`:
    - `cp "$TMP/wsf-staging.env" apps/westayfit/.env.development.local`, then append `EXPO_PUBLIC_WSF_ENV=staging` and `EXPO_PUBLIC_WSF_AUTH_ENABLED=1` to that copy;
    - confirm `git check-ignore -v apps/westayfit/.env.development.local` reports it ignored (`.env*.local` in `apps/westayfit/.gitignore`);
@@ -111,13 +111,13 @@ Run every command from `apps/westayfit`.
   - from the Firebase web app config, `[RO] firebase apps:sdkconfig WEB --project <staging project>` (firebase-tools; not part of this repo, so not checked here);
   - or, if they are already in EAS, `[ACCOUNT] npx eas-cli@25.3.0 env:pull --environment development --path .env.development.local` (read-only on the account). Never pull into `.env.local` (see "How the backend is chosen").
 - `[LOCAL] npx expo start --go`. The repo has `expo-dev-client`, so `--go` is required: without it the CLI serves the development client instead of Expo Go.
-  - **If you are logged in to Expo** (`eas login` or `expo login`), Expo CLI fetches a development code-signing certificate for the linked project the first time Expo Go asks for the manifest. This is an account action on the owner's project (`@expo/cli` `utils/codesigning.js`, `fetchAndCacheNewDevelopmentCodeSigningInfoAsync`).
+  - **If you are logged in to Expo** (`eas login` or `expo login`) and online, Expo CLI fetches a new development code-signing certificate for the linked project **on every manifest request** from Expo Go, generating a new key pair each time. The cached certificate is used only offline (`EXPO_OFFLINE`) or when the fetch fails. Each fetch is an account action on the owner's project (`@expo/cli` 54.0.27 `build/src/utils/codesigning.js:225-266`, `getExpoRootDevelopmentCodeSigningInfoAsync`, and `:367-384`, `fetchAndCacheNewDevelopmentCodeSigningInfoAsync`).
   - **Logged out, it works without one**: the CLI skips signing when no user is signed in.
 - Use the default LAN connection, with the iPhone on the same Wi-Fi, and scan the QR with the iPhone Camera. **Do not add `--tunnel` by default:** a tunnel exposes the dev server through a third-party service.
 - What differs in Expo Go: the camera rep counter's native module (`wsf-pose-camera`) is not in Expo Go. The app fails closed to the manual count (`cameraCounterSupported()` is false), and no MediaPipe is present at all.
 
 **(B) EAS iOS Simulator build. [ACCOUNT, owner]**
-- First, `[RO] npx eas-cli@25.3.0 env:list preview --format short` must list all six `EXPO_PUBLIC_WSF_STAGING_*` names. eas-cli never runs the refusal locally, so a missing value otherwise shows up only on the worker, after the upload.
+- First, `[RO] npx eas-cli@25.3.0 env:list preview --format short | cut -d= -f1` (names only) must list all six `EXPO_PUBLIC_WSF_STAGING_*` names. eas-cli never runs the refusal locally, so a missing value otherwise shows up only on the worker, after the upload. Do not paste the output anywhere.
 - `[ACCOUNT] npx eas-cli@25.3.0 build -p ios --profile preview-simulator`.
 - No Apple account is needed: a simulator build is not signed for devices. It uses 1 of the 15 free iOS builds.
 - The EAS `preview` environment must hold the six staging values; the build refuses at config time otherwise.
