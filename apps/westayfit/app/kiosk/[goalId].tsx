@@ -9,7 +9,7 @@ import { useWsfAuth } from '../../src/auth';
 import { samePulse, type GoalPulse } from '../../src/displayPulse';
 import { getFirebaseAuth, getFirebaseFunctions, wsfUsingEmulators } from '../../src/firebase';
 import { armKioskReturn, resetSharedScreenHandoffs } from '../../src/handoffArming';
-import { KIOSK_REFUSAL_BODY, KIOSK_REFUSAL_HEADLINE, kioskContributeRoute } from '../../src/kioskSession';
+import { KIOSK_REFUSAL_BODY, KIOSK_REFUSAL_HEADLINE, clearKioskSession, kioskContributeRoute } from '../../src/kioskSession';
 import { wsfTheme } from '../../src/theme';
 import { PROGRESS_GREEN } from '../../src/ui/brandAssets';
 import { formatActiveWindowLabel, formatClock, formatPeriod } from '../../src/ui/dates';
@@ -55,7 +55,7 @@ export default function KioskGoal() {
   const params = useLocalSearchParams<{ goalId: string }>();
   const goalId = params.goalId;
   const { width: windowWidth } = useWindowDimensions();
-  const { user } = useWsfAuth();
+  const { ready, user } = useWsfAuth();
 
   // Same hydration rule as the display: the static export renders the phone
   // layout, so the first client render must match it or React re-renders the
@@ -92,16 +92,26 @@ export default function KioskGoal() {
   // signing the visitor out of the account they had just signed in to.
   // useFocusEffect ties the reset to the fact it is about: this device has
   // come to rest on its start screen.
+  //
+  // THE KIOSK SESSION ENDS ONLY ONCE NOBODY IS SIGNED IN (ST-05). The durable
+  // marker (src/kioskSession.ts) is what brings a killed phone back here, so
+  // it is cleared only when auth has answered with no user: after this
+  // screen's sign-out has landed (the effect runs again with no user), never
+  // before it. A sign-out that fails, or a kill before it lands, keeps it.
   useFocusEffect(
     useCallback(() => {
       void resetSharedScreenHandoffs();
-      if (!user) return;
+      if (!ready) return;
+      if (!user) {
+        void clearKioskSession();
+        return;
+      }
       void signOut(getFirebaseAuth()).catch(() => {
         // Nothing useful to do here and nothing to claim: the start screen
         // shows no identity either way, and the next Contribute press lands on
-        // the sign-in gate.
+        // the sign-in gate. The kiosk session stays open (above).
       });
-    }, [user])
+    }, [ready, user])
   );
 
   useEffect(() => {
