@@ -167,8 +167,9 @@ const STRING_FORMS: Record<Lang, StringForm[]> = {
  *
  * Not modelled: nested block comments (Swift and Kotlin allow them; an inner close ends the comment
  * early, which can only leave more text for the scan, never less), Swift raw strings (`#"…"#`),
- * Swift and TS regex literals, Groovy slashy strings and JSX text. The scan test checks that the
- * scanned Swift and Groovy files contain no raw-string or slashy-string delimiters.
+ * Swift and TS regex literals, Groovy slashy and dollar-slashy strings, and JSX text. The scan test
+ * checks that the scanned Swift files contain no raw-string or regex delimiters, and build.gradle
+ * no slashy or dollar-slashy opener.
  */
 function strip(c: string, lang: Lang): string {
   const forms = STRING_FORMS[lang];
@@ -1640,9 +1641,17 @@ describe('privacy: the module records, stores and sends nothing itself; the SDK 
       expect(c, f).not.toMatch(FQN_FORBIDDEN);
     }
     // What the stripper does not model is absent from what it scans: no Swift raw strings or
-    // regex literals (`#"`, `#/`), no Groovy slashy strings (`$/`).
+    // regex literals (`#"`, `#/`), and no Groovy slashy (`/…/`) or dollar-slashy (`$/…/$`) strings
+    // in build.gradle. A slashy opener is a `/` that starts a line, or follows an operator or an
+    // opening bracket, and is not a comment (`//`, `/*`, removed first) or a spaced division.
     for (const f of code.filter((x) => x.endsWith('.swift'))) expect(read(f), f).not.toMatch(/#"|#\//);
+    const SLASHY = /(?:^|[=(,:[{+\-*%~!&|?;<>])\s*\/[^/*\s]/m;
+    expect(strip(read(`${MOD}/android/build.gradle`), 'groovy')).not.toMatch(SLASHY);
     expect(read(`${MOD}/android/build.gradle`)).not.toMatch(/\$\//);
+    for (const [src, slashy] of [
+      ['def p = /a.b/', true], ['assert s ==~ /x/', true], ['f(/x/)', true], ['def l = [\n  /x/\n]', true], ['def c = { a -> /x/ }', true],
+      ['def u = "https://x"', false], ['def h = w / 2 // half of /x', false], ['x /= 2', false], ['def r = (a) / (b)', false], ['/* a */ def q = 1', false],
+    ] as const) expect(SLASHY.test(strip(src, 'groovy')), src).toBe(slashy);
     // A '//' inside a string no longer hides the rest of the line from the scan.
     expect(strip('let s = "a//b"; let x = AVCaptureMovieFileOutput()', 'swift')).toMatch(NATIVE_FORBIDDEN);
     expect(strip('// AVCaptureMovieFileOutput in a comment', 'swift')).not.toMatch(NATIVE_FORBIDDEN);
