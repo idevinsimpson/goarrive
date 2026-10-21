@@ -294,18 +294,18 @@ const KIOSK_G1 = { name: KIOSK, params: { goalId: 'goal-1' } };
 
 /**
  * Who is signed in once the kiosk start screen is focused: THAT SCREEN'S OWN
- * DECISION, which differs by lane. On integrator-2 it signs whoever it finds
- * out (app/kiosk/[goalId].tsx:95-104). On member-1 (MF-08) it signs out only
- * on kiosk evidence, the marker naming this goal or a fresh hand-off, and
- * otherwise ASKS: "Sign out" or "Stay signed in" (src/kioskSignOutGuard.ts
- * decideKioskStart), and an unknown marker is no evidence there. Either way
- * the visitor is at the kiosk start screen, never on member Home: asserted.
+ * DECISION. On integrator-2 it signs whoever it finds out
+ * (app/kiosk/[goalId].tsx:95-104). On member-1 (MF-08) it signs out on kiosk
+ * evidence and otherwise asks (src/kioskSignOutGuard.ts decideKioskStart);
+ * since member W16-23 an UNKNOWN marker is kiosk evidence there, so it signs
+ * out too. On both lanes, then: signed out, never "Stay signed in", at the
+ * kiosk start screen, never on member Home.
  */
 function kioskStartUser(): string | null {
   expect(focusedEl().getAttribute('data-route')).toBe(KIOSK);
   expect(memberHomeRenders).toBe(0);
-  const asks = (focusedEl().textContent ?? '').includes('Stay signed in');
-  return asks ? 'visitor-1' : null;
+  expect(focusedEl().textContent ?? '', 'never offers to stay signed in').not.toContain('Stay signed in');
+  return null;
 }
 
 describe('the launch read of the marker failed', () => {

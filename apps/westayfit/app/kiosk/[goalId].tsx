@@ -14,6 +14,7 @@ import {
   KIOSK_REFUSAL_HEADLINE,
   clearKioskSession,
   kioskContributeRoute,
+  kioskSessionUnknown,
   readKioskSession,
 } from '../../src/kioskSession';
 import { decideKioskStart, noteKioskHandoff } from '../../src/kioskSignOutGuard';
@@ -121,7 +122,16 @@ export default function KioskGoal() {
       if (!ready) return;
       // C7-1: an open kiosk session for this goal on this device is kiosk
       // evidence too, so a phone relaunched mid-session signs its visitor out.
-      const decision = decideKioskStart(Platform.OS, !!user, goalIdRef.current, Date.now(), readKioskSession());
+      // W16-23: so is a marker this device cannot read (or has not read yet):
+      // never an offer to stay signed in when a kiosk session may be open.
+      const decision = decideKioskStart(
+        Platform.OS,
+        !!user,
+        goalIdRef.current,
+        Date.now(),
+        readKioskSession(),
+        kioskSessionUnknown(),
+      );
       setAskSignOut(decision === 'ask');
       if (!user) {
         void clearKioskSession();

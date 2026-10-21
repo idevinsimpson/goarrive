@@ -156,6 +156,21 @@ describe('kioskSignOutGuard (MF-08 interim)', () => {
     expect(decideKioskStart('ios', true, 'goal-1', T0, null)).toBe('ask');
     expect(decideKioskStart('ios', true, null, T0, 'goal-1')).toBe('ask');
     expect(decideKioskStart('web', true, 'goal-1', T0, 'goal-2')).toBe('signOut');
+    // ...a marker the device could read (W16-23).
+    expect(decideKioskStart('ios', true, 'goal-1', T0, null, false)).toBe('ask');
+  });
+
+  // W16-23 (W14-N, RV17-641-N3): a marker the device cannot read (or has not
+  // read yet) answers null; that is not "no kiosk session", so it fails closed.
+  it('an UNKNOWN marker is kiosk evidence: signed out, never asked, whatever the goal or the note', () => {
+    for (const os of ['ios', 'android']) {
+      expect(decideKioskStart(os, true, 'goal-1', T0, null, true), os).toBe('signOut');
+      expect(decideKioskStart(os, true, null, T0, null, true), os).toBe('signOut');
+      noteKioskHandoff('goal-2', T0);
+      expect(decideKioskStart(os, true, 'goal-1', T0 + KIOSK_HANDOFF_TTL_MS + 1, null, true), os).toBe('signOut');
+      expect(decideKioskStart(os, false, 'goal-1', T0, null, true), os).toBe('none');
+    }
+    expect(decideKioskStart('web', true, 'goal-1', T0, null, false)).toBe('signOut');
   });
 
   it('a clock that went backwards does not count either', () => {
