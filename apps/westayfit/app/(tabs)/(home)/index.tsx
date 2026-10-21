@@ -16,7 +16,7 @@ import {
 } from '../../../src/labels';
 import { wsfTheme } from '../../../src/theme';
 import { ButtonLink } from '../../../src/ui/ButtonLink';
-import { CARD_BORDER, NAVY, kit } from '../../../src/ui/kit';
+import { CARD_BORDER, NAVY, OPTION_SELECTED_TINT, PRESSED, kit } from '../../../src/ui/kit';
 import { formatCount, totalOfTargetLabel } from '../../../src/ui/progressFormat';
 import { SAME_LOAD_MS, readGoals, readMyCommunities } from '../../../src/memberReads';
 import { AndroidKeyboardInsetView, KEYBOARD_SCROLL_PROPS } from '../../../src/ui/keyboardAvoidance';
@@ -793,15 +793,25 @@ function CommunityCard({ item, goalState }: { item: MyCommunityItem; goalState: 
     action). The web keeps today's anchor exactly.
   */
   if (Platform.OS !== 'web') {
+    /*
+      RV14-641-N3: visible press feedback, as kit.pressableStyle gives other
+      controls: Android's ripple, and the card's content dimmed while pressed
+      (cleared on release). Not pressableStyle itself: Link asChild merges
+      the child's style by object spread, so a style function would be lost;
+      the pressed state comes through the Pressable's children instead.
+      RV14-641-N4: the label carries the meta line too.
+    */
+    const label = [`${item.displayName}${item.isSample ? ', Sample' : ''}`, meta, status, action].filter(Boolean).join(', ');
     return (
       <Link href={`/community/${item.groupId}` as never} asChild>
         <Pressable
           style={NATIVE_COMMUNITY_CARD}
+          {...(Platform.OS === 'android' ? { android_ripple: { color: OPTION_SELECTED_TINT } } : null)}
           accessibilityRole="link"
-          accessibilityLabel={`${item.displayName}${item.isSample ? ', Sample' : ''}, ${status}, ${action}`}
+          accessibilityLabel={label}
           testID={`wsf-home-community-${item.groupId}`}
         >
-          {body}
+          {({ pressed }) => <View style={pressed ? PRESSED : null}>{body}</View>}
         </Pressable>
       </Link>
     );

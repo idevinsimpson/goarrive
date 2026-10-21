@@ -200,10 +200,18 @@ export type PressableFeedback = {
  * writes every StyleSheet rule into the web's CSS, and the web never uses this.
  */
 export const PRESSED: Readonly<ViewStyle> = Object.freeze({ opacity: 0.72 });
-export function pressableStyle(base: StyleProp<ViewStyle>, tint: ColorValue): PressableFeedback {
+/**
+ * `ripple` shapes Android's ripple (RV14-641-N2: a round control passes
+ * `{ borderless: true, radius }`, or the ripple paints its square bounds).
+ */
+export function pressableStyle(
+  base: StyleProp<ViewStyle>,
+  tint: ColorValue,
+  ripple?: Omit<PressableAndroidRippleConfig, 'color'>,
+): PressableFeedback {
   if (Platform.OS === 'web') return { style: base };
   const style = ({ pressed }: PressableStateCallbackType): StyleProp<ViewStyle> => [base, pressed && PRESSED];
-  return Platform.OS === 'android' ? { style, android_ripple: { color: tint } } : { style };
+  return Platform.OS === 'android' ? { style, android_ripple: { color: tint, ...ripple } } : { style };
 }
 
 export const kit = StyleSheet.create({
