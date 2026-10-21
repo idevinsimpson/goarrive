@@ -36,6 +36,7 @@ vi.mock('firebase/functions', () => ({
 }));
 
 import {
+  JOIN_INFLIGHT_MS,
   SAME_LOAD_MS,
   clearMemberReads,
   forgetCommunity,
@@ -272,5 +273,158 @@ describe('memberReads (PERF-MOBILE-1 cp1)', () => {
       await readGoals<G>('u1', 'g1');
       expect(wasRefused('u1', 'g1')).toBe(false);
     });
+  });
+});
+
+describe('NATIVE-INTEGRATOR-1 (INT-26): a Retry never joins a hung read', () => {
+  const mine = () => calls.filter((c) => c.name === 'wsfMyCommunities');
+  const lists = () => calls.filter((c) => c.name === 'wsfListGoals');
+  const items = (id: string) => ({ items: [{ groupId: id, displayName: id, memberCount: 1 }] });
+
+  it('case 1: with a read hung, Retry sends a new request at once, and its answer stands', async () => {
+    vi.useFakeTimers({ now: 1_000_000, toFake: ['Date'] });
+    const hung = held(items('stale'));
+    answers.wsfMyCommunities = hung.answer;
+    const first = readMyCommunities('u1', SAME_LOAD_MS);
+    await flush();
+    // The network comes back a few seconds later; the member taps Retry.
+    vi.setSystemTime(1_000_000 + 5_000);
+    answers.wsfMyCommunities = () => items('fresh');
+    const retry = await readMyCommunities('u1');
+    expect(mine()).toHaveLength(2);
+    expect(retry.items[0]!.groupId).toBe('fresh');
+    expect(peekMyCommunities('u1')!.items[0]!.groupId).toBe('fresh');
+    // Case 4: the hung read's late answer never overwrites the fresh one.
+    hung.release();
+    await first;
+    expect(peekMyCommunities('u1')!.items[0]!.groupId).toBe('fresh');
+  });
+
+  it('case 3: a mount read (cold Home, then the community it opens) still shares a read in flight, however old', async () => {
+    vi.useFakeTimers({ now: 1_000_000, toFake: ['Date'] });
+    const slow = held(items('g1'));
+    answers.wsfMyCommunities = slow.answer;
+    const a = readMyCommunities('u1', SAME_LOAD_MS);
+    await flush();
+    vi.setSystemTime(1_000_000 + 5_000);
+    const b = readMyCommunities('u1', SAME_LOAD_MS);
+    slow.release();
+    await Promise.all([a, b]);
+    expect(mine()).toHaveLength(1);
+  });
+
+  it('identical fresh reads issued together (within JOIN_INFLIGHT_MS) still share one request', async () => {
+    vi.useFakeTimers({ now: 1_000_000, toFake: ['Date'] });
+    const slow = held({ goals: [] });
+    answers.wsfListGoals = slow.answer;
+    const a = readGoals<G>('u1', 'g1');
+    vi.setSystemTime(1_000_000 + JOIN_INFLIGHT_MS);
+    const b = readGoals<G>('u1', 'g1');
+    slow.release();
+    await Promise.all([a, b]);
+    expect(lists()).toHaveLength(1);
+  });
+
+  it('a superseded read with nothing settled waits for the fresher read: no third request, one answer', async () => {
+    vi.useFakeTimers({ now: 1_000_000, toFake: ['Date'] });
+    const one = held({ goals: [{ goalId: 'a', status: 'active', sharedTotal: 10, target: 100 }] });
+    answers.wsfListGoals = one.answer;
+    const first = readGoals<G>('u1', 'g1');
+    await flush();
+    vi.setSystemTime(1_000_000 + 5_000);
+    const two = held({ goals: [{ goalId: 'a', status: 'active', sharedTotal: 30, target: 100 }] });
+    answers.wsfListGoals = two.answer;
+    const second = readGoals<G>('u1', 'g1');
+    await flush();
+    // Past the join window, so only the superseded read's own rule keeps it from asking again.
+    vi.setSystemTime(1_000_000 + 5_000 + JOIN_INFLIGHT_MS + 1);
+    one.release();
+    await flush();
+    await flush();
+    expect(lists()).toHaveLength(2);
+    two.release();
+    expect((await first).goals[0]!.sharedTotal).toBe(30);
+    expect((await second).goals[0]!.sharedTotal).toBe(30);
+    expect(peekGoals<G>('u1', 'g1')!.goals[0]!.sharedTotal).toBe(30);
+    expect(lists()).toHaveLength(2);
+  });
+
+  const total = (v: number) => ({ goals: [{ goalId: 'a', status: 'active', sharedTotal: v, target: 100 }] });
+  /** Settles 10, then issues A (hung) and, past the join window, B superseding it. */
+  async function supersede(aAnswer: () => Promise<unknown>, bAnswer: () => unknown) {
+    vi.useFakeTimers({ now: 1_000_000, toFake: ['Date'] });
+    answers.wsfListGoals = () => total(10);
+    await readGoals<G>('u1', 'g1');
+    vi.setSystemTime(1_000_000 + 60_000);
+    answers.wsfListGoals = aAnswer;
+    const first = readGoals<G>('u1', 'g1');
+    await flush();
+    vi.setSystemTime(1_000_000 + 65_000);
+    answers.wsfListGoals = bAnswer;
+    const second = readGoals<G>('u1', 'g1');
+    // Observed now, asserted by the test: a rejection here is expected, not unhandled.
+    second.catch(() => undefined);
+    await flush();
+    return { first, second };
+  }
+
+  it('SH-3a: a superseded read that lands first joins the fresher read; never the value settled before both', async () => {
+    const a = held(total(20));
+    const b = held(total(30));
+    const { first, second } = await supersede(a.answer, b.answer);
+    a.release();
+    await flush();
+    b.release();
+    expect((await first).goals[0]!.sharedTotal).toBe(30);
+    expect((await second).goals[0]!.sharedTotal).toBe(30);
+    expect(peekGoals<G>('u1', 'g1')!.goals[0]!.sharedTotal).toBe(30);
+    expect(lists()).toHaveLength(3);
+  });
+
+  it('SH-3b: when the fresher read failed, the superseded answer is kept: newer than what was settled, and no third request', async () => {
+    const a = held(total(20));
+    const { first, second } = await supersede(a.answer, () => Promise.reject(new Error('unavailable')));
+    await expect(second).rejects.toThrow('unavailable');
+    a.release();
+    expect((await first).goals[0]!.sharedTotal).toBe(20);
+    expect(peekGoals<G>('u1', 'g1')!.goals[0]!.sharedTotal).toBe(20);
+    expect(lists()).toHaveLength(3);
+  });
+
+  it('SH-3b with nothing settled before: the superseded answer is kept, no third request', async () => {
+    vi.useFakeTimers({ now: 1_000_000, toFake: ['Date'] });
+    const a = held(total(20));
+    answers.wsfListGoals = a.answer;
+    const first = readGoals<G>('u1', 'g1');
+    await flush();
+    vi.setSystemTime(1_000_000 + 5_000);
+    answers.wsfListGoals = () => Promise.reject(new Error('unavailable'));
+    await expect(readGoals<G>('u1', 'g1')).rejects.toThrow('unavailable');
+    a.release();
+    expect((await first).goals[0]!.sharedTotal).toBe(20);
+    expect(peekGoals<G>('u1', 'g1')!.goals[0]!.sharedTotal).toBe(20);
+    expect(lists()).toHaveLength(2);
+  });
+
+  it('SH-3b never outranks a receipt: a receipt after the superseded read was issued still wins', async () => {
+    const a = held(total(20));
+    const { first, second } = await supersede(a.answer, () => Promise.reject(new Error('unavailable')));
+    await expect(second).rejects.toThrow('unavailable');
+    // The settled 10 is patched by a receipt to 45 (it keeps its old time).
+    noteConfirmedContribution('u1', { goalId: 'a', groupId: 'g1', ownCredit: 5, sharedTotal: 45, target: 100, unit: 'squats', status: 'active' });
+    a.release();
+    expect((await first).goals[0]!.sharedTotal).toBe(45);
+    expect(peekGoals<G>('u1', 'g1')!.goals[0]!.sharedTotal).toBe(45);
+  });
+
+  it('SH-3b never brings back a forgotten community: a refusal after it was issued means ask again, fresh', async () => {
+    const a = held(total(20));
+    const { first, second } = await supersede(a.answer, () => Promise.reject(new Error('unavailable')));
+    await expect(second).rejects.toThrow('unavailable');
+    forgetCommunity('u1', 'g1');
+    answers.wsfListGoals = () => total(50);
+    a.release();
+    expect((await first).goals[0]!.sharedTotal).toBe(50);
+    expect(lists()).toHaveLength(4);
   });
 });

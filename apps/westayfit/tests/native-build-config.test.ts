@@ -1,0 +1,336 @@
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { join } from 'node:path';
+
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+
+// app.config.js is CommonJS, loaded by Expo with Node's require. Load it the same way.
+const appConfig: (ctx: { config: Record<string, unknown> }) => Record<string, unknown> = createRequire(
+  import.meta.url
+)('../app.config.js');
+
+const STAGING_KEYS = [
+  'EXPO_PUBLIC_WSF_STAGING_API_KEY',
+  'EXPO_PUBLIC_WSF_STAGING_AUTH_DOMAIN',
+  'EXPO_PUBLIC_WSF_STAGING_PROJECT_ID',
+  'EXPO_PUBLIC_WSF_STAGING_STORAGE_BUCKET',
+  'EXPO_PUBLIC_WSF_STAGING_SENDER_ID',
+  'EXPO_PUBLIC_WSF_STAGING_APP_ID',
+];
+const ENV_KEYS = [
+  'EAS_BUILD_PLATFORM',
+  'EAS_BUILD_PROFILE',
+  'EXPO_PUBLIC_WSF_ENV',
+  'EXPO_PUBLIC_WSF_USE_EMULATORS',
+  'EXPO_PUBLIC_WSF_CRASH_HARNESS',
+  'EXPO_PUBLIC_WSF_AUTH_ENABLED',
+  'EAS_BUILD_GIT_COMMIT_HASH',
+  ...STAGING_KEYS,
+];
+const COMPLETE_STAGING = Object.fromEntries(STAGING_KEYS.map((k) => [k, 'dummy-value']));
+// INT-11: every build that embeds its JS must say whether sign-in is on.
+const SIGN_IN_ON = { EXPO_PUBLIC_WSF_AUTH_ENABLED: '1' };
+
+// An EAS build that passes its checks: the same config, plus the binary's own
+// build stamp (INT-10, extra.wsfBuild).
+const BUILT = { name: 'We Stay Fit', extra: { wsfBuild: expect.objectContaining({ builtAt: expect.any(String) }) } };
+
+const saved: Record<string, string | undefined> = {};
+
+function run(env: Record<string, string>) {
+  for (const k of ENV_KEYS) delete process.env[k];
+  Object.assign(process.env, env);
+  const config = { name: 'We Stay Fit' };
+  return () => appConfig({ config });
+}
+
+describe('NATIVE-BUILD-1: app.config.js build-time backend refusals', () => {
+  beforeAll(() => {
+    for (const k of ENV_KEYS) saved[k] = process.env[k];
+  });
+  afterEach(() => {
+    for (const k of ENV_KEYS) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  });
+
+  it('runs no checks outside an EAS iOS/Android build (web export, local tooling)', () => {
+    expect(run({})()).toEqual({ name: 'We Stay Fit' });
+    expect(run({ EAS_BUILD_PROFILE: 'preview' })()).toEqual({ name: 'We Stay Fit' });
+  });
+
+  it('refuses a native build that names no backend', () => {
+    expect(run({ EAS_BUILD_PLATFORM: 'ios' })).toThrow(/EXPO_PUBLIC_WSF_ENV must be "staging" or "production" for an ios build \(got ""\)/);
+    expect(run({ EAS_BUILD_PLATFORM: 'android', EAS_BUILD_PROFILE: 'development' })).toThrow(/must be "staging" or "production"/);
+  });
+
+  it('refuses a preview build that carries only the emulator flag', () => {
+    expect(
+      run({ EAS_BUILD_PLATFORM: 'android', EAS_BUILD_PROFILE: 'preview', EXPO_PUBLIC_WSF_USE_EMULATORS: '1' })
+    ).toThrow(/profile "preview" embeds its JavaScript, so EXPO_PUBLIC_WSF_USE_EMULATORS cannot name its backend/);
+    expect(
+      run({ EAS_BUILD_PLATFORM: 'ios', EAS_BUILD_PROFILE: 'preview', EXPO_PUBLIC_WSF_USE_EMULATORS: ' TRUE ' })
+    ).toThrow(/embeds its JavaScript/);
+  });
+
+  it('allows a development client that carries only the emulator flag', () => {
+    expect(
+      run({ EAS_BUILD_PLATFORM: 'android', EAS_BUILD_PROFILE: 'development', EXPO_PUBLIC_WSF_USE_EMULATORS: '1' })()
+    ).toEqual(BUILT);
+    // A value firebase.ts would not treat as on does not count as naming a backend.
+    expect(
+      run({ EAS_BUILD_PLATFORM: 'android', EAS_BUILD_PROFILE: 'development', EXPO_PUBLIC_WSF_USE_EMULATORS: 'yes' })
+    ).toThrow(/must be "staging" or "production"/);
+  });
+
+  it('treats development-simulator as a development client', () => {
+    expect(
+      run({ EAS_BUILD_PLATFORM: 'ios', EAS_BUILD_PROFILE: 'development-simulator', EXPO_PUBLIC_WSF_USE_EMULATORS: '1' })()
+    ).toEqual(BUILT);
+    // No staging values needed: its JS comes from the local dev server.
+    expect(
+      run({ EAS_BUILD_PLATFORM: 'ios', EAS_BUILD_PROFILE: 'development-simulator', EXPO_PUBLIC_WSF_ENV: 'staging' })()
+    ).toEqual(BUILT);
+    expect(
+      run({ EAS_BUILD_PLATFORM: 'android', EAS_BUILD_PROFILE: 'development', EXPO_PUBLIC_WSF_ENV: 'staging' })()
+    ).toEqual(BUILT);
+  });
+
+  it('refuses an embedded-JS staging build missing staging values, and accepts a complete one', () => {
+    expect(
+      run({ EAS_BUILD_PLATFORM: 'android', EAS_BUILD_PROFILE: 'preview', EXPO_PUBLIC_WSF_ENV: 'staging' })
+    ).toThrow(/profile "preview" embeds its JavaScript with EXPO_PUBLIC_WSF_ENV=staging, but these staging values are missing/);
+    expect(
+      run({ EAS_BUILD_PLATFORM: 'android', EAS_BUILD_PROFILE: 'preview', EXPO_PUBLIC_WSF_ENV: 'staging', ...COMPLETE_STAGING, ...SIGN_IN_ON })()
+    ).toEqual(BUILT);
+  });
+
+  it('treats an unlisted development-* profile as embedding its JS', () => {
+    expect(
+      run({ EAS_BUILD_PLATFORM: 'android', EAS_BUILD_PROFILE: 'development-store', EXPO_PUBLIC_WSF_ENV: 'staging' })
+    ).toThrow(/profile "development-store" embeds its JavaScript with EXPO_PUBLIC_WSF_ENV=staging/);
+    expect(
+      run({ EAS_BUILD_PLATFORM: 'android', EAS_BUILD_PROFILE: 'development-store', EXPO_PUBLIC_WSF_USE_EMULATORS: '1' })
+    ).toThrow(/profile "development-store" embeds its JavaScript/);
+    expect(
+      run({
+        EAS_BUILD_PLATFORM: 'android',
+        EAS_BUILD_PROFILE: 'development-store',
+        EXPO_PUBLIC_WSF_ENV: 'staging',
+        ...COMPLETE_STAGING,
+        ...SIGN_IN_ON,
+      })()
+    ).toEqual(BUILT);
+  });
+
+  it('NATIVE-INTEGRATOR-1 (INT-01): refuses a production build carrying the injected-throw harness', () => {
+    expect(
+      run({
+        EAS_BUILD_PLATFORM: 'ios',
+        EAS_BUILD_PROFILE: 'preview',
+        EXPO_PUBLIC_WSF_ENV: 'production',
+        EXPO_PUBLIC_WSF_CRASH_HARNESS: 'progress',
+      })
+    ).toThrow(/EXPO_PUBLIC_WSF_CRASH_HARNESS is set for a production ios build/);
+    // A staging test build may carry it: that is what it is for.
+    expect(
+      run({
+        EAS_BUILD_PLATFORM: 'android',
+        EAS_BUILD_PROFILE: 'preview',
+        EXPO_PUBLIC_WSF_ENV: 'staging',
+        EXPO_PUBLIC_WSF_CRASH_HARNESS: 'progress,timer',
+        ...COMPLETE_STAGING,
+        ...SIGN_IN_ON,
+      })()
+    ).toEqual(BUILT);
+    // Blank is unset.
+    expect(
+      run({
+        EAS_BUILD_PLATFORM: 'ios',
+        EAS_BUILD_PROFILE: 'preview',
+        EXPO_PUBLIC_WSF_ENV: 'production',
+        EXPO_PUBLIC_WSF_CRASH_HARNESS: '  ',
+        ...SIGN_IN_ON,
+      })()
+    ).toEqual(BUILT);
+  });
+
+  it('leaves an explicit production build unchanged (but for its build stamp, INT-10)', () => {
+    expect(
+      run({ EAS_BUILD_PLATFORM: 'ios', EAS_BUILD_PROFILE: 'preview', EXPO_PUBLIC_WSF_ENV: 'production', ...SIGN_IN_ON })()
+    ).toEqual(BUILT);
+  });
+
+  describe('NATIVE-INTEGRATOR-1 (INT-11): a native build cannot ship with sign-in switched off by accident', () => {
+    const stagingPreview = (platform: string, auth?: string) =>
+      run({
+        EAS_BUILD_PLATFORM: platform,
+        EAS_BUILD_PROFILE: 'preview',
+        EXPO_PUBLIC_WSF_ENV: 'staging',
+        ...COMPLETE_STAGING,
+        ...(auth === undefined ? {} : { EXPO_PUBLIC_WSF_AUTH_ENABLED: auth }),
+      });
+
+    it('case 1: an iOS or Android build with the flag unset fails at config time with a named error', () => {
+      for (const platform of ['ios', 'android']) {
+        expect(stagingPreview(platform)).toThrow(
+          new RegExp(`EXPO_PUBLIC_WSF_AUTH_ENABLED is not set to 1 or 0 \\(got ""\\)\\. This ${platform} build would ship with sign-in switched off`)
+        );
+      }
+      expect(
+        run({ EAS_BUILD_PLATFORM: 'ios', EAS_BUILD_PROFILE: 'preview', EXPO_PUBLIC_WSF_ENV: 'production' })
+      ).toThrow(/EXPO_PUBLIC_WSF_AUTH_ENABLED is not set to 1 or 0/);
+      // A value src/featureFlags.ts would not read as on is not a decision either.
+      expect(stagingPreview('android', 'yes')).toThrow(/is not set to 1 or 0 \(got "yes"\)/);
+      expect(stagingPreview('android', '  ')).toThrow(/is not set to 1 or 0/);
+    });
+
+    it('case 1: a staging build with it set to 0 fails the same way', () => {
+      expect(stagingPreview('ios', '0')).toThrow(
+        /EXPO_PUBLIC_WSF_AUTH_ENABLED is off for a staging ios build, which would ship with sign-in switched off/
+      );
+      expect(stagingPreview('android', 'false')).toThrow(/is off for a staging android build/);
+    });
+
+    it('staging builds with it on (1 or true, any case or spacing) build', () => {
+      expect(stagingPreview('ios', '1')()).toEqual(BUILT);
+      expect(stagingPreview('android', ' TRUE ')()).toEqual(BUILT);
+    });
+
+    it('production may switch sign-in off, but only by saying 0 (the launch switch stays the owner\'s)', () => {
+      const prod = (auth: string) =>
+        run({ EAS_BUILD_PLATFORM: 'android', EAS_BUILD_PROFILE: 'preview', EXPO_PUBLIC_WSF_ENV: 'production', EXPO_PUBLIC_WSF_AUTH_ENABLED: auth });
+      expect(prod('0')()).toEqual(BUILT);
+      expect(prod('1')()).toEqual(BUILT);
+    });
+
+    it('a development client takes the flag from the local dev server, so its build does not need it', () => {
+      expect(
+        run({ EAS_BUILD_PLATFORM: 'ios', EAS_BUILD_PROFILE: 'development', EXPO_PUBLIC_WSF_ENV: 'staging' })()
+      ).toEqual(BUILT);
+    });
+
+    it('case 3 (staging half): every committed eas.json profile names both values, and each builds with its own env', () => {
+      const eas = JSON.parse(readFileSync(join(__dirname, '..', 'eas.json'), 'utf8')) as {
+        build: Record<string, { extends?: string; env?: Record<string, string> }>;
+      };
+      const envOf = (name: string): Record<string, string> => {
+        const p = eas.build[name]!;
+        return { ...(p.extends ? envOf(p.extends) : {}), ...(p.env ?? {}) };
+      };
+      for (const name of Object.keys(eas.build)) {
+        const env = envOf(name);
+        expect(env.EXPO_PUBLIC_WSF_ENV, name).toBe('staging');
+        expect(env.EXPO_PUBLIC_WSF_AUTH_ENABLED, name).toBe('1');
+        for (const platform of ['ios', 'android']) {
+          expect(run({ EAS_BUILD_PLATFORM: platform, EAS_BUILD_PROFILE: name, ...env, ...COMPLETE_STAGING })()).toEqual(BUILT);
+        }
+      }
+      // Production publishing is out of this sprint: no production profile is committed (owner decision).
+      expect(Object.keys(eas.build)).not.toContain('production');
+    });
+  });
+
+  describe('NATIVE-INTEGRATOR-1 (I-8a): the preview EAS project, and an iOS simulator build with no Apple account', () => {
+    type Profile = { extends?: string; env?: Record<string, string>; ios?: Record<string, unknown>; android?: Record<string, unknown>; [k: string]: unknown };
+    const readJson = (f: string) => JSON.parse(readFileSync(join(__dirname, '..', f), 'utf8'));
+    const app = () => readJson('app.json').expo as Record<string, any>;
+    const eas = () => readJson('eas.json') as { build: Record<string, Profile> };
+    const resolvedEnv = (build: Record<string, Profile>, name: string): Record<string, string> => {
+      const p = build[name]!;
+      return { ...(p.extends ? resolvedEnv(build, p.extends) : {}), ...(p.env ?? {}) };
+    };
+
+    it('app.json is linked to the owner\'s "We Stay Fit Preview" project, with the app\'s identity unchanged', () => {
+      const expo = app();
+      expect(expo.owner).toBe('devinsimpson');
+      expect(expo.slug).toBe('we-stay-fit-preview');
+      expect(expo.extra.eas.projectId).toBe('3288e568-daaa-4ead-afd2-826fbb59544a');
+      // Unchanged: what a member sees, the link scheme, and the store identities.
+      expect(expo.name).toBe('We Stay Fit');
+      expect(expo.scheme).toBe('westayfit');
+      expect(expo.ios.bundleIdentifier).toBe('com.westayfit.app');
+      expect(expo.android.package).toBe('com.westayfit.app');
+    });
+
+    it('preview-simulator extends preview, builds for the iOS Simulator, and inherits staging with sign-in on', () => {
+      const { build } = eas();
+      expect(build['preview-simulator']).toEqual({ extends: 'preview', ios: { simulator: true } });
+      const env = resolvedEnv(build, 'preview-simulator');
+      expect(env.EXPO_PUBLIC_WSF_ENV).toBe('staging');
+      expect(env.EXPO_PUBLIC_WSF_AUTH_ENABLED).toBe('1');
+    });
+
+    it('it embeds its JavaScript: refused without the six staging values, accepted with them', () => {
+      const sim = (extra: Record<string, string>) =>
+        run({ EAS_BUILD_PLATFORM: 'ios', EAS_BUILD_PROFILE: 'preview-simulator', ...resolvedEnv(eas().build, 'preview-simulator'), ...extra });
+      expect(sim({})).toThrow(/profile "preview-simulator" embeds its JavaScript with EXPO_PUBLIC_WSF_ENV=staging, but these staging values are missing from the EAS environment: EXPO_PUBLIC_WSF_STAGING_API_KEY/);
+      expect(sim(COMPLETE_STAGING)()).toEqual(BUILT);
+      // Not a development client: the stricter, embedded-JS checks apply to it.
+      expect(readFileSync(join(__dirname, '..', 'app.config.js'), 'utf8')).toMatch(
+        /const DEV_CLIENT_PROFILES = \['development', 'development-simulator'\];/,
+      );
+    });
+
+    it('paid fallback off: no profile asks for a paid build resource', () => {
+      const text = readFileSync(join(__dirname, '..', 'eas.json'), 'utf8');
+      expect(text).not.toMatch(/resourceClass/);
+      for (const [name, p] of Object.entries(eas().build)) {
+        expect(p.resourceClass, name).toBeUndefined();
+        expect(p.ios?.resourceClass, name).toBeUndefined();
+        expect(p.android?.resourceClass, name).toBeUndefined();
+      }
+    });
+
+    it('no preview profile carries the emulator flag or the injected-throw harness', () => {
+      const { build } = eas();
+      const previews = Object.keys(build).filter((n) => n.startsWith('preview'));
+      expect(previews.sort()).toEqual(['preview', 'preview-simulator']);
+      for (const name of previews) {
+        const env = resolvedEnv(build, name);
+        expect(env.EXPO_PUBLIC_WSF_USE_EMULATORS, name).toBeUndefined();
+        expect(env.EXPO_PUBLIC_WSF_CRASH_HARNESS, name).toBeUndefined();
+      }
+    });
+  });
+
+  describe('NATIVE-INTEGRATOR-1 (INT-10): an EAS build stamps its own commit and build time', () => {
+    const staging = (extra: Record<string, string> = {}) =>
+      run({
+        EAS_BUILD_PLATFORM: 'ios',
+        EAS_BUILD_PROFILE: 'preview',
+        EXPO_PUBLIC_WSF_ENV: 'staging',
+        ...COMPLETE_STAGING,
+        ...SIGN_IN_ON,
+        ...extra,
+      });
+
+    it('carries the checked-out commit (short, as the web stamp) and the build time in extra.wsfBuild', () => {
+      const before = Date.now();
+      const config = staging({ EAS_BUILD_GIT_COMMIT_HASH: '9F3C2AB41D0E5566778899AABBCCDDEEFF001122' })() as {
+        name: string;
+        extra: { wsfBuild: { commit?: string; builtAt: string } };
+      };
+      expect(config.name).toBe('We Stay Fit');
+      expect(config.extra.wsfBuild.commit).toBe('9f3c2ab');
+      expect(config.extra.wsfBuild.builtAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+      expect(Date.parse(config.extra.wsfBuild.builtAt)).toBeGreaterThanOrEqual(Math.floor(before / 1000) * 1000);
+    });
+
+    it('a missing or malformed commit is left out rather than guessed; other extra keys are kept', () => {
+      const config = staging()() as { extra: { wsfBuild: { commit?: string } } };
+      expect(config.extra.wsfBuild.commit).toBeUndefined();
+      expect((staging({ EAS_BUILD_GIT_COMMIT_HASH: 'main' })() as { extra: { wsfBuild: { commit?: string } } }).extra.wsfBuild.commit).toBeUndefined();
+      for (const k of ENV_KEYS) delete process.env[k];
+      Object.assign(process.env, { EAS_BUILD_PLATFORM: 'ios', EAS_BUILD_PROFILE: 'preview', EXPO_PUBLIC_WSF_ENV: 'staging', ...COMPLETE_STAGING, ...SIGN_IN_ON });
+      const kept = appConfig({ config: { name: 'We Stay Fit', extra: { eas: { projectId: 'p' } } } }) as { extra: Record<string, unknown> };
+      expect(kept.extra.eas).toEqual({ projectId: 'p' });
+      expect(kept.extra.wsfBuild).toBeDefined();
+    });
+
+    it('outside an EAS build nothing is stamped (web and local builds keep their own stamp)', () => {
+      expect(run({ EAS_BUILD_GIT_COMMIT_HASH: '9f3c2ab41d0e' })()).toEqual({ name: 'We Stay Fit' });
+    });
+  });
+});

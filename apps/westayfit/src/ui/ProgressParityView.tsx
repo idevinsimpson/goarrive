@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
 import {
   bodyOf,
@@ -263,10 +263,25 @@ export function ProgressParityView({ state, actions, bottomInset = 0, refresh }:
   );
 }
 
-/** The reference's `.progress-partial`: says the list is short, offers Retry. */
+/**
+ * The reference's `.progress-partial`: says the list is short, offers Retry.
+ *
+ * NATIVE-INTEGRATOR-1 (INT-02). `role`, never `accessibilityRole`, carries
+ * "status". Android parses `accessibilityRole` against a closed enum that has
+ * no STATUS and throws on anything else, which took the whole app down the
+ * moment a goal read failed. `role` goes through the separate, fault-tolerant
+ * ARIA enum, and react-native-web renders `role="status"` exactly as before.
+ * TalkBack hears the note through a polite live region (Android only, so the
+ * web DOM is unchanged; `role="status"` is already polite there).
+ */
 function Partial({ onRetry }: { onRetry: () => void }) {
   return (
-    <View style={s.partial} testID="wsf-activity-partial" accessibilityRole={'status' as never}>
+    <View
+      style={s.partial}
+      testID="wsf-activity-partial"
+      role="status"
+      accessibilityLiveRegion={Platform.OS === 'android' ? 'polite' : undefined}
+    >
       <Text style={s.partialText}>
         <Text style={s.partialStrong}>This list is partial.</Text> Some goals couldn’t be read, so they
         aren’t shown or counted above.

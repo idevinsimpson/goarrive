@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -34,6 +37,15 @@ describe('a kiosk session may end unattended only from a screen it has come to r
     // closed goal, goal not found, load error: nothing further happens on any
     // of them without somebody acting.
     expect(kioskMayFinishUnattended({ ...REST, loadSettled: true })).toBe(true);
+  });
+
+  it('#641 NB-2: a kiosk load error stays at rest — it offers no Try again that would reload and clear the deadline', () => {
+    // A retry passes back through loading, which is not a rest state, so the
+    // countdown would stop while it waited. The screen therefore gives a kiosk
+    // Finish alone (tests/contribute-load-retry.test.tsx renders it).
+    expect(kioskMayFinishUnattended({ ...REST, loadSettled: false })).toBe(false);
+    const screen = readFileSync(join(__dirname, '..', 'app/contribute/[goalId].tsx'), 'utf8');
+    expect(screen).toMatch(/\{kiosk \? null : \(\s*<Pressable\s*onPress=\{retryLoad\}/);
   });
 
   it('a screen somebody is standing at is not', () => {

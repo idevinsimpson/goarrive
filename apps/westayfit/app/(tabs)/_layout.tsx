@@ -1,7 +1,7 @@
 import { Tabs, useNavigation, useRouter } from 'expo-router';
 import { signOut } from 'firebase/auth';
 import { useRef, useState } from 'react';
-import { View } from 'react-native';
+import { Platform, View } from 'react-native';
 
 import { useWsfAuth } from '../../src/auth';
 import { getFirebaseAuth } from '../../src/firebase';
@@ -15,6 +15,9 @@ import {
 } from '../../src/ui/memberShellActions';
 import { MemberTopBar, type MemberMenuItem } from '../../src/ui/MemberTopBar';
 import { TabSceneFade } from '../../src/ui/TabSceneFade';
+import { nativeErrorBoundary } from '../../src/ui/RouteErrorFallback';
+import { signOutToSignedOutHome } from '../../src/ui/signOutReset';
+import { TopCleared } from '../../src/ui/useScreenTopInset';
 
 /**
  * THE MEMBER SHELL: one persistent top bar, four real tabs, and MOVE as an
@@ -45,6 +48,13 @@ import { TabSceneFade } from '../../src/ui/TabSceneFade';
  * the smallest documented cost that works. The trade — three tab switches now
  * add two entries where they added one — was measured, reported and accepted.
  */
+/**
+ * INT-01. A throw in the shell itself (top bar, tab bar, a tab with no
+ * boundary of its own) is contained here, under the root stack, instead of
+ * ending the process. Tabs with their own boundary keep the shell alive.
+ */
+export const ErrorBoundary = nativeErrorBoundary('shell');
+
 export default function MemberTabsLayout() {
   /*
     THE SHELL'S ACTION REGISTRY WRAPS THE SHELL, NOT THE OTHER WAY AROUND.
@@ -99,6 +109,9 @@ function MemberShell() {
   useTabsFocusReturn(shellRef);
   // Which tab was selected last, for the tab fade (src/ui/TabSceneFade.tsx).
   const lastSelectedTab = useRef<string | null>(null);
+  // The root stack (this layout is its `(tabs)` screen): Home's wordmark and
+  // the menu's Sign out both act on it.
+  const rootNavigation = useNavigation();
 
   /**
    * THE MENU HOLDS THE QUIET GLOBAL UTILITIES, AND NOTHING THAT DOES NOT WORK.
@@ -148,7 +161,13 @@ function MemberShell() {
       onPress: () => {
         if (signingOut) return;
         setSigningOut(true);
-        void signOut(getFirebaseAuth()).finally(() => setSigningOut(false));
+        // INT-05: on a phone, a successful sign-out lands on signed-out Home
+        // with nothing behind it (src/ui/signOutReset.ts). Web is unchanged.
+        void signOutToSignedOutHome({
+          signOut: () => signOut(getFirebaseAuth()),
+          dispatch: (action) => rootNavigation.dispatch(action as never),
+          platform: Platform.OS,
+        }).finally(() => setSigningOut(false));
       },
     },
   ];
@@ -168,7 +187,6 @@ function MemberShell() {
     its mounted screen, its scroll and its data. From Home it is a no-op, as
     the top bar has always promised.
   */
-  const rootNavigation = useNavigation();
   const goHome = () =>
     rootNavigation.dispatch({
       type: 'POP_TO',
@@ -185,9 +203,15 @@ function MemberShell() {
           onHome={goHome}
         />
       ) : null}
+      {/* #641 F1: the top bar has cleared the status bar for every scene below it. */}
+      <TopCleared cleared={signedIn}>
       <View style={{ flex: 1 }}>
         <Tabs
           backBehavior="history"
+          // INT-14: on a phone a tab change, however it happens, finds the
+          // menu closed (its dismiss layer already blocks the tab bar while it
+          // is open). Web keeps its own behaviour.
+          screenListeners={Platform.OS === 'web' ? undefined : { focus: () => setMenuOpen(false) }}
           screenOptions={{
             headerShown: false,
             sceneStyle: { backgroundColor: wsfTheme.colors.background },
@@ -229,6 +253,7 @@ function MemberShell() {
           <Tabs.Screen name="you" />
         </Tabs>
       </View>
+      </TopCleared>
     </View>
   );
 }

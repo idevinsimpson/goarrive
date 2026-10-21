@@ -76,10 +76,12 @@ export function selectProjectId(opts: {
 // Returns true under SSR (no window) because the connect*Emulator calls are
 // no-ops there; project selection above is deliberately stricter.
 //
-// NATIVE. React Native defines `window` but has no `window.location`; reading
-// `window.location.hostname` here used to throw at module load on a phone. On
-// iOS/Android the structural guard is the development build itself: the
-// emulator is only reachable from a __DEV__ binary, never a release build.
+// NATIVE. React Native defines `window`; a production-mode native bundle has
+// no `window.location` (a dev session gets Metro's), and reading
+// `window.location.hostname` here used to throw at module load. On iOS/Android
+// the loopback-host gate is meaningless (a dev build's location IS loopback),
+// so native never consults it: the structural guard is the development build
+// itself — the emulator is only reachable from a __DEV__ binary.
 const isNative = Platform.OS === 'ios' || Platform.OS === 'android';
 const nativeDev = isNative && typeof __DEV__ !== 'undefined' && __DEV__ === true;
 
@@ -95,8 +97,10 @@ function shouldUseEmulators(): boolean {
 const emulated = shouldUseEmulators();
 const projectId = selectProjectId({
   flagRaw: process.env.EXPO_PUBLIC_WSF_USE_EMULATORS,
-  hasWindow: typeof window !== 'undefined',
-  hostname: currentWebHostname(),
+  // Native never takes the web loopback path: a release build whose bundle
+  // carries a loopback origin must not select the emulator project id.
+  hasWindow: !isNative && typeof window !== 'undefined',
+  hostname: isNative ? undefined : currentWebHostname(),
   nativeDev,
 });
 

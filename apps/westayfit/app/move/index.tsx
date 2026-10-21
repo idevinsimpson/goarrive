@@ -38,6 +38,7 @@ import {
 } from '../../src/ui/kit';
 import { fillRatio, formatCount, totalOfTargetLabel } from '../../src/ui/progressFormat';
 import { SAME_LOAD_MS, peekGoals, peekMyCommunities, readGoals, readMyCommunities } from '../../src/memberReads';
+import { nativeErrorBoundary } from '../../src/ui/RouteErrorFallback';
 
 /**
  * MOVE. The shell's one action, resolved.
@@ -149,6 +150,9 @@ function resolveFromRecord(uid: string): Resolution | null {
   return { kind: 'choose', groupId, community, goals: open };
 }
 
+/** INT-01. A throw in the MOVE resolver is contained on this screen. */
+export const ErrorBoundary = nativeErrorBoundary('screen');
+
 export default function MoveResolver() {
   const { ready, user } = useWsfAuth();
   const safeArea = useSafeAreaInsets();
@@ -165,6 +169,9 @@ export default function MoveResolver() {
   const motionPreference = useReducedMotionPreference();
   const reducedMotion = sheetHoldsStill(motionPreference);
   const { phase, exit, leaving } = useSheetExit(reducedMotion);
+  // NATIVE-INTEGRATOR-1 (INT-04 case 4): bumped by the error's Try again; the
+  // resolver reads again in place, fresh (INT-26: never joining a hung read).
+  const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     if (!wsfAuthEnabled || !ready) return;
@@ -185,7 +192,9 @@ export default function MoveResolver() {
         // within this load (src/memberReads.ts). Decided from the record, this
         // only confirms it; the member is not shown "working" meanwhile.
         const mine = {
-          data: (await readMyCommunities(user.uid, SAME_LOAD_MS)) as unknown as { items: MyCommunityItem[] },
+          data: (await readMyCommunities(user.uid, reloadToken > 0 ? 0 : SAME_LOAD_MS)) as unknown as {
+            items: MyCommunityItem[];
+          },
         };
         if (cancelled || leaving()) return;
         const ids = mine.data.items.map((i) => i.groupId);
@@ -205,7 +214,7 @@ export default function MoveResolver() {
           row. `readGoals` always asks with it (src/memberReads.ts). Closed
           goals arrive with it; actionableGoals drops them, as it always has.
         */
-        const listed = { data: await readGoals<ListedGoal>(user.uid, groupId, SAME_LOAD_MS) };
+        const listed = { data: await readGoals<ListedGoal>(user.uid, groupId, reloadToken > 0 ? 0 : SAME_LOAD_MS) };
         // `leaving()`: the member pressed Close while this was being read.
         // They are leaving, and the answer must not send them anywhere else.
         if (cancelled || leaving()) return;
@@ -237,7 +246,7 @@ export default function MoveResolver() {
     return () => {
       cancelled = true;
     };
-  }, [ready, user]);
+  }, [ready, user, reloadToken]);
 
   /*
     THE COMPOSITION. The approved target draws MOVE entry as a sheet rising
@@ -489,10 +498,22 @@ export default function MoveResolver() {
           <Text style={s.hiddenProbe} testID="wsf-move-error">
             {state.message}
           </Text>
+          {/* INT-04 case 4: try again here, in place; Home stays the way out. */}
+          <Pressable
+            onPress={() => {
+              setState({ kind: 'working' });
+              setReloadToken((n) => n + 1);
+            }}
+            accessibilityRole="button"
+            style={s.cardAction}
+            testID="wsf-move-error-retry"
+          >
+            <Text style={s.cardActionText}>Try again</Text>
+          </Pressable>
           <ExitLink
             onGo={() => leaveTo('/')}
-            style={s.cardAction}
-            textStyle={s.cardActionText}
+            style={s.ghost}
+            textStyle={s.ghostText}
             testID="wsf-move-error-home"
             label="Go Home"
           />

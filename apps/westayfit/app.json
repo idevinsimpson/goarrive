@@ -1,22 +1,38 @@
 {
   "expo": {
     "name": "We Stay Fit",
-    "slug": "westayfit",
+    "owner": "devinsimpson",
+    "slug": "we-stay-fit-preview",
     "scheme": "westayfit",
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.westayfit.app"
+      "bundleIdentifier": "com.westayfit.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "We Stay Fit uses your front camera to count your squats on this device. No video or photos are recorded, saved or uploaded."
+      }
     },
     "android": {
       "package": "com.westayfit.app",
       "adaptiveIcon": {
         "backgroundColor": "#0B1F3A"
-      }
+      },
+      "permissions": [
+        "android.permission.CAMERA"
+      ],
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.SYSTEM_ALERT_WINDOW"
+      ],
+      "allowBackup": false
     },
     "web": {
       "bundler": "metro",
@@ -25,10 +41,22 @@
       "themeColor": "#0B1F3A"
     },
     "plugins": [
-      "expo-router"
+      "expo-router",
+      [
+        "expo-video",
+        {
+          "supportsBackgroundPlayback": false,
+          "supportsPictureInPicture": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "3288e568-daaa-4ead-afd2-826fbb59544a"
+      }
     }
   }
 }
