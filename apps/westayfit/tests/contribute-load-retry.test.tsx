@@ -535,12 +535,13 @@ describe('W12-2: a failed refresh keeps a warm screen (INT-25); a stale sign-in 
     expect(peekGoals('u1', 'oak')).toBeUndefined();
   });
 
-  it('RV16-641-2: Auth unreachable, a token-less tick answered by the public pulse (a display goal), then the display turned off: the anonymous not-found evicts nothing; the tick asked for one full load', async () => {
+  it('RV16-641-2, RV18-641-F2: Auth unreachable, a token-less tick answered by the public pulse (a display goal), then the display turned off: the anonymous not-found evicts nothing; the tick asked for one full load, and asks again about 30 s later once Auth is back, so a real not-found is a verdict again', async () => {
     await warm('ios');
     fakeAuth.currentUser = { uid: 'u1', getIdToken: async () => 't' };
     refresh.result = 'offline';
     answers.wsfGoalPulse = UNAUTHENTICATED;
-    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    // Date too (RV18-641-F2): the re-armed ask is throttled by the clock.
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
     act(() => root.render(<ContributeToGoal />));
     await settle();
     expect(byId('wsf-contribute-stale-note')).not.toBeNull();
@@ -555,7 +556,7 @@ describe('W12-2: a failed refresh keeps a warm screen (INT-25); a stale sign-in 
     expect(count('wsfMyContribution')).toBe(loadsBefore + 1);
     expect(refresh.calls).toHaveLength(2);
     expect(byId('wsf-contribute-stale-note')).not.toBeNull();
-    // More public ticks ask for nothing more.
+    // More public ticks inside the throttle window ask for nothing more.
     await pollFor(4_000);
     expect(count('wsfMyContribution')).toBe(loadsBefore + 1);
     // The Champion turns the display off: the next token-less tick gets the anonymous not-found.
@@ -565,6 +566,31 @@ describe('W12-2: a failed refresh keeps a warm screen (INT-25); a stale sign-in 
     expect(byId('wsf-contribute-entry-screen')).not.toBeNull();
     expect(peekGoals('u1', 'oak')).toBeDefined();
     // A landed public tick may clear the kept-figures note (its figures are fresh); the guard is what stays.
+    /*
+      RV18-641-F2 (heads-16). The display is on again and Auth is back: the
+      ticks carry a token now, but nothing else re-runs the load (`user` does
+      not change on a token refresh, the foreground only restarts the poll,
+      and the landed ticks hid the note's Retry). While the guard stays set the
+      ask is re-armed about once every 30 s (GUARD_RELOAD_EVERY_MS): exactly one
+      more full load, authorized now, which clears the guard; a later not-found
+      is a verdict again, and the community is forgotten.
+    */
+    answers.wsfGoalPulse = async () => PULSE;
+    answers.wsfMyContribution = async () => MINE;
+    refresh.result = 'ok';
+    const asked = count('wsfMyContribution');
+    // The asked load went out 2 s after the poll started; it is now 10 s. Nothing until 30 s have passed since.
+    await pollFor(20_000);
+    expect(count('wsfMyContribution')).toBe(asked);
+    await pollFor(2_000);
+    expect(count('wsfMyContribution')).toBe(asked + 1);
+    // That load was authorized: the guard is clear, so later ticks ask for nothing more.
+    await pollFor(40_000);
+    expect(count('wsfMyContribution')).toBe(asked + 1);
+    answers.wsfGoalPulse = NOT_FOUND;
+    await pollFor(2_000);
+    expect(byId('wsf-contribute-not-found')).not.toBeNull();
+    expect(peekGoals('u1', 'oak')).toBeUndefined();
   });
 
   it('RV16-641-2: a new context is a new guard; its first public tick asks for its own full load', async () => {

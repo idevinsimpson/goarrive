@@ -156,6 +156,11 @@ import {
 // tick, a longer poll wastes the cache window.
 const POLL_INTERVAL_MS = 2_000;
 /**
+ * RV18-641-F2 (heads-16, native): while the sign-in-offline guard is set, a
+ * landed tick asks for the full load this often (the first ask at once).
+ */
+const GUARD_RELOAD_EVERY_MS = 30_000;
+/**
  * RV15-641-2: the poll has landed nothing for this long while it should be
  * running, so the figures are the last confirmed ones. The line is re-read on
  * the 60 s tick (or any re-render), so it says so within about a minute of
@@ -645,13 +650,17 @@ export default function ContributeToGoal() {
     tick is NOT an authorized answer. wsfGoalPulse answers anyone, token or
     not, when the goal is on a display (aggregateDisplayAuthorized), so a tick
     that succeeds says nothing about the sign-in: it keeps the guard and asks
-    once for the full load (`tickAskedLoadRef`). RV14-641-1: a later failure
-    in transport (an internal or deadline answer) says nothing about the
-    token, so it does not clear it either.
+    for the full load instead (`guardLoadAskedAtRef`): at once, then about
+    every GUARD_RELOAD_EVERY_MS while the guard stays set (RV18-641-F2: when
+    Auth comes back nothing else re-runs the load, because `user` does not
+    change on a token refresh, the foreground only restarts the poll, and a
+    landed tick hides the note's Retry). RV14-641-1: a later failure in
+    transport (an internal or deadline answer) says nothing about the token,
+    so it does not clear it either.
   */
   const signInOfflineRef = useRef(false);
-  // RV16-641-2: a successful tick has already asked for the full load while the guard has been set.
-  const tickAskedLoadRef = useRef(false);
+  // RV16-641-2, RV18-641-F2: when a landed tick last asked for the full load while the guard was set (null: not yet).
+  const guardLoadAskedAtRef = useRef<number | null>(null);
   // W12-2 (ST-06, native): this load has already refreshed the sign-in once.
   const signInRetriedRef = useRef(false);
   const [context, setContext] = useState<ScreenContext>({ kind: 'none' });
@@ -1082,8 +1091,8 @@ export default function ContributeToGoal() {
             }
             if (refreshed === 'offline') {
               // RV12-641-5: until an authorized answer, the heal ticks go out token-less.
-              // RV16-641-2: newly set, a successful tick may ask for one full load again.
-              if (!signInOfflineRef.current) tickAskedLoadRef.current = false;
+              // RV16-641-2: newly set, the next landed tick asks for the full load at once.
+              if (!signInOfflineRef.current) guardLoadAskedAtRef.current = null;
               signInOfflineRef.current = true;
               failTransiently();
               return;
@@ -1207,13 +1216,17 @@ export default function ContributeToGoal() {
           sign-in could not be refreshed this tick may have gone out without a
           token, and the public pulse answers that too when the goal is on a
           display. So the guard stays: a later anonymous not-found (the display
-          turned off) must still evict nothing (RV11-641-1). The tick asks once
-          for the full load instead, whose own-credit read needs the sign-in;
-          that load is what clears the guard.
+          turned off) must still evict nothing (RV11-641-1). The tick asks for
+          the full load instead, whose own-credit read needs the sign-in: at
+          once, and again about every GUARD_RELOAD_EVERY_MS while the guard
+          stays set (RV18-641-F2: if that asked load fails while Auth is still
+          down, nothing else re-runs it once Auth is back). The first
+          authorized load clears the guard.
         */
         if (Platform.OS !== 'web' && signInOfflineRef.current) {
-          if (!tickAskedLoadRef.current) {
-            tickAskedLoadRef.current = true;
+          const askedAt = guardLoadAskedAtRef.current;
+          if (askedAt === null || Date.now() - askedAt >= GUARD_RELOAD_EVERY_MS) {
+            guardLoadAskedAtRef.current = Date.now();
             quietRetry();
           }
         } else {

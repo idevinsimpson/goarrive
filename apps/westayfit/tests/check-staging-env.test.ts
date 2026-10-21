@@ -527,17 +527,29 @@ describe('RV9-641-I11: files in other work trees, and the env files Expo loads',
         under test.
       · An element-access key is followed to its constant string, and a call
         through a key that cannot be (fs[k] with k computed, [f][0]) offends.
-      · A call to a function imported from anything but a node built-in,
-        vitest, typescript or the script under test offends (the script only
-        reads: checked below).
+      · A call into another module offends unless it is a node built-in,
+        vitest, typescript or the script under test, however it is reached:
+        an import, `require`, `module.require`, an alias of either, or the
+        result of `createRequire(...)` (RV18-641-F1). Of the allowed modules,
+        the members that write are watched as well: typescript's `sys` (any
+        member of a `sys` that is not a read offends, even into a root) and
+        `createProgram(...).emit()` (which writes wherever its options say),
+        and vitest's `toMatchFileSnapshot`, by the path it takes.
+        `Reflect.get(o, 'name')` stands for `o.name`, as a callee or a value.
       · A link this file makes to something outside its roots is read-only:
         a path through it, or the link itself for anything but removing,
         renaming or an l* call, offends (by the path's own shape).
 
-    Not modelled: what a child process or the script under test does, code
-    built from strings, and a link reached by a path spelled differently from
-    the one that made it (the afterAll snapshot, which records modes, sees a
-    change after the fact). The scan reads this file only.
+    Not modelled: what a child process or the script under test does, what
+    the allowed modules do beyond their watched members, code built from
+    strings, and a link reached by a path spelled differently from the one
+    that made it (the afterAll snapshot, which records modes, sees a change
+    after the fact). The script's own run-time loads are pinned by name only
+    (the script check below): it `createRequire`s typescript (to transpile
+    src/stagingEnv.ts in memory), @expo/env (the production env-file list)
+    and this repository's app.config.js (run as EAS would), and imports the
+    transpiled stagingEnv as a `data:` URL; what those do is not modelled.
+    The scan reads this file only.
   */
   const PATH_ARGS: Record<string, number[]> = {
     writeFileSync: [0], appendFileSync: [0], unlinkSync: [0], mkdirSync: [0], rmdirSync: [0], rmSync: [0], truncateSync: [0],
@@ -547,10 +559,18 @@ describe('RV9-641-I11: files in other work trees, and the env files Expo loads',
     utimes: [0], lchown: [0], lutimes: [0], lchmod: [0], symlink: [1], link: [0, 1], rename: [0, 1], copyFile: [1], cp: [1], mkdtemp: [0],
     // RV16-641-1: the stream class itself, as `new fs.WriteStream(path)`.
     WriteStream: [0],
+    // RV18-641-F1: the writing members of the allowed modules, by the path they take: typescript's
+    // `sys` (every other `sys` write offends by the rule below) and vitest's file snapshot.
+    deleteFile: [0], createDirectory: [0], toMatchFileSnapshot: [0],
   };
   const CHILD = new Set(['spawn', 'spawnSync', 'exec', 'execSync', 'execFile', 'execFileSync', 'fork']);
   // RV16-641-1: runs code this scan cannot read: always offends.
-  const ALWAYS = new Set(['chdir', 'Worker']);
+  const ALWAYS = new Set(['chdir', 'Worker', 'emit']); // emit: createProgram(...).emit() writes wherever its options say (RV18-641-F1)
+  // RV18-641-F1: the members of typescript's `sys` that only read; a call to any other `sys` member offends.
+  const TS_SYS_READ = new Set([
+    'readFile', 'fileExists', 'directoryExists', 'readDirectory', 'getDirectories', 'getCurrentDirectory', 'getExecutingFilePath',
+    'realpath', 'resolvePath', 'getModifiedTime', 'getFileSize', 'getEnvironmentVariable', 'write', 'exit',
+  ]);
   const watched = (name: string) => Object.prototype.hasOwnProperty.call(PATH_ARGS, name) || CHILD.has(name) || ALWAYS.has(name);
   // RV16-641-1: what a link this file made may still have done to it (it acts on the link, not on what it points at).
   const ON_THE_LINK = new Set(['unlinkSync', 'unlink', 'renameSync', 'rename', 'rmSync', 'rm', 'lchownSync', 'lchown', 'lutimesSync', 'lutimes', 'lchmodSync', 'lchmod']);
@@ -849,6 +869,19 @@ describe('RV9-641-I11: files in other work trees, and the env files Expo loads',
       const init = ts.isVariableDeclaration(decl) && ts.isVariableDeclarationList(decl.parent) && decl.parent.flags & ts.NodeFlags.Const ? decl.initializer && strip(decl.initializer) : undefined;
       return init && (ts.isStringLiteral(init) || ts.isNoSubstitutionTemplateLiteral(init)) ? init.text : null;
     };
+    /** RV18-641-F1: `Reflect.get(o, 'name')` stands for `o.name`: a watched name, '?' when the key cannot be known, or null. */
+    const reflectGet = (raw: ts.Expression): string | null => {
+      const e = strip(raw);
+      if (!ts.isCallExpression(e)) return null;
+      const callee = strip(e.expression);
+      if (!ts.isPropertyAccessExpression(callee) || callee.name.text !== 'get') return null;
+      const target = strip(callee.expression);
+      if (!ts.isIdentifier(target) || target.text !== 'Reflect') return null;
+      const key = e.arguments[1];
+      const k = key ? keyText(key) : null;
+      if (k === null) return '?';
+      return watched(k) ? k : null;
+    };
     const unknownKey = (raw: ts.Expression | undefined): boolean => {
       const e = raw && strip(raw);
       return !!e && ts.isElementAccessExpression(e) && keyText(e.argumentExpression) === null;
@@ -873,7 +906,7 @@ describe('RV9-641-I11: files in other work trees, and the env files Expo loads',
             }
           }
           for (const a of assignments.get(sym) ?? []) found.push(nameOf(a.rhs));
-          return found.find((x): x is string => x !== null && watched(x)) ?? null;
+          return found.find((x): x is string => x !== null && (x === '?' || watched(x))) ?? null;
         } finally {
           naming.delete(sym);
         }
@@ -883,6 +916,9 @@ describe('RV9-641-I11: files in other work trees, and the env files Expo loads',
         const k = keyText(e.argumentExpression);
         return k !== null && watched(k) ? k : null;
       }
+      // RV18-641-F1: `Reflect.get(o, 'rmSync')` is `o.rmSync`; a key that cannot be known is '?'.
+      const rg = reflectGet(e);
+      if (rg !== null) return rg;
       if (ts.isCallExpression(e) && ts.isPropertyAccessExpression(e.expression) && e.expression.name.text === 'bind') return nameOf(e.expression.expression);
       if (ts.isBinaryExpression(e) && e.operatorToken.kind === ts.SyntaxKind.CommaToken) return nameOf(e.right);
       if (ts.isConditionalExpression(e)) return nameOf(e.whenTrue) ?? nameOf(e.whenFalse);
@@ -991,6 +1027,7 @@ describe('RV9-641-I11: files in other work trees, and the env files Expo loads',
         // RV16-641-1: through a key that cannot be known, the target could be anything.
         if (unknownKey(target)) return { name: '?', args: null };
         const name = target ? nameOf(target) : null;
+        if (name === '?') return { name, args: null };
         if (name && callee.name.text === 'call') return { name, args: c.arguments.slice(1) };
         if (name) {
           const list = c.arguments[reflect ? 2 : 1];
@@ -1000,6 +1037,7 @@ describe('RV9-641-I11: files in other work trees, and the env files Expo loads',
       }
       if (unknownKey(callee)) return { name: '?', args: null };
       const name = nameOf(callee);
+      if (name === '?') return { name, args: null };
       return name ? { name, args: c.arguments } : null;
     };
     const callOk = ({ name, args }: Watched): boolean => {
@@ -1109,11 +1147,37 @@ describe('RV9-641-I11: files in other work trees, and the env files Expo loads',
       read: only node's own modules, vitest, typescript and the script under
       test (it only reads) are called.
     */
+    /** RV18-641-F1: `require` itself, `module.require`, an alias of either, or what `createRequire(...)` returns. */
+    const requireLike = (raw: ts.Expression, depth = 0): boolean => {
+      const e = strip(raw);
+      if (depth > 20) return false;
+      if (ts.isPropertyAccessExpression(e)) {
+        const host = strip(e.expression);
+        return e.name.text === 'require' && ts.isIdentifier(host) && host.text === 'module';
+      }
+      if (ts.isCallExpression(e)) {
+        const callee = strip(e.expression);
+        return (ts.isIdentifier(callee) && callee.text === 'createRequire') || (ts.isPropertyAccessExpression(callee) && callee.name.text === 'createRequire');
+      }
+      if (!ts.isIdentifier(e)) return false;
+      if (e.text === 'require') return true;
+      const sym = symbolOf(e);
+      if (!sym) return false;
+      for (const d of sym.declarations ?? []) if (ts.isVariableDeclaration(d) && d.initializer && requireLike(d.initializer, depth + 1)) return true;
+      return (assignments.get(sym) ?? []).some((a) => requireLike(a.rhs, depth + 1));
+    };
+    /** RV18-641-F1: a call on a typescript `sys` member that does not only read. */
+    const sysWrite = (raw: ts.Expression): boolean => {
+      const callee = strip(raw);
+      if (!ts.isPropertyAccessExpression(callee)) return false;
+      const host = strip(callee.expression);
+      return ts.isPropertyAccessExpression(host) && host.name.text === 'sys' && !TS_SYS_READ.has(callee.name.text);
+    };
     const moduleOf = (raw: ts.Expression, depth = 0): string | null => {
       let e = strip(raw);
       while (ts.isPropertyAccessExpression(e) || ts.isElementAccessExpression(e)) e = strip(e.expression);
       if (ts.isAwaitExpression(e)) e = strip(e.expression);
-      if (ts.isCallExpression(e) && (e.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(e.expression) && e.expression.text === 'require'))) {
+      if (ts.isCallExpression(e) && (e.expression.kind === ts.SyntaxKind.ImportKeyword || requireLike(e.expression))) {
         const spec = e.arguments[0] && strip(e.arguments[0]);
         return spec && ts.isStringLiteral(spec) ? spec.text : '?';
       }
@@ -1151,6 +1215,9 @@ describe('RV9-641-I11: files in other work trees, and the env files Expo loads',
         }
       }
       if ((ts.isCallExpression(node) || ts.isNewExpression(node)) && foreign(node.expression)) offenders.push(`foreign: ${node.getText()}`);
+      // RV18-641-F1: typescript's `sys` writes, and a `Reflect.get` of a watched member used as a value.
+      if (ts.isCallExpression(node) && sysWrite(node.expression)) offenders.push(`sys: ${node.getText()}`);
+      if (ts.isCallExpression(node) && reflectGet(node) !== null && !followed(node)) offenders.push(`value: ${node.getText()}`);
       if (isReference(node) && !followed(node) && valueName(node) !== null) offenders.push(`value: ${node.getText()}`);
       ts.forEachChild(node, visit);
     };
@@ -1321,6 +1388,39 @@ describe('RV9-641-I11: files in other work trees, and the env files Expo loads',
     expect(scan(code).offenders).toEqual([]);
   });
 
+  it.each([
+    // RV18-641-F1 (heads-16): the reviewer's Q1-Q8, which the scan passed before, and the forms the fix names.
+    ['Q1 ts.sys.deleteFile on an app env file', "import ts from 'typescript';\nts.sys.deleteFile!(join(APP_ROOT, '.env.development.local'));"],
+    ['Q2 ts.sys.createDirectory in the app', "import ts from 'typescript';\nts.sys.createDirectory(join(APP_ROOT, 'x'));"],
+    ['Q3 module.require of a foreign helper', "module.require('./helpers').zap(join(APP_ROOT, '.env.local'));"],
+    ['Q4 a require alias', "const req = require;\nreq('./helpers').zap(join(APP_ROOT, '.env.local'));"],
+    ['Q5 createRequire', "import { createRequire } from 'node:module';\nconst r = createRequire(import.meta.url);\nr('./helpers').zap(join(APP_ROOT, '.env.local'));"],
+    ['Q6 a vitest file snapshot into the app', "import { expect } from 'vitest';\nawait expect('x').toMatchFileSnapshot(join(APP_ROOT, '.env.production'));"],
+    ['Q7 Reflect.get of a watched member', "Reflect.get(fs, 'rmSync')(join(APP_ROOT, '.env.local'));"],
+    ['Q8 typescript emit into the app', "import ts from 'typescript';\nts.createProgram({ rootNames: [join(DIR, 'a.ts')], options: { outDir: APP_ROOT } }).emit();"],
+    ['a sys write, even into a root', "import ts from 'typescript';\nts.sys.writeFile(join(DIR, 'a'), 'x');"],
+    ['a sys member that is not a read, even into a root', "import ts from 'typescript';\nts.sys.deleteFile!(join(DIR, 'a'));"],
+    ['Reflect.get with a key that cannot be known', "let k = 'readFileSync';\nk = 'rmSync';\nReflect.get(fs, k)(join(DIR, 'a'));"],
+    ['a Reflect.get member as a callback', "[join(DIR, 'a')].forEach(Reflect.get(fs, 'unlinkSync'));"],
+    ['a Reflect.get member through an alias', "const zap = Reflect.get(fs, 'rmSync');\nzap(join(APP_ROOT, '.env'));"],
+    ['createRequire called directly', "import { createRequire } from 'node:module';\ncreateRequire(import.meta.url)('./helpers').zap(join(APP_ROOT, '.env'));"],
+    ['a require alias of an alias', "const r1 = require;\nconst r2 = r1;\nr2('./helpers').zap(join(APP_ROOT, '.env'));"],
+    ['a require alias assigned later', "let r: unknown;\nr = require;\n(r as NodeRequire)('./helpers').zap(join(APP_ROOT, '.env'));"],
+  ])('RV18-641-F1: %s offends', (_what, code) => {
+    expect(scan(code).offenders).not.toEqual([]);
+  });
+
+  it.each([
+    ['sys reads', "import ts from 'typescript';\nconst t = ts.sys.readFile(join(APP_ROOT, 'app.json'));\nconsole.log(t, ts.sys.fileExists(join(APP_ROOT, 'app.json')));"],
+    ['createRequire of a node module, writing in a root', "import { createRequire } from 'node:module';\nconst r = createRequire(import.meta.url);\nr('node:fs').rmSync(join(DIR, 'a'));"],
+    ['module.require of a node module, writing in a root', "module.require('node:fs').rmSync(join(DIR, 'a'));"],
+    ['a file snapshot into a root', "import { expect } from 'vitest';\nawait expect('x').toMatchFileSnapshot(join(DIR, 'snap'));"],
+    ['Reflect.get of a watched member, into a root', "Reflect.get(fs, 'rmSync')(join(DIR, 'a'));"],
+    ['Reflect.get of an unwatched member', "const v = Reflect.get(fs, 'constants');\nconsole.log(v);"],
+  ])('RV18-641-F1: %s passes', (_what, code) => {
+    expect(scan(code).offenders).toEqual([]);
+  });
+
   it('RV16-641-1: the script under test only reads: read-only node:fs imports, spawnSync alone, and its git runs with gitEnv()', () => {
     const sf = ts.createSourceFile('s.mjs', readFileSync(SCRIPT, 'utf8'), ts.ScriptTarget.Latest, true);
     const READ = new Set(['readFileSync', 'realpathSync', 'statSync', 'lstatSync', 'existsSync', 'readdirSync', 'accessSync']);
@@ -1347,6 +1447,26 @@ describe('RV9-641-I11: files in other work trees, and the env files Expo loads',
       const env = opts && ts.isObjectLiteralExpression(opts) ? opts.properties.find((x) => x.name?.getText() === 'env') : undefined;
       expect(env && ts.isPropertyAssignment(env) ? env.initializer.getText() : null).toBe('gitEnv()');
     }
+    // RV18-641-F1: what the script loads at run time is exactly this, by name (what those modules do is not modelled).
+    const requireNames = new Set<string>();
+    const loads: string[] = [];
+    const dynamicImports: string[] = [];
+    const visitLoads = (node: ts.Node) => {
+      if (ts.isCallExpression(node)) {
+        const callee = node.expression;
+        if (callee.kind === ts.SyntaxKind.ImportKeyword) dynamicImports.push(node.arguments[0]?.getText() ?? '');
+        if (ts.isIdentifier(callee) && callee.text === 'createRequire') {
+          expect(node.arguments.map((a) => a.getText().replace(/\s/g, '')), 'createRequire').toEqual([expect.stringMatching(/^join\((APP_ROOT|appRoot),'package\.json'\)$/)]);
+          if (ts.isVariableDeclaration(node.parent) && ts.isIdentifier(node.parent.name)) requireNames.add(node.parent.name.text);
+          if (ts.isCallExpression(node.parent) && node.parent.expression === node) loads.push(node.parent.arguments[0]?.getText() ?? '');
+        } else if (ts.isIdentifier(callee) && requireNames.has(callee.text)) loads.push(node.arguments[0]?.getText() ?? '');
+      }
+      ts.forEachChild(node, visitLoads);
+    };
+    visitLoads(sf);
+    expect(loads.sort()).toEqual(["'@expo/env'", "'typescript'", "join(APP_ROOT, 'app.config.js')"]);
+    expect(dynamicImports).toHaveLength(1);
+    expect(dynamicImports[0]).toMatch(/^`data:text\/javascript;base64,\$\{/);
   });
 
   it('SEC-F1: nothing in this file writes, links, renames or removes a path outside its own temporary roots', () => {
