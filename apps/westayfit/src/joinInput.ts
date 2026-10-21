@@ -63,10 +63,12 @@ const URL_SHAPE = /^([A-Za-z][A-Za-z0-9+.-]*):\/\/([^/?#]*)([^?#]*)(?:\?([^#]*))
 const HOST = /^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\.?|\[[0-9A-Fa-f:.]{2,45}\])(?::\d{1,5})?$/;
 const JOIN_PATH = /^\/join\/([A-Za-z0-9_-]{16,128})\/?$/;
 /**
- * A configured invite host: a plain public DNS name, at least two labels, the
- * last starting with a letter. No port, IP literal, wildcard or trailing dot.
+ * A plain public DNS name: at least two labels, the last starting with a
+ * letter. No port, IP literal, wildcard, single label or trailing dot.
  */
 const PUBLIC_HOST = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+/** Special-use names that never resolve on the public internet (RFC 6761, 6762, 8375; ICANN's .internal). */
+const NON_PUBLIC_SUFFIXES = ['localhost', 'local', 'internal', 'home.arpa'] as const;
 /** A page origin as `location.origin` gives it: http(s), a host, an optional port, nothing else. */
 const PAGE_ORIGIN = /^https?:\/\/[^/?#@\s]+$/;
 const KEPT_PARAMS = ['event', 'activity'] as const;
@@ -95,6 +97,16 @@ export function inviteOriginsFor(os: string, configuredHosts: string | undefined
 }
 
 /**
+ * Whether `host` (no scheme or port) is a public DNS name: PUBLIC_HOST's
+ * shape, and not under a special-use local name. `localhost`, `10.0.2.2`, a
+ * LAN address or `laptop.local` are not.
+ */
+export function isPublicHost(host: string): boolean {
+  const h = host.toLowerCase();
+  return PUBLIC_HOST.test(h) && !NON_PUBLIC_SUFFIXES.some((s) => h === s || h.endsWith(`.${s}`));
+}
+
+/**
  * The canonical hosts named in an `EXPO_PUBLIC_WSF_INVITE_HOSTS` value:
  * lower-cased, de-duplicated, plain public host names only. Empty today.
  */
@@ -102,7 +114,7 @@ export function configuredInviteHosts(value: string | undefined): string[] {
   const hosts = new Set<string>();
   for (const entry of (value ?? '').split(/[\s,]+/)) {
     const host = entry.toLowerCase();
-    if (PUBLIC_HOST.test(host)) hosts.add(host);
+    if (isPublicHost(host)) hosts.add(host);
   }
   return [...hosts];
 }

@@ -230,3 +230,49 @@ describe('F3-N2: a development tunnel is never a shareable origin', () => {
     expect(isShareableHttpsUrl('https://westayfit.app')).toBe(true);
   });
 });
+
+describe('NB-1: only a public host is shareable, configured or not', () => {
+  const saved = process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS;
+    else process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS = saved;
+  });
+
+  it.each([
+    ['localhost', 'https://localhost/join/x'],
+    ['another single label', 'https://intranet/join/x'],
+    ['the Android emulator host', 'https://10.0.2.2/join/x'],
+    ['a LAN address', 'https://192.168.1.20/join/x'],
+    ['loopback', 'https://127.0.0.1'],
+    ['a public IPv4 literal', 'https://203.0.113.7/join/x'],
+    ['an mDNS name', 'https://my-laptop.local/join/x'],
+    ['under localhost', 'https://app.localhost'],
+    ['.internal', 'https://wsf.internal'],
+    ['home.arpa', 'https://nas.home.arpa'],
+    ['a Cloudflare quick tunnel', 'https://plain-words-here.trycloudflare.com'],
+    ['localtunnel', 'https://tidy-cat-12.loca.lt'],
+    ['localtunnel.me', 'https://x.localtunnel.me'],
+    ['localhost.run', 'https://abc123.lhr.life'],
+    ['localhost.run itself', 'https://x.localhost.run'],
+    ['serveo', 'https://x.serveo.net'],
+    ['nip.io naming the emulator host', 'https://10.0.2.2.nip.io/join/x'],
+    ['sslip.io', 'https://192-168-1-20.sslip.io'],
+  ])('%s is refused with nothing configured', (_l, url) => {
+    delete process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS;
+    expect(isShareableHttpsUrl(url)).toBe(false);
+    expect(shareRoute({ product: 'ReactNative' }, url.replace(/\/join\/x$/, ''))).toBe('unavailable');
+  });
+
+  it('a public host is still shareable with nothing configured', () => {
+    delete process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS;
+    expect(isShareableHttpsUrl('https://westayfit.app/join/x')).toBe(true);
+    expect(isShareableHttpsUrl('https://goarrive.web.app')).toBe(true);
+  });
+
+  it('a configured value cannot make a non-public host shareable', () => {
+    process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS = 'localhost, 10.0.2.2, my-laptop.local, wsf.internal';
+    for (const url of ['https://localhost', 'https://10.0.2.2', 'https://my-laptop.local', 'https://wsf.internal']) {
+      expect(isShareableHttpsUrl(url), url).toBe(false);
+    }
+  });
+});

@@ -19,7 +19,7 @@
  * from a rendered page. (The one default below reads the current origin; every
  * rule takes it as an argument.)
  */
-import { configuredInviteHosts } from './joinInput';
+import { configuredInviteHosts, isPublicHost } from './joinInput';
 import { currentOrigin } from './ui/kioskLink';
 
 /**
@@ -30,11 +30,30 @@ import { currentOrigin } from './ui/kioskLink';
 export type ShareRoute = 'nativeShare' | 'webShare' | 'clipboard' | 'unavailable';
 
 /**
- * The domains `expo start --tunnel` serves Metro on (Expo's own tunnel host,
- * and the ngrok domains it has used). A development server, never a public
- * We Stay Fit link -- even though its origin is https with no port.
+ * Domains that put a development server on a public-looking https name: the
+ * ones `expo start --tunnel` uses (Expo's own tunnel host and the ngrok
+ * domains it has used), the other common tunnel providers (Cloudflare quick
+ * tunnels, localtunnel, localhost.run, serveo), and the wildcard DNS
+ * services that name an IP address (nip.io, sslip.io). Never a public We Stay
+ * Fit link, even though such an origin is https with no port.
  */
-export const DEV_TUNNEL_DOMAINS = ['exp.direct', 'exp.host', 'ngrok.io', 'ngrok.app', 'ngrok-free.app', 'ngrok.dev', 'ngrok-free.dev'] as const;
+export const DEV_TUNNEL_DOMAINS = [
+  'exp.direct',
+  'exp.host',
+  'ngrok.io',
+  'ngrok.app',
+  'ngrok-free.app',
+  'ngrok.dev',
+  'ngrok-free.dev',
+  'trycloudflare.com',
+  'loca.lt',
+  'localtunnel.me',
+  'lhr.life',
+  'localhost.run',
+  'serveo.net',
+  'nip.io',
+  'sslip.io',
+] as const;
 
 /**
  * NATIVE-MEMBER-1 F-3 (MF-01). The only kind of link the app hands to the
@@ -46,16 +65,20 @@ export const DEV_TUNNEL_DOMAINS = ['exp.direct', 'exp.host', 'ngrok.io', 'ngrok.
  * origin has none at all (INT-08). These are refused, so the controls are not
  * offered rather than offered with a link that cannot work.
  *
- * HOST (review F3-N2). Once the canonical hosts are configured
- * (`EXPO_PUBLIC_WSF_INVITE_HOSTS`, src/joinInput.ts) the link's host must be
- * one of them, exactly. Until then -- today -- any public host is allowed
- * except a development tunnel's (DEV_TUNNEL_DOMAINS and their subdomains).
+ * HOST (reviews F3-N2, NB-1). The host must be a public DNS name
+ * (`isPublicHost`): never a single label such as `localhost`, an IP literal
+ * (`10.0.2.2`, a LAN address) or a special-use local name. Once the canonical
+ * hosts are configured (`EXPO_PUBLIC_WSF_INVITE_HOSTS`, src/joinInput.ts) it
+ * must be one of them, exactly. Until then -- today -- any public host is
+ * allowed except a development tunnel's (DEV_TUNNEL_DOMAINS and their
+ * subdomains).
  */
 export function isShareableHttpsUrl(url: unknown): url is string {
   if (typeof url !== 'string') return false;
   const shape = /^https:\/\/([A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?)(?:\/[^\s]*)?$/.exec(url);
   if (!shape) return false;
   const host = shape[1]!.toLowerCase();
+  if (!isPublicHost(host)) return false;
   const canonical = configuredInviteHosts(process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS);
   if (canonical.length > 0) return canonical.includes(host);
   return !DEV_TUNNEL_DOMAINS.some((domain) => host === domain || host.endsWith(`.${domain}`));

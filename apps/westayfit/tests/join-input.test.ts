@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { inviteOrigins, inviteOriginsFor, JOIN_INPUT_MAX, parseJoinInput } from '../src/joinInput';
+import { inviteOrigins, inviteOriginsFor, isPublicHost, JOIN_INPUT_MAX, parseJoinInput } from '../src/joinInput';
 import { readActivityLabel } from '../src/eventActivity';
 import { readEventParam } from '../src/ui/eventLinks';
 
@@ -325,5 +325,35 @@ describe('N3: the default origins here (vitest runs as the web)', () => {
     process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS = 'westayfit.app';
     expect(parseJoinInput(`https://westayfit.app/join/${CODE}`)?.href).toBe(`/join/${CODE}`);
     expect(parseJoinInput(`https://evil.example/join/${CODE}`)).toBeNull();
+  });
+});
+
+describe('NB-1: isPublicHost', () => {
+  it('a plain public DNS name is public, in any case', () => {
+    // `shop.glocal` only ends in the same letters as `local`: whole labels count.
+    for (const h of ['westayfit.app', 'staging.westayfit.app', 'GoArrive.Web.App', 'a.b.c.example', 'x1.io', 'shop.glocal']) {
+      expect(isPublicHost(h), h).toBe(true);
+    }
+  });
+  it.each([
+    ['a single label', 'localhost'],
+    ['another single label', 'intranet'],
+    ['the Android emulator host', '10.0.2.2'],
+    ['a LAN address', '192.168.1.20'],
+    ['an IPv6 literal', '[::1]'],
+    ['a port', 'westayfit.app:443'],
+    ['a trailing dot', 'westayfit.app.'],
+    ['a wildcard', '*.westayfit.app'],
+    ['an mDNS name', 'my-laptop.local'],
+    ['under localhost', 'app.localhost'],
+    ['.internal', 'wsf.internal'],
+    ['home.arpa', 'nas.home.arpa'],
+    ['a leading hyphen', '-x.app'],
+    ['empty', ''],
+  ])('%s is not', (_l, h) => {
+    expect(isPublicHost(h)).toBe(false);
+  });
+  it('a configured local name is ignored like any other non-public entry', () => {
+    expect(inviteOriginsFor('ios', 'my-laptop.local, wsf.internal, ok.example', null)).toEqual(['https://ok.example']);
   });
 });
