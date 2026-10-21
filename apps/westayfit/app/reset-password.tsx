@@ -15,6 +15,16 @@ import {
 import { authErrorCode, authErrorMessage } from '../src/authErrors';
 import { wsfAuthEnabled } from '../src/featureFlags';
 import { requestPasswordResetEmail } from '../src/passwordResetEmail';
+import { nativeErrorBoundary } from '../src/ui/RouteErrorFallback';
+
+/*
+  NATIVE-MEMBER-1 W16-13 (INT-01 CS-4). On a phone a render error here shows
+  the contained screen fallback (Try again remounts the route, Go to Home is
+  the way out; src/ui/RouteErrorFallback.native.tsx) instead of ending the
+  process. The web module returns undefined, so the web gets no boundary and
+  nothing changes there.
+*/
+export const ErrorBoundary = nativeErrorBoundary('screen');
 
 export default function ResetPassword() {
   const [email, setEmail] = useState('');
