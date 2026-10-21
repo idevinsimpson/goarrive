@@ -338,6 +338,9 @@ function youFromRecord(uid: string): Screen | null {
   return composeMember(profile, community, goals, owned, elsewhereFromRecord(uid, communities, community.groupId));
 }
 
+/** W13-12: the loading page, as a failed load sees another account's page (`shownRef` below). */
+const LOADING: Screen = { kind: 'loading' };
+
 /**
  * RV15-639-N2. WHETHER A PAGE A FAILED LOAD WOULD KEEP IS ONE ITS FRESH READ
  * STILL SHOWS. A load that fails keeps a member page already on screen (one
@@ -372,6 +375,16 @@ export default function You() {
   const [screen, setScreen] = useState<Screen>(
     () => (ready && user ? youFromRecord(user.uid) : null) ?? { kind: 'loading' },
   );
+  /*
+    W13-12 (RV16-C15-1). THE PAGE ON SCREEN and the account it is drawn for:
+    what a failed load judges (`fail` below), not the page the load began on,
+    which a focus may have redrawn since. Mirrored on every render (this tree
+    has no single setScreen to set it from), so it is the page last rendered;
+    a load reads it only after its own reads have answered, when its own
+    first setScreen has long been rendered.
+  */
+  const shownRef = useRef<{ uid: string | null; screen: Screen }>({ uid: null, screen: LOADING });
+  shownRef.current = { uid: ready && user ? user.uid : null, screen };
   const [signingOut, setSigningOut] = useState(false);
   const [reloads, setReloads] = useState(0);
   // A page that came up before the phone's remembered community was read
@@ -379,8 +392,9 @@ export default function You() {
   // record could not give then is given now. Not after a Retry, which reads
   // everything fresh. The load below still replaces it.
   const communityReady = useCurrentCommunityReady();
-  // heads-11 F2: what that repaint drew, for the load in flight to keep if it
-  // fails (`fail` below), as it keeps a page drawn at mount.
+  // heads-11 F2: what that repaint drew. It lets the load in flight keep the
+  // page on screen if it fails, under the same gate as a page drawn at mount
+  // (`fail` below).
   const repainted = useRef<{ uid: string; screen: Screen } | null>(null);
   useEffect(() => {
     if (!communityReady || !ready || !user || reloads > 0) return;
@@ -478,31 +492,55 @@ export default function You() {
       // THE PROFILE ALONGSIDE THE REST. It is the member's own document and
       // needs no callable, so an identity is on screen even when every goal
       // read fails -- but nothing else has to wait for it.
-      const profileRead: Promise<Profile> = readMemberProfile(uid, reuse).then(toProfile, () => ({
-        displayName: null,
-        memberSince: null,
-      }));
+      // Whether this load's own profile read answered (RV16-C15-3: a kept
+      // page's head never falls back to "You" while a better one is known).
+      let profileAnswered = false;
+      const profileRead: Promise<Profile> = readMemberProfile(uid, reuse).then(
+        (answer) => {
+          profileAnswered = true;
+          return toProfile(answer);
+        },
+        () => ({ displayName: null, memberSince: null }),
+      );
       const fail = async (community?: Community) => {
         const profile = await profileRead;
         if (live.current !== token) return;
         settle();
-        // heads-11 F2: a page the readiness repaint drew while this load was
-        // in flight (it began on loading) is kept and marked stale, exactly
-        // like one drawn at mount, rather than replaced by the failed page.
+        /*
+          WHICH PAGE A FAILED LOAD KEEPS (RV16-C15-1, RV16-C15-2, RV16-639-1).
+          A load may keep what is on screen, marked stale, when it began on a
+          member page from the record (`recorded`), when the readiness repaint
+          drew a member page while it was in flight (`painted`, heads-11 F2),
+          or when it is a return's revalidation (`keep`). ONE GATE decides,
+          on the page ON SCREEN now (`shownRef`), not on the page the load
+          began on, which a focus may have replaced since:
+            · a member page is kept only while the fresh read still shows it
+              (`keptPageStillShown`, RV15-639-N2);
+            · pick, none and failed pages are kept, as before; 'loading' never
+              is: a skeleton is never left up as a stale page (a refused
+              community's page dropped to loading, then a failed revalidation).
+          Otherwise the failed page for the resolved community, with Retry,
+          and nothing is marked stale. The condition is member's (W16-17),
+          with the repainted page added: only this tree keeps it apart.
+        */
         const painted = !recorded && !keep && repainted.current?.uid === uid ? repainted.current.screen : null;
-        // RV15-639-N2: either is kept only while the fresh read still shows it
-        // (`keptPageStillShown`); otherwise the failed page below.
-        if (keptPageStillShown(painted, community, communities)) {
-          setScreen({ ...painted, profile });
-          setStale(true);
-          return;
-        }
-        if (keptPageStillShown(recorded, community, communities)) {
-          setScreen({ ...recorded, profile });
-          setStale(true);
-          return;
-        }
-        if (keep) {
+        const shown = shownRef.current.uid === uid ? shownRef.current.screen : LOADING;
+        if (
+          (keep || (recorded && recorded.kind === 'member') || (painted && painted.kind === 'member')) &&
+          (shown.kind === 'member' ? keptPageStillShown(shown, community, communities) : shown.kind !== 'loading')
+        ) {
+          if (shown.kind === 'member') {
+            // RV16-C15-3. Its head: this load's read if it answered, else the
+            // account's recorded profile, else the head already shown (never
+            // the read's failure fallback, which would say "You").
+            const known = peekMemberProfile(uid);
+            const head = profileAnswered ? profile : known ? toProfile(known) : shown.profile;
+            setScreen((prev) =>
+              prev.kind === 'member' && prev.community.groupId === shown.community.groupId
+                ? { ...prev, profile: head }
+                : prev,
+            );
+          }
           setStale(true);
           return;
         }

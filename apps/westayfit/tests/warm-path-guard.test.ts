@@ -46,9 +46,18 @@ const h = vi.hoisted(() => ({
   /** Whether You last said its figures are stale. */
   youStale: null as null | boolean,
   /** The state You last drew (a failed page carries the community it failed in). */
-  youState: null as null | { kind: string; community?: { groupId: string } },
+  youState: null as null | { kind: string; community?: { groupId: string }; profile?: { displayName: string | null } },
   /** Communities whose goals read fails (RV15-639-N2). */
   goalsFail: new Set<string>(),
+  /** Every community whose goals were asked for, in order. */
+  goalsAsked: [] as string[],
+  /** The focus callback the screen registered last; calling it is a focus (the first call is the mount's own). */
+  focus: null as null | (() => void),
+  /** Communities a fresh server answer refused (`wasRefused`). */
+  refused: new Set<string>(),
+  /** The member profile read: fails, or answers with this name. */
+  profileFail: false,
+  profileName: 'Ann' as string | null,
 }));
 
 vi.mock('../src/memberReads', () => ({
@@ -59,12 +68,16 @@ vi.mock('../src/memberReads', () => ({
   peekOwnCredit: () => undefined,
   readMyCommunities: () => h.fresh.mine,
   readGoals: async (_uid: string, groupId: string) => {
+    h.goalsAsked.push(groupId);
     if (h.goalsFail.has(groupId)) throw new Error('offline');
     return { goals: [] };
   },
-  readMemberProfile: async () => ({ displayName: 'Ann', createdAt: null }),
+  readMemberProfile: async () => {
+    if (h.profileFail) throw new Error('offline');
+    return { displayName: h.profileName, createdAt: null };
+  },
   readOwnCredit: async () => ({ ownCredit: 0, unit: 'reps' }),
-  wasRefused: () => false,
+  wasRefused: (_uid: string | null, groupId: string) => h.refused.has(groupId),
 }));
 vi.mock('../src/auth', () => ({
   useWsfAuth: () => ({ ready: true, user: h.user }),
@@ -76,7 +89,8 @@ vi.mock('firebase/functions', () => ({
   A hand-built `expo-router`: the real package ships untranspiled JSX that
   jsdom's loader refuses (tests/start-community-outcomes.test.tsx), so
   `importOriginal` is not an option. Focus effects are not part of the first
-  frame, so they do nothing here. The rest is the minimal surface screens
+  frame: the callback is only kept (`h.focus`), and a test that needs a
+  return to the screen calls it. The rest is the minimal surface screens
   reach for (the integrated You signs out through `useNavigation`), so a
   screen that grows a navigation call does not break this file.
 */
@@ -105,7 +119,9 @@ vi.mock('expo-router', () => {
     router,
     useRouter: () => router,
     useNavigation: () => navigation,
-    useFocusEffect: () => undefined,
+    useFocusEffect: (callback: () => void) => {
+      h.focus = callback;
+    },
     usePathname: () => '/',
     useLocalSearchParams: () => ({}),
     useSegments: () => [],
@@ -221,6 +237,11 @@ beforeEach(() => {
   h.youStale = null;
   h.youState = null;
   h.goalsFail.clear();
+  h.goalsAsked.length = 0;
+  h.focus = null;
+  h.refused.clear();
+  h.profileFail = false;
+  h.profileName = 'Ann';
 });
 
 afterEach(async () => {
@@ -326,6 +347,13 @@ async function render(route: 'community' | 'you') {
     testIds: () => {
       take(observer.takeRecords());
       return seen;
+    },
+    /** Run `fn` inside act and let what it starts land. */
+    act: async (fn: () => void) => {
+      await React.act(async () => {
+        fn();
+        for (let i = 0; i < 10; i += 1) await tick();
+      });
     },
     /** Let queued work land, inside act. */
     settle: () =>
@@ -606,6 +634,193 @@ describe('RV15-639-N2: a page is kept on a failed load only while the fresh read
     await you.settle();
     expect(h.youFrames.at(-1)).toBe('member:g2');
     expect(h.youFrames).not.toContain('failed');
+  });
+});
+
+/*
+  RV16-C15-1, RV16-C15-2, RV16-639-1. ONE GATE, ON THE PAGE ON SCREEN. A
+  failed load keeps what is on screen (marked stale) when it began on a
+  member page from the record, when the repaint drew one meanwhile, or when
+  it is a return's revalidation. What it judges is the page on screen NOW:
+  a member page only while the fresh read still shows it, any other page
+  except a loading skeleton. Otherwise the failed page, with Retry.
+  RV16-C15-3: a kept page's head is this load's profile if it was read, else
+  the account's recorded one, else the head shown.
+*/
+describe('RV16: a failed load judges the page on screen', () => {
+  const ONE = [TWO[0]];
+
+  /** You drawn at mount on member:g2 from the record, and its own load landed on [g1, g2]. */
+  async function settledOnG2() {
+    disk.map.set(REMEMBERED_KEY, 'g2');
+    const cc = await boot();
+    await cc.currentCommunityReady();
+    const you = await render('you');
+    expect(h.youFrames[0]).toBe('member:g2');
+    h.fresh.land({ items: TWO });
+    await you.until(() => h.goalsAsked.includes('g2'), 'the first load read g2’s goals');
+    await you.settle();
+    expect(h.youFrames.at(-1)).toBe('member:g2');
+    expect(h.youStale).not.toBe(true);
+    return { cc, you };
+  }
+
+  /** A return to the mounted screen (the first call is the mount's own focus). */
+  async function returnTo(you: Awaited<ReturnType<typeof render>>) {
+    expect(h.focus).not.toBeNull();
+    await you.act(() => {
+      h.focus!();
+      h.focus!();
+    });
+  }
+
+  async function expectFailedIn(you: Awaited<ReturnType<typeof render>>, groupId: string | undefined) {
+    await you.until(() => h.youFrames.at(-1) === 'failed', 'the failed page');
+    await you.settle();
+    expect(h.youFrames.at(-1)).toBe('failed');
+    expect(h.youState?.community?.groupId).toBe(groupId);
+    expect(h.youStale).not.toBe(true);
+    expect(typeof h.youRetry).toBe('function');
+  }
+
+  itTimed('a refused community dropped to loading, then the revalidation fails: the failed page with Retry, never a stale skeleton', async () => {
+    const { you } = await settledOnG2();
+    // The server refused g2 (forgetCommunity): it is marked refused and the
+    // record forgets the membership list, so the return revalidates.
+    h.refused.add('g2');
+    h.record.mine = undefined;
+    freshRead();
+    await returnTo(you);
+    await you.until(() => h.youFrames.at(-1) === 'loading', 'g2’s page dropped to loading');
+    h.fresh.fail(new Error('offline'));
+    await expectFailedIn(you, undefined);
+  });
+
+  itTimed('a return’s revalidation: member:g2 on screen, the fresh list is [g1] and g1’s goals fail: the failed page for g1', async () => {
+    const { you } = await settledOnG2();
+    // The record no longer holds g2's goals, so the return keeps the page and revalidates.
+    h.record.goals = {};
+    h.goalsFail.add('g1');
+    freshRead();
+    await returnTo(you);
+    expect(h.youFrames.at(-1)).toBe('member:g2');
+    h.fresh.land({ items: ONE });
+    await expectFailedIn(you, 'g1');
+  });
+
+  itTimed('control: a return’s revalidation whose membership read fails keeps member:g2, stale (nothing contradicts it)', async () => {
+    const { you } = await settledOnG2();
+    h.record.goals = {};
+    freshRead();
+    await returnTo(you);
+    h.fresh.fail(new Error('offline'));
+    await you.until(() => h.youStale === true, 'the stale note');
+    await you.settle();
+    expect(h.youFrames.at(-1)).toBe('member:g2');
+    expect(h.youFrames).not.toContain('failed');
+  });
+
+  itTimed('a focus drew g2 while a load that began on g1 was in flight; the list resolves g2 and g2’s goals fail: member:g2 kept, stale', async () => {
+    disk.map.set(REMEMBERED_KEY, 'g1');
+    h.goalsFail.add('g2');
+    const cc = await boot();
+    await cc.currentCommunityReady();
+    const you = await render('you');
+    expect(h.youFrames[0]).toBe('member:g1');
+    // g2 is chosen elsewhere; the return recomposes from the whole record
+    // (no new load), while the first load's membership read is still out.
+    expect(await cc.rememberCurrentCommunity(h.uid, 'g2')).toBe(true);
+    await returnTo(you);
+    expect(h.youFrames.at(-1)).toBe('member:g2');
+    h.fresh.land({ items: TWO });
+    await you.until(() => h.youStale === true, 'the stale note');
+    await you.settle();
+    expect(h.youFrames.at(-1)).toBe('member:g2');
+    expect(h.youFrames).not.toContain('failed');
+  });
+
+  itTimed('control: drawn at mount on member:g2 and the membership read fails: kept, stale', async () => {
+    disk.map.set(REMEMBERED_KEY, 'g2');
+    const cc = await boot();
+    await cc.currentCommunityReady();
+    const you = await render('you');
+    expect(h.youFrames[0]).toBe('member:g2');
+    h.fresh.fail(new Error('offline'));
+    await you.until(() => h.youStale === true, 'the stale note');
+    await you.settle();
+    expect(h.youFrames.at(-1)).toBe('member:g2');
+    expect(h.youFrames).not.toContain('failed');
+  });
+
+  itTimed('control: a return’s revalidation over a page that is not a member page (pickCommunity) keeps it, stale, as before', async () => {
+    const cc = await boot();
+    await cc.currentCommunityReady();
+    const you = await render('you');
+    expect(h.youFrames[0]).toBe('pickCommunity');
+    h.fresh.land({ items: TWO });
+    await you.settle();
+    h.record.mine = undefined;
+    freshRead();
+    await returnTo(you);
+    expect(h.youFrames.at(-1)).toBe('pickCommunity');
+    h.fresh.fail(new Error('offline'));
+    await you.until(() => h.youStale === true, 'the stale note');
+    await you.settle();
+    expect(h.youFrames.at(-1)).toBe('pickCommunity');
+    expect(h.youFrames).not.toContain('failed');
+  });
+
+  itTimed('RV16-C15-3: a repainted page kept when the profile read fails too keeps the recorded name, not "You"', async () => {
+    h.profileFail = true;
+    disk.map.set(REMEMBERED_KEY, 'g2');
+    const releaseReads = holdLaunchRead();
+    const cc = await boot();
+    const you = await render('you');
+    releaseReads();
+    await cc.currentCommunityReady();
+    await you.until(() => h.youFrames.at(-1) === 'member:g2', 'the repainted member page');
+    expect(h.youState?.profile?.displayName).toBe('Ann');
+    // The account's record now holds a newer name than the head shown: the
+    // recorded profile comes before the shown head.
+    h.record.profile = { displayName: 'Ann Recorded', createdAt: null };
+    h.fresh.fail(new Error('offline'));
+    await you.until(() => h.youStale === true, 'the stale note');
+    await you.settle();
+    expect(h.youFrames.at(-1)).toBe('member:g2');
+    expect(h.youState?.profile?.displayName).toBe('Ann Recorded');
+  });
+
+  itTimed('RV16-C15-3 control: no profile read and nothing recorded: the head already shown stays', async () => {
+    h.profileFail = true;
+    disk.map.set(REMEMBERED_KEY, 'g2');
+    const releaseReads = holdLaunchRead();
+    const cc = await boot();
+    const you = await render('you');
+    releaseReads();
+    await cc.currentCommunityReady();
+    await you.until(() => h.youFrames.at(-1) === 'member:g2', 'the repainted member page');
+    h.record.profile = undefined;
+    h.fresh.fail(new Error('offline'));
+    await you.until(() => h.youStale === true, 'the stale note');
+    await you.settle();
+    expect(h.youFrames.at(-1)).toBe('member:g2');
+    expect(h.youState?.profile?.displayName).toBe('Ann');
+  });
+
+  itTimed('RV16-C15-3 control: when this load read the profile, the kept page takes that read', async () => {
+    h.profileName = 'Bea';
+    disk.map.set(REMEMBERED_KEY, 'g2');
+    const releaseReads = holdLaunchRead();
+    const cc = await boot();
+    const you = await render('you');
+    releaseReads();
+    await cc.currentCommunityReady();
+    await you.until(() => h.youFrames.at(-1) === 'member:g2', 'the repainted member page');
+    h.fresh.fail(new Error('offline'));
+    await you.until(() => h.youStale === true, 'the stale note');
+    await you.settle();
+    expect(h.youFrames.at(-1)).toBe('member:g2');
+    expect(h.youState?.profile?.displayName).toBe('Bea');
   });
 });
 
