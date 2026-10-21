@@ -40,6 +40,13 @@ vi.mock('react-native', async () => {
   };
 });
 
+// This suite is about the ROUND's lifecycle, not the demo clip. The media slot
+// is stubbed so the test does not depend on which MovementDemoMedia the tree
+// carries (the poster-only one here, or the expo-video one once the media lane
+// is merged, which imports expo-router and expo-video). The catalog is empty,
+// so the card never renders the slot in these tests anyway.
+vi.mock('../src/ui/MovementDemoMedia', () => ({ MovementDemoMedia: () => null }));
+
 import { ACTIVE_LIFECYCLE, appLifecycleStep, INTERRUPTED_NOTICE } from '../src/followAlong';
 import { TICK_MS, useFollowAlongSession } from '../src/followAlongSession';
 import { FollowAlongCard } from '../src/ui/FollowAlongCard';
