@@ -1,6 +1,7 @@
 import { signOut } from 'firebase/auth';
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, useNavigation } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Platform } from 'react-native';
 
 import { useWsfAuth } from '../../src/auth';
 import { mapWithLimit } from '../../src/concurrency';
@@ -22,6 +23,7 @@ import {
 } from '../../src/memberReads';
 import { formatEndedOn, formatEndsAt, hasWindowEnded } from '../../src/ui/dates';
 import { MOVE_HREF } from '../../src/ui/MemberTabBar';
+import { signOutToSignedOutHome } from '../../src/ui/signOutReset';
 import { YouParityView } from '../../src/ui/YouParityView';
 import type { YouGoal } from '../../src/youParity';
 
@@ -554,12 +556,26 @@ export default function You() {
     };
   }, [ready, user, reloads, revalidate, setScreen]);
 
+  // NATIVE-MEMBER-1 SH-7 (INT-05). You's own Sign out lands where the menu's
+  // does: on a phone, after a SUCCESSFUL sign-out, the root stack is reset to
+  // signed-out Home as one route with nothing behind it
+  // (src/ui/signOutReset.ts). The reset goes to the root stack -- this tab's
+  // parent, the same navigation object the shell's menu dispatches on -- and
+  // a failed sign-out moves nothing. On the web You has always gone to Home
+  // after signing out; it still does, and only after a successful one.
+  const navigation = useNavigation();
   const onSignOut = useCallback(() => {
     setSigningOut(true);
-    void signOut(getFirebaseAuth())
-      .then(() => router.replace('/'))
+    void signOutToSignedOutHome({
+      signOut: () => signOut(getFirebaseAuth()),
+      dispatch: (action) => (navigation.getParent() ?? navigation).dispatch(action as never),
+      platform: Platform.OS,
+    })
+      .then((signedOut) => {
+        if (signedOut && Platform.OS === 'web') router.replace('/');
+      })
       .finally(() => setSigningOut(false));
-  }, []);
+  }, [navigation]);
 
   const reload = useCallback(() => setReloads((v) => v + 1), []);
 
