@@ -130,9 +130,11 @@ export function shareRoute(nav: unknown, origin: string | null = currentOrigin()
   if (!nav || typeof nav !== 'object') return 'unavailable';
   const candidate = nav as { product?: unknown; share?: unknown; clipboard?: { writeText?: unknown } | null };
   // React Native's navigator is `{ product: 'ReactNative' }`: no Web Share and
-  // no clipboard. The app shares through the OS share sheet, and only when the
-  // link it would share is absolute https -- so in a development build (Metro
-  // origin) or a release build with no public origin, there is no control.
+  // no clipboard. The app shares through the OS share sheet, and only for an
+  // https link whose host is exactly one of
+  // configuredInviteHosts(EXPO_PUBLIC_WSF_INVITE_HOSTS); never when unconfigured
+  // or configured-but-empty -- so in a development build (Metro origin) or a
+  // release build with no public origin, there is no control.
   if (candidate.product === 'ReactNative') {
     return isShareableHttpsUrl(origin) ? 'nativeShare' : 'unavailable';
   }
