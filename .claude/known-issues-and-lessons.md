@@ -252,3 +252,36 @@ The v3 handoff has two music elements — a graph-wired `audible` one for the fo
 This bit us concretely: `ended` (which advances the playlist) lived only on the audible element. While backgrounded that element is paused, and **a paused media element never fires `ended`** — so the shadow played the current track to its end and then simply stopped, with nothing to advance it. Returning to the app resumed the audible at the shadow's position, which immediately hit the end, fired `ended`, and advanced — which is why the symptom presented as "music stops when the track switches" and recovered on re-entry. The track was never switching at all. Fixed in PR #287 by giving the shadow its own `ended`/`error` handlers, guarded by element identity and `inBackgroundRef`.
 
 Two design rules fall out. **When you add a second element that can own playback, audit every listener on the first one** and decide explicitly whether it needs a twin — the failure is silent and only appears at a boundary the tests never reach. And **a handler that can trigger a retry cascade needs a circuit breaker**: `error → advance → error` would have burned an entire playlist in seconds with the real first cause buried at the top of the log, so #287 caps consecutive failures and stops.
+### Worker Class Re-Declaration Requires Explicit Re-Registration, Not a Default Policy (PR #544)
+When a WSF control-state worker is registered without declaring classes, the default routing policy routes every delivery to the lowest-numbered free non-owner worker — not to QA. Before PR #544, the schema v2 reducer refused any `register-worker` event for an already-registered worker, even to add classes, which meant there was no way to configure QA routing after the initial registration. The only path was external state surgery.
+
+The fix: in schema v2, a `register-worker` event for an already-registered worker re-declares its classes at the same inbox (or clears them when `classes` is omitted); queue, packets, and assigned reviews are kept. Inbox moves are still refused (that is `transfer-owner`'s job). An unchanged declaration is also refused so the audit log only records real changes. Schema v1 behavior is unchanged — it still refuses any re-registration.
+
+Lesson: a routing policy that depends on per-worker class declarations must either enforce class declaration at initial registration or provide an explicit re-declaration path. Treating an omitted field at registration as "no classes" and then refusing any update permanently locks workers into the default policy. When a reducer rule is introduced that prevents recovery from an initial omission, pair it with a recovery event or accept that the state will require surgical correction.
+
+### Off-the-Hour Scheduling Prevents Dropped GitHub Actions Runs (PR #544)
+The `wsf-control-reconcile` fallback schedule was set to `*/30` (on the hour and half-hour). GitHub Actions delays and drops scheduled runs most frequently at the top and bottom of the hour under load. Multi-hour gaps in writer runs were observed on this schedule, and those gaps stretched the lost-wake clock for the wake retry and timeout mechanisms that depend on writer runs.
+
+The fix moves the schedule to `13,43 * * * *` — still every 30 minutes but off the hour by 13 and 43 minutes.
+
+Lesson: when a scheduled CI job drives time-sensitive protocol steps (wakes, timeouts, retries), schedule it at non-round-number minutes. GitHub's scheduler deprioritises top-of-hour bursts; a cron at `H/30` is more likely to queue and drop than one at `13,43`. This is especially important for control-plane jobs where a single dropped run extends observable latency by a full scheduling interval.
+
+### WSF Director Integrate Step Should Derive in the Same Run as ACCEPTED (PR #545)
+Before PR #545, the AUTONOMY-ROUTER-1C-INTEGRATE step required a separate writer run after the ACCEPTED decision landed — the Director would record ACCEPTED in one cycle, then a subsequent scheduled writer run would derive INTEGRATE from the merged PR SHA.
+
+PR #545 collapses this into a single pass: when the Director sees both an ACCEPTED decision and a merged PR in the same run, it derives INTEGRATE immediately rather than deferring. The step runs once and does not re-fire on subsequent runs.
+
+Lesson: when a control-plane step's inputs are all present in the same writer run (here: ACCEPTED decision + merge SHA), derive the output in that same run rather than waiting for the next scheduled cycle. Deferral adds latency and leaves the ledger in a half-committed state between cycles, which stretches the window for race conditions and makes the log harder to read.
+### WSF Staging Freshness: File-Tree Rename Produces False Positive in Change Detection (PR #548)
+When comparing two git trees to detect whether the WSF `functions/` directory changed, a renamed file reports both the old path (as a deletion) and the new path (as an addition). A naive comparison that checks for "any changed path under `functions/`" will fire on a rename that touches no functions logic — the rename shows up as two matching paths and trips the gate.
+
+The fix: compare the functions tree independently, on its own rename-aware diff, rather than treating it as part of a whole-tree comparison. Two separate comparisons (one for the functions tree, one for everything else) prevent a top-level rename from triggering a false functions-changed signal.
+
+Lesson: any change-detection gate that scopes on a subdirectory path must account for renames that touch that path prefix without changing the logic inside it. Validate the gate with a fixture that renames a non-functions file whose old or new path shares the `functions/` prefix.
+
+### WSF Unattended Staging Dispatch Requires an Explicit Ledger Switch (PR #549)
+Wiring an automatic (unattended) dispatch step into the `wsf-control-reconcile` scheduled workflow creates a footgun: any reconcile run could trigger a staging deploy unless the dispatch is gated. PR #549 gates the dispatch behind a ledger switch that the owner must explicitly enable — the `fastpath-dispatch.mjs` script reads the switch before firing, and does nothing if the switch is absent or false.
+
+The pattern (Option B unattended path): (1) owner reviews current state and enables the ledger switch; (2) the next scheduled reconcile run reads the switch, finds it set, and dispatches the fast path automatically; (3) the switch is consumed or must be re-enabled for subsequent dispatches. This keeps the "unattended" semantics (no human tap required per cycle) while preventing runaway auto-deploys when the owner hasn't opted in.
+
+Lesson: any CI step that can trigger a deploy or state-advancing action without a human gate must be behind an explicit opt-in signal in durable state (ledger, environment variable, config file) — not just a conditional in the workflow YAML that could be accidentally satisfied. The signal should be owner-set and consumed or time-bounded so it cannot persist indefinitely.
