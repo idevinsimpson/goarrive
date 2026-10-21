@@ -318,7 +318,7 @@ describe('F1d: the contribute route is wired to those rules', () => {
   it('Reconcile: the SAME attempt, the same gate, and a replay’s idea of a refusal (S2)', () => {
     const reconcile = slice('const onReconcile = useCallback', '}, [pending, submitting, goalId, uid, sendContribute');
     expect(reconcile).toContain(`const mayFire = () => ${GATE};`);
-    expect(reconcile).toMatch(/await replayAttempt\(replay, owner, \{[^}]*\bmayFire,\s*\}\)/);
+    expect(reconcile).toMatch(/await replayAttempt\(\s*replay,\s*owner,\s*\{[^}]*\bmayFire,\s*\},/);
     expect(reconcile).toContain('send: (id, n) => sendContribute(id, n),');
     expect(reconcile).not.toContain('mintAttemptId');
     expect(reconcile).not.toContain('takeRoundAttemptId');
@@ -965,5 +965,100 @@ describe('the owner-visible wording has one source', () => {
     );
     expect(ROUTE).toContain('testID="wsf-contribute-not-saved">\n                {NOT_SAVED_NOTICE}\n');
     expect(ROUTE).not.toContain('This device couldn\u2019t save this attempt');
+  });
+});
+
+describe('W13-2 (ST-06): a native replay refreshes the sign-in first', () => {
+  it('offline: held, nothing sent, the record still unknown (not flipped to sending)', async () => {
+    const pc = await launch();
+    await pc.savePendingNew(row('att-1', 3, 'unknown'), A);
+    const handle = io(async () => ({ alreadyRecorded: true }), { replay: true });
+    const settled = await pc.replayAttempt(row('att-1', 3, 'unknown'), A, handle, async () => 'offline');
+    expect(settled).toEqual({ kind: 'held', reason: 'offline' });
+    expect(handle.send).not.toHaveBeenCalled();
+    expect(handle.mayFire).not.toHaveBeenCalled();
+    await flush();
+    expect(stored()).toEqual(row('att-1', 3, 'unknown'));
+  });
+
+  it('signed out: held, nothing sent', async () => {
+    const pc = await launch();
+    await pc.savePendingNew(row('att-1', 3, 'unknown'), A);
+    const handle = io(async () => ({}), { replay: true });
+    expect(await pc.replayAttempt(row('att-1', 3, 'unknown'), A, handle, async () => 'signedOut')).toEqual({
+      kind: 'held',
+      reason: 'signedOut',
+    });
+    expect(handle.send).not.toHaveBeenCalled();
+  });
+
+  it('ok: the existing path, with the refresh strictly before the gate and the send', async () => {
+    const pc = await launch();
+    await pc.savePendingNew(row('att-1', 3, 'unknown'), A);
+    const order: string[] = [];
+    const settled = await pc.replayAttempt(
+      row('att-1', 3, 'unknown'),
+      A,
+      {
+        send: async () => {
+          order.push('send');
+          return { alreadyRecorded: true };
+        },
+        isRefusal: () => false,
+        stillCurrent: () => true,
+        mayFire: () => {
+          order.push('gate');
+          return true;
+        },
+      },
+      async () => {
+        order.push('refresh');
+        return 'ok';
+      }
+    );
+    expect(settled.kind).toBe('confirmed');
+    expect(order).toEqual(['refresh', 'gate', 'send']);
+  });
+
+  it('a preflight that rejects holds as offline', async () => {
+    const pc = await launch();
+    const handle = io(async () => ({}), { replay: true });
+    expect(
+      await pc.replayAttempt(row('att-1', 3, 'unknown'), A, handle, () => Promise.reject(new Error('boom')))
+    ).toEqual({ kind: 'held', reason: 'offline' });
+    expect(handle.send).not.toHaveBeenCalled();
+  });
+
+  it('the route refreshes on native only, and says the right line for each hold', () => {
+    const reconcile = ROUTE.slice(ROUTE.indexOf('const onReconcile = useCallback'), ROUTE.indexOf('const onRetryRestore'));
+    expect(reconcile).toContain(
+      "Platform.OS === 'web' ? undefined : () => refreshSignIn(getFirebaseAuth(), SIGN_IN_REFRESH_TIMEOUT_MS)"
+    );
+    expect(reconcile.indexOf('refreshSignIn(')).toBeGreaterThan(reconcile.indexOf('await replayAttempt('));
+    const held = reconcile.slice(reconcile.indexOf("if (settled.kind === 'held') {"), reconcile.indexOf("} else if (settled.kind === 'notSent') {"));
+    expect(held).toContain("setPending({ ...replay, state: 'unknown' });");
+    expect(held).toContain("setAttemptNotice(settled.reason === 'offline' ? REPLAY_OFFLINE_NOTICE : REPLAY_SIGN_IN_NOTICE);");
+    // Record never refreshes; only a replay does.
+    const record = ROUTE.slice(ROUTE.indexOf('const onRecord = useCallback'), ROUTE.indexOf('const onReconcile = useCallback'));
+    expect(record).not.toContain('refreshSignIn');
+    expect(ROUTE.match(/refreshSignIn\(/g)).toHaveLength(1);
+  });
+});
+
+describe('W13-2 (ST-02): whether leaving now puts the attempt at risk', () => {
+  it('the truth table', async () => {
+    const { attemptAtRiskOnLeave } = await launch();
+    const unknown = row('att-1', 3, 'unknown');
+    const sending = row('att-1', 3, 'sending');
+    const cases: Array<[Parameters<typeof attemptAtRiskOnLeave>[0], boolean]> = [
+      [{ pending: null, pendingDurable: true, submitting: false, restoreFailed: false }, false],
+      [{ pending: null, pendingDurable: true, submitting: true, restoreFailed: false }, true],
+      [{ pending: sending, pendingDurable: true, submitting: false, restoreFailed: false }, true],
+      [{ pending: unknown, pendingDurable: true, submitting: false, restoreFailed: false }, false],
+      [{ pending: unknown, pendingDurable: false, submitting: false, restoreFailed: false }, true],
+      [{ pending: null, pendingDurable: true, submitting: false, restoreFailed: true }, true],
+      [{ pending: null, pendingDurable: false, submitting: false, restoreFailed: false }, false],
+    ];
+    for (const [input, expected] of cases) expect(attemptAtRiskOnLeave(input), JSON.stringify(input)).toBe(expected);
   });
 });
