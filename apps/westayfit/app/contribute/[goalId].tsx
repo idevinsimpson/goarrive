@@ -115,7 +115,7 @@ import {
   totalOfTargetParts,
 } from '../../src/ui/progressFormat';
 
-import { ACTION_GREEN, ACTION_GREEN_DEEP, ON_ACTION, elevation, numeralInputProps, numeralTextProps } from '../../src/ui/kit';
+import { ACTION_GREEN, ACTION_GREEN_DEEP, ON_ACTION, elevation, numeralCapProps, numeralInputProps, numeralTextProps } from '../../src/ui/kit';
 import {
   MEMBER_TAB_MOVE_OVERHANG,
   shellAppliesTo,
@@ -2649,7 +2649,7 @@ export default function ContributeToGoal() {
                   and the figure are one line for every reader and spec. */}
               <View style={styles.tile} testID="wsf-contribute-own-credit">
                 <Text style={styles.tileLabel}>{'Your total on this goal: '}</Text>
-                <Text style={styles.tileValue} {...numeralTextProps}>
+                <Text style={styles.tileValue} {...numeralCapProps}>
                   {formatCount(r.ownCredit)}
                   {ownUnit ? <Text style={styles.tileUnit}>{` ${ownUnit}`}</Text> : null}
                 </Text>
@@ -2672,8 +2672,8 @@ export default function ContributeToGoal() {
                     <Text style={styles.sharedLabel}>
                       {context.kind === 'verified' ? `Shared total · ${context.goalTitle}` : 'Shared total'}
                     </Text>
-                    <Text style={styles.sharedTotal} testID="wsf-contribute-shared-total">
-                      <Text style={styles.sharedCount} {...numeralTextProps}>
+                    <Text style={styles.sharedTotal} testID="wsf-contribute-shared-total" {...numeralCapProps}>
+                      <Text style={styles.sharedCount} {...numeralCapProps}>
                         {totalOfTargetParts(r.sharedTotal, r.target, r.unit).count}
                       </Text>
                       {' '}
@@ -3065,7 +3065,8 @@ export default function ContributeToGoal() {
             />
           </View>
           <View style={styles.heroFacts}>
-            <Text style={styles.heroTotal} testID="wsf-contribute-shared-total" {...numeralTextProps}>
+            {/* RV15-641-1: "N of M <unit>" is a words line (the unit is free text up to 40 characters): capped, and it still wraps. */}
+            <Text style={styles.heroTotal} testID="wsf-contribute-shared-total" {...numeralCapProps}>
               {totalOfTargetLabel(pulse.sharedTotal, pulse.target, unit)}
             </Text>
             {/*
@@ -3178,8 +3179,8 @@ export default function ContributeToGoal() {
           <View style={styles.sheetBody}>
             <Text ref={reviewHeadingRef} style={styles.stepHeading} {...HEADING_1}>Review your contribution</Text>
             <View style={styles.reviewBox}>
-              {/* W12-8 (INT-16): capped and shrinking to fit on a phone (state's range neighbours this line). */}
-              <Text style={styles.reviewQuantity} testID="wsf-contribute-review-quantity" {...numeralTextProps}>
+              {/* W12-8 (INT-16), RV15-641-1: the count and its free-text unit are one paragraph, so it is capped, never shrunk to one line (state's range neighbours this line). */}
+              <Text style={styles.reviewQuantity} testID="wsf-contribute-review-quantity" {...numeralCapProps}>
                 {formatCount(reviewCount)}
                 <Text style={styles.reviewUnit}>{` ${unit}`}</Text>
               </Text>

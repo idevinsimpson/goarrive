@@ -312,13 +312,15 @@ describe('W12-8: the numerals spread the numeral policy', () => {
     return text.slice(text.lastIndexOf(`<${tag}`, at), text.indexOf('>', at) + 1);
   };
 
-  it('contribute: the entry field spreads numeralInputProps; the review quantity spreads numeralTextProps', () => {
+  // RV15-641-1 (changed deliberately): the review quantity holds its free-text unit in the same paragraph, so it takes the cap only.
+  it('contribute: the entry field spreads numeralInputProps; the review quantity spreads numeralCapProps', () => {
     const entry = contribute.slice(
       contribute.lastIndexOf('<TextInput', contribute.indexOf('testID="wsf-contribute-entry"')),
       contribute.indexOf('/>', contribute.indexOf('testID="wsf-contribute-entry"')) + 2,
     );
     expect(entry).toContain('{...numeralInputProps}');
-    expect(elementAt(contribute, 'testID="wsf-contribute-review-quantity"', 'Text')).toContain('{...numeralTextProps}');
+    expect(elementAt(contribute, 'testID="wsf-contribute-review-quantity"', 'Text')).toContain('{...numeralCapProps}');
+    expect(elementAt(contribute, 'testID="wsf-contribute-review-quantity"', 'Text')).not.toContain('numeralTextProps');
   });
 
   it('Progress: the total number spreads numeralTextProps', () => {

@@ -13,8 +13,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * shared count, the closed goal's total, the member's next part and the
  * timer, beside the review quantity and the entry field done in W12-8.
  *
- *   · On a phone each carries numeralTextProps (capped at 1.3x, one line,
- *     shrinking to fit), read from the Text that rendered it.
+ *   · On a phone a count-only root Text (the receipt's addition, the next
+ *     part, the timer) carries numeralTextProps: capped at 1.3x, one line,
+ *     and shrinking to fit (minimumFontScale 0.5 asks for half size; Fabric
+ *     ignores it and its floor is 4 pt, RV15-641-1). A line that mixes a
+ *     numeral with words, its unit free text up to 40 characters (the closed
+ *     total, the own-credit tile, the receipt's shared total, the review
+ *     quantity), takes numeralCapProps, the cap only, so it still wraps at
+ *     the default size. A nested <Text> span passes only the cap to native
+ *     (RV15-641-4), so a span never carries the shrink props. Read from the
+ *     Text that rendered each.
  *   · On the web the screens' DOM is byte-identical to a snapshot taken
  *     from the code before the change (the twin's props are {}):
  *     tests/fixtures/contribute-numerals-web-before-int16.json. The snapshot
@@ -23,8 +31,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  *     `assets/` on, as `<APP_ROOT>/assets/…` (`portable`), so any checkout
  *     compares the same.
  *   · A scan: every style of 24 pt or more in contribute is classified, and
- *     every use of a numeral style spreads the policy (another lane's numeral
- *     shows as a todo until it does).
+ *     each use is judged where it stands: a count-only root spreads
+ *     numeralTextProps, a paragraph with a nested Text or a words line spreads
+ *     numeralCapProps, and a nested span never spreads numeralTextProps
+ *     (another lane's numeral shows as a todo until it adopts the policy).
  * The route renders in jsdom with the callables mocked at the network
  * boundary; textScale is the twin Metro would pick for Platform.OS. No device.
  */
@@ -262,6 +272,8 @@ describe('INT-16: on a phone each large numeral takes the numeral policy', () =>
     return fiber.memoizedProps;
   }
   const POLICY = { maxFontSizeMultiplier: 1.3, numberOfLines: 1, adjustsFontSizeToFit: true, minimumFontScale: 0.5 };
+  /** RV15-641-1: the cap alone, for a line that mixes a numeral with words, and for a nested span. */
+  const CAP = { maxFontSizeMultiplier: 1.3 };
   const phoneProps = (el: Element) => {
     const p = propsOf(el, Text);
     return Object.fromEntries(Object.keys(POLICY).filter((k) => k in p).map((k) => [k, p[k]]));
@@ -275,23 +287,59 @@ describe('INT-16: on a phone each large numeral takes the numeral policy', () =>
     return found;
   };
 
-  it.each(['ios', 'android'] as const)('%s: the kiosk receipt\'s tiles and shared count, the closed total, the next part and the timer', async (platform) => {
+  it.each(['ios', 'android'] as const)('%s: count-only roots take the policy; lines with words, and nested spans, the cap only', async (platform) => {
     (Platform as { OS: string }).OS = platform;
     const receipt = await kioskReceipt();
     expect(phoneProps(receipt.querySelector('[data-testid="wsf-contribute-result-amount"]')!)).toEqual(POLICY);
-    // The receipt's own tile (the anchor above carries an own-credit line of its own).
-    expect(phoneProps(textEl(receipt.querySelector('[data-testid="wsf-contribute-own-credit"]')!, '160'))).toEqual(POLICY);
-    expect(phoneProps(textEl(receipt, '1,275'))).toEqual(POLICY);
+    // The receipt's own tile (the anchor above carries an own-credit line of its own): the total and its unit, one paragraph.
+    expect(phoneProps(textEl(receipt.querySelector('[data-testid="wsf-contribute-own-credit"]')!, '160'))).toEqual(CAP);
+    // The shared total: the words line, and its count, a nested span.
+    expect(phoneProps(receipt.querySelector('[data-testid="wsf-contribute-shared-total"]')!)).toEqual(CAP);
+    expect(phoneProps(textEl(receipt, '1,275'))).toEqual(CAP);
     nextScreen();
     const closed = await SCREENS.closed!();
-    expect(phoneProps(byId('wsf-contribute-shared-total')!)).toEqual(POLICY);
     expect(closed).not.toBeNull();
+    // RV15-641-1: "N of M <unit>" still wraps at the default size: no one-line or shrink props at all.
+    const hero = propsOf(byId('wsf-contribute-shared-total')!, Text);
+    expect(phoneProps(byId('wsf-contribute-shared-total')!)).toEqual(CAP);
+    expect('numberOfLines' in hero || 'adjustsFontSizeToFit' in hero || 'minimumFontScale' in hero).toBe(false);
     nextScreen();
     await SCREENS.entryWithNextPart!();
     expect(phoneProps(byId('wsf-contribute-your-part-next')!)).toEqual(POLICY);
     nextScreen();
+    params.value = { goalId: 'g1' };
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    act(() => typeInto(byId('wsf-contribute-entry') as HTMLInputElement, '35'));
+    await press('wsf-contribute-review');
+    expect(phoneProps(byId('wsf-contribute-review-quantity')!)).toEqual(CAP);
+    nextScreen();
     await SCREENS.moveTimer!();
     expect(phoneProps(byId('wsf-contribute-timer-clock')!)).toEqual(POLICY);
+  });
+
+  it.each(['ios', 'android'] as const)('%s (RV15-641-4): no nested Text span carries a shrink prop, which native would drop', async (platform) => {
+    (Platform as { OS: string }).OS = platform;
+    type F = { type: unknown; return: F | null; memoizedProps: Record<string, unknown> };
+    const offenders = (scope: Element) => {
+      const out: string[] = [];
+      for (const el of Array.from(scope.querySelectorAll('*'))) {
+        const key = Object.keys(el).find((k) => k.startsWith('__reactFiber$'));
+        let f = key ? ((el as unknown as Record<string, F>)[key] ?? null) : null;
+        while (f && f.type !== Text) f = f.return;
+        if (!f) continue;
+        let up = f.return;
+        while (up && up.type !== Text) up = up.return;
+        if (up && ['numberOfLines', 'adjustsFontSizeToFit', 'minimumFontScale'].some((k) => k in f!.memoizedProps)) out.push(el.textContent ?? '');
+      }
+      return out;
+    };
+    const receipt = await kioskReceipt();
+    expect(offenders(receipt)).toEqual([]);
+    nextScreen();
+    expect(offenders(await SCREENS.closed!())).toEqual([]);
+    nextScreen();
+    expect(offenders(await SCREENS.entryWithNextPart!())).toEqual([]);
   });
 
   it('web: the kiosk receipt\'s tiles and shared count take none of it (the twin is empty)', async () => {
@@ -315,12 +363,14 @@ describe('INT-16: every large numeral in contribute uses the policy (scan)', () 
     | { kind: 'numeral'; owner: 'integrator' }
     | { kind: 'numeral'; owner: string; ticket: string }
     | { kind: 'input' }
+    | { kind: 'mixed' }
     | { kind: 'words' | 'glyph' };
   /** Every style of 24 pt or more in contribute, and what it draws. A new one fails until it is listed here. */
   const STYLES: Record<string, Kind> = {
     tileValue: { kind: 'numeral', owner: 'integrator' },
     sharedCount: { kind: 'numeral', owner: 'integrator' },
-    heroTotal: { kind: 'numeral', owner: 'integrator' },
+    // RV15-641-1: "N of M <unit>", a words line built by totalOfTargetLabel.
+    heroTotal: { kind: 'mixed' },
     reviewQuantity: { kind: 'numeral', owner: 'integrator' },
     yoursNext: { kind: 'numeral', owner: 'integrator' },
     timerClock: { kind: 'numeral', owner: 'integrator' },
@@ -337,7 +387,24 @@ describe('INT-16: every large numeral in contribute uses the policy (scan)', () 
   const source = readFileSync(join(APP_ROOT, 'app/contribute/[goalId].tsx'), 'utf8');
   const sf = ts.createSourceFile('c.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const big = new Map<string, number>();
-  const uses: Array<{ key: string; spreads: string[]; line: number }> = [];
+  /** Each use: its style, its spreads, whether it holds a nested <Text>, whether it sits inside one. */
+  const uses: Array<{ key: string; spreads: string[]; line: number; holdsText: boolean; inText: boolean }> = [];
+  const isTextTag = (n: ts.Node) =>
+    (ts.isJsxElement(n) && n.openingElement.tagName.getText() === 'Text') || (ts.isJsxSelfClosingElement(n) && n.tagName.getText() === 'Text');
+  const holdsText = (el: ts.Node): boolean => {
+    let found = false;
+    const look = (c: ts.Node) => {
+      if (found) return;
+      if (isTextTag(c)) found = true;
+      else ts.forEachChild(c, look);
+    };
+    if (ts.isJsxElement(el)) for (const c of el.children) look(c);
+    return found;
+  };
+  const inText = (el: ts.Node): boolean => {
+    for (let p = el.parent; p; p = p.parent) if (isTextTag(p)) return true;
+    return false;
+  };
   const visit = (n: ts.Node) => {
     if (ts.isCallExpression(n) && n.expression.getText() === 'StyleSheet.create' && n.arguments[0] && ts.isObjectLiteralExpression(n.arguments[0])) {
       for (const p of n.arguments[0].properties) {
@@ -352,8 +419,15 @@ describe('INT-16: every large numeral in contribute uses the policy (scan)', () 
     if (ts.isJsxOpeningElement(n) || ts.isJsxSelfClosingElement(n)) {
       const style = n.attributes.properties.find((a) => ts.isJsxAttribute(a) && a.name.getText() === 'style');
       const spreads = n.attributes.properties.filter(ts.isJsxSpreadAttribute).map((a) => a.expression.getText());
+      const element = ts.isJsxOpeningElement(n) ? n.parent : n;
       for (const m of style?.getText().matchAll(/styles\.(\w+)/g) ?? []) {
-        uses.push({ key: m[1]!, spreads, line: sf.getLineAndCharacterOfPosition(n.getStart()).line + 1 });
+        uses.push({
+          key: m[1]!,
+          spreads,
+          line: sf.getLineAndCharacterOfPosition(n.getStart()).line + 1,
+          holdsText: holdsText(element),
+          inText: inText(element),
+        });
       }
     }
     ts.forEachChild(n, visit);
@@ -366,12 +440,21 @@ describe('INT-16: every large numeral in contribute uses the policy (scan)', () 
     expect(Object.keys(STYLES).filter((k) => !big.has(k))).toEqual([]);
   });
 
-  it('each use of an integrator numeral spreads numeralTextProps; the entry field numeralInputProps', () => {
-    const missing = uses
-      .filter((u) => STYLES[u.key]?.kind === 'numeral' && (STYLES[u.key] as { owner: string }).owner === 'integrator')
-      .filter((u) => !u.spreads.includes('numeralTextProps'))
-      .map((u) => `${u.key}@${u.line}`);
-    expect(missing).toEqual([]);
+  it('each use of an integrator numeral is judged where it stands; the entry field spreads numeralInputProps', () => {
+    const integrator = uses.filter((u) => (STYLES[u.key]?.kind === 'numeral' && (STYLES[u.key] as { owner: string }).owner === 'integrator') || STYLES[u.key]?.kind === 'mixed');
+    // A count-only root: the policy.
+    const roots = integrator.filter((u) => STYLES[u.key]!.kind === 'numeral' && !u.holdsText && !u.inText);
+    expect(roots.filter((u) => !u.spreads.includes('numeralTextProps')).map((u) => `${u.key}@${u.line}`)).toEqual([]);
+    // RV15-641-1: a paragraph holding a nested Text (a unit), or a words line, takes the cap only.
+    const lines = integrator.filter((u) => STYLES[u.key]!.kind === 'mixed' || (u.holdsText && !u.inText));
+    expect(lines.filter((u) => !u.spreads.includes('numeralCapProps') || u.spreads.includes('numeralTextProps')).map((u) => `${u.key}@${u.line}`)).toEqual([]);
+    // RV15-641-4: a nested span never carries the shrink props (native would drop them).
+    const spans = integrator.filter((u) => u.inText);
+    expect(spans.filter((u) => u.spreads.includes('numeralTextProps')).map((u) => `${u.key}@${u.line}`)).toEqual([]);
+    // Each case is really met in contribute today.
+    expect(roots.length).toBeGreaterThanOrEqual(3);
+    expect(lines.length).toBeGreaterThanOrEqual(3);
+    expect(spans.length).toBeGreaterThanOrEqual(1);
     const inputs = uses.filter((u) => STYLES[u.key]?.kind === 'input');
     expect(inputs.length).toBeGreaterThan(0);
     // The entry's spread sits on a line of its own inside the element (W12-8); the source pins it.

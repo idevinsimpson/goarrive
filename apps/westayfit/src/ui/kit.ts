@@ -44,6 +44,16 @@ export {
   type NumeralInputProps,
   type NumeralTextProps,
 } from './textScale';
+/**
+ * RV15-641-1, RV15-641-4. A line that MIXES a numeral with words (a total and
+ * its free-text unit, "N of M <unit>") takes the cap only: it still wraps at
+ * the default size, where `numeralTextProps` would force one line and shrink
+ * it (and cut a long unit off with an ellipsis). The cap is also the only
+ * text-scale prop a nested <Text> span hands to native, so a span inside such
+ * a line takes this too. `numeralTextProps` is for a count-only root <Text>.
+ * Empty on the web. (A re-export, so it stays the twin Metro picks.)
+ */
+export { numeralInputProps as numeralCapProps } from './textScale';
 // Contrast-checked at rgb(90,107,133); placeholders use it too. Do not change.
 export const TEXT_MUTED = wsfTheme.colors.textMuted;
 export const ERROR_RED = '#B4232C';
