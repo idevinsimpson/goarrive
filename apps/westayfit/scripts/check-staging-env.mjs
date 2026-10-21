@@ -24,18 +24,23 @@
  * each one is mapped to a fixed label and the names it concerns; the message
  * itself is never written anywhere. Exit 0 on PASS, 1 on FAIL.
  *
- * The file must be one git can never commit by accident. It is refused when
- * git tracks it (by the path given or by the path it resolves to), when it
- * sits inside the repository without being ignored (a `git add -A` would
- * commit it; use a `.env*.local` name or keep it outside), when it has more
- * than one hard link (it could be a tracked file under another name), and
- * whenever git cannot answer (no git, no work tree, an unexpected reply):
- * the check never passes a file it could not place.
+ * The file must be one git can never commit by accident, and one no build
+ * reads. It is refused when git tracks it (by the path given or by the path
+ * it resolves to), in this repository or in whatever other work tree holds
+ * it (a second clone, a sibling worktree, a dotfiles or nested repository);
+ * when it sits inside a repository without being ignored (a `git add -A`
+ * would commit it: keep it outside the repository, for example in $TMP);
+ * when it is one of the env files Expo CLI loads into this app's production
+ * build (`.env`, `.env.local`, `.env.production`, `.env.production.local` in
+ * the app directory), ignored or not, because `npm run build:web` would
+ * inline it; when it has more than one hard link (it could be a tracked file
+ * under another name); and whenever git cannot answer (no git, no work tree,
+ * an unexpected reply): the check never passes a file it could not place.
  */
 import { spawnSync } from 'node:child_process';
 import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const APP_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -181,44 +186,124 @@ export const REFUSALS = {
   notFile: 'refused: that is not a regular file.',
   hardLinked: 'refused: the file has more than one hard link, so it could be a tracked file under another name; copy it to a file of its own.',
   tracked: 'refused: that file is tracked by git; a staging value must never be in the repository.',
-  notIgnored: 'refused: the file is inside the repository and not ignored; move it out or use a .env*.local name.',
+  notIgnored: 'refused: the file is inside a repository and git does not ignore it; keep it outside the repository (for example $TMP).',
+  expoLoaded: 'refused: Expo loads this file into the app\'s builds (.env, .env.local, .env.production, .env.production.local); keep it outside the repository (for example $TMP).',
   git: 'refused: git could not show that the file is outside the repository or ignored by it (no git, no work tree, or an unexpected answer); nothing was read.',
 };
 
-/**
- * One git command, from the app's own work tree, in the C locale (so its
- * replies can be read), and with no GIT_* variable that could point it at
- * another repository or index. Returns { status, stderr }; status is null
- * when git did not run at all.
- */
-function runGit(args) {
-  const env = { ...process.env, LC_ALL: 'C', LANGUAGE: '' };
-  for (const k of Object.keys(env)) if (k.startsWith('GIT_')) delete env[k];
-  const r = spawnSync('git', args, { cwd: APP_ROOT, env, encoding: 'utf8', stdio: ['ignore', 'ignore', 'pipe'] });
-  return { status: r.error ? null : r.status, stderr: String(r.stderr ?? '') };
+/*
+  THE ENV FILES EXPO CLI LOADS for this app's production build (`expo
+  export`, so `npm run build:web`), which would inline every EXPO_PUBLIC_*
+  value into the bundle. The fixed four always, plus whatever @expo/env
+  itself says for 'production' when it can be loaded (it can be switched off
+  with EXPO_NO_DOTENV here and not at build time, so it only ever adds).
+  `.env.development.local` is not among them: only `expo start` loads it.
+*/
+const EXPO_PRODUCTION_ENV_FILES = ['.env.production.local', '.env.local', '.env.production', '.env'];
+export function expoLoadedEnvFiles(appRoot = APP_ROOT) {
+  const names = new Set(EXPO_PRODUCTION_ENV_FILES);
+  try {
+    const expoEnv = createRequire(join(appRoot, 'package.json'))('@expo/env');
+    for (const f of expoEnv.getFiles('production', { silent: true })) if (typeof f === 'string' && f) names.add(basename(f));
+  } catch {
+    // The fixed four stand on their own.
+  }
+  return [...names].map((n) => join(appRoot, n));
 }
 
-const UNTRACKED = /did not match any file/;
-const OUTSIDE = /is outside repository/;
+/** Whether `st` is the same file as one Expo loads (by device and inode: a symlink, case or a second name does not hide it). */
+function isExpoLoaded(st, appRoot = APP_ROOT) {
+  for (const f of expoLoadedEnvFiles(appRoot)) {
+    try {
+      const other = statSync(f);
+      if (other.dev === st.dev && other.ino === st.ino) return true;
+    } catch {
+      // Not there: nothing to match.
+    }
+  }
+  return false;
+}
+
+/**
+ * One git command in `cwd` (the app's work tree unless said otherwise), in
+ * the C locale (so its replies can be read), and with no GIT_* variable that
+ * could point it at another repository or index. Returns { status, stdout,
+ * stderr }; status is null when git did not run at all.
+ */
+function runGit(args, cwd = APP_ROOT) {
+  const env = { ...process.env, LC_ALL: 'C', LANGUAGE: '' };
+  for (const k of Object.keys(env)) if (k.startsWith('GIT_')) delete env[k];
+  const r = spawnSync('git', args, { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  return { status: r.error ? null : r.status, stdout: String(r.stdout ?? ''), stderr: String(r.stderr ?? '') };
+}
+
+/*
+  git's own replies, matched on the exit code AND the whole first line of
+  its message, ignoring only the quoted paths (RV9-641-I11-3). Free text
+  elsewhere in stderr never decides anything; a path with a newline in it
+  matches none of these, and refuses.
+*/
+export const GIT_REPLY = {
+  untracked: /^error: pathspec '.*' did not match any file\(s\) known to git(?:\n|$)/,
+  outside: /^fatal: .*: '.*' is outside repository at '.*'(?:\n|$)/,
+  // "(or any parent up to mount point /x)" or "(or any of the parent directories): .git"
+  notARepository: /^fatal: not a git repository \(or any (?:of the )?parent[^\n]*(?:\n|$)/,
+};
+const isUntracked = (r) => r.status === 1 && GIT_REPLY.untracked.test(r.stderr);
+const isOutside = (r) => r.status === 128 && GIT_REPLY.outside.test(r.stderr);
+
+/** core.ignorecase for the repository at `cwd`: true, false, or null when git gives no clean answer. */
+function ignoresCase(git, cwd) {
+  const r = git(['config', '--bool', 'core.ignorecase'], cwd);
+  if (r.status === 1 && r.stdout.trim() === '') return false;
+  if (r.status === 0 && r.stdout.trim() === 'true') return true;
+  if (r.status === 0 && r.stdout.trim() === 'false') return false;
+  return null;
+}
+
+/** A pathspec that is exactly this path (no glob, no magic of its own), case-folded where the repository folds case (RV9-641-I11-4). */
+const exactly = (path, icase) => `:(literal${icase ? ',icase' : ''})${path}`;
 
 /**
  * Why git says this file may not be read, or null. `given` is the path as
- * typed (resolved), `real` its realpath; `git` runs one git command. Only
- * three answers let a file through: "did not match" (not tracked),
- * "is outside repository", and an ignored path. Anything else refuses.
+ * typed (resolved), `real` its realpath; `git(args, cwd)` runs one git
+ * command.
+ *
+ *   1. The app's own repository first, which also shows git works here: the
+ *      given and the real path must be untracked or outside it, and inside
+ *      it the file must be ignored.
+ *   2. Then the work tree that holds the file itself, whichever it is
+ *      (another clone, a sibling worktree, a dotfiles or nested repository;
+ *      RV9-641-I11-1): there too it must be untracked and ignored. Only a
+ *      clean "not a git repository" means no work tree holds it.
+ *
+ * Every other answer refuses.
  */
 export function gitRefusal(given, real, git = runGit) {
+  const appIcase = ignoresCase(git, APP_ROOT);
+  if (appIcase === null) return REFUSALS.git;
   for (const p of new Set([given, real])) {
-    const r = git(['ls-files', '--error-unmatch', '--', p]);
+    const r = git(['ls-files', '--error-unmatch', '--', exactly(p, appIcase)], APP_ROOT);
     if (r.status === 0) return REFUSALS.tracked;
-    const untracked = r.status === 1 && UNTRACKED.test(r.stderr);
-    const outside = r.status === 128 && OUTSIDE.test(r.stderr);
-    if (!untracked && !outside) return REFUSALS.git;
+    if (!isUntracked(r) && !isOutside(r)) return REFUSALS.git;
   }
-  const r = git(['check-ignore', '-q', '--', real]);
-  if (r.status === 0) return null;
-  if (r.status === 1) return REFUSALS.notIgnored;
-  if (r.status === 128 && OUTSIDE.test(r.stderr)) return null;
+  // check-ignore takes no pathspec magic; an absolute path never starts with ':'.
+  const own = git(['check-ignore', '-q', '--', real], APP_ROOT);
+  if (own.status === 1) return REFUSALS.notIgnored;
+  if (own.status !== 0 && !isOutside(own)) return REFUSALS.git;
+
+  const top = git(['rev-parse', '--show-toplevel'], dirname(real));
+  if (top.status === 128 && GIT_REPLY.notARepository.test(top.stderr)) return null;
+  const root = top.status === 0 ? top.stdout.replace(/\n$/, '') : '';
+  if (!root || root.includes('\n')) return REFUSALS.git;
+  const icase = ignoresCase(git, root);
+  if (icase === null) return REFUSALS.git;
+  const tracked = git(['ls-files', '--error-unmatch', '--', exactly(real, icase)], root);
+  if (tracked.status === 0) return REFUSALS.tracked;
+  if (!isUntracked(tracked)) return REFUSALS.git;
+  const ignored = git(['check-ignore', '-q', '--', real], root);
+  if (ignored.status === 0) return null;
+  if (ignored.status === 1) return REFUSALS.notIgnored;
   return REFUSALS.git;
 }
 
@@ -234,6 +319,7 @@ export function placeFile(given, git = runGit) {
   }
   if (!st.isFile()) return { real: null, refusal: REFUSALS.notFile };
   if (st.nlink > 1) return { real: null, refusal: REFUSALS.hardLinked };
+  if (isExpoLoaded(st)) return { real: null, refusal: REFUSALS.expoLoaded };
   const refusal = gitRefusal(given, real, git);
   return refusal ? { real: null, refusal } : { real, refusal: null };
 }
