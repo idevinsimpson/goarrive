@@ -532,6 +532,30 @@ describe('W12-2: a failed refresh keeps a warm screen (INT-25); a stale sign-in 
     expect(peekGoals('u1', 'oak')).toBeUndefined();
   });
 
+  it('RV14-641-1 (probe PA): Auth unreachable, then a Retry while Functions is down too; a token-less not-found tick still evicts nothing', async () => {
+    await warm('ios');
+    fakeAuth.currentUser = { uid: 'u1', getIdToken: async () => 't' };
+    refresh.result = 'offline';
+    answers.wsfGoalPulse = UNAUTHENTICATED;
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    expect(byId('wsf-contribute-stale-note')).not.toBeNull();
+    // A full outage: both of the Retry's reads fail in transport (internal), which says nothing about the token.
+    answers.wsfGoalPulse = INTERNAL;
+    answers.wsfMyContribution = INTERNAL;
+    await act(async () => byId('wsf-contribute-stale-retry')!.click());
+    await settle();
+    expect(byId('wsf-contribute-stale-note')).not.toBeNull();
+    // Functions is back before Auth: the tick goes out token-less and the public pulse answers the anonymous not-found.
+    answers.wsfGoalPulse = NOT_FOUND;
+    await pollFor(4_000);
+    expect(byId('wsf-contribute-not-found')).toBeNull();
+    expect(byId('wsf-contribute-entry-screen')).not.toBeNull();
+    expect(byId('wsf-contribute-stale-note')).not.toBeNull();
+    expect(peekGoals('u1', 'oak')).toBeDefined();
+  });
+
   it('RV12-641-5: Auth unreachable, then the note\'s Retry loads with a good token; a later not-found tick is a verdict again', async () => {
     await warm('ios');
     fakeAuth.currentUser = { uid: 'u1', getIdToken: async () => 't' };

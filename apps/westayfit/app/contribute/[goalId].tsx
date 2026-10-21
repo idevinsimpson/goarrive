@@ -573,11 +573,13 @@ export default function ContributeToGoal() {
   // W12-2 (INT-25, native): the last load failed while the screen was warm.
   const [refreshFailed, setRefreshFailed] = useState(false);
   /*
-    RV12-641-5 (native): the last load failed because the sign-in could not be
-    refreshed (Auth unreachable), so every request since has gone out without
-    a token. Only then is a heal tick's refusal not a verdict (RV11-641-1);
-    after any other failure the ticks are authorized and a not-found stands.
-    Set with that failure, cleared by any authorized answer, like the note.
+    RV12-641-5 (native): a load's sign-in refresh could not reach Auth, so the
+    requests since may go out without a token. While it is set, a heal tick's
+    refusal is not a verdict (RV11-641-1); when it was never set (an ordinary
+    failure with a good token) an authorized not-found stands. Set with that
+    failure; cleared only by an authorized answer (a load, a tick, a receipt)
+    or a new context. RV14-641-1: a later failure in transport (an internal
+    or deadline answer) says nothing about the token, so it does not clear it.
   */
   const signInOfflineRef = useRef(false);
   // W12-2 (ST-06, native): this load has already refreshed the sign-in once.
@@ -1022,8 +1024,6 @@ export default function ContributeToGoal() {
           setState(loadError);
           return;
         }
-        // RV12-641-5: no read said "unauthenticated", so the token was good; the ticks are authorized.
-        signInOfflineRef.current = false;
         failTransiently();
       }
     })();
@@ -1151,8 +1151,9 @@ export default function ContributeToGoal() {
           screen and forgetting the community on that would be ST-06's own
           scenario made worse. No authorized read has landed since, so the kept
           figures and their note stay, and a Retry's full load decides.
-          RV12-641-5: only then. After any other failure the ticks carry a
-          token, and an authorized not-found ends the screen as below.
+          RV12-641-5: only then. When no refresh has failed (an ordinary
+          failure with a good token), an authorized not-found ends the screen
+          as below; a later transport failure keeps the guard (RV14-641-1).
         */
         if (Platform.OS !== 'web' && signInOfflineRef.current) return;
         // A refusal is not transient: the server has decided this member no
