@@ -1,6 +1,7 @@
 import { signOut } from 'firebase/auth';
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, useNavigation } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Platform } from 'react-native';
 
 import { useWsfAuth } from '../../src/auth';
 import { mapWithLimit } from '../../src/concurrency';
@@ -22,7 +23,9 @@ import {
 } from '../../src/memberReads';
 import { formatEndedOn, formatEndsAt, hasWindowEnded } from '../../src/ui/dates';
 import { MOVE_HREF } from '../../src/ui/MemberTabBar';
+import { signOutToSignedOutHome } from '../../src/ui/signOutReset';
 import { YouParityView } from '../../src/ui/YouParityView';
+import { RESUME_MIN_AWAY_MS, useResumeRefresh } from '../../src/useResumeRefresh';
 import type { YouGoal } from '../../src/youParity';
 
 /**
@@ -331,13 +334,45 @@ function youFromRecord(uid: string): Screen | null {
   return composeMember(profile, community, goals, owned, elsewhereFromRecord(uid, communities, community.groupId));
 }
 
+/*
+  NATIVE-MEMBER-1 F-1 (MF-03). A SCREEN BELONGS TO THE ACCOUNT IT WAS READ FOR.
+
+  The tab stays mounted across a menu Sign out (`freezeOnBlur: false`), so a
+  read still in flight when the account goes away used to land afterwards and
+  draw the previous account's name, community and amounts on a signed-out
+  screen, or under the next account's email. Two guards, each on its own:
+    · the effect's cleanup advances `live`, so a read issued for one session
+      neither lands nor issues the next read once that session has ended;
+    · every screen is stored with the uid it was composed for, and the page
+      draws it only while that uid is the signed-in one. Signed out it draws
+      the signed-out card, from auth state alone, from the very first frame.
+*/
+type Owned = { uid: string | null; screen: Screen };
+const LOADING: Screen = { kind: 'loading' };
+const SIGNED_OUT: Screen = { kind: 'signedOut' };
+
+/** What the page may draw now: never a screen read for another account, or for none. */
+function screenForAccount(ready: boolean, uid: string | null, held: Owned): Screen {
+  if (ready && !uid) return SIGNED_OUT;
+  if (uid && held.uid !== uid) return LOADING;
+  return held.screen;
+}
+
 export default function You() {
   const { ready, user } = useWsfAuth();
   // The first frame already stands on the account's record when it can: a
   // loading state painted for one frame and then replaced is still a flash.
-  const [screen, setScreen] = useState<Screen>(
-    () => (ready && user ? youFromRecord(user.uid) : null) ?? { kind: 'loading' },
-  );
+  const [held, setHeld] = useState<Owned>(() => ({
+    uid: ready && user ? user.uid : null,
+    screen: (ready && user ? youFromRecord(user.uid) : null) ?? LOADING,
+  }));
+  /** Sets the screen for `uid`; an updater sees another account's screen as loading. */
+  const setScreen = useCallback((uid: string | null, next: Screen | ((prev: Screen) => Screen)) => {
+    setHeld((prev) => ({
+      uid,
+      screen: typeof next === 'function' ? next(prev.uid === uid ? prev.screen : LOADING) : next,
+    }));
+  }, []);
   const [signingOut, setSigningOut] = useState(false);
   const [reloads, setReloads] = useState(0);
   /** Guards a landed read against a newer one, and against an unmounted tree. */
@@ -377,6 +412,16 @@ export default function You() {
   */
   const [revalidate, setRevalidate] = useState(0);
   const keepOnScreen = useRef(false);
+  /** INT-12 (W16-2): the next revalidation reads fresh (a return to the app), not from the record. */
+  const freshNext = useRef(false);
+  /**
+   * INT-12 case 4 (review 1343247d-N3): what the member page on screen was
+   * composed from, for this account only, so a failed revalidation that keeps
+   * the page can recompose it against NOW. A goal whose end passed while the
+   * app slept must stop offering "Start moving" even when the server could
+   * not be asked (hasWindowEnded is pure).
+   */
+  const composedFrom = useRef<{ uid: string; args: Parameters<typeof composeMember> } | null>(null);
   const focusedOnce = useRef(false);
   useFocusEffect(
     useCallback(() => {
@@ -388,30 +433,33 @@ export default function You() {
       const uid = user.uid;
       const recorded = youFromRecord(uid);
       if (recorded) {
-        setScreen(recorded);
+        setScreen(uid, recorded);
         return;
       }
-      setScreen((prev) =>
+      setScreen(uid, (prev) =>
         prev.kind === 'member' && wasRefused(uid, prev.community.groupId) ? { kind: 'loading' } : prev,
       );
       keepOnScreen.current = true;
       setRevalidate((n) => n + 1);
-    }, [ready, user]),
+    }, [ready, user, setScreen]),
   );
 
   useEffect(() => {
     if (!ready) return;
     if (!user) {
-      setScreen({ kind: 'signedOut' });
+      composedFrom.current = null;
+      setScreen(null, SIGNED_OUT);
       return;
     }
     const token = ++live.current;
     const uid = user.uid;
-    const reuse = reloads > 0 ? 0 : SAME_LOAD_MS;
-    const recorded = reloads > 0 ? null : youFromRecord(uid);
+    const fresh = reloads > 0 || freshNext.current;
+    freshNext.current = false;
+    const reuse = fresh ? 0 : SAME_LOAD_MS;
+    const recorded = fresh ? null : youFromRecord(uid);
     const keep = keepOnScreen.current;
     keepOnScreen.current = false;
-    setScreen((prev) => recorded ?? (keep && prev.kind !== 'loading' ? prev : { kind: 'loading' }));
+    setScreen(uid, (prev) => recorded ?? (keep && prev.kind !== 'loading' ? prev : { kind: 'loading' }));
     setStale(false);
     setChecking(false);
     const slow = recorded || keep
@@ -437,15 +485,22 @@ export default function You() {
         if (live.current !== token) return;
         settle();
         if (recorded && recorded.kind === 'member') {
-          setScreen({ ...recorded, profile });
+          setScreen(uid, { ...recorded, profile });
           setStale(true);
           return;
         }
         if (keep) {
+          // Kept, but recomposed against now (N3): from what it was composed
+          // from, or from the account's record if that is where it came from.
+          const from = composedFrom.current?.uid === uid ? composedFrom.current.args : null;
+          const again = from ? composeMember(...from) : youFromRecord(uid);
+          if (again && again.kind === 'member') {
+            setScreen(uid, (prev) => (prev.kind === 'member' ? again : prev));
+          }
           setStale(true);
           return;
         }
-        setScreen(community ? { kind: 'failed', profile, community } : { kind: 'failed', profile });
+        setScreen(uid, community ? { kind: 'failed', profile, community } : { kind: 'failed', profile });
       };
 
       let communities: Community[] = [];
@@ -461,7 +516,7 @@ export default function You() {
         const profile = await profileRead;
         if (live.current !== token) return;
         settle();
-        setScreen({ kind: 'noCommunity', profile });
+        setScreen(uid, { kind: 'noCommunity', profile });
         return;
       }
 
@@ -482,7 +537,7 @@ export default function You() {
         const profile = await profileRead;
         if (live.current !== token) return;
         settle();
-        setScreen({ kind: 'pickCommunity', profile, count: communities.length });
+        setScreen(uid, { kind: 'pickCommunity', profile, count: communities.length });
         return;
       }
 
@@ -505,29 +560,72 @@ export default function You() {
       const profile = await profileRead;
       if (live.current !== token) return;
       settle();
-      setScreen(
-        composeMember(
-          profile,
-          community,
-          goals,
-          owned.map((o) => (o.ok ? o.value : null)),
-          elsewhereFromRecord(uid, communities, community.groupId),
-        ),
-      );
+      const args: Parameters<typeof composeMember> = [
+        profile,
+        community,
+        goals,
+        owned.map((o) => (o.ok ? o.value : null)),
+        elsewhereFromRecord(uid, communities, community.groupId),
+      ];
+      composedFrom.current = { uid, args };
+      setScreen(uid, composeMember(...args));
     })();
     return () => {
+      // MF-03: whatever this run still has in flight belongs to a session or
+      // a load that is over -- the signed-out branch above takes no token.
+      live.current += 1;
       if (slow) clearTimeout(slow);
     };
-  }, [ready, user, reloads, revalidate]);
+  }, [ready, user, reloads, revalidate, setScreen]);
 
+  // NATIVE-MEMBER-1 SH-7 (INT-05). You's own Sign out lands where the menu's
+  // does: on a phone, after a SUCCESSFUL sign-out, the root stack is reset to
+  // signed-out Home as one route with nothing behind it
+  // (src/ui/signOutReset.ts). The reset goes to the root stack -- this tab's
+  // parent, the same navigation object the shell's menu dispatches on -- and
+  // a failed sign-out moves nothing. On the web You has always gone to Home
+  // after signing out; it still does, and only after a successful one.
+  const navigation = useNavigation();
   const onSignOut = useCallback(() => {
     setSigningOut(true);
-    void signOut(getFirebaseAuth())
-      .then(() => router.replace('/'))
+    void signOutToSignedOutHome({
+      signOut: () => signOut(getFirebaseAuth()),
+      dispatch: (action) => (navigation.getParent() ?? navigation).dispatch(action as never),
+      platform: Platform.OS,
+    })
+      .then((signedOut) => {
+        if (signedOut && Platform.OS === 'web') router.replace('/');
+      })
       .finally(() => setSigningOut(false));
-  }, []);
+  }, [navigation]);
 
   const reload = useCallback(() => setReloads((v) => v + 1), []);
+
+  const screen = screenForAccount(ready, user?.uid ?? null, held);
+
+  /*
+    NATIVE-MEMBER-1 W16-2 (INT-12). COMING BACK TO THE APP READS FRESH, as
+    Progress does (activity.tsx). A tab return recomposes from the account's
+    record; a return to the app after at least 30 s away
+    (src/useResumeRefresh.ts) asks the server, because a goal may have ended
+    while the app slept and You would otherwise keep offering "Start moving"
+    for it. What is on screen stays while it reads ("Checking…" after a
+    moment); a failed read keeps it, marked as last read, with Retry. A failed
+    screen is retried on any return.
+  */
+  useResumeRefresh(
+    () => {
+      if (!ready || !user) return;
+      if (screen.kind === 'failed') {
+        setReloads((n) => n + 1);
+        return;
+      }
+      freshNext.current = true;
+      keepOnScreen.current = true;
+      setRevalidate((n) => n + 1);
+    },
+    { minAwayMs: screen.kind === 'failed' ? 0 : RESUME_MIN_AWAY_MS },
+  );
 
   return (
     <YouParityView

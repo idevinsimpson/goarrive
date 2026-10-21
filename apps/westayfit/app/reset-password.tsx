@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import { AuthFlagOffPanel } from '../src/AuthFlagOffPanel';
 import {
@@ -22,12 +22,25 @@ export default function ResetPassword() {
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [unconfigured, setUnconfigured] = useState(false);
+  /*
+    NATIVE-MEMBER-1 W16-1 (MF-13). THE KEYBOARD'S GO/ENTER IS A SUBMIT TOO.
+    The email field's Go (native) and Enter (web: react-native-web turns
+    Enter into onSubmitEditing) call onSubmit directly, past the button's
+    disabled state. So onSubmit carries the guards itself: the same rule the
+    button shows, and a synchronous in-flight latch (a ref, not state: two
+    key presses in one tick both see the old state).
+  */
+  const inFlight = useRef(false);
 
   if (!wsfAuthEnabled) {
     return <AuthFlagOffPanel title="Reset your password" testID="wsf-reset-disabled" />;
   }
 
   async function onSubmit() {
+    // The button's rule (an address, and a build that can send), plus: a
+    // link already sent is not re-sent from the keyboard either.
+    if (!email.trim() || unconfigured || sent || inFlight.current) return;
+    inFlight.current = true;
     setError(null);
     setUnconfigured(false);
     setSubmitting(true);
@@ -46,6 +59,11 @@ export default function ResetPassword() {
       if (code === 'functions/failed-precondition') {
         setUnconfigured(true);
       } else {
+        // MF-13 review N-1: the latch reopens only for an outcome the member can
+        // retry. A terminal one keeps it shut, so a Go/Enter that lands before
+        // the re-render (while the old closure still reads the old state) cannot
+        // submit again. "Sent" and "unconfigured" are terminal.
+        inFlight.current = false;
         setError(authErrorMessage(e, 'Reset request failed.'));
       }
     } finally {

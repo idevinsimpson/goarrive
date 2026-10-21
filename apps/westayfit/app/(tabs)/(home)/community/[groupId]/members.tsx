@@ -1,10 +1,11 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { httpsCallable } from 'firebase/functions';
 import { useCallback, useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { useWsfAuth } from '../../../../../src/auth';
 import { describeCallableError } from '../../../../../src/callableErrors';
+import { isUnconfirmedRefusal } from '../../../../../src/callableRefusal';
 import { getFirebaseFunctions } from '../../../../../src/firebase';
 import { memberCountLabel } from '../../../../../src/labels';
 import { InitialsAvatar, isChampionRole } from '../../../../../src/ui/CommunityPresence';
@@ -22,6 +23,7 @@ import {
   TEXT_MUTED,
 } from '../../../../../src/ui/kit';
 import { MEMBER_TAB_BAR_BODY } from '../../../../../src/ui/MemberTabBar';
+import { BACK_GLYPH_HIT_SLOP } from '../../../../../src/ui/kit';
 
 /**
  * MEMBERS — the people in one community.
@@ -71,6 +73,23 @@ type MyCommunitiesResponse = { items: MyCommunityItem[] };
 
 type Phase = 'loading' | 'ready' | 'failed';
 
+/*
+  NATIVE-MEMBER-1 F-9 (HB-02). A BLOCK IS NOT A STATEMENT ABOUT THE ACCOUNT.
+  Under the staging hold `wsfCommunityMembers` is refused before it runs, with
+  no body, which the SDK reports as a bare `permission-denied` (or
+  `unauthenticated`) -- and this page used to turn that into "This account
+  can't do that here." for a member who is allowed to see the list. Only a
+  refusal the function itself wrote ("Members only.") is about the account.
+  One without the handler's sentence -- that block, or the framework turning
+  away a token or App Check ("Unauthenticated") -- is not confirmed, and says
+  only that the list is unavailable (src/callableRefusal.ts). The network
+  sentence and every server sentence are unchanged.
+*/
+const MEMBERS_UNAVAILABLE = 'The member list is temporarily unavailable. Try again later.';
+function membersError(e: unknown, fallback: string): string {
+  return isUnconfirmedRefusal(e) ? MEMBERS_UNAVAILABLE : describeCallableError(e, fallback);
+}
+
 export default function MembersScreen() {
   const { groupId: rawGroupId } = useLocalSearchParams<{ groupId: string }>();
   const groupId = typeof rawGroupId === 'string' ? rawGroupId : '';
@@ -111,7 +130,7 @@ export default function MembersScreen() {
       setCursor(res.data.nextCursor ?? null);
       setPhase('ready');
     } catch (e) {
-      setError(describeCallableError(e, 'The people here could not be loaded just now.'));
+      setError(membersError(e, 'The people here could not be loaded just now.'));
       setPhase('failed');
       return;
     }
@@ -153,7 +172,7 @@ export default function MembersScreen() {
       setMembers((prev) => [...prev, ...(res.data.members ?? [])]);
       setCursor(res.data.nextCursor ?? null);
     } catch (e) {
-      setError(describeCallableError(e, 'More people could not be loaded just now.'));
+      setError(membersError(e, 'More people could not be loaded just now.'));
     } finally {
       setLoadingMore(false);
     }
@@ -163,9 +182,17 @@ export default function MembersScreen() {
     <ScrollView style={st.screen} contentContainerStyle={st.body} testID="wsf-members-screen">
       <View style={st.chrome}>
         <Pressable
-          onPress={() => router.replace(`/community/${groupId}`)}
+          // NATIVE-MEMBER-1 W16-6 (MF-10): on a phone the community is the
+          // screen below this one; going back to it keeps its scroll and
+          // figures instead of building a second instance. With nothing to go
+          // back to (a cold deep link), or on the web, it opens the community.
+          onPress={() =>
+            Platform.OS !== 'web' && router.canGoBack() ? router.back() : router.replace(`/community/${groupId}`)
+          }
           accessibilityRole="link"
           accessibilityLabel="Back to the community"
+          // W16-3 (MF-18): the "‹" glyph reaches 44 pt through its hit slop.
+          hitSlop={BACK_GLYPH_HIT_SLOP}
           testID="wsf-members-back"
         >
           <Text style={st.back}>‹</Text>

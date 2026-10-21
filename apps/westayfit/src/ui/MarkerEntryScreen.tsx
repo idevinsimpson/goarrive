@@ -1,11 +1,12 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { useWsfAuth } from '../auth';
 import { AuthFlagOffPanel } from '../AuthFlagOffPanel';
 import { SecondaryLink, StatusText } from '../AuthFormPrimitives';
 import { describeCallableError } from '../callableErrors';
+import { isUnconfirmedRefusal } from '../callableRefusal';
 import { wsfAuthEnabled } from '../featureFlags';
 import { armMarkerReturn } from '../handoffArming';
 import {
@@ -18,6 +19,7 @@ import {
 } from '../markerEntry';
 import { ButtonLink } from './ButtonLink';
 import { kit } from './kit';
+import { ScreenTopSpacer } from './useScreenTopInset';
 import { WsfWordmark } from './WsfWordmark';
 
 /**
@@ -49,6 +51,8 @@ type Phase =
   | { kind: 'resolved'; marker: ResolvedMarker };
 
 const INVALID_TITLE = 'This code isn’t active';
+const RESOLVE_FAILED = 'We couldn’t open this code. Try again.';
+const JOIN_FAILED = 'We couldn’t join you just now. Try again.';
 
 export function MarkerEntryScreen({
   slug,
@@ -82,10 +86,17 @@ export function MarkerEntryScreen({
       .catch((e: unknown) => {
         if (cancelled) return;
         const code = (e as { code?: unknown })?.code;
-        if (code === 'functions/not-found' || code === 'functions/invalid-argument') {
+        // NATIVE-MEMBER-1 (MF-04's pattern, HB-01 note). A 401/403/404 without
+        // the handler's own sentence -- a block in front of the function, or
+        // the framework rejecting the token or App Check -- is not confirmed:
+        // it says nothing about this code ("isn't active") or this account
+        // ("can't do that") (src/callableRefusal.ts).
+        if (isUnconfirmedRefusal(e)) {
+          setPhase({ kind: 'error', message: RESOLVE_FAILED });
+        } else if (code === 'functions/not-found' || code === 'functions/invalid-argument') {
           setPhase({ kind: 'invalid' });
         } else {
-          setPhase({ kind: 'error', message: describeCallableError(e, 'We couldn’t open this code. Try again.') });
+          setPhase({ kind: 'error', message: describeCallableError(e, RESOLVE_FAILED) });
         }
       });
     return () => {
@@ -135,8 +146,9 @@ export function MarkerEntryScreen({
       setAttempt((n) => n + 1);
     } catch (e) {
       const code = (e as { code?: unknown })?.code;
-      if (code === 'functions/not-found') setPhase({ kind: 'invalid' });
-      else setJoinError(describeCallableError(e, 'We couldn’t join you just now. Try again.'));
+      if (isUnconfirmedRefusal(e)) setJoinError(JOIN_FAILED);
+      else if (code === 'functions/not-found') setPhase({ kind: 'invalid' });
+      else setJoinError(describeCallableError(e, JOIN_FAILED));
     } finally {
       setJoining(false);
     }
@@ -153,6 +165,8 @@ export function MarkerEntryScreen({
 
   const page = (testID: string, children: React.ReactNode) => (
     <ScrollView style={kit.scroll} contentContainerStyle={kit.page} keyboardShouldPersistTaps="handled">
+      {/* NATIVE-MEMBER-1 W16-8 (INT-09): a root-stack screen clears the status bar itself; nothing on web. */}
+      <ScreenTopSpacer />
       <View style={kit.column} testID={testID}>
         <View style={kit.chrome}>
           <WsfWordmark variant="navy" height={22} testID="wsf-marker-wordmark" />
@@ -178,10 +192,18 @@ export function MarkerEntryScreen({
         <Text style={kit.cardTitle} accessibilityRole="header" {...({ 'aria-level': 1 } as Record<string, unknown>)}>
           {INVALID_TITLE}
         </Text>
-        <Text style={kit.body}>
-          It isn’t pointing at a challenge right now. Ask someone at the event, or open the app to
-          find your communities.
-        </Text>
+        {/* MF-19: in the app the member is already in it, so the app names Home instead. */}
+        {Platform.OS === 'web' ? (
+          <Text style={kit.body}>
+            It isn’t pointing at a challenge right now. Ask someone at the event, or open the app to
+            find your communities.
+          </Text>
+        ) : (
+          <Text style={kit.body}>
+            It isn’t pointing at a challenge right now. Ask someone at the event, or go to Home to find
+            your communities.
+          </Text>
+        )}
         <SecondaryLink href="/" label="Back to home" testID="wsf-marker-home" />
       </View>
     );

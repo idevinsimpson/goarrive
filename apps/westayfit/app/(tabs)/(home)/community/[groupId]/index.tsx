@@ -22,6 +22,15 @@ import { rememberCurrentCommunity, resolveCurrentCommunity } from '../../../../.
 import { AuthFlagOffPanel } from '../../../../../src/AuthFlagOffPanel';
 import { describeCallableError } from '../../../../../src/callableErrors';
 import { FormShell } from '../../../../../src/AuthFormPrimitives';
+import {
+  KEYBOARD_SCROLL_PROPS,
+  SHEET_DISMISS_PROPS,
+  sheetBottomPadding,
+  useKeyboardHeight,
+} from '../../../../../src/ui/keyboardAvoidance';
+import { useSheetInsets } from '../../../../../src/ui/sheetInsets';
+import { liveRegion } from '../../../../../src/ui/announce';
+import { STALE_FIGURE_SENTENCE, StaleAnnouncer, nativeA11yHidden } from '../../../../../src/ui/staleFigure';
 import { resolveRepeatPolicy, type RepeatPolicy } from '../../../../../src/contributionFlow';
 import { wsfAuthEnabled } from '../../../../../src/featureFlags';
 import { getFirebaseFirestore, getFirebaseFunctions } from '../../../../../src/firebase';
@@ -64,6 +73,16 @@ import { TabGlyph } from '../../../../../src/ui/TabGlyph';
 import { JoinQrCode } from '../../../../../src/ui/JoinQrCode';
 import { buildJoinUrl, isLinkJoinable } from '../../../../../src/ui/joinLink';
 import { buildKioskUrl } from '../../../../../src/ui/kioskLink';
+import { linkAvailabilityCopy } from '../../../../../src/ui/linkAvailabilityCopy';
+import {
+  canAttemptCopy,
+  copyLink,
+  hasShareSheet,
+  linkShareRoute,
+  offerableLink,
+  offersCopy,
+  shareLinkSheet,
+} from '../../../../../src/ui/shareLink';
 import { buildStationUrl } from '../../../../../src/ui/eventLinks';
 import { buildCombinedUrl } from '../../../../../src/ui/combinedLink';
 import {
@@ -556,6 +575,10 @@ export default function CommunityPage() {
     }, [user?.uid, groupId, router]),
   );
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  // W16-9 (MF-09): the Manage sheet's safe area and keyboard, used on native
+  // only (src/ui/sheetInsets: 0 on web, the provider's insets on a phone).
+  const sheetInsets = useSheetInsets();
+  const sheetKeyboard = useKeyboardHeight();
   const [resetting, setResetting] = useState(false);
   const [resetJoinCode, setResetJoinCode] = useState<string | null>(null);
   const [resetOutcome, setResetOutcome] = useState<'idle' | 'done' | 'failed'>('idle');
@@ -675,17 +698,19 @@ export default function CommunityPage() {
     ? buildCombinedUrl({ origin: linkOrigin(), setupId: combinedCreated.setupId })
     : null;
 
+  // NATIVE-MEMBER-1 F-3 (MF-01): every copy and share goes through
+  // src/ui/shareLink (the web's navigator APIs; the app's expo-clipboard and
+  // OS share sheet, for an absolute https link only).
   const onCopyCombined = useCallback(async () => {
-    if (!combinedUrl || typeof navigator === 'undefined') return;
+    if (!offerableLink(combinedUrl) || !canAttemptCopy()) return;
     clearCombinedCopyReset();
-    try {
-      await navigator.clipboard.writeText(combinedUrl);
+    if ((await copyLink(combinedUrl)) === 'copied') {
       setCombinedCopy('copied');
       combinedCopyResetRef.current = setTimeout(() => {
         combinedCopyResetRef.current = null;
         setCombinedCopy('idle');
       }, 2_000);
-    } catch {
+    } else {
       // Not timed out: a failure has to stay on screen, because the address
       // shown beside it is the Champion's way forward.
       setCombinedCopy('failed');
@@ -1535,16 +1560,15 @@ export default function CommunityPage() {
   const onCopyKiosk = useCallback(
     async (goalId: string) => {
       const url = buildKioskUrl({ origin: linkOrigin(), goalId });
-      if (!url || typeof navigator === 'undefined') return;
+      if (!offerableLink(url) || !canAttemptCopy()) return;
       clearKioskCopyReset();
-      try {
-        await navigator.clipboard.writeText(url);
+      if ((await copyLink(url)) === 'copied') {
         setKioskCopy({ goalId, state: 'copied' });
         kioskCopyResetRef.current = setTimeout(() => {
           kioskCopyResetRef.current = null;
           setKioskCopy({ goalId: null, state: 'idle' });
         }, 2_000);
-      } catch {
+      } else {
         // Not timed out: a failure has to stay on screen, because the address
         // shown beside it is the Champion's way forward.
         setKioskCopy({ goalId, state: 'failed' });
@@ -1564,16 +1588,15 @@ export default function CommunityPage() {
   const onCopyStation = useCallback(
     async (goalId: string) => {
       const url = buildStationUrl({ origin: linkOrigin(), goalId });
-      if (!url || typeof navigator === 'undefined') return;
+      if (!offerableLink(url) || !canAttemptCopy()) return;
       clearStationCopyReset();
-      try {
-        await navigator.clipboard.writeText(url);
+      if ((await copyLink(url)) === 'copied') {
         setStationCopy({ goalId, state: 'copied' });
         stationCopyResetRef.current = setTimeout(() => {
           stationCopyResetRef.current = null;
           setStationCopy({ goalId: null, state: 'idle' });
         }, 2_000);
-      } catch {
+      } else {
         setStationCopy({ goalId, state: 'failed' });
       }
     },
@@ -1721,19 +1744,18 @@ export default function CommunityPage() {
   );
 
   const onCopyInvite = useCallback(async () => {
-    if (!inviteUrl || typeof navigator === 'undefined') return;
+    if (!offerableLink(inviteUrl) || !canAttemptCopy()) return;
     // This tap owns the label from here on. Whatever the previous tap armed
     // is cancelled first, so it cannot clear a confirmation this tap is about
     // to show — or a failure, which must not be timed out at all.
     clearCopyReset();
-    try {
-      await navigator.clipboard.writeText(inviteUrl);
+    if ((await copyLink(inviteUrl)) === 'copied') {
       setCopyStatus('copied');
       copyResetRef.current = setTimeout(() => {
         copyResetRef.current = null;
         setCopyStatus('idle');
       }, 2_000);
-    } catch {
+    } else {
       setCopyStatus('failed');
     }
   }, [inviteUrl, clearCopyReset]);
@@ -1918,18 +1940,9 @@ export default function CommunityPage() {
   }, []);
 
   const onShareInvite = useCallback(async () => {
-    if (!inviteUrl) return;
-    if (typeof navigator === 'undefined' || !('share' in navigator)) return;
-    try {
-      await (navigator as Navigator & {
-        share: (data: ShareData) => Promise<void>;
-      }).share({
-        title: 'Join our We Stay Fit community',
-        url: inviteUrl,
-      });
-    } catch {
-      // User dismissed the share sheet or the browser blocked it — no-op.
-    }
+    if (!offerableLink(inviteUrl)) return;
+    // A dismissed sheet, or one the browser blocked, is a no-op (shareLink).
+    await shareLinkSheet({ title: 'Join our We Stay Fit community', url: inviteUrl });
   }, [inviteUrl]);
 
   /**
@@ -1948,27 +1961,21 @@ export default function CommunityPage() {
    */
   const onShareGoalDisplay = useCallback(
     async (url: string) => {
-      const route = shareRoute(typeof navigator === 'undefined' ? null : navigator);
+      const route = linkShareRoute();
       if (route === 'unavailable') return;
       clearShareReset();
-      if (route === 'webShare') {
-        try {
-          await (navigator as Navigator & {
-            share: (data: ShareData) => Promise<void>;
-          }).share({ url });
-        } catch {
-          /* dismissed or blocked — no claim either way */
-        }
+      if (route === 'webShare' || route === 'nativeShare') {
+        // Dismissed or blocked: no claim either way (shareLink).
+        await shareLinkSheet({ url });
         return;
       }
-      try {
-        await navigator.clipboard.writeText(url);
+      if ((await copyLink(url)) === 'copied') {
         setShareStatus('copied');
         shareResetRef.current = setTimeout(() => {
           shareResetRef.current = null;
           setShareStatus('idle');
         }, 2_000);
-      } catch {
+      } else {
         setShareStatus('failed');
       }
     },
@@ -2103,7 +2110,7 @@ export default function CommunityPage() {
 
   const { group, role, memberCount, otherCommunityCount, isSample, activeChallenge } = state;
   const isChampion = role === 'foundingChampion';
-  const hasShareApi = typeof navigator !== 'undefined' && 'share' in navigator;
+  const hasShareApi = hasShareSheet();
 
   // One featured goal, explicitly: the open goal that ends soonest (the
   // server lists by endsAt). Others keep their own separately labelled mark;
@@ -2252,7 +2259,7 @@ export default function CommunityPage() {
   const linkJoinable = isLinkJoinable(group.joinPolicy);
   // Champions always get the Invite card (on a private community it carries
   // the honest no-link sentence); members get it only with a working link.
-  const showInviteCard = isChampion || (linkJoinable && inviteUrl != null);
+  const showInviteCard = isChampion || (linkJoinable && offerableLink(inviteUrl));
   // One human line under the name, and only once the goal list has answered:
   // a claim about what the community is doing waits for the facts.
   // SLICE 1. When a goal IS running the hero says so in its own words, and a
@@ -2472,7 +2479,7 @@ export default function CommunityPage() {
               ? 'Open this on the screen at your event.'
               : 'Authorize public display under Goals below, or that screen will say the goal is not available.'}
           </Text>
-          {kioskUrlFor(goal.goalId) ? (
+          {offerableLink(kioskUrlFor(goal.goalId)) && (LINK_COPY.offersOpenKiosk || offersCopy()) ? (
             /*
               ONE ACTION, THEN THE UTILITY. Opening the kiosk is the thing a
               Champion came here to do, so it carries the one green primary
@@ -2487,30 +2494,34 @@ export default function CommunityPage() {
               // without being printed for a person.
               dataSet={{ kioskUrl: kioskUrlFor(goal.goalId) ?? '' }}
             >
-              <ButtonLink
-                href={`/kiosk/${goal.goalId}`}
-                label="Open kiosk"
-                style={styles.primaryButton}
-                textStyle={styles.primaryButtonText}
-                testID={`wsf-kiosk-setup-open-${goal.goalId}`}
-              />
-              <Pressable
-                onPress={() => onCopyKiosk(goal.goalId)}
-                style={styles.tertiaryButton}
-                testID={`wsf-kiosk-setup-copy-${goal.goalId}`}
-                accessibilityRole="button"
-                accessibilityLabel={`${goal.title}: copy the kiosk link`}
-              >
-                <Text style={styles.tertiaryButtonText}>
-                  {kioskCopy.goalId === goal.goalId && kioskCopy.state === 'copied'
-                    ? 'Copied'
-                    : 'Copy kiosk link'}
-                </Text>
-              </Pressable>
+              {LINK_COPY.offersOpenKiosk ? (
+                <ButtonLink
+                  href={`/kiosk/${goal.goalId}`}
+                  label="Open kiosk"
+                  style={styles.primaryButton}
+                  textStyle={styles.primaryButtonText}
+                  testID={`wsf-kiosk-setup-open-${goal.goalId}`}
+                />
+              ) : null}
+              {offersCopy() ? (
+                <Pressable
+                  onPress={() => onCopyKiosk(goal.goalId)}
+                  style={styles.tertiaryButton}
+                  testID={`wsf-kiosk-setup-copy-${goal.goalId}`}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${goal.title}: copy the kiosk link`}
+                >
+                  <Text style={styles.tertiaryButtonText}>
+                    {kioskCopy.goalId === goal.goalId && kioskCopy.state === 'copied'
+                      ? 'Copied'
+                      : 'Copy kiosk link'}
+                  </Text>
+                </Pressable>
+              ) : null}
             </View>
           ) : (
             <Text style={styles.body} testID={`wsf-kiosk-setup-unavailable-${goal.goalId}`}>
-              The kiosk link isn’t ready yet. Reload the page to try again.
+              {LINK_COPY.kioskUnavailable}
             </Text>
           )}
           {/*
@@ -2524,8 +2535,8 @@ export default function CommunityPage() {
           */}
           {kioskCopy.goalId === goal.goalId && kioskCopy.state === 'failed' ? (
             <Text style={styles.body} testID={`wsf-kiosk-setup-copy-failed-${goal.goalId}`}>
-              Copy didn’t work on this device. Open the kiosk here, or type this address on the
-              screen: {kioskUrlFor(goal.goalId)}
+              {LINK_COPY.kioskCopyFailed}
+              {kioskUrlFor(goal.goalId)}
             </Text>
           ) : null}
         </View>
@@ -2580,24 +2591,26 @@ export default function CommunityPage() {
           Open this address on each venue screen. Every unpaired screen shows its own code, and you
           approve it here, on your own phone. You can revoke a screen from here at any time.
         </Text>
-        {stationUrlFor(goal.goalId) ? (
-          /*
-            UTILITIES, NOT THE POINT. Getting the address onto a screen is a
-            step on the way; the action on this card is approving the screen
-            that is standing there showing a code. So these two are quiet
-            text controls and the card keeps no second button weight.
-          */
-          <View
-            style={styles.utilityRow}
-            dataSet={{ stationUrl: stationUrlFor(goal.goalId) ?? '' }}
-          >
-            <ButtonLink
-              href={`/station/${goal.goalId}`}
-              label="Open station screen"
-              style={UTILITY_LINK}
-              textStyle={UTILITY_LINK_TEXT}
-              testID={`wsf-kiosk-stations-open-${goal.goalId}`}
-            />
+        {/*
+          UTILITIES, NOT THE POINT. Getting the address onto a screen is a
+          step on the way; the action on this card is approving the screen
+          that is standing there showing a code. So these two are quiet
+          text controls and the card keeps no second button weight. Opening
+          the screen is a route in this app and needs no absolute address
+          (MF-06); only Copy waits for one.
+        */}
+        <View
+          style={styles.utilityRow}
+          dataSet={{ stationUrl: stationUrlFor(goal.goalId) ?? '' }}
+        >
+          <ButtonLink
+            href={`/station/${goal.goalId}`}
+            label="Open station screen"
+            style={UTILITY_LINK}
+            textStyle={UTILITY_LINK_TEXT}
+            testID={`wsf-kiosk-stations-open-${goal.goalId}`}
+          />
+          {offerableLink(stationUrlFor(goal.goalId)) && offersCopy() ? (
             <Pressable
               onPress={() => onCopyStation(goal.goalId)}
               style={[styles.tertiaryButton, styles.rowButton]}
@@ -2611,10 +2624,11 @@ export default function CommunityPage() {
                   : 'Copy station link'}
               </Text>
             </Pressable>
-          </View>
-        ) : (
+          ) : null}
+        </View>
+        {offerableLink(stationUrlFor(goal.goalId)) ? null : (
           <Text style={styles.body} testID={`wsf-kiosk-stations-unavailable-${goal.goalId}`}>
-            The station link isn’t ready yet. Reload the page to try again.
+            {LINK_COPY.stationUnavailable}
           </Text>
         )}
         {stationCopy.goalId === goal.goalId && stationCopy.state === 'failed' ? (
@@ -2654,6 +2668,9 @@ export default function CommunityPage() {
                 testID={`wsf-kiosk-stations-slot-${slot}-${goal.goalId}`}
                 accessibilityRole="button"
                 aria-pressed={chosen}
+                // W16-3 (MF-18): a phone's screen reader does not read
+                // aria-pressed; the chosen slot is announced as selected there.
+                {...(Platform.OS !== 'web' ? { accessibilityState: { selected: chosen } } : {})}
                 accessibilityLabel={`${goal.title}: approve as Station ${slot}`}
               >
                 <Text
@@ -2921,10 +2938,13 @@ export default function CommunityPage() {
         <View
           style={styles.visuallyHidden}
           testID={`wsf-community-goal-stale-status-${goal.goalId}`}
-          {...({ 'aria-live': 'polite' } as Record<string, unknown>)}
+          // W16-3 (INT-18): aria-live="polite" on the web, as before; nothing
+          // on a phone, where StaleAnnouncer speaks the sentence instead.
+          {...liveRegion}
         >
-          {p.refreshFailed ? <Text>Couldn’t refresh. This is the last confirmed figure.</Text> : null}
+          {p.refreshFailed ? <Text>{STALE_FIGURE_SENTENCE}</Text> : null}
         </View>
+        <StaleAnnouncer failed={p.refreshFailed === true} />
         {p.refreshFailed ? (
           <View
             style={onDark ? styles.heroLastKnown : styles.cardLastKnown}
@@ -2933,8 +2953,10 @@ export default function CommunityPage() {
             <Text
               style={onDark ? styles.heroLastKnownText : styles.cardMeta}
               {...({ 'aria-hidden': true } as Record<string, unknown>)}
+              // W16-3 (MF-18): read once, by the announcement, not again here.
+              {...nativeA11yHidden()}
             >
-              Couldn’t refresh. This is the last confirmed figure.
+              {STALE_FIGURE_SENTENCE}
             </Text>
             <Pressable
               onPress={refreshProgress}
@@ -3064,6 +3086,33 @@ export default function CommunityPage() {
   // here with its existing testID, copy and outcome handling, and the
   // administrative facts (community details, the invite QR, link rotation,
   // leaving) live here too — out of the member journey, one tap away.
+  /*
+    NATIVE-MEMBER-1 W16-9 (MF-09). ON A PHONE THE SHEET RESPECTS THE SAFE AREA
+    AND THE KEYBOARD, AND THE SCRIM CLOSES IT. Native only: the panel pads
+    its bottom by the home indicator, or by the keyboard while it is up
+    (sheetBottomPadding, INT-07), so the pairing code and the combined-goal
+    fields rise above it. With the keyboard up the panel may grow to just below
+    the top inset, so what it shows is the window minus the top, the keyboard
+    and the margins. (The keyboard is already in the padding; subtracting it
+    from the cap as well would leave ~90 pt.) A drag puts the keyboard away.
+    The web is untouched: sheetBottomPadding is never called there, so its
+    padding stays 24 and its scrim stays the onClick view (D-3).
+  */
+  const nativeSheet = Platform.OS !== 'web';
+  const sheetMaxHeight =
+    nativeSheet && sheetKeyboard > 0
+      ? windowHeight - sheetInsets.top - SHEET_TOP_MARGIN
+      : Math.min(windowHeight * 0.88, 760);
+  const sheetPanelStyle = nativeSheet
+    ? [
+        styles.sheet,
+        {
+          maxHeight: sheetMaxHeight,
+          paddingBottom: sheetBottomPadding(sheetInsets.bottom, sheetKeyboard, Platform.OS, 24),
+        },
+      ]
+    : [styles.sheet, { maxHeight: sheetMaxHeight }];
+
   const renderManageSheet = () => (
     <Modal
       visible={isChampion && manageOpen}
@@ -3083,15 +3132,28 @@ export default function CommunityPage() {
           press would dismiss the sheet. The Close button (and Escape) is the
           accessible way out.
         */}
-        <View
-          style={styles.sheetScrim}
-          // `onClick` is a react-native-web prop that the RN typings omit.
-          {...({ onClick: () => setManageOpen(false) } as Record<string, unknown>)}
-          accessible={false}
-          aria-hidden
-          testID="wsf-community-manage-scrim"
-        />
-        <View style={[styles.sheet, { maxHeight: Math.min(windowHeight * 0.88, 760) }]} testID="wsf-community-manage-panel">
+        {nativeSheet ? (
+          // W16-9: a phone has no click events; the scrim is a press target
+          // there, still neither focusable nor announced.
+          <Pressable
+            style={styles.sheetScrim}
+            onPress={() => setManageOpen(false)}
+            accessible={false}
+            focusable={false}
+            importantForAccessibility="no-hide-descendants"
+            testID="wsf-community-manage-scrim"
+          />
+        ) : (
+          <View
+            style={styles.sheetScrim}
+            // `onClick` is a react-native-web prop that the RN typings omit.
+            {...({ onClick: () => setManageOpen(false) } as Record<string, unknown>)}
+            accessible={false}
+            aria-hidden
+            testID="wsf-community-manage-scrim"
+          />
+        )}
+        <View style={sheetPanelStyle} testID="wsf-community-manage-panel">
           <View style={styles.sheetHandle} />
           <View style={styles.sheetHeader}>
             {/*
@@ -3125,7 +3187,15 @@ export default function CommunityPage() {
           <Text style={styles.sheetStory} testID="wsf-manage-story">
             {manageStoryLine}
           </Text>
-          <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetContent}>
+          <ScrollView
+            style={styles.sheetScroll}
+            contentContainerStyle={styles.sheetContent}
+            // W16-9: iOS insets for the keyboard, a drag dismisses it, and a
+            // tap on a control lands with the keyboard up. All inert on web.
+            {...KEYBOARD_SCROLL_PROPS}
+            {...SHEET_DISMISS_PROPS}
+            {...(nativeSheet ? { keyboardShouldPersistTaps: 'handled' as const } : {})}
+          >
             {/*
               YOUR EVENT — the reason a Champion opens this sheet, and now the
               first and loudest thing in it. Setting up the screen at an event
@@ -3185,8 +3255,7 @@ export default function CommunityPage() {
                     </Text>
                   ) : goalsState.kind === 'failed' ? (
                     <Text style={styles.body} testID="wsf-kiosk-setup-failed">
-                      This community&apos;s goals could not be loaded, so there is no kiosk address
-                      to give you. Close this and open it again.
+                      {LINK_COPY.kioskGoalsFailed}
                     </Text>
                   ) : activeGoals.length === 0 ? (
                     <Text style={styles.body} testID="wsf-kiosk-setup-empty">
@@ -3223,25 +3292,27 @@ export default function CommunityPage() {
                         Open this on the screen at your event. It shows the shared total and each
                         activity — never a member or a contribution.
                       </Text>
-                      {combinedUrl ? (
-                        /*
-                          The same weighting as a single goal's kiosk: opening
-                          the screen is the action, copying the address is the
-                          way to do it on another device.
-                        */
-                        <View
-                          style={styles.actionStack}
-                          // The address the controls beside it act on, readable
-                          // by a test without being printed at a person.
-                          dataSet={{ combinedUrl }}
-                        >
-                          <ButtonLink
-                            href={`/combined/${combinedCreated.setupId}`}
-                            label="Open combined screen"
-                            style={styles.primaryButton}
-                            textStyle={styles.primaryButtonText}
-                            testID="wsf-combined-open"
-                          />
+                      {/*
+                        The same weighting as a single goal's kiosk: opening
+                        the screen is the action, copying the address is the
+                        way to do it on another device. Opening is a route in
+                        this app and needs no absolute address (MF-06); only
+                        Copy waits for one.
+                      */}
+                      <View
+                        style={styles.actionStack}
+                        // The address the controls beside it act on, readable
+                        // by a test without being printed at a person.
+                        dataSet={{ combinedUrl: combinedUrl ?? '' }}
+                      >
+                        <ButtonLink
+                          href={`/combined/${combinedCreated.setupId}`}
+                          label="Open combined screen"
+                          style={styles.primaryButton}
+                          textStyle={styles.primaryButtonText}
+                          testID="wsf-combined-open"
+                        />
+                        {offerableLink(combinedUrl) && offersCopy() ? (
                           <Pressable
                             onPress={() => void onCopyCombined()}
                             style={styles.tertiaryButton}
@@ -3253,10 +3324,11 @@ export default function CommunityPage() {
                               {combinedCopy === 'copied' ? 'Copied' : 'Copy link'}
                             </Text>
                           </Pressable>
-                        </View>
-                      ) : (
+                        ) : null}
+                      </View>
+                      {offerableLink(combinedUrl) ? null : (
                         <Text style={styles.body} testID="wsf-combined-unavailable">
-                          The combined link isn’t ready yet. Reload the page to try again.
+                          {LINK_COPY.combinedUnavailable}
                         </Text>
                       )}
                       {/*
@@ -3716,12 +3788,11 @@ export default function CommunityPage() {
             <View style={styles.sheetSubsection} testID="wsf-community-qr-section">
               <Text style={styles.sheetSubsectionTitle}>Invite QR</Text>
               {linkJoinable ? (
-                inviteUrl ? (
+                offerableLink(inviteUrl) ? (
                   <JoinQrCode url={inviteUrl} caveat={MANAGE_QR_CAVEAT} />
                 ) : (
                   <Text style={styles.manageIntro} testID="wsf-community-qr-pending">
-                    This community&apos;s invite link is not ready yet, so there is nothing to
-                    encode. Close this and open it again.
+                    {LINK_COPY.qrUnavailable}
                   </Text>
                 )
               ) : (
@@ -3930,7 +4001,12 @@ export default function CommunityPage() {
               {humanLine}
             </Text>
           ) : (
-            <Text style={styles.identityDescriptor} {...({ 'aria-hidden': true } as Record<string, unknown>)}>
+            <Text
+              style={styles.identityDescriptor}
+              {...({ 'aria-hidden': true } as Record<string, unknown>)}
+              // W16-3 (MF-18): a held slot, nothing to read on a phone either.
+              {...nativeA11yHidden()}
+            >
               {'\u00A0'}
             </Text>
           )}
@@ -4585,26 +4661,28 @@ export default function CommunityPage() {
           >
             <Text style={styles.cardTitle} {...HEADING_2}>Invite people</Text>
             {linkJoinable ? (
-              inviteUrl ? (
+              offerableLink(inviteUrl) ? (
                 <>
                   <Text style={styles.body}>
                     Share this community with people you want to move with.
                   </Text>
                   <View style={styles.inviteActions}>
-                    <Pressable
-                      onPress={onCopyInvite}
-                      style={[styles.secondaryButton, styles.rowButton]}
-                      testID="wsf-community-invite-copy"
-                      accessibilityRole="button"
-                    >
-                      <Text style={[styles.secondaryButtonText, styles.rowButtonText]}>
-                        {copyStatus === 'copied'
-                          ? 'Copied'
-                          : copyStatus === 'failed'
-                            ? 'Copy failed — use the QR code'
-                            : 'Copy invite'}
-                      </Text>
-                    </Pressable>
+                    {offersCopy() ? (
+                      <Pressable
+                        onPress={onCopyInvite}
+                        style={[styles.secondaryButton, styles.rowButton]}
+                        testID="wsf-community-invite-copy"
+                        accessibilityRole="button"
+                      >
+                        <Text style={[styles.secondaryButtonText, styles.rowButtonText]}>
+                          {copyStatus === 'copied'
+                            ? 'Copied'
+                            : copyStatus === 'failed'
+                              ? 'Copy failed — use the QR code'
+                              : 'Copy invite'}
+                        </Text>
+                      </Pressable>
+                    ) : null}
                     {hasShareApi ? (
                       <Pressable
                         onPress={onShareInvite}
@@ -4634,7 +4712,7 @@ export default function CommunityPage() {
                 </>
               ) : (
                 <Text style={styles.cardMeta} testID="wsf-community-invite-pending">
-                  Your invite link isn&apos;t ready yet. Reload the page to try again.
+                  {LINK_COPY.inviteUnavailable}
                 </Text>
               )
             ) : (
@@ -5016,12 +5094,25 @@ const MANAGE_QR_CAVEAT =
 const INVITE_QR_CAVEAT =
   'Scanning opens the join page — whoever scans it still has to sign in and finish setting up an account before they can join.';
 
+/*
+  NATIVE-MEMBER-1 F-4 (MF-06, MF-08 interim). What a missing link says is
+  per platform (src/ui/linkAvailabilityCopy.ts): web copy is unchanged, the
+  app never asks for a page reload, and "Open kiosk" is web-only for now --
+  opened inside a Champion's own app the signed-out kiosk would end their
+  session. The station and combined screens sign nobody out, so their
+  relative "Open …" actions no longer wait for an absolute link to exist.
+*/
+const LINK_COPY = linkAvailabilityCopy(Platform.OS);
+
 const CARD_BORDER = '#E3E7E1';
 const SURFACE_WHITE = wsfTheme.colors.surface;
 
 // Cream at reduced strength on the navy hero: still well above 4.5:1.
 const HERO_MUTED = 'rgba(247,245,240,0.78)';
 const HERO_RULE = 'rgba(247,245,240,0.35)';
+
+/** W16-9: with the keyboard up, the native Manage sheet stops this far below the top inset. */
+const SHEET_TOP_MARGIN = 12;
 
 const styles = StyleSheet.create({
   // HOME-NORTHSTAR-PARITY-1. The reference's page ground (#FBFAF4), the

@@ -1,4 +1,4 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import {
   DEVICE_CHOICE_HEADING,
@@ -84,28 +84,32 @@ export function DeviceChoice({
         */}
         <View style={styles.sheetCard}>
           <Text style={styles.sheetLabel}>{DEVICE_CHOICE_PERSONAL_LABEL}</Text>
-          <Text style={styles.sheetBody}>{DEVICE_CHOICE_PERSONAL_DESCRIPTION}</Text>
+          <Text style={styles.sheetBody} {...nativeHidden()}>
+            {DEVICE_CHOICE_PERSONAL_DESCRIPTION}
+          </Text>
           <Pressable
             onPress={onChoosePersonal}
             style={styles.sheetPrimary}
             testID={`${testID}-personal`}
             accessibilityRole="button"
-            accessibilityLabel={`${DEVICE_CHOICE_PERSONAL_LABEL}. ${DEVICE_CHOICE_PERSONAL_DESCRIPTION}`}
+            {...choiceA11y(SHEET_PERSONAL_ACTION, DEVICE_CHOICE_PERSONAL_DESCRIPTION, `${DEVICE_CHOICE_PERSONAL_LABEL}. ${DEVICE_CHOICE_PERSONAL_DESCRIPTION}`)}
           >
-            <Text style={styles.sheetPrimaryText}>This is my phone</Text>
+            <Text style={styles.sheetPrimaryText}>{SHEET_PERSONAL_ACTION}</Text>
           </Pressable>
         </View>
         <View style={styles.sheetCardQuiet}>
           <Text style={styles.sheetLabel}>{DEVICE_CHOICE_SHARED_LABEL}</Text>
-          <Text style={styles.sheetBody}>{sharedDescription}</Text>
+          <Text style={styles.sheetBody} {...nativeHidden()}>
+            {sharedDescription}
+          </Text>
           <Pressable
             onPress={onChooseShared}
             style={styles.sheetSecondary}
             testID={`${testID}-shared`}
             accessibilityRole="button"
-            accessibilityLabel={`${DEVICE_CHOICE_SHARED_LABEL}. ${sharedDescription}`}
+            {...choiceA11y(SHEET_SHARED_ACTION, sharedDescription, `${DEVICE_CHOICE_SHARED_LABEL}. ${sharedDescription}`)}
           >
-            <Text style={styles.sheetSecondaryText}>We’re sharing this screen</Text>
+            <Text style={styles.sheetSecondaryText}>{SHEET_SHARED_ACTION}</Text>
           </Pressable>
         </View>
         <Text style={kit.caption} testID={`${testID}-note`}>
@@ -146,6 +150,25 @@ export function DeviceChoice({
   );
 }
 
+/** The sheet's two buttons, as they read: the visible words are the native label. */
+const SHEET_PERSONAL_ACTION = 'This is my phone';
+const SHEET_SHARED_ACTION = 'We’re sharing this screen';
+
+/**
+ * W16-3 (MF-18). On a phone a button is read by its label and then its hint,
+ * so the label is the words on the button and the hint is the description;
+ * the description's own Text is hidden there, so it is not read twice. The
+ * web keeps today's single aria-label ("<label>. <description>").
+ */
+function choiceA11y(visible: string, description: string, webLabel: string) {
+  return Platform.OS === 'web'
+    ? { accessibilityLabel: webLabel }
+    : { accessibilityLabel: visible, accessibilityHint: description };
+}
+function nativeHidden() {
+  return Platform.OS === 'web' ? {} : ({ accessible: false, importantForAccessibility: 'no' } as const);
+}
+
 function ChoiceCard({
   label,
   description,
@@ -163,12 +186,12 @@ function ChoiceCard({
       style={[kit.card, styles.choiceCard]}
       testID={testID}
       accessibilityRole="button"
-      accessibilityLabel={`${label}. ${description}`}
+      {...choiceA11y(label, description, `${label}. ${description}`)}
     >
       <Text style={[kit.cardTitle, styles.shrink]} testID={`${testID}-label`}>
         {label}
       </Text>
-      <Text style={[kit.cardMeta, styles.shrink]} testID={`${testID}-description`}>
+      <Text style={[kit.cardMeta, styles.shrink]} testID={`${testID}-description`} {...nativeHidden()}>
         {description}
       </Text>
     </Pressable>

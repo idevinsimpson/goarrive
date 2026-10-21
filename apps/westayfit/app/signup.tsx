@@ -34,6 +34,15 @@ export default function SignUp() {
   const [offerSignIn, setOfferSignIn] = useState(false);
   const emailRef = useRef<TextInput>(null);
   const passwordRef = useRef<TextInput>(null);
+  /*
+    NATIVE-MEMBER-1 W16-1 (MF-13). THE KEYBOARD'S GO/ENTER IS A SUBMIT TOO.
+    The password field's Go (native) and Enter (web: react-native-web turns
+    Enter into onSubmitEditing) call onSubmit directly, past the button's
+    disabled state. So onSubmit carries the guards itself: the same rule the
+    button shows, and a synchronous in-flight latch (a ref, not state: two
+    key presses in one tick both see the old state).
+  */
+  const inFlight = useRef(false);
 
   // Already-signed-in short-circuit — mirror of signin.tsx. A member with a
   // live session landing on /signup would otherwise be handed a form asking
@@ -82,6 +91,8 @@ export default function SignUp() {
   const canSubmit = !!displayName.trim() && !!email.trim() && password.length >= 8;
 
   async function onSubmit() {
+    if (!canSubmit || inFlight.current) return;
+    inFlight.current = true;
     setError(null);
     setOfferSignIn(false);
     setSubmitting(true);
@@ -123,6 +134,11 @@ export default function SignUp() {
       // send round trip). A second replace at this point would pull a member
       // who has since tapped "I have verified" back off profile-setup.
     } catch (e) {
+      // MF-13 review N-1: the latch reopens only for an outcome the member can
+      // retry. A terminal one keeps it shut, so a Go/Enter that lands before
+      // the re-render (while the old closure still reads the old state) cannot
+      // submit again. The account exists once create resolves: success is terminal.
+      inFlight.current = false;
       setError(authErrorMessage(e, 'Sign-up failed.'));
       setOfferSignIn(isEmailAlreadyInUse(e));
     } finally {
