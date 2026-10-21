@@ -162,14 +162,13 @@ export function MovementDemoSlot(props: MovementDemoMediaProps) {
   // shown nothing yet, so it reads as the poster until its own first frame.
   const [shown, setShown] = useState<{ player: VideoPlayer; value: Showing }>({ player, value: 'poster' });
   const showing: Showing = shown.player === player ? shown.value : 'poster';
-  // A call that would change nothing keeps the same state object, so React skips the render.
-  const setShowing = useCallback(
-    (value: Showing) =>
-      setShown((prev) =>
-        prev.player === playerRef.current && prev.value === value ? prev : { player: playerRef.current, value }
-      ),
-    []
-  );
+  // A call that would change nothing keeps the same state object, so React
+  // skips the render. The player is captured when the call is made: React may
+  // run the updater later (at render), when playerRef could already name another.
+  const setShowing = useCallback((value: Showing) => {
+    const forPlayer = playerRef.current;
+    setShown((prev) => (prev.player === forPlayer && prev.value === value ? prev : { player: forPlayer, value }));
+  }, []);
 
   /** The clip may play only while the round runs and someone can see it. */
   const mayPlay = useCallback(

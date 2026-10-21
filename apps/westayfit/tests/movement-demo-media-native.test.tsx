@@ -98,6 +98,12 @@ const ctl = vi.hoisted(() => {
     players: [] as InstanceType<typeof FakePlayer>[],
     videoProps: null as Record<string, any> | null,
     focused: true,
+    /**
+     * Whether unmounting runs the focus cleanup (as expo-router does). Off, it
+     * models a slot whose screen stays focused while the slot goes away with
+     * its focus flag left stale, so `mayPlay()` alone would still say yes.
+     */
+    blurOnUnmount: true,
     focusSubs: new Set<{ focus: () => void; blur: () => void }>(),
     appState: 'active' as string,
     appListeners: new Set<(state: string) => void>(),
@@ -147,7 +153,7 @@ vi.mock('expo-router', async () => {
       ctl.focusSubs.add(sub);
       return () => {
         ctl.focusSubs.delete(sub);
-        if (typeof cleanup === 'function') cleanup();
+        if (ctl.blurOnUnmount && typeof cleanup === 'function') cleanup();
       };
     }, [effect]);
   }
@@ -196,6 +202,7 @@ beforeEach(() => {
   ctl.players.length = 0;
   ctl.videoProps = null;
   ctl.focused = true;
+  ctl.blurOnUnmount = true;
   ctl.focusSubs.clear();
   ctl.appState = 'active';
   ctl.appListeners.clear();
@@ -707,6 +714,9 @@ describe('review follow-ups (#636 round 2)', () => {
     for (const outcome of ['resolve', 'reject'] as const) {
       it(`across unmount: a reload that ${outcome}s afterwards plays nothing, retries nothing, sets nothing`, async () => {
         const errors = errorConsole();
+        // Even with the focus flag left standing (so `mayPlay()` would say yes),
+        // only the reload's own player/alive guard keeps it from playing.
+        ctl.blurOnUnmount = false;
         render('running');
         const p = player();
         p.replaceResult = 'defer';
@@ -733,6 +743,8 @@ describe('review follow-ups (#636 round 2)', () => {
       for (const slot of [false, true]) {
         it(`across a source change (${slot ? 'unkeyed slot' : 'keyed'}): A's reload that ${outcome}s afterwards touches neither A nor B`, async () => {
           const errors = errorConsole();
+          // Keyed, A's slot unmounts: leave its focus flag standing so only the guard can stop a play.
+          ctl.blurOnUnmount = false;
           render('running', false, { poster: POSTER, clip: CLIP, slot });
           const a = player();
           a.replaceResult = 'defer';
@@ -779,6 +791,34 @@ describe('review follow-ups (#636 round 2)', () => {
     const bareBefore = el('fa-demo');
     render('idle', false, { poster: POSTER_B, clip: CLIP_B, slot: true });
     expect(el('fa-demo')).toBe(bareBefore); // unkeyed: the same element, scoped internally
+  });
+
+  it('a showing update is bound to the player it was made for, even if React applies it after a source change (F1)', () => {
+    render('running', false, { poster: POSTER, clip: CLIP, slot: true });
+    const a = player();
+    emit('playingChange', { isPlaying: true });
+    firstFrame();
+    expect(state()).toBe('playing');
+    // In ONE batch: A reports playing again (a 'playing' update made for A), and the source changes to B.
+    act(() => {
+      a.emit('playingChange', { isPlaying: true });
+      root.render(
+        <MovementDemoSlot
+          posterUri={POSTER_B}
+          clipUri={CLIP_B}
+          label="Movement guide: squats."
+          playback="running"
+          reducedMotion={false}
+          imageStyle={{ width: 240, height: 240 }}
+          fallback={null}
+          testIDPrefix="fa"
+        />
+      );
+    });
+    // B has shown no frame: A's update must not make B read as playing.
+    expect(player()).not.toBe(a);
+    expect(state()).toBe('poster');
+    expect(el('fa-poster')?.getAttribute('data-uri')).toBe(POSTER_B);
   });
 
   it('a showing update that changes nothing does not re-render the slot (R2-636-6)', () => {
