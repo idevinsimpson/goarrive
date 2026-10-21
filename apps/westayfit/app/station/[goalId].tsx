@@ -3,7 +3,6 @@ import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -62,7 +61,8 @@ import { FollowAlongCard } from '../../src/ui/FollowAlongCard';
 import { kit } from '../../src/ui/kit';
 import { LivingWeProgress } from '../../src/ui/LivingWeProgress';
 import { formatCount, percentLabel, statusLine } from '../../src/ui/progressFormat';
-import { encodeQr, qrSvgDataUriRaw } from '../../src/ui/qr';
+import { encodeQr, renderQrSvg } from '../../src/ui/qr';
+import { SvgMarkup } from '../../src/ui/SvgMarkup';
 import { WsfWordmark } from '../../src/ui/WsfWordmark';
 
 /**
@@ -178,12 +178,13 @@ type StationStateResponse = {
 const QR_SIZE_PHONE = 168;
 const QR_SIZE_WIDE = 232;
 
-/** The symbol, or null when the encoder refuses the string. Never a partial
- * symbol: a truncated QR scans cleanly and sends the scanner somewhere wrong. */
-function qrUri(url: string | null): string | null {
+/** The symbol's RAW markup (drawn by SvgMarkup, W12-19), or null when the
+ * encoder refuses the string. Never a partial symbol: a truncated QR scans
+ * cleanly and sends the scanner somewhere wrong. */
+function qrMarkup(url: string | null): string | null {
   if (!url) return null;
   try {
-    return qrSvgDataUriRaw(encodeQr(url), { dark: wsfTheme.colors.primary, light: '#FFFFFF' });
+    return renderQrSvg(encodeQr(url), { dark: wsfTheme.colors.primary, light: '#FFFFFF' });
   } catch {
     return null;
   }
@@ -893,11 +894,11 @@ export default function StationScreen() {
     activity: unit,
   });
   const joinBare = buildEventJoinUrlFromScreenedCode({ origin, joinCode, goalId });
-  const joinPreferredQr = qrUri(joinWithActivity);
+  const joinPreferredQr = qrMarkup(joinWithActivity);
   const joinUrl = joinPreferredQr ? joinWithActivity : joinBare;
-  const joinQr = joinPreferredQr ?? qrUri(joinBare);
+  const joinQr = joinPreferredQr ?? qrMarkup(joinBare);
   const eventUrl = buildEventUrl({ origin, goalId });
-  const eventQr = qrUri(eventUrl);
+  const eventQr = qrMarkup(eventUrl);
 
   return (
     <StationSurface
@@ -1281,10 +1282,9 @@ export default function StationScreen() {
           {joinQr && joinUrl ? (
             <View style={styles.qrBlock} testID="wsf-station-qr-join" dataSet={{ qrUrl: joinUrl }}>
               <Text style={styles.qrHeading}>New here?</Text>
-              <Image
-                source={{ uri: joinQr }}
+              <SvgMarkup
+                markup={joinQr}
                 style={[styles.qrImage, { width: qrSize, height: qrSize }]}
-                resizeMode="contain"
                 accessibilityLabel="QR code that opens the page to join this community"
                 testID="wsf-station-qr-join-image"
               />
@@ -1309,10 +1309,9 @@ export default function StationScreen() {
           {turnRunningWide ? null : eventQr && eventUrl ? (
             <View style={styles.qrBlock} testID="wsf-station-qr-member" dataSet={{ qrUrl: eventUrl }}>
               <Text style={styles.qrHeading}>Already a member?</Text>
-              <Image
-                source={{ uri: eventQr }}
+              <SvgMarkup
+                markup={eventQr}
                 style={[styles.qrImage, { width: qrSize, height: qrSize }]}
-                resizeMode="contain"
                 accessibilityLabel="QR code that opens this event on your own phone"
                 testID="wsf-station-qr-member-image"
               />

@@ -42,7 +42,7 @@
 import { useLocalSearchParams } from 'expo-router';
 import { httpsCallable } from 'firebase/functions';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Image, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 import { type GoalPulse } from '../../src/displayPulse';
 import { getFirebaseFunctions } from '../../src/firebase';
@@ -60,7 +60,8 @@ import { ButtonLink } from '../../src/ui/ButtonLink';
 import { readEventParam } from '../../src/ui/eventLinks';
 import { FollowAlongCard } from '../../src/ui/FollowAlongCard';
 import { kit } from '../../src/ui/kit';
-import { encodeQr, qrSvgDataUriRaw } from '../../src/ui/qr';
+import { encodeQr, renderQrSvg } from '../../src/ui/qr';
+import { SvgMarkup } from '../../src/ui/SvgMarkup';
 import { ScreenTopSpacer } from '../../src/ui/useScreenTopInset';
 import { WsfWordmark } from '../../src/ui/WsfWordmark';
 
@@ -185,10 +186,13 @@ export default function MoveScreen() {
 
   const handoffHref = moveHandoffHref({ goalId, roundId, groupId: groupIdHint });
   const handoffUrl = moveHandoffUrl({ origin, goalId, roundId, groupId: groupIdHint });
-  const qrUri = useMemo(() => {
+  // W12-19 (MF-05): the RAW markup, drawn by SvgMarkup. On a phone an SVG data
+  // URI in <Image> is an empty box; on the web SvgMarkup is the same <Image>
+  // with the same raw data URI, style, label and testID as before.
+  const qrMarkup = useMemo(() => {
     if (!handoffUrl) return null;
     try {
-      return qrSvgDataUriRaw(encodeQr(handoffUrl), {
+      return renderQrSvg(encodeQr(handoffUrl), {
         dark: wsfTheme.colors.primary,
         light: '#FFFFFF',
       });
@@ -243,12 +247,11 @@ export default function MoveScreen() {
       <Text style={kit.cardTitle} testID="wsf-move-panel-status">
         {session.statusLine}
       </Text>
-      {qrUri ? (
+      {qrMarkup ? (
         <>
-          <Image
-            source={{ uri: qrUri }}
+          <SvgMarkup
+            markup={qrMarkup}
             style={styles.qr}
-            resizeMode="contain"
             accessibilityLabel="QR code: open this round’s entry page on your own phone."
             testID="wsf-move-panel-qr"
           />
