@@ -219,10 +219,18 @@ describe('W16-3 (b), (c), INT-18 in Community Home (wiring)', () => {
     const at = src.indexOf('aria-pressed={chosen}');
     expect(src.slice(at, at + 400)).toContain("{...(Platform.OS !== 'web' ? { accessibilityState: { selected: chosen } } : {})}");
   });
-  it('(c) the visible stale sentence and the held nbsp slot are hidden natively', () => {
+  // heads-9 B-1: natively the region is neither live nor visible, so its copy
+  // is the one hidden; the visible sentence stays browsable. Rendered on iOS
+  // and the web in tests/stale-figure-browse.test.tsx.
+  it('(c) the stale region\'s copy and the held nbsp slot are hidden natively; the visible stale sentence is not', () => {
     expect(src.match(/\{\.\.\.nativeA11yHidden\(\)\}/g)).toHaveLength(2);
+    const region = src.indexOf('testID={`wsf-community-goal-stale-status-${goal.goalId}`}');
+    expect(src.slice(region, region + 500)).toContain('<Text {...nativeA11yHidden()}>{STALE_FIGURE_SENTENCE}</Text>');
     const stale = src.indexOf('testID={`wsf-community-goal-stale-${goal.goalId}`}');
-    expect(src.slice(stale, stale + 600)).toContain('{...nativeA11yHidden()}');
+    const visible = src.slice(stale, src.indexOf('</Text>', stale));
+    expect(visible).toContain('{STALE_FIGURE_SENTENCE}');
+    expect(visible).not.toContain('nativeA11yHidden');
+    expect(visible).toContain("{...({ 'aria-hidden': true } as Record<string, unknown>)}");
     const nbsp = src.indexOf("{'\\u00A0'}");
     expect(src.slice(nbsp - 400, nbsp)).toContain('{...nativeA11yHidden()}');
   });

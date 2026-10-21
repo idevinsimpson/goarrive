@@ -2929,9 +2929,17 @@ export default function CommunityPage() {
           whenever a figure is — empty, and out of the layout (absolute, one
           pixel, so the healthy hero does not move by the stack's gap) — and
           the sentence is put INTO it when a read fails. Retry is outside it,
-          so the announcement is the sentence alone. The visible copy of the
+          so the announcement is the sentence alone.
+
+          THE REGION SPEAKS ON THE WEB ONLY. There the visible copy of the
           sentence is hidden from assistive technology, because the region
-          already reads it in the same place.
+          reads it in the same place. On a phone the region is not live (W16-3:
+          StaleAnnouncer speaks the sentence once per failure instead), and an
+          opacity-0, one-pixel box is skipped by VoiceOver and TalkBack, so it
+          is the region's copy that is hidden there, and the visible sentence
+          stays where a screen reader can browse to it (heads-9 B-1). A member
+          who interrupts the announcement, or comes back to the card later,
+          still finds it beside the figure.
         */}
         <View
           style={styles.visuallyHidden}
@@ -2940,7 +2948,8 @@ export default function CommunityPage() {
           // on a phone, where StaleAnnouncer speaks the sentence instead.
           {...liveRegion}
         >
-          {p.refreshFailed ? <Text>{STALE_FIGURE_SENTENCE}</Text> : null}
+          {/* B-1: natively a hidden duplicate of the visible sentence. */}
+          {p.refreshFailed ? <Text {...nativeA11yHidden()}>{STALE_FIGURE_SENTENCE}</Text> : null}
         </View>
         <StaleAnnouncer failed={p.refreshFailed === true} />
         {p.refreshFailed ? (
@@ -2950,9 +2959,9 @@ export default function CommunityPage() {
           >
             <Text
               style={onDark ? styles.heroLastKnownText : styles.cardMeta}
+              // The web's region reads it; React Native's Text ignores
+              // aria-hidden, so on a phone this is the browsable copy (B-1).
               {...({ 'aria-hidden': true } as Record<string, unknown>)}
-              // W16-3 (MF-18): read once, by the announcement, not again here.
-              {...nativeA11yHidden()}
             >
               {STALE_FIGURE_SENTENCE}
             </Text>
