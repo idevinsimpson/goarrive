@@ -1,11 +1,35 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Platform, StyleSheet, Text, View } from 'react-native';
+import {
+  AccessibilityInfo,
+  Animated,
+  AppState,
+  Platform,
+  StyleSheet,
+  Text,
+  View,
+  type LayoutChangeEvent,
+} from 'react-native';
 
 import type { TogetherPresentation } from '../contributionFlow';
 import { LivingWeProgress } from './LivingWeProgress';
-import { percentLabel, statusLine, totalOfTargetParts } from './progressFormat';
+import { percentLabel, statusLine, totalOfTargetLabel, totalOfTargetParts } from './progressFormat';
 import { runTogetherMotion, TOGETHER_COLORS } from './togetherMotion';
-import { useReducedMotion } from './useReducedMotion';
+import {
+  createNativeTogetherRun,
+  startTogetherNativeMotion,
+  TogetherNativeLayer,
+  type NativeTogetherRun,
+} from './togetherMotionNative';
+import {
+  decideTogetherPhase,
+  isMeasured,
+  NATIVE_START_DEADLINE_MS,
+  nextTogetherPhase,
+  settlesAtDeadline,
+  settlesOnAppState,
+  type TogetherPhase,
+} from './togetherPhase';
+import { useReducedMotionPreference } from './useReducedMotion';
 
 /**
  * TOGETHER-COMPLETION-1 — the owner-selected completion on the confirmed
@@ -24,7 +48,56 @@ import { useReducedMotion } from './useReducedMotion';
  *
  * TEST IDS ARE THE RECEIPT'S OWN. The heading, payoff, amount, shared total,
  * percent and status keep the ids every existing receipt spec reads.
+ *
+ * NATIVE-MOTION-1. iOS and Android play the same timeline as the web
+ * (togetherMotionNative.tsx, from togetherMotion.ts's numbers). Native differs
+ * only in how it reaches the same one decision (togetherPhase.ts): it waits —
+ * showing the trusted before ratio, moving nothing — until the reduced-motion
+ * preference has been read and the stage is measured, then plays or settles;
+ * anything not ready within NATIVE_START_DEADLINE_MS settles. Leaving the
+ * foreground settles it for good. The web path is unchanged.
+ *
+ * NATIVE ANNOUNCEMENT. The web container is an `aria-live` region (the
+ * screen's). On native that region is off and this receipt announces itself
+ * ONCE, at mount, with the confirmed amount and the confirmed shared total —
+ * never a figure from the tween.
  */
+export function togetherAnnouncement(o: {
+  eyebrow: string;
+  amountText: string;
+  unit: string | null;
+  shared: { total: number; target: number; unit: string } | null;
+}): string {
+  const amount = `${o.eyebrow}: ${o.amountText}${o.unit ? ` ${o.unit}` : ''}.`;
+  if (!o.shared) return amount;
+  return `${amount} Shared total: ${totalOfTargetLabel(o.shared.total, o.shared.target, o.shared.unit)}.`;
+}
+
+/**
+ * EXACTLY ONCE PER RECEIPT (native), BY RECEIPT IDENTITY. The owner knows which
+ * receipt this is and whether it has been announced; it says so with
+ * `announce` and is told with `onAnnounced` — the same shape as `fresh` /
+ * `onFreshConsumed`. Nothing is remembered here between instances, so two
+ * receipts on screen at once (two stacked contribute routes) are each
+ * announced, whatever their figures, and a remount of an announced receipt is
+ * silent because its owner has already been told.
+ *
+ * Spoken only while the app is in the foreground: a receipt that appears
+ * while it is in the background or inactive waits for the first `active`
+ * (a screen reader drops speech posted while the app is not active). Still
+ * one call; unmounting first cancels it and leaves the receipt unannounced.
+ */
+function speakAnnouncement(message: string): void {
+  const withOptions = (AccessibilityInfo as { announceForAccessibilityWithOptions?: unknown })
+    .announceForAccessibilityWithOptions;
+  if (typeof withOptions === 'function') {
+    // Queued behind current speech on iOS; React Native routes Android to its plain announce.
+    AccessibilityInfo.announceForAccessibilityWithOptions(message, { queue: true });
+  } else {
+    AccessibilityInfo.announceForAccessibility(message);
+  }
+}
+
 export function TogetherCompletion({
   presentation: p,
   eyebrow,
@@ -37,6 +110,8 @@ export function TogetherCompletion({
   actions,
   fresh,
   onFreshConsumed,
+  announce,
+  onAnnounced,
   windowWidth,
   windowHeight,
 }: {
@@ -53,26 +128,67 @@ export function TogetherCompletion({
   actions: ReactNode;
   fresh: boolean;
   onFreshConsumed: () => void;
+  /**
+   * Native only: whether THIS receipt still has to be announced. The owner
+   * keeps it per receipt (true until `onAnnounced`), so a remount is silent.
+   * Read once, at mount.
+   */
+  announce: boolean;
+  /** Called once, when the announcement has actually been spoken. */
+  onAnnounced: () => void;
   windowWidth: number;
   windowHeight: number;
 }) {
-  const reduced = useReducedMotion();
+  const preference = useReducedMotionPreference();
+  const reduced = preference.reduced;
+  const web = Platform.OS === 'web';
   const short = windowHeight < 700;
 
-  // ONE decision, at mount. Later prop changes cannot start it again.
-  const [phase, setPhase] = useState<'playing' | 'settled'>(() =>
-    fresh && p.animate && Platform.OS === 'web' && !reduced ? 'playing' : 'settled'
+  // Everything the one decision and the native run use, AS IT WAS AT MOUNT.
+  // The owner clears `fresh` the moment it is consumed (and `p.animate` with
+  // it), so a native receipt still waiting on its preference must not re-read
+  // them; and the story and ratios it plays are the ones it appeared with.
+  const mountedWith = useRef({
+    fresh,
+    animate: p.animate,
+    crossed: p.crossed,
+    fromRatio: p.fromRatio,
+    toRatio: p.toRatio,
+  }).current;
+
+  // ONE decision, at mount. Later prop changes cannot start it again; native
+  // may only defer it (`pending`) until the reduced-motion answer arrives.
+  const [phase, setPhase] = useState<TogetherPhase>(() =>
+    decideTogetherPhase({
+      fresh,
+      animate: p.animate,
+      reducedKnown: preference.known,
+      reduced,
+      reducedFailed: preference.failed,
+      platform: Platform.OS,
+      appActive: web || !settlesOnAppState(AppState.currentState),
+    })
   );
   const [displayRatio, setDisplayRatio] = useState<number | null>(() =>
-    phase === 'playing' ? p.fromRatio : null
+    phase === 'settled' ? null : mountedWith.fromRatio
   );
   const consumedRef = useRef(false);
   // Whether this instance was ELIGIBLE when it appeared. The owner clears
   // `fresh` the moment it is consumed, so later renders must not read it.
-  const eligibleAtMount = useRef(fresh && p.animate).current;
+  const eligibleAtMount = mountedWith.fresh && mountedWith.animate;
   const cancelRef = useRef<((finish: boolean) => void) | null>(null);
   const stageRef = useRef<View>(null);
   const markRef = useRef<View>(null);
+  // Native only: the measured stage and mark, and whether the motion started.
+  const stageSize = useRef<{ width: number; height: number } | null>(null);
+  const markFrame = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
+  const [measured, setMeasured] = useState(false);
+  const startedRef = useRef(false);
+  // Native only: the one run, built once at the measured → playing transition.
+  const [nativeRun, setNativeRun] = useState<NativeTogetherRun | null>(null);
+  const builtRef = useRef(false);
+  const phaseRef = useRef(phase);
+  phaseRef.current = phase;
 
   useEffect(() => {
     if (fresh && !consumedRef.current) {
@@ -87,10 +203,51 @@ export function TogetherCompletion({
     cancelRef.current = null;
     setDisplayRatio(null);
     setPhase('settled');
+    setNativeRun(null);
   }, []);
 
+  // NATIVE: announce the confirmed receipt exactly once (the web's live region
+  // does this there). Whether it is still owed is the owner's fact, read at
+  // mount; this instance guards itself against React's development
+  // double-invoke. Independent of the motion: a receipt that never moves is
+  // announced the same way. Not spoken until the app is active.
+  const announceAtMount = useRef(announce).current;
+  const announcedRef = useRef(false);
+  const latestReceipt = useRef({ eyebrow, amountText, unit, shared });
+  latestReceipt.current = { eyebrow, amountText, unit, shared };
   useEffect(() => {
-    if (phase !== 'playing') return;
+    if (web || !announceAtMount || announcedRef.current) return undefined;
+    const speak = () => {
+      if (announcedRef.current) return;
+      announcedRef.current = true;
+      try {
+        speakAnnouncement(togetherAnnouncement(latestReceipt.current));
+      } catch {
+        // Announcing is a courtesy; the receipt is on screen either way.
+      }
+      onAnnounced();
+    };
+    if (!settlesOnAppState(AppState.currentState)) {
+      speak();
+      return undefined;
+    }
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'active') speak();
+    });
+    return () => sub?.remove?.();
+    // Mount only: the receipt is announced when it appears, not on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Settle now, from wherever this instance is: a running motion is stopped
+  // through its own cancel (final ratio, then settle); a waiting one settles.
+  const finishNow = useCallback(() => {
+    if (cancelRef.current) cancelRef.current(true);
+    else settle();
+  }, [settle]);
+
+  useEffect(() => {
+    if (phase !== 'playing' || !web) return;
     const stage = stageRef.current as unknown as HTMLElement | null;
     const mark = markRef.current as unknown as HTMLElement | null;
     if (!stage || !mark || typeof document === 'undefined') {
@@ -118,13 +275,139 @@ export function TogetherCompletion({
 
   // Reduced motion switched ON while playing settles THIS instance for good;
   // switching it OFF later finds a settled instance and replays nothing.
+  // (Native: also an instance still waiting for its layout.)
   useEffect(() => {
-    if (reduced && cancelRef.current) cancelRef.current(true);
+    if (!reduced) return;
+    if (cancelRef.current) cancelRef.current(true);
+    else if (!web && phaseRef.current !== 'settled') settle();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reduced]);
+
+  // NATIVE: the deferred half of the one decision. Only `pending` moves, and
+  // only on the mount-time eligibility: reduced → settled, not → playing.
+  useEffect(() => {
+    if (phase !== 'pending') return;
+    const next = nextTogetherPhase(phase, {
+      fresh: mountedWith.fresh,
+      animate: mountedWith.animate,
+      reducedKnown: preference.known,
+      reduced: preference.reduced,
+      reducedFailed: preference.failed,
+      platform: Platform.OS,
+      appActive: !settlesOnAppState(AppState.currentState),
+    });
+    if (next === 'settled') settle();
+    else if (next !== phase) setPhase(next);
+  }, [phase, preference.known, preference.reduced, preference.failed, mountedWith, settle]);
+
+  // NATIVE: the stage and the mark measure themselves; the motion needs both,
+  // and a zero or near-zero box is not a measurement (the deadline settles).
+  const onStageLayout = useCallback((e: LayoutChangeEvent) => {
+    const { width, height } = e.nativeEvent.layout;
+    stageSize.current = isMeasured({ width, height }) ? { width, height } : null;
+    if (stageSize.current && markFrame.current) setMeasured(true);
+  }, []);
+  const onMarkLayout = useCallback((e: LayoutChangeEvent) => {
+    const { x, y, width, height } = e.nativeEvent.layout;
+    markFrame.current = isMeasured({ width, height }) ? { x, y, width, height } : null;
+    if (stageSize.current && markFrame.current) setMeasured(true);
+  }, []);
+  const measuring = !web && phase !== 'settled';
+
+  // NATIVE: one run per instance, built ONCE when it is both playing and
+  // measured (as the web measures at its start), from the mount-time story.
+  // A run that cannot be built settles: the receipt is complete without it.
+  useEffect(() => {
+    if (web || phase !== 'playing' || !measured || builtRef.current) return;
+    const stage = stageSize.current;
+    const mark = markFrame.current;
+    if (!stage || !mark) return;
+    builtRef.current = true;
+    try {
+      setNativeRun(
+        createNativeTogetherRun({
+          crossed: mountedWith.crossed,
+          width: stage.width,
+          height: stage.height,
+          centerX: mark.x + mark.width / 2,
+          centerY: mark.y + mark.height / 2,
+          markWidth: mark.width,
+          markHeight: mark.height,
+        })
+      );
+    } catch {
+      settle();
+    }
+  }, [web, phase, measured, mountedWith, settle]);
+
+  useEffect(() => {
+    if (!nativeRun) return;
+    let cancel: (finish: boolean) => void;
+    try {
+      cancel = startTogetherNativeMotion({
+        run: nativeRun,
+        from: mountedWith.fromRatio,
+        to: mountedWith.toRatio,
+        onRatio: (ratio) => setDisplayRatio(ratio),
+        onSettled: settle,
+      });
+    } catch {
+      settle();
+      return;
+    }
+    startedRef.current = true;
+    cancelRef.current = cancel;
+    // Close, route exit and unmount stop every animation, timer and frame.
+    return () => {
+      cancel(false);
+      cancelRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nativeRun]);
+
+  // NATIVE: anything not moving by the deadline settles instead of starting late.
+  useEffect(() => {
+    if (web || phase === 'settled') return;
+    const timer = setTimeout(() => {
+      if (settlesAtDeadline(phaseRef.current, startedRef.current)) finishNow();
+    }, NATIVE_START_DEADLINE_MS);
+    return () => clearTimeout(timer);
+    // Mount only: the deadline is measured from the moment the receipt appeared.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // NATIVE: leaving the foreground settles for good; coming back replays nothing.
+  const settledNow = phase === 'settled';
+  useEffect(() => {
+    if (web || settledNow) return;
+    // Already out of the foreground when this subscribes: settle now, not on the next change.
+    if (settlesOnAppState(AppState.currentState)) {
+      finishNow();
+      return;
+    }
+    const sub = AppState.addEventListener('change', (next) => {
+      if (settlesOnAppState(next)) finishNow();
+    });
+    return () => sub?.remove?.();
+  }, [web, settledNow, finishNow]);
 
   const columnWidth = Math.min(windowWidth, 430);
   const markWidth = Math.max(160, Math.min(columnWidth - 48, short ? 214 : 332));
   const lines = p.payoffLines;
+  // The run is rendered only while this instance is playing.
+  const playingRun = phase === 'playing' ? nativeRun : null;
+  const we = shared ? (
+    <LivingWeProgress
+      completed={shared.total}
+      target={shared.target}
+      unit={shared.unit}
+      width={markWidth}
+      surface="dark"
+      unfilledTint={TOGETHER_COLORS.unfilled}
+      displayRatio={displayRatio}
+      testID="wsf-contribute-we"
+    />
+  ) : null;
 
   return (
     <View
@@ -146,7 +429,7 @@ export function TogetherCompletion({
         </View>
       ) : null}
 
-      <View ref={stageRef} style={styles.stage}>
+      <View ref={stageRef} style={styles.stage} onLayout={measuring ? onStageLayout : undefined}>
         <View style={styles.effort}>
           <Text style={styles.eyebrow}>{eyebrow}</Text>
           <Text style={[styles.amount, short ? styles.amountShort : null]} testID="wsf-contribute-result-amount">
@@ -159,17 +442,19 @@ export function TogetherCompletion({
         </View>
 
         {shared ? (
-          <View ref={markRef} style={[styles.mark, short ? styles.markShort : null, { width: markWidth }]} testID="wsf-together-mark">
-            <LivingWeProgress
-              completed={shared.total}
-              target={shared.target}
-              unit={shared.unit}
-              width={markWidth}
-              surface="dark"
-              unfilledTint={TOGETHER_COLORS.unfilled}
-              displayRatio={displayRatio}
-              testID="wsf-contribute-we"
-            />
+          <View
+            ref={markRef}
+            style={[styles.mark, short ? styles.markShort : null, { width: markWidth }]}
+            testID="wsf-together-mark"
+            onLayout={measuring ? onMarkLayout : undefined}
+          >
+            {web ? (
+              we
+            ) : (
+              // Native: the pulse scales this wrapper (the web animates the mark itself).
+              // Always present on native, so starting or ending the pulse never remounts the WE.
+              <Animated.View style={playingRun ? playingRun.styles.pulse : undefined}>{we}</Animated.View>
+            )}
           </View>
         ) : null}
 
@@ -180,6 +465,9 @@ export function TogetherCompletion({
         >
           {lines ? `${lines[0]}\n${lines[1]}` : p.payoff}
         </Text>
+
+        {/* Native: the web canvas's layer, on top of the stage, only while playing. */}
+        {playingRun ? <TogetherNativeLayer run={playingRun} /> : null}
       </View>
 
       {shared ? (
