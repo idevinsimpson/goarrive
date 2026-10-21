@@ -55,7 +55,11 @@
  * two hours on a phone. A join of any OTHER code never sees it. (2) Records
  * written by the build before this format (bare values) are discarded at
  * deploy: somebody mid-sign-up across the deploy lands on the community they
- * joined rather than the event.
+ * joined rather than the event. (3) A consumed context survives if the
+ * device refuses its removal twice and the overwrite — or refuses one removal
+ * while a newer write lands that the device also refuses (that write counts
+ * as newer, so the discard stops). It can then apply once more to a later
+ * join of the same code, within the expiry.
  *
  * FORMAT: `{"goalId":…,"joinCode":…}` and
  * `{"activity":…,"goalId":…,"joinCode":…}`, plus `"owner":…` when an account
@@ -216,9 +220,11 @@ const NO_CONTEXT: JoinEventContext = { goalId: null, activity: null };
  *
  * Waits for the native launch read (immediate on web), reads the event and its
  * activity for the account that just joined AND for the code it just joined
- * with — the activity only if it belongs to that event — and discards BOTH in
- * the same breath whatever they held, so the context is consumed once: a
- * second call, a later join or another account finds nothing. A context from
+ * with — the activity only if it belongs to that event — and discards BOTH
+ * whatever they held, so the context is consumed once: a later call, a later
+ * join or another account finds nothing. (Two takes running at the same
+ * moment can both read it before either discards; the join route takes it
+ * once per join.) A context from
  * another join code, a code-less leftover, one that belongs to another
  * account, or an activity without its event, is not applied — it is discarded
  * with the rest and never routes.

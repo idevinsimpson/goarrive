@@ -359,3 +359,87 @@ describe('#639 N1/N2 (delta review)', () => {
     expect(m.dm.readDeviceMode()).toBe('personal');
   });
 });
+
+describe('#639 follow-up: newer writes are decided by write generation, not value', () => {
+  function refuseRemovalsWhile(during: () => void) {
+    const real = disk.api.removeItem;
+    let first = true;
+    disk.api.removeItem = async () => {
+      if (first) {
+        first = false;
+        during();
+      }
+      throw new Error('storage refused the removal');
+    };
+    return () => {
+      disk.api.removeItem = real;
+    };
+  }
+
+  it('an IDENTICAL re-stash that lands during a refused removal survives (own-phone after a shared drop)', async () => {
+    let m = await launch();
+    await scan(m, G1, 'Squats');
+    m = await launch();
+    await m.pad.postAuthDestinationsReady();
+    const mm = m;
+    const restore = refuseRemovalsWhile(() => {
+      // The very same record, stashed again.
+      void mm.je.setPendingEventGoal(G1, CODE, null);
+    });
+    try {
+      await m.je.dropJoinJourney();
+    } finally {
+      restore();
+    }
+    await new Promise((r) => setTimeout(r, 0));
+    expect(m.je.readPendingEventGoal(null, CODE)).toBe(G1);
+    m = await launch();
+    expect((await m.je.takeJoinEventContext(A, CODE)).goalId).toBe(G1);
+  });
+
+  it('the SAME device answer given again during a refused removal is not overwritten with "forgotten"', async () => {
+    let m = await launch();
+    await m.dm.saveDeviceMode('shared');
+    m = await launch();
+    await m.dm.deviceModeReady();
+    const mm = m;
+    const restore = refuseRemovalsWhile(() => {
+      void mm.dm.saveDeviceMode('shared');
+    });
+    try {
+      await m.dm.clearDeviceMode();
+    } finally {
+      restore();
+    }
+    await new Promise((r) => setTimeout(r, 0));
+    m = await launch();
+    await m.dm.deviceModeReady();
+    expect(m.dm.readDeviceMode()).toBe('shared');
+  });
+
+  it('the TIMEOUT path still discards: a read that answers after the wait is consumed, not left for a later join', async () => {
+    let m = await launch();
+    await scan(m, G1, 'Squats');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const realGet = disk.api.getItem;
+    disk.api.getItem = async (key: string) => {
+      await new Promise((r) => setTimeout(r, 3_000));
+      return realGet(key);
+    };
+    try {
+      m = await launch();
+      let answer: unknown = 'waiting';
+      void m.je.takeJoinEventContextWithin(A, CODE).then((c) => (answer = c));
+      await vi.advanceTimersByTimeAsync(m.je.JOIN_CONTEXT_WAIT_MS + 10);
+      expect(answer).toEqual({ goalId: null, activity: null });
+      await vi.advanceTimersByTimeAsync(12_000);
+      expect(disk.map.has(EVENT_KEY)).toBe(false);
+      expect(disk.map.has(ACTIVITY_KEY)).toBe(false);
+    } finally {
+      disk.api.getItem = realGet;
+    }
+    vi.useRealTimers();
+    m = await launch();
+    expect(await m.je.takeJoinEventContext(A, CODE)).toEqual({ goalId: null, activity: null });
+  });
+});
