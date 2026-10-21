@@ -30,8 +30,8 @@ const CONTRIBUTE_SITES: Record<string, Site> = {
   'wsf-contribute-pending': { owner: 'state', ticket: 'W13-4', note: 'pending / unknown' },
   'wsf-contribute-restore-failed': { owner: 'state', ticket: 'W13-4', note: 'the stored attempt could not be read' },
   'wsf-contribute-receipt': { owner: 'state', ticket: 'W13-4', note: 'the receipts (the Together receipt speaks itself on native)' },
-  'wsf-kiosk-countdown': { owner: 'state', ticket: 'W13-4', note: 'the kiosk countdown' },
-  'wsf-kiosk-finish-error': { owner: 'state', ticket: 'W13-4', note: 'the kiosk sign-out failure' },
+  'wsf-kiosk-countdown': { owner: 'state', ticket: 'W13-4b', note: 'the kiosk countdown' },
+  'wsf-kiosk-finish-error': { owner: 'state', ticket: 'W13-4b', note: 'the kiosk sign-out failure' },
   'wsf-contribute-adjust-value': { owner: 'camera', ticket: 'W15', note: 'the adjust value' },
 };
 
