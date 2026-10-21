@@ -108,10 +108,18 @@ vi.mock('expo-router', () => {
 vi.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
+// The shell's measurements and routes, as the tabs import them (the real
+// module draws the bar). Kept to the shell's surface so a tab that starts
+// using another of its exports does not throw here: on the integrated tree
+// Community reserves its bottom space through tabContentBottomReserve.
 vi.mock('../src/ui/MemberTabBar', () => ({
   MEMBER_TAB_BAR_BODY: 56,
   MEMBER_TAB_MOVE_OVERHANG: 16,
   MOVE_HREF: '/move',
+  MEMBER_TABS: [],
+  tabContentBottomReserve: (safeBottom: number) => 56 + 16 + safeBottom,
+  shellAppliesTo: () => false,
+  MemberTabBar: () => null,
 }));
 vi.mock('../src/ui/CommunityPrivacyControls', () => ({
   onPrivacySettled: () => () => undefined,
