@@ -1,23 +1,37 @@
-import { act, useEffect, type ReactNode } from 'react';
+import { act, useEffect, useState, type ComponentType, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
  * INT-28 (W12-14) — Android Back from a lone cold-link route goes Home, and a
  * link to nothing gets this app's own screen. The pure decision
- * (src/ui/coldBack.ts), the root layout's listener (app/_layout.tsx, rendered
- * under a stand-in navigation container whose own Back listener is
- * registered in its effect, as React Navigation's is) and app/+not-found.tsx.
- * BackHandler is a fake that calls the newest listener first, as Android does.
+ * (src/ui/coldBack.ts), the root layout's listener (app/_layout.tsx) and
+ * app/+not-found.tsx. BackHandler is a fake that calls the newest listener
+ * first, as Android does.
+ *
+ * THE MOUNT ORDER IS expo-router 6's (RV13-641-F2). The navigation container
+ * stand-in registers its Back listener in commit 1 and renders its children
+ * only in a later commit (on Android the initial URL is a Promise, and the
+ * safe-area provider renders nothing until the native insets arrive). The
+ * route is a screen whose own Back handler registers through an expo-router-
+ * like focus effect, deferred until its navigation object is set in a passive
+ * effect, as expo-router's useFocusEffect is (INT-19 on the contribution
+ * screen). So the real order Android calls them in is screen → cold-back →
+ * container.
  */
 
 const ctl = vi.hoisted(() => ({
   os: 'android' as 'ios' | 'android' | 'web',
   listeners: [] as Array<() => boolean>,
   rootState: null as unknown,
-  canGoBack: false,
   calls: [] as string[],
   dispatched: [] as unknown[],
+  /** Who was asked, in order, on the last Back. */
+  asked: [] as string[],
+  /** The route the root Stack renders (a stand-in screen), or none. */
+  screen: null as null | ComponentType,
+  /** Whether that screen's own Back handler consumes the press (INT-19). */
+  screenConsumes: false,
 }));
 
 vi.mock('react-native', async () => {
@@ -42,14 +56,21 @@ vi.mock('react-native', async () => {
 
 vi.mock('expo-router', async () => {
   const React = await import('react');
-  // The root layout's own navigation object: its screen in expo-router's internal root navigator.
+  // The root layout's own navigation object: its screen in expo-router's
+  // internal root navigator. Only the cold-back listener reads it on Back.
   const navigation = {
-    getState: () => ctl.rootState,
+    getState: () => {
+      ctl.asked.push('cold-back');
+      return ctl.rootState;
+    },
     dispatch: (a: unknown) => ctl.dispatched.push(a),
   };
-  const Stack = Object.assign(({ children }: { children?: ReactNode }) => React.createElement(React.Fragment, null, children), {
-    Screen: () => null,
-  });
+  // The root Stack renders its focused route (the test's stand-in screen).
+  const Stack = Object.assign(
+    ({ children }: { children?: ReactNode }) =>
+      React.createElement(React.Fragment, null, children, ctl.screen ? React.createElement(ctl.screen) : null),
+    { Screen: () => null },
+  );
   return {
     Stack,
     useNavigation: () => navigation,
@@ -77,7 +98,7 @@ vi.mock('../src/ui/RouteErrorFallback', () => ({ nativeErrorBoundary: () => unde
 vi.mock('../src/ui/useReducedMotion', () => ({ useReducedMotion: () => false }));
 vi.mock('../src/ui/useScreenTopInset', () => ({ useScreenTopInset: () => 0 }));
 
-import { COLD_BACK_ROUTES, coldBackHandler, coldBackReset } from '../src/ui/coldBack';
+import { appRootState, COLD_BACK_ROUTES, coldBackHandler, coldBackReset } from '../src/ui/coldBack';
 import { SIGNED_OUT_HOME_RESET } from '../src/ui/signOutReset';
 
 const { default: RootLayout } = await import('../app/_layout');
@@ -92,9 +113,11 @@ beforeEach(() => {
   ctl.os = 'android';
   ctl.listeners = [];
   ctl.rootState = container_(lone('settings'));
-  ctl.canGoBack = false;
   ctl.calls = [];
   ctl.dispatched = [];
+  ctl.asked = [];
+  ctl.screen = null;
+  ctl.screenConsumes = false;
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -177,62 +200,136 @@ describe('coldBackReset', () => {
   });
 });
 
-/** Stands in for the navigation container ABOVE the root layout: its Back listener goes in its own effect. */
+/**
+ * Stands in for expo-router 6's navigation container ABOVE the root layout. Its
+ * Back listener (useBackButton, called before its early return) goes in in
+ * commit 1, while it renders nothing; the children (the root layout and its
+ * routes) render in a later commit.
+ */
 function NavigationContainerStandIn({ children }: { children?: ReactNode }) {
+  const [ready, setReady] = useState(false);
   useEffect(() => {
-    // React Navigation: go back if anything can, else let the next listener decide.
+    // React Navigation: go back if the app's Stack has anything under its top route.
     const h = () => {
-      if (!ctl.canGoBack) return false;
+      ctl.asked.push('container');
+      if ((appRootState(ctl.rootState as never)?.routes?.length ?? 0) < 2) return false;
       ctl.calls.push('react-navigation goBack');
+      return true;
+    };
+    ctl.listeners.push(h);
+    const t = setTimeout(() => setReady(true), 0);
+    return () => {
+      clearTimeout(t);
+      ctl.listeners = ctl.listeners.filter((x) => x !== h);
+    };
+  }, []);
+  return ready ? <>{children}</> : null;
+}
+
+/**
+ * A route with its own Back handler, registered as expo-router's useFocusEffect
+ * does it (INT-19 on the contribution screen): only once the navigation object
+ * has been set, in a passive effect, so a commit after the screen mounts.
+ */
+function ScreenWithBackHandler() {
+  const [navigation, setNavigation] = useState<object | null>(null);
+  useEffect(() => setNavigation({}), []);
+  useEffect(() => {
+    if (!navigation) return undefined;
+    const h = () => {
+      ctl.asked.push('screen');
+      if (!ctl.screenConsumes) return false;
+      ctl.calls.push('screen handles Back');
       return true;
     };
     ctl.listeners.push(h);
     return () => {
       ctl.listeners = ctl.listeners.filter((x) => x !== h);
     };
-  }, []);
-  return <>{children}</>;
+  }, [navigation]);
+  return null;
 }
 
 /** Android's hardware Back: the newest listener first, until one returns true. */
 function pressBack(): boolean {
+  ctl.asked = [];
   for (const h of [...ctl.listeners].reverse()) if (h()) return true;
   return false;
 }
 
-const showLayout = () =>
-  act(() =>
-    root.render(
-      <NavigationContainerStandIn>
-        <RootLayout />
-      </NavigationContainerStandIn>,
-    ),
-  );
-
-describe('the root layout’s Back listener (Android only, lowest priority)', () => {
-  it('Android: registered once, before the navigation container’s, so React Navigation’s own Back runs first', () => {
-    vi.useFakeTimers();
-    showLayout();
-    // Anything deferred has run too: the order below is the final one.
+/** Mounts the tree in expo-router's order: the container's commit 1, then everything deferred. */
+function showLayout() {
+  vi.useFakeTimers();
+  try {
+    act(() =>
+      root.render(
+        <NavigationContainerStandIn>
+          <RootLayout />
+        </NavigationContainerStandIn>,
+      ),
+    );
+    // Commit 1: the container's listener, and nothing rendered under it yet.
+    expect(ctl.listeners).toHaveLength(1);
     act(() => vi.runAllTimers());
+  } finally {
     vi.useRealTimers();
-    expect(ctl.listeners).toHaveLength(2);
-    ctl.canGoBack = true;
-    expect(pressBack()).toBe(true);
-    expect(ctl.calls).toEqual(['react-navigation goBack']);
+  }
+}
+
+describe('the root layout’s Back listener (Android only), in expo-router’s real mount order', () => {
+  it('Android: registered once, after the container’s and before the screen’s, so it is asked second: screen → cold-back → container', () => {
+    ctl.screen = ScreenWithBackHandler;
+    ctl.rootState = container_(lone('kiosk/[goalId]')); // nobody consumes: everyone is asked
+    showLayout();
+    expect(ctl.listeners).toHaveLength(3);
+    expect(pressBack()).toBe(false);
+    expect(ctl.asked).toEqual(['screen', 'cold-back', 'container']);
     expect(ctl.dispatched).toEqual([]);
   });
 
-  it('Android: nothing to go back to on a lone cold Settings → reset to Home, and the press is consumed', () => {
+  it('Android: a screen’s own handler (INT-19 on a cold, lone contribution) decides first; cold-back is never asked', () => {
+    ctl.screen = ScreenWithBackHandler;
+    ctl.screenConsumes = true;
+    ctl.rootState = container_(lone('contribute/[goalId]', { goalId: 'g1' }));
     showLayout();
     expect(pressBack()).toBe(true);
-    expect(ctl.dispatched).toEqual([RESET_TO_STACK]);
+    expect(ctl.asked).toEqual(['screen']);
+    expect(ctl.calls).toEqual(['screen handles Back']);
+    expect(ctl.dispatched).toEqual([]);
   });
 
-  it('Android: nothing to go back to on a kiosk → Back leaves as Android expects', () => {
+  it('Android: the screen passes on a lone cold Settings → cold-back resets to Home and consumes the press; React Navigation is not reached', () => {
+    ctl.screen = ScreenWithBackHandler;
+    showLayout();
+    expect(pressBack()).toBe(true);
+    expect(ctl.asked).toEqual(['screen', 'cold-back']);
+    expect(ctl.dispatched).toEqual([RESET_TO_STACK]);
+    expect(ctl.calls).toEqual([]);
+  });
+
+  it('Android: anything under the top route (depth > 1, even over an allowlisted route) → cold-back passes and React Navigation goes back', () => {
+    ctl.screen = ScreenWithBackHandler;
+    for (const stack of [
+      { key: 'stack-root', index: 1, routes: [{ name: 'join/[joinCode]' }, { name: 'signin' }] },
+      { key: 'stack-root', index: 1, routes: [{ name: '(tabs)' }, { name: 'settings' }] },
+    ]) {
+      ctl.rootState = container_(stack);
+      ctl.calls = [];
+      showLayout();
+      expect(pressBack()).toBe(true);
+      expect(ctl.asked).toEqual(['screen', 'cold-back', 'container']);
+      expect(ctl.calls).toEqual(['react-navigation goBack']);
+      expect(ctl.dispatched).toEqual([]);
+      act(() => root.unmount());
+      root = createRoot(container);
+    }
+  });
+
+  it('Android: a lone kiosk, with nothing under it → nobody consumes, and Back leaves as Android expects', () => {
     ctl.rootState = container_(lone('kiosk/[goalId]'));
     showLayout();
     expect(pressBack()).toBe(false);
+    expect(ctl.asked).toEqual(['cold-back', 'container']);
     expect(ctl.dispatched).toEqual([]);
   });
 
@@ -249,6 +346,7 @@ describe('the root layout’s Back listener (Android only, lowest priority)', ()
 
   it('unmounting removes it', () => {
     showLayout();
+    expect(ctl.listeners).toHaveLength(2);
     act(() => root.unmount());
     root = createRoot(container);
     expect(ctl.listeners).toHaveLength(0);

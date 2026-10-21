@@ -177,6 +177,8 @@ export function shellAppliesTo(pathname: string, params?: ShellRouteParams): boo
  */
 /** The MOVE label's cap on a phone: it sits in a fixed circle, so it grows less than the labels (W12-8). */
 const MOVE_TEXT_CAP = 1.1;
+/** The raised MOVE circle's radius (62 / 2), for its round Android ripple. */
+const MOVE_RADIUS = 31;
 
 export function MemberTabBar({ state, navigation, insets, onMove }: BottomTabBarProps & { onMove: () => void }) {
   const { width, fontScale } = useWindowDimensions();
@@ -218,7 +220,8 @@ export function MemberTabBar({ state, navigation, insets, onMove }: BottomTabBar
       ref={moveRef}
       onPress={onMove}
       // W12-17 (INT-33): pressed feedback on a phone; the web's style is unchanged.
-      {...pressableStyle(styles.move, ACTION_GREEN_DEEP)}
+      // RV14-641-N2: a round ripple, the circle's own radius, not its square bounds.
+      {...pressableStyle(styles.move, ACTION_GREEN_DEEP, { borderless: true, radius: MOVE_RADIUS })}
       testID="wsf-member-tab-move"
       accessibilityRole="button"
       accessibilityLabel="Move: record what you did"
@@ -419,9 +422,9 @@ const styles = StyleSheet.create({
     // Raised ABOVE the bar's top edge, which is what makes it read as the
     // product's one action rather than a fifth destination.
     marginTop: -24,
-    width: 62,
-    height: 62,
-    borderRadius: 31,
+    width: MOVE_RADIUS * 2,
+    height: MOVE_RADIUS * 2,
+    borderRadius: MOVE_RADIUS,
     backgroundColor: ACTION_GREEN,
     alignItems: 'center',
     justifyContent: 'center',

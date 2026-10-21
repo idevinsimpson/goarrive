@@ -39,6 +39,70 @@ vi.mock('expo-router', () => ({
   Link: ({ children }: { children?: unknown }) => children,
 }));
 vi.mock('../src/firebase', () => ({ getFirebaseFunctions: () => ({}), getFirebaseAuth: () => ({}), wsfIsStaging: false }));
+/*
+  W12-C11. The route's FollowAlongCard draws the media lane's MovementDemoMedia,
+  which on a composed tree imports expo-video (its native module cannot load
+  in jsdom). Mocked at that boundary in the media lane's own shape
+  (tests/movement-demo-media-native.test.tsx): one player per source, the
+  previous released on a source change and the last on unmount, a VideoView
+  that draws a plain element, and no createVideoPlayer. Here the clip is
+  never the subject, so the player only takes and ignores its calls.
+*/
+vi.mock('expo-video', async () => {
+  const React = await import('react');
+  class FakePlayer {
+    loop = false;
+    muted = false;
+    volume = 1;
+    audioMixingMode = 'auto';
+    staysActiveInBackground = true;
+    showNowPlayingNotification = true;
+    allowsExternalPlayback = true;
+    keepScreenOnWhilePlaying = true;
+    timeUpdateEventInterval = 1;
+    status = 'idle';
+    currentTime = 0;
+    source: unknown;
+    constructor(source: unknown) {
+      this.source = source;
+    }
+    play() {}
+    pause() {}
+    release() {}
+    replace(source: unknown) {
+      this.source = source;
+    }
+    replaceAsync(source: unknown) {
+      this.source = source;
+      return Promise.resolve();
+    }
+    addListener() {
+      return { remove: () => undefined };
+    }
+  }
+  function useVideoPlayer(source: unknown, setup?: (p: FakePlayer) => void) {
+    const key = JSON.stringify(source ?? null);
+    const ref = React.useRef<{ key: string; player: FakePlayer } | null>(null);
+    if (!ref.current || ref.current.key !== key) {
+      ref.current?.player.release();
+      const player = new FakePlayer(source);
+      setup?.(player);
+      ref.current = { key, player };
+    }
+    React.useEffect(() => () => ref.current?.player.release(), []);
+    return ref.current.player;
+  }
+  function VideoView(props: Record<string, unknown>) {
+    return React.createElement('div', { 'data-testid': props.testID as string | undefined });
+  }
+  return {
+    useVideoPlayer,
+    VideoView,
+    createVideoPlayer: () => {
+      throw new Error('createVideoPlayer must not be used');
+    },
+  };
+});
 const pulse = vi.hoisted(() => ({ answer: (): Promise<unknown> => new Promise(() => undefined) }));
 vi.mock('firebase/functions', () => ({
   httpsCallable: () => async () => ({ data: await pulse.answer() }),

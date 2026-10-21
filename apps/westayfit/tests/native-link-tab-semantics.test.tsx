@@ -41,7 +41,14 @@ vi.mock('expo-router', () => ({
     links.props.push(props);
     const { href, asChild, children, style: _style, testID, ...rest } = props;
     if (asChild && isValidElement(children)) {
-      return cloneElement(children as ReactElement<{ onPress?: () => void }>, { onPress: () => router.push(href) });
+      // As expo-router's Slot does (RV14-641-N5): the child's own onPress runs, then the Link's navigation.
+      const child = children as ReactElement<{ onPress?: (e: unknown) => void }>;
+      return cloneElement(child, {
+        onPress: (e: unknown) => {
+          child.props.onPress?.(e);
+          router.push(href);
+        },
+      });
     }
     return (
       <a href={href} data-testid={testID as string} {...rest}>
@@ -72,7 +79,8 @@ vi.mock('../src/memberReads', () => ({
   readGoals: async () => ({ goals: [] }),
 }));
 
-const { Dimensions, StyleSheet } = await import('react-native');
+const { Dimensions, Pressable, StyleSheet } = await import('react-native');
+const { OPTION_SELECTED_TINT, PRESSED } = await import('../src/ui/kit');
 const { default: Home } = await import('../app/(tabs)/(home)/index');
 const { MemberTabBar } = await import('../src/ui/MemberTabBar');
 
@@ -84,6 +92,14 @@ const settle = async () => {
 };
 type Fiber = { type: unknown; return: Fiber | null; alternate: Fiber | null; memoizedProps: Record<string, unknown> };
 /** The props of the component that rendered `el` (react-native-web drops the phone's props from the DOM). */
+/** The props the Pressable that rendered `el` was given. */
+function pressableOf(el: Element): Record<string, unknown> {
+  const own = el as unknown as Record<string, unknown>;
+  const fiberKey = Object.keys(el).find((k) => k.startsWith('__reactFiber$'))!;
+  let fiber = own[fiberKey] as Fiber;
+  while (fiber && fiber.type !== Pressable) fiber = fiber.return as Fiber;
+  return fiber.memoizedProps;
+}
 function propsOf(el: Element): Record<string, unknown> {
   const own = el as unknown as Record<string, unknown>;
   const fiberKey = Object.keys(el).find((k) => k.startsWith('__reactFiber$'))!;
@@ -118,9 +134,19 @@ describe('W12-10 (INT-22): Home\'s community card', () => {
     const card = byId('wsf-home-community-oak')!;
     const props = propsOf(card);
     expect(props.accessibilityRole).toBe('link');
-    expect(props.accessibilityLabel).toBe('Oak Grove Together, No goal running yet, Open');
+    // Name, the meta line (RV14-641-N4), status, action: what the card shows, in its order.
+    expect(props.accessibilityLabel).toBe('Oak Grove Together, 3 members, No goal running yet, Open');
+    expect(card.textContent).toContain('3 members');
     // A sample community says so in its label, as its title does.
-    expect(propsOf(byId('wsf-home-community-harbor')!).accessibilityLabel).toBe('Harbor Lunch Crew, Sample, No goal running yet, Open');
+    expect(propsOf(byId('wsf-home-community-harbor')!).accessibilityLabel).toBe('Harbor Lunch Crew, Sample, 5 members, No goal running yet, Open');
+    // RV14-641-N3: press feedback. The content dims while pressed; Android adds its ripple.
+    const pressable = pressableOf(card);
+    expect(typeof pressable.children).toBe('function');
+    const at = (pressed: boolean) => (pressable.children as (s: { pressed: boolean }) => { props: { style: unknown } })({ pressed }).props.style;
+    expect(at(true)).toBe(PRESSED);
+    expect(at(false)).toBeNull();
+    if (os === 'android') expect(pressable.android_ripple).toEqual({ color: OPTION_SELECTED_TINT });
+    else expect(pressable.android_ripple).toBeUndefined();
     // The card is a view: no text styles on it.
     expect(StyleSheet.flatten(props.style as never)).not.toHaveProperty('textDecorationLine');
     const oakLink = links.props.find((p) => p.href === '/community/oak')!;

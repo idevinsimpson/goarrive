@@ -101,7 +101,7 @@ import {
 import { wsfTheme } from '../../src/theme';
 import { PROGRESS_GREEN } from '../../src/ui/brandAssets';
 import { SignInLink } from '../../src/ui/SignInLink';
-import { formatClock } from '../../src/ui/dates';
+import { formatConfirmedAt } from '../../src/ui/dates';
 import { LivingWeProgress } from '../../src/ui/LivingWeProgress';
 import { TogetherCompletion } from '../../src/ui/TogetherCompletion';
 import { TOGETHER_COLORS } from '../../src/ui/togetherMotion';
@@ -573,11 +573,13 @@ export default function ContributeToGoal() {
   // W12-2 (INT-25, native): the last load failed while the screen was warm.
   const [refreshFailed, setRefreshFailed] = useState(false);
   /*
-    RV12-641-5 (native): the last load failed because the sign-in could not be
-    refreshed (Auth unreachable), so every request since has gone out without
-    a token. Only then is a heal tick's refusal not a verdict (RV11-641-1);
-    after any other failure the ticks are authorized and a not-found stands.
-    Set with that failure, cleared by any authorized answer, like the note.
+    RV12-641-5 (native): a load's sign-in refresh could not reach Auth, so the
+    requests since may go out without a token. While it is set, a heal tick's
+    refusal is not a verdict (RV11-641-1); when it was never set (an ordinary
+    failure with a good token) an authorized not-found stands. Set with that
+    failure; cleared only by an authorized answer (a load, a tick, a receipt)
+    or a new context. RV14-641-1: a later failure in transport (an internal
+    or deadline answer) says nothing about the token, so it does not clear it.
   */
   const signInOfflineRef = useRef(false);
   // W12-2 (ST-06, native): this load has already refreshed the sign-in once.
@@ -1022,8 +1024,6 @@ export default function ContributeToGoal() {
           setState(loadError);
           return;
         }
-        // RV12-641-5: no read said "unauthenticated", so the token was good; the ticks are authorized.
-        signInOfflineRef.current = false;
         failTransiently();
       }
     })();
@@ -1151,8 +1151,9 @@ export default function ContributeToGoal() {
           screen and forgetting the community on that would be ST-06's own
           scenario made worse. No authorized read has landed since, so the kept
           figures and their note stay, and a Retry's full load decides.
-          RV12-641-5: only then. After any other failure the ticks carry a
-          token, and an authorized not-found ends the screen as below.
+          RV12-641-5: only then. When no refresh has failed (an ordinary
+          failure with a good token), an authorized not-found ends the screen
+          as below; a later transport failure keeps the guard (RV14-641-1).
         */
         if (Platform.OS !== 'web' && signInOfflineRef.current) return;
         // A refusal is not transient: the server has decided this member no
@@ -1313,9 +1314,11 @@ export default function ContributeToGoal() {
         again. After a warm load failed and no tick has landed, pulseAt is
         still null; without this, clearing the note above would stop the
         pulse poll (and its foreground return) for the rest of the screen's
-        life. Only a missing time is filled.
+        life. Only a missing time is filled, and only on a phone (RV14-641-1,
+        f03e909e track): the web has no refreshFailed term, so its poll gate
+        and its "Confirmed" line stay exactly as they were.
       */
-      setPulseAt((prev) => prev ?? new Date());
+      if (Platform.OS !== 'web') setPulseAt((prev) => prev ?? new Date());
       // Ready for the next fresh attempt.
       attemptRef.current = null;
       setEntry('');
@@ -2432,9 +2435,15 @@ export default function ContributeToGoal() {
               <Text style={styles.anchorStaleRetryText}>Retry</Text>
             </Pressable>
           </View>
-        ) : pulseAt && !anchorShort ? (
+        ) : null}
+        {/*
+          W12-6 (INT-12): the confirmed time names its day when it is not
+          today, and after a refresh that did not land it reads "Last
+          confirmed" beside the note above.
+        */}
+        {pulseAt && !anchorShort ? (
           <Text style={styles.anchorUpdated} testID="wsf-contribute-context-updated">
-            {`Confirmed ${formatClock(pulseAt)}`}
+            {formatConfirmedAt(pulseAt, new Date(), { failed: refreshFailed })}
           </Text>
         ) : null}
       </View>
@@ -2460,7 +2469,7 @@ export default function ContributeToGoal() {
         {pending != null && pending > 0 ? (
           <>
             <Text style={styles.yoursArrow}>→</Text>
-            <Text style={styles.yoursNext} testID="wsf-contribute-your-part-next">
+            <Text style={styles.yoursNext} testID="wsf-contribute-your-part-next" {...numeralTextProps}>
               {formatCount(anchorOwnCredit + pending)}
             </Text>
           </>
@@ -2632,7 +2641,7 @@ export default function ContributeToGoal() {
               <View style={styles.tile}>
                 <Text style={styles.tileLabel}>Your addition</Text>
                 {/* The exact number recorded -- theirs, not the community's. */}
-                <Text style={styles.tileValue} testID="wsf-contribute-result-amount">
+                <Text style={styles.tileValue} testID="wsf-contribute-result-amount" {...numeralTextProps}>
                   {r.alreadyRecorded ? formatCount(r.addedCount) : `+${formatCount(r.addedCount)}`}
                 </Text>
               </View>
@@ -2640,7 +2649,7 @@ export default function ContributeToGoal() {
                   and the figure are one line for every reader and spec. */}
               <View style={styles.tile} testID="wsf-contribute-own-credit">
                 <Text style={styles.tileLabel}>{'Your total on this goal: '}</Text>
-                <Text style={styles.tileValue}>
+                <Text style={styles.tileValue} {...numeralTextProps}>
                   {formatCount(r.ownCredit)}
                   {ownUnit ? <Text style={styles.tileUnit}>{` ${ownUnit}`}</Text> : null}
                 </Text>
@@ -2664,7 +2673,7 @@ export default function ContributeToGoal() {
                       {context.kind === 'verified' ? `Shared total · ${context.goalTitle}` : 'Shared total'}
                     </Text>
                     <Text style={styles.sharedTotal} testID="wsf-contribute-shared-total">
-                      <Text style={styles.sharedCount}>
+                      <Text style={styles.sharedCount} {...numeralTextProps}>
                         {totalOfTargetParts(r.sharedTotal, r.target, r.unit).count}
                       </Text>
                       {' '}
@@ -3056,7 +3065,7 @@ export default function ContributeToGoal() {
             />
           </View>
           <View style={styles.heroFacts}>
-            <Text style={styles.heroTotal} testID="wsf-contribute-shared-total">
+            <Text style={styles.heroTotal} testID="wsf-contribute-shared-total" {...numeralTextProps}>
               {totalOfTargetLabel(pulse.sharedTotal, pulse.target, unit)}
             </Text>
             {/*
@@ -3392,6 +3401,8 @@ export default function ContributeToGoal() {
             <Text
               style={[styles.timerClock, windowHeight < 700 ? styles.timerClockShort : null]}
               testID="wsf-contribute-timer-clock"
+              // INT-16: the policy's cap and shrink-to-fit on a phone; nothing on the web.
+              {...numeralTextProps}
             >
               {formatElapsed(timerElapsed)}
             </Text>

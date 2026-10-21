@@ -40,10 +40,16 @@ export default function RootLayout() {
     // A test build's injected timer / rejection faults (src/crashHarness.ts).
     fireAsyncCrashFaults();
     // INT-28 (W12-14): Android Back from a lone cold-link route goes Home
-    // (src/ui/coldBack.ts). Registered here, once: this effect runs before the
-    // navigation container's (a parent's effects run after its children's),
-    // and Android calls the newest listener first, so React Navigation's own
-    // Back runs first and this only when it has nothing to go back to.
+    // (src/ui/coldBack.ts). Registered here, once. expo-router's navigation
+    // container registers its own Back listener a commit EARLIER (it renders
+    // nothing until the initial URL and the safe-area insets have arrived),
+    // and Android calls the newest listener first, so this one is called
+    // BEFORE React Navigation's Back. That is safe: it consumes the press only
+    // when the root stack is one lone allowlisted route, which React
+    // Navigation cannot pop; with anything under it, it passes and React
+    // Navigation goes back. A screen's own handler registered through
+    // expo-router's useFocusEffect (INT-19 on the contribution screen)
+    // registers later still, so it runs first.
     if (Platform.OS !== 'android') return undefined;
     const sub = BackHandler.addEventListener('hardwareBackPress', coldBackHandler(navigation as never));
     return () => sub.remove();

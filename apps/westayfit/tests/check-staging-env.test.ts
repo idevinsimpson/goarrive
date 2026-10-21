@@ -64,7 +64,8 @@ const envEntries = (dir: string) =>
     .sort()
     .map((name) => {
       const st = lstatSync(join(dir, name));
-      return { name, ino: st.ino, size: st.size, mtimeMs: st.mtimeMs };
+      // RV14-641-1: the mode too, so a chmod is seen as well as a write.
+      return { name, ino: st.ino, size: st.size, mtimeMs: st.mtimeMs, mode: st.mode };
     });
 const APP_ENV_BEFORE = envEntries(APP_ROOT);
 
@@ -83,11 +84,21 @@ for (const name of [...EXPO_FILES, '.env.development.local']) writeFileSync(join
 const REPOS = realpathSync(mkdtempSync(join(tmpdir(), 'wsf-check-staging-env-repos-')));
 const REPO = join(REPOS, 'repo');
 const SIBLING = join(REPOS, 'sibling');
+/*
+  RV14-641-3. git hands a hook run in a linked worktree GIT_DIR and
+  GIT_INDEX_FILE as absolute paths. Inherited, they would send the fixture's
+  init, add, commit and worktree add into the owner's repository. So the
+  fixture's git gets the script's own scrubbed environment (gitEnv: no GIT_*,
+  absolute PATH entries only, the C locale) and no system or global config.
+*/
+type Env = Record<string, string | undefined>;
+const fixtureGitEnv = (env: Env): Env => ({ ...gitEnv(env), GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' });
 const fixtureGit = (cwd: string, ...args: string[]) => {
   const r = spawnSync(
     'git',
     ['-c', 'user.name=wsf-test', '-c', 'user.email=wsf-test@example.invalid', '-c', 'commit.gpgsign=false', '-c', 'init.defaultBranch=main', '-c', 'core.hooksPath=/dev/null', ...args],
-    { cwd, encoding: 'utf8', env: { ...process.env, LC_ALL: 'C', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' } },
+    // (The cast only satisfies this project's NODE_ENV typing; gitEnv keeps NODE_ENV when it is set.)
+    { cwd, encoding: 'utf8', env: fixtureGitEnv(process.env) as NodeJS.ProcessEnv },
   );
   if (r.status !== 0) throw new Error(`git ${args.join(' ')} failed`);
 };
@@ -472,67 +483,404 @@ describe('RV9-641-I11: files in other work trees, and the env files Expo loads',
   });
 
   /*
-    SEC-F1, widened for RV12-641-3. Every call that writes, links, renames,
-    removes, opens, copies onto or changes the mode or times of a path, by
-    name whether called bare or as a property (fs.rmSync,
-    require('node:fs').rmSync, promises.writeFile), with every path argument
-    it changes (both of a rename or a hard link). A path argument offends when
-    its text, or the declaration of any name in it (followed through
-    aliases), mentions the app directory.
+    SEC-F1 as an allowlist (RV14-641-1, after RV12-641-3). The scan watches
+    every call that writes, links, renames, removes, opens, copies onto, makes
+    a temporary directory at, or changes the mode or times of a path; every
+    child process; and process.chdir. It finds a watched call by its name:
+    bare, as a property (fs.rmSync, require('node:fs').rmSync,
+    promises.writeFile), under a string key (fs['rmSync']), through a renamed
+    import or destructuring ({ rmSync: zap }), a local alias
+    (const f = fs.rmSync), .bind, .call, .apply or Reflect.apply.
+
+    Every path such a call changes must resolve to one of this file's own
+    temporary roots: a mkdtempSync under tmpdir() (or under a root), or
+    join/resolve of a root, or a `${root}/…` template, with segments that
+    neither climb ('..') nor restart ('/'). Names are followed by the
+    checker's own scopes, through every declaration and assignment; loop
+    variables through their lists; a local function's parameters through
+    every call site (a recursive call is the induction step). Anything else
+    offends: a relative path (vitest runs in the app directory), process.cwd(),
+    import.meta.url, a URL, a callback's parameter or that of a function used
+    as a value, a spread argument, a path appended to.
+
+    A child process needs a cwd that is a root, and a command and arguments
+    that are roots or plain words (no '..', no absolute path but /dev/null, no
+    ~, $ or backquote), except node running this script, its copy or its
+    link. process.chdir always offends.
+
+    Not modelled: what a child process or the script under test does, code
+    built from strings, and a write that follows a link this file made into
+    the app directory (it makes those only to read through them; the afterAll
+    snapshot, which now records modes, sees a change after the fact).
   */
   const PATH_ARGS: Record<string, number[]> = {
     writeFileSync: [0], appendFileSync: [0], unlinkSync: [0], mkdirSync: [0], rmdirSync: [0], rmSync: [0], truncateSync: [0],
-    openSync: [0], createWriteStream: [0], chmodSync: [0], chownSync: [0], utimesSync: [0], lchownSync: [0], lutimesSync: [0],
-    symlinkSync: [1], linkSync: [0, 1], renameSync: [0, 1], copyFileSync: [1], cpSync: [1],
+    openSync: [0], createWriteStream: [0], chmodSync: [0], chownSync: [0], utimesSync: [0], lchownSync: [0], lutimesSync: [0], lchmodSync: [0],
+    symlinkSync: [1], linkSync: [0, 1], renameSync: [0, 1], copyFileSync: [1], cpSync: [1], mkdtempSync: [0],
     writeFile: [0], appendFile: [0], unlink: [0], mkdir: [0], rmdir: [0], rm: [0], truncate: [0], open: [0], chmod: [0], chown: [0],
-    utimes: [0], symlink: [1], link: [0, 1], rename: [0, 1], copyFile: [1], cp: [1],
+    utimes: [0], lchown: [0], lutimes: [0], lchmod: [0], symlink: [1], link: [0, 1], rename: [0, 1], copyFile: [1], cp: [1], mkdtemp: [0],
   };
-  const APP_NAMES = new Set(['APP_ROOT', 'SCRIPT', '__dirname', '__filename']);
+  const CHILD = new Set(['spawn', 'spawnSync', 'exec', 'execSync', 'execFile', 'execFileSync', 'fork']);
+  const watched = (name: string) => Object.prototype.hasOwnProperty.call(PATH_ARGS, name) || CHILD.has(name) || name === 'chdir';
+  type Mode = 'path' | 'segment' | 'number';
+  type Watched = { name: string; args: readonly ts.Expression[] | null };
+
   function appWrites(source: string): { calls: number; offenders: string[] } {
-    const sf = ts.createSourceFile('t.ts', source, ts.ScriptTarget.Latest, true);
-    // Every declared name and the expressions it is set from (every declaration of the name, any scope: the strict reading).
-    const inits = new Map<string, ts.Expression[]>();
-    const add = (name: string, init: ts.Expression) => inits.set(name, [...(inits.get(name) ?? []), init]);
-    const collect = (node: ts.Node) => {
-      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) add(node.name.text, node.initializer);
-      // `for (const f of [join(APP_ROOT, …)])`: the loop variable comes from the list.
-      if (ts.isForOfStatement(node) && ts.isVariableDeclarationList(node.initializer)) {
-        for (const d of node.initializer.declarations) if (ts.isIdentifier(d.name)) add(d.name.text, node.expression);
+    // A one-file program, so that names resolve by their real scopes (no library, no import followed).
+    const fileName = '/scan/t.ts';
+    const host: ts.CompilerHost = {
+      getSourceFile: (f, target) => (f === fileName ? ts.createSourceFile(f, source, target, true) : undefined),
+      getDefaultLibFileName: () => '/scan/lib.d.ts',
+      writeFile: () => undefined,
+      getCurrentDirectory: () => '/scan',
+      getCanonicalFileName: (f) => f,
+      useCaseSensitiveFileNames: () => true,
+      getNewLine: () => '\n',
+      fileExists: (f) => f === fileName,
+      readFile: () => undefined,
+    };
+    const program = ts.createProgram({ rootNames: [fileName], options: { noLib: true, noResolve: true, types: [] }, host });
+    const sf = program.getSourceFile(fileName)!;
+    const checker = program.getTypeChecker();
+    const symbolOf = (id: ts.Identifier) =>
+      ts.isShorthandPropertyAssignment(id.parent) && id.parent.name === id ? checker.getShorthandAssignmentValueSymbol(id.parent) : checker.getSymbolAtLocation(id);
+    const strip = (e: ts.Expression): ts.Expression =>
+      ts.isParenthesizedExpression(e) || ts.isAsExpression(e) || ts.isNonNullExpression(e) || ts.isSatisfiesExpression(e) || ts.isTypeAssertionExpression(e) ? strip(e.expression) : e;
+
+    // Every assignment to a name (and whether it appends), every name a destructuring assignment or a bare loop target sets (opaque), every reference.
+    const assignments = new Map<ts.Symbol, Array<{ rhs: ts.Expression; compound: boolean }>>();
+    const opaque = new Set<ts.Symbol>();
+    const refs = new Map<ts.Symbol, ts.Identifier[]>();
+    const taint = (node: ts.Node): void => {
+      const sym = ts.isIdentifier(node) ? symbolOf(node) : undefined;
+      if (sym) opaque.add(sym);
+      ts.forEachChild(node, taint);
+    };
+    const collect = (node: ts.Node): void => {
+      if (ts.isIdentifier(node) && !(ts.isPropertyAccessExpression(node.parent) && node.parent.name === node)) {
+        const sym = symbolOf(node);
+        if (sym) refs.set(sym, [...(refs.get(sym) ?? []), node]);
       }
+      if (ts.isBinaryExpression(node) && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment) {
+        const sym = ts.isIdentifier(node.left) ? symbolOf(node.left) : undefined;
+        if (sym) assignments.set(sym, [...(assignments.get(sym) ?? []), { rhs: node.right, compound: node.operatorToken.kind !== ts.SyntaxKind.EqualsToken }]);
+        else if (!ts.isPropertyAccessExpression(node.left) && !ts.isElementAccessExpression(node.left)) taint(node.left);
+      }
+      if ((ts.isForOfStatement(node) || ts.isForInStatement(node)) && !ts.isVariableDeclarationList(node.initializer)) taint(node.initializer);
       ts.forEachChild(node, collect);
     };
     collect(sf);
-    /** Whether a path expression can reach the app directory: its names, followed through their declarations. */
-    const reachesApp = (expr: ts.Node, seen: Set<string>): boolean => {
-      if (ts.isIdentifier(expr)) {
-        if (APP_NAMES.has(expr.text)) return true;
-        if (seen.has(expr.text)) return false;
-        seen.add(expr.text);
-        return (inits.get(expr.text) ?? []).some((init) => reachesApp(init, seen));
-      }
-      if (ts.isStringLiteral(expr) || ts.isNoSubstitutionTemplateLiteral(expr) || ts.isNumericLiteral(expr)) return false;
-      // A call's callee is not a path (join, mkdtempSync …); its arguments may be. A property's name is not a name.
-      if (ts.isCallExpression(expr)) return expr.arguments.some((a) => reachesApp(a, seen));
-      if (ts.isPropertyAccessExpression(expr)) return reachesApp(expr.expression, seen);
-      let found = false;
-      ts.forEachChild(expr, (child) => {
-        found ||= reachesApp(child, seen);
-      });
-      return found;
+
+    const ids = new Map<ts.Symbol, number>();
+    const idOf = (sym: ts.Symbol) => {
+      if (!ids.has(sym)) ids.set(sym, ids.size);
+      return ids.get(sym)!;
     };
+    const busy = new Set<string>();
+    // A name met again while it is being resolved adds nothing new; its other sources decide (a recursive call is the induction step).
+    const guard = (key: string, run: () => boolean): boolean => {
+      if (busy.has(key)) return true;
+      busy.add(key);
+      try {
+        return run();
+      } finally {
+        busy.delete(key);
+      }
+    };
+
+    /** A module function's name (join, path.join, tmpdir …): an import, an unbound global or a property of one; never a local of that name. */
+    const imported = (sym: ts.Symbol | undefined) =>
+      !sym || ((sym.declarations ?? []).length > 0 && sym.declarations!.every((d) => ts.isImportSpecifier(d) || ts.isImportClause(d) || ts.isNamespaceImport(d)));
+    const moduleFn = (raw: ts.Expression): string | null => {
+      const e = strip(raw);
+      if (ts.isIdentifier(e)) {
+        const sym = symbolOf(e);
+        return imported(sym) ? (sym?.declarations?.find(ts.isImportSpecifier)?.propertyName?.text ?? e.text) : null;
+      }
+      return ts.isPropertyAccessExpression(e) && ts.isIdentifier(e.expression) && imported(symbolOf(e.expression)) ? e.name.text : null;
+    };
+
+    /** The call sites of a local function, or null when it is used any other way (a callback, a value, an export). */
+    const callSites = (fn: ts.SignatureDeclaration): ts.CallExpression[] | null => {
+      const decl = ts.isFunctionDeclaration(fn)
+        ? fn
+        : (ts.isArrowFunction(fn) || ts.isFunctionExpression(fn)) && ts.isVariableDeclaration(fn.parent) && fn.parent.initializer === fn
+          ? fn.parent
+          : undefined;
+      if (!decl?.name || !ts.isIdentifier(decl.name) || ts.getCombinedModifierFlags(decl) & ts.ModifierFlags.Export) return null;
+      const sym = symbolOf(decl.name);
+      if (!sym || opaque.has(sym) || assignments.has(sym)) return null;
+      const sites: ts.CallExpression[] = [];
+      for (const ref of refs.get(sym) ?? []) {
+        if (ref === decl.name) continue;
+        if (!ts.isCallExpression(ref.parent) || ref.parent.expression !== ref) return null;
+        sites.push(ref.parent);
+      }
+      return sites;
+    };
+    const paramOk = (p: ts.ParameterDeclaration, check: (e: ts.Expression) => boolean): boolean => {
+      if (!ts.isIdentifier(p.name) || p.dotDotDotToken) return false;
+      const index = p.parent.parameters.indexOf(p);
+      const sites = callSites(p.parent);
+      return (
+        sites !== null &&
+        sites.every((c) => {
+          if (c.arguments.slice(0, index + 1).some(ts.isSpreadElement)) return false;
+          const arg = c.arguments[index];
+          return arg ? check(arg) : p.initializer !== undefined && check(p.initializer);
+        })
+      );
+    };
+    /** Whether every value a name can hold passes `check`: each declaration, each assignment, each call site's argument. */
+    const throughSymbol = (
+      id: ts.Identifier,
+      tag: string,
+      check: (e: ts.Expression) => boolean,
+      appended: (rhs: ts.Expression) => boolean,
+      ofList: ((list: ts.Expression) => boolean) | null,
+    ): boolean => {
+      const sym = symbolOf(id);
+      if (!sym || opaque.has(sym)) return false;
+      return guard(`${tag}:${idOf(sym)}`, () => {
+        const decls = sym.declarations ?? [];
+        let unset = false;
+        for (const d of decls) {
+          if (ts.isParameter(d)) {
+            if (!paramOk(d, check)) return false;
+            continue;
+          }
+          if (!ts.isVariableDeclaration(d) || !ts.isIdentifier(d.name) || !ts.isVariableDeclarationList(d.parent)) return false;
+          const statement = d.parent.parent;
+          if (ts.isForOfStatement(statement)) {
+            if (!ofList || !ofList(statement.expression)) return false;
+          } else if (ts.isForInStatement(statement)) return false;
+          else if (d.initializer) {
+            if (!check(d.initializer)) return false;
+          } else unset = true;
+        }
+        const set = assignments.get(sym) ?? [];
+        return decls.length > 0 && !(unset && set.length === 0) && set.every((a) => (a.compound ? appended(a.rhs) : check(a.rhs)));
+      });
+    };
+
+    const NUMERIC = new Set([
+      ts.SyntaxKind.PlusToken, ts.SyntaxKind.MinusToken, ts.SyntaxKind.AsteriskToken, ts.SyntaxKind.SlashToken, ts.SyntaxKind.PercentToken,
+      ts.SyntaxKind.PlusEqualsToken, ts.SyntaxKind.MinusEqualsToken, ts.SyntaxKind.AsteriskEqualsToken,
+    ]);
+    const UNARY = new Set([ts.SyntaxKind.PlusToken, ts.SyntaxKind.MinusToken, ts.SyntaxKind.PlusPlusToken, ts.SyntaxKind.MinusMinusToken]);
+    /** A number (`n`, `(n += 1)`): its digits can neither climb nor restart a path. */
+    const isNumber = (raw: ts.Expression): boolean => {
+      const e = strip(raw);
+      if (ts.isNumericLiteral(e) || ts.isPostfixUnaryExpression(e)) return true;
+      if (ts.isPrefixUnaryExpression(e)) return UNARY.has(e.operator);
+      if (ts.isIdentifier(e)) return throughSymbol(e, 'number', isNumber, isNumber, (list) => elementOf(list, 'number'));
+      return ts.isBinaryExpression(e) && NUMERIC.has(e.operatorToken.kind) && isNumber(e.left) && isNumber(e.right);
+    };
+    /** A segment after a root: no '..', not absolute; a template only with numbers in it; a name appended to only with numbers. */
+    const isSegment = (raw: ts.Expression): boolean => {
+      const e = strip(raw);
+      if (ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e)) return !e.text.startsWith('/') && !e.text.includes('..');
+      if (ts.isTemplateExpression(e)) {
+        const pieces = [e.head.text, ...e.templateSpans.map((s) => s.literal.text)];
+        return !e.head.text.startsWith('/') && pieces.every((t) => !t.includes('..')) && e.templateSpans.every((s) => isNumber(s.expression));
+      }
+      if (ts.isIdentifier(e)) return throughSymbol(e, 'segment', isSegment, isNumber, (list) => elementOf(list, 'segment'));
+      if (ts.isConditionalExpression(e)) return isSegment(e.whenTrue) && isSegment(e.whenFalse);
+      return isNumber(e);
+    };
+    /** A path inside one of this file's temporary roots. */
+    const isPath = (raw: ts.Expression): boolean => {
+      const e = strip(raw);
+      if (ts.isIdentifier(e)) return throughSymbol(e, 'path', isPath, () => false, (list) => elementOf(list, 'path'));
+      if (ts.isConditionalExpression(e)) return isPath(e.whenTrue) && isPath(e.whenFalse);
+      if (ts.isTemplateExpression(e)) {
+        const [first, ...rest] = e.templateSpans;
+        return (
+          e.head.text === '' &&
+          first !== undefined &&
+          isPath(first.expression) &&
+          (first.literal.text.startsWith('/') || (first.literal.text === '' && rest.length === 0)) &&
+          e.templateSpans.every((s) => !s.literal.text.includes('..')) &&
+          rest.every((s) => isNumber(s.expression))
+        );
+      }
+      if (!ts.isCallExpression(e) || e.arguments.some(ts.isSpreadElement)) return false;
+      const [head, ...segments] = e.arguments;
+      switch (moduleFn(e.expression)) {
+        case 'mkdtempSync':
+          return head !== undefined && inTmp(head);
+        case 'realpathSync': {
+          // Only of a fresh temporary directory: inside a root, a name could be a link this file made.
+          const inner = head && strip(head);
+          return segments.length === 0 && !!inner && ts.isCallExpression(inner) && moduleFn(inner.expression) === 'mkdtempSync' && isPath(inner);
+        }
+        case 'join':
+        case 'resolve':
+          return head !== undefined && isPath(head) && segments.every((s) => isSegment(s));
+        default:
+          return false;
+      }
+    };
+    /** mkdtempSync's prefix: join(tmpdir(), <segments>), or inside a root. */
+    const inTmp = (raw: ts.Expression): boolean => {
+      const e = strip(raw);
+      if (ts.isCallExpression(e) && moduleFn(e.expression) === 'join' && !e.arguments.some(ts.isSpreadElement)) {
+        const [head, ...segments] = e.arguments;
+        const base = head && strip(head);
+        if (base && ts.isCallExpression(base) && moduleFn(base.expression) === 'tmpdir' && base.arguments.length === 0) return segments.every((s) => isSegment(s));
+      }
+      return isPath(e);
+    };
+    const test = (e: ts.Expression, mode: Mode) => (mode === 'path' ? isPath(e) : mode === 'segment' ? isSegment(e) : isNumber(e));
+    /** Every element of a list a loop runs over. */
+    const elementOf = (raw: ts.Expression, mode: Mode): boolean => {
+      const e = strip(raw);
+      if (ts.isArrayLiteralExpression(e)) return e.elements.every((el) => (ts.isSpreadElement(el) ? elementOf(el.expression, mode) : test(el, mode)));
+      // readdirSync's entries are bare names, never '.' or '..': segments, not paths.
+      if (ts.isCallExpression(e) && moduleFn(e.expression) === 'readdirSync') return mode === 'segment';
+      if (ts.isIdentifier(e)) return throughSymbol(e, `${mode}-list`, (x) => elementOf(x, mode), () => false, null);
+      return false;
+    };
+
+    // A child process's words: roots, or plain words that neither climb nor name an absolute path (but /dev/null) nor expand in a shell.
+    const word = (t: string) => !t.includes('..') && !/[~$`]/.test(t) && !/(^|[\s=:,;'"])\//.test(t.replace(/\/dev\/null(?=$|[\s'"])/g, ''));
+    const wordOk = (raw: ts.Expression): boolean => {
+      const e = strip(raw);
+      if (ts.isArrayLiteralExpression(e)) return e.elements.every((el) => (ts.isSpreadElement(el) ? restOk(el.expression) : wordOk(el)));
+      if (ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e)) return word(e.text);
+      return isPath(e);
+    };
+    /** A spread list of words: a constant list, or a rest parameter, through every call site. */
+    const restOk = (raw: ts.Expression): boolean => {
+      const e = strip(raw);
+      if (!ts.isIdentifier(e)) return wordOk(e);
+      const sym = symbolOf(e);
+      const d = sym?.declarations;
+      if (!sym || !d || d.length !== 1 || opaque.has(sym) || assignments.has(sym)) return false;
+      const decl = d[0]!;
+      if (ts.isVariableDeclaration(decl) && decl.initializer && ts.isVariableDeclarationList(decl.parent) && ts.isVariableStatement(decl.parent.parent)) {
+        const init = decl.initializer;
+        return guard(`rest:${idOf(sym)}`, () => wordOk(init));
+      }
+      if (!ts.isParameter(decl) || !decl.dotDotDotToken) return false;
+      const index = decl.parent.parameters.indexOf(decl);
+      return guard(`rest:${idOf(sym)}`, () => {
+        const sites = callSites(decl.parent);
+        return (
+          sites !== null &&
+          sites.every((c) => !c.arguments.slice(0, index).some(ts.isSpreadElement) && c.arguments.slice(index).every((a) => (ts.isSpreadElement(a) ? restOk(a.expression) : wordOk(a))))
+        );
+      });
+    };
+    // This script, and the copy and the link of it this file makes: node runs them as the owner would, from any directory.
+    const scripts = new Set<ts.Symbol>();
+    const isScript = (raw: ts.Expression | undefined) => {
+      const e = raw && strip(raw);
+      const sym = e && ts.isIdentifier(e) ? symbolOf(e) : undefined;
+      return sym !== undefined && scripts.has(sym);
+    };
+    for (const st of sf.statements) {
+      if (!ts.isVariableStatement(st)) continue;
+      for (const d of st.declarationList.declarations) {
+        const sym = ts.isIdentifier(d.name) && d.name.text === 'SCRIPT' ? symbolOf(d.name) : undefined;
+        if (sym && !assignments.has(sym) && d.initializer?.getText().replace(/\s/g, '') === "join(APP_ROOT,'scripts','check-staging-env.mjs')") scripts.add(sym);
+      }
+    }
+    const findCopies = (node: ts.Node): void => {
+      if (ts.isCallExpression(node) && ['copyFileSync', 'symlinkSync'].includes(moduleFn(node.expression) ?? '') && isScript(node.arguments[0])) {
+        const to = node.arguments[1] && strip(node.arguments[1]);
+        const sym = to && ts.isIdentifier(to) ? symbolOf(to) : undefined;
+        if (sym && !assignments.has(sym) && !opaque.has(sym)) scripts.add(sym);
+      }
+      ts.forEachChild(node, findCopies);
+    };
+    findCopies(sf);
+    const childOk = (args: readonly ts.Expression[]): boolean => {
+      if (args.some(ts.isSpreadElement)) return false;
+      const [command, list] = args.map(strip);
+      if (command && ts.isPropertyAccessExpression(command) && command.getText() === 'process.execPath' && list && ts.isArrayLiteralExpression(list) && isScript(list.elements[0])) return true;
+      const options = args.map(strip).filter(ts.isObjectLiteralExpression);
+      if (options.length !== 1 || options[0]!.properties.some(ts.isSpreadAssignment)) return false;
+      const cwd = options[0]!.properties.find((p) => p.name !== undefined && ts.isIdentifier(p.name) && p.name.text === 'cwd');
+      const cwdOk = cwd !== undefined && (ts.isShorthandPropertyAssignment(cwd) ? isPath(cwd.name) : ts.isPropertyAssignment(cwd) && isPath(cwd.initializer));
+      return cwdOk && args.filter((a) => !ts.isObjectLiteralExpression(strip(a))).every((a) => wordOk(a));
+    };
+
+    // The watched name a callee stands for: by its own name, a key, an import or destructuring rename, an alias, a bound copy, a parameter's arguments.
+    const keyOf = (n: ts.PropertyName | undefined): string | null => {
+      if (n && (ts.isIdentifier(n) || ts.isStringLiteral(n))) return n.text;
+      const k = n && ts.isComputedPropertyName(n) ? strip(n.expression) : undefined;
+      return k && (ts.isStringLiteral(k) || ts.isNoSubstitutionTemplateLiteral(k)) ? k.text : null;
+    };
+    const naming = new Set<ts.Symbol>();
+    const nameOf = (raw: ts.Expression): string | null => {
+      const e = strip(raw);
+      if (ts.isIdentifier(e)) {
+        if (watched(e.text)) return e.text;
+        const sym = symbolOf(e);
+        if (!sym || naming.has(sym)) return null;
+        naming.add(sym);
+        try {
+          const found: Array<string | null> = [];
+          for (const d of sym.declarations ?? []) {
+            if (ts.isImportSpecifier(d)) found.push(d.propertyName?.text ?? null);
+            else if (ts.isBindingElement(d)) found.push(keyOf(d.propertyName));
+            else if (ts.isVariableDeclaration(d) && d.initializer) found.push(nameOf(d.initializer));
+            else if (ts.isParameter(d)) {
+              const index = d.parent.parameters.indexOf(d);
+              for (const c of callSites(d.parent) ?? []) found.push(c.arguments[index] ? nameOf(c.arguments[index]) : null);
+            }
+          }
+          for (const a of assignments.get(sym) ?? []) found.push(nameOf(a.rhs));
+          return found.find((x): x is string => x !== null && watched(x)) ?? null;
+        } finally {
+          naming.delete(sym);
+        }
+      }
+      if (ts.isPropertyAccessExpression(e)) return watched(e.name.text) ? e.name.text : null;
+      if (ts.isElementAccessExpression(e)) {
+        const k = strip(e.argumentExpression);
+        return (ts.isStringLiteral(k) || ts.isNoSubstitutionTemplateLiteral(k)) && watched(k.text) ? k.text : null;
+      }
+      if (ts.isCallExpression(e) && ts.isPropertyAccessExpression(e.expression) && e.expression.name.text === 'bind') return nameOf(e.expression.expression);
+      if (ts.isBinaryExpression(e) && e.operatorToken.kind === ts.SyntaxKind.CommaToken) return nameOf(e.right);
+      if (ts.isConditionalExpression(e)) return nameOf(e.whenTrue) ?? nameOf(e.whenFalse);
+      return null;
+    };
+    const watchedCall = (c: ts.CallExpression): Watched | null => {
+      const callee = strip(c.expression);
+      if (ts.isPropertyAccessExpression(callee) && (callee.name.text === 'call' || callee.name.text === 'apply')) {
+        const base = strip(callee.expression);
+        const reflect = callee.name.text === 'apply' && ts.isIdentifier(base) && base.text === 'Reflect';
+        const target = reflect ? c.arguments[0] : base;
+        const name = target ? nameOf(target) : null;
+        if (name && callee.name.text === 'call') return { name, args: c.arguments.slice(1) };
+        if (name) {
+          const list = c.arguments[reflect ? 2 : 1];
+          const arr = list && strip(list);
+          return { name, args: arr && ts.isArrayLiteralExpression(arr) ? arr.elements : null };
+        }
+      }
+      const name = nameOf(callee);
+      return name ? { name, args: c.arguments } : null;
+    };
+    const callOk = ({ name, args }: Watched): boolean => {
+      if (args === null || name === 'chdir') return false;
+      if (CHILD.has(name)) return childOk(args);
+      return PATH_ARGS[name]!.every((i) => {
+        const arg = args[i];
+        if (!arg || args.slice(0, i + 1).some(ts.isSpreadElement)) return false;
+        return name.startsWith('mkdtemp') ? inTmp(arg) : isPath(arg);
+      });
+    };
+
     const offenders: string[] = [];
     let calls = 0;
-    const visit = (node: ts.Node) => {
-      if (ts.isCallExpression(node)) {
-        const callee = node.expression;
-        const name = ts.isIdentifier(callee) ? callee.text : ts.isPropertyAccessExpression(callee) ? callee.name.text : null;
-        if (name && name in PATH_ARGS) {
-          calls += 1;
-          for (const i of PATH_ARGS[name]!) {
-            const arg = node.arguments[i];
-            if (!arg || reachesApp(arg, new Set())) offenders.push(node.getText());
-          }
-        }
+    const visit = (node: ts.Node): void => {
+      const call = ts.isCallExpression(node) ? watchedCall(node) : null;
+      if (call) {
+        calls += 1;
+        if (!callOk(call)) offenders.push(node.getText());
       }
       ts.forEachChild(node, visit);
     };
@@ -540,31 +888,125 @@ describe('RV9-641-I11: files in other work trees, and the env files Expo loads',
     return { calls, offenders: [...new Set(offenders)] };
   }
 
-  it('SEC-F1 / RV12-641-3: the scan sees a write, rename, removal or alias that reaches the app directory', () => {
-    const offends = (code: string) => appWrites(`const APP_ROOT = join(__dirname, '..');\nconst DIR = mkdtempSync('x');\n${code}`).offenders.length > 0;
-    // The reviewer's survivors: a rename out of it, a removal through an alias, and a property callee.
-    expect(offends("renameSync(join(APP_ROOT, '.env.local'), join(DIR, 'moved-out'));")).toBe(true);
-    expect(offends("const ZZ_OWNER = join(APP_ROOT, '.env.development.local');\nunlinkSync(ZZ_OWNER);")).toBe(true);
-    expect(offends("require('node:fs').rmSync(join(APP_ROOT, '.env.local'));")).toBe(true);
-    // Aliases of aliases, loop variables, the promises API, streams, copies onto it, hard links of its files.
-    expect(offends("const A = APP_ROOT;\nconst B = join(A, 'x');\nwriteFileSync(B, 'y');")).toBe(true);
-    expect(offends("for (const f of [join(APP_ROOT, '.env')]) unlinkSync(f);")).toBe(true);
-    expect(offends("const p = `${APP_ROOT}/.env`;\ntruncateSync(p);")).toBe(true);
-    expect(offends("await fs.promises.writeFile(join(APP_ROOT, '.env'), 'y');")).toBe(true);
-    expect(offends("createWriteStream(join(APP_ROOT, '.env'));")).toBe(true);
-    expect(offends("copyFileSync(join(DIR, 'a'), join(APP_ROOT, '.env'));")).toBe(true);
-    expect(offends("linkSync(join(APP_ROOT, 'app.json'), join(DIR, 'twin'));")).toBe(true);
-    expect(offends("rmSync(join(__dirname, '..', '.env.local'));")).toBe(true);
-    // What the tests do: write in their own directories, read the app's files, link to them from outside.
-    expect(offends("writeFileSync(join(DIR, 'a.env'), 'x');")).toBe(false);
-    expect(offends("symlinkSync(join(APP_ROOT, 'app.json'), join(DIR, 'link'));")).toBe(false);
-    expect(offends("copyFileSync(join(APP_ROOT, 'scripts', 'x.mjs'), join(DIR, 'x.mjs'));")).toBe(false);
+  // The roots and helpers as this file declares them. Each case is scanned after them, never run.
+  const PREFIX = [
+    'export {};',
+    "const APP_ROOT = join(__dirname, '..');",
+    "const SCRIPT = join(APP_ROOT, 'scripts', 'check-staging-env.mjs');",
+    "const DIR = realpathSync(mkdtempSync(join(tmpdir(), 'wsf-check-staging-env-')));",
+    "const REPOS = realpathSync(mkdtempSync(join(tmpdir(), 'wsf-check-staging-env-repos-')));",
+    "const REPO = join(REPOS, 'repo');",
+    'let n = 0;',
+    "const fixtureGit = (cwd: string, ...args: string[]) => spawnSync('git', ['-c', 'core.hooksPath=/dev/null', ...args], { cwd, encoding: 'utf8' });",
+    'function removeOwnTree(dir: string) {',
+    '  for (const entry of readdirSync(dir)) {',
+    '    const full = join(dir, entry);',
+    '    if (lstatSync(full).isDirectory()) {',
+    '      removeOwnTree(full);',
+    '      rmdirSync(full);',
+    '    } else unlinkSync(full);',
+    '  }',
+    '}',
+    '',
+  ].join('\n');
+  const scan = (code: string) => appWrites(`${PREFIX}${code}\n`);
+
+  it('SEC-F1: the roots and helpers alone pass, and every watched call in them is seen', () => {
+    // Two mkdtempSync, fixtureGit's spawnSync, removeOwnTree's rmdirSync and unlinkSync.
+    expect(scan('')).toEqual({ calls: 5, offenders: [] });
   });
 
-  it('SEC-F1: nothing in this file writes, links, renames or removes a path in the real app directory', () => {
+  it.each([
+    // RV12-641-3's survivors and the forms its fix named.
+    ['a rename out of it', "renameSync(join(APP_ROOT, '.env.local'), join(DIR, 'moved-out'));"],
+    ['a removal through an alias', "const ZZ_OWNER = join(APP_ROOT, '.env.development.local');\nunlinkSync(ZZ_OWNER);"],
+    ['a property callee', "require('node:fs').rmSync(join(APP_ROOT, '.env.local'));"],
+    ['an alias of an alias', "const A = APP_ROOT;\nconst B = join(A, 'x');\nwriteFileSync(B, 'y');"],
+    ['a loop variable', "for (const f of [join(APP_ROOT, '.env')]) unlinkSync(f);"],
+    ['a template', 'const p = `${APP_ROOT}/.env`;\ntruncateSync(p);'],
+    ['the promises API', "await fs.promises.writeFile(join(APP_ROOT, '.env'), 'y');"],
+    ['a stream', "createWriteStream(join(APP_ROOT, '.env'));"],
+    ['a copy onto it', "copyFileSync(join(DIR, 'a'), join(APP_ROOT, '.env'));"],
+    ['a hard link of its file', "linkSync(join(APP_ROOT, 'app.json'), join(DIR, 'twin'));"],
+    ['__dirname itself', "rmSync(join(__dirname, '..', '.env.local'));"],
+    // RV14-641-1's survivors, S01-S21.
+    ['S01 a renamed destructuring', "const { rmSync: zap } = require('node:fs');\nzap(join(APP_ROOT, '.env.local'));"],
+    ['S02 a string key', "fs['rmSync'](join(APP_ROOT, '.env.local'));"],
+    ['S03 rm in a child, in the app directory', "spawnSync('rm', ['-f', join(APP_ROOT, '.env.local')]);"],
+    ['S03 rm in a child, from a root, at the app directory', "spawnSync('rm', ['-f', join(APP_ROOT, '.env.local')], { cwd: DIR });"],
+    ['S04 rm through a shell', "execSync('rm -f ' + join(APP_ROOT, '.env.local'));"],
+    ['S04 a relative rm through a shell (no cwd: the app directory)', "execSync('rm -f .env.local');"],
+    ['S05 a helper with a path parameter', "const zap = (p: string) => unlinkSync(p);\nzap(join(APP_ROOT, '.env'));"],
+    ['S05 a helper passed as a value', "function zap(p: string) {\n  unlinkSync(p);\n}\n[join(DIR, 'a')].forEach(zap);"],
+    ['S06 the file\'s own removeOwnTree', 'removeOwnTree(APP_ROOT);'],
+    ['S07 chdir, then a relative removal', "process.chdir(APP_ROOT);\nunlinkSync('.env.local');"],
+    ['S08 a relative write', "writeFileSync('.env.local', 'x');"],
+    ['S09 process.cwd()', "writeFileSync(join(process.cwd(), '.env.local'), 'x');"],
+    ['S10 .call', "writeFileSync.call(null, join(APP_ROOT, '.env'), 'x');"],
+    ['S11 Reflect.apply', "Reflect.apply(writeFileSync, null, [join(APP_ROOT, '.env'), 'x']);"],
+    ['S12 git clean in the app directory', "spawnSync('git', ['clean', '-fdX'], { cwd: APP_ROOT });"],
+    ['S13 a URL from import.meta.url', "writeFileSync(new URL('../.env.local', import.meta.url), 'x');"],
+    ['S14 a renamed promises member', "const { rename: mv } = fs.promises;\nawait mv(join(APP_ROOT, '.env'), join(DIR, 'x'));"],
+    ['S15 process.binding', "process.binding('fs').unlink(join(APP_ROOT, '.env'));"],
+    ['S16 chmodSync', "chmodSync(join(APP_ROOT, '.env.development.local'), 0o777);"],
+    ['S17 resolve of a relative name', "writeFileSync(resolve('.env.development.local'), 'x');"],
+    ['S18 an open for writing', "ftruncateSync(openSync(join(APP_ROOT, '.env'), 'r+'));"],
+    ['S19 fixtureGit in the app directory', "fixtureGit(APP_ROOT, 'clean', '-fdX');"],
+    ['S20 a dynamic import', "(await import('node:fs')).writeFileSync(join(APP_ROOT, '.env'), 'x');"],
+    ['S21 a read-only open (fchmod needs no write access)', "openSync(join(APP_ROOT, '.env'), 'r');"],
+    // The allowlist's own edges.
+    ['a segment that climbs', "writeFileSync(join(DIR, '..', 'x'), 'x');"],
+    ['a segment that restarts', "writeFileSync(resolve(DIR, '/tmp/x'), 'x');"],
+    ['a template beside a root', 'writeFileSync(`${DIR}-x/.env`, \'x\');'],
+    ['a name reassigned', "let p = join(DIR, 'a');\np = APP_ROOT;\nunlinkSync(p);"],
+    ['a path appended to', "let p = join(DIR, 'a');\np += '/../../x';\nunlinkSync(p);"],
+    ['a segment from a parameter', "const put = (name: string) => writeFileSync(join(DIR, name), 'x');\nput('../.env');"],
+    ['a segment built from dots', "let s = '.';\ns += '.';\nunlinkSync(join(DIR, s));"],
+    ['a destructuring assignment', "let p = join(DIR, 'a');\n[p] = [APP_ROOT];\nunlinkSync(p);"],
+    ['a callback\'s parameter', "[join(APP_ROOT, '.env')].forEach((p) => unlinkSync(p));"],
+    ['a spread argument', "const args = [join(APP_ROOT, '.env'), 'x'] as const;\nwriteFileSync(...args);"],
+    ['a temporary directory made in the app', "mkdtempSync(join(APP_ROOT, 'x'));"],
+    ['node running another file in the app directory', "spawnSync(process.execPath, [join(DIR, 'other.mjs')], { cwd: APP_ROOT });"],
+    ['a shell expansion from a root', "execSync('rm -f ~/x', { cwd: DIR });"],
+    ['fixtureGit pointed at the app', "fixtureGit(REPO, '-C', APP_ROOT, 'clean', '-fdX');"],
+    ['an options object from elsewhere', "const opts = { cwd: DIR };\nspawnSync('git', ['status'], opts);"],
+    ['options spread over a root', "spawnSync('git', ['status'], { cwd: DIR, ...{ cwd: APP_ROOT } });"],
+    ['an absolute word', "spawnSync('rm', ['-f', '/home/u/app/.env.local'], { cwd: DIR });"],
+    ['a word that climbs', "spawnSync('rm', ['-f', '../.env.local'], { cwd: DIR });"],
+    ['process.chdir, even into a root', 'process.chdir(DIR);'],
+    ['a renamed import', "import { rmSync as zap } from 'node:fs';\nzap(join(APP_ROOT, '.env'));"],
+    ['a local alias', "const f = fs.rmSync;\nf(join(APP_ROOT, '.env'));"],
+    ['a bound copy', "const zap = rmSync.bind(null);\nzap(join(APP_ROOT, '.env'));"],
+    ['an exported helper', 'export function zap(p: string) {\n  unlinkSync(p);\n}'],
+    ['a local function named join', "const join = (...parts: string[]) => parts.join('/../');\nwriteFileSync(join(DIR, 'a'), 'x');"],
+    ['a real path inside a root (it may be a link)', "writeFileSync(join(realpathSync(join(DIR, 'link')), '.env'), 'x');"],
+    ['a template segment of strings', "unlinkSync(join(DIR, `${'.'}${'.'}`));"],
+  ])('RV14-641-1: %s offends', (_what, code) => {
+    expect(scan(code).offenders).not.toEqual([]);
+  });
+
+  it.each([
+    // What this file does: write in its own directories, read the app's files, link to them from outside.
+    ['a write in a root', "writeFileSync(join(DIR, 'a.env'), 'x');"],
+    ['a link from a root to an app file', "symlinkSync(join(APP_ROOT, 'app.json'), join(DIR, 'link'));"],
+    ['a copy of an app file into a root', "copyFileSync(join(APP_ROOT, 'scripts', 'x.mjs'), join(DIR, 'x.mjs'));"],
+    ['numbered names', 'const file = join(DIR, `case-${(n += 1)}.env`);\nwriteFileSync(file, \'x\');\nlinkSync(file, join(DIR, `hard-${n}-twin.env`));'],
+    ['a loop over plain names', "for (const name of ['.env', '.env.local']) unlinkSync(join(DIR, name));"],
+    ['a loop over a root\'s entries', 'for (const entry of readdirSync(DIR)) unlinkSync(join(DIR, entry));'],
+    ['fixtureGit in a root, adding a worktree in another', "fixtureGit(REPO, 'worktree', 'add', '-q', join(REPOS, 'sibling'));"],
+    ['removeOwnTree of a root', 'removeOwnTree(DIR);\nrmdirSync(DIR);'],
+    ['node running this script from the app directory', "spawnSync(process.execPath, [SCRIPT, join(APP_ROOT, 'app.json')], { cwd: APP_ROOT });"],
+    ['a template inside a root', "writeFileSync(`${DIR}/x.env`, 'x');"],
+    ['a path built step by step', "let p = join(DIR, 'a');\np = join(p, 'b');\nunlinkSync(p);"],
+    ['a helper with a segment parameter', "const put = (name: string) => writeFileSync(join(DIR, name), 'x');\nput('a.env');\nput(`b-${n}.env`);"],
+  ])('RV14-641-1: %s passes', (_what, code) => {
+    expect(scan(code).offenders).toEqual([]);
+  });
+
+  it('SEC-F1: nothing in this file writes, links, renames or removes a path outside its own temporary roots', () => {
     const source = readFileSync(__filename, 'utf8');
     const { calls, offenders } = appWrites(source);
-    expect(calls).toBeGreaterThan(10);
+    expect(calls).toBeGreaterThan(40);
     expect(offenders).toEqual([]);
     // The old helper that wrote fixed names into the app directory is gone (named in two parts, so this line is not a match).
     expect(source.includes(['with', 'AppFile'].join(''))).toBe(false);
@@ -681,6 +1123,31 @@ describe('RV11-641-SEC: other checkouts, mount points, bind mounts, and the git 
     it('gitEnv: no GIT_* but GIT_DISCOVERY_ACROSS_FILESYSTEM=1, the C locale, and only absolute PATH entries', () => {
       const env = gitEnv({ PATH: `.:/usr/bin::rel/bin:/bin`, GIT_DIR: '/x', GIT_INDEX_FILE: '/y', GIT_DISCOVERY_ACROSS_FILESYSTEM: '0', HOME: '/home/u', LC_ALL: 'de_DE.UTF-8' });
       expect(env).toEqual({ PATH: '/usr/bin:/bin', HOME: '/home/u', LC_ALL: 'C', LANGUAGE: '', GIT_DISCOVERY_ACROSS_FILESYSTEM: '1' });
+    });
+
+    it('RV14-641-3: the fixture\'s git keeps no GIT_* from the environment and reads no system or global config', () => {
+      const owner = { GIT_DIR: '/owner/.git', GIT_INDEX_FILE: '/owner/.git/index', GIT_WORK_TREE: '/owner', GIT_COMMON_DIR: '/owner/.git', GIT_OBJECT_DIRECTORY: '/owner/.git/objects' };
+      const env = fixtureGitEnv({ PATH: '/usr/bin:rel/bin', HOME: '/home/u', ...owner });
+      for (const name of Object.keys(owner)) expect(env, name).not.toHaveProperty(name);
+      expect(env).toMatchObject({ PATH: '/usr/bin', HOME: '/home/u', LC_ALL: 'C', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' });
+    });
+
+    it('RV14-641-3: with GIT_DIR and GIT_INDEX_FILE exported, as git does for a hook in a linked worktree, the fixture\'s git still works in its own directory', () => {
+      const fresh = join(REPOS, `gitdir-probe-${(n += 1)}`);
+      mkdirSync(fresh);
+      const saved = { GIT_DIR: process.env.GIT_DIR, GIT_INDEX_FILE: process.env.GIT_INDEX_FILE };
+      // The fixture repository stands in for the owner's: an inherited GIT_DIR would re-initialise it and leave `fresh` empty.
+      process.env.GIT_DIR = join(REPO, '.git');
+      process.env.GIT_INDEX_FILE = join(REPO, '.git', 'index');
+      try {
+        fixtureGit(fresh, 'init', '-q');
+      } finally {
+        for (const [name, value] of Object.entries(saved)) {
+          if (value === undefined) delete process.env[name];
+          else process.env[name] = value;
+        }
+      }
+      expect(readdirSync(fresh)).toEqual(['.git']);
     });
 
     it('every git command starts with no fsmonitor hook and no untracked cache', () => {
