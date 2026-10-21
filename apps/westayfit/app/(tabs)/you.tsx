@@ -30,6 +30,7 @@ import { formatEndedOn, formatEndsAt, hasWindowEnded } from '../../src/ui/dates'
 // W16-5 (INT-17): on a phone the native twin names the opener focus returns to.
 import { armTabsFocusReturnTo } from '../../src/ui/focusReturn';
 import { MOVE_HREF } from '../../src/ui/MemberTabBar';
+import { nativeErrorBoundary } from '../../src/ui/RouteErrorFallback';
 import { signOutToSignedOutHome } from '../../src/ui/signOutReset';
 import { YOU_SETTINGS_TARGET, YouParityView } from '../../src/ui/YouParityView';
 import { RESUME_MIN_AWAY_MS, useResumeRefresh } from '../../src/useResumeRefresh';
@@ -371,6 +372,9 @@ function screenForAccount(ready: boolean, uid: string | null, held: Owned): Scre
   if (uid && held.uid !== uid) return LOADING;
   return held.screen;
 }
+
+/** NATIVE-MEMBER-1 W16-13 (INT-01 CS-4). On a phone a throw in You is contained inside the You tab, as Progress's is; undefined on the web. */
+export const ErrorBoundary = nativeErrorBoundary('tab');
 
 export default function You() {
   const { ready, user } = useWsfAuth();
