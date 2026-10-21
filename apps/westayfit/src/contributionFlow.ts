@@ -3,7 +3,8 @@
  * how a callable error is classified, and what a confirmed result says.
  *
  * Kept out of the route so every rule is unit-tested directly. Nothing here
- * talks to the network or to storage.
+ * talks to storage, and nothing talks to the network except `refreshSignIn`,
+ * which drives the Auth handle it is given (a forced token refresh).
  */
 
 import { describeCallableError } from './callableErrors';
