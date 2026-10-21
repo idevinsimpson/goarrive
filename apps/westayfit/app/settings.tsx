@@ -10,8 +10,12 @@ import {
   CREAM,
   NAVY,
 } from '../src/ui/kit';
+import { lift } from '../src/ui/lift';
+import { modalPanelA11y } from '../src/ui/modalA11y';
 import { isOverMemberTabs } from '../src/ui/moveSheetRoute';
 import { SCRIM_PROPS, sheetData, useSheetExit, useSheetFocusContainment } from '../src/ui/sheetMotion';
+import { SheetPanel, SheetScrim, useSideSwipeToClose } from '../src/ui/sheetMotionNative';
+import { useReducedMotionPreference } from '../src/ui/useReducedMotion';
 import { useReducedMotion } from '../src/ui/useReducedMotion';
 
 /**
@@ -40,6 +44,16 @@ export default function SettingsScreen() {
     neither. Focus enters on Close and stays in the panel; Close, Escape and
     the scrim put the member back where they were, and the focus with them.
     Opened cold, it is the page it always was.
+
+    MO-03 (W14-5). On iOS and Android too: presented without the stack's
+    travel (app/_layout.tsx), the scrim fades in place and the panel comes
+    32 pt from the right over 240 ms, leaving in 180 ms (SheetScrim and
+    SheetPanel, src/ui/sheetMotionNative.tsx; on the web the same Pressable
+    and View with the same props). A rightward swipe closes it. The panel
+    lifts with the platform's token (src/ui/lift.ts; nothing on the web) and
+    keeps VoiceOver inside it (modalPanelA11y; the web keeps aria-modal).
+    Close keeps reading the reduced-motion boolean, as before: until the
+    preference is heard the panel is held unseen, so nothing waits visibly.
   */
   const navigation = useNavigation();
   const [asPanel] = useState<boolean>(() => {
@@ -51,12 +65,15 @@ export default function SettingsScreen() {
   });
   const reducedMotion = useReducedMotion();
   const { phase, exit } = useSheetExit(reducedMotion);
+  // The panel's parts read the full preference: not yet heard means no travel.
+  const motionPreference = useReducedMotionPreference();
   const insets = useSafeAreaInsets();
   const panelRef = useRef<View>(null);
   useSheetFocusContainment(panelRef, asPanel);
   const close = () => exit(() => (router.canGoBack() ? router.back() : router.replace('/you')));
   const closeRef = useRef(close);
   closeRef.current = close;
+  const swipe = useSideSwipeToClose(() => closeRef.current());
   useEffect(() => {
     if (!asPanel || typeof document === 'undefined') return;
     const onKey = (e: KeyboardEvent) => {
@@ -86,19 +103,26 @@ export default function SettingsScreen() {
       ]}
       testID="wsf-settings-panel-root"
     >
-      <Pressable
+      <SheetScrim
         style={st.scrim}
         onPress={close}
         testID="wsf-settings-scrim"
         {...SCRIM_PROPS}
         {...(sheetData('scrim', phase) as object)}
+        phase={phase}
+        preference={motionPreference}
       />
-      <View
+      <SheetPanel
+        part="side"
         ref={panelRef}
-        style={st.panel}
+        style={[st.panel, lift.panel]}
         testID="wsf-settings-panel"
         {...({ role: 'dialog', 'aria-modal': true, 'aria-label': 'Settings' } as Record<string, unknown>)}
+        {...modalPanelA11y}
         {...(sheetData('side', phase) as object)}
+        {...swipe}
+        phase={phase}
+        preference={motionPreference}
       >
         <View style={st.panelHead}>
           <Text style={st.panelTitle} {...({ role: 'heading', 'aria-level': 2 } as Record<string, unknown>)}>
@@ -127,7 +151,7 @@ export default function SettingsScreen() {
         <View style={[st.panelFill, st.panelBody]} testID="wsf-settings-screen">
           {children}
         </View>
-      </View>
+      </SheetPanel>
     </View>
   );
 

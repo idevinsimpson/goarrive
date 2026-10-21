@@ -1,6 +1,17 @@
 import { useNavigation } from 'expo-router';
 import { forwardRef, useEffect, useLayoutEffect, useMemo, useRef, type ComponentProps } from 'react';
-import { Animated, Easing, Platform, Pressable, View, type StyleProp, type ViewStyle } from 'react-native';
+import {
+  Animated,
+  Easing,
+  PanResponder,
+  Platform,
+  Pressable,
+  View,
+  type GestureResponderHandlers,
+  type PanResponderInstance,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
 
 import { claimNativeSheetExit, SHEET_IN_MS, SHEET_OUT_MS, type SheetPhase } from './sheetMotion';
 import type { ReducedMotionPreference } from './useReducedMotion';
@@ -239,6 +250,51 @@ export const SheetPanel = forwardRef<View, SheetPanelProps>(function SheetPanel(
     />
   );
 });
+
+/**
+ * MO-03 (W14-5) — A SIDE PANEL SWIPES AWAY TO THE RIGHT, on iOS and Android.
+ *
+ * Settings comes in from the right; a member can send it back the same way.
+ * A drag that is clearly rightward (more across than down, so the panel's own
+ * vertical scrolling is never taken) claims the gesture; on release, a drag
+ * past about 60 pt, or a fast rightward flick, closes the panel through the
+ * screen's own Close -- the same 180 ms exit, the same guards. The panel does
+ * not follow the finger. The web has no such gesture: there (and in the web
+ * build's stub) this returns no handlers at all.
+ */
+export const SIDE_SWIPE_CLOSE_PT = 60;
+/** A rightward flick, in points per millisecond. */
+export const SIDE_FLICK_VX = 0.5;
+const SIDE_SWIPE_CLAIM_PT = 8;
+
+/** Whether a move is the side panel's swipe: rightward, and more across than down. */
+export function sideSwipeClaims(g: { dx: number; dy: number }): boolean {
+  return g.dx > SIDE_SWIPE_CLAIM_PT && g.dx > Math.abs(g.dy) * 1.5;
+}
+
+/** Whether a released swipe closes the side panel: far enough, or flicked. */
+export function sideSwipeCloses(g: { dx: number; vx: number }): boolean {
+  return g.dx > SIDE_SWIPE_CLOSE_PT || (g.dx > 0 && g.vx > SIDE_FLICK_VX);
+}
+
+const NO_HANDLERS: GestureResponderHandlers = Object.freeze({});
+
+/** The side panel's swipe-to-close handlers (native), or none (web). */
+export function useSideSwipeToClose(close: () => void): GestureResponderHandlers {
+  const closeRef = useRef(close);
+  closeRef.current = close;
+  const responder = useRef<PanResponderInstance | null>(null);
+  if (responder.current === null) {
+    responder.current = PanResponder.create({
+      onMoveShouldSetPanResponder: (_e, g) => sideSwipeClaims(g),
+      onPanResponderRelease: (_e, g) => {
+        if (sideSwipeCloses(g)) closeRef.current();
+      },
+      onPanResponderTerminationRequest: () => true,
+    });
+  }
+  return Platform.OS !== 'web' ? responder.current.panHandlers : NO_HANDLERS;
+}
 
 // Names the native wrappers (and marks this module in a native export; the web
 // export must not carry them: tests/web-bundle-native-motion.test.ts).
