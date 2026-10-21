@@ -49,7 +49,10 @@ vi.mock('../src/ui/useReducedMotion', async (importOriginal) => ({
 }));
 
 const router = { replace: vi.fn(), push: vi.fn(), dismissTo: vi.fn(), back: vi.fn(), canGoBack: () => true };
-const navigation = { dispatch: vi.fn(), isFocused: () => true, getParent: () => undefined, addListener: () => () => {}, setParams: vi.fn() };
+// W16-19: the screens read the root stack at the landing (landAfterAuth's
+// kiosk-beneath guard). Here they were opened over Home, with no kiosk.
+const ROOT_STACK = { index: 1, routes: [{ name: '(tabs)' }, { name: 'signin' }] };
+const navigation = { dispatch: vi.fn(), isFocused: () => true, getParent: () => undefined, addListener: () => () => {}, setParams: vi.fn(), getState: () => ROOT_STACK };
 vi.mock('expo-router', () => ({
   router,
   Link: ({ href, children }: { href: string; children: ReactNode }) => <a href={href}>{children}</a>,
