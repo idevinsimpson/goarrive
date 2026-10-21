@@ -56,16 +56,8 @@ vi.mock('../src/memberReads', () => ({
 vi.mock('../src/auth', () => ({
   useWsfAuth: () => ({ ready: true, user: h.user }),
 }));
-vi.mock('../src/firebase', () => ({
-  getFirebaseFunctions: () => ({}),
-  getFirebaseAuth: () => ({ currentUser: null }),
-}));
 vi.mock('firebase/functions', () => ({
   httpsCallable: () => async () => ({ data: { members: [], nextCursor: null, additions: [] } }),
-}));
-vi.mock('firebase/auth', () => ({
-  signOut: async () => undefined,
-  onAuthStateChanged: () => () => undefined,
 }));
 /*
   A hand-built `expo-router`: the real package ships untranspiled JSX that
@@ -129,9 +121,21 @@ afterEach(() => {
   for (const c of cleanup.splice(0)) c();
 });
 
-/** A fresh process over `disk`: the app was opened. Returns its currentCommunity module. */
+/**
+ * A fresh process over `disk`: the app was opened. Returns its currentCommunity
+ * module. Firebase is mocked AFTER the boot, because a harness boot may mock
+ * it for its own needs (the session watch's `getFirebaseAuth` only).
+ */
 async function boot() {
   bootNative(disk);
+  vi.doMock('../src/firebase', () => ({
+    getFirebaseFunctions: () => ({}),
+    getFirebaseAuth: () => ({ currentUser: null }),
+  }));
+  vi.doMock('firebase/auth', () => ({
+    signOut: async () => undefined,
+    onAuthStateChanged: () => () => undefined,
+  }));
   return import('../src/currentCommunity');
 }
 
