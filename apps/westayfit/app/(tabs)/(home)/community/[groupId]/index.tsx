@@ -31,6 +31,8 @@ import {
 import { useSheetInsets } from '../../../../../src/ui/sheetInsets';
 import { liveRegion } from '../../../../../src/ui/announce';
 import { STALE_FIGURE_SENTENCE, StaleAnnouncer, nativeA11yHidden } from '../../../../../src/ui/staleFigure';
+// W16-4 (MF-11): the one text-scale policy (W12-8): layout widths and the initials discs.
+import { chromeTextProps, effectiveWidth } from '../../../../../src/ui/textScale';
 import { resolveRepeatPolicy, type RepeatPolicy } from '../../../../../src/contributionFlow';
 import { wsfAuthEnabled } from '../../../../../src/featureFlags';
 import { getFirebaseFirestore, getFirebaseFunctions } from '../../../../../src/firebase';
@@ -574,7 +576,7 @@ export default function CommunityPage() {
       if (chosen && chosen !== groupId) router.replace(`/community/${chosen}` as never);
     }, [user?.uid, groupId, router]),
   );
-  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight, fontScale } = useWindowDimensions();
   // W16-9 (MF-09): the Manage sheet's safe area and keyboard, used on native
   // only (src/ui/sheetInsets: 0 on web, the provider's insets on a phone).
   const sheetInsets = useSheetInsets();
@@ -2169,6 +2171,21 @@ export default function CommunityPage() {
   */
   const heroContentWidth = Math.max(60, windowWidth - 2 * 20 - 2 * 16);
   /*
+    NATIVE-MEMBER-1 W16-4 (MF-11). THE TEXT'S WIDTH DECIDES, NOT THE SCREEN'S.
+
+    The hero's narrow steps below (the pill beside the kicker, the title's
+    type, the count's line, the label's tracking) were written for the web,
+    where 200% zoom halves the CSS width they read. On a phone the system
+    text size grows every font and leaves the width alone, so at the largest
+    sizes a 390 pt screen still chose the wide layout and the text collided
+    or broke mid-word. The steps now read the width divided by the text size
+    (src/ui/textScale, W12-8: never wider than the width, and the width itself
+    on the web). The We mark and the bloom are drawn, not set in type, so
+    they stay on the physical width.
+  */
+  const heroTextWidth = effectiveWidth(heroContentWidth, fontScale);
+  const windowTextWidth = effectiveWidth(windowWidth, fontScale);
+  /*
     THE TARGET'S OWN PROPORTION, NOT THE WIDEST THE CARD ALLOWS.
 
     Letting the mark take the full content width made it larger than the
@@ -2236,11 +2253,11 @@ export default function CommunityPage() {
   */
   // HOME-NORTHSTAR-PARITY-1. The pill beside the kicker needs the kicker
   // (~120) and the whole window pill (~170) side by side in the card.
-  const pillBeside = heroContentWidth >= 300;
+  const pillBeside = heroTextWidth >= 300;
   const heroTitleType =
-    windowWidth < 240
+    windowTextWidth < 240
       ? { fontSize: 18, lineHeight: 23 }
-      : windowWidth < 300
+      : windowTextWidth < 300
         ? { fontSize: 20, lineHeight: 25 }
         : null;
   // The hero's progress area reserves the room the We mark, its three facts
@@ -2888,7 +2905,7 @@ export default function CommunityPage() {
                 about 200% zoom the hero is ~123 px wide, and a space let the
                 line break inside "of 5,000 squats" instead of after the count.
               */}
-              {heroContentWidth < 200 ? '\n' : ' '}
+              {heroTextWidth < 200 ? '\n' : ' '}
               <Text style={styles.heroTotalRest}>
                 {totalOfTargetParts(sharedTotal, target, unit).rest}
               </Text>
@@ -2931,9 +2948,17 @@ export default function CommunityPage() {
           whenever a figure is — empty, and out of the layout (absolute, one
           pixel, so the healthy hero does not move by the stack's gap) — and
           the sentence is put INTO it when a read fails. Retry is outside it,
-          so the announcement is the sentence alone. The visible copy of the
+          so the announcement is the sentence alone.
+
+          THE REGION SPEAKS ON THE WEB ONLY. There the visible copy of the
           sentence is hidden from assistive technology, because the region
-          already reads it in the same place.
+          reads it in the same place. On a phone the region is not live (W16-3:
+          StaleAnnouncer speaks the sentence once per failure instead), and an
+          opacity-0, one-pixel box is skipped by VoiceOver and TalkBack, so it
+          is the region's copy that is hidden there, and the visible sentence
+          stays where a screen reader can browse to it (heads-9 B-1). A member
+          who interrupts the announcement, or comes back to the card later,
+          still finds it beside the figure.
         */}
         <View
           style={styles.visuallyHidden}
@@ -2942,7 +2967,8 @@ export default function CommunityPage() {
           // on a phone, where StaleAnnouncer speaks the sentence instead.
           {...liveRegion}
         >
-          {p.refreshFailed ? <Text>{STALE_FIGURE_SENTENCE}</Text> : null}
+          {/* B-1: natively a hidden duplicate of the visible sentence. */}
+          {p.refreshFailed ? <Text {...nativeA11yHidden()}>{STALE_FIGURE_SENTENCE}</Text> : null}
         </View>
         <StaleAnnouncer failed={p.refreshFailed === true} />
         {p.refreshFailed ? (
@@ -2952,9 +2978,9 @@ export default function CommunityPage() {
           >
             <Text
               style={onDark ? styles.heroLastKnownText : styles.cardMeta}
+              // The web's region reads it; React Native's Text ignores
+              // aria-hidden, so on a phone this is the browsable copy (B-1).
               {...({ 'aria-hidden': true } as Record<string, unknown>)}
-              // W16-3 (MF-18): read once, by the announcement, not again here.
-              {...nativeA11yHidden()}
             >
               {STALE_FIGURE_SENTENCE}
             </Text>
@@ -4210,7 +4236,7 @@ export default function CommunityPage() {
                       <View style={styles.heroLabelRow}>
                         <View style={styles.heroLabelDot} />
                         <Text
-                          style={[styles.heroEyebrow, windowWidth < 240 ? styles.heroLabelNarrow : null]}
+                          style={[styles.heroEyebrow, windowTextWidth < 240 ? styles.heroLabelNarrow : null]}
                           testID="wsf-community-goal-label"
                         >
                           Community goal
@@ -4621,22 +4647,44 @@ export default function CommunityPage() {
         */}
         {activeChallenge ? (
           <View style={styles.section} testID="wsf-community-challenge-card">
-            <Link
-              href={`/community/${groupId}/challenge` as never}
-              style={styles.card}
-              testID="wsf-community-challenge-link"
-            >
-              <View>
-                <Text style={styles.sectionEyebrow}>Community challenge</Text>
-                <Text style={styles.cardTitle}>{activeChallenge.title}</Text>
-                <Text style={styles.cardMeta}>
-                  {challengeParticipationLabel(
-                    activeChallenge.participantCount,
-                    activeChallenge.completedCount
-                  )}
-                </Text>
-              </View>
-            </Link>
+            {(() => {
+              const participation = challengeParticipationLabel(
+                activeChallenge.participantCount,
+                activeChallenge.completedCount
+              );
+              const body = (
+                <View>
+                  <Text style={styles.sectionEyebrow}>Community challenge</Text>
+                  <Text style={styles.cardTitle}>{activeChallenge.title}</Text>
+                  <Text style={styles.cardMeta}>{participation}</Text>
+                </View>
+              );
+              const href = `/community/${groupId}/challenge` as never;
+              /*
+                W16-4 (INT-22). On a phone a Link without asChild is a Text
+                holding the card: no link role and no single name, so a screen
+                reader stepped through three loose lines. Natively the card is
+                a Pressable the Link drives (the Home community card's shape,
+                W12-10): one link, named by its three lines joined. The web
+                keeps today's anchor.
+              */
+              return Platform.OS === 'web' ? (
+                <Link href={href} style={styles.card} testID="wsf-community-challenge-link">
+                  {body}
+                </Link>
+              ) : (
+                <Link href={href} asChild>
+                  <Pressable
+                    style={StyleSheet.flatten(styles.card)}
+                    accessibilityRole="link"
+                    accessibilityLabel={`Community challenge, ${activeChallenge.title}, ${participation}`}
+                    testID="wsf-community-challenge-link"
+                  >
+                    {body}
+                  </Pressable>
+                </Link>
+              );
+            })()}
           </View>
         ) : null}
 
@@ -4867,12 +4915,17 @@ function HomePresenceStack({
           key={`${p.displayName}-${i}`}
           style={[disc, ring, i > 0 ? overlap : null, { backgroundColor: STACK_FILLS[i % 3] }]}
         >
-          <Text style={[text, stackStyles.onFill]}>{initialsOf(p.displayName)}</Text>
+          {/* W16-4 (MF-11): a disc's letters keep to it at any text size. */}
+          <Text style={[text, stackStyles.onFill]} {...chromeTextProps}>
+            {initialsOf(p.displayName)}
+          </Text>
         </View>
       ))}
       {more > 0 ? (
         <View style={[disc, ring, overlap, stackStyles.more]}>
-          <Text style={[text, stackStyles.onMore]}>{`+${more}`}</Text>
+          <Text style={[text, stackStyles.onMore]} {...chromeTextProps}>
+            {`+${more}`}
+          </Text>
         </View>
       ) : null}
     </View>
@@ -5041,7 +5094,7 @@ function HomeMomentumRow({ row }: { row: ActivityRow }) {
   return (
     <View style={rowStyles.row} testID="wsf-momentum-row">
       <View style={[rowStyles.avatar, named ? null : rowStyles.avatarAnon]}>
-        <Text style={[rowStyles.avatarText, named ? null : rowStyles.avatarTextAnon]}>
+        <Text style={[rowStyles.avatarText, named ? null : rowStyles.avatarTextAnon]} {...chromeTextProps}>
           {named ? initialsOf(row.displayName!) : '·'}
         </Text>
       </View>
