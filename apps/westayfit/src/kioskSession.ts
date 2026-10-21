@@ -207,6 +207,20 @@ export function readKioskSession(): string | null {
   return raw && isGoalIdShape(raw) ? raw : null;
 }
 
+/**
+ * Whether the device's marker is UNKNOWN (RV17-641-N3): on a phone, the
+ * launch read has not landed yet, or the store could not be read (tried
+ * twice, src/storage/mirror.ts). `readKioskSession()` answers null then,
+ * which must not be taken for "no kiosk session": a caller that would route
+ * away from a kiosk on that null treats it as unreadable instead. An explicit
+ * write of the marker (a new kiosk session) makes it known again. Never true
+ * on the web, where there is no marker.
+ */
+export function kioskSessionUnknown(): boolean {
+  if (HAS_SYNC_STORAGE) return false;
+  return marker.unreadable(KIOSK_SESSION_MARKER_KEY) || !marker.loaded(KIOSK_SESSION_MARKER_KEY);
+}
+
 /** The keys Finish is allowed to remove. Nothing else in storage is touched:
  * an unresolved attempt belongs to the member it was written for. */
 export function kioskSessionStorageKeys(): readonly string[] {
