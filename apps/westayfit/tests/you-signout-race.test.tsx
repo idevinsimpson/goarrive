@@ -38,8 +38,10 @@ vi.mock('../src/firebase', () => ({ getFirebaseAuth: () => ({}) }));
 vi.mock('firebase/auth', () => ({ signOut: () => Promise.resolve() }));
 
 // A focused tab: the focus callback runs on mount and again whenever it changes.
+const NAVIGATION = { dispatch: vi.fn(), getParent: () => undefined };
 vi.mock('expo-router', () => ({
   router: { replace: vi.fn(), push: vi.fn() },
+  useNavigation: () => NAVIGATION,
   useFocusEffect: (cb: () => void | (() => void)) => {
     useEffect(() => cb(), [cb]);
   },
