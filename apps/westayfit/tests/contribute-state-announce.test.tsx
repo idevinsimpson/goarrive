@@ -267,7 +267,7 @@ describe('W13-4 site scan (app/contribute/[goalId].tsx)', () => {
     expect(s).toContain('{...liveRegion}');
     expect(s).not.toContain('aria-live');
     expect(s).toContain('<SpokenOnce message={RECORDING_HEADING} announceKey={`${pending.attemptId}:sending`} />');
-    expect(ROUTE).toContain('<Text style={styles.stepHeading} {...HEADING_1}>{RECORDING_HEADING}</Text>');
+    expect(ROUTE).toContain('<Text ref={stateHeadingRef} style={styles.stepHeading} {...HEADING_1}>{RECORDING_HEADING}</Text>');
   });
 
   it('unknown: liveRegion, and its heading (with the notice) said once per attempt', () => {
@@ -276,7 +276,7 @@ describe('W13-4 site scan (app/contribute/[goalId].tsx)', () => {
     expect(s).not.toContain('aria-live');
     expect(s).toContain('message={attemptNotice ? `${UNKNOWN_OUTCOME_HEADING} ${attemptNotice}` : UNKNOWN_OUTCOME_HEADING}');
     expect(s).toContain('announceKey={`${pending.attemptId}:unknown`}');
-    expect(ROUTE).toContain('<Text style={styles.stepHeading} {...HEADING_1}>{UNKNOWN_OUTCOME_HEADING}</Text>');
+    expect(ROUTE).toContain('<Text ref={stateHeadingRef} style={styles.stepHeading} {...HEADING_1}>{UNKNOWN_OUTCOME_HEADING}</Text>');
   });
 
   it('couldn’t read: liveRegion, and its heading said once', () => {

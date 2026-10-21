@@ -102,7 +102,6 @@ import { PROGRESS_GREEN } from '../../src/ui/brandAssets';
 import { ButtonLink } from '../../src/ui/ButtonLink';
 import { formatClock } from '../../src/ui/dates';
 import { LivingWeProgress } from '../../src/ui/LivingWeProgress';
-import { liveRegion } from '../../src/ui/announce';
 import { SpokenOnce } from '../../src/ui/SpokenOnce';
 import { TogetherCompletion } from '../../src/ui/TogetherCompletion';
 import { TOGETHER_COLORS } from '../../src/ui/togetherMotion';
@@ -131,6 +130,8 @@ import {
   useSheetExit,
   useSheetFocusContainment,
 } from '../../src/ui/sheetMotion';
+import { liveRegion } from '../../src/ui/announce';
+import { useStepHeadingFocus } from '../../src/ui/stepHeadingFocus';
 import { useReducedMotion } from '../../src/ui/useReducedMotion';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -548,6 +549,17 @@ export default function ContributeToGoal() {
   // before the load completes, so this value is never the one on screen.
   const [repeatPolicy, setRepeatPolicy] = useState<RepeatPolicy>(() => known?.policy ?? 'once');
   const [pending, setPending] = useState<PendingContribution | null>(null);
+  /*
+    W13-5 (INT-17, native). The in-flight and unknown-outcome screens replace
+    what was on screen in place (the count or review step, a restore, Confirm
+    and its answer), taking the control the member pressed with it. When the
+    attempt or its state changes, the heading of the screen now showing takes
+    the screen reader's focus (src/ui/stepHeadingFocus.native.ts: never on the
+    first mount; a later change cancels a pending one). A no-op on web, where
+    the sheet's focus containment does this.
+  */
+  const stateHeadingRef = useRef<Text>(null);
+  useStepHeadingFocus(pending ? `${pending.attemptId}:${pending.state}` : null, stateHeadingRef);
   /*
     NATIVE-STATE-1. The pending record lives behind the device storage
     boundary now (AsyncStorage on a phone), so reading it back takes a moment.
@@ -2494,7 +2506,7 @@ export default function ContributeToGoal() {
           {renderSheetHead('Your attempt')}
           <View style={styles.sheetBody}>
             <ActivityIndicator color={NAVY} size="large" />
-            <Text style={styles.stepHeading} {...HEADING_1}>{RECORDING_HEADING}</Text>
+            <Text ref={stateHeadingRef} style={styles.stepHeading} {...HEADING_1}>{RECORDING_HEADING}</Text>
             <Text style={styles.stepBody}>{effortLabel(pending.count, unitKnown)}</Text>
           </View>
         </View>
@@ -2538,7 +2550,7 @@ export default function ContributeToGoal() {
           />
           {renderSheetHead('Your attempt')}
           <View style={styles.sheetBody}>
-            <Text style={styles.stepHeading} {...HEADING_1}>{UNKNOWN_OUTCOME_HEADING}</Text>
+            <Text ref={stateHeadingRef} style={styles.stepHeading} {...HEADING_1}>{UNKNOWN_OUTCOME_HEADING}</Text>
             <Text style={styles.stepBody} testID="wsf-contribute-pending-count">
               {'You entered '}
               <Text style={styles.pendingAmount}>{effortLabel(pending.count, unitKnown)}</Text>
