@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import { AppState, StyleSheet, Text, View, type AppStateStatus } from 'react-native';
 
 import {
@@ -155,8 +155,9 @@ export function relativeWhen(at: string, nowMs: number = Date.now()): string {
   once, when the row rendered, and then stood still while the screen stayed
   open. One shared ticker re-renders its readers every 60 s while the app is
   in front, and once more on the return to it; in the background it holds no
-  timer at all, and with no reader it holds nothing. Exported for other
-  relative labels (member: Community Home's momentum rows).
+  timer at all, and with no reader it holds nothing. Its reader is Community
+  Home's momentum rows (HomeMomentumRow, RV15-641-3); this module's
+  MomentumRow reads it too, though no screen renders that row today.
 */
 export const NOW_TICK_MS = 60_000;
 const tickReaders = new Set<() => void>();
@@ -201,9 +202,15 @@ function readTick(read: () => void): () => void {
     }
   };
 }
-/** The current time in ms, re-read every NOW_TICK_MS while the app is in front and on its return. */
+/**
+ * The current time in ms, re-read every NOW_TICK_MS while the app is in front
+ * and on its return. RV15-641-5: the store's value is only as fresh as its
+ * last tick, and after a spell with no reader that can be hours old; a reader
+ * never paints a time earlier than its own mount.
+ */
 export function useNowTick(): number {
-  return useSyncExternalStore(readTick, () => tickNow, () => tickNow);
+  const [mountedAt] = useState(() => Date.now());
+  return Math.max(useSyncExternalStore(readTick, () => tickNow, () => tickNow), mountedAt);
 }
 
 /** One momentum row: who moved, how much, when. */

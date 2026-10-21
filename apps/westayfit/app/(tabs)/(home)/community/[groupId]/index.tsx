@@ -118,6 +118,7 @@ import {
 import {
   initialsOf,
   relativeWhen,
+  useNowTick,
   type ActivityRow,
   type PresencePerson,
 } from '../../../../../src/ui/CommunityPresence';
@@ -4958,6 +4959,9 @@ function GlyphButtonLink({
  * so nothing here could say which row is the viewer's without guessing.
  */
 function HomeMomentumRow({ row }: { row: ActivityRow }) {
+  // RV15-641-3 (W12-6, INT-12): "3m ago" moves on while the page is open, on the shared 60 s tick.
+  const nowMs = useNowTick();
+
   const named = row.displayName !== null && row.displayName.trim() !== '';
   const amount = `${row.amount.toLocaleString()}${row.unit ? ` ${row.unit}` : ''}`;
   return (
@@ -4972,7 +4976,7 @@ function HomeMomentumRow({ row }: { row: ActivityRow }) {
           {named ? row.displayName : 'Anonymous member'}
         </Text>
         <Text style={rowStyles.what} numberOfLines={1}>
-          {`added ${amount}${row.at ? ` · ${relativeWhen(row.at)}` : ''}`}
+          {`added ${amount}${row.at ? ` · ${relativeWhen(row.at, nowMs)}` : ''}`}
         </Text>
       </View>
       <Text style={rowStyles.amount}>{`+${amount}`}</Text>
