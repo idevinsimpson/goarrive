@@ -338,6 +338,9 @@ export default function CommunityIndexScreen() {
       const open = current ? activeGoals(current.goals).slice(0, MOMENTUM_GOAL_LIMIT) : [];
 
       // Recent movement and the roster are independent reads: side by side.
+      // Any per-goal failure is noted, so a quiet revalidation can keep the
+      // momentum it showed (review 1343247d-N1) instead of an emptied list.
+      let momentumFailed = false;
       const readMomentum = async (): Promise<Addition[]> => {
         if (open.length === 0) return [];
         const recent = httpsCallable<{ goalId: string }, { additions: Addition[] }>(
@@ -348,6 +351,7 @@ export default function CommunityIndexScreen() {
           const r = await recent({ goalId: g.goalId });
           return Array.isArray(r.data?.additions) ? r.data.additions : [];
         });
+        if (reads.some((r) => !r.ok)) momentumFailed = true;
         return (
           reads
             .flatMap((r) => (r.ok ? r.value : []))
@@ -363,10 +367,17 @@ export default function CommunityIndexScreen() {
       const rosterIssued = rosterGen.current;
       const readCurrentRoster = async (): Promise<Roster> => (current ? readRoster(current.groupId) : 'pending');
 
-      const [momentum, fetched] = await Promise.all([
-        readMomentum().catch(() => [] as Addition[]),
+      const [readMomentumRows, fetched] = await Promise.all([
+        readMomentum().catch(() => {
+          momentumFailed = true;
+          return [] as Addition[];
+        }),
         readCurrentRoster(),
       ]);
+      // A quiet revalidation whose momentum read failed keeps the rows it
+      // showed for the same community (N1); otherwise, as before.
+      const keepMomentum = keep !== null && momentumFailed && keep.currentId === currentId && keep.momentum.length > 0;
+      const momentum = keepMomentum ? keep.momentum : readMomentumRows;
 
       if (liveRef.current === token) {
         settle();
@@ -378,7 +389,7 @@ export default function CommunityIndexScreen() {
           keep.roster !== 'pending' &&
           !('failed' in keep.roster) &&
           keep.roster.groupId === fetched.groupId;
-        if (keptStale || keepRoster) setStale(true);
+        if (keptStale || keepRoster || keepMomentum) setStale(true);
         setState((prev) => {
           // A roster re-read after a privacy change is newer than this one.
           const roster =

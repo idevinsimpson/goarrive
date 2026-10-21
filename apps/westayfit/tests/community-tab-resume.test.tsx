@@ -48,9 +48,10 @@ vi.mock('../src/memberReads', () => ({
 }));
 const fnError = (code: string, message: string) => Object.assign(new Error(message), { code: `functions/${code}` });
 const members = vi.fn();
+const recent = vi.fn();
 vi.mock('firebase/functions', () => ({
   httpsCallable: (_f: unknown, name: string) =>
-    name === 'wsfCommunityMembers' ? (...a: unknown[]) => members(...a) : () => Promise.resolve({ data: { additions: [] } }),
+    name === 'wsfCommunityMembers' ? (...a: unknown[]) => members(...a) : (...a: unknown[]) => recent(...a),
 }));
 
 const { default: CommunityTab } = await import('../app/(tabs)/community/index');
@@ -69,6 +70,8 @@ beforeEach(() => {
   readMyCommunities.mockReset();
   readGoals.mockReset();
   members.mockReset();
+  recent.mockReset();
+  recent.mockResolvedValue({ data: { additions: [] } });
   readMyCommunities.mockResolvedValue({ items: [OAK] });
   readGoals.mockResolvedValue({ goals: [goal(241)] });
   members.mockResolvedValue({ data: { members: [{ displayName: 'Alex', role: 'member' }], nextCursor: null } });
@@ -170,6 +173,18 @@ describe('W16-2 / INT-12: the Community tab revalidates on a return to the app',
     await flush();
     expect(byId('wsf-parity-member-0')).not.toBeNull();
     expect(byId('wsf-parity-roster-failed')).toBeNull();
+    expect(byId('wsf-community-index-stale')).not.toBeNull();
+  });
+
+  // Review 1343247d-N1: the momentum rows are kept too, not emptied.
+  it('a revalidation whose recent-movement read fails keeps the momentum rows, marked as last read', async () => {
+    recent.mockResolvedValue({ data: { additions: [{ amount: 12, unit: 'squats', at: new Date(Date.now() - 60_000).toISOString() }] } });
+    await render();
+    expect(byId('wsf-community-index-momentum')).not.toBeNull();
+    recent.mockRejectedValue(fnError('unavailable', 'unavailable'));
+    await returnAfter(RESUME_MIN_AWAY_MS + 1_000);
+    await flush();
+    expect(byId('wsf-community-index-momentum')).not.toBeNull();
     expect(byId('wsf-community-index-stale')).not.toBeNull();
   });
 
