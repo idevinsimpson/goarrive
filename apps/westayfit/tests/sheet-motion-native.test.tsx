@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import * as nodePath from 'node:path';
 
-import { act, createRef, forwardRef, useImperativeHandle, type ReactNode } from 'react';
+import { act, createRef, forwardRef, StrictMode, useImperativeHandle, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Easing, Pressable, Text, View } from 'react-native';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -360,6 +360,21 @@ describe('a native sheet comes in', () => {
     expect(panelValue().v).toBe(1);
   });
 
+  it('React StrictMode (development) re-runs the entry’s effect: the sheet ends at rest, never stuck transparent (RV10-634-N1)', () => {
+    act(() =>
+      root.render(
+        <StrictMode>
+          <Sheet phase="in" preference={KNOWN} />
+        </StrictMode>,
+      ),
+    );
+    // Whatever StrictMode's re-run left behind is stopped, and both parts are at rest.
+    expect(fx.timings.length).toBeGreaterThan(0);
+    expect(fx.timings.every((t) => t.stopped || t.value.v === 1)).toBe(true);
+    expect((motionStyle('scrim').opacity as { v: number }).v).toBe(1);
+    expect((motionStyle('panel').opacity as { v: number }).v).toBe(1);
+  });
+
   it('unmounting mid-entry stops it', () => {
     show({ phase: 'in', preference: KNOWN });
     const runs = fx.timings.slice();
@@ -512,13 +527,23 @@ describe('useSheetExit on iOS and Android', () => {
     expect(s.phase()).toBe('rest');
   });
 
-  it('the timer fires but the sheet is no longer in front: nothing', () => {
+  it('the timer fires but the sheet is no longer in front (its blur not delivered yet): no navigation, back at rest, and a later Close works', () => {
     vi.useFakeTimers();
     const s = mountExit();
     s.exit();
     nav.focused = false;
     act(() => vi.advanceTimersByTime(SHEET_OUT_MS));
     expect(s.went).toHaveLength(0);
+    // Abandoned as a blur would: visible and pressable again, not stuck mid-exit (RV10-634-N2).
+    expect(s.phase()).toBe('rest');
+    expect(container.querySelector('[data-testid="panel"]')!.getAttribute('data-pointer-events')).toBe('');
+    emit('blur'); // the late blur changes nothing
+    expect(s.phase()).toBe('rest');
+    nav.focused = true; // in front again
+    s.exit();
+    expect(s.phase()).toBe('out');
+    act(() => vi.advanceTimersByTime(SHEET_OUT_MS));
+    expect(s.went).toHaveLength(1);
   });
 
   it('reduced motion, or a preference not heard yet: no wait, no exit phase', () => {
