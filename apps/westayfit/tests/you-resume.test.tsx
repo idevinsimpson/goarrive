@@ -198,8 +198,9 @@ describe('W16-2 / INT-12: You revalidates on a return to the app', () => {
   inputs of the last NETWORK compose, even when the page on screen had since
   been drawn from the account's record (the focus path, the recorded branch,
   the first frame), so older inputs could replace a newer page. The record
-  is now preferred, the community on screen is never swapped, and a page
-  drawn from the record clears the network inputs.
+  is now preferred, the community on screen is never swapped, and (heads-11
+  NB-3) the inputs kept are always those of the page on screen, a record
+  draw included.
 */
 describe('heads-10 F-1: a failed resume never draws older inputs over the page', () => {
   const OWN = (n: number) => ({ ownCredit: n, unit: 'squats' });
@@ -271,7 +272,7 @@ describe('heads-10 F-1: a failed resume never draws older inputs over the page',
     expect(byId('wsf-you-lead-own')!.textContent).toBe('25 squats');
   });
 
-  it('a page drawn from the record clears the network inputs: once the record is incomplete, a failed resume keeps the page as it is', async () => {
+  it('a page drawn from the record replaces the network inputs: once the record is incomplete, a failed resume keeps that page (25), never the older 10', async () => {
     readOwnCredit.mockResolvedValue(OWN(10));
     await render();
     record = { communities: { items: [COMMUNITY] }, profile: { displayName: 'Alex', createdAt: null }, goals: { oak: { goals: [goal('active')] } }, own: { g1: OWN(25) } };
@@ -282,5 +283,118 @@ describe('heads-10 F-1: a failed resume never draws older inputs over the page',
     record = { ...record, own: {} };
     await failResume();
     expect(byId('wsf-you-lead-own')!.textContent).toBe('25 squats');
+  });
+});
+
+/*
+  heads-11 NB-3 and NB-4, on the same keep path.
+  NB-3: nulling the inputs on a record draw left INT-12 case 4 open. A page
+  drawn from the record, then a record that lost a fact, a failed focus
+  revalidation, and a failed resume past a goal's end still offered Start
+  moving. The record's own inputs are now kept with the page.
+  NB-4: the kept page's head ignored this load's profile read and could drop
+  to the pending bar.
+*/
+describe('heads-11 NB-3, NB-4: the kept You page', () => {
+  const OWN = (n: number) => ({ ownCredit: n, unit: 'squats' });
+  const OFFLINE = () => Object.assign(new Error('x'), { code: 'functions/unavailable' });
+
+  it('NB-3: drawn from the record, the record then loses a fact; a failed resume past the goal end still stops offering Start moving', async () => {
+    // Start moving is offered before a first confirmed contribution (own part 0).
+    const G = { ...goal('active'), endsAt: new Date(Date.now() + 60_000).toISOString() };
+    readGoals.mockResolvedValue({ goals: [G] });
+    await render();
+    expect(byId('wsf-you-name')?.textContent).toBe('Alex');
+    // Back to the tab with a whole record: the page is drawn from it (its name says so).
+    record = { communities: { items: [COMMUNITY] }, profile: { displayName: 'Alex R.', createdAt: null }, goals: { oak: { goals: [G] } }, own: { g1: OWN(0) } };
+    refocus();
+    await flush();
+    expect(byId('wsf-you-name')?.textContent).toBe('Alex R.');
+    expect(byId('wsf-you-start-moving')).not.toBeNull();
+    // The record loses the own part, and the focus revalidation fails.
+    record = { ...record, own: {} };
+    readMyCommunities.mockRejectedValueOnce(OFFLINE());
+    refocus();
+    await flush();
+    expect(byId('wsf-you-stale')).not.toBeNull();
+    expect(byId('wsf-you-start-moving')).not.toBeNull();
+    // The phone sleeps past the goal's end; the resume read fails too.
+    readMyCommunities.mockRejectedValueOnce(OFFLINE());
+    await returnAfter(RESUME_MIN_AWAY_MS + 60_000);
+    await flush();
+    expect(byId('wsf-you-member')).not.toBeNull();
+    expect(byId('wsf-you-start-moving')).toBeNull();
+  });
+
+  it('NB-4: with no profile ever read, a failed resume keeps the "You" header, never the pending bar', async () => {
+    readMemberProfile.mockRejectedValue(OFFLINE());
+    // The record holds everything but the profile.
+    record = { communities: { items: [COMMUNITY] }, goals: { oak: { goals: [goal('active')] } }, own: { g1: OWN(25) } };
+    await render();
+    expect(byId('wsf-you-name')?.textContent).toBe('You');
+    expect(byId('wsf-you-name-pending')).toBeNull();
+    readMyCommunities.mockRejectedValueOnce(OFFLINE());
+    await returnAfter(RESUME_MIN_AWAY_MS + 1_000);
+    await flush();
+    expect(byId('wsf-you-stale')).not.toBeNull();
+    expect(byId('wsf-you-name-pending')).toBeNull();
+    expect(byId('wsf-you-name')?.textContent).toBe('You');
+  });
+
+  it('NB-3: opened on the record with the first read failing, the record then loses a fact; a failed resume past the goal end still stops offering Start moving', async () => {
+    const G = { ...goal('active'), endsAt: new Date(Date.now() + 60_000).toISOString() };
+    record = { communities: { items: [COMMUNITY] }, profile: { displayName: 'Alex', createdAt: null }, goals: { oak: { goals: [G] } }, own: { g1: OWN(0) } };
+    readMyCommunities.mockRejectedValueOnce(OFFLINE());
+    await render();
+    expect(byId('wsf-you-stale')).not.toBeNull();
+    expect(byId('wsf-you-start-moving')).not.toBeNull();
+    record = { ...record, own: {} };
+    readMyCommunities.mockRejectedValueOnce(OFFLINE());
+    await returnAfter(RESUME_MIN_AWAY_MS + 60_000);
+    await flush();
+    expect(byId('wsf-you-member')).not.toBeNull();
+    expect(byId('wsf-you-start-moving')).toBeNull();
+  });
+
+  it('NB-3: a kept page recomposed from the record takes its inputs: once the record later loses a fact, the older network inputs (10) never come back', async () => {
+    readOwnCredit.mockResolvedValue(OWN(10));
+    await render();
+    expect(byId('wsf-you-lead-own')!.textContent).toBe('10 squats');
+    // A receipt recorded 25 while You stayed on screen; a failed resume draws it.
+    record = { communities: { items: [COMMUNITY] }, profile: { displayName: 'Alex', createdAt: null }, goals: { oak: { goals: [goal('active')] } }, own: { g1: OWN(25) } };
+    readMyCommunities.mockRejectedValueOnce(OFFLINE());
+    await returnAfter(RESUME_MIN_AWAY_MS + 1_000);
+    await flush();
+    expect(byId('wsf-you-lead-own')!.textContent).toBe('25 squats');
+    // The record then loses the own part; another failed resume keeps 25.
+    record = { ...record, own: {} };
+    readMyCommunities.mockRejectedValueOnce(OFFLINE());
+    await returnAfter(RESUME_MIN_AWAY_MS + 1_000);
+    await flush();
+    expect(byId('wsf-you-lead-own')!.textContent).toBe('25 squats');
+  });
+
+  it("NB-4: when this load's profile read fails too, the recorded name stays (the read's fallback is not a profile)", async () => {
+    record = { communities: { items: [COMMUNITY] }, profile: { displayName: 'Alex', createdAt: null }, goals: { oak: { goals: [goal('active')] } }, own: { g1: OWN(25) } };
+    await render();
+    expect(byId('wsf-you-name')?.textContent).toBe('Alex');
+    readMemberProfile.mockRejectedValueOnce(OFFLINE());
+    readMyCommunities.mockRejectedValueOnce(OFFLINE());
+    await returnAfter(RESUME_MIN_AWAY_MS + 1_000);
+    await flush();
+    expect(byId('wsf-you-stale')).not.toBeNull();
+    expect(byId('wsf-you-name')?.textContent).toBe('Alex');
+  });
+
+  it("NB-4: when this load's profile read answers and only the communities fail, the kept head shows the fresh name", async () => {
+    record = { communities: { items: [COMMUNITY] }, profile: { displayName: 'Alex', createdAt: null }, goals: { oak: { goals: [goal('active')] } }, own: { g1: OWN(25) } };
+    await render();
+    expect(byId('wsf-you-name')?.textContent).toBe('Alex');
+    readMemberProfile.mockResolvedValueOnce({ displayName: 'Alex B.', createdAt: null });
+    readMyCommunities.mockRejectedValueOnce(OFFLINE());
+    await returnAfter(RESUME_MIN_AWAY_MS + 1_000);
+    await flush();
+    expect(byId('wsf-you-stale')).not.toBeNull();
+    expect(byId('wsf-you-name')?.textContent).toBe('Alex B.');
   });
 });
