@@ -156,8 +156,6 @@ export function kioskRemainingMs(startedAt: number, now: number, totalMs = KIOSK
   return left > 0 ? left : 0;
 }
 
-/** Whole seconds to show. Rounds UP, so "1 second" is on screen for the last
- * whole second rather than flicking to 0 while time is still left. */
 /**
  * The countdown line, or null when the session clock is not running —
  * nothing is going to end the session (a request in flight, a restore being
@@ -169,6 +167,8 @@ export function kioskCountdownText(startedAt: number | null, now: number, totalM
   return kioskCountdownLabel(kioskRemainingSeconds(kioskRemainingMs(startedAt, now, totalMs)));
 }
 
+/** Whole seconds to show. Rounds UP, so "1 second" is on screen for the last
+ * whole second rather than flicking to 0 while time is still left. */
 export function kioskRemainingSeconds(remainingMs: number): number {
   if (!Number.isFinite(remainingMs) || remainingMs <= 0) return 0;
   return Math.ceil(remainingMs / 1000);
