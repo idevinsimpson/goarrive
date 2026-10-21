@@ -38,17 +38,32 @@ vi.mock('react-native', async (importOriginal) => {
 });
 
 const params: Record<string, string> = {};
+/*
+  Settings opened cold, as a page (not the panel over the member tabs), and
+  the screen in front. One stable object, as React Navigation's is. Motion's
+  MO-03 F4 (W14, 1b431fab) reads isFocused() at mount and subscribes to focus
+  and blur, so those are here too, with a small listener registry.
+*/
+const navListeners = vi.hoisted(() => new Map<string, Set<() => void>>());
+const settingsNavigation = vi.hoisted(() => ({
+  getState: () => ({ index: 0, routes: [{ key: 'settings-1', name: 'settings' }] }),
+  setParams: () => {},
+  isFocused: () => true,
+  addListener: (event: string, cb: () => void) => {
+    const set = navListeners.get(event) ?? new Set<() => void>();
+    navListeners.set(event, set);
+    set.add(cb);
+    return () => {
+      set.delete(cb);
+    };
+  },
+}));
 vi.mock('expo-router', () => ({
   router: { replace: vi.fn(), push: vi.fn(), back: vi.fn(), canGoBack: () => false },
   Link: ({ href, children }: { href: string; children: ReactNode }) => <a href={href}>{children}</a>,
   useLocalSearchParams: () => params,
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
-  // Settings opened cold, as a page (not the panel over the member tabs).
-  useNavigation: () => ({
-    getState: () => ({ index: 0, routes: [{ key: 'settings-1', name: 'settings' }] }),
-    setParams: vi.fn(),
-    addListener: () => () => {},
-  }),
+  useNavigation: () => settingsNavigation,
   useFocusEffect: (cb: () => void | (() => void)) => {
     useEffect(() => cb(), [cb]);
   },
