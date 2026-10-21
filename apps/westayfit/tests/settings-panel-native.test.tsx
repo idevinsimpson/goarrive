@@ -160,6 +160,18 @@ vi.mock('expo-router', () => ({
 }));
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 vi.mock('../src/auth', () => ({ useWsfAuth: () => ({ ready: true, user: { uid: 'u1' } }) }));
+// No backend is ever configured here. On an integrated tree Settings reaches
+// the state lane's session modules (kioskSession → postAuthDestination →
+// firebase), whose native configuration refuses at load without one.
+vi.mock('../src/firebase', () => ({
+  getFirebaseApp: () => ({}),
+  getFirebaseAuth: () => ({}),
+  getFirebaseFirestore: () => ({}),
+  getFirebaseFunctions: () => ({}),
+  wsfIsStaging: false,
+  wsfUsingEmulators: false,
+  wsfFirebaseProjectId: 'test-project',
+}));
 vi.mock('../src/movement-camera/MoveCameraSettingsSection', () => ({ MoveCameraSettingsSection: () => null }));
 vi.mock('../src/ui/CommunityPrivacyControls', () => ({ CommunityPrivacyControls: () => null }));
 vi.mock('../src/ui/useReducedMotion', () => ({
