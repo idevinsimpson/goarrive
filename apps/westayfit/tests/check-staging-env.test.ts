@@ -11,8 +11,13 @@ import { afterAll, describe, expect, it } from 'vitest';
 import {
   APP_CONFIG_RULES,
   GIT_REPLY,
+  GIT_SAFETY_ARGS,
   REFUSALS,
+  bindMountRefusal,
   expoLoadedEnvFiles,
+  readMountInfo,
+  expoLoadedEnvNames,
+  gitEnv,
   placeFile,
   RESOLVER_RULES,
   UNRECOGNISED,
@@ -284,18 +289,29 @@ describe('check:staging-env refuses a file git could commit, and fails closed wi
   });
 
   describe('gitRefusal: the app repository, then the work tree that holds the file; only clean answers pass', () => {
-    type Reply = { status: number | null; stdout?: string; stderr: string };
+    type Answer = { status: number | null; stdout?: string; stderr: string };
+    /*
+      A reply, or how git words it for the call it answers: git prints the
+      pathspec and its path verbatim, and the script now expects exactly those
+      (RV11-641-SEC-N2), so a fake reply is built from the call's own last
+      argument.
+    */
+    type Reply = Answer | ((args: string[]) => Answer);
+    const pathOf = (spec: string) => spec.replace(/^:\([^)]*\)/, '');
     const OK: Reply = { status: 0, stdout: '', stderr: '' };
-    const NO_MATCH: Reply = { status: 1, stderr: "error: pathspec ':(literal)/x' did not match any file(s) known to git\nDid you forget to 'git add'?\n" };
-    const OUTSIDE: Reply = { status: 128, stderr: "fatal: :(literal)/x: '/x' is outside repository at '/repo'\n" };
-    const NOT_A_REPO: Reply = { status: 128, stderr: 'fatal: not a git repository (or any parent up to mount point /)\nStopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).\n' };
+    const NO_MATCH: Reply = (args) => ({ status: 1, stderr: `error: pathspec '${args.at(-1)}' did not match any file(s) known to git\nDid you forget to 'git add'?\n` });
+    const OUTSIDE: Reply = (args) => ({ status: 128, stderr: `fatal: ${args.at(-1)}: '${pathOf(args.at(-1)!)}' is outside repository at '/repo'\n` });
+    const NOT_A_REPO: Reply = { status: 128, stderr: 'fatal: not a git repository (or any of the parent directories): .git\n' };
     const UNSET: Reply = { status: 1, stdout: '', stderr: '' };
+    const asked = (r: Reply, args: string[]): Answer => (typeof r === 'function' ? r(args) : r);
+    /** A reply as git words it for this call, then changed (another status, a line before it …). */
+    const reword = (r: Reply, change: (a: Answer) => Answer): Reply => (args) => change(asked(r, args));
     type Answers = Partial<Record<'appConfig' | 'lsGiven' | 'lsReal' | 'appIgnore' | 'top' | 'otherConfig' | 'otherLs' | 'otherIgnore', Reply>>;
     /** Outside every repository unless a case says otherwise. */
     const fake = (a: Answers) => {
       const calls: Array<[string, string[]]> = [];
       // git's answer as the script reads it: stdout is always a string.
-      const git = (args: string[], cwd?: string) => ({ stdout: '', ...answer(args, cwd) });
+      const git = (args: string[], cwd?: string) => ({ stdout: '', ...asked(answer(args, cwd), args) });
       const answer = (args: string[], cwd?: string): Reply => {
         const where = cwd === APP_ROOT ? 'app' : String(cwd);
         calls.push([where, args]);
@@ -359,10 +375,16 @@ describe('check:staging-env refuses a file git could commit, and fails closed wi
       ['the app is not a work tree', { appConfig: { status: 128, stderr: NOT_A_REPO.stderr } }],
       ['core.ignorecase answers something else', { appConfig: { status: 0, stdout: 'maybe\n', stderr: '' } }],
       ['exit 1 that is not "did not match"', { lsReal: { status: 1, stderr: 'error: something new\n' } }],
-      ['"did not match" with another status', { lsReal: { status: 128, stderr: NO_MATCH.stderr } }],
-      ['"outside repository" with another status', { lsGiven: { status: 1, stderr: OUTSIDE.stderr } }],
-      ['"did not match" only on a later line', { lsReal: { status: 1, stderr: "warning: x\nerror: pathspec '/x' did not match any file(s) known to git\n" } }],
-      ['"is outside repository" only on a later line', { lsGiven: { status: 128, stderr: "fatal: unsafe repository\n'/x' is outside repository at '/r'\n" } }],
+      ['"did not match" with another status', { lsReal: reword(NO_MATCH, (r) => ({ ...r, status: 128 })) }],
+      ['"outside repository" with another status', { lsGiven: reword(OUTSIDE, (r) => ({ ...r, status: 1 })) }],
+      ['"did not match" only on a later line', { lsReal: reword(NO_MATCH, (r) => ({ ...r, stderr: `warning: x\n${r.stderr}` })) }],
+      ['"is outside repository" only on a later line', { lsGiven: reword(OUTSIDE, (r) => ({ ...r, stderr: `fatal: unsafe repository\n${r.stderr}` })) }],
+      ['SEC-N2: "did not match" for another pathspec', { lsReal: { status: 1, stderr: "error: pathspec ':(literal)/elsewhere.env' did not match any file(s) known to git\n" } }],
+      ['SEC-N2: "outside repository" for another path', { lsGiven: { status: 128, stderr: "fatal: :(literal)/elsewhere: '/elsewhere' is outside repository at '/repo'\n" } }],
+      ['SEC-N2: "outside repository" naming no work tree', { lsGiven: (args: string[]) => ({ status: 128, stderr: `fatal: ${args.at(-1)}: '${pathOf(args.at(-1)!)}' is outside repository at ''\n` }) }],
+      ['SEC-N2: the pathspec is in a submodule', { lsGiven: (args: string[]) => ({ status: 128, stderr: `fatal: Pathspec '${args.at(-1)}' is in submodule 'sub'\n` }) }],
+      ['SEC-N2: the app check-ignore says another path is outside', { appIgnore: { status: 128, stderr: "fatal: /elsewhere: '/elsewhere' is outside repository at '/repo'\n" } }],
+      ['SEC-N2: the other repository says another pathspec did not match', { ...IN_OTHER, otherLs: { status: 1, stderr: "error: pathspec ':(literal)/repo2/other.env' did not match any file(s) known to git\n" } }],
       ['"is outside repository" as free text in another fatal', { lsGiven: { status: 128, stderr: 'fatal: the path is outside repository somewhere\n' } }],
       ['app check-ignore fails some other way', { appIgnore: { status: 128, stderr: 'fatal: unsafe repository\n' } }],
       ['app check-ignore does not run', { appIgnore: { status: null, stderr: '' } }],
@@ -377,12 +399,21 @@ describe('check:staging-env refuses a file git could commit, and fails closed wi
       expect(run(answers as Answers)).toBe(REFUSALS.git);
     });
 
-    it('RV9-641-I11-3: the reply patterns match git\'s whole first line and ignore only the quoted paths', () => {
-      expect(GIT_REPLY.untracked.test("error: pathspec ':(literal)/a b/it\\'s.env' did not match any file(s) known to git\nDid you forget to 'git add'?\n")).toBe(true);
-      expect(GIT_REPLY.outside.test("fatal: :(literal)/dev/shm/x.env: '/dev/shm/x.env' is outside repository at '/repo'\n")).toBe(true);
-      expect(GIT_REPLY.notARepository.test('fatal: not a git repository (or any of the parent directories): .git\n')).toBe(true);
-      expect(GIT_REPLY.untracked.test("error: pathspec 'a\nb' did not match any file(s) known to git\n")).toBe(false);
-      expect(GIT_REPLY.outside.test('fatal: is outside repository\n')).toBe(false);
+    it('RV9-641-I11-3 / SEC-N2: a reply is git\'s whole first line, built from the exact pathspec and path passed', () => {
+      const spec = ":(literal)/a b/it's.env";
+      expect(GIT_REPLY.untracked(`error: pathspec '${spec}' did not match any file(s) known to git\nDid you forget to 'git add'?\n`, spec)).toBe(true);
+      expect(GIT_REPLY.outside("fatal: :(literal)/dev/shm/x.env: '/dev/shm/x.env' is outside repository at '/repo'\n", ':(literal)/dev/shm/x.env', '/dev/shm/x.env')).toBe(true);
+      expect(GIT_REPLY.outside("fatal: /dev/shm/x.env: '/dev/shm/x.env' is outside repository at '/repo'\n", '/dev/shm/x.env', '/dev/shm/x.env')).toBe(true);
+      expect(GIT_REPLY.notARepository('fatal: not a git repository (or any of the parent directories): .git\n')).toBe(true);
+      expect(GIT_REPLY.notARepository('fatal: not a git repository (or any parent up to mount point /dev)\nStopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).\n')).toBe(true);
+      // A path with a newline: git's first line ends inside it, so nothing matches.
+      expect(GIT_REPLY.untracked("error: pathspec 'a\nb' did not match any file(s) known to git\n", 'a\nb')).toBe(false);
+      expect(GIT_REPLY.outside('fatal: is outside repository\n', ':(literal)/x', '/x')).toBe(false);
+      // The reviewer's crafted case: a directory name holding the fixed words cannot make the submodule error read as outside.
+      const crafted = ":(literal)/app/sub/d: 'z' is outside repository at 'w/x.env";
+      const submodule = `fatal: Pathspec '${crafted}' is in submodule 'sub'\n`;
+      expect(GIT_REPLY.outside(submodule, crafted, pathOf(crafted))).toBe(false);
+      expect(GIT_REPLY.outside(submodule, ':(literal)/app/sub/d', '/app/sub/d')).toBe(false);
     });
   });
 });
@@ -460,8 +491,172 @@ describe('RV9-641-I11: files in other work trees, and the env files Expo loads',
 
   it('the refusals give no .env*.local advice and point outside the repository', () => {
     expect(REFUSALS.notIgnored).toContain('keep it outside the repository (for example $TMP)');
-    expect(REFUSALS.expoLoaded).toContain('keep it outside the repository (for example $TMP)');
+    expect(REFUSALS.expoLoaded).toContain('give it another name and keep it outside the repository (for example $TMP/wsf-staging.env)');
+    expect(REFUSALS.bindMount).toContain('outside the repository (for example $TMP)');
     for (const r of Object.values(REFUSALS)) expect(r).not.toContain('.env*.local');
+  });
+});
+
+describe('RV11-641-SEC: other checkouts, mount points, bind mounts, and the git that runs', () => {
+  const refused = (r: ReturnType<typeof runOn>, refusal: string) => {
+    expect(r.stdout).toBe(`${refusal}\nFAIL\n`);
+    expect(r.code).toBe(1);
+  };
+  /** git, for placeFile cases that must be refused before git is asked. */
+  const noGit = () => {
+    throw new Error('git was asked');
+  };
+
+  describe('SEC-F2: an Expo env file name is refused in any checkout, in any case', () => {
+    // A sibling worktree of the fixture repository: .env.local is ignored there (*.local), .env is not.
+    writeFileSync(join(SIBLING, '.env.local'), envText(GOOD));
+    writeFileSync(join(SIBLING, '.env'), envText(GOOD));
+
+    it('a sibling worktree\'s .env.local (ignored by git) and .env are refused, by the script as run', () => {
+      refused(runOn(join(SIBLING, '.env.local'), '--platform', 'ios'), REFUSALS.expoLoaded);
+      refused(runOn(join(SIBLING, '.env'), '--platform', 'ios'), REFUSALS.expoLoaded);
+    });
+
+    it('by name before git is asked, whatever the case, outside every repository too', () => {
+      for (const name of ['.env', '.ENV.Local', '.env.PRODUCTION', '.Env.Production.Local']) {
+        const file = join(DIR, name);
+        writeFileSync(file, envText(GOOD));
+        expect(placeFile(file, noGit, FAKE_APP)).toEqual({ real: null, refusal: REFUSALS.expoLoaded });
+        unlinkSync(file);
+      }
+    });
+
+    it('the name given or the name it resolves to: a link named .env, or a plain name linked to a .env.local', () => {
+      const plain = join(DIR, `plain-${(n += 1)}.env`);
+      writeFileSync(plain, envText(GOOD));
+      const named = join(DIR, '.env');
+      symlinkSync(plain, named);
+      expect(placeFile(named, noGit, FAKE_APP).refusal).toBe(REFUSALS.expoLoaded);
+      unlinkSync(named);
+      const innocent = join(DIR, `innocent-${(n += 1)}.env`);
+      symlinkSync(join(SIBLING, '.env.local'), innocent);
+      expect(placeFile(innocent, noGit, FAKE_APP).refusal).toBe(REFUSALS.expoLoaded);
+    });
+
+    it('.env.development.local (only expo start loads it) and other names still pass to git', () => {
+      const file = join(DIR, '.env.development.local');
+      writeFileSync(file, envText(GOOD));
+      const placed = placeFile(file, undefined, FAKE_APP);
+      expect(placed).toEqual({ real: file, refusal: null });
+      unlinkSync(file);
+    });
+
+    it('the names are the fixed four plus @expo/env\'s own list for production', () => {
+      expect(expoLoadedEnvNames(APP_ROOT).sort()).toEqual(['.env', '.env.local', '.env.production', '.env.production.local']);
+    });
+  });
+
+  describe('SEC-F3 and SEC-N1: the git that runs, and how', () => {
+    it('gitEnv: no GIT_* but GIT_DISCOVERY_ACROSS_FILESYSTEM=1, the C locale, and only absolute PATH entries', () => {
+      const env = gitEnv({ PATH: `.:/usr/bin::rel/bin:/bin`, GIT_DIR: '/x', GIT_INDEX_FILE: '/y', GIT_DISCOVERY_ACROSS_FILESYSTEM: '0', HOME: '/home/u', LC_ALL: 'de_DE.UTF-8' });
+      expect(env).toEqual({ PATH: '/usr/bin:/bin', HOME: '/home/u', LC_ALL: 'C', LANGUAGE: '', GIT_DISCOVERY_ACROSS_FILESYSTEM: '1' });
+    });
+
+    it('every git command starts with no fsmonitor hook and no untracked cache', () => {
+      expect(GIT_SAFETY_ARGS).toEqual(['-c', 'core.fsmonitor=false', '-c', 'core.untrackedCache=false']);
+    });
+
+    // A git that records how it was run (its directory, its arguments, its git and locale environment) and says "not a repository".
+    const fakeGit = (log: string) =>
+      [
+        '#!/bin/sh',
+        `{ printf 'cwd=%s\\n' "$PWD"; printf 'args=%s\\n' "$*"; env | grep -E '^(GIT_|LC_ALL=)' | sort; } >> '${log}'`,
+        "echo 'fatal: not a git repository (or any of the parent directories): .git' >&2",
+        'exit 128',
+        '',
+      ].join('\n');
+
+    it('as run: the variable, the C locale and the safety flags reach git; no other GIT_* does', () => {
+      const bin = join(DIR, 'git');
+      const log = join(DIR, `git-log-${(n += 1)}.txt`);
+      writeFileSync(bin, fakeGit(log), { mode: 0o755 });
+      const file = join(DIR, `case-${(n += 1)}.env`);
+      writeFileSync(file, envText(GOOD));
+      const r = runWith({ PATH: `${DIR}:${process.env.PATH}`, GIT_DIR: '/elsewhere', GIT_INDEX_FILE: '/elsewhere/index' }, file);
+      unlinkSync(bin);
+      // The app repository answered "not a repository": refused, nothing read.
+      refused(r, REFUSALS.git);
+      const lines = readFileSync(log, 'utf8').trim().split('\n');
+      expect(lines).toEqual([
+        `cwd=${APP_ROOT}`,
+        'args=-c core.fsmonitor=false -c core.untrackedCache=false config --bool core.ignorecase',
+        'GIT_DISCOVERY_ACROSS_FILESYSTEM=1',
+        'LC_ALL=C',
+      ]);
+    });
+
+    it('a git next to the env file, reached through a relative PATH entry, never runs', () => {
+      const bin = join(DIR, 'git');
+      const log = join(DIR, `git-log-${(n += 1)}.txt`);
+      writeFileSync(bin, fakeGit(log), { mode: 0o755 });
+      const file = join(DIR, `case-${(n += 1)}.env`);
+      writeFileSync(file, envText(GOOD));
+      // '.' first: without the filter, the work-tree lookup (run in the file's directory) would start that git.
+      const r = runWith({ PATH: `.:${process.env.PATH}` }, file, '--platform', 'ios');
+      unlinkSync(bin);
+      expect(r.stdout.trim().split('\n').pop()).toBe('PASS');
+      expect(r.code).toBe(0);
+      expect(() => readFileSync(log, 'utf8')).toThrow();
+    });
+  });
+
+  describe('SEC-F4: a file reached through a bind mount is refused (Linux mount table)', () => {
+    const mount = (root: string, point: string, fs = 'ext4', options = 'rw') => `29 1 8:1 ${root} ${point} rw,relatime shared:1 - ${fs} /dev/sda1 ${options}`;
+    const table = (...lines: string[]) => `${lines.join('\n')}\n`;
+    const BASE = [mount('/', '/'), mount('/', '/dev/shm', 'tmpfs', 'rw,size=1g')];
+
+    it('the root mount and an ordinary tmpfs: nothing to refuse', () => {
+      expect(bindMountRefusal('/home/u/x.env', table(...BASE))).toBeNull();
+      expect(bindMountRefusal('/dev/shm/x.env', table(...BASE))).toBeNull();
+    });
+
+    it('a bind of a repository\'s subdirectory: refused; a neighbour of its mount point is not under it', () => {
+      const t = table(...BASE, mount('/rv11/apps/westayfit', '/dev/shm/bindapp'));
+      expect(bindMountRefusal('/dev/shm/bindapp/app.json', t)).toBe(REFUSALS.bindMount);
+      expect(bindMountRefusal('/dev/shm/bindapp', t)).toBe(REFUSALS.bindMount);
+      expect(bindMountRefusal('/dev/shm/bindappx/y.env', t)).toBeNull();
+      expect(bindMountRefusal('/dev/shm/other.env', t)).toBeNull();
+    });
+
+    it('the latest mount on a mount point is the one that holds the file', () => {
+      expect(bindMountRefusal('/mnt/x.env', table(...BASE, mount('/sub', '/mnt'), mount('/', '/mnt', 'tmpfs')))).toBeNull();
+      expect(bindMountRefusal('/mnt/x.env', table(...BASE, mount('/', '/mnt', 'tmpfs'), mount('/sub', '/mnt')))).toBe(REFUSALS.bindMount);
+    });
+
+    it('a btrfs subvolume mounted whole is not a bind; a bind of a directory inside one is', () => {
+      expect(bindMountRefusal('/home/u/x.env', table(mount('/@', '/', 'btrfs', 'rw,subvol=/@'), mount('/@home', '/home', 'btrfs', 'rw,ssd,subvol=/@home')))).toBeNull();
+      expect(bindMountRefusal('/x.env', table(mount('/root', '/', 'btrfs', 'rw,subvol=root')))).toBeNull();
+      expect(bindMountRefusal('/srv/app/app.json', table(mount('/@', '/', 'btrfs', 'rw,subvol=/@'), mount('/@home/u/repo/apps', '/srv/app', 'btrfs', 'rw,subvol=/@home')))).toBe(REFUSALS.bindMount);
+    });
+
+    it('mount points with escaped characters are read as the kernel writes them', () => {
+      expect(bindMountRefusal('/mnt/with space/x.env', table(...BASE, mount('/sub', '/mnt/with\\040space')))).toBe(REFUSALS.bindMount);
+    });
+
+    it('no mount table (macOS, Windows): not checked; an unreadable or unparsable one: refused', () => {
+      // How the table is read: none where the file does not exist, '' (refused) where it cannot be read.
+      expect(readMountInfo(join(DIR, 'no-such-mountinfo'))).toBeNull();
+      expect(readMountInfo(DIR)).toBe('');
+      expect(bindMountRefusal('/x.env', null)).toBeNull();
+      expect(bindMountRefusal('/x.env', '')).toBe(REFUSALS.mounts);
+      expect(bindMountRefusal('/x.env', 'garbage\n')).toBe(REFUSALS.mounts);
+      expect(bindMountRefusal('/x.env', table(mount('/', '/dev/shm', 'tmpfs')))).toBe(REFUSALS.mounts);
+    });
+
+    it('placeFile asks the mount table before the Expo names and git', () => {
+      const file = join(DIR, `case-${(n += 1)}.env`);
+      writeFileSync(file, envText(GOOD));
+      const bound = table(mount('/', '/'), mount('/elsewhere/apps/westayfit', DIR, 'tmpfs'));
+      expect(placeFile(file, noGit, FAKE_APP, () => bound)).toEqual({ real: null, refusal: REFUSALS.bindMount });
+      expect(placeFile(file, noGit, FAKE_APP, () => '')).toEqual({ real: null, refusal: REFUSALS.mounts });
+      // With an ordinary table it goes on to git, as before.
+      expect(placeFile(file, undefined, FAKE_APP, () => table(mount('/', '/')))).toEqual({ real: file, refusal: null });
+    });
   });
 });
 
