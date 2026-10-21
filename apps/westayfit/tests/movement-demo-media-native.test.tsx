@@ -798,6 +798,12 @@ describe('review follow-ups (#636 round 2)', () => {
     const a = player();
     emit('playingChange', { isPlaying: true });
     firstFrame();
+    // PRECONDITION — why this must follow a real showing change: A must already
+    // show 'playing', so the batched update below is a NO-OP for A. Captured
+    // correctly it stays bound to A (and B reads as its poster); read lazily at
+    // render, after the ref has moved to B, it would be re-bound to B and show
+    // B as playing. Without this real prior change there is nothing to tell
+    // the two apart.
     expect(state()).toBe('playing');
     // In ONE batch: A reports playing again (a 'playing' update made for A), and the source changes to B.
     act(() => {
@@ -913,7 +919,7 @@ describe('MO-06: the clip re-syncs to the round on every foreground', () => {
     expect(ctl.players.every((pl) => pl.source === null && pl.count('play') === 0)).toBe(true);
   });
 
-  it('never takes the audio session or shows Now Playing, never plays in the background, and leaving releases the player', () => {
+  it('never takes the audio session or shows Now Playing, never plays in the background; unmount releases the player, blur only pauses it', () => {
     render('running');
     const p = player();
     expect(p).toMatchObject({
@@ -923,8 +929,34 @@ describe('MO-06: the clip re-syncs to the round on every foreground', () => {
       showNowPlayingNotification: false,
       staysActiveInBackground: false,
     });
+    // Leaving by a forward push keeps the host mounted: the screen blurs and the
+    // clip PAUSES (kept, so a return resumes on its frame without reloading)…
+    blur();
+    expect(p.calls.at(-1)).toBe('pause');
+    expect(p.released).toBe(false);
+    focus();
+    expect(p.calls.at(-1)).toBe('play');
+    expect(player()).toBe(p);
+    // …and leaving for good unmounts the slot, which releases it.
     act(() => root.unmount());
     expect(p.released).toBe(true);
     root = createRoot(container);
+  });
+
+  it('a late background and the return arrive back to back, before the held round renders (N3)', () => {
+    render('running');
+    const p = player();
+    emit('playingChange', { isPlaying: true });
+    firstFrame();
+    // The background event was late: by the time it lands the app is already
+    // back, and the round's held render (MO-05) has not arrived yet.
+    appGoes('background');
+    appGoes('active'); // the round still reads 'running' here, so play() is re-asserted…
+    expect(p.calls.slice(-2)).toEqual(['pause', 'play']);
+    render('held'); // …then the round's pause lands
+    expect(p.calls.at(-1)).toBe('pause');
+    expect(state()).toBe('paused'); // the frame, held
+    render('running'); // Resume
+    expect(p.calls.at(-1)).toBe('play');
   });
 });
