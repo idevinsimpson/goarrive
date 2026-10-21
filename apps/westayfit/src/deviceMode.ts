@@ -110,7 +110,44 @@ export function readDeviceMode(): DeviceMode | null {
  */
 export function saveDeviceMode(mode: DeviceMode): Promise<boolean> {
   if (!isDeviceMode(mode)) return Promise.resolve(false);
-  return store.write(DEVICE_MODE_KEY, mode);
+  const saving = store.write(DEVICE_MODE_KEY, mode);
+  void saving.then((kept) => noteSaveResult(kept));
+  return saving;
+}
+
+/*
+  WHETHER THE DEVICE CAN BE SAID TO REMEMBER THE ANSWER (ST-04, native).
+
+  The device question's note says the answer "is remembered on this device
+  only". On a phone that is true only if the device kept the last answer and
+  its storage can be read at all. `deviceModeMayBeRemembered` is false after
+  the last save was refused, or while the stored answer is unreadable. On web
+  it is always true: the browser build's wording and behaviour are unchanged
+  (the render gate is the member lane's, W16-3).
+*/
+let lastSaveRefused = false;
+const rememberedListeners = new Set<() => void>();
+
+function noteSaveResult(kept: boolean): void {
+  const refused = !kept;
+  if (refused === lastSaveRefused) return;
+  lastSaveRefused = refused;
+  for (const l of [...rememberedListeners]) l();
+}
+
+export function deviceModeMayBeRemembered(): boolean {
+  if (HAS_SYNC_STORAGE) return true;
+  return !lastSaveRefused && !store.unreadable(DEVICE_MODE_KEY);
+}
+
+/** Notified whenever `deviceModeMayBeRemembered` may have changed (a save's answer, or the mirror's launch read). */
+export function subscribeDeviceModeMayBeRemembered(listener: () => void): () => void {
+  rememberedListeners.add(listener);
+  const unsubscribeStore = store.subscribe(listener);
+  return () => {
+    rememberedListeners.delete(listener);
+    unsubscribeStore();
+  };
 }
 
 /** What a device answer that could not be removed is overwritten with: not
