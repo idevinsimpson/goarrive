@@ -103,7 +103,7 @@ import {
 import { wsfTheme } from '../../src/theme';
 import { PROGRESS_GREEN } from '../../src/ui/brandAssets';
 import { SignInLink } from '../../src/ui/SignInLink';
-import { formatClock } from '../../src/ui/dates';
+import { formatConfirmedAt } from '../../src/ui/dates';
 import { LivingWeProgress } from '../../src/ui/LivingWeProgress';
 import { SpokenOnce } from '../../src/ui/SpokenOnce';
 import { TogetherCompletion } from '../../src/ui/TogetherCompletion';
@@ -2457,9 +2457,15 @@ export default function ContributeToGoal() {
               <Text style={styles.anchorStaleRetryText}>Retry</Text>
             </Pressable>
           </View>
-        ) : pulseAt && !anchorShort ? (
+        ) : null}
+        {/*
+          W12-6 (INT-12): the confirmed time names its day when it is not
+          today, and after a refresh that did not land it reads "Last
+          confirmed" beside the note above.
+        */}
+        {pulseAt && !anchorShort ? (
           <Text style={styles.anchorUpdated} testID="wsf-contribute-context-updated">
-            {`Confirmed ${formatClock(pulseAt)}`}
+            {formatConfirmedAt(pulseAt, new Date(), { failed: refreshFailed })}
           </Text>
         ) : null}
       </View>
@@ -2485,7 +2491,7 @@ export default function ContributeToGoal() {
         {pending != null && pending > 0 ? (
           <>
             <Text style={styles.yoursArrow}>→</Text>
-            <Text style={styles.yoursNext} testID="wsf-contribute-your-part-next">
+            <Text style={styles.yoursNext} testID="wsf-contribute-your-part-next" {...numeralTextProps}>
               {formatCount(anchorOwnCredit + pending)}
             </Text>
           </>
@@ -2657,7 +2663,7 @@ export default function ContributeToGoal() {
               <View style={styles.tile}>
                 <Text style={styles.tileLabel}>Your addition</Text>
                 {/* The exact number recorded -- theirs, not the community's. */}
-                <Text style={styles.tileValue} testID="wsf-contribute-result-amount">
+                <Text style={styles.tileValue} testID="wsf-contribute-result-amount" {...numeralTextProps}>
                   {r.alreadyRecorded ? formatCount(r.addedCount) : `+${formatCount(r.addedCount)}`}
                 </Text>
               </View>
@@ -2665,7 +2671,7 @@ export default function ContributeToGoal() {
                   and the figure are one line for every reader and spec. */}
               <View style={styles.tile} testID="wsf-contribute-own-credit">
                 <Text style={styles.tileLabel}>{'Your total on this goal: '}</Text>
-                <Text style={styles.tileValue}>
+                <Text style={styles.tileValue} {...numeralTextProps}>
                   {formatCount(r.ownCredit)}
                   {ownUnit ? <Text style={styles.tileUnit}>{` ${ownUnit}`}</Text> : null}
                 </Text>
@@ -2689,7 +2695,7 @@ export default function ContributeToGoal() {
                       {context.kind === 'verified' ? `Shared total · ${context.goalTitle}` : 'Shared total'}
                     </Text>
                     <Text style={styles.sharedTotal} testID="wsf-contribute-shared-total">
-                      <Text style={styles.sharedCount}>
+                      <Text style={styles.sharedCount} {...numeralTextProps}>
                         {totalOfTargetParts(r.sharedTotal, r.target, r.unit).count}
                       </Text>
                       {' '}
@@ -3088,7 +3094,7 @@ export default function ContributeToGoal() {
             />
           </View>
           <View style={styles.heroFacts}>
-            <Text style={styles.heroTotal} testID="wsf-contribute-shared-total">
+            <Text style={styles.heroTotal} testID="wsf-contribute-shared-total" {...numeralTextProps}>
               {totalOfTargetLabel(pulse.sharedTotal, pulse.target, unit)}
             </Text>
             {/*
@@ -3427,6 +3433,8 @@ export default function ContributeToGoal() {
             <Text
               style={[styles.timerClock, windowHeight < 700 ? styles.timerClockShort : null]}
               testID="wsf-contribute-timer-clock"
+              // INT-16: the policy's cap and shrink-to-fit on a phone; nothing on the web.
+              {...numeralTextProps}
             >
               {formatElapsed(timerElapsed)}
             </Text>

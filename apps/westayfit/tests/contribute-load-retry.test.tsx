@@ -602,6 +602,35 @@ describe('W12-2: a failed refresh keeps a warm screen (INT-25); a stale sign-in 
     expect(byId('wsf-contribute-context-updated')!.textContent).toBe(confirmed);
   });
 
+  it('W12-6: after a later load fails, the confirmed line reads "Last confirmed" beside the note (native)', async () => {
+    windowOf(844);
+    await warm('ios');
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    expect(byId('wsf-contribute-context-updated')!.textContent).toMatch(/^Confirmed \d{1,2}:\d{2}/);
+    // The route's community changes and the goal loads again; this time it fails.
+    answers.wsfGoalPulse = INTERNAL;
+    params.value = { goalId: 'g1', groupId: 'elm' };
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    expect(byId('wsf-contribute-stale-note')).not.toBeNull();
+    expect(byId('wsf-contribute-context-updated')!.textContent).toMatch(/^Last confirmed \d{1,2}:\d{2}/);
+  });
+
+  it('W12-6: a confirmed time from another day names the day (the web\'s line too)', async () => {
+    windowOf(844);
+    vi.useFakeTimers({ now: Date.UTC(2026, 9, 20, 15, 41), toFake: ['Date', 'setInterval', 'clearInterval'] });
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    const sameDay = byId('wsf-contribute-context-updated')!.textContent!;
+    expect(sameDay).toMatch(/^Confirmed \d{1,2}:\d{2}/);
+    // A day and an hour later, with no tick landed (the poll is not advanced), anything that renders names the day.
+    vi.setSystemTime(Date.UTC(2026, 9, 21, 16, 41));
+    act(() => typeInto(entry(), '3'));
+    await settle();
+    expect(byId('wsf-contribute-context-updated')!.textContent).toBe(`Confirmed Oct 20, ${sameDay.slice('Confirmed '.length)}`);
+  });
+
   it('web: a poll not-found still ends the screen, as before', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     act(() => root.render(<ContributeToGoal />));
