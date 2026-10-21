@@ -9,8 +9,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * RV12-641-N1 — verify-email runs ONE CHECK AT A TIME. A tap ("I have
  * verified"), the unconfigured poll and a return to the app all claim the same
  * check first: one that finds it held does not start a second check (a tap
- * returns, a tick skips to its next turn, a return does nothing), and each
- * releases only its own claim, also when its check fails. Before, a tap or a
+ * joins it and reports its answer, RV15-641-N2; a tick skips to its next turn;
+ * a return does nothing), and each releases only its own claim, also when its
+ * check fails. Before, a tap or a
  * tick during a return's check (and, on the web, the poll's visibility tick
  * during its own timed tick) started a second check, and both routed.
  *
@@ -28,6 +29,8 @@ const ctl = vi.hoisted(() => ({
   hold: false,
   pending: [] as Array<() => void>,
   failNext: false,
+  /** The held reload fails once it is released. */
+  failAfterHold: false,
   outcome: null as null | 'unconfigured',
 }));
 
@@ -74,6 +77,10 @@ vi.mock('firebase/auth', () => ({
       throw Object.assign(new Error('offline'), { code: 'auth/network-request-failed' });
     }
     if (ctl.hold) await new Promise<void>((resolve) => ctl.pending.push(resolve));
+    if (ctl.failAfterHold) {
+      ctl.failAfterHold = false;
+      throw Object.assign(new Error('offline'), { code: 'auth/network-request-failed' });
+    }
     u.emailVerified = ctl.verifiedAfterReload;
   },
   signOut: async () => undefined,
@@ -122,8 +129,10 @@ beforeEach(() => {
   ctl.hold = false;
   ctl.pending = [];
   ctl.failNext = false;
+  ctl.failAfterHold = false;
   ctl.outcome = null;
   USER.emailVerified = false;
+  USER.uid = 'u1';
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -289,6 +298,71 @@ describe('one check at a time (RV12-641-N1)', () => {
     await returnToApp();
     expect(ctl.reloads).toBe(2);
     expect(ctl.calls).toEqual(ROUTED);
+  });
+});
+
+describe('RV15-641-N2: a tap during a silent check is answered', () => {
+  const status = () => container.querySelector('[data-testid="wsf-verify-status"]')?.textContent ?? null;
+  const errorText = () => container.querySelector('[data-testid="wsf-verify-error"]')?.textContent ?? null;
+  const button = () => container.querySelector('[data-testid="wsf-verify-check"]')!.textContent ?? '';
+
+  it('the return’s check comes back unverified: the tap shows it is checking, then says so; still one check', async () => {
+    ctl.verifiedAfterReload = false;
+    await mount();
+    ctl.hold = true;
+    await returnToApp();
+    expect(ctl.reloads).toBe(1);
+    await tap();
+    expect(button()).not.toContain('I have verified'); // the checking state
+    expect(status()).toBeNull();
+    ctl.hold = false;
+    await releaseOne();
+    expect(ctl.reloads).toBe(1);
+    expect(status()).toBe('Still unverified. Check your inbox and try again.');
+    expect(button()).toContain('I have verified');
+    expect(ctl.calls).toEqual([]);
+  });
+
+  it('the return’s check fails: the tap that joined it shows the error; still one check', async () => {
+    await mount();
+    ctl.hold = true;
+    await returnToApp();
+    await tap();
+    ctl.hold = false;
+    ctl.failAfterHold = true;
+    await releaseOne();
+    expect(ctl.reloads).toBe(1);
+    expect(errorText()).not.toBeNull();
+    expect(ctl.calls).toEqual([]);
+  });
+
+  it('the return’s check routes on: the tap that joined it adds nothing; one route', async () => {
+    await mount();
+    ctl.hold = true;
+    await returnToApp();
+    await tap();
+    ctl.hold = false;
+    await releaseOne();
+    expect(ctl.reloads).toBe(1);
+    expect(status()).toBeNull();
+    expect(errorText()).toBeNull();
+    expect(ctl.calls).toEqual(ROUTED);
+  });
+
+  it('a check in flight for another account is waited out; then the tap checks for this one', async () => {
+    ctl.verifiedAfterReload = false;
+    await mount();
+    ctl.hold = true;
+    await returnToApp(); // claimed for u1
+    expect(ctl.reloads).toBe(1);
+    USER.uid = 'u2'; // the account changed meanwhile
+    await tap();
+    expect(ctl.reloads).toBe(1);
+    ctl.hold = false;
+    await releaseOne(); // u1's check ends
+    await settle();
+    expect(ctl.reloads).toBe(2); // the tap's own check, for u2
+    expect(status()).toBe('Still unverified. Check your inbox and try again.');
   });
 });
 
