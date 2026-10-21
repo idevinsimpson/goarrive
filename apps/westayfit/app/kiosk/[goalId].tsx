@@ -9,7 +9,13 @@ import { useWsfAuth } from '../../src/auth';
 import { samePulse, type GoalPulse } from '../../src/displayPulse';
 import { getFirebaseAuth, getFirebaseFunctions, wsfUsingEmulators } from '../../src/firebase';
 import { armKioskReturn, resetSharedScreenHandoffs } from '../../src/handoffArming';
-import { KIOSK_REFUSAL_BODY, KIOSK_REFUSAL_HEADLINE, clearKioskSession, kioskContributeRoute } from '../../src/kioskSession';
+import {
+  KIOSK_REFUSAL_BODY,
+  KIOSK_REFUSAL_HEADLINE,
+  clearKioskSession,
+  kioskContributeRoute,
+  readKioskSession,
+} from '../../src/kioskSession';
 import { decideKioskStart, noteKioskHandoff } from '../../src/kioskSignOutGuard';
 import { wsfTheme } from '../../src/theme';
 import { PROGRESS_GREEN } from '../../src/ui/brandAssets';
@@ -106,7 +112,9 @@ export default function KioskGoal() {
   useFocusEffect(
     useCallback(() => {
       void resetSharedScreenHandoffs();
-      const decision = decideKioskStart(Platform.OS, !!user, goalIdRef.current);
+      // C7-1: an open kiosk session for this goal on this device is kiosk
+      // evidence too, so a phone relaunched mid-session signs its visitor out.
+      const decision = decideKioskStart(Platform.OS, !!user, goalIdRef.current, Date.now(), readKioskSession());
       setAskSignOut(decision === 'ask');
       if (decision !== 'signOut') return;
       void signOut(getFirebaseAuth()).catch(() => {
