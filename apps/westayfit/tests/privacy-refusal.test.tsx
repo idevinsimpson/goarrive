@@ -73,6 +73,8 @@ describe('MF-04 case 1: a body-less refusal is a save that did not go through', 
     ['403', () => fnError('permission-denied', 'permission-denied')],
     ['404', () => fnError('not-found', 'not-found')],
     ['403 with a status-only body', () => fnError('permission-denied', 'PERMISSION_DENIED')],
+    ['403 with a proxy reason phrase', () => fnError('permission-denied', 'Forbidden')],
+    ['404 with a proxy reason phrase', () => fnError('not-found', 'Not Found.')],
   ])('a body-less %s says not saved, keeps the stored switch, never "no longer a member"', async (_l, make) => {
     readMyCommunities.mockImplementation(() => listed(OAK));
     setVisibility.mockRejectedValue(make());
@@ -123,9 +125,12 @@ describe("MF-04 case 3: the function's own refusal, confirmed, still says so", (
       'You’re no longer a member of Oak Grove, so this setting can’t be changed.',
     );
     expect(forgetCommunity).toHaveBeenCalledWith('member-1', 'oak');
+    expect(forgetCommunity).toHaveBeenCalledTimes(1);
     // Its block stays, with the refusal said and no switches.
     expect(byId('wsf-privacy-panel-block-oak')).not.toBeNull();
     expect(byId('wsf-privacy-panel-name-oak')).toBeNull();
+    // N5: ONE re-read after the refusal both confirms it and redraws the rows.
+    expect(readMyCommunities).toHaveBeenCalledTimes(2);
   });
 
   it('a server not-found, confirmed, is refused the same way', async () => {
@@ -146,6 +151,8 @@ describe("MF-04 case 3: the function's own refusal, confirmed, still says so", (
     expect(container.textContent).not.toMatch(NO_LONGER);
     expect(byId('wsf-privacy-panel-error-oak')!.textContent).toContain(NOT_SAVED);
     expect(forgetCommunity).not.toHaveBeenCalled();
+    // N5: the same single re-read decides "not saved" too.
+    expect(readMyCommunities).toHaveBeenCalledTimes(2);
   });
 
   it('"Members only." when the memberships cannot be re-read is not said either', async () => {

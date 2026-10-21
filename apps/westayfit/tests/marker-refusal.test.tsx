@@ -69,6 +69,9 @@ describe('resolve', () => {
     ['403', () => fnError('permission-denied', 'permission-denied')],
     ['401', () => fnError('unauthenticated', 'unauthenticated')],
     ['404', () => fnError('not-found', 'not-found')],
+    ["401 from the framework ('Unauthenticated', N4)", () => fnError('unauthenticated', 'Unauthenticated')],
+    ["404 with a proxy reason phrase ('Not Found', N4)", () => fnError('not-found', 'Not Found')],
+    ["403 with a proxy reason phrase ('Forbidden', N4)", () => fnError('permission-denied', 'Forbidden')],
   ])('a body-less %s shows the neutral retry, not a claim about the code or the account', async (_l, make) => {
     await render(resolverOf(() => Promise.reject(make())));
     expect(byId('wsf-marker-invalid')).toBeNull();

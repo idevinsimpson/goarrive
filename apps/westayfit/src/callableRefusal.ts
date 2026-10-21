@@ -1,25 +1,51 @@
 /**
- * NATIVE-MEMBER-1 (HB-02, MF-04). WHO REFUSED: THE FUNCTION, OR SOMETHING IN
- * FRONT OF IT?
+ * NATIVE-MEMBER-1 (HB-02, MF-04). DID THE FUNCTION ITSELF REFUSE, OR IS THE
+ * REFUSAL NOT CONFIRMED?
  *
- * Every refusal this product's functions make is an `HttpsError` with a
- * sentence the function wrote ("Members only.", "Sign in first.", the
- * not-found message), and the SDK passes that sentence through as
- * `e.message`. A refusal made BEFORE the function runs -- the staging hold's
- * Cloud Run invoker check, a missing deployment, a proxy -- has no such body:
- * the SDK maps the bare HTTP status (401, 403, 404) to a code and uses the
- * code itself as the message (`@firebase/functions` `_errorForResponse`). A
- * body that names only the status (`PERMISSION_DENIED`) or an empty message
- * says no more than that.
+ * The refusals this product's function HANDLERS make are `HttpsError`s with
+ * a sentence the handler wrote ("Members only.", "Sign in first.", "Goal not
+ * found."), and the SDK passes that sentence through as `e.message`. Only
+ * that is the function's own statement about this account or this thing.
  *
- * So "this account is not allowed", "sign in again" and "you are no longer a
- * member" are only true when the function itself said so. Everything else is
- * a server that could not be reached in the usual way, and the screens say
- * that instead of a claim about the account.
+ * Two other kinds of failure arrive with the same codes (401/403/404 ->
+ * `unauthenticated`, `permission-denied`, `not-found`) but no such sentence:
+ *   · a refusal IN FRONT OF the function -- the staging hold's Cloud Run
+ *     invoker check, a missing deployment, a proxy. The body is not the
+ *     function's, so the SDK uses the code itself as the message
+ *     (`@firebase/functions` `_errorForResponse`), or the body names only a
+ *     status (`PERMISSION_DENIED`, `Forbidden`, `Not Found`);
+ *   · a refusal by the FUNCTIONS FRAMEWORK before the handler runs -- an
+ *     invalid or revoked ID token, or a failed App Check: firebase-functions'
+ *     onCall throws `HttpsError('unauthenticated', 'Unauthenticated')`.
+ * Neither is the handler speaking, and the client cannot tell them apart.
+ * So neither is reported as "refused": not "this account is not allowed",
+ * not "sign in again", not "no longer a member". They are NOT CONFIRMED, and
+ * the screens say only that the thing did not go through (Members: the list
+ * is temporarily unavailable, as HB-02 specifies; the marker: try again; the
+ * privacy panel: not saved or unconfirmed). This module makes no claim about
+ * WHICH of the two it was.
  */
 
-/** Codes that, from the function itself, are a statement about this account or this thing. */
+/** Codes that, in the handler's own words, are a statement about this account or this thing. */
 const REFUSAL_CODES = new Set(['permission-denied', 'unauthenticated', 'not-found']);
+
+/**
+ * Messages that name only a status, never a handler's sentence: the code
+ * itself in any spelling, the framework's "Unauthenticated", and the HTTP
+ * reason phrases a proxy or front end may send. Compared lower-cased, with
+ * `-`/`_` read as spaces and one trailing full stop ignored. None of the
+ * handlers' own sentences is one of these.
+ */
+const STATUS_ONLY = new Set(['unauthenticated', 'unauthorized', 'permission denied', 'forbidden', 'not found']);
+
+function normalised(text: string): string {
+  return text
+    .trim()
+    .toLowerCase()
+    .replace(/[-_]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/\.$/, '');
+}
 
 function bareCode(e: unknown): string | null {
   if (!e || typeof e !== 'object' || !('code' in e)) return null;
@@ -28,24 +54,34 @@ function bareCode(e: unknown): string | null {
   return code.slice('functions/'.length);
 }
 
-/** True when a failed callable carries a sentence its function wrote, not just its status. */
+/** True when a failed callable carries a sentence its handler wrote, not just a status. */
 export function serverWroteMessage(e: unknown): boolean {
   const code = bareCode(e);
   if (!code) return false;
   const raw = (e as { message?: unknown }).message;
-  const message = typeof raw === 'string' ? raw.trim() : '';
+  const message = typeof raw === 'string' ? normalised(raw) : '';
   if (message === '') return false;
-  if (message.toLowerCase() === code) return false;
-  if (message.toUpperCase() === code.toUpperCase().replace(/-/g, '_')) return false;
+  if (message === normalised(code)) return false;
+  if (STATUS_ONLY.has(message)) return false;
   return true;
 }
 
 /**
- * A refusal-coded callable failure (`permission-denied`, `unauthenticated`,
- * `not-found`) with no sentence from the function: a block in front of it,
- * never a fact about the account.
+ * For a failed callable:
+ *   refused       a refusal code in the handler's own words (a confirmed fact);
+ *   notConfirmed  a refusal code with no handler sentence: a block in front of
+ *                 the function, or the framework rejecting the token or App
+ *                 Check. No claim about the account;
+ *   null          not a refusal-coded callable failure at all.
  */
-export function isBodylessRefusal(e: unknown): boolean {
+export type CallableRefusal = 'refused' | 'notConfirmed';
+export function classifyCallableRefusal(e: unknown): CallableRefusal | null {
   const code = bareCode(e);
-  return code !== null && REFUSAL_CODES.has(code) && !serverWroteMessage(e);
+  if (code === null || !REFUSAL_CODES.has(code)) return null;
+  return serverWroteMessage(e) ? 'refused' : 'notConfirmed';
+}
+
+/** A refusal-coded callable failure that the handler did not confirm in its own words. */
+export function isUnconfirmedRefusal(e: unknown): boolean {
+  return classifyCallableRefusal(e) === 'notConfirmed';
 }

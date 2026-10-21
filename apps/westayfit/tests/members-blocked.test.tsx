@@ -2,7 +2,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { isBodylessRefusal, serverWroteMessage } from '../src/callableRefusal';
+import { classifyCallableRefusal, isUnconfirmedRefusal, serverWroteMessage } from '../src/callableRefusal';
 
 /**
  * NATIVE-MEMBER-1 F-9 (HB-02 case 1, and case 3's network half).
@@ -24,16 +24,59 @@ describe('callableRefusal: who refused', () => {
   it('a body-less refusal carries no server sentence', () => {
     for (const e of [BODYLESS_403(), BODYLESS_401(), BODYLESS_404()]) {
       expect(serverWroteMessage(e)).toBe(false);
-      expect(isBodylessRefusal(e)).toBe(true);
+      expect(isUnconfirmedRefusal(e)).toBe(true);
     }
   });
   it('a body naming only the status, or an empty message, is body-less too', () => {
-    expect(isBodylessRefusal(fnError('permission-denied', 'PERMISSION_DENIED'))).toBe(true);
-    expect(isBodylessRefusal(fnError('unauthenticated', 'UNAUTHENTICATED'))).toBe(true);
-    expect(isBodylessRefusal(fnError('not-found', 'NOT_FOUND'))).toBe(true);
-    expect(isBodylessRefusal(fnError('permission-denied', ''))).toBe(true);
-    expect(isBodylessRefusal(fnError('permission-denied', '   '))).toBe(true);
-    expect(isBodylessRefusal(fnError('permission-denied', 'Permission-Denied'))).toBe(true);
+    expect(isUnconfirmedRefusal(fnError('permission-denied', 'PERMISSION_DENIED'))).toBe(true);
+    expect(isUnconfirmedRefusal(fnError('unauthenticated', 'UNAUTHENTICATED'))).toBe(true);
+    expect(isUnconfirmedRefusal(fnError('not-found', 'NOT_FOUND'))).toBe(true);
+    expect(isUnconfirmedRefusal(fnError('permission-denied', ''))).toBe(true);
+    expect(isUnconfirmedRefusal(fnError('permission-denied', '   '))).toBe(true);
+    expect(isUnconfirmedRefusal(fnError('permission-denied', 'Permission-Denied'))).toBe(true);
+  });
+  // N4: the functions framework turns away an invalid or revoked ID token, or
+  // a failed App Check, before the handler runs, with
+  // HttpsError('unauthenticated', 'Unauthenticated'). Not the handler's words:
+  // not confirmed, never "refused".
+  it("the framework's token or App Check rejection is not confirmed, not refused", () => {
+    for (const message of ['Unauthenticated', 'unauthenticated', ' Unauthenticated. ', 'UNAUTHENTICATED']) {
+      const e = fnError('unauthenticated', message);
+      expect(serverWroteMessage(e), message).toBe(false);
+      expect(classifyCallableRefusal(e), message).toBe('notConfirmed');
+      expect(isUnconfirmedRefusal(e), message).toBe(true);
+    }
+  });
+  it('a front end or proxy reason phrase is not confirmed either', () => {
+    for (const [code, message] of [
+      ['unauthenticated', 'Unauthorized'],
+      ['permission-denied', 'Forbidden'],
+      ['permission-denied', 'Permission denied.'],
+      ['permission-denied', 'permission_denied'],
+      ['not-found', 'Not Found'],
+      ['not-found', 'not found.'],
+    ] as const) {
+      expect(classifyCallableRefusal(fnError(code, message)), `${code} ${message}`).toBe('notConfirmed');
+    }
+  });
+  it("every refusal the handlers write is 'refused' (functions-westayfit sentences)", () => {
+    for (const [code, message] of [
+      ['unauthenticated', 'Sign in first.'],
+      ['unauthenticated', 'wsfSaveProfile requires an authenticated caller.'],
+      ['permission-denied', 'Members only.'],
+      ['not-found', 'Goal not found.'],
+      ['not-found', 'Community not found.'],
+      ['not-found', 'Move not found.'],
+      ['not-found', 'Challenge not found.'],
+    ] as const) {
+      expect(classifyCallableRefusal(fnError(code, message)), message).toBe('refused');
+    }
+  });
+  it('classifyCallableRefusal is null for anything that is not a refusal-coded callable failure', () => {
+    expect(classifyCallableRefusal(fnError('internal', 'Something broke.'))).toBeNull();
+    expect(classifyCallableRefusal(fnError('invalid-argument', 'Bad Request'))).toBeNull();
+    expect(classifyCallableRefusal({ code: 'permission-denied', message: 'Forbidden' })).toBeNull();
+    expect(classifyCallableRefusal(null)).toBeNull();
   });
   it("the function's own refusals are not", () => {
     for (const e of [
@@ -42,20 +85,20 @@ describe('callableRefusal: who refused', () => {
       fnError('not-found', 'We couldn’t find that code.'),
     ]) {
       expect(serverWroteMessage(e)).toBe(true);
-      expect(isBodylessRefusal(e)).toBe(false);
+      expect(isUnconfirmedRefusal(e)).toBe(false);
     }
   });
   it('other codes, and anything that is not a callable error, are never a refusal', () => {
-    expect(isBodylessRefusal(fnError('internal', 'internal'))).toBe(false);
-    expect(isBodylessRefusal(fnError('unavailable', 'unavailable'))).toBe(false);
-    expect(isBodylessRefusal(fnError('failed-precondition', 'failed-precondition'))).toBe(false);
+    expect(isUnconfirmedRefusal(fnError('internal', 'internal'))).toBe(false);
+    expect(isUnconfirmedRefusal(fnError('unavailable', 'unavailable'))).toBe(false);
+    expect(isUnconfirmedRefusal(fnError('failed-precondition', 'failed-precondition'))).toBe(false);
     // A Firestore refusal is not a callable's.
     const firestore = { code: 'permission-denied', message: 'Missing or insufficient permissions.' };
-    expect(isBodylessRefusal(firestore)).toBe(false);
+    expect(isUnconfirmedRefusal(firestore)).toBe(false);
     expect(serverWroteMessage(firestore)).toBe(false);
-    expect(isBodylessRefusal({ code: 'xxxxxxxxxxnot-found', message: 'not-found' })).toBe(false);
+    expect(isUnconfirmedRefusal({ code: 'xxxxxxxxxxnot-found', message: 'not-found' })).toBe(false);
     for (const e of [null, undefined, 'permission-denied', 403, {}, { code: 7 }, new Error('x')]) {
-      expect(isBodylessRefusal(e)).toBe(false);
+      expect(isUnconfirmedRefusal(e)).toBe(false);
       expect(serverWroteMessage(e)).toBe(false);
     }
   });
@@ -114,6 +157,8 @@ describe('Members under a transport block (HB-02 case 1)', () => {
     ['a body-less 401', BODYLESS_401],
     ['a body-less 404', BODYLESS_404],
     ['a status-only body', () => fnError('permission-denied', 'PERMISSION_DENIED')],
+    ["the framework's token or App Check rejection (N4)", () => fnError('unauthenticated', 'Unauthenticated')],
+    ['a proxy reason phrase (N4)', () => fnError('permission-denied', 'Forbidden')],
   ])('%s says the list is unavailable and claims nothing about the account', async (_l, make) => {
     members.mockRejectedValue(make());
     await render();

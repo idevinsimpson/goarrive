@@ -2,7 +2,7 @@ import { httpsCallable } from 'firebase/functions';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useWsfAuth } from '../auth';
-import { serverWroteMessage } from '../callableRefusal';
+import { classifyCallableRefusal } from '../callableRefusal';
 import { getFirebaseFunctions } from '../firebase';
 import { currentFirst, resolveCurrentCommunity } from '../currentCommunity';
 import { forgetCommunity, peekMemberProfile, readMyCommunities } from '../memberReads';
@@ -70,16 +70,6 @@ type Failure = { kind: PrivacySaveErrorKind; setting: Setting; value: Visibility
 
 const REFUSED = new Set(['functions/not-found', 'functions/permission-denied']);
 
-/** Whether the account's memberships still list `groupId`; null when they could not be read. */
-async function stillListed(uid: string, groupId: string): Promise<boolean | null> {
-  try {
-    const answer = await readMyCommunities(uid);
-    return (answer.items ?? []).some((i) => i.groupId === groupId);
-  } catch {
-    return null;
-  }
-}
-
 export function CommunityPrivacyControls({ compact = false }: { compact?: boolean }) {
   const { user, ready } = useWsfAuth();
   const uid = user?.uid ?? null;
@@ -120,9 +110,23 @@ export function CommunityPrivacyControls({ compact = false }: { compact?: boolea
     setSaving(next);
   };
 
-  /** Re-reads what is stored. Returns the fresh rows, or null if it could not. */
+  const setFailure = (groupId: string, failure: Failure | null) => {
+    const next = { ...failuresRef.current };
+    if (failure) next[groupId] = failure;
+    else delete next[groupId];
+    failuresRef.current = next;
+    setFailures(next);
+  };
+
+  /**
+   * Re-reads what is stored. Returns the fresh rows, or null if it could not.
+   * `refusal`: the function refused a save on this community in its own
+   * words; if this read no longer lists the community, that is confirmed --
+   * it is forgotten and its refusal recorded before the rows are drawn, so
+   * its block stays on screen with the refusal said.
+   */
   const load = useCallback(
-    async ({ quiet }: { quiet: boolean }): Promise<CommunityRow[] | null> => {
+    async ({ quiet, refusal }: { quiet: boolean; refusal?: Failure & { groupId: string } }): Promise<CommunityRow[] | null> => {
       if (!uid) return null;
       const token = ++live.current;
       const ep = epoch.current;
@@ -133,6 +137,10 @@ export function CommunityPrivacyControls({ compact = false }: { compact?: boolea
         const answer = await readMyCommunities(uid);
         if (live.current !== token || epoch.current !== ep) return null;
         const fresh = (answer.items ?? []) as unknown as CommunityRow[];
+        if (refusal && !fresh.some((f) => f.groupId === refusal.groupId)) {
+          forgetCommunity(uid, refusal.groupId);
+          setFailure(refusal.groupId, { kind: 'membershipRefused', setting: refusal.setting, value: refusal.value });
+        }
         const merged = fresh.map((f) => {
           const shown = rowsRef.current.find((r) => r.groupId === f.groupId);
           if (!shown) return f;
@@ -171,14 +179,6 @@ export function CommunityPrivacyControls({ compact = false }: { compact?: boolea
     setFailures({});
     void load({ quiet: false });
   }, [ready, uid, load]);
-
-  const setFailure = (groupId: string, failure: Failure | null) => {
-    const next = { ...failuresRef.current };
-    if (failure) next[groupId] = failure;
-    else delete next[groupId];
-    failuresRef.current = next;
-    setFailures(next);
-  };
 
   const save = useCallback(
     async (groupId: string, setting: Setting, value: Visibility) => {
@@ -219,25 +219,22 @@ export function CommunityPrivacyControls({ compact = false }: { compact?: boolea
         const code = (e as { code?: unknown } | null)?.code;
         // NATIVE-MEMBER-1 F-6 (MF-04). "No longer a member" is said, and the
         // community forgotten, only when the FUNCTION refused in its own words
-        // and the memberships, re-read quietly, agree. A body-less 403/404 is
-        // the staging block or a proxy in front of the function: it says
-        // nothing about membership, so it is a save that did not go through.
-        if (typeof code === 'string' && REFUSED.has(code) && serverWroteMessage(e)) {
-          const listed = await stillListed(uid, groupId);
-          if (epoch.current !== ep) return;
-          if (listed === false) {
-            forgetCommunity(uid, groupId);
-            setFailure(groupId, { kind: 'membershipRefused', setting, value });
-            setSavingFor(groupId, null);
-            await load({ quiet: true });
-            return;
-          }
-        }
-        // Re-read rather than guess -- quietly, and without clearing the failure.
+        // and the memberships, re-read quietly, agree. A 403/404 without the
+        // handler's sentence (the staging block, a proxy, or the framework
+        // turning a token away) is not confirmed: it says nothing about
+        // membership, so it is a save that did not go through.
+        const refused =
+          typeof code === 'string' && REFUSED.has(code) && classifyCallableRefusal(e) === 'refused';
+        // Re-read rather than guess -- quietly, and without clearing the
+        // failure. ONE read answers both questions (N5): after the function's
+        // own refusal, is the community still listed; and did the value land.
         setSavingFor(groupId, null);
-        const fresh = await load({ quiet: true });
+        const fresh = await load({ quiet: true, refusal: refused ? { groupId, kind: 'membershipRefused', setting, value } : undefined });
+        if (epoch.current !== ep) return;
+        // Confirmed: load() has forgotten it and recorded the refusal.
+        if (refused && fresh !== null && !fresh.some((r) => r.groupId === groupId)) return;
         // The member has acted on this community since: that is the news now.
-        if (epoch.current !== ep || actions.current.get(groupId) !== action) return;
+        if (actions.current.get(groupId) !== action) return;
         const stored = fresh?.find((r) => r.groupId === groupId);
         const landed =
           stored !== undefined && (setting === 'name' ? stored.nameVisibility : stored.activityVisibility) === value;

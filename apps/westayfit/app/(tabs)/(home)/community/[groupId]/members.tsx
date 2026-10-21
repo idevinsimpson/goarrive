@@ -5,7 +5,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { useWsfAuth } from '../../../../../src/auth';
 import { describeCallableError } from '../../../../../src/callableErrors';
-import { isBodylessRefusal } from '../../../../../src/callableRefusal';
+import { isUnconfirmedRefusal } from '../../../../../src/callableRefusal';
 import { getFirebaseFunctions } from '../../../../../src/firebase';
 import { memberCountLabel } from '../../../../../src/labels';
 import { InitialsAvatar, isChampionRole } from '../../../../../src/ui/CommunityPresence';
@@ -78,13 +78,15 @@ type Phase = 'loading' | 'ready' | 'failed';
   no body, which the SDK reports as a bare `permission-denied` (or
   `unauthenticated`) -- and this page used to turn that into "This account
   can't do that here." for a member who is allowed to see the list. Only a
-  refusal the function itself wrote ("Members only.") is about the account;
-  a body-less one says the list is unavailable, and the network sentence and
-  every server sentence are unchanged.
+  refusal the function itself wrote ("Members only.") is about the account.
+  One without the handler's sentence -- that block, or the framework turning
+  away a token or App Check ("Unauthenticated") -- is not confirmed, and says
+  only that the list is unavailable (src/callableRefusal.ts). The network
+  sentence and every server sentence are unchanged.
 */
 const MEMBERS_UNAVAILABLE = 'The member list is temporarily unavailable. Try again later.';
 function membersError(e: unknown, fallback: string): string {
-  return isBodylessRefusal(e) ? MEMBERS_UNAVAILABLE : describeCallableError(e, fallback);
+  return isUnconfirmedRefusal(e) ? MEMBERS_UNAVAILABLE : describeCallableError(e, fallback);
 }
 
 export default function MembersScreen() {
