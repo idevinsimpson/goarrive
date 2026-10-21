@@ -21,7 +21,8 @@ import {
 import { authErrorCode, authErrorMessage } from '../src/authErrors';
 import { wsfAuthEnabled } from '../src/featureFlags';
 import { getFirebaseAuth, getFirebaseFirestore } from '../src/firebase';
-import { routeAfterAuth, usePendingJoinCodeReady } from '../src/pendingJoinCode';
+import { routeAfterAuth } from '../src/pendingJoinCode';
+import { usePostAuthDestinationsReady } from '../src/postAuthDestination';
 import { requestVerificationEmail } from '../src/verificationEmail';
 import {
   beginVerificationSend,
@@ -45,9 +46,9 @@ export default function VerifyEmail() {
   // leave "Sending" on screen until some unrelated render happened to pick the
   // answer up.
   useSyncExternalStore(subscribeVerificationSend, verificationSendSnapshot, verificationSendSnapshot);
-  // Re-renders once a phone has read the pending join code from storage, so
-  // the destination card is right on a cold start. No-op on web.
-  usePendingJoinCodeReady();
+  // Re-renders once a phone has read the post-auth destinations from storage,
+  // so the destination card is right on a cold start. No-op on web.
+  usePostAuthDestinationsReady();
 
   // Whose screen this is. When the account changes underneath — a sign-out, or
   // a different account signing in — every local claim on screen belonged to

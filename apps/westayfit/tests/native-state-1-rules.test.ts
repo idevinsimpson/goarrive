@@ -88,6 +88,8 @@ afterEach(() => {
   vi.doUnmock('../src/storage/kv');
   vi.doUnmock('../src/storage/sessionKv');
   vi.doUnmock('../src/storage/syncRead');
+  vi.doUnmock('../src/firebase');
+  vi.doUnmock('firebase/auth');
   vi.resetModules();
 });
 
@@ -646,7 +648,7 @@ describe('the native session store', () => {
     disk.map.set('wsf.pendingJoinCode', JSON.stringify({ v: code, exp: t0 + 60 * 60 * 1000 }));
     bootNative(disk);
     const pj = await import('../src/pendingJoinCode');
-    await pj.pendingJoinCodeReady();
+    await (await import('../src/postAuthDestination')).postAuthDestinationsReady();
     expect(pj.readPendingJoinCode(null)).toBe(code);
     vi.setSystemTime(t0 + 60 * 60 * 1000 + 1000);
     expect(pj.readPendingJoinCode(null)).toBeNull();

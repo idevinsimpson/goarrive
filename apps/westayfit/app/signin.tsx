@@ -27,11 +27,8 @@ import {
 import { authErrorMessage, isCredentialMismatch } from '../src/authErrors';
 import { wsfAuthEnabled } from '../src/featureFlags';
 import { getFirebaseAuth, getFirebaseFirestore } from '../src/firebase';
-import {
-  isPendingJoinCodeReady,
-  routeAfterAuth,
-  usePendingJoinCodeReady,
-} from '../src/pendingJoinCode';
+import { routeAfterAuth } from '../src/pendingJoinCode';
+import { isPostAuthDestinationsReady, usePostAuthDestinationsReady } from '../src/postAuthDestination';
 
 export default function SignIn() {
   const { ready, user } = useWsfAuth();
@@ -50,22 +47,22 @@ export default function SignIn() {
     terminal hop, exactly as before.
 
     "Once" means once the store CAN answer. On web that is mount, as it always
-    was. On a phone the pending join code is read from storage at launch, so
-    a cold start straight onto this screen reads it the moment that read
+    was. On a phone the destinations are read from storage at launch, so a
+    cold start straight onto this screen reads them the moment that read
     lands (milliseconds, and while the form is still behind "Loading…" for
-    auth). The form is only ever shown to someone signed out, so a code
-    stashed under an account is not announced here.
+    auth). The form is only ever shown to someone signed out, so a
+    destination stashed under an account is not announced here.
   */
-  const joinCodeReady = usePendingJoinCodeReady();
-  const readDestinationOnce = useRef(isPendingJoinCodeReady());
+  const destinationsReady = usePostAuthDestinationsReady();
+  const readDestinationOnce = useRef(isPostAuthDestinationsReady());
   const [destinationKind, setDestinationKind] = useState<AuthDestinationKind | null>(() =>
-    isPendingJoinCodeReady() ? readAuthDestinationKind(null) : null
+    isPostAuthDestinationsReady() ? readAuthDestinationKind(null) : null
   );
   useEffect(() => {
-    if (!joinCodeReady || readDestinationOnce.current) return;
+    if (!destinationsReady || readDestinationOnce.current) return;
     readDestinationOnce.current = true;
     setDestinationKind(readAuthDestinationKind(null));
-  }, [joinCodeReady]);
+  }, [destinationsReady]);
   const returning = destinationKind !== null;
   const words = destinationKind
     ? authReturnHeading(destinationKind)

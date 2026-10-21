@@ -170,12 +170,23 @@ describe('the auth return stores a slug, never a URL', () => {
     expect(readAuthDestinationKind()).toBe('event');
   });
 
-  it('the screen clears older returns when it arms its own, so a fresh scan wins', () => {
+  it('the screen clears older returns when it arms its own, so a fresh scan wins', async () => {
     const screen = read('src/ui/MarkerEntryScreen.tsx');
     const arm = screen.slice(screen.indexOf('const armReturn'), screen.indexOf('const onJoin'));
-    expect(arm).toMatch(/clearPendingJoinCode\(\)/);
-    expect(arm).toMatch(/clearEventReturn\(\)/);
-    expect(arm.indexOf('setMarkerReturn')).toBeGreaterThan(arm.indexOf('clearEventReturn'));
+    expect(arm).toContain('armMarkerReturn(slug, uid)');
+    // What arming does: every older return that would outrank it is gone,
+    // and the marker is in the tab the moment the call returns.
+    const { armMarkerReturn } = await import('../src/handoffArming');
+    const { nextRouteAfterAuth } = await import('../src/pendingJoinCode');
+    window.sessionStorage.setItem('wsf.pendingJoinCode', 'J0inCodeForMarker_01');
+    window.sessionStorage.setItem('wsf.eventReturn', JSON.stringify({ goalId: 'goal-1', at: Date.now() }));
+    window.sessionStorage.setItem('wsf.kioskReturnGoalId', 'goal-k');
+    void armMarkerReturn('flag-07', null);
+    expect(nextRouteAfterAuth('/')).toBe('/go/flag-07');
+    for (const k of ['wsf.pendingJoinCode', 'wsf.eventReturn', 'wsf.kioskReturnGoalId']) {
+      expect(window.sessionStorage.getItem(k), k).toBeNull();
+    }
+    window.sessionStorage.clear();
   });
 });
 
