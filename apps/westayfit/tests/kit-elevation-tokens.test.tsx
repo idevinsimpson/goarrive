@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { act } from 'react';
@@ -21,6 +21,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
  * loads them afresh under a mocked Platform (as tests/lift-tokens.test.ts
  * does). No device.
  */
+// Each case loads kit, lift and the tab bar afresh (vi.resetModules), which takes seconds on a loaded machine.
+vi.setConfig({ testTimeout: 30_000 });
 const rn = vi.hoisted(() => ({ os: 'web' as 'ios' | 'android' | 'web' }));
 
 vi.mock('react-native', async () => {
@@ -94,6 +96,49 @@ describe('W12-15: elevation.* per platform', () => {
         expect(kit.elevation[key]).not.toHaveProperty(prop);
       }
     }
+  });
+});
+
+describe('RV13-641-N2: turning a token\'s lift off', () => {
+  it('web and Android: exactly the bare key the off states had ({ shadowOpacity: 0 })', async () => {
+    for (const os of ['web', 'android'] as const) {
+      const { kit } = await on(os);
+      expect(kit.ELEVATION_OFF).toEqual({ shadowOpacity: 0 });
+      expect(Object.keys(kit.ELEVATION_OFF)).toEqual(['shadowOpacity']);
+    }
+  });
+
+  it('iOS: the boxShadow is cancelled too, so a token followed by it draws no lift', async () => {
+    const { kit, StyleSheet } = await on('ios');
+    expect(kit.ELEVATION_OFF).toEqual({ shadowOpacity: 0, boxShadow: 'none' });
+    for (const token of Object.values(kit.elevation)) {
+      expect(StyleSheet.flatten([token, kit.ELEVATION_OFF] as never)).toMatchObject({ boxShadow: 'none' });
+    }
+  });
+
+  it('no bare `shadowOpacity: 0` is left to cancel a token (app/ and src/, kit.ts aside); the off states spread ELEVATION_OFF', () => {
+    const root = join(__dirname, '..');
+    const walk = (dir: string, out: string[] = []): string[] => {
+      for (const entry of readdirSync(dir)) {
+        const full = join(dir, entry);
+        if (statSync(full).isDirectory()) walk(full, out);
+        else if (/\.(ts|tsx)$/.test(entry)) out.push(full);
+      }
+      return out;
+    };
+    const files = [...walk(join(root, 'app')), ...walk(join(root, 'src'))].filter((f) => !f.endsWith(join('src', 'ui', 'kit.ts')));
+    const bare = files.filter((f) => /shadowOpacity: *0([^.0-9]|$)/m.test(readFileSync(f, 'utf8')));
+    expect(bare).toEqual([]);
+    const spreads = files
+      .map((f) => [f.slice(root.length + 1), (readFileSync(f, 'utf8').match(/\.\.\.ELEVATION_OFF\b/g) ?? []).length] as const)
+      .filter(([, n]) => n > 0);
+    expect(Object.fromEntries(spreads)).toEqual({
+      'src/ui/designTarget/ChallengeHomeTargets.tsx': 3,
+      'src/ui/designTarget/EventQueueTargets.tsx': 1,
+      'src/ui/designTarget/FollowAlongTargets.tsx': 2,
+      'src/ui/designTarget/JoinSetupTargets.tsx': 1,
+      'src/ui/designTarget/RoomScreenTargets.tsx': 1,
+    });
   });
 });
 

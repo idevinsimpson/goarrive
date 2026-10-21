@@ -455,8 +455,105 @@ describe('W12-2: a failed refresh keeps a warm screen (INT-25); a stale sign-in 
     expect(byId('wsf-contribute-stale-note')).toBeNull();
   });
 
-  it('RV11-641-5: a confirmed receipt clears the kept-figures note (Record more shows the confirmed anchor)', async () => {
+  it('RV12-641-4: Auth still unreachable, the note\'s Retry gets the anonymous not-found FIRST and "unauthenticated" after: still warm, the community kept, the sign-in refreshed again', async () => {
     await warm('ios');
+    fakeAuth.currentUser = { uid: 'u1', getIdToken: async () => 't' };
+    refresh.result = 'offline';
+    answers.wsfGoalPulse = UNAUTHENTICATED;
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    expect(byId('wsf-contribute-stale-note')).not.toBeNull();
+    expect(refresh.calls).toHaveLength(1);
+    // Retry: both reads go out token-less. The public pulse refuses at once; the own-credit read says unauthenticated later.
+    answers.wsfGoalPulse = NOT_FOUND;
+    let unauthenticated!: () => void;
+    answers.wsfMyContribution = () =>
+      new Promise((_, reject) => (unauthenticated = () => reject(new FirebaseError('functions/unauthenticated', 'stale token'))));
+    await act(async () => byId('wsf-contribute-stale-retry')!.click());
+    await settle();
+    // The pulse's not-found has landed; nothing is decided on it alone.
+    expect(byId('wsf-contribute-not-found')).toBeNull();
+    await act(async () => unauthenticated());
+    await settle();
+    expect(byId('wsf-contribute-not-found')).toBeNull();
+    expect(byId('wsf-contribute-entry-screen')).not.toBeNull();
+    expect(byId('wsf-contribute-stale-note')).not.toBeNull();
+    expect(peekGoals('u1', 'oak')).toBeDefined();
+    expect(refresh.calls).toHaveLength(2);
+  });
+
+  it('RV12-641-5: after an ordinary failure (the token was good), an authorized not-found tick ends the screen and forgets the community', async () => {
+    await warm('android');
+    answers.wsfGoalPulse = INTERNAL;
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    expect(byId('wsf-contribute-stale-note')).not.toBeNull();
+    expect(peekGoals('u1', 'oak')).toBeDefined();
+    answers.wsfGoalPulse = NOT_FOUND;
+    await pollFor(2_000);
+    expect(byId('wsf-contribute-not-found')).not.toBeNull();
+    expect(peekGoals('u1', 'oak')).toBeUndefined();
+    // And the poll ends with it.
+    const sent = count('wsfGoalPulse');
+    await pollFor(6_000);
+    expect(count('wsfGoalPulse')).toBe(sent);
+  });
+
+  it('RV12-641-6 (P7): native, warm and healthy, a poll tick\'s not-found ends the screen and forgets the community', async () => {
+    await warm('ios');
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    expect(byId('wsf-contribute-stale-note')).toBeNull();
+    expect(peekGoals('u1', 'oak')).toBeDefined();
+    answers.wsfGoalPulse = NOT_FOUND;
+    await pollFor(2_000);
+    expect(byId('wsf-contribute-not-found')).not.toBeNull();
+    expect(peekGoals('u1', 'oak')).toBeUndefined();
+  });
+
+  it('RV12-641-6 (P2): Auth unreachable, then a good tick heals the screen; a later not-found tick is a verdict again', async () => {
+    await warm('ios');
+    fakeAuth.currentUser = { uid: 'u1', getIdToken: async () => 't' };
+    refresh.result = 'offline';
+    answers.wsfGoalPulse = UNAUTHENTICATED;
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    expect(byId('wsf-contribute-stale-note')).not.toBeNull();
+    // Auth is back: the heal tick is authorized and clears the note.
+    answers.wsfGoalPulse = async () => PULSE;
+    await pollFor(2_000);
+    expect(byId('wsf-contribute-stale-note')).toBeNull();
+    answers.wsfGoalPulse = NOT_FOUND;
+    await pollFor(2_000);
+    expect(byId('wsf-contribute-not-found')).not.toBeNull();
+    expect(peekGoals('u1', 'oak')).toBeUndefined();
+  });
+
+  it('RV12-641-5: Auth unreachable, then the note\'s Retry loads with a good token; a later not-found tick is a verdict again', async () => {
+    await warm('ios');
+    fakeAuth.currentUser = { uid: 'u1', getIdToken: async () => 't' };
+    refresh.result = 'offline';
+    answers.wsfGoalPulse = UNAUTHENTICATED;
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    expect(byId('wsf-contribute-stale-note')).not.toBeNull();
+    answers.wsfGoalPulse = async () => PULSE;
+    await act(async () => byId('wsf-contribute-stale-retry')!.click());
+    await settle();
+    expect(byId('wsf-contribute-stale-note')).toBeNull();
+    answers.wsfGoalPulse = NOT_FOUND;
+    await pollFor(2_000);
+    expect(byId('wsf-contribute-not-found')).not.toBeNull();
+    expect(peekGoals('u1', 'oak')).toBeUndefined();
+  });
+
+  it('RV11-641-5: a confirmed receipt clears the kept-figures note (Record more shows the confirmed anchor), and the poll runs on (N1)', async () => {
+    await warm('ios');
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     // The live account the send is checked against (mayFireAs).
     fakeAuth.currentUser = { uid: 'u1', getIdToken: async () => 't' };
     answers.wsfGoalPulse = INTERNAL;
@@ -475,6 +572,34 @@ describe('W12-2: a failed refresh keeps a warm screen (INT-25); a stale sign-in 
     expect(byId('wsf-contribute-entry-screen')).not.toBeNull();
     expect(byId('wsf-contribute-stale-note')).toBeNull();
     expect(byId('wsf-contribute-shared-total')!.textContent).toContain('75');
+    // Heads-11 N1: the receipt is a confirmed read, so the poll runs again and shows a peer's later total.
+    answers.wsfGoalPulse = async () => ({ ...PULSE, sharedTotal: 90 });
+    const before = count('wsfGoalPulse');
+    await pollFor(4_000);
+    expect(count('wsfGoalPulse')).toBeGreaterThan(before);
+    expect(byId('wsf-contribute-shared-total')!.textContent).toContain('90');
+  });
+
+  it('N1: a receipt keeps a confirmed time the screen already has (only a missing one is filled; the web\'s line is unchanged)', async () => {
+    windowOf(844);
+    vi.useFakeTimers({ now: Date.UTC(2026, 9, 21, 9, 0), toFake: ['Date', 'setInterval', 'clearInterval'] });
+    fakeAuth.currentUser = { uid: 'u1', getIdToken: async () => 't' };
+    answers.wsfContribute = async () => ({ addedCount: 35, ownCredit: 40, sharedTotal: 75, target: 100, unit: 'squats', status: 'active', alreadyRecorded: false });
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    const confirmed = byId('wsf-contribute-context-updated')!.textContent;
+    expect(confirmed).toMatch(/^Confirmed /);
+    // Ten minutes later, before any tick: the receipt confirms the figures, not a new read time.
+    vi.setSystemTime(Date.UTC(2026, 9, 21, 9, 10));
+    act(() => typeInto(entry(), '35'));
+    await act(async () => byId('wsf-contribute-review')!.click());
+    await settle();
+    await act(async () => byId('wsf-contribute-submit')!.click());
+    await settle();
+    await act(async () => byId('wsf-contribute-record-more')!.click());
+    await settle();
+    expect(byId('wsf-contribute-shared-total')!.textContent).toContain('75');
+    expect(byId('wsf-contribute-context-updated')!.textContent).toBe(confirmed);
   });
 
   it('web: a poll not-found still ends the screen, as before', async () => {

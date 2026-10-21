@@ -775,26 +775,49 @@ function CommunityCard({ item, goalState }: { item: MyCommunityItem; goalState: 
     .filter((part): part is string => !!part)
     .join(' · ');
   const { status, action } = cardStatusAndAction(item, goalState);
+  const body = (
+    <View style={styles.cardBody}>
+      <Text style={kit.cardTitle}>
+        {item.displayName}
+        {item.isSample ? (
+          <>
+            {' · '}
+            <Text style={kit.badge}>Sample</Text>
+          </>
+        ) : null}
+      </Text>
+      {meta ? <Text style={kit.cardMeta}>{meta}</Text> : null}
+      <Text style={kit.body}>{status}</Text>
+      <Text style={styles.cardAction}>{action}</Text>
+    </View>
+  );
+  /*
+    W12-10 (INT-22, native). A Link without asChild is a bare Text on a phone:
+    no role, and the screen reader stops on each line of the card in turn.
+    There the card is a Pressable link with one label (name, status, the
+    action). The web keeps today's anchor exactly.
+  */
+  if (Platform.OS !== 'web') {
+    return (
+      <Link href={`/community/${item.groupId}` as never} asChild>
+        <Pressable
+          style={NATIVE_COMMUNITY_CARD}
+          accessibilityRole="link"
+          accessibilityLabel={`${item.displayName}${item.isSample ? ', Sample' : ''}, ${status}, ${action}`}
+          testID={`wsf-home-community-${item.groupId}`}
+        >
+          {body}
+        </Pressable>
+      </Link>
+    );
+  }
   return (
     <Link
       href={`/community/${item.groupId}` as never}
       style={COMMUNITY_CARD}
       testID={`wsf-home-community-${item.groupId}`}
     >
-      <View style={styles.cardBody}>
-        <Text style={kit.cardTitle}>
-          {item.displayName}
-          {item.isSample ? (
-            <>
-              {' · '}
-              <Text style={kit.badge}>Sample</Text>
-            </>
-          ) : null}
-        </Text>
-        {meta ? <Text style={kit.cardMeta}>{meta}</Text> : null}
-        <Text style={kit.body}>{status}</Text>
-        <Text style={styles.cardAction}>{action}</Text>
-      </View>
+      {body}
     </Link>
   );
 }
@@ -937,6 +960,8 @@ const styles = StyleSheet.create({
 // `display: 'flex'` makes the anchor the card's own box, so its border wraps
 // the whole card and the anchor measures the card's full height. Flattened
 // once, at module scope, so the Link gets one plain object.
+// W12-10: the phone's card is a View (a Pressable), so it takes no text styles.
+const NATIVE_COMMUNITY_CARD = StyleSheet.flatten([kit.card, { flexDirection: 'column' as const }]);
 const COMMUNITY_CARD = StyleSheet.flatten([
   kit.card,
   {

@@ -1,3 +1,4 @@
+import { FirebaseError } from 'firebase/app';
 import { act, useEffect, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { BackHandler, Platform } from 'react-native';
@@ -78,7 +79,7 @@ vi.mock('../src/pendingContribution', async () => {
   };
 });
 
-const { clearMemberReads } = await import('../src/memberReads');
+const { clearMemberReads, peekGoals, readGoals, readOwnCredit } = await import('../src/memberReads');
 const { default: ContributeToGoal } = await import('../app/contribute/[goalId]');
 
 const PULSE = { sharedTotal: 40, target: 100, unit: 'squats', status: 'active' };
@@ -283,6 +284,36 @@ describe('W12-3: Android Back on the route', () => {
     expect(await back()).toBe(true);
     expect(byId('wsf-contribute-not-saved')).not.toBeNull();
     expect(router.back).not.toHaveBeenCalled();
+  });
+
+  it('heads-11 N3: unknown and NOT kept, then the goal load says not found (the step hidden): Back is still consumed, the notice stays', async () => {
+    // Opened warm from the account's record, so the step is there while the goal's own load is still out.
+    nav.sheet = true;
+    params.value = { goalId: 'g1', groupId: 'oak', mode: 'move' };
+    answers.wsfListGoals = async () => ({ goals: [{ goalId: 'g1', title: '500 squats together', status: 'active', target: 100, unit: 'squats', sharedTotal: 40 }] });
+    answers.wsfMyCommunities = async () => ({ items: [{ groupId: 'oak', displayName: 'Oak Grove Together', memberCount: 3 }] });
+    await readGoals('u1', 'oak');
+    await readOwnCredit('u1', 'g1');
+    let refuse!: () => void;
+    answers.wsfGoalPulse = () =>
+      new Promise((_, reject) => (refuse = () => reject(new FirebaseError('functions/not-found', 'gone'))));
+    storage.refuses = true;
+    answers.wsfContribute = OFFLINE;
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    await press('wsf-contribute-done');
+    act(() => typeInto(byId('wsf-contribute-entry') as HTMLInputElement, '35'));
+    await press('wsf-contribute-review');
+    await press('wsf-contribute-submit');
+    expect(byId('wsf-contribute-not-saved')).not.toBeNull();
+    // The load lands now: not found. The attempt is still the device's only copy.
+    await act(async () => refuse());
+    await settle();
+    expect(peekGoals('u1', 'oak')).toBeUndefined();
+    for (let i = 0; i < 2; i += 1) expect(await back()).toBe(true);
+    expect(byId('wsf-contribute-not-saved')).not.toBeNull();
+    expect(router.back).not.toHaveBeenCalled();
+    expect(router.replace).not.toHaveBeenCalled();
   });
 
   it('unknown and kept → Back closes the sheet (the attempt waits on the device)', async () => {

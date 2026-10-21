@@ -1,4 +1,12 @@
-import { Platform, StyleSheet, type ViewStyle } from 'react-native';
+import {
+  Platform,
+  StyleSheet,
+  type ColorValue,
+  type PressableAndroidRippleConfig,
+  type PressableStateCallbackType,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
 
 import { wsfTheme } from '../theme';
 import { PROGRESS_GREEN } from './brandAssets';
@@ -145,6 +153,17 @@ export const elevation = {
   }),
 };
 /*
+  RV13-641-N2. TURNING A TOKEN'S LIFT OFF (a disabled or done state over a
+  style that spreads one): spread ELEVATION_OFF, not a bare `shadowOpacity: 0`.
+  On iOS the token is a boxShadow, which shadowOpacity does not reach, so
+  there it is also cancelled ('none' parses to no shadow). The web and
+  Android get exactly `{ shadowOpacity: 0 }`, as the bare key gave them.
+*/
+export const ELEVATION_OFF: ElevationStyle = Platform.select<ElevationStyle>({
+  ios: { shadowOpacity: 0, boxShadow: 'none' },
+  default: { shadowOpacity: 0 },
+});
+/*
   W12-15 (INT-21, INT-31). The lift tokens for surfaces that need more than
   elevation.* (kit-base's src/ui/lift.ts): lift.panel for a side or bottom
   panel, lift.tabBar (Android's upward shadow) and lift.knob. `{}` on the web.
@@ -157,6 +176,31 @@ export { lift, PANEL_BOX_SHADOW_IOS, TAB_BAR_BOX_SHADOW_ANDROID, type LiftTokens
  * sits in. A press target only: nothing is drawn, so web layout is unchanged.
  */
 export const BACK_GLYPH_HIT_SLOP = { top: 8, bottom: 8, left: 17, right: 17 } as const;
+
+/*
+  W12-17 (INT-33). PRESSED FEEDBACK ON A PHONE. No control showed it: a tap
+  on iOS or Android looked like nothing happened until the next screen came.
+  pressableStyle(base, tint) gives a Pressable its style and feedback: on a
+  phone the style dims while pressed and clears on release (PRESSED), and
+  Android adds its ripple in `tint`. The web gets `base` itself, the same
+  object, so its DOM is unchanged. Spread it on a Pressable you own; never
+  on a <Link asChild> child or a ButtonLink, where Link merges the child's
+  style by object spread and a function style would blank the route.
+*/
+export type PressableFeedback = {
+  style: StyleProp<ViewStyle> | ((state: PressableStateCallbackType) => StyleProp<ViewStyle>);
+  android_ripple?: PressableAndroidRippleConfig;
+};
+/**
+ * A phone's pressed state. A plain object, not a StyleSheet entry: react-native-web
+ * writes every StyleSheet rule into the web's CSS, and the web never uses this.
+ */
+export const PRESSED: Readonly<ViewStyle> = Object.freeze({ opacity: 0.72 });
+export function pressableStyle(base: StyleProp<ViewStyle>, tint: ColorValue): PressableFeedback {
+  if (Platform.OS === 'web') return { style: base };
+  const style = ({ pressed }: PressableStateCallbackType): StyleProp<ViewStyle> => [base, pressed && PRESSED];
+  return Platform.OS === 'android' ? { style, android_ripple: { color: tint } } : { style };
+}
 
 export const kit = StyleSheet.create({
   // ---- page ----

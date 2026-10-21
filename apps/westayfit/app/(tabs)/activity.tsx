@@ -281,6 +281,18 @@ export default function ActivityScreen() {
     rest stay while a revalidation reads what is missing. A warm return with
     a whole record makes no call at all.
   */
+  /*
+    RV12-641-A3 (native). Whether Progress is the screen in front: its partial
+    note is spoken only then, never over MOVE or another tab while this
+    screen sits mounted behind them.
+  */
+  const [inFront, setInFront] = useState(false);
+  useFocusEffect(
+    useCallback(() => {
+      setInFront(true);
+      return () => setInFront(false);
+    }, []),
+  );
   const [revalidate, setRevalidate] = useState(0);
   const keepOnScreen = useRef(false);
   /** INT-12: the next revalidation reads fresh (a return to the app), not from the record. */
@@ -453,6 +465,7 @@ export default function ActivityScreen() {
       state={view}
       bottomInset={safeArea.bottom}
       refresh={{ checking, stale, onRetry: retry }}
+      inFront={inFront}
       actions={{
         onRetry: retry,
         // INT-20: on a phone MOVE is pushed over Progress, so closing it comes

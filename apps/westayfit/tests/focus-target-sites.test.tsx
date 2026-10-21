@@ -32,16 +32,18 @@ vi.mock('react-native', async () => {
 vi.mock('../src/ui/focusTarget', async () => import('../src/ui/focusTarget.native'));
 type Route = { key: string; name: string };
 const nav = { routes: [] as Route[], listeners: {} as Record<string, Array<() => void>> };
+// One navigation object, as react-navigation gives a screen: the shell's focus-return effect depends on it.
+const navigation = vi.hoisted(() => ({
+  getState: () => ({ index: nav.routes.length - 1, routes: nav.routes }),
+  addListener: (event: string, cb: () => void) => {
+    (nav.listeners[event] ??= []).push(cb);
+    return () => {
+      nav.listeners[event] = (nav.listeners[event] ?? []).filter((x) => x !== cb);
+    };
+  },
+}));
 vi.mock('expo-router', () => ({
-  useNavigation: () => ({
-    getState: () => ({ index: nav.routes.length - 1, routes: nav.routes }),
-    addListener: (event: string, cb: () => void) => {
-      (nav.listeners[event] ??= []).push(cb);
-      return () => {
-        nav.listeners[event] = (nav.listeners[event] ?? []).filter((x) => x !== cb);
-      };
-    },
-  }),
+  useNavigation: () => navigation,
   Link: ({ children }: { children?: ReactNode }) => <>{children}</>,
 }));
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
@@ -67,6 +69,8 @@ const TAB_STATE = {
   ],
 };
 
+/** The menu's rows, per case (the shell's own menu is built in app/(tabs)/_layout.tsx). */
+const menuItems = { value: [] as import('../src/ui/MemberTopBar').MemberMenuItem[] };
 /** The shell: the native focus return over both bars, as app/(tabs)/_layout.tsx wires it. */
 function Shell() {
   const ref = useRef(null);
@@ -74,7 +78,7 @@ function Shell() {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <MemberTopBar onHome={() => undefined} menu={[]} menuOpen={open} onMenuToggle={setOpen} />
+      <MemberTopBar onHome={() => undefined} menu={menuItems.value} menuOpen={open} onMenuToggle={setOpen} />
       <MemberTabBar
         state={TAB_STATE as never}
         navigation={{ emit: () => ({ defaultPrevented: false }), navigate: () => undefined } as never}
@@ -103,6 +107,7 @@ const lastFocused = () => fx.focused[fx.focused.length - 1];
 beforeEach(() => {
   fx.os = 'android';
   fx.focused.length = 0;
+  menuItems.value = [];
   nav.routes = [{ key: 't', name: '(tabs)' }];
   nav.listeners = {};
   // A phone's width: the MOVE button is drawn (below 260 px the bar wraps without it).
@@ -114,6 +119,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -160,6 +166,68 @@ describe('W12-9 part 2: the MOVE and menu buttons take the screen reader\'s focu
     act(() => root.render(<div />));
     native.returnFocusSoon(() => null, { node: null, testId: 'wsf-member-tab-move' }, []);
     native.returnFocusSoon(() => null, { node: null, testId: 'wsf-member-topbar-menu-button' }, []);
+    expect(fx.focused).toHaveLength(0);
+  });
+});
+
+describe('RV12-641-A1: a menu row that opens another surface does not pull the screen reader back to the menu button', () => {
+  // Settings as the shell opens it: the return armed to the menu button, then the panel over the tabs.
+  const settingsRow = {
+    kind: 'link' as const,
+    key: 'settings',
+    label: 'Settings',
+    href: '/settings',
+    onNavigate: () => {
+      native.armTabsFocusReturnTo('wsf-member-topbar-menu-button');
+      cover('settings');
+    },
+  };
+  // Manage community: an RN Modal over the shell, no navigation.
+  const manageRow = { kind: 'action' as const, key: 'manage', label: 'Manage community', onPress: () => undefined };
+  const open = () => act(() => byId('wsf-member-topbar-menu-button')!.click());
+
+  it('Android: Settings from the menu: nothing focused behind the panel; its close returns to the menu button', () => {
+    menuItems.value = [settingsRow];
+    act(() => root.render(<Shell />));
+    open();
+    act(() => byId('wsf-member-topbar-menu-settings')!.click());
+    expect(fx.focused).toHaveLength(0);
+    uncover();
+    expect(fx.focused).toEqual([byId('wsf-member-topbar-menu-button')]);
+  });
+
+  it('iOS (after the 400 ms wait): the Manage sheet from the menu: nothing focused behind it', () => {
+    fx.os = 'ios';
+    vi.useFakeTimers();
+    menuItems.value = [manageRow];
+    act(() => root.render(<Shell />));
+    open();
+    act(() => byId('wsf-member-topbar-menu-manage')!.click());
+    act(() => vi.advanceTimersByTime(450));
+    expect(fx.focused).toHaveLength(0);
+  });
+
+  it('dismissed without a choice (the layer, the button), after a row closed it once: the button takes the focus back', () => {
+    menuItems.value = [manageRow];
+    act(() => root.render(<Shell />));
+    open();
+    act(() => byId('wsf-member-topbar-menu-manage')!.click());
+    expect(fx.focused).toHaveLength(0);
+    open();
+    act(() => byId('wsf-member-topbar-menu-dismiss')!.click());
+    expect(fx.focused).toEqual([byId('wsf-member-topbar-menu-button')]);
+    open();
+    open();
+    expect(fx.focused).toHaveLength(2);
+  });
+
+  it('web: a row still hands keyboard focus to the button, as before; the screen reader is never touched', () => {
+    fx.os = 'web';
+    menuItems.value = [manageRow];
+    act(() => root.render(<Shell />));
+    open();
+    act(() => byId('wsf-member-topbar-menu-manage')!.click());
+    expect(document.activeElement).toBe(byId('wsf-member-topbar-menu-button'));
     expect(fx.focused).toHaveLength(0);
   });
 });

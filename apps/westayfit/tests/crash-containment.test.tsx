@@ -34,7 +34,9 @@ import {
 import {
   CRASH_RECORDS_KEY,
   MAX_CRASH_RECORDS,
+  MAX_FRAME_LINE,
   MAX_SCRUB_INPUT,
+  MAX_STACK_INPUT,
   crashRecordOf,
   type CrashKv,
   WITHHELD_MESSAGE,
@@ -179,17 +181,59 @@ describe('scrubbing: a record carries no email, display name, goal title or join
     expect(recordMessage('Rendered more hooks than during the previous render.')).toBe('Rendered more hooks than…');
   });
 
-  it('a very long message or stack is cut before any pattern runs, so building a record stays fast (CS-2)', () => {
+  /*
+    CS-2, DETERMINISTIC. Building a record is bounded work because no pattern
+    ever sees more than a fixed length of input. That is checked directly,
+    not with a stopwatch (a wall-clock bound fails on a loaded machine and
+    proves little on a fast one): every regular-expression match made while a
+    record is built goes through RegExp.prototype.exec (replace, test, match
+    and split all call it once it is replaced), so the length of every string
+    a pattern ran over is recorded. Two facts follow from what is recorded:
+    no pattern sees more than the cut, and what lies past the cut changes
+    nothing that is done.
+  */
+  function patternInputs<T>(fn: () => T): { result: T; lengths: number[] } {
+    const exec = RegExp.prototype.exec;
+    const lengths: number[] = [];
+    RegExp.prototype.exec = function patched(this: RegExp, input: string) {
+      lengths.push(String(input).length);
+      return exec.call(this, input);
+    };
+    try {
+      return { result: fn(), lengths };
+    } finally {
+      RegExp.prototype.exec = exec;
+    }
+  }
+
+  it('the pattern counter sees what a scrub runs (replace, test and the frame patterns all count)', () => {
+    const { lengths } = patternInputs(() => recordMessage('Cannot read property x of undefined'));
+    expect(lengths.length).toBeGreaterThan(4);
+    expect(patternInputs(() => scrubFrames('    at ok (index.bundle:5:6)')).lengths.length).toBeGreaterThan(1);
+  });
+
+  it('a very long message or stack is cut before any pattern runs, so building a record is bounded work (CS-2)', () => {
     // Shapes that made the old patterns quadratic: long runs with no digit, long dotted runs.
     const runs = ['a'.repeat(80_000), 'a.'.repeat(40_000), `${'x'.repeat(40_000)}@`, `${'b+'.repeat(40_000)}://`];
+    // The cuts themselves, so a looser one fails here rather than passing by its own measure.
+    expect([MAX_SCRUB_INPUT, MAX_STACK_INPUT, MAX_FRAME_LINE]).toEqual([1000, 4000, 400]);
+    const stackOf = (raw: string) => `Error: x\n    at ok (index.bundle:5:6)\n    at ${raw} (${raw}:1:2)\n${raw}@${raw}:3:4`;
     for (const raw of runs) {
-      const t0 = performance.now();
-      const out = recordMessage(raw);
-      const frames = scrubFrames(`Error: x\n    at ok (index.bundle:5:6)\n    at ${raw} (${raw}:1:2)\n${raw}@${raw}:3:4`);
-      expect(performance.now() - t0).toBeLessThan(250);
-      expect(out.length).toBeLessThanOrEqual(160);
-      expect(frames).toEqual(['ok@index.bundle:5:6']);
+      const message = patternInputs(() => recordMessage(raw));
+      expect(Math.max(...message.lengths)).toBeLessThanOrEqual(MAX_SCRUB_INPUT);
+      // Exactly the work its first MAX_SCRUB_INPUT characters cost: the rest is never looked at.
+      expect(message.lengths).toEqual(patternInputs(() => recordMessage(raw.slice(0, MAX_SCRUB_INPUT))).lengths);
+      expect(message.result.length).toBeLessThanOrEqual(160);
+      const frames = patternInputs(() => scrubFrames(stackOf(raw)));
+      expect(Math.max(...frames.lengths)).toBeLessThanOrEqual(MAX_FRAME_LINE);
+      expect(frames.result).toEqual(['ok@index.bundle:5:6']);
     }
+    // A stack of many short lines: past MAX_STACK_INPUT nothing is read, however many frames follow.
+    const junk = 'nope\n'.repeat(MAX_STACK_INPUT);
+    const stack = `${junk}    at late (index.bundle:7:8)\n`;
+    const frames = patternInputs(() => scrubFrames(stack));
+    expect(frames.lengths).toEqual(patternInputs(() => scrubFrames(stack.slice(0, MAX_STACK_INPUT))).lengths);
+    expect(frames.result).toEqual([]);
     // An over-long line is skipped unread; a real frame after it is still kept.
     const long = 'q'.repeat(500);
     expect(scrubFrames(`    at ${long} (${long}:1:2)\n    at ok (index.bundle:5:6)`)).toEqual(['ok@index.bundle:5:6']);

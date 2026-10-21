@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { kit } from './kit';
+import { OPTION_SELECTED_TINT, kit, pressableStyle } from './kit';
 
 /**
  * One selectable option row: the control every guided decision uses
@@ -42,7 +42,11 @@ export function OptionRow({
     <Pressable
       onPress={onPress}
       disabled={disabled}
-      style={[kit.optionRow, selected ? kit.optionRowSelected : null, disabled ? styles.disabled : null]}
+      // W12-17 (INT-33): pressed feedback on a phone; the web's style is unchanged.
+      {...pressableStyle(
+        [kit.optionRow, selected ? kit.optionRowSelected : null, disabled ? styles.disabled : null],
+        OPTION_SELECTED_TINT,
+      )}
       testID={testID}
       accessibilityRole="radio"
       // `checked` only. react-native-web maps accessibilityState.selected to

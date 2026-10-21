@@ -58,6 +58,10 @@ export function rawLiveRegions(text: string): string[] {
   return elementsWith(text, /aria-live=/).map((e) => e.id);
 }
 
+/** Whether a phone announcement (`<SpokenOnce`, `useAnnounce(`) sits beside an element: just before it, or inside it. */
+const spokenBeside = (text: string, e: { start: number; end: number }) =>
+  /<SpokenOnce\b|useAnnounce\(/.test(text.slice(Math.max(0, e.start - 500), e.end + 400));
+
 /**
  * The testID of each element in `text` that spreads the helper's `liveRegion`
  * and is spoken on a phone: a `useAnnounce(` call or a `<SpokenOnce` beside
@@ -65,7 +69,19 @@ export function rawLiveRegions(text: string): string[] {
  */
 export function adoptedLiveRegions(text: string): string[] {
   return elementsWith(text, /\{\.\.\.liveRegion\}/)
-    .filter((e) => /<SpokenOnce\b|useAnnounce\(/.test(text.slice(Math.max(0, e.start - 500), e.end + 400)))
+    .filter((e) => spokenBeside(text, e))
+    .map((e) => e.id);
+}
+
+/**
+ * RV13-641-N1. The testID of each element that carries a RAW aria-live while
+ * a phone announcement sits beside it: a site that had adopted the helper
+ * and slipped back (on Android a raw aria-live is a live region of its own,
+ * so it would speak twice beside the announcement).
+ */
+export function regressedLiveRegions(text: string): string[] {
+  return elementsWith(text, /aria-live=/)
+    .filter((e) => spokenBeside(text, e))
     .map((e) => e.id);
 }
 
@@ -85,7 +101,8 @@ describe('W12-7: the integrator\'s announcing sites use the shared helper', () =
   });
 
   it('the Progress partial note: spoken once per appearance; no Android live region beside it (it would speak twice)', () => {
-    expect(progress).toContain("useAnnounce(PARTIAL_SENTENCE, 'partial');");
+    // RV12-641-A3: and only while Progress is in front.
+    expect(progress).toContain("useAnnounce(PARTIAL_SENTENCE, inFront ? 'partial' : null);");
     expect(progress).not.toContain('accessibilityLiveRegion');
     expect(progress).toMatch(/testID="wsf-activity-partial" role="status"/);
   });
@@ -117,6 +134,17 @@ describe('W12-7: every announcing site in contribute is listed with its owner', 
     expect(adoptedLiveRegions('<View testID="e" aria-live="polite">\n  <SpokenOnce message={m} announceKey="k" />')).toEqual([]);
   });
 
+  it('RV13-641-N1: the regression detector finds a raw aria-live beside a phone announcement, and nothing else', () => {
+    expect(regressedLiveRegions('<View testID="a" aria-live="polite">\n  <SpokenOnce message={m} announceKey="k" />')).toEqual(['a']);
+    expect(regressedLiveRegions('<SpokenOnce message={m} announceKey="k" />\n<Text testID="b" aria-live="polite">')).toEqual(['b']);
+    expect(regressedLiveRegions('<View testID="c" aria-live="polite">')).toEqual([]);
+    expect(regressedLiveRegions('<View testID="d" {...liveRegion}>\n  <SpokenOnce message={m} announceKey="k" />')).toEqual([]);
+  });
+
+  it('RV13-641-N1: no site that adopted the helper has slipped back to a raw aria-live (a ratchet, not a todo)', () => {
+    expect(regressedLiveRegions(contribute)).toEqual([]);
+  });
+
   it('no raw aria-live outside the list; none on an integrator site; every listed site is still in the file', () => {
     expect(raw.filter((id) => !(id in CONTRIBUTE_SITES))).toEqual([]);
     expect(raw.filter((id) => CONTRIBUTE_SITES[id]?.owner === 'integrator')).toEqual([]);
@@ -125,8 +153,10 @@ describe('W12-7: every announcing site in contribute is listed with its owner', 
 
   /*
     Another lane's site: a todo while any of its elements still carries a raw
-    aria-live; once none does, it must be adopted (liveRegion, and spoken).
-    A falling raw count is the goal, so there is no floor on it.
+    aria-live with no phone announcement beside it; once none does, it must
+    be adopted (liveRegion, and spoken). A raw aria-live beside an
+    announcement is a regression and fails above (RV13-641-N1). A falling raw
+    count is the goal, so there is no floor on it.
   */
   for (const [id, site] of Object.entries(CONTRIBUTE_SITES).filter(([, s]) => s.owner !== 'integrator')) {
     if (raw.includes(id)) it.todo(`${site.ticket} (${site.owner}): ${id}, ${site.note}, adopts liveRegion + useAnnounce or SpokenOnce`);

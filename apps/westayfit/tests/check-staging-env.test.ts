@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { spawnSync } from 'node:child_process';
-import { linkSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmdirSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmdirSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -37,7 +37,13 @@ import {
 
 const APP_ROOT = join(__dirname, '..');
 const SCRIPT = join(APP_ROOT, 'scripts', 'check-staging-env.mjs');
-const DIR = mkdtempSync(join(tmpdir(), 'wsf-check-staging-env-'));
+/*
+  RV12-641-1. Every temporary directory is named by its real path: on macOS
+  the temporary directory is reached through a symlink (/var -> /private/var),
+  and the script reports real paths.
+*/
+const TMP_REAL = realpathSync(tmpdir());
+const DIR = realpathSync(mkdtempSync(join(tmpdir(), 'wsf-check-staging-env-')));
 let n = 0;
 
 // RV7-641-7: only what this file made. DIR holds plain files and links, never a directory; it is
@@ -62,7 +68,7 @@ const envEntries = (dir: string) =>
     });
 const APP_ENV_BEFORE = envEntries(APP_ROOT);
 
-const FAKE_APP = mkdtempSync(join(tmpdir(), 'wsf-check-staging-env-app-'));
+const FAKE_APP = realpathSync(mkdtempSync(join(tmpdir(), 'wsf-check-staging-env-app-')));
 const EXPO_FILES = ['.env', '.env.local', '.env.production', '.env.production.local'];
 const SENTINEL = (name: string) => `# OWNER_SENTINEL ${name} ${process.pid}: this file must survive the tests unchanged\n`;
 for (const name of [...EXPO_FILES, '.env.development.local']) writeFileSync(join(FAKE_APP, name), SENTINEL(name));
@@ -74,7 +80,7 @@ for (const name of [...EXPO_FILES, '.env.development.local']) writeFileSync(join
   entry by entry (never following a link) after checking it is that
   directory.
 */
-const REPOS = mkdtempSync(join(tmpdir(), 'wsf-check-staging-env-repos-'));
+const REPOS = realpathSync(mkdtempSync(join(tmpdir(), 'wsf-check-staging-env-repos-')));
 const REPO = join(REPOS, 'repo');
 const SIBLING = join(REPOS, 'sibling');
 const fixtureGit = (cwd: string, ...args: string[]) => {
@@ -115,7 +121,7 @@ afterAll(() => {
   for (const entry of readdirSync(DIR)) unlinkSync(join(DIR, entry));
   rmdirSync(DIR);
   for (const dir of [FAKE_APP, REPOS]) {
-    if (dir.startsWith(tmpdir()) && basename(dir).startsWith('wsf-check-staging-env-')) {
+    if (dir.startsWith(TMP_REAL) && basename(dir).startsWith('wsf-check-staging-env-')) {
       removeOwnTree(dir);
       rmdirSync(dir);
     }
@@ -465,28 +471,148 @@ describe('RV9-641-I11: files in other work trees, and the env files Expo loads',
     expect(rel(FAKE_APP)).toEqual(['.env', '.env.local', '.env.production', '.env.production.local']);
   });
 
-  it('SEC-F1: nothing in this file writes, links, renames or removes a path in the real app directory', () => {
-    const source = readFileSync(__filename, 'utf8');
+  /*
+    SEC-F1, widened for RV12-641-3. Every call that writes, links, renames,
+    removes, opens, copies onto or changes the mode or times of a path, by
+    name whether called bare or as a property (fs.rmSync,
+    require('node:fs').rmSync, promises.writeFile), with every path argument
+    it changes (both of a rename or a hard link). A path argument offends when
+    its text, or the declaration of any name in it (followed through
+    aliases), mentions the app directory.
+  */
+  const PATH_ARGS: Record<string, number[]> = {
+    writeFileSync: [0], appendFileSync: [0], unlinkSync: [0], mkdirSync: [0], rmdirSync: [0], rmSync: [0], truncateSync: [0],
+    openSync: [0], createWriteStream: [0], chmodSync: [0], chownSync: [0], utimesSync: [0], lchownSync: [0], lutimesSync: [0],
+    symlinkSync: [1], linkSync: [0, 1], renameSync: [0, 1], copyFileSync: [1], cpSync: [1],
+    writeFile: [0], appendFile: [0], unlink: [0], mkdir: [0], rmdir: [0], rm: [0], truncate: [0], open: [0], chmod: [0], chown: [0],
+    utimes: [0], symlink: [1], link: [0, 1], rename: [0, 1], copyFile: [1], cp: [1],
+  };
+  const APP_NAMES = new Set(['APP_ROOT', 'SCRIPT', '__dirname', '__filename']);
+  function appWrites(source: string): { calls: number; offenders: string[] } {
     const sf = ts.createSourceFile('t.ts', source, ts.ScriptTarget.Latest, true);
-    const WRITES: Record<string, number> = {
-      writeFileSync: 0, appendFileSync: 0, unlinkSync: 0, mkdirSync: 0, rmdirSync: 0, rmSync: 0, truncateSync: 0,
-      symlinkSync: 1, linkSync: 1, renameSync: 1, copyFileSync: 1,
+    // Every declared name and the expressions it is set from (every declaration of the name, any scope: the strict reading).
+    const inits = new Map<string, ts.Expression[]>();
+    const add = (name: string, init: ts.Expression) => inits.set(name, [...(inits.get(name) ?? []), init]);
+    const collect = (node: ts.Node) => {
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) add(node.name.text, node.initializer);
+      // `for (const f of [join(APP_ROOT, …)])`: the loop variable comes from the list.
+      if (ts.isForOfStatement(node) && ts.isVariableDeclarationList(node.initializer)) {
+        for (const d of node.initializer.declarations) if (ts.isIdentifier(d.name)) add(d.name.text, node.expression);
+      }
+      ts.forEachChild(node, collect);
+    };
+    collect(sf);
+    /** Whether a path expression can reach the app directory: its names, followed through their declarations. */
+    const reachesApp = (expr: ts.Node, seen: Set<string>): boolean => {
+      if (ts.isIdentifier(expr)) {
+        if (APP_NAMES.has(expr.text)) return true;
+        if (seen.has(expr.text)) return false;
+        seen.add(expr.text);
+        return (inits.get(expr.text) ?? []).some((init) => reachesApp(init, seen));
+      }
+      if (ts.isStringLiteral(expr) || ts.isNoSubstitutionTemplateLiteral(expr) || ts.isNumericLiteral(expr)) return false;
+      // A call's callee is not a path (join, mkdtempSync …); its arguments may be. A property's name is not a name.
+      if (ts.isCallExpression(expr)) return expr.arguments.some((a) => reachesApp(a, seen));
+      if (ts.isPropertyAccessExpression(expr)) return reachesApp(expr.expression, seen);
+      let found = false;
+      ts.forEachChild(expr, (child) => {
+        found ||= reachesApp(child, seen);
+      });
+      return found;
     };
     const offenders: string[] = [];
     let calls = 0;
     const visit = (node: ts.Node) => {
-      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text in WRITES) {
-        calls += 1;
-        const target = node.arguments[WRITES[node.expression.text]!];
-        if (!target || /APP_ROOT|__dirname/.test(target.getText())) offenders.push(node.getText());
+      if (ts.isCallExpression(node)) {
+        const callee = node.expression;
+        const name = ts.isIdentifier(callee) ? callee.text : ts.isPropertyAccessExpression(callee) ? callee.name.text : null;
+        if (name && name in PATH_ARGS) {
+          calls += 1;
+          for (const i of PATH_ARGS[name]!) {
+            const arg = node.arguments[i];
+            if (!arg || reachesApp(arg, new Set())) offenders.push(node.getText());
+          }
+        }
       }
       ts.forEachChild(node, visit);
     };
     visit(sf);
+    return { calls, offenders: [...new Set(offenders)] };
+  }
+
+  it('SEC-F1 / RV12-641-3: the scan sees a write, rename, removal or alias that reaches the app directory', () => {
+    const offends = (code: string) => appWrites(`const APP_ROOT = join(__dirname, '..');\nconst DIR = mkdtempSync('x');\n${code}`).offenders.length > 0;
+    // The reviewer's survivors: a rename out of it, a removal through an alias, and a property callee.
+    expect(offends("renameSync(join(APP_ROOT, '.env.local'), join(DIR, 'moved-out'));")).toBe(true);
+    expect(offends("const ZZ_OWNER = join(APP_ROOT, '.env.development.local');\nunlinkSync(ZZ_OWNER);")).toBe(true);
+    expect(offends("require('node:fs').rmSync(join(APP_ROOT, '.env.local'));")).toBe(true);
+    // Aliases of aliases, loop variables, the promises API, streams, copies onto it, hard links of its files.
+    expect(offends("const A = APP_ROOT;\nconst B = join(A, 'x');\nwriteFileSync(B, 'y');")).toBe(true);
+    expect(offends("for (const f of [join(APP_ROOT, '.env')]) unlinkSync(f);")).toBe(true);
+    expect(offends("const p = `${APP_ROOT}/.env`;\ntruncateSync(p);")).toBe(true);
+    expect(offends("await fs.promises.writeFile(join(APP_ROOT, '.env'), 'y');")).toBe(true);
+    expect(offends("createWriteStream(join(APP_ROOT, '.env'));")).toBe(true);
+    expect(offends("copyFileSync(join(DIR, 'a'), join(APP_ROOT, '.env'));")).toBe(true);
+    expect(offends("linkSync(join(APP_ROOT, 'app.json'), join(DIR, 'twin'));")).toBe(true);
+    expect(offends("rmSync(join(__dirname, '..', '.env.local'));")).toBe(true);
+    // What the tests do: write in their own directories, read the app's files, link to them from outside.
+    expect(offends("writeFileSync(join(DIR, 'a.env'), 'x');")).toBe(false);
+    expect(offends("symlinkSync(join(APP_ROOT, 'app.json'), join(DIR, 'link'));")).toBe(false);
+    expect(offends("copyFileSync(join(APP_ROOT, 'scripts', 'x.mjs'), join(DIR, 'x.mjs'));")).toBe(false);
+  });
+
+  it('SEC-F1: nothing in this file writes, links, renames or removes a path in the real app directory', () => {
+    const source = readFileSync(__filename, 'utf8');
+    const { calls, offenders } = appWrites(source);
     expect(calls).toBeGreaterThan(10);
     expect(offenders).toEqual([]);
     // The old helper that wrote fixed names into the app directory is gone (named in two parts, so this line is not a match).
     expect(source.includes(['with', 'AppFile'].join(''))).toBe(false);
+  });
+
+  /*
+    RV12-641-2. The CLI as the owner runs it refuses its own app's Expo env
+    files: a copy of the script in the fake app directory (its app root comes
+    from its own location, and it imports only node built-ins at load) is run
+    on that directory's .env.local and on a link to it. And main hands
+    placeFile the path alone, so the app root is always the script's own.
+  */
+  it('the script runs when reached through a symlink (it compares real paths before running main)', () => {
+    const link = join(DIR, `link-script-${(n += 1)}.mjs`);
+    symlinkSync(SCRIPT, link);
+    const file = join(DIR, `case-${(n += 1)}.env`);
+    writeFileSync(file, envText(GOOD));
+    const r = spawnSync(process.execPath, [link, file, '--platform', 'ios'], { cwd: DIR, encoding: 'utf8', env: process.env });
+    expect(r.stdout.trim().split('\n').pop()).toBe('PASS');
+    expect(r.status).toBe(0);
+    const tracked = spawnSync(process.execPath, [link, join(APP_ROOT, 'app.json')], { cwd: DIR, encoding: 'utf8', env: process.env });
+    expect(tracked.stdout).toBe(`${REFUSALS.tracked}\nFAIL\n`);
+    expect(tracked.status).toBe(1);
+  });
+
+  it('RV12-641-2: the script as run refuses its own app directory\'s Expo env files, and main passes placeFile the path alone', () => {
+    mkdirSync(join(FAKE_APP, 'scripts'));
+    const copy = join(FAKE_APP, 'scripts', 'check-staging-env.mjs');
+    copyFileSync(SCRIPT, copy);
+    const runCopy = (file: string) => spawnSync(process.execPath, [copy, file], { cwd: FAKE_APP, encoding: 'utf8', env: process.env });
+    for (const target of [join(FAKE_APP, '.env.local'), join(FAKE_APP, '.env.production')]) {
+      const r = runCopy(target);
+      expect(r.stdout).toBe(`${REFUSALS.expoLoaded}\nFAIL\n`);
+      expect(r.status).toBe(1);
+    }
+    const link = join(DIR, `link-copy-${(n += 1)}.env`);
+    symlinkSync(join(FAKE_APP, '.env.local'), link);
+    expect(runCopy(link).stdout).toBe(`${REFUSALS.expoLoaded}\nFAIL\n`);
+    // main's one placeFile call takes exactly one argument.
+    const sf = ts.createSourceFile('s.mjs', readFileSync(SCRIPT, 'utf8'), ts.ScriptTarget.Latest, true);
+    const main = sf.statements.find((st): st is ts.FunctionDeclaration => ts.isFunctionDeclaration(st) && st.name?.text === 'main')!;
+    const calls: ts.CallExpression[] = [];
+    const visit = (node: ts.Node) => {
+      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'placeFile') calls.push(node);
+      ts.forEachChild(node, visit);
+    };
+    visit(main);
+    expect(calls.map((c) => c.arguments.length)).toEqual([1]);
   });
 
   it('the refusals give no .env*.local advice and point outside the repository', () => {

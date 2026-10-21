@@ -14,6 +14,7 @@ import {
   PROGRESS_GREEN,
   SURFACE,
   elevation,
+  ELEVATION_OFF,
 } from '../kit';
 
 /**
@@ -982,7 +983,7 @@ const s = StyleSheet.create({
     ...elevation.action,
   },
   primaryBig: { minHeight: 84, paddingHorizontal: 54, borderRadius: 24 },
-  primaryOff: { backgroundColor: '#CDE8D5', shadowOpacity: 0 },
+  primaryOff: { backgroundColor: '#CDE8D5', ...ELEVATION_OFF },
   primaryText: { color: ON_ACTION, fontSize: 22, fontWeight: '900' },
   primaryTextBig: { fontSize: 30 },
   primaryTextOff: { color: '#6B8A76' },
