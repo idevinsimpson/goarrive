@@ -32,7 +32,18 @@ import type { BoundaryProps, FallbackVariant } from './routeErrorTypes';
  * recovers). None of this component ships in the web bundle.
  *
  * Each caught error is recorded, scrubbed, for Build details
- * (src/crashRecords.ts, shown by src/ui/CrashRecordsCard.native.tsx).
+ * (src/crashRecords.ts, shown by src/ui/CrashRecordsCard.native.tsx). The
+ * screen itself shows only fixed copy, never the error's own text.
+ *
+ * ALWAYS A WAY OUT (#641 CS-4). Try again remounts what failed, and a route
+ * that throws every time throws again. So every variant also offers Go to
+ * Home. Where the fallback stands in for a navigator (root, shell, homeTab),
+ * that navigator is unmounted and React Navigation has dropped its state; Go
+ * to Home first asks for '/' (expo-router queues it for the navigator that is
+ * still mounted, so the remounted one opens on Home rather than on whatever
+ * stale screen its route still names), then remounts. At the root nothing is
+ * left to navigate: the request is refused, and the remount alone starts the
+ * stack fresh, on its first screen, which is Home ((tabs) → (home) → index).
  */
 
 export type { FallbackVariant };
@@ -44,9 +55,9 @@ type Props = {
 };
 
 const COPY: Record<FallbackVariant, string> = {
-  root: 'The app hit a problem and stopped this screen. Try again to reload it.',
-  shell: 'The app hit a problem and stopped this screen. Try again to reload it.',
-  homeTab: 'This page hit a problem and stopped. Try again, or pick another tab below.',
+  root: 'The app hit a problem and stopped this screen. Try again, or go to Home.',
+  shell: 'The app hit a problem and stopped this screen. Try again, or go to Home.',
+  homeTab: 'This page hit a problem and stopped. Try again, go to Home, or pick another tab below.',
   tab: 'This page hit a problem and stopped. Try again, or go to Home.',
   screen: 'This screen hit a problem and stopped. Try again, or go to Home.',
   // Never "recorded": the attempt's outcome is unknown from here.
@@ -54,15 +65,27 @@ const COPY: Record<FallbackVariant, string> = {
     'This screen hit a problem and stopped. Anything you were adding is not confirmed: check Progress before you add it again.',
 };
 
-/** Variants with a live navigator beneath them, where "Go to Home" can act. */
-const HAS_HOME_LINK: Record<FallbackVariant, boolean> = {
-  root: false,
-  shell: false,
-  homeTab: false,
-  tab: true,
-  screen: true,
-  contribute: true,
+/**
+ * Variants that stand in for a whole navigator: Go to Home also remounts it.
+ * The others sit inside a live navigator, which simply moves to Home.
+ */
+const REMOUNTS_ON_HOME: Record<FallbackVariant, boolean> = {
+  root: true,
+  shell: true,
+  homeTab: true,
+  tab: false,
+  screen: false,
+  contribute: false,
 };
+
+/** Asks for Home; never throws (a throw in a press handler is fatal on a phone). */
+function requestHome(): void {
+  try {
+    router.navigate('/');
+  } catch {
+    // The root fallback: no navigator is mounted to take it. The remount resets.
+  }
+}
 
 export function RouteErrorFallback({ error, retry, variant }: Props) {
   const [retrying, setRetrying] = useState(false);
@@ -98,16 +121,25 @@ export function RouteErrorFallback({ error, retry, variant }: Props) {
         >
           <Text style={kit.primaryButtonText}>{retrying ? 'Trying again…' : 'Try again'}</Text>
         </Pressable>
-        {HAS_HOME_LINK[variant] ? (
-          <Pressable
-            onPress={() => router.navigate('/')}
-            style={kit.secondaryButton}
-            accessibilityRole="button"
-            testID="wsf-route-error-home"
-          >
-            <Text style={kit.secondaryButtonText}>Go to Home</Text>
-          </Pressable>
-        ) : null}
+        <Pressable
+          onPress={() => {
+            requestHome();
+            // After the queued navigation is dispatched (a discrete press
+            // flushes its effects first), so the remount reads the new route.
+            if (REMOUNTS_ON_HOME[variant]) {
+              setTimeout(() => {
+                void Promise.resolve()
+                  .then(retry)
+                  .catch(() => undefined);
+              }, 0);
+            }
+          }}
+          style={kit.secondaryButton}
+          accessibilityRole="button"
+          testID="wsf-route-error-home"
+        >
+          <Text style={kit.secondaryButtonText}>Go to Home</Text>
+        </Pressable>
         {harness ? (
           <Pressable
             onPress={disarmAllCrashSites}

@@ -1,9 +1,10 @@
 import {
   crashRecordOf,
   persistCrash,
+  type CrashKv,
   type CrashRecord,
 } from './crashRecords';
-import { deviceKv, type DeviceKv } from './storage/kv';
+import { deviceKv } from './storage/kv';
 
 /**
  * NATIVE-INTEGRATOR-1 (INT-01). THE APP'S LAST LINE ON A PHONE: RECORD, THEN
@@ -32,8 +33,19 @@ import { deviceKv, type DeviceKv } from './storage/kv';
  * Adopting a crash reporter is an owner decision; this keeps what one would
  * need and sends nothing anywhere.
  *
- * Imported first by `app/_layout.tsx`, so it installs before any other module
- * of the app runs.
+ * WHEN IT INSTALLS (#641 CS-5). Imported first by `app/_layout.tsx`, which is
+ * NOT the first app module to run: expo-router evaluates every `_layout` in
+ * sorted order while it builds the route tree, so `(tabs)/(home)/_layout`,
+ * `(tabs)/_layout` (with src/auth and Firebase) and `community/_layout` run
+ * before it. That is one synchronous pass, so the wrapper is in place before
+ * any timer, event or promise callback of the app can run, which is all it
+ * handles.
+ *
+ * WHAT IT NEVER SEES. An uncaught render error (one no route boundary catches,
+ * or one thrown while a module evaluates during that pass) goes from React's
+ * onUncaughtError straight to ExceptionsManager as fatal, without passing
+ * through ErrorUtils, so it is not recorded. The route boundaries exist so
+ * that render errors are caught instead.
  */
 
 /** The longest a fatal error waits for its record to be written. */
@@ -58,7 +70,7 @@ export type InstallOptions = {
   platform?: string;
   /** A development build: RN already tracks rejections there (LogBox). */
   dev?: boolean;
-  kv?: DeviceKv;
+  kv?: CrashKv;
   graceMs?: number;
   /** Tests only: install again over a previous install. */
   force?: boolean;

@@ -86,12 +86,16 @@ export default function BrandShell() {
     again from `loading`, fresh, never an answer from before the failure.
   */
   const [reloadToken, setReloadToken] = useState(0);
+  // Whether the list now loading came from a Retry: its cards then read fresh
+  // too, never joining a goal read that may be hung (#641 SH-5b).
+  const listFromRetry = useRef(false);
 
   useEffect(() => {
     // Only fetch for a signed-in user with auth enabled. Feature-flag-off, no
     // auth SDK is initialised — the fetch would throw at getFirebaseFunctions.
     if (!wsfAuthEnabled || !ready || !user) return;
     let cancelled = false;
+    listFromRetry.current = reloadToken > 0;
     setMyCommunities({ kind: 'loading' });
     (async () => {
       try {
@@ -182,15 +186,18 @@ export default function BrandShell() {
     fires when it comes back (src/useResumeRefresh.ts). A return after at least
     30 s re-reads exactly what a return to this screen re-reads, quietly. An
     error on screen (a cold start offline) is retried on any return to the
-    app, so reconnecting and coming back needs no tap.
+    app, so reconnecting and coming back needs no tap. So is a list still
+    loading: a read stuck under packet loss would otherwise hold Loading until
+    its timeout (#641 SH-5c); the fresh read joins one still young.
   */
+  const retryOnReturn = myCommunities.kind === 'error' || myCommunities.kind === 'loading';
   useResumeRefresh(
     () => {
       if (!wsfAuthEnabled || !ready || !user) return;
-      if (myCommunities.kind === 'error') setReloadToken((n) => n + 1);
+      if (retryOnReturn) setReloadToken((n) => n + 1);
       else if (myCommunities.kind === 'ready') setReturnToken((n) => n + 1);
     },
-    { minAwayMs: myCommunities.kind === 'error' ? 0 : RESUME_MIN_AWAY_MS },
+    { minAwayMs: retryOnReturn ? 0 : RESUME_MIN_AWAY_MS },
   );
 
   // The open goal of each community, so a card can say what is happening and
@@ -223,7 +230,9 @@ export default function BrandShell() {
     }
     const uid = user?.uid;
     if (!uid) return;
-    const firstForAccount = cardsReadOnce.current !== uid;
+    // The first read for this list may share this load's answer, unless the
+    // list itself came from a Retry (#641 SH-5b).
+    const firstForAccount = cardsReadOnce.current !== uid && !listFromRetry.current;
     cardsReadOnce.current = uid;
     let cancelled = false;
     const ids = myCommunities.items.map((item) => item.groupId);

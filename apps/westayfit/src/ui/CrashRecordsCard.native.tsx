@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { clearCrashRecords, readCrashRecords, type CrashRecord } from '../crashRecords';
-import type { DeviceKv } from '../storage/kv';
+import { clearCrashRecords, readCrashRecords, type CrashKv, type CrashRecord } from '../crashRecords';
 import { kit } from './kit';
 
 /**
@@ -16,7 +15,7 @@ import { kit } from './kit';
  * nothing when there are none. iOS and Android only: the web build gets
  * src/ui/CrashRecordsCard.tsx, which renders nothing and reads nothing.
  */
-export function CrashRecordsCard({ kv }: { kv?: DeviceKv }) {
+export function CrashRecordsCard({ kv }: { kv?: CrashKv }) {
   const [records, setRecords] = useState<CrashRecord[]>([]);
   useEffect(() => {
     let live = true;
