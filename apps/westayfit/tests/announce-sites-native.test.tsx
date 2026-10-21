@@ -134,7 +134,12 @@ describe('W12-7: contribute speaks its refusal and its entry error on a phone', 
     const headline = byId('wsf-contribute-refused-headline')!.textContent;
     const body = byId('wsf-contribute-refused-body')!.textContent;
     expect(headline).toBe('This goal is no longer accepting contributions.');
-    expect(spoken).toEqual([`Not recorded. ${headline} ${body}`]);
+    // Exactly once, and the last thing said. The state lane's sending screen
+    // speaks its own line earlier in the same attempt (W13-4); that is not
+    // this site's to suppress.
+    const refusal = `Not recorded. ${headline} ${body}`;
+    expect(spoken.filter((m) => m === refusal)).toHaveLength(1);
+    expect(spoken.at(-1)).toBe(refusal);
   });
 
   it('the refusal carries no live region of its own on a phone (it would speak twice beside the announcement)', async () => {

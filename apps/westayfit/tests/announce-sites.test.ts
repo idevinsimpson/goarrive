@@ -12,7 +12,9 @@ import { describe, expect, it } from 'vitest';
  * scan lists every announcing site in the files below with its owner:
  *   - the integrator's sites must use the helper now;
  *   - another lane's site is listed with its ticket and shows as a todo until
- *     it adopts the helper (it then simply passes);
+ *     it adopts the helper: once it spreads `liveRegion` and is spoken
+ *     (`useAnnounce`, or the state lane's `SpokenOnce`) it is checked as
+ *     adopted;
  *   - a raw `aria-live` that is on no list fails, so a new site has to be
  *     added here, by whoever owns it.
  * Extend SITES rather than loosening the rule.
@@ -37,17 +39,34 @@ const CONTRIBUTE_SITES: Record<string, Site> = {
 
 const read = (rel: string) => readFileSync(join(__dirname, '..', rel), 'utf8');
 
-/** The testID of each element in `text` that carries a raw `aria-live` attribute. */
-export function rawLiveRegions(text: string): string[] {
-  const ids: string[] = [];
-  const re = /aria-live=/g;
+/** Each element in `text` whose opening tag carries `marker`: its testID and where the tag starts and ends. */
+function elementsWith(text: string, marker: RegExp): Array<{ id: string; start: number; end: number }> {
+  const found: Array<{ id: string; start: number; end: number }> = [];
+  const re = new RegExp(marker.source, 'g');
   let m: RegExpExecArray | null;
   while ((m = re.exec(text))) {
     const start = text.lastIndexOf('<', m.index);
-    const element = text.slice(start, text.indexOf('>', m.index) + 1);
-    ids.push(/testID="([^"]+)"/.exec(element)?.[1] ?? `(no testID at ${m.index})`);
+    const end = text.indexOf('>', m.index) + 1;
+    const element = text.slice(start, end);
+    found.push({ id: /testID="([^"]+)"/.exec(element)?.[1] ?? `(no testID at ${m.index})`, start, end });
   }
-  return ids;
+  return found;
+}
+
+/** The testID of each element in `text` that carries a raw `aria-live` attribute. */
+export function rawLiveRegions(text: string): string[] {
+  return elementsWith(text, /aria-live=/).map((e) => e.id);
+}
+
+/**
+ * The testID of each element in `text` that spreads the helper's `liveRegion`
+ * and is spoken on a phone: a `useAnnounce(` call or a `<SpokenOnce` beside
+ * it (just before the element, or inside it).
+ */
+export function adoptedLiveRegions(text: string): string[] {
+  return elementsWith(text, /\{\.\.\.liveRegion\}/)
+    .filter((e) => /<SpokenOnce\b|useAnnounce\(/.test(text.slice(Math.max(0, e.start - 500), e.end + 400)))
+    .map((e) => e.id);
 }
 
 const contribute = read(CONTRIBUTE);
@@ -81,19 +100,40 @@ describe('W12-7: the integrator\'s announcing sites use the shared helper', () =
 describe('W12-7: every announcing site in contribute is listed with its owner', () => {
   const raw = rawLiveRegions(contribute);
 
+  const adopted = adoptedLiveRegions(contribute);
+
   it('the detector finds aria-live by its element\'s testID, wherever the attribute sits', () => {
     expect(rawLiveRegions('<View testID="a" aria-live="polite">')).toEqual(['a']);
     expect(rawLiveRegions('<Text\n  style={s}\n  aria-live={x}\n  testID="b"\n>')).toEqual(['b']);
     expect(rawLiveRegions('<View {...liveRegion} testID="c">')).toEqual([]);
   });
 
-  it('no raw aria-live outside the list; none on an integrator site', () => {
-    expect(raw.length).toBeGreaterThan(3);
-    expect(raw.filter((id) => !(id in CONTRIBUTE_SITES))).toEqual([]);
-    expect(raw.filter((id) => CONTRIBUTE_SITES[id]?.owner === 'integrator')).toEqual([]);
+  it('an adopted site spreads liveRegion and is spoken beside it (SpokenOnce inside or just before, or useAnnounce)', () => {
+    expect(adoptedLiveRegions('<View testID="a" {...liveRegion}>\n  <SpokenOnce message={m} announceKey="k" />')).toEqual(['a']);
+    expect(adoptedLiveRegions('<SpokenOnce message={m} announceKey="k" />\n<Text testID="b" {...liveRegion}>')).toEqual(['b']);
+    expect(adoptedLiveRegions('useAnnounce(m, k);\n<View testID="c" {...liveRegion}>')).toEqual(['c']);
+    // liveRegion with nothing speaking it on a phone is not adopted; nor is a raw aria-live.
+    expect(adoptedLiveRegions('<View testID="d" {...liveRegion}>')).toEqual([]);
+    expect(adoptedLiveRegions('<View testID="e" aria-live="polite">\n  <SpokenOnce message={m} announceKey="k" />')).toEqual([]);
   });
 
+  it('no raw aria-live outside the list; none on an integrator site; every listed site is still in the file', () => {
+    expect(raw.filter((id) => !(id in CONTRIBUTE_SITES))).toEqual([]);
+    expect(raw.filter((id) => CONTRIBUTE_SITES[id]?.owner === 'integrator')).toEqual([]);
+    for (const id of Object.keys(CONTRIBUTE_SITES)) expect(contribute).toContain(`testID="${id}"`);
+  });
+
+  /*
+    Another lane's site: a todo while any of its elements still carries a raw
+    aria-live; once none does, it must be adopted (liveRegion, and spoken).
+    A falling raw count is the goal, so there is no floor on it.
+  */
   for (const [id, site] of Object.entries(CONTRIBUTE_SITES).filter(([, s]) => s.owner !== 'integrator')) {
-    if (raw.includes(id)) it.todo(`${site.ticket} (${site.owner}): ${id}, ${site.note}, adopts liveRegion + useAnnounce`);
+    if (raw.includes(id)) it.todo(`${site.ticket} (${site.owner}): ${id}, ${site.note}, adopts liveRegion + useAnnounce or SpokenOnce`);
+    else {
+      it(`${site.ticket} (${site.owner}): ${id}, ${site.note}: adopted (liveRegion, and spoken on a phone)`, () => {
+        expect(adopted).toContain(id);
+      });
+    }
   }
 });
