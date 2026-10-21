@@ -45,6 +45,7 @@ import {
   SURFACE,
   TEXT_MUTED,
 } from '../../src/ui/kit';
+import { KEYBOARD_SCROLL_PROPS } from '../../src/ui/keyboardAvoidance';
 import { MovementPicker } from '../../src/ui/MovementPicker';
 import { OptionGroup, OptionRow } from '../../src/ui/OptionRow';
 import { formatCount } from '../../src/ui/progressFormat';
@@ -1406,6 +1407,8 @@ function Page({
       // (measured `5800472286`; removed per Director `5800455297` §2).
       contentContainerStyle={kit.page}
       keyboardShouldPersistTaps="handled"
+      // NATIVE-INTEGRATOR-1 (INT-06): iOS keeps a focused field above the keyboard.
+      {...KEYBOARD_SCROLL_PROPS}
     >
       <View
         style={kit.column}

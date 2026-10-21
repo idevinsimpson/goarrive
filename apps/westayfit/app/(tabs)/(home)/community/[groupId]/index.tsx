@@ -142,6 +142,7 @@ import {
   totalOfTargetParts,
 } from '../../../../../src/ui/progressFormat';
 import { injectedRenderFault } from '../../../../../src/crashHarness';
+import { RESUME_MIN_AWAY_MS, useResumeRefresh } from '../../../../../src/useResumeRefresh';
 
 type GroupDoc = {
   displayName: string;
@@ -904,6 +905,8 @@ export default function CommunityPage() {
    */
   const refusedHere = useRef(false);
 
+  // INT-04: bumped by the entry error's Retry; the entry read runs again in place.
+  const [entryReload, setEntryReload] = useState(0);
   useEffect(() => {
     if (!wsfAuthEnabled) return;
     if (!ready) return;
@@ -1053,7 +1056,17 @@ export default function CommunityPage() {
     return () => {
       cancelled = true;
     };
-  }, [ready, user, groupId]);
+  }, [ready, user, groupId, entryReload]);
+  /*
+    NATIVE-INTEGRATOR-1 (INT-04). TRY AGAIN, IN PLACE. The entry error used to
+    offer only "Back to home", which pushed a fresh Home over this errored
+    screen. Retry re-runs the entry read on this same screen, so the page loads
+    where the member is, with one entry in the Home stack.
+  */
+  const retryEntry = useCallback(() => {
+    setState({ kind: 'loading' });
+    setEntryReload((n) => n + 1);
+  }, []);
 
   // The seam this package exists to add. Every other wsfGoals access is by
   // explicit goalId, so before wsfListGoals a member who did not create the
@@ -1430,6 +1443,23 @@ export default function CommunityPage() {
   // INT-01: a test build's community-detail fault, the `window.location.origin`
   // read ST-01 crashed on (src/crashHarness.ts); inert otherwise.
   injectedRenderFault('community-detail-origin');
+
+  /*
+    NATIVE-INTEGRATOR-1 (INT-12). COMING BACK TO THE APP IS A RETURN. The JS
+    context survives hours in the background and no focus event fires on the
+    way back (src/useResumeRefresh.ts), so after at least 30 s away this bumps
+    the same return token a focus does: the goal list and progress re-read
+    quietly (no skeleton, scroll kept) and the membership is re-checked, so a
+    member removed meanwhile lands on the not-member state. An entry error on
+    screen is retried on any return.
+  */
+  useResumeRefresh(
+    () => {
+      if (state.kind === 'error') retryEntry();
+      else if (state.kind === 'ready') setReturnToken((n) => n + 1);
+    },
+    { minAwayMs: state.kind === 'error' ? 0 : RESUME_MIN_AWAY_MS },
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -2017,6 +2047,15 @@ export default function CommunityPage() {
               red `styles.error` stays for the real validation errors below. */}
           <Text style={kit.body}>{state.message}</Text>
         </View>
+        {/* INT-04: the way to try again, in place. */}
+        <Pressable
+          onPress={retryEntry}
+          style={kit.primaryButton}
+          accessibilityRole="button"
+          testID="wsf-community-error-retry"
+        >
+          <Text style={kit.primaryButtonText}>Try again</Text>
+        </Pressable>
         <ButtonLink
           href="/"
           style={kit.tertiaryButton}
