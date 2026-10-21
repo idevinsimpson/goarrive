@@ -110,8 +110,16 @@ export function readDeviceMode(): DeviceMode | null {
  */
 export function saveDeviceMode(mode: DeviceMode): Promise<boolean> {
   if (!isDeviceMode(mode)) return Promise.resolve(false);
+  // Over an unreadable stored answer, nothing is known to be kept until the
+  // device answers this save (the mirror clears its unreadable flag as soon
+  // as the write is issued).
+  const unconfirmed = !HAS_SYNC_STORAGE && store.unreadable(DEVICE_MODE_KEY);
+  if (unconfirmed) unconfirmedSaves += 1;
   const saving = store.write(DEVICE_MODE_KEY, mode);
-  void saving.then((kept) => noteSaveResult(kept));
+  void saving.then((kept) => {
+    if (unconfirmed) unconfirmedSaves -= 1;
+    noteSaveResult(kept, unconfirmed);
+  });
   return saving;
 }
 
@@ -120,24 +128,39 @@ export function saveDeviceMode(mode: DeviceMode): Promise<boolean> {
 
   The device question's note says the answer "is remembered on this device
   only". On a phone that is true only if the device kept the last answer and
-  its storage can be read at all. `deviceModeMayBeRemembered` is false after
-  the last save was refused, or while the stored answer is unreadable. On web
-  it is always true: the browser build's wording and behaviour are unchanged
-  (the render gate is the member lane's, W16-3).
+  its storage can be read at all. `deviceModeMayBeRemembered` is false:
+    - after the last save was refused, and after `clearDeviceMode` could not
+      forget (its last-resort overwrite refused too: the old answer is still
+      on the device and returns after a relaunch);
+    - while the stored answer is unreadable, including while a save made over
+      an unreadable answer is still waiting for the device's answer (no
+      optimistic true in between).
+  On web it is always true: the browser build's wording and behaviour are
+  unchanged (the render gate is the member lane's, W16-3).
 */
 let lastSaveRefused = false;
+// Saves issued over an unreadable stored answer that the device has not answered yet.
+let unconfirmedSaves = 0;
 const rememberedListeners = new Set<() => void>();
 
-function noteSaveResult(kept: boolean): void {
+function noteSaveResult(kept: boolean, notifyAnyway = false): void {
   const refused = !kept;
-  if (refused === lastSaveRefused) return;
+  if (refused === lastSaveRefused && !notifyAnyway) return;
   lastSaveRefused = refused;
-  for (const l of [...rememberedListeners]) l();
+  // Each listener's failure is its own (as in src/storage/mirror.ts): one that
+  // throws must not keep the rest on a stale answer.
+  for (const l of [...rememberedListeners]) {
+    try {
+      l();
+    } catch {
+      // the listener's own failure
+    }
+  }
 }
 
 export function deviceModeMayBeRemembered(): boolean {
   if (HAS_SYNC_STORAGE) return true;
-  return !lastSaveRefused && !store.unreadable(DEVICE_MODE_KEY);
+  return !lastSaveRefused && unconfirmedSaves === 0 && !store.unreadable(DEVICE_MODE_KEY);
 }
 
 /** Notified whenever `deviceModeMayBeRemembered` may have changed (a save's answer, or the mirror's launch read). */
@@ -182,6 +205,9 @@ export async function clearDeviceMode(): Promise<boolean> {
   if (await store.remove(DEVICE_MODE_KEY)) return true;
   if (newerLanded()) return true;
   const kept = await store.write(DEVICE_MODE_KEY, FORGOTTEN);
+  // Not forgotten: the old answer is still on the device and comes back after
+  // a relaunch, so it cannot be said to be remembered as answered now.
+  if (!kept) noteSaveResult(false);
   return kept;
 }
 
