@@ -45,6 +45,13 @@ export type KeyMirror = {
   loaded(key: string): boolean;
   /** Native: the store could not be read for this key, so `read` answering null proves nothing. */
   unreadable(key: string): boolean;
+  /**
+   * How many writes (not removals) this process has made to `key` through
+   * this mirror. A caller that removes a record and must not then destroy a
+   * NEWER write — even one with the same value — compares it before and
+   * after. Works on web too, where `read` is the browser store itself.
+   */
+  writeCount(key: string): number;
   /** Hydrate one key from the store (no-op once loaded). */
   load(key: string): Promise<void>;
   /** Hydrate every stored key with this prefix. */
@@ -68,6 +75,8 @@ export function createKeyMirror(
   // Per-key count of writes made in this process. A hydration started before
   // a write must not land on top of it.
   const writes = new Map<string, number>();
+  // Writes only (removals excluded), for `writeCount`.
+  const written = new Map<string, number>();
   const listeners = new Set<() => void>();
 
   const notify = () => {
@@ -125,6 +134,9 @@ export function createKeyMirror(
     unreadable(key) {
       return failed.has(key);
     },
+    writeCount(key) {
+      return written.get(key) ?? 0;
+    },
     load,
     async loadPrefix(prefix) {
       let keys: string[] = [];
@@ -137,6 +149,7 @@ export function createKeyMirror(
     },
     write(key, value) {
       bump(key);
+      written.set(key, (written.get(key) ?? 0) + 1);
       failed.delete(key);
       memory.set(key, { value, expiresAt: stamp() });
       notify();

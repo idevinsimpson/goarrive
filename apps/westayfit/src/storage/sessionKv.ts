@@ -33,7 +33,8 @@ export const sessionKv: DeviceKv = {
   },
   async readItem(key) {
     const s = webSession();
-    if (!s) return { ok: false };
+    // No Storage object: nothing stored and nothing storable (see kv.ts).
+    if (!s) return { ok: true, value: null };
     try {
       return { ok: true, value: s.getItem(key) };
     } catch {
