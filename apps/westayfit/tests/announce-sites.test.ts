@@ -85,7 +85,8 @@ describe('W12-7: the integrator\'s announcing sites use the shared helper', () =
   });
 
   it('the Progress partial note: spoken once per appearance; no Android live region beside it (it would speak twice)', () => {
-    expect(progress).toContain("useAnnounce(PARTIAL_SENTENCE, 'partial');");
+    // RV12-641-A3: and only while Progress is in front.
+    expect(progress).toContain("useAnnounce(PARTIAL_SENTENCE, inFront ? 'partial' : null);");
     expect(progress).not.toContain('accessibilityLiveRegion');
     expect(progress).toMatch(/testID="wsf-activity-partial" role="status"/);
   });
