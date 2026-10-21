@@ -1,6 +1,6 @@
 import type { ReactElement, ReactNode } from 'react';
 import { Platform, View } from 'react-native';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { SafeAreaProvider, initialWindowMetrics, type Metrics } from 'react-native-safe-area-context';
 
 import { wsfIsStaging } from './firebase';
 import { StagingBanner } from './StagingBanner';
@@ -31,11 +31,27 @@ import { StagingBanner } from './StagingBanner';
 
 type ScreenLayout = (props: { options?: { presentation?: string }; children: ReactElement }) => ReactElement;
 
+/*
+  FIRST-FRAME METRICS (#641 NB-5). A nested provider with no initialMetrics
+  starts from its parent's insets and corrects itself after one native
+  measurement, so the first frame below the strip would pad the full status
+  bar and then jump. Each provider here starts from what it will measure:
+  below the strip, the window's metrics with a top of 0; the modal's own
+  frame (which starts at the top of the window), the window's metrics.
+*/
+const NO_INSETS = { top: 0, right: 0, bottom: 0, left: 0 };
+export function belowTheStrip(window: Metrics | null = initialWindowMetrics): Metrics {
+  return {
+    frame: window?.frame ?? { x: 0, y: 0, width: 0, height: 0 },
+    insets: { ...(window?.insets ?? NO_INSETS), top: 0 },
+  };
+}
+
 export function frameFor(staging: boolean) {
   return function StagingStackFrame({ children }: { children: ReactNode }) {
     if (!staging) return <View style={{ flex: 1 }}>{children}</View>;
     return (
-      <SafeAreaProvider style={{ flex: 1 }} testID="wsf-staging-stack-frame">
+      <SafeAreaProvider style={{ flex: 1 }} initialMetrics={belowTheStrip()} testID="wsf-staging-stack-frame">
         {children}
       </SafeAreaProvider>
     );
@@ -47,9 +63,11 @@ export function screenLayoutFor(staging: boolean, platform: string): ScreenLayou
   return function StagingModalLayout({ options, children }) {
     if (options?.presentation !== 'transparentModal') return children;
     return (
-      <SafeAreaProvider testID="wsf-staging-modal-frame">
+      <SafeAreaProvider initialMetrics={initialWindowMetrics} testID="wsf-staging-modal-frame">
         <StagingBanner />
-        <SafeAreaProvider style={{ flex: 1 }}>{children}</SafeAreaProvider>
+        <SafeAreaProvider style={{ flex: 1 }} initialMetrics={belowTheStrip()}>
+          {children}
+        </SafeAreaProvider>
       </SafeAreaProvider>
     );
   };

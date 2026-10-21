@@ -9,10 +9,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const navigate = vi.fn();
 vi.mock('expo-router', () => ({ router: { navigate: (...a: unknown[]) => navigate(...a) } }));
 // The real module imports React Native internals jsdom cannot load. The
-// fallback reads only this constant from it (no provider).
-vi.mock('react-native-safe-area-context', () => ({
-  initialWindowMetrics: { insets: { top: 47, bottom: 34, left: 0, right: 0 }, frame: { x: 0, y: 0, width: 390, height: 844 } },
-}));
+// fallback reads the window's first metrics (root) and the nearest provider's
+// insets through its context (the other variants, #641 NB-4).
+vi.mock('react-native-safe-area-context', async () => {
+  const { createContext } = await import('react');
+  return {
+    initialWindowMetrics: { insets: { top: 47, bottom: 34, left: 0, right: 0 }, frame: { x: 0, y: 0, width: 390, height: 844 } },
+    SafeAreaInsetsContext: createContext<null | { top: number; bottom: number; left: number; right: number }>(null),
+  };
+});
+const { SafeAreaInsetsContext } = await import('react-native-safe-area-context');
 
 import * as webContainment from '../src/crashContainment';
 import { installCrashContainment } from '../src/crashContainment.native';
@@ -632,6 +638,35 @@ describe('route boundaries and their fallback', () => {
     // Home is the tab that failed: Try again, Go to Home, and the tab bar is the way elsewhere.
     expect(byId('wsf-route-error-body')!.textContent).toContain('pick another tab');
     expect(byId('wsf-route-error-home')).not.toBeNull();
+  });
+
+  it('NB-4: root pads by the window\'s first metrics; shell, screen and contribute by the nearest provider; tabs by nothing', () => {
+    const top = (variant: FallbackVariant, provided: number | null) => {
+      act(() =>
+        root.render(
+          provided === null ? (
+            <RouteErrorFallback error={new Error('x')} retry={() => undefined} variant={variant} />
+          ) : (
+            <SafeAreaInsetsContext.Provider value={{ top: provided, bottom: 0, left: 0, right: 0 }}>
+              <RouteErrorFallback error={new Error('x')} retry={() => undefined} variant={variant} />
+            </SafeAreaInsetsContext.Provider>
+          ),
+        ),
+      );
+      return byId('wsf-route-error')!.style.paddingTop;
+    };
+    // Below a staging strip (or inside a provider that already cleared it) the provider says 0.
+    for (const v of ['shell', 'screen', 'contribute'] as FallbackVariant[]) {
+      expect(top(v, 0), v).toBe('24px');
+      expect(top(v, 30), v).toBe('54px');
+      // No provider at all: the window's metrics, never a throw.
+      expect(top(v, null), v).toBe(`${24 + 47}px`);
+    }
+    // The root fallback has no provider left above it: always the window's metrics.
+    expect(top('root', 0)).toBe(`${24 + 47}px`);
+    expect(top('root', null)).toBe(`${24 + 47}px`);
+    expect(top('tab', 30)).toBe('24px');
+    expect(top('homeTab', 30)).toBe('24px');
   });
 
   it('the contribute fallback says not confirmed and points to Progress; it never says recorded', () => {

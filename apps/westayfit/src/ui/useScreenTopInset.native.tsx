@@ -1,6 +1,6 @@
 import { useFocusEffect } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useCallback, useState } from 'react';
+import { createContext, useCallback, useContext, useState, type ReactNode } from 'react';
 import { View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -26,13 +26,29 @@ import { statusBarStyleFor, type ScreenTone } from './statusBarPolicy';
  *
  * The inset is the nearest SafeAreaProvider's. On a staging build the stack
  * sits in its own provider below the red strip (src/stagingShell.native.tsx),
- * so a screen there clears the strip, not the status bar a second time. On
- * web (src/ui/useScreenTopInset.ts) all of it is inert.
+ * so a screen there clears the strip, not the status bar a second time.
+ *
+ * UNDER THE MEMBER TOP BAR THE TOP IS ALREADY CLEARED (#641 F1). The signed-in
+ * shell (app/(tabs)/_layout.tsx) draws MemberTopBar, which pads the status bar
+ * itself, and wraps its scenes in <TopCleared cleared>. Inside that, the inset
+ * is 0 and no screen sets the status-bar icons: a FormShell rendered inside a
+ * tab (a community's challenge page, its join gate) would otherwise add the
+ * inset a second time below the bar and turn the icons white over the cream
+ * bar. On web (src/ui/useScreenTopInset.ts) all of it is inert.
  */
 export type { ScreenTone };
 
+const TopClearedContext = createContext(false);
+
+/** Scenes below a bar that already clears the status bar (the signed-in member shell). */
+export function TopCleared({ cleared, children }: { cleared: boolean; children: ReactNode }) {
+  return <TopClearedContext.Provider value={cleared}>{children}</TopClearedContext.Provider>;
+}
+
 export function useScreenTopInset(): number {
-  return useSafeAreaInsets().top;
+  const cleared = useContext(TopClearedContext);
+  const top = useSafeAreaInsets().top;
+  return cleared ? 0 : top;
 }
 
 export function ScreenTopSpacer() {
@@ -41,6 +57,7 @@ export function ScreenTopSpacer() {
 }
 
 export function ScreenStatusBar({ tone }: { tone: ScreenTone }) {
+  const cleared = useContext(TopClearedContext);
   const [focused, setFocused] = useState(false);
   useFocusEffect(
     useCallback(() => {
@@ -48,5 +65,7 @@ export function ScreenStatusBar({ tone }: { tone: ScreenTone }) {
       return () => setFocused(false);
     }, []),
   );
+  // Under the member top bar the bar's own ground is behind the status bar: leave the icons to the shell.
+  if (cleared) return null;
   return focused ? <StatusBar style={statusBarStyleFor(tone, STAGING_STRIP_UNDER_STATUS_BAR)} /> : null;
 }

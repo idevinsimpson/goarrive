@@ -3,7 +3,7 @@ import { join } from 'node:path';
 
 import { act, useEffect, useState, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { BackHandler, Platform, Text, View } from 'react-native';
+import { BackHandler, Dimensions, Platform, Text, View } from 'react-native';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
@@ -24,8 +24,22 @@ const state = {
 };
 vi.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: state.top, bottom: 34, left: 0, right: 0 }),
-  SafeAreaProvider: ({ children, testID }: { children: ReactNode; testID?: string }) => (
-    <div data-testid={testID ?? 'safe-area-provider'} data-provider="1">
+  initialWindowMetrics: { insets: { top: 59, bottom: 34, left: 0, right: 0 }, frame: { x: 0, y: 0, width: 393, height: 852 } },
+  SafeAreaProvider: ({
+    children,
+    testID,
+    initialMetrics,
+  }: {
+    children: ReactNode;
+    testID?: string;
+    initialMetrics?: { insets: { top: number; bottom: number } } | null;
+  }) => (
+    <div
+      data-testid={testID ?? 'safe-area-provider'}
+      data-provider="1"
+      data-initial-top={initialMetrics ? String(initialMetrics.insets.top) : 'none'}
+      data-initial-bottom={initialMetrics ? String(initialMetrics.insets.bottom) : 'none'}
+    >
       {children}
     </div>
   ),
@@ -34,6 +48,7 @@ vi.mock('expo-status-bar', () => ({
   StatusBar: ({ style }: { style: string }) => <span data-testid="status-bar" data-style={style} />,
 }));
 vi.mock('expo-router', () => ({
+  Link: ({ href, children }: { href: string; children: ReactNode }) => <a href={href}>{children}</a>,
   // Focus as the navigator reports it, switchable from the test.
   useFocusEffect: (cb: () => void | (() => void)) => {
     const [focused, setFocused] = useState(state.focused);
@@ -75,6 +90,7 @@ const { statusBarStyleFor } = await import('../src/ui/statusBarPolicy');
 const { buildInfoFrom } = await import('../src/nativeBuildInfo.native');
 const { nativeBuildInfo: webBuildInfo } = await import('../src/nativeBuildInfo');
 const { MemberTopBar } = await import('../src/ui/MemberTopBar');
+const { FormShell } = await import('../src/AuthFormPrimitives');
 
 const APP_ROOT = join(__dirname, '..');
 const read = (p: string) => readFileSync(join(APP_ROOT, p), 'utf8');
@@ -162,6 +178,87 @@ describe('INT-09: the top inset and the status bar', () => {
   });
 });
 
+describe('#641 F1: under the signed-in member shell the top is already cleared', () => {
+  function Probe() {
+    return <Text testID="inset">{String(native.useScreenTopInset())}</Text>;
+  }
+
+  it('inside TopCleared the inset is 0 and no screen sets the status bar; outside it nothing changes', () => {
+    act(() =>
+      root.render(
+        <native.TopCleared cleared>
+          <Probe />
+          <native.ScreenTopSpacer />
+          <native.ScreenStatusBar tone="navy" />
+        </native.TopCleared>,
+      ),
+    );
+    expect(byId('inset')!.textContent).toBe('0');
+    expect(byId('wsf-screen-top-spacer')).toBeNull();
+    expect(byId('status-bar')).toBeNull();
+    // Signed out the shell clears nothing (no top bar): the screen clears it itself.
+    act(() =>
+      root.render(
+        <native.TopCleared cleared={false}>
+          <Probe />
+          <native.ScreenStatusBar tone="navy" />
+        </native.TopCleared>,
+      ),
+    );
+    expect(byId('inset')!.textContent).toBe('59');
+    expect(byId('status-bar')!.dataset.style).toBe('light');
+  });
+
+  it('iOS, 59 pt inset: a FormShell inside a tab (a challenge page, a join gate) adds no second gap and no white icons', () => {
+    setOs('ios');
+    const field = () => byId('wsf-form-wordmark')!.parentElement!.parentElement!;
+    act(() =>
+      root.render(
+        <native.TopCleared cleared>
+          <FormShell heading="Challenge" step="Members only" testID="wsf-challenge-not-member">
+            <Text>body</Text>
+          </FormShell>
+        </native.TopCleared>,
+      ),
+    );
+    expect(field().style.paddingTop).toBe('');
+    expect(byId('status-bar')).toBeNull();
+    // The same FormShell as a root-stack screen (sign in) still clears the status bar, under light icons.
+    act(() =>
+      root.render(
+        <FormShell heading="Sign in" step="Step 1 of 2" testID="wsf-signin">
+          <Text>body</Text>
+        </FormShell>,
+      ),
+    );
+    expect(field().style.paddingTop).toBe(`${28 + 59}px`);
+    expect(byId('status-bar')!.dataset.style).toBe('light');
+  });
+
+  it('the shell wraps its scenes, and only them, in TopCleared while signed in', () => {
+    const layout = read('app/(tabs)/_layout.tsx');
+    expect(layout).toContain('<TopCleared cleared={signedIn}>');
+    // The bar itself stays outside: it is what clears the status bar.
+    expect(layout.indexOf('<MemberTopBar')).toBeLessThan(layout.indexOf('<TopCleared cleared={signedIn}>'));
+    expect(layout.indexOf('<TopCleared cleared={signedIn}>')).toBeLessThan(layout.indexOf('<Tabs\n          backBehavior'));
+    expect(layout.indexOf('</Tabs>')).toBeLessThan(layout.indexOf('</TopCleared>'));
+  });
+
+  it('web: TopCleared is just its children (no element)', async () => {
+    const webModule = await vi.importActual<typeof import('../src/ui/useScreenTopInset')>('../src/ui/useScreenTopInset');
+    act(() => root.render(<View testID="x"><Text>a</Text></View>));
+    const plain = container.innerHTML;
+    act(() =>
+      root.render(
+        <webModule.TopCleared cleared>
+          <View testID="x"><Text>a</Text></View>
+        </webModule.TopCleared>,
+      ),
+    );
+    expect(container.innerHTML).toBe(plain);
+  });
+});
+
 describe('INT-10: the staging strip', () => {
   it('native: paints behind the status bar and starts its text below it', () => {
     setOs('ios');
@@ -205,6 +302,9 @@ describe('INT-10: the staging strip', () => {
     const Staged = frameFor(true);
     act(() => root.render(<Staged><Text testID="child">x</Text></Staged>));
     expect(byId('wsf-staging-stack-frame')!.querySelector('[data-testid="child"]')).not.toBeNull();
+    // NB-5: it starts from what it will measure below the strip (top 0, the window's bottom), no first-frame jump.
+    expect(byId('wsf-staging-stack-frame')!.dataset.initialTop).toBe('0');
+    expect(byId('wsf-staging-stack-frame')!.dataset.initialBottom).toBe('34');
     const Plain = frameFor(false);
     act(() => root.render(<Plain><Text testID="child">x</Text></Plain>));
     expect(byId('wsf-staging-stack-frame')).toBeNull();
@@ -230,6 +330,10 @@ describe('INT-10: the staging strip', () => {
     expect(banner!.style.paddingTop).toBe('65px');
     expect(below!.dataset.provider).toBe('1');
     expect(below!.querySelector('[data-testid="screen"]')).not.toBeNull();
+    // NB-5: the modal's frame starts at the top of the window; its content starts below the strip.
+    expect(frame.dataset.initialTop).toBe('59');
+    expect(below!.dataset.initialTop).toBe('0');
+    expect(below!.dataset.initialBottom).toBe('34');
   });
 
   it('AppShell wires the frame and the layout around the stack', () => {
@@ -270,6 +374,9 @@ describe('INT-14: the member menu on a notched phone', () => {
 
   it('native: a tap outside closes the menu and activates nothing beneath it', () => {
     setOs('android');
+    // An edge-to-edge Android phone whose window is shorter than its screen.
+    vi.spyOn(Dimensions, 'get').mockImplementation(((dim: string) =>
+      dim === 'screen' ? { width: 412, height: 900, scale: 2.6, fontScale: 1 } : { width: 412, height: 820, scale: 2.6, fontScale: 1 }) as never);
     onNavigate.mockClear();
     onSignOut.mockClear();
     const onHome = vi.fn();
@@ -293,7 +400,8 @@ describe('INT-14: the member menu on a notched phone', () => {
     // Over the bar (drawn after it) and under the sheet (drawn before it).
     const order = Array.from(byId('wsf-member-topbar')!.children).map((e) => (e as HTMLElement).dataset.testid ?? 'bar');
     expect(order).toEqual(['bar', 'wsf-member-topbar-menu-dismiss', 'wsf-member-topbar-menu']);
-    expect(layer.style.height).not.toBe('');
+    // NB-6: the screen's height (here taller than the window) plus both insets, so the Android tab bar cannot take the tap.
+    expect(layer.style.height).toBe(`${900 + 59 + 34}px`);
     act(() => layer.click());
     expect(toggles).toEqual([false]);
     expect(byId('wsf-member-topbar-menu')).toBeNull();
