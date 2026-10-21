@@ -101,7 +101,7 @@ import {
 import { wsfTheme } from '../../src/theme';
 import { PROGRESS_GREEN } from '../../src/ui/brandAssets';
 import { SignInLink } from '../../src/ui/SignInLink';
-import { formatClock } from '../../src/ui/dates';
+import { formatConfirmedAt } from '../../src/ui/dates';
 import { LivingWeProgress } from '../../src/ui/LivingWeProgress';
 import { TogetherCompletion } from '../../src/ui/TogetherCompletion';
 import { TOGETHER_COLORS } from '../../src/ui/togetherMotion';
@@ -2432,9 +2432,15 @@ export default function ContributeToGoal() {
               <Text style={styles.anchorStaleRetryText}>Retry</Text>
             </Pressable>
           </View>
-        ) : pulseAt && !anchorShort ? (
+        ) : null}
+        {/*
+          W12-6 (INT-12): the confirmed time names its day when it is not
+          today, and after a refresh that did not land it reads "Last
+          confirmed" beside the note above.
+        */}
+        {pulseAt && !anchorShort ? (
           <Text style={styles.anchorUpdated} testID="wsf-contribute-context-updated">
-            {`Confirmed ${formatClock(pulseAt)}`}
+            {formatConfirmedAt(pulseAt, new Date(), { failed: refreshFailed })}
           </Text>
         ) : null}
       </View>

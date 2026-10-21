@@ -271,6 +271,41 @@ export function formatClock(d: Date): string {
 }
 
 /**
+ * W12-6 (INT-12). WHEN A FIGURE WAS LAST CONFIRMED, NAMING THE DAY WHEN IT
+ * IS NOT TODAY. A bare clock reads as today, so yesterday's "Confirmed
+ * 3:41 PM" claimed a freshness it did not have.
+ *   same local day        "Confirmed 3:41 PM"
+ *   another day           "Confirmed Oct 20, 3:41 PM"
+ *   another year          "Confirmed Dec 31, 2025, 11:58 PM"
+ *   `failed` (a refresh that did not land) prefixes "Last confirmed".
+ * The day is compared on calendar parts in the reader's zone (or `timeZone`),
+ * never by elapsed hours, so a 23- or 25-hour DST day is still one day.
+ * Published for other lanes' freshness lines (member: W16-2). The display,
+ * kiosk and station keep formatClock.
+ */
+export function formatConfirmedAt(
+  at: Date,
+  now: Date = new Date(),
+  opts: { failed?: boolean } & DateOptions = {},
+): string | null {
+  if (Number.isNaN(at.getTime()) || Number.isNaN(now.getTime())) return null;
+  const zone = resolveZone(opts);
+  if (!zone.ok) return null;
+  const prefix = opts.failed ? 'Last confirmed' : 'Confirmed';
+  const time = new Intl.DateTimeFormat(opts.locale, { timeZone: zone.timeZone, hour: 'numeric', minute: '2-digit' }).format(at);
+  const atDay = ymd(at, opts.locale, zone.timeZone);
+  const nowDay = ymd(now, opts.locale, zone.timeZone);
+  if (atDay === nowDay) return `${prefix} ${time}`;
+  const day = new Intl.DateTimeFormat(opts.locale, {
+    timeZone: zone.timeZone,
+    month: 'short',
+    day: 'numeric',
+    ...(atDay.slice(0, 4) === nowDay.slice(0, 4) ? {} : { year: 'numeric' as const }),
+  }).format(at);
+  return `${prefix} ${day}, ${time}`;
+}
+
+/**
  * How long ago something happened, in the shortest honest form.
  *
  * For the Community screen's recent-movement strip, beside an amount and a
