@@ -14,10 +14,9 @@ import {
 import { lift } from '../src/ui/lift';
 import { modalPanelA11y } from '../src/ui/modalA11y';
 import { isOverMemberTabs } from '../src/ui/moveSheetRoute';
-import { SCRIM_PROPS, sheetData, useSheetExit, useSheetFocusContainment } from '../src/ui/sheetMotion';
+import { SCRIM_PROPS, sheetData, sheetHoldsStill, useSheetExit, useSheetFocusContainment } from '../src/ui/sheetMotion';
 import { SheetPanel, SheetScrim, useSideSwipeToClose } from '../src/ui/sheetMotionNative';
 import { useReducedMotionPreference } from '../src/ui/useReducedMotion';
-import { useReducedMotion } from '../src/ui/useReducedMotion';
 import { ScreenTopSpacer } from '../src/ui/useScreenTopInset';
 
 /**
@@ -54,8 +53,11 @@ export default function SettingsScreen() {
     and View with the same props). A rightward swipe closes it. The panel
     lifts with the platform's token (src/ui/lift.ts; nothing on the web) and
     keeps VoiceOver inside it (modalPanelA11y; the web keeps aria-modal).
-    Close keeps reading the reduced-motion boolean, as before: until the
-    preference is heard the panel is held unseen, so nothing waits visibly.
+    Close reads the same preference as the panel's parts, through
+    sheetHoldsStill as MOVE does: reduced motion, or (on a phone) a preference
+    not yet heard while the panel is held unseen, closes at once rather than
+    waiting out an exit nobody sees (RV12-634-F1). On the web that is the
+    reduced-motion answer, exactly as before.
   */
   const navigation = useNavigation();
   const [asPanel] = useState<boolean>(() => {
@@ -65,10 +67,10 @@ export default function SettingsScreen() {
     const me = st?.routes?.[st.index ?? 0];
     return Boolean(me) && isOverMemberTabs(me!, st);
   });
-  const reducedMotion = useReducedMotion();
-  const { phase, exit } = useSheetExit(reducedMotion);
-  // The panel's parts read the full preference: not yet heard means no travel.
+  // The panel's parts and its Close read one preference: not yet heard means
+  // no travel, and no wait.
   const motionPreference = useReducedMotionPreference();
+  const { phase, exit } = useSheetExit(sheetHoldsStill(motionPreference));
   const insets = useSafeAreaInsets();
   const panelRef = useRef<View>(null);
   useSheetFocusContainment(panelRef, asPanel);

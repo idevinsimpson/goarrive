@@ -49,7 +49,10 @@ import type { ReducedMotionPreference } from './useReducedMotion';
  *
  * Reduced motion turned on mid-flight ends the motion at once: at rest during
  * the entry, gone during the exit. Blurred mid-exit (something presented over
- * the sheet: `useSheetExit` sets `rest`), the sheet is back at rest. Unmounting
+ * the sheet: `useSheetExit` sets `rest`), the sheet is back at rest. An entry
+ * overtaken while it runs is stopped where it is: a Close inside its 240 ms
+ * leaves from that point, and a re-run of the same phase (React StrictMode's
+ * development double-invoke, or a preference re-read) finishes it. Unmounting
  * stops whatever is running.
  *
  * WEB. Metro resolves sheetMotionNative.web.ts there instead: the hook returns
@@ -107,6 +110,8 @@ export function useNativeSheetMotion(
   }
   const progress = progressRef.current;
   const running = useRef<Animated.CompositeAnimation | null>(null);
+  // An entry stopped part-way by its effect's cleanup, not yet resumed or overtaken.
+  const interrupted = useRef(false);
 
   const stop = () => {
     running.current?.stop();
@@ -131,25 +136,52 @@ export function useNativeSheetMotion(
     });
   };
 
+  // The entry belongs to the effect that starts it. Overtaken while it runs
+  // (a new phase or preference, React StrictMode's development re-run, or an
+  // unmount), it is STOPPED WHERE IT IS and marked interrupted; it is never
+  // snapped to rest, so a Close inside the 240 ms leaves from that point
+  // rather than jumping to rest first (RV12-634-F2). The next run decides:
+  // 'out' leaves from there, 'rest' or reduced motion puts it at rest, and the
+  // same phase finishes the entry, so it is never left part-way with a
+  // transparent panel and a scrim swallowing taps (RV10-634-N1).
+  const enter = () => {
+    interrupted.current = false;
+    play(1);
+    return () => {
+      if (running.current === null) return;
+      stop();
+      interrupted.current = true;
+    };
+  };
+
   // A layout effect, so the first painted frame is already at the starting point.
   useLayoutEffect(() => {
     if (!native) return;
     if (phase === 'out') {
       // `useSheetExit` sets 'out' only when it waits, which it does only once
-      // the preference allowed travel. Reduced motion turned on during the
+      // the preference allowed travel. It leaves from wherever the sheet is,
+      // an interrupted entry included. Reduced motion turned on during the
       // exit ends it at once.
+      interrupted.current = false;
       if (reduced) jump(0);
       else play(0);
       return;
     }
     if (phase === 'rest') {
       entryDecided.current = true;
+      interrupted.current = false;
       jump(1);
       return;
     }
     if (entryDecided.current) {
-      // Reduced motion asked for during the entry: end it at rest.
-      if (reduced) jump(1);
+      if (reduced) {
+        // Reduced motion asked for during the entry: end it at rest.
+        interrupted.current = false;
+        jump(1);
+        return;
+      }
+      // An entry this mount stopped part-way: finish it from there.
+      if (interrupted.current) return enter();
       return;
     }
     if (reduced || failed) {
@@ -160,15 +192,7 @@ export function useNativeSheetMotion(
     // Not heard yet: hold at the starting point (the deadline below bounds it).
     if (!known) return;
     entryDecided.current = true;
-    play(1);
-    // The entry belongs to the effect that starts it: re-run (React
-    // StrictMode's development double-invoke), unmounted, or overtaken by a
-    // new phase or preference while still running, it ends at rest -- never
-    // left part-way, with a transparent panel and a scrim swallowing taps
-    // (RV10-634-N1).
-    return () => {
-      if (running.current !== null) jump(1);
-    };
+    return enter();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [native, phase, reduced, known, failed]);
 
@@ -255,26 +279,31 @@ export const SheetPanel = forwardRef<View, SheetPanelProps>(function SheetPanel(
  * MO-03 (W14-5) — A SIDE PANEL SWIPES AWAY TO THE RIGHT, on iOS and Android.
  *
  * Settings comes in from the right; a member can send it back the same way.
- * A drag that is clearly rightward (more across than down, so the panel's own
- * vertical scrolling is never taken) claims the gesture; on release, a drag
- * past about 60 pt, or a fast rightward flick, closes the panel through the
- * screen's own Close -- the same 180 ms exit, the same guards. The panel does
- * not follow the finger. The web has no such gesture: there (and in the web
- * build's stub) this returns no handlers at all.
+ * A drag that is clearly rightward claims the gesture: past 16 pt, and more
+ * than twice as far across as down, so the panel's own vertical scrolling is
+ * never taken. On release, a drag past 60 pt, or a fast rightward flick past
+ * 30 pt, closes the panel through the screen's own Close -- the same 180 ms
+ * exit, the same guards. The flick's floor is above a switch's slide (24 pt
+ * or less), so flicking one of the panel's switches never closes it
+ * (RV12-634-F3). The panel does not follow the finger. The web has no such
+ * gesture: there (and in the web build's stub) this returns no handlers at all.
  */
 export const SIDE_SWIPE_CLOSE_PT = 60;
 /** A rightward flick, in points per millisecond. */
 export const SIDE_FLICK_VX = 0.5;
-const SIDE_SWIPE_CLAIM_PT = 8;
+/** How far a flick must travel to close: past a switch's slide (24 pt or less). */
+export const SIDE_FLICK_MIN_PT = 30;
+/** How far a rightward drag goes before the panel claims it. */
+export const SIDE_SWIPE_CLAIM_PT = 16;
 
-/** Whether a move is the side panel's swipe: rightward, and more across than down. */
+/** Whether a move is the side panel's swipe: rightward, and more than twice as far across as down. */
 export function sideSwipeClaims(g: { dx: number; dy: number }): boolean {
-  return g.dx > SIDE_SWIPE_CLAIM_PT && g.dx > Math.abs(g.dy) * 1.5;
+  return g.dx > SIDE_SWIPE_CLAIM_PT && g.dx > Math.abs(g.dy) * 2;
 }
 
-/** Whether a released swipe closes the side panel: far enough, or flicked. */
+/** Whether a released swipe closes the side panel: far enough, or flicked past a switch's slide. */
 export function sideSwipeCloses(g: { dx: number; vx: number }): boolean {
-  return g.dx > SIDE_SWIPE_CLOSE_PT || (g.dx > 0 && g.vx > SIDE_FLICK_VX);
+  return g.dx > SIDE_SWIPE_CLOSE_PT || (g.dx > SIDE_FLICK_MIN_PT && g.vx > SIDE_FLICK_VX);
 }
 
 const NO_HANDLERS: GestureResponderHandlers = Object.freeze({});

@@ -22,6 +22,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 type FakeTiming = {
   value: { v: number };
+  /** The value when the timing was created: where it starts from. */
+  from: number;
   config: { toValue: number; duration: number; easing: (t: number) => number; useNativeDriver: boolean };
   started: boolean;
   stopped: boolean;
@@ -57,6 +59,7 @@ vi.mock('react-native', async () => {
     let done: ((r: { finished: boolean }) => void) | undefined;
     const t: FakeTiming = {
       value,
+      from: value.v,
       config,
       started: false,
       stopped: false,
@@ -369,7 +372,7 @@ describe('a native sheet comes in', () => {
     expect(panelValue().v).toBe(1);
   });
 
-  it('React StrictMode (development) re-runs the entry’s effect: the sheet ends at rest, never stuck transparent (RV10-634-N1)', () => {
+  it('React StrictMode (development) re-runs the entry’s effect: the re-run finishes the entry, never left stuck transparent (RV10-634-N1)', () => {
     act(() =>
       root.render(
         <StrictMode>
@@ -377,11 +380,48 @@ describe('a native sheet comes in', () => {
         </StrictMode>,
       ),
     );
-    // Whatever StrictMode's re-run left behind is stopped, and both parts are at rest.
-    expect(fx.timings.length).toBeGreaterThan(0);
-    expect(fx.timings.every((t) => t.stopped || t.value.v === 1)).toBe(true);
-    expect((motionStyle('scrim').opacity as { v: number }).v).toBe(1);
-    expect((motionStyle('panel').opacity as { v: number }).v).toBe(1);
+    for (const testID of ['scrim', 'panel']) {
+      const value = motionStyle(testID).opacity as { v: number };
+      const runs = timingsOf(value);
+      // The first run's entry is stopped where it was, not snapped to rest
+      // (RV12-634-F2); the re-run plays the rest of it, from there.
+      expect(runs.length).toBeGreaterThanOrEqual(2);
+      expect(runs.slice(0, -1).every((t) => t.stopped)).toBe(true);
+      const last = runs[runs.length - 1]!;
+      expect(last).toMatchObject({ started: true, stopped: false, from: 0 });
+      expect(last.config).toMatchObject({ toValue: 1, duration: 240, useNativeDriver: true });
+      last.finish();
+      expect(value.v).toBe(1);
+    }
+  });
+
+  it('Close inside the entry’s 240 ms: the entry stops where it is and the exit leaves from there, never snapping to rest first (RV12-634-F2)', () => {
+    show({ phase: 'in', preference: KNOWN });
+    // Part-way in: the native driver's value, as stopping it reads it back.
+    scrimValue().v = 0.4;
+    panelValue().v = 0.4;
+    show({ phase: 'out', preference: KNOWN });
+    for (const value of [scrimValue(), panelValue()]) {
+      const runs = timingsOf(value);
+      expect(runs).toHaveLength(2);
+      const [entry, exit] = runs as [FakeTiming, FakeTiming];
+      expect(entry.stopped).toBe(true);
+      expect(exit).toMatchObject({ started: true, stopped: false, from: 0.4 });
+      expect(exit.config).toMatchObject({ toValue: 0, duration: 180 });
+      exit.finish();
+      expect(value.v).toBe(0);
+    }
+  });
+
+  it('an entry overtaken by a blur (`rest`) ends at rest; a re-render after that starts nothing', () => {
+    show({ phase: 'in', preference: KNOWN });
+    panelValue().v = 0.4;
+    show({ phase: 'rest', preference: KNOWN });
+    expect(timingsOf(panelValue())[0]!.stopped).toBe(true);
+    expect(panelValue().v).toBe(1);
+    show({ phase: 'in', preference: KNOWN });
+    expect(timingsOf(panelValue())).toHaveLength(1);
+    expect(panelValue().v).toBe(1);
   });
 
   it('unmounting mid-entry stops it', () => {
@@ -569,7 +609,7 @@ describe('useSheetExit on iOS and Android', () => {
     expect(fx.timings.filter((t) => t.config.toValue === 0)).toHaveLength(0);
   });
 
-  it('a sheet with no native exit yet (the contribution sheet, Settings): navigates at once, as before', () => {
+  it('a sheet with no native parts mounted (a screen not yet swapped): navigates at once, as before', () => {
     const s = mountExit({ withNativeParts: false });
     s.exit();
     expect(s.went).toHaveLength(1);
