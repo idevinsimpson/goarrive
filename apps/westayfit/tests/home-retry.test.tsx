@@ -27,7 +27,9 @@ vi.mock('../src/firebase', () => ({ getFirebaseAuth: () => ({}) }));
 const USER = { uid: 'u1', email: 'member@example.com', displayName: 'Member' };
 vi.mock('../src/auth', () => ({ useWsfAuth: () => ({ ready: true, user: USER }) }));
 // Two communities and nothing chosen: Home shows the list rather than opening one.
-vi.mock('../src/currentCommunity', () => ({ resolveCurrentCommunity: () => null }));
+// `useCurrentCommunityReady` is the state lane's (wsf-native-state-3): always
+// true on web. Listed so this mock serves the merged tree as well as this one.
+vi.mock('../src/currentCommunity', () => ({ resolveCurrentCommunity: () => null, useCurrentCommunityReady: () => true }));
 const readMyCommunities = vi.fn();
 const readGoals = vi.fn();
 vi.mock('../src/memberReads', () => ({
@@ -94,6 +96,41 @@ describe('Home (INT-04)', () => {
     expect(byId('wsf-home-my-error')).toBeNull();
     expect(byId('wsf-home-my-list')!.textContent).toContain('Oak Grove Together');
     // The mount read may take an answer from this load; the Retry never does.
+    expect(readMyCommunities.mock.calls).toEqual([
+      ['u1', 10_000],
+      ['u1', 0],
+    ]);
+    // The cards of a list that came from a Retry read fresh too (#641 SH-5b).
+    expect(readGoals.mock.calls.map((c) => [c[1], c[2]])).toEqual([
+      ['oak', 0],
+      ['harbor', 0],
+    ]);
+  });
+
+  it('a cold start shares this load\'s answers: list and cards (no Retry, reuse SAME_LOAD_MS)', async () => {
+    readMyCommunities.mockResolvedValue(TWO);
+    act(() => root.render(<Home />));
+    await settle();
+    expect(readMyCommunities.mock.calls).toEqual([['u1', 10_000]]);
+    expect(readGoals.mock.calls.map((c) => [c[1], c[2]])).toEqual([
+      ['oak', 10_000],
+      ['harbor', 10_000],
+    ]);
+  });
+
+  it('a list stuck loading (a read hung under packet loss) is retried, fresh, on any return to the app (#641 SH-5c)', async () => {
+    vi.useFakeTimers({ now: 1_000_000 });
+    readMyCommunities.mockReturnValueOnce(new Promise(() => undefined)).mockResolvedValueOnce(TWO);
+    act(() => root.render(<Home />));
+    await settle();
+    expect(byId('wsf-home-my-list')).toBeNull();
+    act(() => appStateHandlers.forEach((h) => h('background')));
+    act(() => vi.advanceTimersByTime(3_000));
+    act(() => appStateHandlers.forEach((h) => h('active')));
+    await act(async () => vi.advanceTimersByTime(1_000));
+    vi.useRealTimers();
+    await settle();
+    expect(byId('wsf-home-my-list')!.textContent).toContain('Harbor Lunch Crew');
     expect(readMyCommunities.mock.calls).toEqual([
       ['u1', 10_000],
       ['u1', 0],

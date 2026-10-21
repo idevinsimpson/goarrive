@@ -11,7 +11,9 @@
     "ts:check": "tsc --noEmit",
     "test:vitest": "vitest run",
     "test:vitest:watch": "vitest",
-    "test:e2e": "playwright test --config=playwright.config.ts"
+    "test:e2e": "playwright test --config=playwright.config.ts",
+    "typecheck:native": "node scripts/typecheck-native.mjs",
+    "check:staging-env": "node scripts/check-staging-env.mjs"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "0.10.35",

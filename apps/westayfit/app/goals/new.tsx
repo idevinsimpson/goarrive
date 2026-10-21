@@ -4,6 +4,7 @@ import { doc, getDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { createRef, useCallback, useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
 import {
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -45,7 +46,7 @@ import {
   SURFACE,
   TEXT_MUTED,
 } from '../../src/ui/kit';
-import { KEYBOARD_SCROLL_PROPS } from '../../src/ui/keyboardAvoidance';
+import { AndroidKeyboardInsetView, KEYBOARD_SCROLL_PROPS } from '../../src/ui/keyboardAvoidance';
 import { MovementPicker } from '../../src/ui/MovementPicker';
 import { OptionGroup, OptionRow } from '../../src/ui/OptionRow';
 import { formatCount } from '../../src/ui/progressFormat';
@@ -1395,7 +1396,7 @@ function Page({
   dataSet?: Record<string, string>;
   scrollRef?: Ref<ScrollView>;
 }) {
-  return (
+  const scroll = (
     <ScrollView
       ref={scrollRef}
       style={kit.scroll}
@@ -1431,6 +1432,14 @@ function Page({
       </View>
     </ScrollView>
   );
+  // NATIVE-INTEGRATOR-1 (INT-06). Android only: a frame that pads by the IME,
+  // so a field focused after scrolling stays above it. Web and iOS render the
+  // scroll view exactly as before, with no wrapper.
+  return Platform.OS === 'android' ? (
+    <AndroidKeyboardInsetView style={styles.keyboardFrame}>{scroll}</AndroidKeyboardInsetView>
+  ) : (
+    scroll
+  );
 }
 
 // Flattened at module scope: ButtonLink hands its style to Link asChild,
@@ -1439,6 +1448,7 @@ function Page({
 const chromeBackStyle = StyleSheet.flatten([kit.chromeLink, { flexShrink: 1, minWidth: 0 }]);
 
 const styles = StyleSheet.create({
+  keyboardFrame: { flex: 1 },
   /*
     THE ACTION GREEN, on this route's primary calls to action.
 

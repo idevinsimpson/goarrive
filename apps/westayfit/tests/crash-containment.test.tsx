@@ -9,10 +9,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const navigate = vi.fn();
 vi.mock('expo-router', () => ({ router: { navigate: (...a: unknown[]) => navigate(...a) } }));
 // The real module imports React Native internals jsdom cannot load. The
-// fallback reads only this constant from it (no provider).
-vi.mock('react-native-safe-area-context', () => ({
-  initialWindowMetrics: { insets: { top: 47, bottom: 34, left: 0, right: 0 }, frame: { x: 0, y: 0, width: 390, height: 844 } },
-}));
+// fallback reads the window's first metrics (root) and the nearest provider's
+// insets through its context (the other variants, #641 NB-4).
+vi.mock('react-native-safe-area-context', async () => {
+  const { createContext } = await import('react');
+  return {
+    initialWindowMetrics: { insets: { top: 47, bottom: 34, left: 0, right: 0 }, frame: { x: 0, y: 0, width: 390, height: 844 } },
+    SafeAreaInsetsContext: createContext<null | { top: number; bottom: number; left: number; right: number }>(null),
+  };
+});
+const { SafeAreaInsetsContext } = await import('react-native-safe-area-context');
 
 import * as webContainment from '../src/crashContainment';
 import { installCrashContainment } from '../src/crashContainment.native';
@@ -28,7 +34,9 @@ import {
 import {
   CRASH_RECORDS_KEY,
   MAX_CRASH_RECORDS,
+  MAX_SCRUB_INPUT,
   crashRecordOf,
+  type CrashKv,
   WITHHELD_MESSAGE,
   persistCrash,
   readCrashRecords,
@@ -36,7 +44,6 @@ import {
   scrubFrames,
   scrubMessage,
 } from '../src/crashRecords';
-import type { DeviceKv } from '../src/storage/kv';
 import * as webRecordsCard from '../src/ui/CrashRecordsCard';
 import { CrashRecordsCard } from '../src/ui/CrashRecordsCard.native';
 import * as webFallback from '../src/ui/RouteErrorFallback';
@@ -53,7 +60,9 @@ import type { FallbackVariant } from '../src/ui/routeErrorTypes';
 
 const APP_ROOT = join(__dirname, '..');
 
-function memoryKv(opts: { hang?: boolean; fail?: boolean } = {}): DeviceKv & { data: Map<string, string> } {
+// Typed as the narrow store the crash modules take, so this fake compiles
+// whatever else DeviceKv requires (#641 SH-4: the state lane's readItem).
+function memoryKv(opts: { hang?: boolean; fail?: boolean } = {}): CrashKv & { data: Map<string, string> } {
   const data = new Map<string, string>();
   return {
     data,
@@ -69,9 +78,6 @@ function memoryKv(opts: { hang?: boolean; fail?: boolean } = {}): DeviceKv & { d
     async removeItem(k) {
       data.delete(k);
       return true;
-    },
-    async keysWithPrefix(p) {
-      return [...data.keys()].filter((k) => k.startsWith(p));
     },
   };
 }
@@ -155,6 +161,44 @@ describe('scrubbing: a record carries no email, display name, goal title or join
       'WSF injected render fault: community-detail-origin (read undefined)',
     );
     expect(recordMessage('')).toBe('');
+  });
+
+  it('a message React builds from app data keeps only its fixed opening words (CS-1)', () => {
+    const raw =
+      `Objects are not valid as a React child (found: object with keys {${DISPLAY_NAME}, Sam Lee, ${GOAL_TITLE}}). ` +
+      'If you meant to render a collection of children, use an array instead.';
+    expect(recordMessage(raw)).toBe('Objects are not valid as a React child…');
+    const json = JSON.stringify(crashRecordOf(new Error(raw), 'boundary'));
+    for (const secret of [DISPLAY_NAME, 'Alex', 'Rivera', 'Sam Lee', GOAL_TITLE, 'squats']) expect(json).not.toContain(secret);
+    expect(recordMessage('Maximum update depth exceeded. This can happen when a component repeatedly calls setState.')).toBe(
+      'Maximum update depth exceeded…',
+    );
+    expect(recordMessage('Rendered fewer hooks than expected. This may be caused by an accidental early return statement.')).toBe(
+      'Rendered fewer hooks than…',
+    );
+    expect(recordMessage('Rendered more hooks than during the previous render.')).toBe('Rendered more hooks than…');
+  });
+
+  it('a very long message or stack is cut before any pattern runs, so building a record stays fast (CS-2)', () => {
+    // Shapes that made the old patterns quadratic: long runs with no digit, long dotted runs.
+    const runs = ['a'.repeat(80_000), 'a.'.repeat(40_000), `${'x'.repeat(40_000)}@`, `${'b+'.repeat(40_000)}://`];
+    for (const raw of runs) {
+      const t0 = performance.now();
+      const out = recordMessage(raw);
+      const frames = scrubFrames(`Error: x\n    at ok (index.bundle:5:6)\n    at ${raw} (${raw}:1:2)\n${raw}@${raw}:3:4`);
+      expect(performance.now() - t0).toBeLessThan(250);
+      expect(out.length).toBeLessThanOrEqual(160);
+      expect(frames).toEqual(['ok@index.bundle:5:6']);
+    }
+    // An over-long line is skipped unread; a real frame after it is still kept.
+    const long = 'q'.repeat(500);
+    expect(scrubFrames(`    at ${long} (${long}:1:2)\n    at ok (index.bundle:5:6)`)).toEqual(['ok@index.bundle:5:6']);
+    // What is cut is never looked at, so text past the cut cannot reach the record,
+    // even where everything before it collapses to nothing.
+    expect(scrubMessage(`${' '.repeat(MAX_SCRUB_INPUT)}${DISPLAY_NAME}`)).toBe('');
+    expect(scrubMessage(`${'word '.repeat(MAX_SCRUB_INPUT / 5)}${EMAIL}`)).not.toContain('example');
+    // The same digit and long-token rules as before, in one pass.
+    expect(scrubMessage(`code ${JOIN_CODE} id a1b and abcdefghijklmnop plain`)).toBe('code <id> id <id> and <id> plain');
   });
 });
 
@@ -470,11 +514,108 @@ describe('route boundaries and their fallback', () => {
       ),
     );
     expect(byId('wsf-route-error')).not.toBeNull();
-    // No Home link where there is no navigator left to act on it.
-    expect(byId('wsf-route-error-home')).toBeNull();
     disarmAllCrashSites();
     await act(async () => byId('wsf-route-error-retry')!.click());
     expect(byId('wsf-shell')).not.toBeNull();
+  });
+
+  it.each(['root', 'shell', 'homeTab'] as FallbackVariant[])(
+    'CS-4: the %s fallback has a way out when Try again throws again: Go to Home asks for Home, then remounts',
+    async (variant) => {
+      vi.useFakeTimers();
+      try {
+        armCrashSiteForTest('root-shell');
+        let renders = 0;
+        function Navigator() {
+          renders += 1;
+          injectedRenderFault('root-shell');
+          return <Text testID="wsf-home">home</Text>;
+        }
+        act(() =>
+          root.render(
+            <Try catch={nativeErrorBoundary(variant)!}>
+              <Navigator />
+            </Try>,
+          ),
+        );
+        // Still throwing: Try again comes straight back to the fallback.
+        await act(async () => byId('wsf-route-error-retry')!.click());
+        expect(byId('wsf-route-error')).not.toBeNull();
+        expect(byId('wsf-route-error-home')!.textContent).toBe('Go to Home');
+        // Go to Home: '/' is requested first, and only then is the navigator remounted.
+        disarmAllCrashSites();
+        const before = renders;
+        act(() => byId('wsf-route-error-home')!.click());
+        expect(navigate).toHaveBeenCalledWith('/');
+        expect(renders).toBe(before);
+        await act(async () => {
+          vi.runAllTimers();
+        });
+        expect(byId('wsf-route-error')).toBeNull();
+        expect(byId('wsf-home')).not.toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it('CS-4: at the root no navigator is mounted, so Home is refused; the press never throws and the remount still happens', async () => {
+    vi.useFakeTimers();
+    try {
+      navigate.mockImplementationOnce(() => {
+        throw new Error('Attempted to navigate before mounting the Root Layout component.');
+      });
+      armCrashSiteForTest('root-shell');
+      function Shell() {
+        injectedRenderFault('root-shell');
+        return <Text testID="wsf-shell">shell</Text>;
+      }
+      act(() =>
+        root.render(
+          <Try catch={nativeErrorBoundary('root')!}>
+            <Shell />
+          </Try>,
+        ),
+      );
+      disarmAllCrashSites();
+      expect(() => act(() => byId('wsf-route-error-home')!.click())).not.toThrow();
+      await act(async () => {
+        vi.runAllTimers();
+      });
+      expect(byId('wsf-shell')).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('CS-4: inside a live navigator (tab, screen, contribute) Go to Home only navigates; it never remounts the failed route', async () => {
+    vi.useFakeTimers();
+    try {
+      for (const variant of ['tab', 'screen', 'contribute'] as FallbackVariant[]) {
+        const retry = vi.fn();
+        act(() => root.render(<RouteErrorFallback error={new Error('x')} retry={retry} variant={variant} />));
+        navigate.mockClear();
+        act(() => byId('wsf-route-error-home')!.click());
+        await act(async () => {
+          vi.runAllTimers();
+        });
+        expect(navigate).toHaveBeenCalledWith('/');
+        expect(retry).not.toHaveBeenCalled();
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('CS-6: the fallback never shows the error\'s own text, whatever the variant', () => {
+    const variants = ['root', 'shell', 'homeTab', 'tab', 'screen', 'contribute'] as FallbackVariant[];
+    for (const variant of variants) {
+      const error = new Error(`render failed for ${DISPLAY_NAME} <${EMAIL}> on "${GOAL_TITLE}" code ${JOIN_CODE}`);
+      act(() => root.render(<RouteErrorFallback error={error} retry={() => undefined} variant={variant} />));
+      const text = container.textContent!;
+      expect(text).toContain('Something went wrong');
+      for (const secret of [DISPLAY_NAME, EMAIL, GOAL_TITLE, JOIN_CODE, 'render failed']) expect(text, variant).not.toContain(secret);
+    }
   });
 
   it('INT-01 case 4: a window.location.origin read during community detail render shows the contained screen', () => {
@@ -494,8 +635,38 @@ describe('route boundaries and their fallback', () => {
     );
     expect(globalThis.window).toBe(realWindow);
     expect(byId('wsf-route-error')).not.toBeNull();
-    // Home is the tab that failed: it offers Try again; the tab bar is the way elsewhere.
+    // Home is the tab that failed: Try again, Go to Home, and the tab bar is the way elsewhere.
     expect(byId('wsf-route-error-body')!.textContent).toContain('pick another tab');
+    expect(byId('wsf-route-error-home')).not.toBeNull();
+  });
+
+  it('NB-4: root pads by the window\'s first metrics; shell, screen and contribute by the nearest provider; tabs by nothing', () => {
+    const top = (variant: FallbackVariant, provided: number | null) => {
+      act(() =>
+        root.render(
+          provided === null ? (
+            <RouteErrorFallback error={new Error('x')} retry={() => undefined} variant={variant} />
+          ) : (
+            <SafeAreaInsetsContext.Provider value={{ top: provided, bottom: 0, left: 0, right: 0 }}>
+              <RouteErrorFallback error={new Error('x')} retry={() => undefined} variant={variant} />
+            </SafeAreaInsetsContext.Provider>
+          ),
+        ),
+      );
+      return byId('wsf-route-error')!.style.paddingTop;
+    };
+    // Below a staging strip (or inside a provider that already cleared it) the provider says 0.
+    for (const v of ['shell', 'screen', 'contribute'] as FallbackVariant[]) {
+      expect(top(v, 0), v).toBe('24px');
+      expect(top(v, 30), v).toBe('54px');
+      // No provider at all: the window's metrics, never a throw.
+      expect(top(v, null), v).toBe(`${24 + 47}px`);
+    }
+    // The root fallback has no provider left above it: always the window's metrics.
+    expect(top('root', 0)).toBe(`${24 + 47}px`);
+    expect(top('root', null)).toBe(`${24 + 47}px`);
+    expect(top('tab', 30)).toBe('24px');
+    expect(top('homeTab', 30)).toBe('24px');
   });
 
   it('the contribute fallback says not confirmed and points to Progress; it never says recorded', () => {
@@ -529,7 +700,7 @@ describe('route boundaries and their fallback', () => {
   });
 });
 
-describe('the route files export their boundaries, and the handler installs first', () => {
+describe('the route files export their boundaries, and the handler installs early', () => {
   const read = (p: string) => readFileSync(join(APP_ROOT, p), 'utf8');
   it.each([
     ['app/_layout.tsx', 'root'],
@@ -543,7 +714,7 @@ describe('the route files export their boundaries, and the handler installs firs
     expect(read(file)).toContain(`export const ErrorBoundary = nativeErrorBoundary('${variant}');`);
   });
 
-  it('app/_layout.tsx imports crashContainment before anything else', () => {
+  it('app/_layout.tsx imports crashContainment first (it installs within the same route-loading pass, before any timer or callback can run)', () => {
     const firstImport = read('app/_layout.tsx')
       .split('\n')
       .find((l) => l.startsWith('import '));

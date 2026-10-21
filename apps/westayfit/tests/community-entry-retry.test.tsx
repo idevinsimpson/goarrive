@@ -39,12 +39,13 @@ vi.mock('../src/currentCommunity', () => ({
   resolveCurrentCommunity: () => null,
 }));
 const readGoals = vi.fn();
+const readMyCommunities = vi.fn();
 vi.mock('../src/memberReads', () => ({
   SAME_LOAD_MS: 10_000,
   forgetCommunity: vi.fn(),
   peekMyCommunities: () => undefined,
   readGoals: (...a: unknown[]) => readGoals(...a),
-  readMyCommunities: () => Promise.resolve({ items: [{ groupId: 'oak', displayName: 'Oak Grove Together', memberCount: 3, isSample: false, activeChallenge: null }] }),
+  readMyCommunities: (...a: unknown[]) => readMyCommunities(...a),
   readOwnCredit: () => Promise.reject(new Error('offline')),
 }));
 
@@ -67,6 +68,10 @@ beforeEach(() => {
   getDoc.mockReset();
   readGoals.mockReset();
   readGoals.mockResolvedValue({ goals: [] });
+  readMyCommunities.mockReset();
+  readMyCommunities.mockResolvedValue({
+    items: [{ groupId: 'oak', displayName: 'Oak Grove Together', memberCount: 3, isSample: false, activeChallenge: null }],
+  });
   Object.values(router).forEach((f) => f.mockReset());
   appStateHandlers = [];
   vi.spyOn(AppState, 'addEventListener').mockImplementation(((_t: string, h: (s: string) => void) => {
@@ -111,6 +116,47 @@ describe('Community Home entry (INT-04)', () => {
     expect(getDoc.mock.calls.map((c) => c[0])).toEqual(['wsfMemberships/oak_u1', 'wsfMemberships/oak_u1', 'wsfCommunityGroups/oak']);
   });
 
+  it('case 3 with the goal list blocked too: one Try again loads the goals as well (SH-1)', async () => {
+    // firestore.googleapis.com AND cloudfunctions.net blocked: the entry read
+    // and the goal list both fail on the first load, then the network returns.
+    getDoc.mockRejectedValueOnce(OFFLINE);
+    readGoals.mockRejectedValueOnce(Object.assign(new Error('internal'), { code: 'functions/unavailable' }));
+    act(() => root.render(<CommunityPage />));
+    await settle();
+    expect(byId('wsf-community-error')).not.toBeNull();
+    expect(readGoals).toHaveBeenCalledTimes(1);
+    getDoc.mockImplementation(async (path: string) => (path.startsWith('wsfMemberships/') ? MEMBERSHIP : GROUP));
+    await act(async () => byId('wsf-community-error-retry')!.click());
+    await settle();
+    expect(byId('wsf-community-error')).toBeNull();
+    expect(container.textContent).toContain('Oak Grove Together');
+    expect(byId('wsf-community-goals-error')).toBeNull();
+    // The goal list was read again, fresh (reuse 0), on the same tap.
+    expect(readGoals).toHaveBeenCalledTimes(2);
+    expect(readGoals.mock.calls[1][2]).toBe(0);
+  });
+
+  it('INT-26: the retried entry read is fresh, never joining a read that may hang (SH-5)', async () => {
+    getDoc.mockRejectedValueOnce(OFFLINE);
+    act(() => root.render(<CommunityPage />));
+    await settle();
+    getDoc.mockImplementation(async (path: string) => (path.startsWith('wsfMemberships/') ? MEMBERSHIP : GROUP));
+    await act(async () => byId('wsf-community-error-retry')!.click());
+    await settle();
+    expect(container.textContent).toContain('Oak Grove Together');
+    // The first load never reached it (the membership read failed); the retry asks fresh.
+    expect(readMyCommunities.mock.calls.map((c) => c[1])).toEqual([0]);
+  });
+
+  it('a first load shares the same-load answer (reuse SAME_LOAD_MS)', async () => {
+    getDoc.mockImplementation(async (path: string) => (path.startsWith('wsfMemberships/') ? MEMBERSHIP : GROUP));
+    act(() => root.render(<CommunityPage />));
+    await settle();
+    expect(container.textContent).toContain('Oak Grove Together');
+    expect(readMyCommunities.mock.calls.map((c) => c[1])).toEqual([10_000]);
+    expect(readGoals.mock.calls.map((c) => c[2])).toEqual([10_000]);
+  });
+
   it('still offline: Try again tries again and says so again', async () => {
     getDoc.mockRejectedValue(OFFLINE);
     act(() => root.render(<CommunityPage />));
@@ -140,8 +186,26 @@ describe('Community Home entry (INT-04)', () => {
     expect(byId('wsf-community-not-member')).not.toBeNull();
   });
 
+  it('an entry stuck loading (a read hung under packet loss) is retried on any return to the app (#641 SH-5c)', async () => {
+    getDoc.mockReturnValueOnce(new Promise(() => undefined));
+    vi.useFakeTimers({ now: 1_000_000, toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    act(() => root.render(<CommunityPage />));
+    await settle();
+    expect(container.textContent).not.toContain('Oak Grove Together');
+    getDoc.mockImplementation(async (path: string) => (path.startsWith('wsfMemberships/') ? MEMBERSHIP : GROUP));
+    act(() => appStateHandlers.forEach((h) => h('background')));
+    act(() => vi.advanceTimersByTime(2_000));
+    act(() => appStateHandlers.forEach((h) => h('active')));
+    await act(async () => vi.advanceTimersByTime(1_000));
+    vi.useRealTimers();
+    await settle();
+    expect(byId('wsf-community-error')).toBeNull();
+    expect(container.textContent).toContain('Oak Grove Together');
+  });
+
   it('INT-04 with INT-12: an entry error is retried when the member comes back to the app', async () => {
     getDoc.mockRejectedValueOnce(OFFLINE);
+    readGoals.mockRejectedValueOnce(Object.assign(new Error('internal'), { code: 'functions/unavailable' }));
     vi.useFakeTimers({ now: 1_000_000, toFake: ['Date', 'setTimeout', 'clearTimeout'] });
     act(() => root.render(<CommunityPage />));
     await settle();
@@ -155,5 +219,8 @@ describe('Community Home entry (INT-04)', () => {
     await settle();
     expect(byId('wsf-community-error')).toBeNull();
     expect(container.textContent).toContain('Oak Grove Together');
+    // The goal list that failed with it is read again on the same return.
+    expect(byId('wsf-community-goals-error')).toBeNull();
+    expect(readGoals).toHaveBeenCalledTimes(2);
   });
 });

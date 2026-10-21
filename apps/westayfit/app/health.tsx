@@ -4,11 +4,20 @@ import { WSF_BUILD_STAMP } from '../src/buildStamp';
 import { wsfIsStaging } from '../src/firebase';
 import { CrashRecordsCard } from '../src/ui/CrashRecordsCard';
 import { kit } from '../src/ui/kit';
+import { useScreenTopInset } from '../src/ui/useScreenTopInset';
 import { WsfWordmark } from '../src/ui/WsfWordmark';
 
+// kit.page's own top padding, under the status bar on a phone (INT-09).
+const PAGE_TOP = 16;
+
 export default function Health() {
+  // INT-09: a root-stack screen with no header starts below the status bar. 0 on web.
+  const topInset = useScreenTopInset();
   return (
-    <ScrollView style={kit.scroll} contentContainerStyle={kit.page}>
+    <ScrollView
+      style={kit.scroll}
+      contentContainerStyle={topInset > 0 ? [kit.page, { paddingTop: PAGE_TOP + topInset }] : kit.page}
+    >
       <View style={kit.column} testID="wsf-health">
         <View style={kit.chrome}>
           <WsfWordmark variant="navy" height={22} testID="wsf-health-wordmark" />
