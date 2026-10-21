@@ -3,9 +3,9 @@ import { signOut } from 'firebase/auth';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { useWsfAuth } from '../../../src/auth';
+import { AuthConnectingNote, useWsfAuth } from '../../../src/auth';
 import { describeCallableError } from '../../../src/callableErrors';
-import { resolveCurrentCommunity } from '../../../src/currentCommunity';
+import { resolveCurrentCommunity, useCurrentCommunityReady } from '../../../src/currentCommunity';
 import { wsfAuthEnabled } from '../../../src/featureFlags';
 import { getFirebaseAuth } from '../../../src/firebase';
 import {
@@ -75,7 +75,7 @@ type CardGoalState =
 const JOIN_CODE_SHAPE = /^[A-Za-z0-9_-]{16,128}$/;
 
 export default function BrandShell() {
-  const { ready, user } = useWsfAuth();
+  const { ready, user, slow } = useWsfAuth();
   const [myCommunities, setMyCommunities] = useState<MyCommunitiesState>({ kind: 'idle' });
   const [goalsByGroup, setGoalsByGroup] = useState<Record<string, CardGoalState>>({});
   const [joinCodeInput, setJoinCodeInput] = useState('');
@@ -330,7 +330,8 @@ export default function BrandShell() {
           // No hero while auth settles: a returning member must not watch a
           // marketing hero appear and vanish before their communities show.
           <View testID="wsf-home-loading" data-state="loading">
-            <Text style={kit.statusText}>Loading…</Text>
+            {/* INT-27 (native): the first auth answer is slow; say so, still loading. */}
+            {slow ? <AuthConnectingNote testID="wsf-home-connecting" /> : <Text style={kit.statusText}>Loading…</Text>}
           </View>
         ) : showSignedIn ? (
           <SignedInHome
@@ -559,9 +560,18 @@ function SignedInHome({
   // mid-flight and came Home stays on Home when it lands (M5), and a member
   // who pressed Back from a community to see the list gets the list, not the
   // community again. A different account decides afresh.
+  //
+  // ON A PHONE the remembered community is read from storage at launch, and a
+  // decision taken once must not be taken on "not read yet": it waits for
+  // that read (`useCurrentCommunityReady`, always true on web).
   const uid = user?.uid ?? null;
+  const communityReady = useCurrentCommunityReady();
   const decided = useRef<{ uid: string | null; openable: string | null } | null>(null);
-  if (state.kind === 'ready' && (decided.current === null || decided.current.uid !== uid)) {
+  if (
+    state.kind === 'ready' &&
+    communityReady &&
+    (decided.current === null || decided.current.uid !== uid)
+  ) {
     decided.current = {
       uid,
       openable: resolveCurrentCommunity(uid, state.items.map((item) => item.groupId)),

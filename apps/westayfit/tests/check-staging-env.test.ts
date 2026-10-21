@@ -1,8 +1,8 @@
 // @vitest-environment node
 import { spawnSync } from 'node:child_process';
-import { linkSync, mkdtempSync, readdirSync, readFileSync, rmdirSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { linkSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmdirSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import ts from 'typescript';
@@ -10,7 +10,10 @@ import { afterAll, describe, expect, it } from 'vitest';
 
 import {
   APP_CONFIG_RULES,
+  GIT_REPLY,
   REFUSALS,
+  expoLoadedEnvFiles,
+  placeFile,
   RESOLVER_RULES,
   UNRECOGNISED,
   gitRefusal,
@@ -32,10 +35,89 @@ const SCRIPT = join(APP_ROOT, 'scripts', 'check-staging-env.mjs');
 const DIR = mkdtempSync(join(tmpdir(), 'wsf-check-staging-env-'));
 let n = 0;
 
-// RV7-641-7: only what this file made. DIR holds plain files and links, never a directory.
+// RV7-641-7: only what this file made. DIR holds plain files and links, never a directory; it is
+// removed in the one afterAll below, with the fixtures, before that hook judges anything.
+
+/*
+  RV11-641-SEC-F1. THIS FILE NEVER WRITES INTO THE REAL APP DIRECTORY. An
+  owner's checkout keeps real staging values in apps/westayfit/.env.development.local
+  (and may keep .env.local); a test that wrote or unlinked a fixed name there
+  would destroy them. Every in-repository case uses the repositories made
+  below, and the Expo env-file cases a fake app directory (FAKE_APP) passed to
+  placeFile. The real app directory's .env* files are recorded now and checked
+  untouched in afterAll; the fake directory's sentinels likewise.
+*/
+const envEntries = (dir: string) =>
+  readdirSync(dir)
+    .filter((name) => name.startsWith('.env'))
+    .sort()
+    .map((name) => {
+      const st = lstatSync(join(dir, name));
+      return { name, ino: st.ino, size: st.size, mtimeMs: st.mtimeMs };
+    });
+const APP_ENV_BEFORE = envEntries(APP_ROOT);
+
+const FAKE_APP = mkdtempSync(join(tmpdir(), 'wsf-check-staging-env-app-'));
+const EXPO_FILES = ['.env', '.env.local', '.env.production', '.env.production.local'];
+const SENTINEL = (name: string) => `# OWNER_SENTINEL ${name} ${process.pid}: this file must survive the tests unchanged\n`;
+for (const name of [...EXPO_FILES, '.env.development.local']) writeFileSync(join(FAKE_APP, name), SENTINEL(name));
+
+/*
+  Real repositories, made here: a small repository with a tracked file, an
+  ignored one and a loose one, and a `git worktree add` sibling of it. All
+  of it lives under one mkdtemp directory of its own, removed in afterAll
+  entry by entry (never following a link) after checking it is that
+  directory.
+*/
+const REPOS = mkdtempSync(join(tmpdir(), 'wsf-check-staging-env-repos-'));
+const REPO = join(REPOS, 'repo');
+const SIBLING = join(REPOS, 'sibling');
+const fixtureGit = (cwd: string, ...args: string[]) => {
+  const r = spawnSync(
+    'git',
+    ['-c', 'user.name=wsf-test', '-c', 'user.email=wsf-test@example.invalid', '-c', 'commit.gpgsign=false', '-c', 'init.defaultBranch=main', '-c', 'core.hooksPath=/dev/null', ...args],
+    { cwd, encoding: 'utf8', env: { ...process.env, LC_ALL: 'C', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' } },
+  );
+  if (r.status !== 0) throw new Error(`git ${args.join(' ')} failed`);
+};
+mkdirSync(REPO);
+fixtureGit(REPO, 'init', '-q');
+writeFileSync(join(REPO, '.gitignore'), '*.local\n');
+writeFileSync(join(REPO, 'tracked.env'), '# dummy values for a test, not real\n');
+fixtureGit(REPO, 'add', '.gitignore', 'tracked.env');
+fixtureGit(REPO, 'commit', '-q', '-m', 'test fixture');
+fixtureGit(REPO, 'worktree', 'add', '-q', SIBLING);
+
+function removeOwnTree(dir: string) {
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    if (lstatSync(full).isDirectory()) {
+      removeOwnTree(full);
+      rmdirSync(full);
+    } else unlinkSync(full);
+  }
+}
 afterAll(() => {
+  // The guard reads first, cleans up whatever it finds, and only then judges, so a failure leaves nothing behind.
+  const appEnvAfter = envEntries(APP_ROOT);
+  const sentinels = [...EXPO_FILES, '.env.development.local'].map((name) => {
+    try {
+      return readFileSync(join(FAKE_APP, name), 'utf8');
+    } catch {
+      return null;
+    }
+  });
   for (const entry of readdirSync(DIR)) unlinkSync(join(DIR, entry));
   rmdirSync(DIR);
+  for (const dir of [FAKE_APP, REPOS]) {
+    if (dir.startsWith(tmpdir()) && basename(dir).startsWith('wsf-check-staging-env-')) {
+      removeOwnTree(dir);
+      rmdirSync(dir);
+    }
+  }
+  // The real app directory's env files are exactly as they were, and so are the fake one's sentinels.
+  expect(appEnvAfter).toEqual(APP_ENV_BEFORE);
+  expect(sentinels).toEqual([...EXPO_FILES, '.env.development.local'].map(SENTINEL));
 });
 
 const GOOD: Record<string, string> = {
@@ -72,15 +154,15 @@ const envText = (env: Record<string, string>) =>
     .map(([k, v]) => `${k}=${v}`)
     .join('\n')}\n`;
 
-/** A file inside the app directory, removed again whatever happens. */
-function withAppFile<T>(name: string, text: string, fn: (path: string) => T): T {
-  const path = join(APP_ROOT, name);
-  writeFileSync(path, text);
-  try {
-    return fn(path);
-  } finally {
-    unlinkSync(path);
-  }
+// The fixture repository's loose and ignored files, with dummy values (written after envText exists).
+writeFileSync(join(REPO, 'loose.env'), envText(GOOD));
+writeFileSync(join(REPO, 'kept.local'), envText(GOOD));
+writeFileSync(join(SIBLING, 'loose.env'), envText(GOOD));
+
+/** The script run from another directory (a relative path is resolved against it). */
+function runIn(cwd: string, ...args: string[]) {
+  const r = spawnSync(process.execPath, [SCRIPT, ...args], { cwd, encoding: 'utf8', env: process.env });
+  return { code: r.status, stdout: r.stdout, stderr: r.stderr, all: `${r.stdout}${r.stderr}` };
 }
 
 const failures = (stdout: string) =>
@@ -157,26 +239,20 @@ describe('check:staging-env refuses a file git could commit, and fails closed wi
     expect(r.stdout).toBe(`${refusal}\nFAIL\n`);
     expect(r.stderr).toBe('');
   };
-  const tag = `${process.pid}-${Date.now().toString(36)}`;
-
   it('refuses to read a file git tracks', () => {
     refusedWith(runOn(join(APP_ROOT, 'app.json')), REFUSALS.tracked);
   });
 
-  it('RV7-641-2: an untracked file inside the repository that git does not ignore is refused before it is read', () => {
-    withAppFile(`staging-${tag}.env`, envText(GOOD), (path) => {
-      refusedWith(runOn(path), REFUSALS.notIgnored);
-      // The same file, named relative to the app.
-      refusedWith(runOn(`staging-${tag}.env`), REFUSALS.notIgnored);
-    });
+  it('RV7-641-2: an untracked file inside a repository that git does not ignore is refused before it is read', () => {
+    refusedWith(runOn(join(REPO, 'loose.env')), REFUSALS.notIgnored);
+    // The same file, named relative to where the script runs.
+    refusedWith(runIn(REPO, 'loose.env'), REFUSALS.notIgnored);
   });
 
-  it('a .env*.local file inside the repository is ignored by git, so it is checked', () => {
-    withAppFile(`.env.wsf-test-${tag}.local`, envText(GOOD), (path) => {
-      const r = runOn(path, '--platform', 'ios');
-      expect(r.code).toBe(0);
-      expect(r.stdout.trim().split('\n').pop()).toBe('PASS');
-    });
+  it('a file inside a repository that git ignores is checked', () => {
+    const r = runOn(join(REPO, 'kept.local'), '--platform', 'ios');
+    expect(r.code).toBe(0);
+    expect(r.stdout.trim().split('\n').pop()).toBe('PASS');
   });
 
   it('RV7-641-1: a symlink outside the repository to a tracked file is judged by its real path', () => {
@@ -185,12 +261,10 @@ describe('check:staging-env refuses a file git could commit, and fails closed wi
     refusedWith(runOn(link), REFUSALS.tracked);
   });
 
-  it('RV7-641-1: a symlink outside the repository to an unignored file inside it is refused', () => {
-    withAppFile(`staging-${tag}-target.env`, envText(GOOD), (target) => {
-      const link = join(DIR, `link-inside-${(n += 1)}.env`);
-      symlinkSync(target, link);
-      refusedWith(runOn(link), REFUSALS.notIgnored);
-    });
+  it('RV7-641-1: a symlink outside the repository to an unignored file inside one is refused', () => {
+    const link = join(DIR, `link-inside-${(n += 1)}.env`);
+    symlinkSync(join(REPO, 'loose.env'), link);
+    refusedWith(runOn(link), REFUSALS.notIgnored);
   });
 
   it('a file with a second hard link is refused (it could be a tracked file under another name)', () => {
@@ -209,51 +283,185 @@ describe('check:staging-env refuses a file git could commit, and fails closed wi
     refusedWith(runWith({ GIT_INDEX_FILE: join(DIR, 'no-such-index') }, join(APP_ROOT, 'app.json')), REFUSALS.tracked);
   });
 
-  describe('gitRefusal: only three git answers let a file through', () => {
-    type Reply = { status: number | null; stderr: string };
-    const NO_MATCH: Reply = { status: 1, stderr: "error: pathspec '/x' did not match any file(s) known to git" };
-    const OUTSIDE: Reply = { status: 128, stderr: "fatal: /x: '/x' is outside repository at '/repo'" };
-    const fake = (answers: { lsGiven?: Reply; lsReal?: Reply; ignore?: Reply }) => {
-      const calls: string[][] = [];
-      const git = (args: string[]): Reply => {
-        calls.push(args);
-        if (args[0] === 'ls-files') return (args[3] === '/given' ? answers.lsGiven : answers.lsReal) ?? NO_MATCH;
-        return answers.ignore ?? OUTSIDE;
+  describe('gitRefusal: the app repository, then the work tree that holds the file; only clean answers pass', () => {
+    type Reply = { status: number | null; stdout?: string; stderr: string };
+    const OK: Reply = { status: 0, stdout: '', stderr: '' };
+    const NO_MATCH: Reply = { status: 1, stderr: "error: pathspec ':(literal)/x' did not match any file(s) known to git\nDid you forget to 'git add'?\n" };
+    const OUTSIDE: Reply = { status: 128, stderr: "fatal: :(literal)/x: '/x' is outside repository at '/repo'\n" };
+    const NOT_A_REPO: Reply = { status: 128, stderr: 'fatal: not a git repository (or any parent up to mount point /)\nStopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).\n' };
+    const UNSET: Reply = { status: 1, stdout: '', stderr: '' };
+    type Answers = Partial<Record<'appConfig' | 'lsGiven' | 'lsReal' | 'appIgnore' | 'top' | 'otherConfig' | 'otherLs' | 'otherIgnore', Reply>>;
+    /** Outside every repository unless a case says otherwise. */
+    const fake = (a: Answers) => {
+      const calls: Array<[string, string[]]> = [];
+      // git's answer as the script reads it: stdout is always a string.
+      const git = (args: string[], cwd?: string) => ({ stdout: '', ...answer(args, cwd) });
+      const answer = (args: string[], cwd?: string): Reply => {
+        const where = cwd === APP_ROOT ? 'app' : String(cwd);
+        calls.push([where, args]);
+        const app = where === 'app';
+        if (args[0] === 'config') return (app ? a.appConfig : a.otherConfig) ?? UNSET;
+        if (args[0] === 'rev-parse') return a.top ?? NOT_A_REPO;
+        if (args[0] === 'ls-files') {
+          if (!app) return a.otherLs ?? NO_MATCH;
+          return (args[3]!.endsWith('/given') ? a.lsGiven : a.lsReal) ?? OUTSIDE;
+        }
+        return (app ? a.appIgnore : a.otherIgnore) ?? (app ? OUTSIDE : OK);
       };
       return { git, calls };
     };
+    const IN_OTHER: Answers = { top: { status: 0, stdout: '/repo2\n', stderr: '' } };
+    const run = (a: Answers) => gitRefusal('/given', '/repo2/real.env', fake(a).git);
 
-    it('outside the repository, or inside and ignored: allowed; check-ignore is asked about the real path', () => {
-      const out = fake({ lsGiven: OUTSIDE, lsReal: OUTSIDE, ignore: OUTSIDE });
-      expect(gitRefusal('/given', '/real', out.git)).toBeNull();
-      expect(out.calls).toEqual([
-        ['ls-files', '--error-unmatch', '--', '/given'],
-        ['ls-files', '--error-unmatch', '--', '/real'],
-        ['check-ignore', '-q', '--', '/real'],
+    it('outside every repository: allowed, after the app repository answered and the file\'s directory is no work tree', () => {
+      const f = fake({});
+      expect(gitRefusal('/given', '/repo2/real.env', f.git)).toBeNull();
+      expect(f.calls).toEqual([
+        ['app', ['config', '--bool', 'core.ignorecase']],
+        ['app', ['ls-files', '--error-unmatch', '--', ':(literal)/given']],
+        ['app', ['ls-files', '--error-unmatch', '--', ':(literal)/repo2/real.env']],
+        ['app', ['check-ignore', '-q', '--', '/repo2/real.env']],
+        ['/repo2', ['rev-parse', '--show-toplevel']],
       ]);
-      expect(gitRefusal('/given', '/real', fake({ ignore: { status: 0, stderr: '' } }).git)).toBeNull();
     });
 
-    it('the given path tracked (a tracked symlink), or the real path tracked: refused as tracked', () => {
-      expect(gitRefusal('/given', '/real', fake({ lsGiven: { status: 0, stderr: '' }, ignore: { status: 0, stderr: '' } }).git)).toBe(REFUSALS.tracked);
-      expect(gitRefusal('/given', '/real', fake({ lsReal: { status: 0, stderr: '' }, ignore: { status: 0, stderr: '' } }).git)).toBe(REFUSALS.tracked);
+    it('RV9-641-I11-1: in another work tree, asked there with its own root: ignored passes, tracked or not ignored refuses', () => {
+      const f = fake({ ...IN_OTHER });
+      expect(gitRefusal('/given', '/repo2/real.env', f.git)).toBeNull();
+      expect(f.calls.slice(5)).toEqual([
+        ['/repo2', ['config', '--bool', 'core.ignorecase']],
+        ['/repo2', ['ls-files', '--error-unmatch', '--', ':(literal)/repo2/real.env']],
+        ['/repo2', ['check-ignore', '-q', '--', '/repo2/real.env']],
+      ]);
+      expect(run({ ...IN_OTHER, otherLs: OK })).toBe(REFUSALS.tracked);
+      expect(run({ ...IN_OTHER, otherIgnore: { status: 1, stderr: '' } })).toBe(REFUSALS.notIgnored);
     });
 
-    it('inside and not ignored: refused', () => {
-      expect(gitRefusal('/given', '/real', fake({ ignore: { status: 1, stderr: '' } }).git)).toBe(REFUSALS.notIgnored);
+    it('in the app repository: the given or the real path tracked, or not ignored, refuses', () => {
+      expect(run({ lsGiven: OK })).toBe(REFUSALS.tracked);
+      expect(run({ lsReal: OK })).toBe(REFUSALS.tracked);
+      expect(run({ lsGiven: NO_MATCH, lsReal: NO_MATCH, appIgnore: { status: 1, stderr: '' } })).toBe(REFUSALS.notIgnored);
+      expect(run({ lsGiven: NO_MATCH, lsReal: NO_MATCH, appIgnore: OK, top: { status: 0, stdout: '/app\n', stderr: '' } })).toBeNull();
+    });
+
+    it('RV9-641-I11-4: a repository that folds case is asked case-folded', () => {
+      const f = fake({ appConfig: { status: 0, stdout: 'true\n', stderr: '' }, ...IN_OTHER, otherConfig: { status: 0, stdout: 'true\n', stderr: '' } });
+      expect(gitRefusal('/given', '/repo2/real.env', f.git)).toBeNull();
+      const specs = f.calls.filter(([, args]) => args[0] === 'ls-files').map(([, args]) => args[3]);
+      expect(specs).toEqual([':(literal,icase)/given', ':(literal,icase)/repo2/real.env', ':(literal,icase)/repo2/real.env']);
+      const plain = fake({ appConfig: { status: 0, stdout: 'false\n', stderr: '' } });
+      gitRefusal('/given', '/repo2/real.env', plain.git);
+      expect(plain.calls[1]![1][3]).toBe(':(literal)/given');
     });
 
     it.each([
-      ['git is not installed', { lsGiven: { status: null, stderr: '' } }],
-      ['not a work tree', { lsGiven: { status: 128, stderr: 'fatal: not a git repository (or any of the parent directories): .git' } }],
-      ['exit 1 that is not "did not match"', { lsReal: { status: 1, stderr: 'error: something new' } }],
+      ['git is not installed', { appConfig: { status: null, stderr: '' } }],
+      ['the app is not a work tree', { appConfig: { status: 128, stderr: NOT_A_REPO.stderr } }],
+      ['core.ignorecase answers something else', { appConfig: { status: 0, stdout: 'maybe\n', stderr: '' } }],
+      ['exit 1 that is not "did not match"', { lsReal: { status: 1, stderr: 'error: something new\n' } }],
       ['"did not match" with another status', { lsReal: { status: 128, stderr: NO_MATCH.stderr } }],
       ['"outside repository" with another status', { lsGiven: { status: 1, stderr: OUTSIDE.stderr } }],
-      ['check-ignore fails some other way', { ignore: { status: 128, stderr: 'fatal: unsafe repository' } }],
-      ['check-ignore does not run', { ignore: { status: null, stderr: '' } }],
+      ['"did not match" only on a later line', { lsReal: { status: 1, stderr: "warning: x\nerror: pathspec '/x' did not match any file(s) known to git\n" } }],
+      ['"is outside repository" only on a later line', { lsGiven: { status: 128, stderr: "fatal: unsafe repository\n'/x' is outside repository at '/r'\n" } }],
+      ['"is outside repository" as free text in another fatal', { lsGiven: { status: 128, stderr: 'fatal: the path is outside repository somewhere\n' } }],
+      ['app check-ignore fails some other way', { appIgnore: { status: 128, stderr: 'fatal: unsafe repository\n' } }],
+      ['app check-ignore does not run', { appIgnore: { status: null, stderr: '' } }],
+      ['rev-parse fails some other way (dubious ownership)', { top: { status: 128, stderr: 'fatal: detected dubious ownership in repository at /repo2\n' } }],
+      ['"not a git repository" only on a later line', { top: { status: 128, stderr: 'fatal: something\nfatal: not a git repository (or any parent)\n' } }],
+      ['rev-parse answers nothing', { top: { status: 0, stdout: '', stderr: '' } }],
+      ['the other repository\'s ls-files says something else', { ...IN_OTHER, otherLs: { status: 128, stderr: 'fatal: index file corrupt\n' } }],
+      ['the other repository says the file is outside it', { ...IN_OTHER, otherLs: OUTSIDE }],
+      ['the other repository\'s check-ignore fails', { ...IN_OTHER, otherIgnore: { status: 128, stderr: 'fatal: x\n' } }],
+      ['the other repository\'s config fails', { ...IN_OTHER, otherConfig: { status: 128, stderr: 'fatal: bad config\n' } }],
     ] as const)('%s: refused, never read', (_why, answers) => {
-      expect(gitRefusal('/given', '/real', fake(answers).git)).toBe(REFUSALS.git);
+      expect(run(answers as Answers)).toBe(REFUSALS.git);
     });
+
+    it('RV9-641-I11-3: the reply patterns match git\'s whole first line and ignore only the quoted paths', () => {
+      expect(GIT_REPLY.untracked.test("error: pathspec ':(literal)/a b/it\\'s.env' did not match any file(s) known to git\nDid you forget to 'git add'?\n")).toBe(true);
+      expect(GIT_REPLY.outside.test("fatal: :(literal)/dev/shm/x.env: '/dev/shm/x.env' is outside repository at '/repo'\n")).toBe(true);
+      expect(GIT_REPLY.notARepository.test('fatal: not a git repository (or any of the parent directories): .git\n')).toBe(true);
+      expect(GIT_REPLY.untracked.test("error: pathspec 'a\nb' did not match any file(s) known to git\n")).toBe(false);
+      expect(GIT_REPLY.outside.test('fatal: is outside repository\n')).toBe(false);
+    });
+  });
+});
+
+describe('RV9-641-I11: files in other work trees, and the env files Expo loads', () => {
+  const refused = (r: ReturnType<typeof runOn>, refusal: string) => {
+    expect(r.stdout).toBe(`${refusal}\nFAIL\n`);
+    expect(r.code).toBe(1);
+  };
+
+  it('(a) another repository: its tracked file and its loose file are refused; its ignored file is checked', () => {
+    refused(runOn(join(REPO, 'tracked.env')), REFUSALS.tracked);
+    refused(runOn(join(REPO, 'loose.env')), REFUSALS.notIgnored);
+    const kept = runOn(join(REPO, 'kept.local'), '--platform', 'ios');
+    expect(kept.code).toBe(0);
+    expect(kept.stdout.trim().split('\n').pop()).toBe('PASS');
+  });
+
+  it('(b) a git worktree sibling: its checked-out tracked file and its loose file are refused', () => {
+    refused(runOn(join(SIBLING, 'tracked.env')), REFUSALS.tracked);
+    refused(runOn(join(SIBLING, 'loose.env')), REFUSALS.notIgnored);
+  });
+
+  it('a symlink from outside every repository to the other repository\'s tracked file is refused', () => {
+    const link = join(DIR, `link-other-${(n += 1)}.env`);
+    symlinkSync(join(REPO, 'tracked.env'), link);
+    refused(runOn(link), REFUSALS.tracked);
+  });
+
+  // The env-file cases run against a fake app directory (SEC-F1): placeFile with its appRoot.
+  it('RV9-641-I11-2: the four env files Expo loads into a production build are refused in the app directory', () => {
+    for (const name of EXPO_FILES) expect(placeFile(join(FAKE_APP, name), undefined, FAKE_APP)).toEqual({ real: null, refusal: REFUSALS.expoLoaded });
+    // And through a symlink from outside: the same file by device and inode.
+    const link = join(DIR, `link-expo-${(n += 1)}.env`);
+    symlinkSync(join(FAKE_APP, '.env.local'), link);
+    expect(placeFile(link, undefined, FAKE_APP).refusal).toBe(REFUSALS.expoLoaded);
+  });
+
+  it('.env.development.local (only expo start loads it) is not an Expo-loaded file: it is placed, for path A', () => {
+    const placed = placeFile(join(FAKE_APP, '.env.development.local'), undefined, FAKE_APP);
+    expect(placed.refusal).toBeNull();
+    expect(placed.real).toBe(join(FAKE_APP, '.env.development.local'));
+  });
+
+  it('the Expo list is the fixed four plus what @expo/env says for production, in the app directory', () => {
+    const rel = (root: string) => expoLoadedEnvFiles(root).map((f: string) => f.slice(root.length + 1)).sort();
+    expect(rel(APP_ROOT)).toEqual(['.env', '.env.local', '.env.production', '.env.production.local']);
+    // Where @expo/env cannot be loaded (the fake directory has no node_modules), the fixed four stand.
+    expect(rel(FAKE_APP)).toEqual(['.env', '.env.local', '.env.production', '.env.production.local']);
+  });
+
+  it('SEC-F1: nothing in this file writes, links, renames or removes a path in the real app directory', () => {
+    const source = readFileSync(__filename, 'utf8');
+    const sf = ts.createSourceFile('t.ts', source, ts.ScriptTarget.Latest, true);
+    const WRITES: Record<string, number> = {
+      writeFileSync: 0, appendFileSync: 0, unlinkSync: 0, mkdirSync: 0, rmdirSync: 0, rmSync: 0, truncateSync: 0,
+      symlinkSync: 1, linkSync: 1, renameSync: 1, copyFileSync: 1,
+    };
+    const offenders: string[] = [];
+    let calls = 0;
+    const visit = (node: ts.Node) => {
+      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text in WRITES) {
+        calls += 1;
+        const target = node.arguments[WRITES[node.expression.text]!];
+        if (!target || /APP_ROOT|__dirname/.test(target.getText())) offenders.push(node.getText());
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+    expect(calls).toBeGreaterThan(10);
+    expect(offenders).toEqual([]);
+    // The old helper that wrote fixed names into the app directory is gone (named in two parts, so this line is not a match).
+    expect(source.includes(['with', 'AppFile'].join(''))).toBe(false);
+  });
+
+  it('the refusals give no .env*.local advice and point outside the repository', () => {
+    expect(REFUSALS.notIgnored).toContain('keep it outside the repository (for example $TMP)');
+    expect(REFUSALS.expoLoaded).toContain('keep it outside the repository (for example $TMP)');
+    for (const r of Object.values(REFUSALS)) expect(r).not.toContain('.env*.local');
   });
 });
 
@@ -462,6 +670,11 @@ describe('check:staging-env rules match every current refusal, and a value canno
   function stagingSites(value: string): string[][] {
     const sites: string[][] = [];
     const visit = (node: ts.Node) => {
+      // RV9-641-I11-5: refuse() takes an array literal (read below) or `problems` (the pushes); any other shape fails here.
+      if (ts.isCallExpression(node) && node.expression.getText() === 'refuse') {
+        const arg = node.arguments[0];
+        expect(node.arguments.length === 1 && !!arg && (ts.isArrayLiteralExpression(arg) || (ts.isIdentifier(arg) && arg.text === 'problems')), node.getText()).toBe(true);
+      }
       if (ts.isCallExpression(node) && node.expression.getText() === 'refuse' && node.arguments[0] && ts.isArrayLiteralExpression(node.arguments[0])) {
         let messages = [HEADER];
         for (const el of node.arguments[0].elements) {

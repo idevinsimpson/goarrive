@@ -346,6 +346,58 @@ export function pausesForInterruption(reason: unknown): boolean {
   );
 }
 
+/**
+ * MO-05 — the native app lifecycle, read the same way. Pure.
+ *
+ * Going to the BACKGROUND is the native "this screen went away" (the web's
+ * `hidden`): the round pauses. Being only INACTIVE is not — Control Center,
+ * a notification pulled down, the app switcher glimpsed and abandoned — that
+ * is the blur rule above, and a round does not pause for it.
+ *
+ * NOTHING ACCRUES FOR THE INTERRUPTION ITSELF. iOS passes through `inactive`
+ * on its way to `background` (an incoming call is inactive while it rings,
+ * background once answered), so the pause is dated to the moment the app first
+ * went inactive, not to when the background event arrived. Android goes
+ * straight to background, dated to the event. `lastTickAt` caps a background
+ * event delivered late (JavaScript can be suspended right after the app
+ * leaves): the round cannot have run more than one tick past its last tick.
+ *
+ * A RING-SIZED WINDOW. The backdate reaches back at most RING_BACKDATE_MS
+ * (about how long a call rings before it goes to voicemail): a long inactive
+ * stretch that ends in the background — Control Center left open, then Home —
+ * gives back no more than that, so the round cannot reclaim minutes the
+ * screen already showed as gone. Within the window the inactive time is
+ * treated as part of the interruption (documented: Control Center for 20 s,
+ * then Home, returns those 20 s to the round).
+ */
+export type AppLifecycle = { inactiveSince: number | null };
+export const ACTIVE_LIFECYCLE: AppLifecycle = { inactiveSince: null };
+export const RING_BACKDATE_MS = 30_000;
+
+export function appLifecycleStep(
+  prev: AppLifecycle,
+  next: string,
+  now: number,
+  lastTickAt: number | null = null,
+  tickMs = 250,
+  maxBackdateMs = RING_BACKDATE_MS
+): { lifecycle: AppLifecycle; pauseAt: number | null } {
+  if (next === 'inactive') {
+    return { lifecycle: { inactiveSince: prev.inactiveSince ?? now }, pauseAt: null };
+  }
+  if (next === 'background') {
+    // The late-event cap FIRST: `seen` is the latest moment the round can
+    // actually have been on screen. The ring window is then measured back from
+    // it, so a late event cannot cost the backdate to the first ring.
+    const seen = lastTickAt !== null && Number.isFinite(lastTickAt) ? Math.min(now, lastTickAt + tickMs) : now;
+    const pauseAt =
+      prev.inactiveSince === null ? seen : Math.min(seen, Math.max(prev.inactiveSince, seen - maxBackdateMs));
+    return { lifecycle: ACTIVE_LIFECYCLE, pauseAt };
+  }
+  // 'active' (or anything else): back in front, nothing to pause.
+  return { lifecycle: ACTIVE_LIFECYCLE, pauseAt: null };
+}
+
 /** What the screen says once an interruption has paused a round. */
 export const INTERRUPTED_NOTICE =
   'Paused when this screen went away. Nothing was counted while it was paused — pick up where you left off.';

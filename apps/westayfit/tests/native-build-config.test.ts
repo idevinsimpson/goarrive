@@ -4,6 +4,8 @@ import { join } from 'node:path';
 
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
+import { wsfTheme } from '../src/theme';
+
 // app.config.js is CommonJS, loaded by Expo with Node's require. Load it the same way.
 const appConfig: (ctx: { config: Record<string, unknown> }) => Record<string, unknown> = createRequire(
   import.meta.url
@@ -252,6 +254,17 @@ describe('NATIVE-BUILD-1: app.config.js build-time backend refusals', () => {
       expect(expo.scheme).toBe('westayfit');
       expect(expo.ios.bundleIdentifier).toBe('com.westayfit.app');
       expect(expo.android.package).toBe('com.westayfit.app');
+    });
+
+    it('INT-34 (W12-18): the cold launch is cream, not white — app.json backgroundColor is the app ground, applied on Android by expo-system-ui', () => {
+      const expo = app();
+      expect(expo.backgroundColor).toBe('#F7F5F0');
+      expect(expo.backgroundColor).toBe(wsfTheme.colors.background);
+      // Light status bar and navigation styles with it (unchanged).
+      expect(expo.userInterfaceStyle).toBe('light');
+      // expo-system-ui is what sets the root view's background (and the light style) from app.json on Android.
+      const pkg = readJson('package.json') as { dependencies: Record<string, string> };
+      expect(pkg.dependencies['expo-system-ui']).toMatch(/^~6\./);
     });
 
     it('preview-simulator extends preview, builds for the iOS Simulator, and inherits staging with sign-in on', () => {

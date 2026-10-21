@@ -8,13 +8,8 @@ import { Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from
 import { useWsfAuth } from '../../src/auth';
 import { samePulse, type GoalPulse } from '../../src/displayPulse';
 import { getFirebaseAuth, getFirebaseFunctions, wsfUsingEmulators } from '../../src/firebase';
-import {
-  KIOSK_REFUSAL_BODY,
-  KIOSK_REFUSAL_HEADLINE,
-  clearKioskReturnGoal,
-  kioskContributeRoute,
-  setKioskReturnGoal,
-} from '../../src/kioskSession';
+import { armKioskReturn, resetSharedScreenHandoffs } from '../../src/handoffArming';
+import { KIOSK_REFUSAL_BODY, KIOSK_REFUSAL_HEADLINE, clearKioskSession, kioskContributeRoute } from '../../src/kioskSession';
 import { decideKioskStart, noteKioskHandoff } from '../../src/kioskSignOutGuard';
 import { wsfTheme } from '../../src/theme';
 import { PROGRESS_GREEN } from '../../src/ui/brandAssets';
@@ -65,7 +60,7 @@ export default function KioskGoal() {
   const goalIdRef = useRef(goalId);
   goalIdRef.current = goalId;
   const { width: windowWidth } = useWindowDimensions();
-  const { user } = useWsfAuth();
+  const { ready, user } = useWsfAuth();
 
   // Same hydration rule as the display: the static export renders the phone
   // layout, so the first client render must match it or React re-renders the
@@ -89,8 +84,11 @@ export default function KioskGoal() {
   // and the next one must not inherit them, so the account goes. This is the
   // reset half of Finish, applied wherever the kiosk comes to rest.
   //
-  // Only the kiosk's own storage key is removed. An unresolved attempt
-  // belongs to the account that made it and stays reconcilable.
+  // Every post-auth destination an earlier visitor armed is removed (the
+  // kiosk return, and the join code, event and marker returns that would
+  // outrank or shadow the next visitor's — src/handoffArming.ts). An
+  // unresolved attempt belongs to the account that made it and stays
+  // reconcilable.
   //
   // ONLY WHILE THIS SCREEN IS THE ONE IN FRONT OF SOMEBODY. As a plain
   // useEffect keyed on `user` this fired at the worst possible moment: the
@@ -102,21 +100,32 @@ export default function KioskGoal() {
   // useFocusEffect ties the reset to the fact it is about: this device has
   // come to rest on its start screen.
   //
+  // THE KIOSK SESSION ENDS ONLY ONCE NOBODY IS SIGNED IN (ST-05). The durable
+  // marker (src/kioskSession.ts) is what brings a killed phone back here, so
+  // it is cleared only when auth has answered with no user: after this
+  // screen's sign-out has landed (the effect runs again with no user), never
+  // before it. A sign-out that fails, or a kill before it lands, keeps it.
+  //
   // NATIVE-MEMBER-1 F-4 (MF-08 interim). In the app this route can open on
   // somebody's own phone; there the account goes only after they say so
   // (src/kioskSignOutGuard.ts). On the web nothing changes.
   useFocusEffect(
     useCallback(() => {
-      clearKioskReturnGoal();
+      void resetSharedScreenHandoffs();
+      if (!ready) return;
       const decision = decideKioskStart(Platform.OS, !!user, goalIdRef.current);
       setAskSignOut(decision === 'ask');
+      if (!user) {
+        void clearKioskSession();
+        return;
+      }
       if (decision !== 'signOut') return;
       void signOut(getFirebaseAuth()).catch(() => {
         // Nothing useful to do here and nothing to claim: the start screen
         // shows no identity either way, and the next Contribute press lands on
-        // the sign-in gate.
+        // the sign-in gate. The kiosk session stays open (above).
       });
-    }, [user])
+    }, [ready, user])
   );
 
   useEffect(() => {
@@ -199,7 +208,12 @@ export default function KioskGoal() {
   // too) exactly the way a scanned join code already does.
   const onContribute = useCallback(() => {
     if (!goalId) return;
-    setKioskReturnGoal(goalId);
+    // No owner, deliberately: this start screen is signed out by design (it
+    // signs out whoever it finds), so the return is the handoff for the
+    // visitor about to sign in (src/postAuthDestination.ts). Anything stale
+    // that would outrank it on the terminal hop is cleared with it
+    // (src/handoffArming.ts).
+    void armKioskReturn(goalId);
     noteKioskHandoff(goalId);
     router.push(kioskContributeRoute(goalId) as never);
   }, [goalId]);

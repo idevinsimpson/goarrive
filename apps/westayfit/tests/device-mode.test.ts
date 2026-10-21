@@ -66,9 +66,9 @@ describe('remembering the answer', () => {
     expect(readDeviceMode()).toBeNull();
   });
 
-  it('round-trips both answers, and stores the bare word and nothing else', () => {
+  it('round-trips both answers, and stores the bare word and nothing else', async () => {
     for (const mode of DEVICE_MODES) {
-      expect(saveDeviceMode(mode)).toBe(true);
+      expect(await saveDeviceMode(mode)).toBe(true);
       expect(readDeviceMode()).toBe(mode);
       // THE WHOLE STORED VALUE. Not a JSON envelope, not a timestamp, not a
       // uid: a fact about a device with no person in it.
@@ -112,19 +112,19 @@ describe('remembering the answer', () => {
     }
   });
 
-  it('refuses to store a value that is not one of the two answers', () => {
-    expect(saveDeviceMode('kiosk' as unknown as DeviceMode)).toBe(false);
-    expect(saveDeviceMode(null as unknown as DeviceMode)).toBe(false);
+  it('refuses to store a value that is not one of the two answers', async () => {
+    expect(await saveDeviceMode('kiosk' as unknown as DeviceMode)).toBe(false);
+    expect(await saveDeviceMode(null as unknown as DeviceMode)).toBe(false);
     expect(window.localStorage.getItem(DEVICE_MODE_KEY)).toBeNull();
   });
 });
 
 describe('a browser that will not let it remember anything', () => {
-  it('reports the failure rather than claiming the answer was kept', () => {
+  it('reports the failure rather than claiming the answer was kept', async () => {
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new Error('storage disabled');
     });
-    expect(saveDeviceMode('shared')).toBe(false);
+    expect(await saveDeviceMode('shared')).toBe(false);
   });
 
   it('reads as no answer rather than throwing', () => {

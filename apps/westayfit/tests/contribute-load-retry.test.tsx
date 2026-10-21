@@ -1,9 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { FirebaseError } from 'firebase/app';
 import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { AppState, Platform } from 'react-native';
+import { AppState, Dimensions, Platform } from 'react-native';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
@@ -45,9 +46,15 @@ vi.mock('../src/ui/useScreenTopInset', () => ({
   ScreenTopSpacer: () => null,
   ScreenStatusBar: ({ tone }: { tone: string }) => <span data-testid="screen-status-bar" data-tone={tone} />,
 }));
-vi.mock('../src/ui/useReducedMotion', () => ({ useReducedMotion: () => true }));
+vi.mock('../src/ui/useReducedMotion', () => ({
+  useReducedMotion: () => true,
+  // Motion's lane reads the preference with its known/failed state too.
+  useReducedMotionPreference: () => ({ known: true, reduced: true, failed: false }),
+}));
+// W12-2: the device's Auth, with or without a signed-in user, per case.
+const fakeAuth = { currentUser: null as null | { uid: string; getIdToken: () => Promise<string> } };
 vi.mock('../src/firebase', () => ({
-  getFirebaseAuth: () => ({}),
+  getFirebaseAuth: () => fakeAuth,
   getFirebaseFirestore: () => ({}),
   getFirebaseFunctions: () => ({}),
   wsfUsingEmulators: false,
@@ -56,6 +63,18 @@ vi.mock('../src/firebase', () => ({
 vi.mock('firebase/auth', () => ({ signOut: vi.fn(), onAuthStateChanged: () => () => undefined }));
 const USER = { uid: 'u1', email: 'member@example.com', displayName: 'Member', emailVerified: true };
 vi.mock('../src/auth', () => ({ useWsfAuth: () => ({ ready: true, user: USER }) }));
+// W12-2 (ST-06): what refreshing the sign-in answers, per case.
+const refresh = { result: 'ok' as 'ok' | 'offline' | 'signedOut', calls: [] as unknown[][] };
+vi.mock('../src/contributionFlow', async () => {
+  const actual = await vi.importActual<typeof import('../src/contributionFlow')>('../src/contributionFlow');
+  return {
+    ...actual,
+    refreshSignIn: async (...args: unknown[]) => {
+      refresh.calls.push(args);
+      return refresh.result;
+    },
+  };
+});
 const calls: string[] = [];
 const answers: Record<string, () => Promise<unknown>> = {};
 vi.mock('firebase/functions', () => ({
@@ -67,7 +86,7 @@ vi.mock('firebase/functions', () => ({
   },
 }));
 
-const { clearMemberReads } = await import('../src/memberReads');
+const { clearMemberReads, peekGoals, readGoals, readOwnCredit } = await import('../src/memberReads');
 const { signOut } = await import('firebase/auth');
 const { default: ContributeToGoal } = await import('../app/contribute/[goalId]');
 
@@ -92,6 +111,9 @@ const pollFor = async (ms: number) => {
 };
 
 beforeEach(() => {
+  fakeAuth.currentUser = null;
+  refresh.result = 'ok';
+  refresh.calls.length = 0;
   inset.top = 0;
   params.value = { goalId: 'g1' };
   clearMemberReads();
@@ -278,5 +300,262 @@ describe('#641 NB-1 and NB-2: what Try again re-reads, and the kiosk', () => {
     await settle();
     expect(signOut).toHaveBeenCalledTimes(1);
     expect(router.dismissTo).toHaveBeenCalledWith('/kiosk/g1');
+  });
+});
+
+describe('W12-2: a failed refresh keeps a warm screen (INT-25); a stale sign-in is refreshed (ST-06)', () => {
+  const LISTED = { goals: [{ goalId: 'g1', title: '500 squats together', status: 'active', target: 100, unit: 'squats', sharedTotal: 40 }] };
+  const COMMUNITIES = { items: [{ groupId: 'oak', displayName: 'Oak Grove Together', memberCount: 3 }] };
+  const INTERNAL = () => Promise.reject(Object.assign(new Error('internal'), { code: 'functions/internal' }));
+  const UNAUTHENTICATED = () => Promise.reject(new FirebaseError('functions/unauthenticated', 'stale token'));
+  const NOT_FOUND = () => Promise.reject(new FirebaseError('functions/not-found', 'gone'));
+  const typeInto = (el: HTMLInputElement, value: string) => {
+    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set?.call(el, value);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  const entry = () => byId('wsf-contribute-entry') as HTMLInputElement;
+  // jsdom reports a 0-tall window (a "short screen"); a case that needs a phone's height says so.
+  const windowOf = (height: number) =>
+    vi.spyOn(Dimensions, 'get').mockReturnValue({ width: 390, height, scale: 3, fontScale: 1 });
+
+  /** This account's record already holds the goal and the member's part: the screen opens warm. */
+  async function warm(os: string) {
+    (Platform as { OS: string }).OS = os;
+    params.value = { goalId: 'g1', groupId: 'oak' };
+    answers.wsfListGoals = async () => LISTED;
+    answers.wsfMyCommunities = async () => COMMUNITIES;
+    await readGoals('u1', 'oak');
+    await readOwnCredit('u1', 'g1');
+    calls.length = 0;
+  }
+
+  it('native, warm, the refresh fails: the step, the typed 35 and Review stay; the note says the figures are kept', async () => {
+    windowOf(844);
+    await warm('ios');
+    let fail!: (e: unknown) => void;
+    answers.wsfGoalPulse = () => new Promise((_, reject) => (fail = reject));
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    expect(byId('wsf-contribute-entry-screen')).not.toBeNull();
+    act(() => typeInto(entry(), '35'));
+    await act(async () => fail(Object.assign(new Error('internal'), { code: 'functions/internal' })));
+    await settle();
+    expect(byId('wsf-contribute-load-error')).toBeNull();
+    expect(byId('wsf-contribute-entry-screen')).not.toBeNull();
+    expect(entry().value).toBe('35');
+    expect(byId('wsf-contribute-stale-note')!.textContent).toContain('Couldn’t check for updates just now. Showing the last confirmed figures.');
+    expect(byId('wsf-contribute-shared-total')!.textContent).toContain('40');
+    expect(byId('wsf-contribute-context-updated')).toBeNull();
+    await act(async () => byId('wsf-contribute-review')!.click());
+    await settle();
+    expect(byId('wsf-contribute-review-screen')).not.toBeNull();
+  });
+
+  it('native, a short screen (no "Confirmed" line there): the note still shows', async () => {
+    windowOf(640);
+    await warm('ios');
+    answers.wsfGoalPulse = INTERNAL;
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    expect(byId('wsf-contribute-stale-note')).not.toBeNull();
+    expect(byId('wsf-contribute-stale-retry')).not.toBeNull();
+  });
+
+  it('native, cold, the load fails: the load error with Try again, as before', async () => {
+    (Platform as { OS: string }).OS = 'android';
+    answers.wsfGoalPulse = INTERNAL;
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    expect(byId('wsf-contribute-load-error')).not.toBeNull();
+    expect(byId('wsf-contribute-load-retry')).not.toBeNull();
+    expect(byId('wsf-contribute-stale-note')).toBeNull();
+  });
+
+  it('native, warm: not-found still replaces the warm screen', async () => {
+    await warm('ios');
+    answers.wsfGoalPulse = NOT_FOUND;
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    expect(byId('wsf-contribute-not-found')).not.toBeNull();
+    expect(byId('wsf-contribute-entry-screen')).toBeNull();
+  });
+
+  it('native: the poll starts after the failure, and its first good tick clears the note', async () => {
+    windowOf(844);
+    await warm('android');
+    answers.wsfGoalPulse = INTERNAL;
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    expect(byId('wsf-contribute-stale-note')).not.toBeNull();
+    expect(count('wsfGoalPulse')).toBe(1);
+    answers.wsfGoalPulse = async () => ({ ...PULSE, sharedTotal: 44 });
+    await pollFor(2_000);
+    expect(count('wsfGoalPulse')).toBe(2);
+    expect(byId('wsf-contribute-stale-note')).toBeNull();
+    expect(byId('wsf-contribute-context-updated')!.textContent).toMatch(/^Confirmed /);
+    expect(byId('wsf-contribute-shared-total')!.textContent).toContain('44');
+  });
+
+  it('native: the note\'s Retry loads again in place, without the loading screen, keeping the entry', async () => {
+    await warm('ios');
+    answers.wsfGoalPulse = INTERNAL;
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    act(() => typeInto(entry(), '35'));
+    let land!: (v: unknown) => void;
+    answers.wsfGoalPulse = () => new Promise((resolve) => (land = resolve));
+    await act(async () => byId('wsf-contribute-stale-retry')!.click());
+    await settle();
+    // While it reads, the screen stays as it was.
+    expect(byId('wsf-contribute-entry-screen')).not.toBeNull();
+    expect(entry().value).toBe('35');
+    await act(async () => land(PULSE));
+    await settle();
+    expect(byId('wsf-contribute-stale-note')).toBeNull();
+    expect(entry().value).toBe('35');
+    expect(count('wsfGoalPulse')).toBe(2);
+  });
+
+  it('native, warm, unauthenticated and Auth cannot be reached: warm kept with the note, never the sign-in screen', async () => {
+    await warm('ios');
+    fakeAuth.currentUser = { uid: 'u1', getIdToken: async () => 't' };
+    refresh.result = 'offline';
+    answers.wsfGoalPulse = UNAUTHENTICATED;
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    expect(refresh.calls).toHaveLength(1);
+    expect(refresh.calls[0]).toEqual([fakeAuth, 8_000]);
+    expect(byId('wsf-contribute-signed-out')).toBeNull();
+    expect(byId('wsf-contribute-entry-screen')).not.toBeNull();
+    expect(byId('wsf-contribute-stale-note')).not.toBeNull();
+  });
+
+  it('RV11-641-1: native, warm, Auth unreachable, then a heal tick answers the anonymous not-found: still warm, the note kept, the community remembered', async () => {
+    await warm('ios');
+    fakeAuth.currentUser = { uid: 'u1', getIdToken: async () => 't' };
+    refresh.result = 'offline';
+    answers.wsfGoalPulse = UNAUTHENTICATED;
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    expect(byId('wsf-contribute-stale-note')).not.toBeNull();
+    // The heal poll runs; its token-less tick gets the public pulse's anonymous answer.
+    answers.wsfGoalPulse = NOT_FOUND;
+    await pollFor(4_000);
+    expect(count('wsfGoalPulse')).toBeGreaterThanOrEqual(2);
+    expect(byId('wsf-contribute-not-found')).toBeNull();
+    expect(byId('wsf-contribute-entry-screen')).not.toBeNull();
+    expect(byId('wsf-contribute-stale-note')).not.toBeNull();
+    expect(peekGoals('u1', 'oak')).toBeDefined();
+    // Retry's full load decides: an authorized answer heals it.
+    answers.wsfGoalPulse = async () => PULSE;
+    await act(async () => byId('wsf-contribute-stale-retry')!.click());
+    await settle();
+    expect(byId('wsf-contribute-stale-note')).toBeNull();
+  });
+
+  it('RV11-641-5: a confirmed receipt clears the kept-figures note (Record more shows the confirmed anchor)', async () => {
+    await warm('ios');
+    // The live account the send is checked against (mayFireAs).
+    fakeAuth.currentUser = { uid: 'u1', getIdToken: async () => 't' };
+    answers.wsfGoalPulse = INTERNAL;
+    answers.wsfContribute = async () => ({ addedCount: 35, ownCredit: 40, sharedTotal: 75, target: 100, unit: 'squats', status: 'active', alreadyRecorded: false });
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    expect(byId('wsf-contribute-stale-note')).not.toBeNull();
+    act(() => typeInto(entry(), '35'));
+    await act(async () => byId('wsf-contribute-review')!.click());
+    await settle();
+    await act(async () => byId('wsf-contribute-submit')!.click());
+    await settle();
+    expect(byId('wsf-contribute-receipt')).not.toBeNull();
+    await act(async () => byId('wsf-contribute-record-more')!.click());
+    await settle();
+    expect(byId('wsf-contribute-entry-screen')).not.toBeNull();
+    expect(byId('wsf-contribute-stale-note')).toBeNull();
+    expect(byId('wsf-contribute-shared-total')!.textContent).toContain('75');
+  });
+
+  it('web: a poll not-found still ends the screen, as before', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    answers.wsfGoalPulse = NOT_FOUND;
+    await pollFor(2_000);
+    expect(byId('wsf-contribute-not-found')).not.toBeNull();
+  });
+
+  it('native, unauthenticated, the refresh gives a fresh token: exactly one reload, which loads', async () => {
+    (Platform as { OS: string }).OS = 'android';
+    fakeAuth.currentUser = { uid: 'u1', getIdToken: async () => 't' };
+    refresh.result = 'ok';
+    let first = true;
+    answers.wsfGoalPulse = () => {
+      if (first) {
+        first = false;
+        return UNAUTHENTICATED();
+      }
+      return Promise.resolve(PULSE);
+    };
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    expect(refresh.calls).toHaveLength(1);
+    expect(count('wsfGoalPulse')).toBe(2);
+    expect(byId('wsf-contribute-signed-out')).toBeNull();
+    expect(byId('wsf-contribute-load-error')).toBeNull();
+    expect(byId('wsf-contribute-entry-screen')).not.toBeNull();
+  });
+
+  it('native, still unauthenticated after a fresh token: one reload only, then the sign-in screen (no loop)', async () => {
+    (Platform as { OS: string }).OS = 'ios';
+    fakeAuth.currentUser = { uid: 'u1', getIdToken: async () => 't' };
+    refresh.result = 'ok';
+    answers.wsfGoalPulse = UNAUTHENTICATED;
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    await settle();
+    expect(refresh.calls).toHaveLength(1);
+    expect(count('wsfGoalPulse')).toBe(2);
+    expect(byId('wsf-contribute-signed-out')).not.toBeNull();
+  });
+
+  it('native, unauthenticated, Auth says the session is over: the sign-in screen', async () => {
+    await warm('ios');
+    fakeAuth.currentUser = { uid: 'u1', getIdToken: async () => 't' };
+    refresh.result = 'signedOut';
+    answers.wsfGoalPulse = UNAUTHENTICATED;
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    expect(refresh.calls).toHaveLength(1);
+    expect(byId('wsf-contribute-signed-out')).not.toBeNull();
+  });
+
+  it('native, unauthenticated with no user on the device: the sign-in screen, nothing refreshed', async () => {
+    (Platform as { OS: string }).OS = 'android';
+    answers.wsfGoalPulse = UNAUTHENTICATED;
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    expect(refresh.calls).toHaveLength(0);
+    expect(byId('wsf-contribute-signed-out')).not.toBeNull();
+  });
+
+  it('web, warm: a failed refresh is the load error as today, and unauthenticated is the sign-in screen with no refresh', async () => {
+    await warm('web');
+    answers.wsfGoalPulse = INTERNAL;
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    expect(byId('wsf-contribute-load-error')).not.toBeNull();
+    expect(byId('wsf-contribute-stale-note')).toBeNull();
+    act(() => root.unmount());
+    root = createRoot(container);
+    clearMemberReads();
+    await warm('web');
+    fakeAuth.currentUser = { uid: 'u1', getIdToken: async () => 't' };
+    answers.wsfGoalPulse = UNAUTHENTICATED;
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    expect(byId('wsf-contribute-signed-out')).not.toBeNull();
+    expect(refresh.calls).toHaveLength(0);
   });
 });

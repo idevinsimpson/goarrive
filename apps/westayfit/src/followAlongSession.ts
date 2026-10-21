@@ -29,9 +29,11 @@
  * when somebody presses Start.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AccessibilityInfo } from 'react-native';
+import { AppState, Platform } from 'react-native';
 
 import {
+  ACTIVE_LIFECYCLE,
+  appLifecycleStep,
   buildFollowAlongPlan,
   clockElapsed,
   clockRunning,
@@ -52,6 +54,7 @@ import {
 } from './followAlong';
 import { demoMediaFor } from './movementDemoMedia';
 import { figureKindFor, type MoveFigureKind, type MovePose } from './ui/moveFigure';
+import { useReducedMotion } from './ui/useReducedMotion';
 
 /** How often the screen re-reads the clock. Fine enough to look alive. */
 export const TICK_MS = 250;
@@ -120,20 +123,21 @@ export function useFollowAlongSession(input: {
   const [stopped, setStopped] = useState(false);
   const [interrupted, setInterrupted] = useState(false);
   const [now, setNow] = useState(() => Date.now());
-  const [reducedMotion, setReducedMotion] = useState(false);
+  // MO-08: LIVE, not read once. A person who turns on Reduce Motion (or Android
+  // "Remove animations") mid-round — which on a phone means leaving the app —
+  // finds the figure still and both poses shown when they come back, with no
+  // remount. On the web this is now the media query's live subscription
+  // (before: one read at mount), a deliberate web change.
+  const reducedMotion = useReducedMotion();
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    AccessibilityInfo.isReduceMotionEnabled?.()
-      .then((on) => {
-        if (!cancelled) setReducedMotion(Boolean(on));
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  /** When the clock was last read while running (native lifecycle uses it to cap a late background event). */
+  const lastTickRef = useRef<number | null>(null);
+  /**
+   * Native only: when the app went inactive, while it still is (null otherwise).
+   * State, not just a ref, because the end-of-round effect below must re-run
+   * when the app comes back.
+   */
+  const [inactiveSince, setInactiveSince] = useState<number | null>(null);
 
   const running = clockRunning(clock);
 
@@ -146,8 +150,12 @@ export function useFollowAlongSession(input: {
       }
       return undefined;
     }
-    setNow(Date.now());
-    tickRef.current = setInterval(() => setNow(Date.now()), TICK_MS);
+    lastTickRef.current = Date.now();
+    setNow(lastTickRef.current);
+    tickRef.current = setInterval(() => {
+      lastTickRef.current = Date.now();
+      setNow(lastTickRef.current);
+    }, TICK_MS);
     return () => {
       if (tickRef.current) {
         clearInterval(tickRef.current);
@@ -165,6 +173,10 @@ export function useFollowAlongSession(input: {
     [unit, length, demoMedia]
   );
 
+  // Read by the native lifecycle listener, which is attached once.
+  const planRef = useRef(plan);
+  planRef.current = plan;
+
   const elapsedMs = clockElapsed(clock, now);
   const at = stepAt(plan, elapsedMs);
   const started = roundId !== null && (running || clock.heldMs > 0 || stopped);
@@ -178,9 +190,16 @@ export function useFollowAlongSession(input: {
         : 'round';
 
   // A round that ran to its end stops the clock rather than accruing forever.
+  //
+  // NOT WHILE THE APP IS ONLY INACTIVE (native, MO-05 NB-1): a call that rings
+  // past the end of the round must still be able to pause it — when it is
+  // answered, `background` dates the pause to when the ringing began, before
+  // the end. So the clock is left running while inactive; if the app comes
+  // straight back (call declined, Control Center closed), this runs then and
+  // the round finishes as the blur rule says it did.
   useEffect(() => {
-    if (finished && clockRunning(clock)) setClock((c) => pauseClock(c, Date.now()));
-  }, [finished, clock]);
+    if (finished && clockRunning(clock) && inactiveSince === null) setClock((c) => pauseClock(c, Date.now()));
+  }, [finished, clock, inactiveSince]);
 
   const onStart = useCallback(() => {
     // A NEW round is a new attempt. Starting again after a stop asks the host
@@ -242,14 +261,17 @@ export function useFollowAlongSession(input: {
     clockRef.current = clock;
   }, [clock]);
 
+  // `at`: when the interruption began. The web pauses at the event; native may
+  // date it earlier (see appLifecycleStep), so nothing accrues for it.
+  const interrupt = useCallback((reason: string, at?: number) => {
+    if (!pausesForInterruption(reason)) return;
+    if (!clockRunning(clockRef.current)) return;
+    setInterrupted(true);
+    setClock((c) => pauseClock(c, at ?? Date.now()));
+  }, []);
+
   useEffect(() => {
     if (typeof document === 'undefined') return undefined;
-    const interrupt = (reason: string) => {
-      if (!pausesForInterruption(reason)) return;
-      if (!clockRunning(clockRef.current)) return;
-      setInterrupted(true);
-      setClock((c) => pauseClock(c, Date.now()));
-    };
     const onVisibility = () => {
       if (document.visibilityState === 'hidden') interrupt('hidden');
     };
@@ -260,7 +282,45 @@ export function useFollowAlongSession(input: {
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('pagehide', onHide);
     };
-  }, []);
+  }, [interrupt]);
+
+  // MO-05 — NATIVE: the app going to the background is the same interruption
+  // as a hidden tab (`hidden`); being only inactive is the blur rule and does
+  // not pause. Returning does not resume: the round waits, says why
+  // (INTERRUPTED_NOTICE), and Resume picks it up. Attached once; reads the
+  // clock through its ref like the web listener.
+  useEffect(() => {
+    if (Platform.OS === 'web') return undefined;
+    let lifecycle = ACTIVE_LIFECYCLE;
+    const sub = AppState.addEventListener('change', (next) => {
+      const step = appLifecycleStep(lifecycle, next, Date.now(), lastTickRef.current, TICK_MS);
+      lifecycle = step.lifecycle;
+      // The pause (if any) lands in the same batch as clearing `inactiveSince`,
+      // so the end-of-round effect never sees a running clock with it cleared.
+      //
+      // A backdated pause that would land at or after the round's end is no
+      // interruption (F1): the round ran out while the app was only inactive
+      // (the blur rule), so it simply finishes — the end-of-round effect stops
+      // the clock once `inactiveSince` clears — with no "paused" notice beside
+      // "That's the round" and no Resume that could go nowhere.
+      //
+      // Nor is one that leaves nothing banked (N1): the app was already
+      // inactive when Start was pressed and went to the background within the
+      // window, so the backdate reaches to before the run began and nothing of
+      // the round ran in front of the person (a pause before the run's start
+      // banks nothing: clockElapsed never counts a negative run). The clock
+      // stops where it began and the card is Ready again — "Not started" with
+      // no "paused" notice beside it. A resumed round keeps what it had banked
+      // and is interrupted as usual.
+      if (step.pauseAt !== null) {
+        const banked = clockElapsed(clockRef.current, step.pauseAt);
+        if (banked === 0) setClock((c) => pauseClock(c, step.pauseAt!));
+        else if (!stepAt(planRef.current, banked).finished) interrupt('hidden', step.pauseAt);
+      }
+      setInactiveSince(step.lifecycle.inactiveSince);
+    });
+    return () => sub?.remove?.();
+  }, [interrupt]);
 
   const kind = figureKindFor(unit);
   const media = mediaPresentation(plan.media);

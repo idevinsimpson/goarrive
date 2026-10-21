@@ -18,6 +18,8 @@ export type { SvgMarkupProps } from './svgMarkupTypes';
  * the markup's width and height are superseded by the box (`100%`); its
  * viewBox keeps the drawing's proportions (`xMidYMid meet`, like `contain`).
  */
+const CLIP: ViewStyle = { overflow: 'hidden' };
+
 export function SvgMarkup({ markup, style, accessibilityLabel, testID }: SvgMarkupProps) {
   return (
     <View
@@ -25,8 +27,8 @@ export function SvgMarkup({ markup, style, accessibilityLabel, testID }: SvgMark
       accessibilityRole="image"
       accessibilityLabel={accessibilityLabel}
       testID={testID}
-      // The call sites' styles are plain box styles (width, height, aspect ratio, margin).
-      style={style as StyleProp<ViewStyle>}
+      // A box style (SvgMarkupStyle has no image-only keys); the drawing never spills past it.
+      style={[CLIP, style as StyleProp<ViewStyle>]}
     >
       <SvgXml xml={markup} width="100%" height="100%" />
     </View>

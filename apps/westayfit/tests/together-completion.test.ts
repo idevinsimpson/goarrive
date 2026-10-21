@@ -195,9 +195,9 @@ describe('Together presentation: receipt truth and fresh presentation are separa
     expect({ ...a, animate: true }).toEqual(b);
   });
 
-  it('no reliable before: shows the final WE at once and invents no tween', () => {
+  it('no reliable before: the fresh receipt still plays (MO-01), invents no tween, and holds the fill at after/target', () => {
     for (const opts of [
-      { ...fresh, sharedBefore: null }, // unknown: reconcile / reload
+      { ...fresh, sharedBefore: null }, // unknown: the before read failed
       { ...fresh, beforeTarget: 4000 }, // a different target
       { ...fresh, beforeTarget: null },
       { ...fresh, sharedBefore: 3800 }, // above the confirmed after
@@ -205,7 +205,7 @@ describe('Together presentation: receipt truth and fresh presentation are separa
     ]) {
       const p = togetherPresentation(receipt(), opts);
       expect(p.before).toBeNull();
-      expect(p.animate).toBe(false);
+      expect(p.animate).toBe(true);
       expect(p.fromRatio).toBe(p.toRatio);
     }
   });
@@ -213,7 +213,8 @@ describe('Together presentation: receipt truth and fresh presentation are separa
   it('never infers the before from sharedTotal − addedCount', () => {
     const p = togetherPresentation(receipt(), { communityName: null, fresh: true });
     expect(p.before).toBeNull();
-    expect(p.animate).toBe(false);
+    expect(p.fromRatio).toBe(p.toRatio); // no tween from an inferred total
+    expect(p.animate).toBe(true); // but the acknowledgment still plays
   });
 
   it('own-only receipt (shared visibility lost): no WE, no motion, its own exact facts', () => {

@@ -1,9 +1,20 @@
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
-import { Fragment } from 'react';
+import { Fragment, useEffect, useRef } from 'react';
 import { Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 import { isKioskFlag } from '../kioskSession';
-import { ACTION_GREEN, NAVY, ON_ACTION, PROGRESS_GREEN, TEXT_MUTED, elevation } from './kit';
+import { registerFocusTarget } from './focusTarget';
+import {
+  ACTION_GREEN,
+  NAVY,
+  ON_ACTION,
+  PROGRESS_GREEN,
+  TEXT_MUTED,
+  chromeTextProps,
+  effectiveWidth,
+  elevation,
+  lift,
+} from './kit';
 import { MEMBER_SHELL_GROUND, MEMBER_SHELL_RULE } from './memberShellMetrics';
 import { TabGlyph } from './TabGlyph';
 
@@ -160,8 +171,17 @@ export function shellAppliesTo(pathname: string, params?: ShellRouteParams): boo
  * rather than being a tab screen, which is what makes it structurally
  * incapable of ever rendering a selected state.
  */
+/** The MOVE label's cap on a phone: it sits in a fixed circle, so it grows less than the labels (W12-8). */
+const MOVE_TEXT_CAP = 1.1;
+
 export function MemberTabBar({ state, navigation, insets, onMove }: BottomTabBarProps & { onMove: () => void }) {
-  const { width } = useWindowDimensions();
+  const { width, fontScale } = useWindowDimensions();
+  const native = Platform.OS !== 'web';
+  // W12-9 (INT-17, native): where the screen reader's focus comes back when
+  // MOVE closes (src/ui/focusTarget.ts; nothing on the web, which finds the
+  // opener in the document itself).
+  const moveRef = useRef<View>(null);
+  useEffect(() => registerFocusTarget('wsf-member-tab-move', moveRef), []);
   /**
    * AT 200% TEXT ZOOM THE FOUR DESTINATIONS WRAP INSTEAD OF CLIPPING.
    *
@@ -170,7 +190,29 @@ export function MemberTabBar({ state, navigation, insets, onMove }: BottomTabBar
    * its own tab. Below 260px the bar becomes two rows of two: all four
    * destinations stay reachable and nothing runs off the screen.
    */
-  const narrow = width < 260;
+  /*
+    W12-8 (INT-15, native). ON A PHONE THE WIDTH THE TEXT HAS DECIDES IT. At
+    a large system text size a 390 pt phone has the room of a much narrower
+    one (effectiveWidth: width / fontScale), so the bar wraps there too, and
+    the wrapped bar keeps MOVE: a raised row above the two rows of two. The
+    web decides by its CSS width exactly as before (effectiveWidth is the
+    width there), and its wrapped bar is unchanged.
+  */
+  const narrow = effectiveWidth(width, fontScale) < 260;
+  const moveButton = (
+    <Pressable
+      ref={moveRef}
+      onPress={onMove}
+      style={styles.move}
+      testID="wsf-member-tab-move"
+      accessibilityRole="button"
+      accessibilityLabel="Move: record what you did"
+    >
+      <Text style={styles.moveText} {...chromeTextProps} {...(native ? { maxFontSizeMultiplier: MOVE_TEXT_CAP } : null)}>
+        MOVE
+      </Text>
+    </Pressable>
+  );
   return (
     <View
       style={[styles.bar, { paddingBottom: 10 + insets.bottom }, narrow ? styles.barWrapped : null]}
@@ -178,6 +220,11 @@ export function MemberTabBar({ state, navigation, insets, onMove }: BottomTabBar
       accessibilityRole={Platform.OS === 'web' ? ('navigation' as 'none') : undefined}
       accessibilityLabel="Main"
     >
+      {narrow && native ? (
+        <View style={styles.moveRow} testID="wsf-member-tab-move-row">
+          {moveButton}
+        </View>
+      ) : null}
       {MEMBER_TABS.map((tab, index) => {
         const routeIndex = state.routes.findIndex((r) => r.name === tab.name);
         const route = state.routes[routeIndex];
@@ -230,26 +277,16 @@ export function MemberTabBar({ state, navigation, insets, onMove }: BottomTabBar
             <View style={[styles.glyphWrap, active ? styles.glyphWrapActive : null]}>
               <TabGlyph name={tab.key} color={active ? NAVY : TEXT_MUTED} />
             </View>
-            <Text style={[styles.label, active ? styles.labelActive : null]}>{tab.label}</Text>
+            <Text style={[styles.label, active ? styles.labelActive : null]} {...chromeTextProps}>
+              {tab.label}
+            </Text>
           </Pressable>
           {/*
             The raised control's slot. Without it the circle overlapped the
             destinations either side of the middle, because four tabs spread
             evenly leave a gap narrower than the control.
           */}
-          {!narrow && index === 1 ? (
-            <View style={styles.moveSlot}>
-              <Pressable
-                onPress={onMove}
-                style={styles.move}
-                testID="wsf-member-tab-move"
-                accessibilityRole="button"
-                accessibilityLabel="Move: record what you did"
-              >
-                <Text style={styles.moveText}>MOVE</Text>
-              </Pressable>
-            </View>
-          ) : null}
+          {!narrow && index === 1 ? <View style={styles.moveSlot}>{moveButton}</View> : null}
           </Fragment>
         );
       })}
@@ -316,8 +353,14 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.06,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: -4 },
+    // W12-15 (INT-31): the same lift on Android, where the shadow props draw
+    // nothing and elevation cannot cast upward (an upward boxShadow); `{}` on
+    // iOS, which draws the props above, and on the web.
+    ...lift.tabBar,
   },
   barWrapped: { flexWrap: 'wrap' },
+  // W12-8 (native): the wrapped bar's MOVE, a full-width row above the two rows of two.
+  moveRow: { flexBasis: '100%', alignItems: 'center' },
   tab: { flex: 1, alignItems: 'center', gap: 2, paddingTop: 14, paddingBottom: 4, minHeight: 48, justifyContent: 'center' },
   // Two rows of two. `flexBasis` rather than `width` so the row still
   // distributes the leftover pixel instead of overflowing by it.
