@@ -107,6 +107,8 @@ vi.mock('../src/ui/MemberTabBar', () => ({
   MEMBER_TAB_BAR_BODY: 56,
   MEMBER_TAB_MOVE_OVERHANG: 16,
   MOVE_HREF: '/move',
+  // W16-12 (INT-30, member): the Community tab reserves through W12-16's helper.
+  tabContentBottomReserve: (safeBottom: number) => 56 + 16 + safeBottom,
 }));
 vi.mock('../src/ui/CommunityPrivacyControls', () => ({
   onPrivacySettled: () => () => undefined,

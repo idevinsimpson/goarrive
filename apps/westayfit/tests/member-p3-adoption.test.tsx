@@ -14,9 +14,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * INT-36: Community Home's momentum amounts go through formatCount (W12-18):
  * en-US on a phone ("4,999"; a German phone printed "4.999", which reads as
  * four point nine), and the browser's own locale on the web, as before. The
- * device locale is stubbed to de-DE. INT-30 (the tab-bar reserve) and INT-33
- * (DeviceChoice press feedback) wait for W12-16 and W12-17, which have not
- * landed.
+ * device locale is stubbed to de-DE.
+ *
+ * INT-30 (W12-16): the Community tab's and You's scroll content reserves
+ * what tabContentBottomReserve says: on a phone only MOVE's 24 pt overhang
+ * (the bar is laid out below the scene), on the web today's value. INT-33
+ * (W12-17): DeviceChoice's buttons take kit.pressableStyle: a pressed style
+ * on a phone (and Android's ripple), the very same style on the web.
  *
  * lift.ts picks its tokens at import (Platform.select), so each platform
  * imports the view afresh with the platform set first, and Platform.select
@@ -29,6 +33,8 @@ const platform = vi.hoisted(() => ({ os: 'web' as 'ios' | 'android' | 'web' }));
 
 type Props = Record<string, unknown>;
 const knobStyles: unknown[] = [];
+const scrollProps: Props[] = [];
+const pressProps = new Map<string, Props>();
 vi.mock('react-native', async (importOriginal) => {
   const rn = await importOriginal<typeof import('react-native')>();
   const View = forwardRef<unknown, Props>((props, ref) => {
@@ -36,6 +42,16 @@ vi.mock('react-native', async (importOriginal) => {
     // The knob: the switch's 20 pt disc.
     if (flat.width === 20 && flat.height === 20 && flat.borderRadius === 10) knobStyles.push(props.style);
     const Real = rn.View as unknown as (p: Props) => ReactNode;
+    return <Real ref={ref} {...props} />;
+  });
+  const ScrollView = forwardRef<unknown, Props>((props, ref) => {
+    scrollProps.push(props);
+    const Real = rn.ScrollView as unknown as (p: Props) => ReactNode;
+    return <Real ref={ref} {...props} />;
+  });
+  const Pressable = forwardRef<unknown, Props>((props, ref) => {
+    if (typeof props.testID === 'string') pressProps.set(props.testID, props);
+    const Real = rn.Pressable as unknown as (p: Props) => ReactNode;
     return <Real ref={ref} {...props} />;
   });
   const Platform = {
@@ -46,7 +62,7 @@ vi.mock('react-native', async (importOriginal) => {
     select: (o: Record<string, unknown>) =>
       platform.os in o ? o[platform.os] : platform.os !== 'web' && 'native' in o ? o.native : o.default,
   };
-  return { ...rn, View, Platform };
+  return { ...rn, View, ScrollView, Pressable, Platform };
 });
 
 // ---- INT-36: Community Home with one momentum row, under a German device ----
@@ -81,7 +97,8 @@ vi.mock('expo-router', () => {
 });
 vi.mock('react-native-safe-area-context', async () => {
   const { createContext } = await import('react');
-  return { SafeAreaInsetsContext: createContext(null), useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) };
+  // A 34 pt home indicator: today's web reserve includes it; a phone's does not need it.
+  return { SafeAreaInsetsContext: createContext(null), useSafeAreaInsets: () => ({ top: 0, bottom: 34, left: 0, right: 0 }) };
 });
 vi.mock('../src/ui/memberShellActions', () => ({ useMemberShellAction: () => undefined }));
 vi.mock('firebase/firestore', () => ({
@@ -104,16 +121,24 @@ vi.mock('../src/firebase', () => ({ getFirebaseFirestore: () => ({}), getFirebas
 vi.mock('../src/featureFlags', () => ({ wsfAuthEnabled: true }));
 const AUTH = { ready: true, user: { uid: 'u1', email: 'm@example.com' } };
 vi.mock('../src/auth', () => ({ useWsfAuth: () => AUTH }));
-vi.mock('../src/currentCommunity', () => ({ rememberCurrentCommunity: vi.fn(), resolveCurrentCommunity: () => null }));
+vi.mock('../src/currentCommunity', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  rememberCurrentCommunity: vi.fn(),
+  resolveCurrentCommunity: () => null,
+}));
 vi.mock('../src/memberReads', () => ({
   SAME_LOAD_MS: 10_000,
   forgetCommunity: vi.fn(),
   peekMyCommunities: () => undefined,
+  peekGoals: () => undefined,
+  wasRefused: () => false,
   readGoals: () => Promise.resolve({ goals: [] }),
   readMyCommunities: () =>
     Promise.resolve({ items: [{ groupId: 'oak', displayName: 'Oak Grove', memberCount: 3, isSample: false, activeChallenge: null }] }),
   readOwnCredit: () => Promise.reject(new Error('offline')),
 }));
+
+vi.mock('../src/ui/CommunityPrivacyControls', () => ({ onPrivacySettled: () => () => {} }));
 
 let container: HTMLDivElement;
 let root: Root;
@@ -237,3 +262,136 @@ describe('W16-12 / INT-36: Community Home counts in one format', () => {
     expect(row.textContent).toContain(`added ${today} squats`);
   });
 });
+
+describe('W16-12 / INT-30: tab screens reserve what the bar actually covers', () => {
+  const flush = () =>
+    act(async () => {
+      for (let i = 0; i < 30; i++) await Promise.resolve();
+    });
+  async function communityTabOn(os: 'ios' | 'android' | 'web'): Promise<Record<string, unknown>> {
+    platform.os = os;
+    vi.resetModules();
+    scrollProps.length = 0;
+    const { default: CommunityTab } = await import('../app/(tabs)/community/index');
+    act(() => root.render(<CommunityTab />));
+    await flush();
+    const props = [...scrollProps].reverse().find((p) => p.testID === 'wsf-community-index');
+    expect(props, 'the Community tab scroll view').toBeDefined();
+    return (StyleSheet.flatten(props!.contentContainerStyle as never) ?? {}) as Record<string, unknown>;
+  }
+  async function youOn(os: 'ios' | 'android' | 'web'): Promise<Record<string, unknown>> {
+    platform.os = os;
+    vi.resetModules();
+    scrollProps.length = 0;
+    const { YouParityView } = await import('../src/ui/YouParityView');
+    const actions = { onSettings: vi.fn(), onSignOut: vi.fn(), onSignIn: vi.fn(), onCommunity: vi.fn(), onRetry: vi.fn(), onStartMoving: vi.fn() };
+    act(() => root.render(<YouParityView state={{ kind: 'loading' }} email={null} signingOut={false} actions={actions} />));
+    expect(scrollProps.length).toBeGreaterThan(0);
+    return (StyleSheet.flatten(scrollProps[scrollProps.length - 1]!.contentContainerStyle as never) ?? {}) as Record<string, unknown>;
+  }
+
+  it.each(['ios', 'android'] as const)("%s: the Community tab reserves MOVE's 24 pt overhang (+ its 16), not the whole bar", async (os) => {
+    expect((await communityTabOn(os)).paddingBottom).toBe(24 + 16);
+  });
+
+  it("web: the Community tab's reserve is today's (bar body 64 + MOVE 24 + inset 34, + 16)", async () => {
+    expect((await communityTabOn('web')).paddingBottom).toBe(64 + 24 + 34 + 16);
+  });
+
+  it.each(['ios', 'android'] as const)("%s: You reserves MOVE's 24 pt overhang", async (os) => {
+    expect((await youOn(os)).paddingBottom).toBe(24);
+  });
+
+  it("web: You's reserve is today's stylesheet value (64 + 24), and nothing is added inline", async () => {
+    expect((await youOn('web')).paddingBottom).toBe(64 + 24);
+    // [s.body, the native reserve, compact]: the reserve's slot is empty on the web.
+    const style = scrollProps[scrollProps.length - 1]!.contentContainerStyle as unknown[];
+    expect(style).toHaveLength(3);
+    expect(style[1]).toBeNull();
+  });
+});
+
+describe('W16-12 / INT-33: DeviceChoice gives pressed feedback on a phone', () => {
+  async function choiceOn(os: 'ios' | 'android' | 'web', variant: 'legacy' | 'sheet') {
+    platform.os = os;
+    vi.resetModules();
+    pressProps.clear();
+    const { DeviceChoice } = await import('../src/ui/DeviceChoice');
+    act(() => root.render(<DeviceChoice onChoosePersonal={() => {}} onChooseShared={() => {}} variant={variant} testID="wsf-dc" />));
+    return {
+      personal: pressProps.get('wsf-dc-personal')!,
+      shared: pressProps.get('wsf-dc-shared')!,
+    };
+  }
+  const flat = (st: unknown) => (StyleSheet.flatten(st as never) ?? {}) as Record<string, unknown>;
+
+  it.each(['legacy', 'sheet'] as const)('iOS (%s): a pressed style while pressed, none at rest, no ripple', async (variant) => {
+    const { personal, shared } = await choiceOn('ios', variant);
+    for (const p of [personal, shared]) {
+      expect(typeof p.style).toBe('function');
+      const styleFn = p.style as (s: { pressed: boolean }) => unknown;
+      expect(flat(styleFn({ pressed: true })).opacity).toBe(0.72);
+      expect(flat(styleFn({ pressed: false })).opacity).toBeUndefined();
+      expect(p.android_ripple).toBeUndefined();
+    }
+  });
+
+  it.each(['legacy', 'sheet'] as const)('Android (%s): the pressed style and a ripple', async (variant) => {
+    const { personal, shared } = await choiceOn('android', variant);
+    for (const p of [personal, shared]) {
+      expect(flat((p.style as (s: { pressed: boolean }) => unknown)({ pressed: true })).opacity).toBe(0.72);
+      expect((p.android_ripple as { color?: string } | undefined)?.color).toEqual(expect.any(String));
+    }
+  });
+
+  it.each(['legacy', 'sheet'] as const)("web (%s): the same style object as today, no function, no ripple", async (variant) => {
+    const { personal, shared } = await choiceOn('web', variant);
+    for (const p of [personal, shared]) {
+      expect(typeof p.style).not.toBe('function');
+      expect(p.android_ripple).toBeUndefined();
+      expect(flat(p.style).opacity).toBeUndefined();
+    }
+  });
+});
+
+/*
+  THE WEB DOM, FOR A BEFORE/AFTER COMPARISON (W16-12 INT-30/INT-33). With
+  WSF_DUMP_P3_DOM set, the web rendering of the Community tab, You (loading)
+  and both DeviceChoice variants is written to that path, to compare with the
+  same render on the tree before this change. Without it this only checks
+  that each surface rendered.
+*/
+describe('W16-12: the web DOM of the INT-30/INT-33 surfaces (dump for comparison)', () => {
+  it('web DOM dump: Community tab, You, DeviceChoice legacy and sheet', async () => {
+    const parts: string[] = [];
+    const take = async (label: string, load: () => Promise<ReactNode>) => {
+      platform.os = 'web';
+      vi.resetModules();
+      const node = await load();
+      act(() => root.render(<>{node}</>));
+      await act(async () => {
+        for (let i = 0; i < 30; i++) await Promise.resolve();
+      });
+      expect(container.innerHTML.length, label).toBeGreaterThan(0);
+      parts.push(`<!-- ${label} -->\n${container.innerHTML}`);
+    };
+    await take('community tab', async () => {
+      const { default: CommunityTab } = await import('../app/(tabs)/community/index');
+      return <CommunityTab />;
+    });
+    await take('you (loading)', async () => {
+      const { YouParityView } = await import('../src/ui/YouParityView');
+      const actions = { onSettings: vi.fn(), onSignOut: vi.fn(), onSignIn: vi.fn(), onCommunity: vi.fn(), onRetry: vi.fn(), onStartMoving: vi.fn() };
+      return <YouParityView state={{ kind: 'loading' }} email={null} signingOut={false} actions={actions} />;
+    });
+    for (const variant of ['legacy', 'sheet'] as const) {
+      await take(`device choice (${variant})`, async () => {
+        const { DeviceChoice } = await import('../src/ui/DeviceChoice');
+        return <DeviceChoice onChoosePersonal={() => {}} onChooseShared={() => {}} variant={variant} testID="wsf-dc" />;
+      });
+    }
+    const dump = process.env.WSF_DUMP_P3_DOM;
+    if (dump) (await import('node:fs')).writeFileSync(dump, parts.join('\n'), { flag: 'wx' });
+  });
+});
+
