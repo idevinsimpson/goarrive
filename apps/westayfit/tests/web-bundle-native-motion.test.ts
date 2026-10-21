@@ -17,8 +17,13 @@ import { describe, expect, it } from 'vitest';
  */
 
 // The native Together driver, (MO-04) the native tab fade, TabSceneFade.native.tsx,
-// and (MO-02) the native sheet motion, sheetMotionNative.tsx.
+// (MO-02) the native sheet motion, sheetMotionNative.tsx, and (W14-2) the native
+// twins of the shared helpers TogetherCompletion now uses: announce.native.ts
+// (the queued announcement) and textScale.native.ts (the numeral policy). The
+// web twins carry neither name; on native React Native itself also has them.
 const NATIVE_ONLY = [
+  'announceForAccessibilityWithOptions',
+  'minimumFontScale',
   'wsf-together-native-layer',
   'buildNativeTogetherTimeline',
   'glowBands',

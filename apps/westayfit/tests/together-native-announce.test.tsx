@@ -78,6 +78,22 @@ vi.mock('../src/ui/useReducedMotion', () => ({
   useReducedMotionPreference: () => ({ ...ctl.pref }),
 }));
 
+// W14-2: TogetherCompletion speaks through the shared helper (src/ui/announce).
+// Vitest applies no platform extensions, so it is routed as Metro resolves it:
+// the native twin on iOS and Android, the web twin on the web.
+vi.mock('../src/ui/announce', async () => {
+  const web = (await vi.importActual('../src/ui/announce')) as typeof import('../src/ui/announce');
+  const native = await import('../src/ui/announce.native');
+  return {
+    get liveRegion() {
+      return ctl.os === 'web' ? web.liveRegion : native.liveRegion;
+    },
+    get useAnnounce() {
+      return ctl.os === 'web' ? web.useAnnounce : native.useAnnounce;
+    },
+  };
+});
+
 import { togetherPresentation, type ContributeReceipt } from '../src/contributionFlow';
 import { TogetherCompletion } from '../src/ui/TogetherCompletion';
 import { TOGETHER_TIMING } from '../src/ui/togetherMotion';
@@ -452,6 +468,23 @@ describe('how it is spoken, and who owns the identity', () => {
     show({ r: receipt() });
     advance(TOGETHER_TIMING.settleMs);
     expect(count()).toBe(0);
+  });
+
+  it('`announce` is read once, at mount (its contract): an instance that mounted already announced stays silent whatever it is passed later', () => {
+    const r1 = receipt();
+    show({ r: r1 });
+    expect(count()).toBe(1);
+    show({ r: r1, shape: 'boxed' }); // remounted: mounts already announced
+    show({ r: receipt({ addedCount: 25, ownCredit: 25 }), shape: 'boxed' }); // the same instance is now passed `announce` true
+    expect(count()).toBe(1);
+  });
+
+  it('W14-2: spoken through the shared helper (src/ui/announce), keyed by this receipt while it is owed', () => {
+    const completion = readFileSync(nodePath.resolve(__dirname, '../src/ui/TogetherCompletion.tsx'), 'utf8');
+    const code = completion.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+    expect(code).toMatch(/import \{ useAnnounce \} from '\.\/announce';/);
+    expect(code).not.toMatch(/AccessibilityInfo/);
+    expect(code).toMatch(/useAnnounce\(\s*togetherAnnouncement\(\{ eyebrow, amountText, unit, shared \}\),\s*announceAtMount \? RECEIPT_ANNOUNCEMENT : null,\s*onAnnounced,\s*\)/);
   });
 
   it('TogetherCompletion keeps no announcement memory of its own; the contribute screen wires identity per receipt object', () => {

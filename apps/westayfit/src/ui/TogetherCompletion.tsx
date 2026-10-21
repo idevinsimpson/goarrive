@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
-  AccessibilityInfo,
   Animated,
   AppState,
   Platform,
@@ -11,6 +10,7 @@ import {
 } from 'react-native';
 
 import type { TogetherPresentation } from '../contributionFlow';
+import { useAnnounce } from './announce';
 import { LivingWeProgress } from './LivingWeProgress';
 import { percentLabel, statusLine, totalOfTargetLabel, totalOfTargetParts } from './progressFormat';
 import { runTogetherMotion, TOGETHER_COLORS } from './togetherMotion';
@@ -29,6 +29,7 @@ import {
   settlesOnAppState,
   type TogetherPhase,
 } from './togetherPhase';
+import { numeralTextProps } from './textScale';
 import { useReducedMotionPreference } from './useReducedMotion';
 
 /**
@@ -82,21 +83,14 @@ export function togetherAnnouncement(o: {
  * announced, whatever their figures, and a remount of an announced receipt is
  * silent because its owner has already been told.
  *
- * Spoken only while the app is in the foreground: a receipt that appears
- * while it is in the background or inactive waits for the first `active`
- * (a screen reader drops speech posted while the app is not active). Still
- * one call; unmounting first cancels it and leaves the receipt unannounced.
+ * Spoken through the shared helper (src/ui/announce, INT-18; W14-2), keyed by
+ * this receipt while it is owed: once, queued, only while the app is in the
+ * foreground — a receipt that appears in the background or inactive waits for
+ * the first `active` (a screen reader drops speech posted while the app is
+ * not active) — and unmounting first cancels it and leaves the receipt
+ * unannounced.
  */
-function speakAnnouncement(message: string): void {
-  const withOptions = (AccessibilityInfo as { announceForAccessibilityWithOptions?: unknown })
-    .announceForAccessibilityWithOptions;
-  if (typeof withOptions === 'function') {
-    // Queued behind current speech on iOS; React Native routes Android to its plain announce.
-    AccessibilityInfo.announceForAccessibilityWithOptions(message, { queue: true });
-  } else {
-    AccessibilityInfo.announceForAccessibility(message);
-  }
-}
+const RECEIPT_ANNOUNCEMENT = 'together-receipt';
 
 export function TogetherCompletion({
   presentation: p,
@@ -208,36 +202,19 @@ export function TogetherCompletion({
 
   // NATIVE: announce the confirmed receipt exactly once (the web's live region
   // does this there). Whether it is still owed is the owner's fact, read at
-  // mount; this instance guards itself against React's development
-  // double-invoke. Independent of the motion: a receipt that never moves is
-  // announced the same way. Not spoken until the app is active.
+  // mount: owed, the key is this receipt's and the helper speaks it once (a
+  // re-render, new figures or React's development double-invoke do not repeat
+  // it), with the latest confirmed figures, once the app is active; not owed,
+  // there is no key and nothing is spoken. Independent of the motion: a
+  // receipt that never moves is announced the same way. On the web the
+  // helper does nothing (the screen's live region speaks) and `onAnnounced`
+  // is never called.
   const announceAtMount = useRef(announce).current;
-  const announcedRef = useRef(false);
-  const latestReceipt = useRef({ eyebrow, amountText, unit, shared });
-  latestReceipt.current = { eyebrow, amountText, unit, shared };
-  useEffect(() => {
-    if (web || !announceAtMount || announcedRef.current) return undefined;
-    const speak = () => {
-      if (announcedRef.current) return;
-      announcedRef.current = true;
-      try {
-        speakAnnouncement(togetherAnnouncement(latestReceipt.current));
-      } catch {
-        // Announcing is a courtesy; the receipt is on screen either way.
-      }
-      onAnnounced();
-    };
-    if (!settlesOnAppState(AppState.currentState)) {
-      speak();
-      return undefined;
-    }
-    const sub = AppState.addEventListener('change', (next) => {
-      if (next === 'active') speak();
-    });
-    return () => sub?.remove?.();
-    // Mount only: the receipt is announced when it appears, not on every render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  useAnnounce(
+    togetherAnnouncement({ eyebrow, amountText, unit, shared }),
+    announceAtMount ? RECEIPT_ANNOUNCEMENT : null,
+    onAnnounced,
+  );
 
   // Settle now, from wherever this instance is: a running motion is stopped
   // through its own cancel (final ratio, then settle); a waiting one settles.
@@ -432,7 +409,12 @@ export function TogetherCompletion({
       <View ref={stageRef} style={styles.stage} onLayout={measuring ? onStageLayout : undefined}>
         <View style={styles.effort}>
           <Text style={styles.eyebrow}>{eyebrow}</Text>
-          <Text style={[styles.amount, short ? styles.amountShort : null]} testID="wsf-contribute-result-amount">
+          {/* INT-16: capped at 1.3x on a phone, one line, shrinking to fit rather than breaking '+5,015'; nothing on the web. */}
+          <Text
+            style={[styles.amount, short ? styles.amountShort : null]}
+            testID="wsf-contribute-result-amount"
+            {...numeralTextProps}
+          >
             {amountText}
           </Text>
           {/* The receipt's heading, in words: the same sentence it has always been. */}

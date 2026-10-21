@@ -13,6 +13,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  */
 
 const ctl = vi.hoisted(() => ({
+  os: 'ios' as 'ios' | 'web',
+  /** The last props each Text with a testID was given (W14-2: the amount's numeral policy). */
+  textProps: {} as Record<string, Record<string, unknown>>,
   pref: { reduced: false, known: false, failed: false },
   appState: 'active' as string,
   /** When set, AppState.currentState reads these in turn (then appState). */
@@ -48,12 +51,60 @@ vi.mock('react-native', async () => {
       ctl.announcements.push(message);
     },
   };
+  const Text = React.forwardRef<unknown, Record<string, any>>(function RecordedText(props, ref) {
+    if (typeof props.testID === 'string') ctl.textProps[props.testID] = props;
+    return React.createElement(actual.Text, { ...props, ref });
+  });
   return {
     ...actual,
     View,
+    Text,
     AppState,
     AccessibilityInfo,
-    Platform: { ...actual.Platform, OS: 'ios', select: (o: Record<string, unknown>) => o.ios ?? o.native ?? o.default },
+    Platform: {
+      ...actual.Platform,
+      get OS() {
+        return ctl.os;
+      },
+      select: (o: Record<string, unknown>) => o[ctl.os] ?? o.native ?? o.default,
+    },
+  };
+});
+
+// W14-2: the shared helpers, routed as Metro resolves them (vitest applies no
+// platform extensions): the native twins on iOS, the web twins on the web.
+vi.mock('../src/ui/announce', async () => {
+  const web = (await vi.importActual('../src/ui/announce')) as typeof import('../src/ui/announce');
+  const native = await import('../src/ui/announce.native');
+  return {
+    get liveRegion() {
+      return ctl.os === 'web' ? web.liveRegion : native.liveRegion;
+    },
+    get useAnnounce() {
+      return ctl.os === 'web' ? web.useAnnounce : native.useAnnounce;
+    },
+  };
+});
+vi.mock('../src/ui/textScale', async () => {
+  const web = (await vi.importActual('../src/ui/textScale')) as typeof import('../src/ui/textScale');
+  const native = await import('../src/ui/textScale.native');
+  const pick = () => (ctl.os === 'web' ? web : native);
+  return {
+    get TEXT_SCALE_CAPS() {
+      return pick().TEXT_SCALE_CAPS;
+    },
+    get effectiveWidth() {
+      return pick().effectiveWidth;
+    },
+    get chromeTextProps() {
+      return pick().chromeTextProps;
+    },
+    get numeralTextProps() {
+      return pick().numeralTextProps;
+    },
+    get numeralInputProps() {
+      return pick().numeralInputProps;
+    },
   };
 });
 
@@ -95,6 +146,8 @@ beforeEach(() => {
   });
   // react-native-web has no native animated module and says so.
   vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  ctl.os = 'ios';
+  ctl.textProps = {};
   ctl.pref = { reduced: false, known: false, failed: false };
   ctl.appState = 'active';
   ctl.appStateReads = [];
@@ -466,5 +519,41 @@ describe('native Together: review follow-ups', () => {
     ctl.pref = { reduced: false, known: true, failed: false };
     render();
     expect(layer()!.children.length).toBe(1 + 24 * 3 + 2);
+  });
+});
+
+describe('W14-2 (INT-16): the receipt numeral is capped on a phone, untouched on the web', () => {
+  const AMOUNT = 'wsf-contribute-result-amount';
+
+  it('native: the amount Text takes the numeral policy — capped at 1.3x, one line, shrinking to fit', () => {
+    render({ r: receipt({ addedCount: 5015, ownCredit: 5015 }) });
+    expect(ctl.textProps[AMOUNT]).toMatchObject({
+      maxFontSizeMultiplier: 1.3,
+      numberOfLines: 1,
+      adjustsFontSizeToFit: true,
+      minimumFontScale: 0.5,
+    });
+    expect(text(AMOUNT)).toBe('+5015');
+  });
+
+  it('web: none of it — the amount is exactly the Text it was (no line clamp, no ellipsis)', () => {
+    ctl.os = 'web';
+    render({ r: receipt({ addedCount: 5015, ownCredit: 5015 }) });
+    const given = ctl.textProps[AMOUNT]!;
+    for (const key of ['maxFontSizeMultiplier', 'numberOfLines', 'adjustsFontSizeToFit', 'minimumFontScale']) {
+      expect(given, key).not.toHaveProperty(key);
+    }
+    // Today's element, with the style the receipt passes: the same DOM.
+    const reference = document.createElement('div');
+    const refRoot = createRoot(reference);
+    act(() =>
+      refRoot.render(
+        <Text style={given.style as never} testID={AMOUNT}>
+          +5015
+        </Text>,
+      ),
+    );
+    expect(container.querySelector(`[data-testid="${AMOUNT}"]`)!.outerHTML).toBe(reference.firstElementChild!.outerHTML);
+    act(() => refRoot.unmount());
   });
 });
