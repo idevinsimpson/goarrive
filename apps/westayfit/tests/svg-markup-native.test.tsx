@@ -65,9 +65,26 @@ describe('MF-05: SvgMarkup draws raw SVG markup on a phone', () => {
     expect(svg.getAttribute('data-xml')).toBe(QR_MARKUP);
     expect(svg.getAttribute('data-width')).toBe('100%');
     expect(svg.getAttribute('data-height')).toBe('100%');
+    // RV10-641-3: the box keeps the caller's size ...
+    expect(box.style.width).toBe('180px');
     // No data URI and no <img> anywhere: that is the path that renders blank.
     expect(el.innerHTML).not.toContain('data:image/svg+xml');
     expect(el.querySelector('img')).toBeNull();
+  });
+
+  it('RV10-641-3: ... and clips the drawing to it (overflow hidden, before the caller\'s style)', () => {
+    const el = NativeSvgMarkup({ markup: QR_MARKUP, style: { width: 180, height: 180 } });
+    expect((el.props.style as unknown[])[0]).toEqual({ overflow: 'hidden' });
+    expect((el.props.style as unknown[])[1]).toEqual({ width: 180, height: 180 });
+  });
+
+  it('RV10-641-3: the style takes a box, never the keys only an <Image> understands', () => {
+    const ok = <NativeSvgMarkup markup={QR_MARKUP} style={{ width: 120, aspectRatio: 1, margin: 4, borderRadius: 8 }} />;
+    // @ts-expect-error resizeMode would be dropped silently by the native View
+    const resize = <NativeSvgMarkup markup={QR_MARKUP} style={{ resizeMode: 'cover' }} />;
+    // @ts-expect-error tintColor would be dropped silently by the native View
+    const tint = <WebSvgMarkup markup={QR_MARKUP} style={{ tintColor: '#000' }} />;
+    expect([ok, resize, tint]).toHaveLength(3);
   });
 
   it('the native twin draws the movement figure the same way', () => {
