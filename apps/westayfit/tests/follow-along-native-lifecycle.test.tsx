@@ -117,6 +117,12 @@ describe('appLifecycleStep (pure)', () => {
     expect(appLifecycleStep(shortInactive, 'background', 120_000).pauseAt).toBe(100_000);
   });
 
+  it('a late event keeps the backdate to the first ring: the cap applies before the window (F2)', () => {
+    expect(appLifecycleStep({ inactiveSince: 0 }, 'background', 65_000, 5_000, 250).pauseAt).toBe(0);
+    // A long inactive stretch ending in a late event: the window is measured back from the capped moment.
+    expect(appLifecycleStep({ inactiveSince: 0 }, 'background', 200_000, 100_000, 250).pauseAt).toBe(100_250 - RING_BACKDATE_MS);
+  });
+
   it('a late background event is capped one tick after the last tick', () => {
     expect(appLifecycleStep(ACTIVE_LIFECYCLE, 'background', 70_000, 10_000, TICK_MS).pauseAt).toBe(10_000 + TICK_MS);
     expect(appLifecycleStep(ACTIVE_LIFECYCLE, 'background', 10_100, 10_000, TICK_MS).pauseAt).toBe(10_100);
@@ -218,6 +224,21 @@ describe('iOS', () => {
     expect(vi.getTimerCount()).toBe(0);
     advance(60_000);
     expect(el('fa-finished')).not.toBeNull();
+  });
+
+  it('inactive longer than the seconds left plus the window, then Home: the round has simply finished — no paused notice (F1)', () => {
+    act(() => root.render(<Host />));
+    press('fa-start');
+    advance(3_000 + 50_000);
+    expect(status()).toBe('10 left in this round');
+    app('inactive'); // Control Center / the notification shade
+    advance(45_000); // more than the 10 s left + the 30 s window
+    app('background');
+    app('active');
+    expect(el('fa-finished')).not.toBeNull(); // "That's the round"
+    expect(notice()).toBeNull(); // not also "Paused when this screen went away"
+    expect(el('fa-start')).toBeNull(); // and no Resume
+    expect(vi.getTimerCount()).toBe(0); // the clock stopped
   });
 
   it('Control Center left open, then Home: at most a ring-sized window is given back (NB-2)', () => {

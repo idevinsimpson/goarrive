@@ -386,8 +386,12 @@ export function appLifecycleStep(
     return { lifecycle: { inactiveSince: prev.inactiveSince ?? now }, pauseAt: null };
   }
   if (next === 'background') {
-    let pauseAt = prev.inactiveSince === null ? now : Math.min(now, Math.max(prev.inactiveSince, now - maxBackdateMs));
-    if (lastTickAt !== null && Number.isFinite(lastTickAt)) pauseAt = Math.min(pauseAt, lastTickAt + tickMs);
+    // The late-event cap FIRST: `seen` is the latest moment the round can
+    // actually have been on screen. The ring window is then measured back from
+    // it, so a late event cannot cost the backdate to the first ring.
+    const seen = lastTickAt !== null && Number.isFinite(lastTickAt) ? Math.min(now, lastTickAt + tickMs) : now;
+    const pauseAt =
+      prev.inactiveSince === null ? seen : Math.min(seen, Math.max(prev.inactiveSince, seen - maxBackdateMs));
     return { lifecycle: ACTIVE_LIFECYCLE, pauseAt };
   }
   // 'active' (or anything else): back in front, nothing to pause.

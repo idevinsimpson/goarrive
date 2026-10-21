@@ -179,6 +179,10 @@ export function useFollowAlongSession(input: {
     [unit, length, demoMedia]
   );
 
+  // Read by the native lifecycle listener, which is attached once.
+  const planRef = useRef(plan);
+  planRef.current = plan;
+
   const elapsedMs = clockElapsed(clock, now);
   const at = stepAt(plan, elapsedMs);
   const started = roundId !== null && (running || clock.heldMs > 0 || stopped);
@@ -299,7 +303,15 @@ export function useFollowAlongSession(input: {
       lifecycle = step.lifecycle;
       // The pause (if any) lands in the same batch as clearing `inactiveSince`,
       // so the end-of-round effect never sees a running clock with it cleared.
-      if (step.pauseAt !== null) interrupt('hidden', step.pauseAt);
+      //
+      // A backdated pause that would land at or after the round's end is no
+      // interruption (F1): the round ran out while the app was only inactive
+      // (the blur rule), so it simply finishes — the end-of-round effect stops
+      // the clock once `inactiveSince` clears — with no "paused" notice beside
+      // "That's the round" and no Resume that could go nowhere.
+      if (step.pauseAt !== null && !stepAt(planRef.current, clockElapsed(clockRef.current, step.pauseAt)).finished) {
+        interrupt('hidden', step.pauseAt);
+      }
       setInactiveSince(step.lifecycle.inactiveSince);
     });
     return () => sub?.remove?.();
