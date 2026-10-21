@@ -15,6 +15,7 @@ export function ButtonLink({
   testID,
   label,
   accessibilityLabel,
+  accessibilityHint,
   onPress,
   replace = false,
 }: {
@@ -30,6 +31,12 @@ export function ButtonLink({
    * somebody who cannot see which row the button is in.
    */
   accessibilityLabel?: string;
+  /**
+   * What happens when it is pressed, when that is not obvious from the label
+   * (W16-18: on a phone, the station and combined screens take over this
+   * phone). A screen reader reads it after the label.
+   */
+  accessibilityHint?: string;
   /** Runs before the navigation (Link calls the child's onPress first). */
   onPress?: () => void;
   /**
@@ -50,6 +57,7 @@ export function ButtonLink({
         testID={testID}
         accessibilityRole="link"
         accessibilityLabel={accessibilityLabel}
+        accessibilityHint={accessibilityHint}
         onPress={onPress}
       >
         <Text style={textStyle}>{label}</Text>
