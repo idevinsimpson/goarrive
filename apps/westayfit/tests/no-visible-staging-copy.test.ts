@@ -49,7 +49,7 @@ const ALLOWED: Array<{ file: string; reason: Reason; note: string }> = [
 ];
 /** Visible occurrences another lane is removing: allowed only while that exact text is there. */
 const KNOWN_PENDING: Array<{ file: string; text: string; owner: string }> = [
-  { file: 'app/goals/new.tsx', text: 'STAGING SYNTHETIC TEST', owner: 'member-1, W16-24 (in flight): the synthetic-goal marker on the goal form' },
+  // W12-27: none. (member-1's "STAGING SYNTHETIC TEST" on app/goals/new.tsx became 'SYNTHETIC TEST' in 4459a1a1.)
 ];
 
 export type Occurrence = { line: number; kind: 'string' | 'template' | 'jsx-text'; text: string };

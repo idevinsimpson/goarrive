@@ -23,7 +23,7 @@ import { useReducedMotion } from '../src/ui/useReducedMotion';
 
 /**
  * INT-01. THE LAST-RESORT BOUNDARY. A throw anywhere in the shell that no
- * route boundary below catches (the staging strip, the providers, the stack
+ * route boundary below catches (the banners, the providers, the stack
  * itself) renders this in place of the whole layout. It needs no provider:
  * the safe-area and auth providers it would sit under are what just failed.
  * Native only; web keeps its own behaviour (src/ui/RouteErrorFallback.tsx).
@@ -58,9 +58,8 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <WsfAuthProvider>
         {/* INT-09: the default for cream screens. A navy screen sets light
-            icons while it is focused (src/ui/useScreenTopInset ScreenStatusBar),
-            and over a native staging build's red strip they are light
-            everywhere (src/ui/statusBarPolicy.ts). Nothing on web. */}
+            icons while it is focused (src/ui/useScreenTopInset ScreenStatusBar;
+            the policy is src/ui/statusBarPolicy.ts). Nothing on web. */}
         <StatusBar style={statusBarStyleFor('cream')} />
         <KioskLaunchGuard />
         <AppShell />
