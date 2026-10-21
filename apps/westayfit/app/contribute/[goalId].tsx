@@ -132,6 +132,8 @@ import {
   useSheetFocusContainment,
 } from '../../src/ui/sheetMotion';
 import { SheetPanel, SheetScrim } from '../../src/ui/sheetMotionNative';
+import { useStepHeadingFocus } from '../../src/ui/stepHeadingFocus';
+import { numeralTextProps } from '../../src/ui/textScale';
 import { useReducedMotion, useReducedMotionPreference } from '../../src/ui/useReducedMotion';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { nativeErrorBoundary } from '../../src/ui/RouteErrorFallback';
@@ -1762,6 +1764,12 @@ export default function ContributeToGoal() {
   // In MOVE's sheet: focus enters the panel on Close, Tab stays in the panel,
   // and a step that replaces the member's step re-orients focus inside it.
   useSheetFocusContainment(sheetPanelRef, asSheet, asSheet ? renderedPhase : null);
+  // W15-1 (INT-17): on iOS and Android the screen reader moves to the Adjust
+  // heading each time the step changes to Adjust (camera Finish, or Edit from
+  // the review), never on the first mount. A no-op on the web, where the
+  // sheet's focus containment above does this.
+  const adjustHeadingRef = useRef<Text>(null);
+  useStepHeadingFocus(step === 'adjust' ? 'adjust' : null, adjustHeadingRef);
 
   const renderChrome = (showBack: boolean, tone: 'light' | 'dark' = 'light', mono = false) =>
     // In the sheet, its own header carries the title and Close: a wordmark and
@@ -3196,7 +3204,7 @@ export default function ContributeToGoal() {
         <View style={styles.sheet} testID="wsf-contribute-adjust-screen">
           {renderSheetHead('Start moving')}
           <View style={styles.sheetBody}>
-            <Text style={styles.stepHeading} {...HEADING_1} testID="wsf-contribute-adjust-heading">
+            <Text ref={adjustHeadingRef} style={styles.stepHeading} {...HEADING_1} testID="wsf-contribute-adjust-heading">
               {`We counted ${formatCount(cameraEstimate)} ${one(cameraEstimate)}`}
             </Text>
             <Text style={styles.body}>Adjust if needed.</Text>
@@ -3211,7 +3219,8 @@ export default function ContributeToGoal() {
               >
                 <Text style={styles.adjustButtonText}>−</Text>
               </Pressable>
-              <Text style={styles.adjustValue} testID="wsf-contribute-adjust-value" aria-live="polite">
+              {/* W15-1 (INT-16): on a phone, capped at 1.3x, one line, shrinking to fit; nothing on the web. */}
+              <Text style={styles.adjustValue} {...numeralTextProps} testID="wsf-contribute-adjust-value" aria-live="polite">
                 {String(adjusted)}
               </Text>
               <Pressable
