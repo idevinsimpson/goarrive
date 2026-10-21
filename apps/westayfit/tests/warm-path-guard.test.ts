@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { bootNative, createFakeAsyncStorage, type FakeAsyncStorage } from './nativeStorageHarness';
 
@@ -171,7 +171,24 @@ const TEST_MS = 20_000;
 const UNTIL_MS = 8_000;
 const itTimed = (name: string, fn: () => Promise<void>) => it(name, fn, TEST_MS);
 
+/*
+  NO PROMISE OUTLIVES ITS TEST UNSEEN. A rejection nobody handles (a screen's
+  load bound to a mock without the call it makes, say) used to surface only
+  as a run-level "Unhandled Rejection" after every test had passed, naming no
+  test. Each one raised while a test runs is collected here and fails that
+  test, after its pending work has been drained (afterEach).
+*/
+const unhandled: unknown[] = [];
+const onUnhandled = (reason: unknown) => {
+  unhandled.push(reason);
+};
+
+afterAll(() => {
+  process.off('unhandledRejection', onUnhandled);
+});
+
 beforeAll(async () => {
+  process.on('unhandledRejection', onUnhandled);
   disk = createFakeAsyncStorage();
   await boot();
   await import('react');
@@ -200,6 +217,8 @@ afterEach(async () => {
   // the next test boots a fresh process and re-mocks its modules: no late
   // continuation from this test may run against the next test's mocks.
   for (let i = 0; i < 20; i += 1) await new Promise<void>((resolve) => setImmediate(resolve));
+  const seen = unhandled.splice(0).map((r) => (r instanceof Error ? r.message : String(r)));
+  expect(seen, 'unhandled rejections raised during this test').toEqual([]);
 });
 
 /**
