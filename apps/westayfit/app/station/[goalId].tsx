@@ -901,6 +901,17 @@ export default function StationScreen() {
   const joinQr = joinPreferredQr ?? qrMarkup(joinBare);
   const eventUrl = buildEventUrl({ origin, goalId });
   const eventQr = qrMarkup(eventUrl);
+  /*
+    RV16-641-1. NO ORIGIN IS NOT NO JOIN CODE. A phone build with no public
+    origin named (W12-13: EXPO_PUBLIC_WSF_PUBLIC_ORIGIN unset) can draw no
+    link, but the community may well admit by link: the server handed this
+    screen a code. Saying "This community isn't joined from a link" there is
+    false, so the join block is left out instead. The sentence stays for a
+    community that admits nobody by link (no code). No new wording.
+  */
+  const joinDrawn = Boolean(joinQr && joinUrl);
+  const joinHiddenForNoOrigin = !joinDrawn && Boolean(joinCode) && origin === null;
+  const memberDrawn = Boolean(eventQr && eventUrl);
 
   return (
     <StationSurface
@@ -1292,7 +1303,7 @@ export default function StationScreen() {
               />
               <Text style={styles.qrCaption}>Scan to join, then add your part.</Text>
             </View>
-          ) : (
+          ) : joinHiddenForNoOrigin ? null : (
             <View style={styles.qrBlock} testID="wsf-station-qr-join-unavailable">
               <Text style={styles.qrHeading}>New here?</Text>
               {/*
@@ -1323,8 +1334,8 @@ export default function StationScreen() {
         </View>
       </View>
 
-      {/* It explains the join codes, so it goes when they do. */}
-      {turnRunningWide ? null : (
+      {/* It explains the join codes, so it goes when they do, and when neither is drawn (RV16-641-1). */}
+      {turnRunningWide || !(joinDrawn || memberDrawn) ? null : (
         <Text style={styles.caption} testID="wsf-station-qr-note">
           These codes open the event on your own phone. This screen shows only the person whose
           turn it is, and their repetitions are entered after the round.
