@@ -113,6 +113,7 @@ import {
 import { useReducedMotion } from '../../src/ui/useReducedMotion';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { nativeErrorBoundary } from '../../src/ui/RouteErrorFallback';
+import { useAppInForeground } from '../../src/useResumeRefresh';
 import {
   KEYBOARD_SCROLL_PROPS,
   KeyboardInsetView,
@@ -694,6 +695,20 @@ export default function ContributeToGoal() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [goalId, uid]);
 
+  /*
+    NATIVE-INTEGRATOR-1 (INT-04 case 4). TRY AGAIN, IN PLACE. Bumped by the
+    load error's Try again: the goal loads again on this same screen. Both of
+    its reads are fresh: the pulse is a direct call, and readOwnCredit asks the
+    server (INT-26: it never joins a read that may be hung).
+  */
+  const [loadToken, setLoadToken] = useState(0);
+  const retryLoad = useCallback(() => {
+    setState({ kind: 'loading' });
+    setLoadToken((n) => n + 1);
+  }, []);
+  // INT-12 case 5: the pulse poll below runs only while the app is in front.
+  const appInForeground = useAppInForeground();
+
   useEffect(() => {
     if (!wsfAuthEnabled) return;
     if (!ready) return;
@@ -770,7 +785,7 @@ export default function ContributeToGoal() {
     return () => {
       cancelled = true;
     };
-  }, [ready, user, goalId, groupIdHint]);
+  }, [ready, user, goalId, groupIdHint, loadToken]);
 
   // Optional labels, verified server-side before they are shown together.
   // Independent of the goal load: a failure here only means the generic
@@ -816,7 +831,11 @@ export default function ContributeToGoal() {
   // The poll starts once this screen's own fresh read has landed (`pulseAt`),
   // exactly as before PERF-MOBILE-1: opening on the account's record must not
   // send a second identical pulse alongside the fresh one (measured).
-  const shouldPoll = beforeWrite && pulseAt !== null && (state.kind === 'ready' || state.kind === 'closed');
+  // INT-12 case 5: and only while the app is in the foreground, so a count
+  // entry left open in the background sends no pulses; the poll restarts on
+  // return, and its first tick is the one refresh.
+  const shouldPoll =
+    beforeWrite && pulseAt !== null && (state.kind === 'ready' || state.kind === 'closed') && appInForeground;
   useEffect(() => {
     if (!wsfAuthEnabled) return;
     if (!ready || !user || !goalId) return;
@@ -1778,6 +1797,15 @@ export default function ContributeToGoal() {
         <View style={styles.card} testID="wsf-contribute-load-error">
           <Text style={styles.heading} {...HEADING_1}>Something went wrong</Text>
           <Text style={styles.body}>{state.message}</Text>
+          {/* INT-04 case 4: try again here, in place. */}
+          <Pressable
+            onPress={retryLoad}
+            accessibilityRole="button"
+            style={styles.primaryButton}
+            testID="wsf-contribute-load-retry"
+          >
+            <Text style={styles.primaryButtonText}>Try again</Text>
+          </Pressable>
           {/* NOT ON A SHARED DEVICE. "Back to home" is the member home of the
               account signed in right now, so on a kiosk it is a door out of the
               session and into somebody's account for whoever walks up next.
