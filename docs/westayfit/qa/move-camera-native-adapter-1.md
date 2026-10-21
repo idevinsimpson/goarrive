@@ -486,6 +486,31 @@ A coordinator diagnostic type-checked the app with Metro's native resolution (`m
 | F2: the reader's count cross-check can be balanced by a decoy string (M05) | **Subsumed by F1.** M05 changes the stripped code, so the pin fails it (self-test and mutation run above). The reader is left as it was and documented as a diagnostic only. |
 | F3: the plugin check read only own-line `id '…'`, so `id('x')`, two ids on one line and `apply plugin` passed | **Subsumed by F1.** The pin covers the whole `plugins { … }` block and every `apply`. M14, M15, M16, A and C each fail it. |
 
+## W15-1: the Adjust step adopts the shared native accessibility policies (INT-16, INT-17)
+
+The branch merges `claude/wsf-native-a11y-kit-base-1` at `a424b073`. That merge adds new files only (merge-tree clean), among them `src/ui/textScale(.native).ts` and `src/ui/stepHeadingFocus(.native).ts`. In the camera's Adjust step on the contribute screen:
+- **The adjusted number** (`adjustValue`) spreads `numeralTextProps`. On a phone it is capped at 1.3x, kept on one line, and shrinks to fit down to half size. On the web the props are empty.
+- **The Adjust heading** takes `useStepHeadingFocus`, keyed `'adjust'` while the step is Adjust and `null` otherwise, through a ref on its level-1 Text. On a phone the screen reader moves to the heading each time the step changes to Adjust (camera Finish, or Edit from the review), never on the first mount. On the web the hook is a no-op, because the sheet's focus containment already does this.
+- **Not done, per the L0 corrections:**
+  - The "Saving…" hint is dropped. `MoveCameraSettingsSection.tsx` has no saving state, and the section is hidden on native while the gate is off (CAM-02). That file is unchanged.
+  - The knob elevation (INT-31) is deferred.
+- `NATIVE_CAMERA_TELEMETRY_APPROVED` stays `false`. Nothing under `frozen/` changed.
+
+**Tests:** `tests/camera-a11y-adoption.test.tsx` (4) renders the REAL contribute screen. Firebase, auth, the router and member reads are faked, and a stub camera's Finish hands the screen 12 squats.
+- With `Platform.OS` `ios` and the `.native` twins, the number's Text gets the four numeral props, and the heading and the note get none.
+- Also on `ios`, the focus moves to the Adjust heading after camera Finish and again after Edit from the review. It does not move on the first mount, during the camera step, or on the review step.
+- With the web twins, the number gets none of the props and no line-clamp style, and the focus never moves.
+- A source check pins the two adoption sites and the one top-level hook call.
+
+**Web DOM:** the Adjust step's HTML, rendered by this harness on the web, is byte-identical before and after the change (8,230 bytes).
+
+**Mutation-checked:** five source mutants each fail the suite.
+- Dropping the spread fails the numeral test and the source check.
+- Moving the spread to the heading fails the same two.
+- Dropping the hook call fails the focus test and the source check.
+- Dropping the heading's ref fails the same two.
+- Importing `textScale.native` directly, which puts native props on the web, fails the web test and the source check.
+
 ## Deviations from the research report, and why
 
 - **Podspec at the module root**, not `ios/`. CocoaPods file patterns cannot climb out of the pod root with `..`, and the single shared model lives in `assets/`. `expo-module.config.json` `apple.podspecPath` points to it; autolinking resolves it (checked).
