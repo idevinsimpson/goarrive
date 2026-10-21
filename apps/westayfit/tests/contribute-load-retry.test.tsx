@@ -838,3 +838,70 @@ describe('W12-2: a failed refresh keeps a warm screen (INT-25); a stale sign-in 
     expect(refresh.calls).toHaveLength(0);
   });
 });
+
+/*
+  W14-L (INT-25 cases 1 and 2, parity re-audit at candidate-14): the W12-2 cases
+  above all open on the entry step (their warm() sets no mode). Here the screen
+  opens on the MOVEMENT step (mode=move), a timer is running, and the fresh read
+  fails late: the step, the running timer and the kept figures stay, and the
+  member goes on to Done, 35 and Review. A separate describe (appended), so it
+  merges apart from the W12-2 block.
+*/
+describe('W14-L: INT-25 on the movement step — a late failed fresh read keeps the step and a running timer', () => {
+  const LISTED = { goals: [{ goalId: 'g1', title: '500 squats together', status: 'active', target: 100, unit: 'squats', sharedTotal: 40 }] };
+  const COMMUNITIES = { items: [{ groupId: 'oak', displayName: 'Oak Grove Together', memberCount: 3 }] };
+  const typeInto = (el: HTMLInputElement, value: string) => {
+    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set?.call(el, value);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  const clock = () => byId('wsf-contribute-timer-clock')!.textContent;
+
+  /** This account's record already holds the goal and the member's part; the screen opens on MOVE. */
+  async function warmOnMove(os: string) {
+    (Platform as { OS: string }).OS = os;
+    vi.spyOn(Dimensions, 'get').mockReturnValue({ width: 390, height: 844, scale: 3, fontScale: 1 });
+    answers.wsfListGoals = async () => LISTED;
+    answers.wsfMyCommunities = async () => COMMUNITIES;
+    await readGoals('u1', 'oak');
+    await readOwnCredit('u1', 'g1');
+    params.value = { goalId: 'g1', groupId: 'oak', mode: 'move' };
+    calls.length = 0;
+  }
+
+  for (const platform of ['ios', 'android'] as const) {
+    it(`${platform}: the timer runs, the held read fails (functions/unavailable): the step, the running timer and the kept figures stay; Done, 35, Review`, async () => {
+      await warmOnMove(platform);
+      let fail!: (e: unknown) => void;
+      answers.wsfGoalPulse = () => new Promise((_, reject) => (fail = reject));
+      vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+      act(() => root.render(<ContributeToGoal />));
+      await settle();
+      expect(byId('wsf-contribute-move-screen')).not.toBeNull();
+      await act(async () => byId('wsf-contribute-timer-start')!.click());
+      await act(async () => vi.advanceTimersByTime(3_000));
+      expect(clock()).toBe('0:03');
+      // The fresh read fails, late, while the timer runs.
+      await act(async () => fail(Object.assign(new Error('unavailable'), { code: 'functions/unavailable' })));
+      await settle();
+      expect(byId('wsf-contribute-load-error')).toBeNull();
+      expect(byId('wsf-contribute-move-screen')).not.toBeNull();
+      expect(byId('wsf-contribute-timer-pause')).not.toBeNull();
+      expect(byId('wsf-contribute-stale-note')!.textContent).toContain('Showing the last confirmed figures.');
+      expect(clock()).toBe('0:03');
+      // It keeps running.
+      await act(async () => vi.advanceTimersByTime(2_000));
+      await settle();
+      expect(clock()).toBe('0:05');
+      expect(byId('wsf-contribute-timer-pause')).not.toBeNull();
+      // Done, 35, Review.
+      await act(async () => byId('wsf-contribute-done')!.click());
+      await settle();
+      const entry = byId('wsf-contribute-entry') as HTMLInputElement;
+      expect(entry).not.toBeNull();
+      act(() => typeInto(entry, '35'));
+      await act(async () => byId('wsf-contribute-review')!.click());
+      await settle();
+      expect(byId('wsf-contribute-review-screen')).not.toBeNull();
+    });
+  }
+});

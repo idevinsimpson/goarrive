@@ -1,3 +1,5 @@
+// The context @react-navigation/native re-exports (and expo-router's screens provide), from its own package.
+import { NavigationContext } from '@react-navigation/core';
 import { router } from 'expo-router';
 import { useContext, useEffect, useState, type ComponentType } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -5,6 +7,8 @@ import { SafeAreaInsetsContext, initialWindowMetrics } from 'react-native-safe-a
 
 import { crashHarnessEnabled, disarmAllCrashSites } from '../crashHarness.native';
 import { noteCaughtError } from '../crashRecords';
+import { getFirebaseAuth } from '../firebase';
+import { kioskStartRoute, readKioskReturnGoal, readKioskSession } from '../kioskSession';
 import { CREAM, kit } from './kit';
 import type { BoundaryProps, FallbackVariant } from './routeErrorTypes';
 
@@ -21,9 +25,11 @@ import type { BoundaryProps, FallbackVariant } from './routeErrorTypes';
  *
  * PLAIN REACT NATIVE, NO PROVIDERS. The root fallback renders in place of the
  * root layout, so the safe-area and auth providers are gone with it. This
- * component reads nothing from context: the top inset comes from
+ * component needs nothing from context: the top inset comes from
  * `initialWindowMetrics` (a constant, no provider), navigation from
- * expo-router's imperative `router`, styles from the kit.
+ * expo-router's imperative `router`, styles from the kit. Where a context IS
+ * there it is used, read without a hook that throws: the nearest safe-area
+ * inset, and a screen's own navigator for Go to Home (RV16-641-N1).
  *
  * NATIVE ONLY. This file is the iOS and Android module; the web build gets
  * src/ui/RouteErrorFallback.tsx, whose `nativeErrorBoundary` returns undefined,
@@ -44,6 +50,24 @@ import type { BoundaryProps, FallbackVariant } from './routeErrorTypes';
  * stale screen its route still names), then remounts. At the root nothing is
  * left to navigate: the request is refused, and the remount alone starts the
  * stack fresh, on its first screen, which is Home ((tabs) → (home) → index).
+ *
+ * NEVER HOME WHILE A KIOSK SESSION IS OPEN (RV15-642-F1, PRIVACY). At a phone
+ * kiosk the visitor is signed in on Sign in, Create account, verify-email or
+ * the kiosk contribution, over the kiosk's start screen. Go to Home there
+ * pushed member Home over the kiosk, signed in as the visitor on a shared
+ * device. So while a kiosk session is open (the device's durable marker, or
+ * the kiosk return armed for this account or for nobody in particular: the
+ * same rule as the sign-in screens' way out, src/ui/authRedirect.ts on the
+ * member lane) the way out is BACK TO THE KIOSK: router.dismissTo pops to the
+ * kiosk's start screen (React Navigation's POP_TO; it replaces the current
+ * route with it when it is not on the stack), and the start screen, focused
+ * again, signs the visitor out. The body says so too. The account is read
+ * from Firebase directly, inside a try (no provider is needed, and a failed
+ * read counts as nobody). It is read again at the press and fails closed: a
+ * button that said "Back to the kiosk" never goes Home. A navigator the
+ * fallback stands in for is remounted as for Home, and the kiosk asked for
+ * again once it has (at the root, the first request has no navigator to take
+ * it).
  */
 
 export type { FallbackVariant };
@@ -67,7 +91,11 @@ const COPY: Record<FallbackVariant, string> = {
 
 /**
  * Variants that stand in for a whole navigator: Go to Home also remounts it.
- * The others sit inside a live navigator, which simply moves to Home.
+ * The others sit inside a live navigator. A tab's fallback moves its tab to
+ * Home. A screen's or the contribution's sits on the ROOT stack, often
+ * presented as a modal over the tabs (Settings, MOVE, the contribution
+ * sheet), where navigate('/') pushed a SECOND (tabs) above the fallback; so
+ * those pop back to the tabs instead (RV15-634-N1).
  */
 const REMOUNTS_ON_HOME: Record<FallbackVariant, boolean> = {
   root: true,
@@ -78,8 +106,78 @@ const REMOUNTS_ON_HOME: Record<FallbackVariant, boolean> = {
   contribute: false,
 };
 
+/** New copy (RV14-642-F1, the member lane's way out), pending owner wording sign-off. */
+export const FALLBACK_WAY_OUT_KIOSK = 'Back to the kiosk';
+/** New copy (RV15-642-F1): the body while a kiosk session is open, pending owner wording sign-off. */
+export const FALLBACK_KIOSK_COPY = 'This screen hit a problem and stopped. Try again, or go back to the kiosk.';
+
+/**
+ * The goal of the kiosk session open on this device, or null. Never throws: an
+ * account that cannot be read counts as nobody in particular (the kiosk
+ * return armed at a kiosk has no owner), and each record is read on its own
+ * (RV16-641-N2): a marker read that throws still lets the kiosk return name
+ * the kiosk, rather than failing open to Go to Home.
+ */
+export function openKioskGoalForFallback(): string | null {
+  let uid: string | null = null;
+  try {
+    uid = getFirebaseAuth().currentUser?.uid ?? null;
+  } catch {
+    uid = null;
+  }
+  let marker: string | null = null;
+  try {
+    marker = readKioskSession();
+  } catch {
+    marker = null;
+  }
+  if (marker) return marker;
+  try {
+    return readKioskReturnGoal(uid);
+  } catch {
+    return null;
+  }
+}
+
+/** Root-stack variants: Home is the tabs beneath, popped back to. */
+const POPS_TO_HOME: Record<FallbackVariant, boolean> = {
+  root: false,
+  shell: false,
+  homeTab: false,
+  tab: false,
+  screen: true,
+  contribute: true,
+};
+
+/** The tabs as they stand, Home selected: contribute's own "Back to Home" (leaveFor). */
+const POP_TO_HOME_TAB = { type: 'POP_TO', payload: { name: '(tabs)', params: { screen: '(home)' } } } as const;
+
+type Dispatches = { dispatch: (action: never) => void } | undefined;
+
 /** Asks for Home; never throws (a throw in a press handler is fatal on a phone). */
-function requestHome(): void {
+function requestHome(variant: FallbackVariant, navigation: Dispatches): void {
+  if (POPS_TO_HOME[variant]) {
+    // POP_TO the tabs and select the Home tab as it stands (RV16-641-N1), as
+    // contribute's "Back to Home" does: dismissTo('/') named Home's index,
+    // which the Home stack pushed over a mounted community, whose own redirect
+    // then built a second copy of it. With nothing beneath (a cold link) the
+    // tabs replace this route. dismissTo('/') and then navigate('/') stay the
+    // fallbacks, should this screen have no navigator to dispatch to.
+    try {
+      if (navigation) {
+        navigation.dispatch(POP_TO_HOME_TAB as never);
+        return;
+      }
+    } catch {
+      // fall through to dismissTo
+    }
+    try {
+      router.dismissTo('/' as never);
+      return;
+    } catch {
+      // fall through to navigate
+    }
+  }
   try {
     router.navigate('/');
   } catch {
@@ -87,9 +185,22 @@ function requestHome(): void {
   }
 }
 
+/** Asks for the kiosk's start screen; never throws. */
+function requestKiosk(goalId: string): void {
+  try {
+    router.dismissTo(kioskStartRoute(goalId) as never);
+  } catch {
+    // The root fallback: no navigator is mounted yet; asked again after the remount.
+  }
+}
+
 export function RouteErrorFallback({ error, retry, variant }: Props) {
   const [retrying, setRetrying] = useState(false);
   const harness = crashHarnessEnabled();
+  // Read on every render (two memory reads): the way out this screen shows.
+  const shownKioskGoal = openKioskGoalForFallback();
+  // The navigator this fallback's route sits in (none at the root, or in a test without one).
+  const navigation = useContext(NavigationContext) as Dispatches;
   useEffect(() => {
     void noteCaughtError(error);
   }, [error]);
@@ -118,7 +229,7 @@ export function RouteErrorFallback({ error, retry, variant }: Props) {
           Something went wrong
         </Text>
         <Text style={kit.body} testID="wsf-route-error-body">
-          {COPY[variant]}
+          {shownKioskGoal && variant !== 'contribute' ? FALLBACK_KIOSK_COPY : COPY[variant]}
         </Text>
         <Pressable
           onPress={() => {
@@ -134,13 +245,18 @@ export function RouteErrorFallback({ error, retry, variant }: Props) {
         </Pressable>
         <Pressable
           onPress={() => {
-            requestHome();
+            // Read again at the press; fails closed to the kiosk this screen showed.
+            const kioskGoal = openKioskGoalForFallback() ?? shownKioskGoal;
+            if (kioskGoal) requestKiosk(kioskGoal);
+            else requestHome(variant, navigation);
             // After the queued navigation is dispatched (a discrete press
             // flushes its effects first), so the remount reads the new route.
             if (REMOUNTS_ON_HOME[variant]) {
               setTimeout(() => {
                 void Promise.resolve()
                   .then(retry)
+                  // At the root the first request had no navigator: ask again.
+                  .then(() => (kioskGoal ? setTimeout(() => requestKiosk(kioskGoal), 0) : undefined))
                   .catch(() => undefined);
               }, 0);
             }
@@ -149,7 +265,7 @@ export function RouteErrorFallback({ error, retry, variant }: Props) {
           accessibilityRole="button"
           testID="wsf-route-error-home"
         >
-          <Text style={kit.secondaryButtonText}>Go to Home</Text>
+          <Text style={kit.secondaryButtonText}>{shownKioskGoal ? FALLBACK_WAY_OUT_KIOSK : 'Go to Home'}</Text>
         </Pressable>
         {harness ? (
           <Pressable

@@ -26,6 +26,7 @@ import { routeAfterAuth } from '../src/pendingJoinCode';
 import { landAfterAuth } from '../src/ui/authLanding';
 import { usePostAuthDestinationsReady } from '../src/postAuthDestination';
 import { useResumeRefresh } from '../src/useResumeRefresh';
+import { nativeErrorBoundary } from '../src/ui/RouteErrorFallback';
 import { requestVerificationEmail } from '../src/verificationEmail';
 import {
   beginVerificationSend,
@@ -37,11 +38,36 @@ import {
   type VerificationSendOutcome,
 } from '../src/verificationSendState';
 
+/** INT-01: a render error here shows the contained screen fallback on iOS and Android (nothing on the web). */
+export const ErrorBoundary = nativeErrorBoundary('screen');
+
+/** The one check in flight: whose it is, and its answer (true when it routed on). */
+type CheckClaim = { uid: string; promise: Promise<boolean> | null };
+
 export default function VerifyEmail() {
   const { ready, user } = useWsfAuth();
   const [checking, setChecking] = useState(false);
-  // A check in flight (a tap, or a return to the app): a return does not start another.
-  const checkingRef = useRef(false);
+  // ONE CHECK AT A TIME (RV12-641-N1). A tap, the unconfigured poll and a
+  // return to the app all claim this before checking: one that finds it held
+  // does not start a second check (a tick skips to its next turn, a return
+  // does nothing), and each releases only its own claim, also when its check
+  // fails. Two checks in flight would both route.
+  //
+  // A TAP IS ANSWERED (RV15-641-N2). A tap that finds a silent check in flight
+  // for the same account joins it: the button shows it is checking, and the
+  // tap reports that check's answer as its own would ("Still unverified…",
+  // or the error). A check still in flight for another account (the account
+  // changed meanwhile) is waited out, and then the tap checks for itself.
+  const checkClaim = useRef<CheckClaim | null>(null);
+  const claimCheck = useCallback((uid: string): CheckClaim | null => {
+    if (checkClaim.current !== null) return null;
+    const claim: CheckClaim = { uid, promise: null };
+    checkClaim.current = claim;
+    return claim;
+  }, []);
+  const releaseCheck = useCallback((claim: CheckClaim) => {
+    if (checkClaim.current === claim) checkClaim.current = null;
+  }, []);
   const [resending, setResending] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -118,26 +144,43 @@ export default function VerifyEmail() {
       push: (href) => router.push(href as never),
       replace: (href) => router.replace(href as never),
       platform: Platform.OS,
+      // RV13-641-N2: a kiosk return pops back to the kiosk's start screen.
+      routes: () => (navigation.getState() as { routes?: ReadonlyArray<{ name: string; params?: object }> } | undefined)?.routes,
+      dismissTo: (href) => router.dismissTo(href as never),
     });
     return true;
   }, [navigation]);
 
   const onCheck = useCallback(async () => {
     if (!user) return;
-    checkingRef.current = true;
     setChecking(true);
     setError(null);
     setStatus(null);
+    let mine: CheckClaim | null = null;
     try {
-      const verified = await passThroughIfVerified(user);
+      let held = checkClaim.current;
+      if (held && held.uid !== user.uid) {
+        // Another account's check: let it finish, then check for this one.
+        await held.promise?.catch(() => undefined);
+        held = checkClaim.current;
+      }
+      let answer: Promise<boolean> | null = null;
+      if (held) {
+        answer = held.promise;
+      } else {
+        mine = claimCheck(user.uid);
+        if (mine) answer = mine.promise = passThroughIfVerified(user);
+      }
+      if (!answer) return;
+      const verified = await answer;
       if (!verified) setStatus('Still unverified. Check your inbox and try again.');
     } catch (e) {
       setError(authErrorMessage(e, 'Refresh failed.'));
     } finally {
-      checkingRef.current = false;
+      if (mine) releaseCheck(mine);
       setChecking(false);
     }
-  }, [user, passThroughIfVerified]);
+  }, [user, passThroughIfVerified, claimCheck, releaseCheck]);
 
   /*
     THE SEND OUTCOME, DERIVED ONCE AND USED BY BOTH THE EFFECT AND THE RENDER.
@@ -195,15 +238,22 @@ export default function VerifyEmail() {
 
     const tick = async () => {
       if (stopped || hidden()) return schedule();
+      // Another check is in flight (a return to the app, or this poll's own
+      // visibility tick): skip this turn rather than check twice.
+      const claim = claimCheck(user.uid);
+      if (!claim) return schedule();
       try {
         // The uid is re-checked here as well as inside the shared path: this
         // is the cheap guard, that one is the one that cannot be skipped.
         if (getFirebaseAuth().currentUser?.uid !== startedFor) return;
-        const routed = await passThroughIfVerified(user);
+        claim.promise = passThroughIfVerified(user);
+        const routed = await claim.promise;
         if (routed) stopped = true;
       } catch {
         // Silent by design. A failed refresh is not news to anybody on this
         // screen, and the screen already says what is true.
+      } finally {
+        releaseCheck(claim);
       }
       if (!stopped) schedule();
     };
@@ -232,7 +282,7 @@ export default function VerifyEmail() {
         document.removeEventListener('visibilitychange', onVisible);
       }
     };
-  }, [sendOutcome, user, passThroughIfVerified]);
+  }, [sendOutcome, user, passThroughIfVerified, claimCheck, releaseCheck]);
 
   /*
     INT-13 (part A). ON A PHONE, COMING BACK TO THE APP CHECKS AGAIN.
@@ -242,19 +292,17 @@ export default function VerifyEmail() {
     to tap the link came back to a screen that never asked. Any return from
     the background (no minimum time away) checks once through the same path:
     silently, like the poll (unverified says nothing, a failure says nothing),
-    never while a tap's check is in flight, and never routing for an account
-    that changed meanwhile (passThroughIfVerified's uid checks). The web keeps
-    its own visibility path and does nothing here.
+    never while another check is in flight (the one claim above), and never
+    routing for an account that changed meanwhile (passThroughIfVerified's uid
+    checks). The web keeps its own visibility path and does nothing here.
   */
   useResumeRefresh(
     () => {
-      if (Platform.OS === 'web' || !user || checkingRef.current) return;
-      checkingRef.current = true;
-      void passThroughIfVerified(user)
-        .catch(() => undefined)
-        .finally(() => {
-          checkingRef.current = false;
-        });
+      if (Platform.OS === 'web' || !user) return;
+      const claim = claimCheck(user.uid);
+      if (!claim) return;
+      claim.promise = passThroughIfVerified(user);
+      void claim.promise.catch(() => undefined).finally(() => releaseCheck(claim));
     },
     { minAwayMs: 0 },
   );

@@ -44,7 +44,10 @@ vi.mock('react-native', async () => {
   };
 });
 vi.mock('expo-router', () => {
-  const navigation = { dispatch: (a: unknown) => ctl.calls.push(['dispatch', a]) };
+  const navigation = {
+    dispatch: (a: unknown) => ctl.calls.push(['dispatch', a]),
+    getState: () => ({ routes: [{ name: '(tabs)' }, { name: 'verify-email' }] }),
+  };
   return {
     router: {
       replace: (h: string) => ctl.calls.push(['replace', h]),

@@ -31,6 +31,7 @@ import {
 } from '../src/authDestination';
 import { routeAfterAuth } from '../src/pendingJoinCode';
 import { landAfterAuth } from '../src/ui/authLanding';
+import { nativeErrorBoundary } from '../src/ui/RouteErrorFallback';
 import { usePostAuthDestinationsReady } from '../src/postAuthDestination';
 
 type ExistingProfile = {
@@ -38,6 +39,9 @@ type ExistingProfile = {
   acceptedTermsVersion?: string;
   acceptedPrivacyVersion?: string;
 };
+
+/** INT-01: a render error here shows the contained screen fallback on iOS and Android (nothing on the web). */
+export const ErrorBoundary = nativeErrorBoundary('screen');
 
 export default function ProfileSetup() {
   const { ready, user } = useWsfAuth();
@@ -55,6 +59,9 @@ export default function ProfileSetup() {
       push: (href) => router.push(href as never),
       replace: (href) => router.replace(href as never),
       platform: Platform.OS,
+      // RV13-641-N2: a kiosk return pops back to the kiosk's start screen.
+      routes: () => (navigation.getState() as { routes?: ReadonlyArray<{ name: string; params?: object }> } | undefined)?.routes,
+      dismissTo: (href) => router.dismissTo(href as never),
     });
   const [displayName, setDisplayName] = useState('');
   const [acceptedTerms, setAcceptedTerms] = useState(false);
