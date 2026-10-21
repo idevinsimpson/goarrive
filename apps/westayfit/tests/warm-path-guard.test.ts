@@ -61,13 +61,45 @@ vi.mock('firebase/functions', () => ({
 }));
 /*
   A hand-built `expo-router`: the real package ships untranspiled JSX that
-  jsdom's loader refuses (tests/start-community-outcomes.test.tsx). Focus
-  effects are not part of the first frame, so they do nothing here.
+  jsdom's loader refuses (tests/start-community-outcomes.test.tsx), so
+  `importOriginal` is not an option. Focus effects are not part of the first
+  frame, so they do nothing here. The rest is the minimal surface screens
+  reach for (the integrated You signs out through `useNavigation`), so a
+  screen that grows a navigation call does not break this file.
 */
-vi.mock('expo-router', () => ({
-  router: { push: () => undefined, replace: () => undefined },
-  useFocusEffect: () => undefined,
-}));
+vi.mock('expo-router', () => {
+  const router = {
+    push: () => undefined,
+    replace: () => undefined,
+    navigate: () => undefined,
+    back: () => undefined,
+    dismissTo: () => undefined,
+    canGoBack: () => false,
+  };
+  const navigation = {
+    addListener: () => () => undefined,
+    removeListener: () => undefined,
+    isFocused: () => true,
+    canGoBack: () => false,
+    dispatch: () => undefined,
+    navigate: () => undefined,
+    goBack: () => undefined,
+    setOptions: () => undefined,
+    getParent: () => undefined,
+    getState: () => ({ index: 0, routes: [] }),
+  };
+  return {
+    router,
+    useRouter: () => router,
+    useNavigation: () => navigation,
+    useFocusEffect: () => undefined,
+    usePathname: () => '/',
+    useLocalSearchParams: () => ({}),
+    useSegments: () => [],
+    Link: () => null,
+    Redirect: () => null,
+  };
+});
 vi.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
@@ -146,8 +178,12 @@ const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
 async function boot() {
   bootNative(disk);
   vi.doMock('../src/firebase', () => ({
-    getFirebaseFunctions: () => ({}),
+    getFirebaseApp: () => ({}),
     getFirebaseAuth: () => ({ currentUser: null }),
+    getFirebaseFirestore: () => ({}),
+    getFirebaseFunctions: () => ({}),
+    wsfUsingEmulators: false,
+    wsfIsStaging: false,
   }));
   vi.doMock('firebase/auth', () => ({
     signOut: async () => undefined,
