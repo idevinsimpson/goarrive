@@ -137,7 +137,7 @@ vi.mock('react-native', async () => {
 // One navigation object per screen, as the navigator gives (the native sheet
 // parts claim it, and useSheetExit asks about the same object).
 const nav = vi.hoisted(() => {
-  const state = { listeners: {} as Record<string, Array<() => void>> };
+  const state = { listeners: {} as Record<string, Array<() => void>>, focused: true };
   const navigation = {
     getState: () => ({ index: 1, routes: [{ key: 'tabs', name: '(tabs)' }, { key: 'settings-1', name: 'settings' }] }),
     addListener: (event: string, cb: () => void) => {
@@ -146,7 +146,7 @@ const nav = vi.hoisted(() => {
         state.listeners[event] = (state.listeners[event] ?? []).filter((x) => x !== cb);
       };
     },
-    isFocused: () => true,
+    isFocused: () => state.focused,
   };
   return Object.assign(state, { navigation });
 });
@@ -189,7 +189,7 @@ vi.mock('../src/ui/modalA11y', () => ({
   },
 }));
 
-import SettingsScreen from '../app/settings';
+import SettingsScreen, * as settingsRoute from '../app/settings';
 import {
   SHEET_IN_EASING,
   SHEET_OUT_EASING,
@@ -216,6 +216,7 @@ beforeEach(() => {
   fx.pref = { reduced: false, known: true, failed: false };
   fx.back = [];
   nav.listeners = {};
+  nav.focused = true;
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -227,6 +228,12 @@ afterEach(() => {
 });
 
 const show = () => act(() => root.render(<SettingsScreen />));
+/** A route presented over Settings (`blur`), or Settings back in front (`focus`). */
+const navEvent = (event: 'focus' | 'blur') =>
+  act(() => {
+    nav.focused = event === 'focus';
+    (nav.listeners[event] ?? []).slice().forEach((cb) => cb());
+  });
 const press = (testID: string) => act(() => (container.querySelector(`[data-testid="${testID}"]`) as HTMLElement).click());
 const advance = (ms: number) => act(() => vi.advanceTimersByTime(ms));
 const motionOf = (testID: string) => {
@@ -434,6 +441,57 @@ describe('lift and containment', () => {
     const el = container.querySelector('[data-testid="wsf-settings-panel"]')!;
     expect(el.getAttribute('aria-modal')).toBe('true');
     expect(el.getAttribute('role')).toBe('dialog');
+  });
+
+  it('iOS: a route presented over Settings drops the modal claim, so VoiceOver is not trapped; back in front, it returns (MO-03 F4)', () => {
+    show();
+    expect(fx.animated['wsf-settings-panel']).toMatchObject({ accessibilityViewIsModal: true });
+    navEvent('blur');
+    expect(fx.animated['wsf-settings-panel']).not.toHaveProperty('accessibilityViewIsModal');
+    expect(fx.animated['wsf-settings-panel']).toMatchObject({ 'aria-modal': true, role: 'dialog' });
+    navEvent('focus');
+    expect(fx.animated['wsf-settings-panel']).toMatchObject({ accessibilityViewIsModal: true });
+    navEvent('blur');
+    expect(fx.animated['wsf-settings-panel']).not.toHaveProperty('accessibilityViewIsModal');
+  });
+
+  it('iOS: mounted while another route is in front, it claims nothing until it comes to the front', () => {
+    nav.focused = false;
+    show();
+    expect(fx.animated['wsf-settings-panel']).not.toHaveProperty('accessibilityViewIsModal');
+    navEvent('focus');
+    expect(fx.animated['wsf-settings-panel']).toMatchObject({ accessibilityViewIsModal: true });
+  });
+
+  it('Android: unchanged, never a modal claim, in front or covered', () => {
+    fx.os = 'android';
+    show();
+    expect(fx.animated['wsf-settings-panel']).not.toHaveProperty('accessibilityViewIsModal');
+    navEvent('blur');
+    expect(fx.animated['wsf-settings-panel']).not.toHaveProperty('accessibilityViewIsModal');
+    navEvent('focus');
+    expect(fx.animated['wsf-settings-panel']).not.toHaveProperty('accessibilityViewIsModal');
+  });
+
+  it('the web: covered or in front, the panel element is the same, aria-modal and all', () => {
+    fx.os = 'web';
+    show();
+    const html = () => (container.querySelector('[data-testid="wsf-settings-panel"]')!.cloneNode(false) as HTMLElement).outerHTML;
+    const inFront = html();
+    expect(inFront).toContain('aria-modal="true"');
+    navEvent('blur');
+    expect(html()).toBe(inFront);
+    navEvent('focus');
+    expect(html()).toBe(inFront);
+    expect(fx.plain['wsf-settings-panel']).not.toHaveProperty('accessibilityViewIsModal');
+  });
+
+  it('INT-01: the route exports the contained screen boundary (undefined on the web build, which vitest loads)', () => {
+    const src = readFileSync(nodePath.resolve(__dirname, '../app/settings.tsx'), 'utf8');
+    expect(src).toContain("export const ErrorBoundary = nativeErrorBoundary('screen');");
+    expect(src).toContain("import { nativeErrorBoundary } from '../src/ui/RouteErrorFallback';");
+    expect('ErrorBoundary' in settingsRoute).toBe(true);
+    expect(settingsRoute.ErrorBoundary).toBeUndefined();
   });
 
   it('the web panel element is the View it was: same attributes, same CSS phase, the empty token adding nothing', () => {

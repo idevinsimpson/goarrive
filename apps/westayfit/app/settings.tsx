@@ -1,6 +1,6 @@
 import { router, useNavigation } from 'expo-router';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useWsfAuth } from '../src/auth';
@@ -13,9 +13,16 @@ import {
 import { lift } from '../src/ui/lift';
 import { modalPanelA11y } from '../src/ui/modalA11y';
 import { isOverMemberTabs } from '../src/ui/moveSheetRoute';
+import { nativeErrorBoundary } from '../src/ui/RouteErrorFallback';
 import { SCRIM_PROPS, sheetData, sheetHoldsStill, useSheetExit, useSheetFocusContainment } from '../src/ui/sheetMotion';
 import { SheetPanel, SheetScrim, useSideSwipeToClose } from '../src/ui/sheetMotionNative';
 import { useReducedMotionPreference } from '../src/ui/useReducedMotion';
+
+/** INT-01: a render error here shows the contained screen fallback on iOS and Android (nothing on the web). */
+export const ErrorBoundary = nativeErrorBoundary('screen');
+
+/** No modal claim: off iOS, or while a route is presented over Settings. */
+const NOT_MODAL = Object.freeze({});
 
 /**
  * SETTINGS — the hub.
@@ -49,8 +56,12 @@ export default function SettingsScreen() {
     32 pt from the right over 240 ms, leaving in 180 ms (SheetScrim and
     SheetPanel, src/ui/sheetMotionNative.tsx; on the web the same Pressable
     and View with the same props). A rightward swipe closes it. The panel
-    lifts with the platform's token (src/ui/lift.ts; nothing on the web) and
-    keeps VoiceOver inside it (modalPanelA11y; the web keeps aria-modal).
+    lifts with the platform's token (src/ui/lift.ts; nothing on the web) and,
+    on iOS, keeps VoiceOver inside it (modalPanelA11y) WHILE IT IS IN FRONT:
+    a route presented over Settings blurs it and the claim is dropped, so
+    VoiceOver is not trapped in a panel nobody sees; back in front, it
+    returns (MO-03 F4, INT-17). Android has no such prop; the web keeps
+    aria-modal, unchanged.
     Close reads the same preference as the panel's parts, through
     sheetHoldsStill as MOVE does: reduced motion, or (on a phone) a preference
     not yet heard while the panel is held unseen, closes at once rather than
@@ -65,6 +76,17 @@ export default function SettingsScreen() {
     const me = st?.routes?.[st.index ?? 0];
     return Boolean(me) && isOverMemberTabs(me!, st);
   });
+  // Whether Settings is the screen in front: re-rendered on focus and blur.
+  const [inFront, setInFront] = useState<boolean>(() => navigation.isFocused());
+  useEffect(() => {
+    setInFront(navigation.isFocused());
+    const offFocus = navigation.addListener('focus', () => setInFront(true));
+    const offBlur = navigation.addListener('blur', () => setInFront(false));
+    return () => {
+      offFocus();
+      offBlur();
+    };
+  }, [navigation]);
   // The panel's parts and its Close read one preference: not yet heard means
   // no travel, and no wait.
   const motionPreference = useReducedMotionPreference();
@@ -120,7 +142,7 @@ export default function SettingsScreen() {
         style={[st.panel, lift.panel]}
         testID="wsf-settings-panel"
         {...({ role: 'dialog', 'aria-modal': true, 'aria-label': 'Settings' } as Record<string, unknown>)}
-        {...modalPanelA11y}
+        {...(Platform.OS === 'ios' && inFront ? modalPanelA11y : NOT_MODAL)}
         {...(sheetData('side', phase) as object)}
         {...swipe}
         phase={phase}
