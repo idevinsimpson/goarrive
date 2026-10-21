@@ -2,7 +2,7 @@ import { router, useFocusEffect, useLocalSearchParams, useNavigation, usePathnam
 import { FirebaseError } from 'firebase/app';
 import { signOut } from 'firebase/auth';
 import { httpsCallable } from 'firebase/functions';
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   BackHandler,
@@ -132,6 +132,7 @@ import {
   useSheetFocusContainment,
 } from '../../src/ui/sheetMotion';
 import { SheetPanel, SheetScrim } from '../../src/ui/sheetMotionNative';
+import { liveRegion, useAnnounce } from '../../src/ui/announce';
 import { modalPanelA11y } from '../../src/ui/modalA11y';
 import { useStepHeadingFocus } from '../../src/ui/stepHeadingFocus';
 import { numeralTextProps } from '../../src/ui/textScale';
@@ -558,6 +559,9 @@ export default function ContributeToGoal() {
   const [pulseAt, setPulseAt] = useState<Date | null>(null);
   // W12-2 (INT-25, native): the last load failed while the screen was warm.
   const [refreshFailed, setRefreshFailed] = useState(false);
+  // The poll's catch reads it (RV11-641-1).
+  const refreshFailedRef = useRef(false);
+  refreshFailedRef.current = refreshFailed;
   // W12-2 (ST-06, native): this load has already refreshed the sign-in once.
   const signInRetriedRef = useRef(false);
   const [context, setContext] = useState<ScreenContext>({ kind: 'none' });
@@ -1099,6 +1103,16 @@ export default function ContributeToGoal() {
         });
       } catch (e) {
         if (cancelled) return;
+        /*
+          RV11-641-1 (native). WHILE THE LAST LOAD FAILED, A TICK'S REFUSAL IS
+          NOT A VERDICT. After a sign-in refresh that could not reach Auth, the
+          SDK sends these ticks with no Authorization, and the public pulse
+          answers the anonymous "not found": evicting the warm screen and
+          forgetting the community on that would be ST-06's own scenario made
+          worse. No authorized read has landed since the failure, so the kept
+          figures and their note stay, and a Retry's full load decides.
+        */
+        if (Platform.OS !== 'web' && refreshFailedRef.current) return;
         // A refusal is not transient: the server has decided this member no
         // longer has a route to the goal (membership lost, goal gone). The
         // screen must not keep painting a total it is no longer entitled to,
@@ -1709,6 +1723,32 @@ export default function ContributeToGoal() {
   const reviewHeadingRef = useRef<Text>(null);
   useStepHeadingFocus(step === 'enter' ? 'enter' : null, enterHeadingRef);
   useStepHeadingFocus(step === 'review' ? 'review' : null, reviewHeadingRef);
+  /*
+    W12-7 (INT-18, native). AN OUTCOME THAT REPLACES WHAT WAS ON SCREEN IS
+    SPOKEN. iOS ignores aria-live and the entry error's alert role, so on a
+    phone the refusal and the entry error announce their visible sentence,
+    once each time they appear (src/ui/announce.native.ts). The web keeps the
+    refusal's polite live region (liveRegion) and the error's alert role, and
+    useAnnounce does nothing there. One key per appearance: the refusal
+    object, and a token made whenever the error's text changes.
+  */
+  const announceIds = useRef(new WeakMap<object, number>());
+  const announceNext = useRef(0);
+  const announceKeyFor = (o: object | null): number | null => {
+    if (!o) return null;
+    let k = announceIds.current.get(o);
+    if (k === undefined) {
+      k = (announceNext.current += 1);
+      announceIds.current.set(o, k);
+    }
+    return k;
+  };
+  const refusalSpoken = refusal
+    ? refusalCopy(refusal.reason, refusal.count, state.kind === 'ready' || state.kind === 'closed' ? state.pulse.unit : '')
+    : null;
+  useAnnounce(refusalSpoken ? `Not recorded. ${refusalSpoken.headline} ${refusalSpoken.body}` : null, announceKeyFor(refusal));
+  const entryErrorToken = useMemo(() => (entryError ? {} : null), [entryError]);
+  useAnnounce(entryError, announceKeyFor(entryErrorToken));
   useFocusEffect(
     useCallback(() => {
       if (Platform.OS !== 'android' || kiosk) return undefined;
@@ -2682,7 +2722,7 @@ export default function ContributeToGoal() {
         <View
           style={styles.sheet}
           testID="wsf-contribute-refused"
-          aria-live="polite"
+          {...liveRegion}
           {...({ dataSet: { reason: refusal.reason } } as Record<string, unknown>)}
         >
           {renderSheetHead('Your attempt')}

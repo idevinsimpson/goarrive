@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
 import {
   bodyOf,
@@ -17,6 +17,7 @@ import {
 import { ACTION_GREEN, NAVY, PROGRESS_GREEN, SURFACE, elevation } from './kit';
 import { MEMBER_TAB_BAR_BODY, MEMBER_TAB_MOVE_OVERHANG } from './MemberTabBar';
 import { RefreshNote, type RefreshState } from './RefreshNote';
+import { useAnnounce } from './announce';
 
 /**
  * PROGRESS PARITY VIEW — the accepted Lovable Progress reference (`09b8a73c`,
@@ -271,17 +272,17 @@ export function ProgressParityView({ state, actions, bottomInset = 0, refresh }:
  * no STATUS and throws on anything else, which took the whole app down the
  * moment a goal read failed. `role` goes through the separate, fault-tolerant
  * ARIA enum, and react-native-web renders `role="status"` exactly as before.
- * TalkBack hears the note through a polite live region (Android only, so the
- * web DOM is unchanged; `role="status"` is already polite there).
+ * W12-7 (INT-18): on a phone the note is spoken once each time it appears
+ * (src/ui/announce.native.ts): iOS has no live region, and Android's polite
+ * region beside an explicit announcement would speak it twice, so that region
+ * is gone. The web keeps `role="status"`, which is already polite there.
  */
+export const PARTIAL_SENTENCE = 'This list is partial. Some goals couldn’t be read, so they aren’t shown or counted above.';
+
 function Partial({ onRetry }: { onRetry: () => void }) {
+  useAnnounce(PARTIAL_SENTENCE, 'partial');
   return (
-    <View
-      style={s.partial}
-      testID="wsf-activity-partial"
-      role="status"
-      accessibilityLiveRegion={Platform.OS === 'android' ? 'polite' : undefined}
-    >
+    <View style={s.partial} testID="wsf-activity-partial" role="status">
       <Text style={s.partialText}>
         <Text style={s.partialStrong}>This list is partial.</Text> Some goals couldn’t be read, so they
         aren’t shown or counted above.

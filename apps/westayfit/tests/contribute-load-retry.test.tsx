@@ -86,7 +86,7 @@ vi.mock('firebase/functions', () => ({
   },
 }));
 
-const { clearMemberReads, readGoals, readOwnCredit } = await import('../src/memberReads');
+const { clearMemberReads, peekGoals, readGoals, readOwnCredit } = await import('../src/memberReads');
 const { signOut } = await import('firebase/auth');
 const { default: ContributeToGoal } = await import('../app/contribute/[goalId]');
 
@@ -429,6 +429,39 @@ describe('W12-2: a failed refresh keeps a warm screen (INT-25); a stale sign-in 
     expect(byId('wsf-contribute-signed-out')).toBeNull();
     expect(byId('wsf-contribute-entry-screen')).not.toBeNull();
     expect(byId('wsf-contribute-stale-note')).not.toBeNull();
+  });
+
+  it('RV11-641-1: native, warm, Auth unreachable, then a heal tick answers the anonymous not-found: still warm, the note kept, the community remembered', async () => {
+    await warm('ios');
+    fakeAuth.currentUser = { uid: 'u1', getIdToken: async () => 't' };
+    refresh.result = 'offline';
+    answers.wsfGoalPulse = UNAUTHENTICATED;
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    expect(byId('wsf-contribute-stale-note')).not.toBeNull();
+    // The heal poll runs; its token-less tick gets the public pulse's anonymous answer.
+    answers.wsfGoalPulse = NOT_FOUND;
+    await pollFor(4_000);
+    expect(count('wsfGoalPulse')).toBeGreaterThanOrEqual(2);
+    expect(byId('wsf-contribute-not-found')).toBeNull();
+    expect(byId('wsf-contribute-entry-screen')).not.toBeNull();
+    expect(byId('wsf-contribute-stale-note')).not.toBeNull();
+    expect(peekGoals('u1', 'oak')).toBeDefined();
+    // Retry's full load decides: an authorized answer heals it.
+    answers.wsfGoalPulse = async () => PULSE;
+    await act(async () => byId('wsf-contribute-stale-retry')!.click());
+    await settle();
+    expect(byId('wsf-contribute-stale-note')).toBeNull();
+  });
+
+  it('web: a poll not-found still ends the screen, as before', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    answers.wsfGoalPulse = NOT_FOUND;
+    await pollFor(2_000);
+    expect(byId('wsf-contribute-not-found')).not.toBeNull();
   });
 
   it('native, unauthenticated, the refresh gives a fresh token: exactly one reload, which loads', async () => {

@@ -1,8 +1,9 @@
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
-import { Fragment } from 'react';
+import { Fragment, useEffect, useRef } from 'react';
 import { Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 import { isKioskFlag } from '../kioskSession';
+import { registerFocusTarget } from './focusTarget';
 import { ACTION_GREEN, NAVY, ON_ACTION, PROGRESS_GREEN, TEXT_MUTED, elevation } from './kit';
 import { MEMBER_SHELL_GROUND, MEMBER_SHELL_RULE } from './memberShellMetrics';
 import { TabGlyph } from './TabGlyph';
@@ -162,6 +163,11 @@ export function shellAppliesTo(pathname: string, params?: ShellRouteParams): boo
  */
 export function MemberTabBar({ state, navigation, insets, onMove }: BottomTabBarProps & { onMove: () => void }) {
   const { width } = useWindowDimensions();
+  // W12-9 (INT-17, native): where the screen reader's focus comes back when
+  // MOVE closes (src/ui/focusTarget.ts; nothing on the web, which finds the
+  // opener in the document itself).
+  const moveRef = useRef<View>(null);
+  useEffect(() => registerFocusTarget('wsf-member-tab-move', moveRef), []);
   /**
    * AT 200% TEXT ZOOM THE FOUR DESTINATIONS WRAP INSTEAD OF CLIPPING.
    *
@@ -240,6 +246,7 @@ export function MemberTabBar({ state, navigation, insets, onMove }: BottomTabBar
           {!narrow && index === 1 ? (
             <View style={styles.moveSlot}>
               <Pressable
+                ref={moveRef}
                 onPress={onMove}
                 style={styles.move}
                 testID="wsf-member-tab-move"

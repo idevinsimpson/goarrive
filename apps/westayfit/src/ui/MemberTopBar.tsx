@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { BackHandler, Dimensions, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { focusSoon, registerFocusTarget } from './focusTarget';
 import { CARD_BORDER, CREAM, INK_QUIET, NAVY, TEXT_MUTED } from './kit';
 import { MEMBER_SHELL_GROUND, MEMBER_SHELL_RULE, MEMBER_TOP_BAR_BODY } from './memberShellMetrics';
 import { WsfWordmark } from './WsfWordmark';
@@ -74,9 +75,19 @@ export function MemberTopBar({
   */
   const menuButtonRef = useRef<{ focus?: () => void } | null>(null);
   const wasOpen = useRef(menuOpen);
+  // W12-9 (INT-17, native): Settings, opened from this menu, returns the
+  // screen reader's focus here when it closes (src/ui/focusTarget.ts).
+  useEffect(() => registerFocusTarget('wsf-member-topbar-menu-button', menuButtonRef), []);
   useEffect(() => {
-    if (wasOpen.current && !menuOpen) menuButtonRef.current?.focus?.();
+    let cancel: (() => void) | undefined;
+    if (wasOpen.current && !menuOpen) {
+      // The web moves keyboard focus; on a phone `.focus()` does nothing for
+      // VoiceOver or TalkBack, so the screen reader's focus is moved instead.
+      if (Platform.OS === 'web') menuButtonRef.current?.focus?.();
+      else cancel = focusSoon(menuButtonRef);
+    }
     wasOpen.current = menuOpen;
+    return cancel;
   }, [menuOpen]);
 
   /*
