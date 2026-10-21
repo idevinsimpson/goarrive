@@ -9,7 +9,7 @@
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import type { DeviceKv } from './kvTypes';
+import { isAppKeyPrefix, type DeviceKv } from './kvTypes';
 
 // From the suffix-free contract module, never from './kv': on a phone './kv'
 // IS this file, and the alias would be circular (src/storage/kvTypes.ts).
@@ -47,6 +47,9 @@ export const deviceKv: DeviceKv = {
     }
   },
   async keysWithPrefix(prefix) {
+    // Never outside the app's namespace: Firebase Auth's `firebase:*` keys
+    // share this storage (src/storage/kvTypes.ts).
+    if (!isAppKeyPrefix(prefix)) return [];
     try {
       const keys = await AsyncStorage.getAllKeys();
       return keys.filter((k) => k.startsWith(prefix));
