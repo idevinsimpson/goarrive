@@ -20,6 +20,8 @@
  * bar until every caller has moved.
  */
 
+import { COUNT_LOCALE } from './countLocale';
+
 export type GoalStatus = 'active' | 'closed';
 
 /** T / G clamped to [0, 1]. Non-positive targets and negative totals are 0. */
@@ -116,10 +118,15 @@ export function progressPhase(
   return 'building';
 }
 
-/** Thousands-grouped count for human reading; the value itself is untouched. */
+/**
+ * Thousands-grouped count for human reading; the value itself is untouched.
+ * INT-36: on a phone always en-US ("4,999"), whatever the device's region —
+ * a German phone printed "4.999", which reads as four point nine. On the web
+ * the browser's own locale, as before (src/ui/countLocale.ts).
+ */
 export function formatCount(n: number): string {
   if (!Number.isFinite(n)) return '0';
-  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(Math.trunc(n));
+  return new Intl.NumberFormat(COUNT_LOCALE, { maximumFractionDigits: 0 }).format(Math.trunc(n));
 }
 
 /** "241 of 500 squats" */
