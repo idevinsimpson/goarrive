@@ -24,6 +24,17 @@
  * after sign-in, ST-05 lands them on member Home, not back here) leaves no
  * note that could later skip the question for an account opening another
  * kiosk link, or the same one long after.
+ *
+ * heads-10 C7-1. THE NOTE DIES WITH THE PROCESS; THE KIOSK SESSION DOES NOT.
+ * When the OS kills a phone mid-session (verify-email, /contribute?kiosk=1),
+ * the launch guard brings it back to this start screen with the visitor still
+ * signed in (state's durable marker, src/kioskSession.ts). The memory note is
+ * gone, so it used to ask, and "Stay signed in" left the previous visitor on
+ * member Home (ST-05 case 5). An open kiosk-session marker for THIS goal is
+ * now kiosk evidence in its own right: the device says a kiosk session is
+ * open here, so whoever is signed in is its visitor and goes, without asking.
+ * A marker for another goal is no evidence (the screen asks), and the web
+ * never has one (readKioskSession is null there).
  */
 
 /**
@@ -46,8 +57,10 @@ export type KioskStartDecision = 'none' | 'signOut' | 'ask';
 /**
  * What the start screen for `goalId` does on arrival. Spends the hand-off note.
  *   none     nobody is signed in;
- *   signOut  the web, or a visitor who came through this goal's kiosk hand-off
- *            within KIOSK_HANDOFF_TTL_MS;
+ *   signOut  the web; a visitor who came through this goal's kiosk hand-off
+ *            within KIOSK_HANDOFF_TTL_MS; or (C7-1) a device whose open
+ *            kiosk-session marker, `openKioskSession` (src/kioskSession.ts
+ *            `readKioskSession()`), names this goal;
  *   ask      the app, with any other account: confirm before signing out.
  */
 export function decideKioskStart(
@@ -55,11 +68,13 @@ export function decideKioskStart(
   signedIn: boolean,
   goalId: string | null | undefined,
   now: number = Date.now(),
+  openKioskSession: string | null = null,
 ): KioskStartDecision {
   const note = handoff;
   handoff = null;
   if (!signedIn) return 'none';
   if (os === 'web') return 'signOut';
+  if (typeof goalId === 'string' && openKioskSession === goalId) return 'signOut';
   const age = note ? now - note.at : -1;
   const visitor = note !== null && typeof goalId === 'string' && note.goalId === goalId && age >= 0 && age <= KIOSK_HANDOFF_TTL_MS;
   return visitor ? 'signOut' : 'ask';

@@ -140,6 +140,24 @@ describe('kioskSignOutGuard (MF-08 interim)', () => {
     expect(decideKioskStart('ios', true, undefined, T0 + 1_000)).toBe('ask');
   });
 
+  // heads-10 C7-1: the device's open kiosk-session marker (src/kioskSession.ts
+  // readKioskSession) outlives the memory note, which a relaunch loses.
+  it('an open kiosk-session marker for THIS goal is kiosk evidence, with no note at all', () => {
+    expect(decideKioskStart('ios', true, 'goal-1', T0, 'goal-1')).toBe('signOut');
+    expect(decideKioskStart('android', true, 'goal-1', T0, 'goal-1')).toBe('signOut');
+    // Long after any hand-off window: the session is still open, so still the visitor.
+    noteKioskHandoff('goal-1', T0);
+    expect(decideKioskStart('ios', true, 'goal-1', T0 + KIOSK_HANDOFF_TTL_MS + 1, 'goal-1')).toBe('signOut');
+    expect(decideKioskStart('ios', false, 'goal-1', T0, 'goal-1')).toBe('none');
+  });
+
+  it("a marker for another goal, or none, is no evidence: the app still asks", () => {
+    expect(decideKioskStart('ios', true, 'goal-1', T0, 'goal-2')).toBe('ask');
+    expect(decideKioskStart('ios', true, 'goal-1', T0, null)).toBe('ask');
+    expect(decideKioskStart('ios', true, null, T0, 'goal-1')).toBe('ask');
+    expect(decideKioskStart('web', true, 'goal-1', T0, 'goal-2')).toBe('signOut');
+  });
+
   it('a clock that went backwards does not count either', () => {
     noteKioskHandoff('goal-1', T0);
     expect(decideKioskStart('ios', true, 'goal-1', T0 - 1)).toBe('ask');
