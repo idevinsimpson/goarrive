@@ -12,6 +12,7 @@ import {
   SURFACE,
   TEXT_MUTED,
 } from './kit';
+import { formatCount } from './progressFormat';
 
 /**
  * THE SHARED SOCIAL PIECES — presence initials and the momentum list.
@@ -168,7 +169,7 @@ export function MomentumRow({ row, first }: { row: ActivityRow; first: boolean }
           {named ? row.displayName : 'Anonymous member'}
         </Text>
         <Text style={styles.momentumWhat}>
-          added {row.amount.toLocaleString()}
+          added {formatCount(row.amount)}
           {row.unit ? ` ${row.unit}` : ''}
           {row.at ? ` · ${relativeWhen(row.at)}` : ''}
         </Text>
