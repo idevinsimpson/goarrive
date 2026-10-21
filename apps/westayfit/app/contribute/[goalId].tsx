@@ -29,11 +29,13 @@ import {
   ATTEMPT_CONFLICT_NOTICE,
   ATTEMPT_NOT_SENT_NOTICE,
   NOT_SAVED_NOTICE,
+  RECORDING_HEADING,
   REPLAY_OFFLINE_NOTICE,
   REPLAY_SIGN_IN_NOTICE,
   RESTORE_FAILED_BODY,
   RESTORE_FAILED_HEADING,
   RESTORE_RETRY_LABEL,
+  UNKNOWN_OUTCOME_HEADING,
   canAddMore,
   classifyContributeError,
   isDefiniteRefusal,
@@ -100,6 +102,8 @@ import { PROGRESS_GREEN } from '../../src/ui/brandAssets';
 import { ButtonLink } from '../../src/ui/ButtonLink';
 import { formatClock } from '../../src/ui/dates';
 import { LivingWeProgress } from '../../src/ui/LivingWeProgress';
+import { liveRegion } from '../../src/ui/announce';
+import { SpokenOnce } from '../../src/ui/SpokenOnce';
 import { TogetherCompletion } from '../../src/ui/TogetherCompletion';
 import { TOGETHER_COLORS } from '../../src/ui/togetherMotion';
 import {
@@ -2188,7 +2192,7 @@ export default function ContributeToGoal() {
             <View
               style={styles.togetherBody}
               testID="wsf-contribute-receipt"
-              aria-live="polite"
+              {...liveRegion}
               {...({ dataSet: { variant } } as Record<string, unknown>)}
             >
               <TogetherCompletion
@@ -2484,11 +2488,13 @@ export default function ContributeToGoal() {
     return screen(
       <>
         {renderChrome(false)}
-        <View style={styles.sheet} testID="wsf-contribute-recording" aria-live="polite">
+        <View style={styles.sheet} testID="wsf-contribute-recording" {...liveRegion}>
+          {/* W13-4: said once per attempt on a phone; the live region speaks on web. */}
+          <SpokenOnce message={RECORDING_HEADING} announceKey={`${pending.attemptId}:sending`} />
           {renderSheetHead('Your attempt')}
           <View style={styles.sheetBody}>
             <ActivityIndicator color={NAVY} size="large" />
-            <Text style={styles.stepHeading} {...HEADING_1}>Recording your contribution…</Text>
+            <Text style={styles.stepHeading} {...HEADING_1}>{RECORDING_HEADING}</Text>
             <Text style={styles.stepBody}>{effortLabel(pending.count, unitKnown)}</Text>
           </View>
         </View>
@@ -2524,10 +2530,15 @@ export default function ContributeToGoal() {
           shared total is untouched, nothing offers to discard the attempt, and
           nothing says "nothing was counted" -- none of that is known.
         */}
-        <View style={styles.sheet} testID="wsf-contribute-pending" aria-live="polite">
+        <View style={styles.sheet} testID="wsf-contribute-pending" {...liveRegion}>
+          {/* W13-4: said once per attempt on a phone, with the one-line notice when there is one. */}
+          <SpokenOnce
+            message={attemptNotice ? `${UNKNOWN_OUTCOME_HEADING} ${attemptNotice}` : UNKNOWN_OUTCOME_HEADING}
+            announceKey={`${pending.attemptId}:unknown`}
+          />
           {renderSheetHead('Your attempt')}
           <View style={styles.sheetBody}>
-            <Text style={styles.stepHeading} {...HEADING_1}>We couldn’t confirm your contribution yet.</Text>
+            <Text style={styles.stepHeading} {...HEADING_1}>{UNKNOWN_OUTCOME_HEADING}</Text>
             <Text style={styles.stepBody} testID="wsf-contribute-pending-count">
               {'You entered '}
               <Text style={styles.pendingAmount}>{effortLabel(pending.count, unitKnown)}</Text>
@@ -2767,7 +2778,9 @@ export default function ContributeToGoal() {
     return screen(
       <>
         {renderChrome(false)}
-        <View style={styles.sheet} testID="wsf-contribute-restore-failed" aria-live="polite">
+        <View style={styles.sheet} testID="wsf-contribute-restore-failed" {...liveRegion}>
+          {/* W13-4: said once on a phone, while this screen stays up. */}
+          <SpokenOnce message={RESTORE_FAILED_HEADING} announceKey="restore-failed" />
           {renderSheetHead('Your attempt')}
           <View style={styles.sheetBody}>
             <Text style={styles.stepHeading} {...HEADING_1}>{RESTORE_FAILED_HEADING}</Text>
