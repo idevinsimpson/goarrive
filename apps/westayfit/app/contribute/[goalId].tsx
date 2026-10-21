@@ -1711,6 +1711,9 @@ export default function ContributeToGoal() {
       step,
       initialStep: initialStep === 'move' ? 'move' : 'enter',
       asSheet,
+      // The closed, not-found, sign-in, error and loading screens, and the
+      // unreadable-attempt screen, all render in front of the step.
+      stepShown: state.kind === 'ready' && !(restoreFailed && beforeWrite),
     },
     edit: onEdit,
   };

@@ -16,6 +16,10 @@ import { attemptAtRiskOnLeave, type PendingContribution } from './pendingContrib
  *       control stays the deliberate way out;
  *   (b) a settled screen (a receipt, a refusal, or an unknown attempt the
  *       device kept): the sheet closes like Close; a page goes back;
+ *   (b2) a screen that does not draw the step (the goal closed, not found,
+ *       the sign-in screen, an error, loading, the unreadable-attempt
+ *       screen): as (b), so Back never walks steps nobody can see
+ *       (RV11-641-2);
  *   (c) review: back to the entry, keeping the count;
  *   (d) adjust: nothing (unreachable on a phone while the camera gate is off);
  *   (e) entry opened from the movement step: back to it, with the timer still
@@ -39,6 +43,8 @@ export type ContributeBackSnapshot = {
   initialStep: 'move' | 'enter';
   /** Presented as the sheet over the member's tab (Close exits it), or a page. */
   asSheet: boolean;
+  /** The step is what is on screen (the goal is ready and no other screen stands in front of it). */
+  stepShown: boolean;
 };
 
 /** consume: Back does nothing; close: the sheet's Close; edit: review to entry; toMove: entry to movement; pass: the navigator's own Back. */
@@ -58,6 +64,7 @@ export function contributeBackAction(s: ContributeBackSnapshot): ContributeBackA
     return 'consume';
   }
   if (s.hasResult || s.hasRefusal || (s.pending?.state === 'unknown' && s.pendingDurable)) return leave;
+  if (!s.stepShown) return leave;
   if (s.step === 'review') return 'edit';
   if (s.step === 'adjust') return 'consume';
   if (s.step === 'enter') return s.initialStep === 'move' ? 'toMove' : leave;
