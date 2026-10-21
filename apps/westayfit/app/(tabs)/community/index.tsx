@@ -1,7 +1,7 @@
 import { router, useFocusEffect } from 'expo-router';
 import { httpsCallable } from 'firebase/functions';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useWsfAuth } from '../../../src/auth';
@@ -692,11 +692,22 @@ function FailureBody({ onRetry }: { onRetry: () => void }) {
         <Pill
           label="Start a community"
           testID="wsf-community-index-start"
-          onPress={() => router.replace('/start-community')}
+          onPress={openStartCommunity}
         />
       </View>
     </View>
   );
+}
+
+/**
+ * NATIVE-MEMBER-1 W16-7 (INT-20). On a phone, Start a community opens OVER
+ * the tabs (a push), so its confirmed create can dismiss back into them
+ * (app/start-community.tsx); a replace swapped the tab itself for the form.
+ * The web keeps replace, its address bar unchanged.
+ */
+function openStartCommunity(): void {
+  if (Platform.OS === 'web') router.replace('/start-community');
+  else router.push('/start-community' as never);
 }
 
 /* ── no memberships ──────────────────────────────────────────────────────── */
@@ -718,7 +729,7 @@ function EmptyBody() {
         <View style={styles.emptyRule} />
         <Text style={styles.emptyOr}>Or start your own and invite people to it.</Text>
         <Pressable
-          onPress={() => router.replace('/start-community')}
+          onPress={openStartCommunity}
           accessibilityRole="link"
           accessibilityLabel="Start a community"
           style={styles.primary}

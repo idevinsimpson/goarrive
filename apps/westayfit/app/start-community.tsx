@@ -2,7 +2,7 @@ import { router, useNavigation } from 'expo-router';
 import { onAuthStateChanged } from 'firebase/auth';
 import { httpsCallable } from 'firebase/functions';
 import { useEffect, useRef, useState } from 'react';
-import { StyleSheet, Text, View, type TextInput } from 'react-native';
+import { Platform, StyleSheet, Text, View, type TextInput } from 'react-native';
 
 import { useWsfAuth } from '../src/auth';
 import { AuthFlagOffPanel } from '../src/AuthFlagOffPanel';
@@ -143,6 +143,22 @@ const COMMUNITY_LIST_HREF = '/?view=communities';
  * IS the failure, whatever caused it.
  */
 const NAVIGATION_GRACE_MS = 1500;
+
+/**
+ * NATIVE-MEMBER-1 W16-7 (INT-20). ON A PHONE THE NEW COMMUNITY OPENS IN THE
+ * TABS ALREADY THERE. This screen sits on the root stack over (tabs) (the
+ * Community tab pushes it on a phone), and `router.replace` swapped it for a
+ * SECOND (tabs) holding the community. `router.dismissTo` pops this screen
+ * and opens /community/<id> in the existing tabs' Home stack, the way MOVE
+ * and the contribution flow leave (app/move/index.tsx, contribute/[goalId]).
+ * A successful dismiss unmounts this screen as a replace did, so the grace
+ * check below still holds. The web keeps replace, its address bar as before.
+ */
+function openCommunity(groupId: string): void {
+  const href = `/community/${groupId}`;
+  if (Platform.OS === 'web') router.replace(href);
+  else router.dismissTo(href as never);
+}
 
 export default function StartCommunity() {
   const { ready, user } = useWsfAuth();
@@ -471,16 +487,17 @@ export default function StartCommunity() {
     }
 
     try {
-      router.replace(`/community/${reached.groupId}`);
+      openCommunity(reached.groupId);
     } catch {
       // A platform that fails loudly and synchronously.
       offerTheCommunity('unopened');
       return;
     }
-    // …and the web, which does not. The replace above targets this screen,
-    // because this screen is the focused one, so a successful navigation
-    // removes it; still being mounted after the grace period means it did not
-    // happen. The guards inside make this a no-op when it did.
+    // …and the web, which does not. The replace above (the web) targets this
+    // screen, because this screen is the focused one, and the dismiss (a
+    // phone) pops it, so a successful navigation removes it either way; still
+    // being mounted after the grace period means it did not happen. The guards
+    // inside make this a no-op when it did.
     if (navTimer.current) clearTimeout(navTimer.current);
     navTimer.current = setTimeout(() => offerTheCommunity('unopened'), NAVIGATION_GRACE_MS);
   }
@@ -489,7 +506,7 @@ export default function StartCommunity() {
     // Re-navigation only. This must never call the callable: the community is
     // already there, and a second create would be a second community.
     forgetUnacknowledgedCreate(groupId);
-    router.replace(`/community/${groupId}`);
+    openCommunity(groupId);
   }
 
   /*

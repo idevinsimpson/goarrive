@@ -1,8 +1,8 @@
-import { router } from 'expo-router';
+import { router, useNavigation } from 'expo-router';
 import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
-import { useEffect, useRef, useState } from 'react';
-import type { TextInput } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Platform, type TextInput } from 'react-native';
 
 import { useWsfAuth } from '../src/auth';
 import { AuthFlagOffPanel } from '../src/AuthFlagOffPanel';
@@ -21,6 +21,8 @@ import { authErrorCode, authErrorMessage, isEmailAlreadyInUse } from '../src/aut
 import { wsfAuthEnabled } from '../src/featureFlags';
 import { getFirebaseAuth, getFirebaseFirestore } from '../src/firebase';
 import { routeAfterAuth } from '../src/pendingJoinCode';
+import { landAfterAuth } from '../src/ui/authLanding';
+import { REDIRECT_FAILED_SENTENCE } from '../src/ui/authRedirect';
 import { requestVerificationEmail } from '../src/verificationEmail';
 import { beginVerificationSend, recordVerificationSend } from '../src/verificationSendState';
 
@@ -44,6 +46,24 @@ export default function SignUp() {
   */
   const inFlight = useRef(false);
 
+  // W16-7 (INT-20, MF-16): as signin.tsx. The terminal hop lands through
+  // landAfterAuth (on a phone, Home only with the destination pushed over it;
+  // on the web, replace as before), and an offline profile read has a way out
+  // on a phone. The web keeps its Loading branch.
+  const navigation = useNavigation();
+  const land = useCallback(
+    (next: string) =>
+      landAfterAuth(next, {
+        dispatch: (action) => navigation.dispatch(action as never),
+        push: (href) => router.push(href as never),
+        replace: (href) => router.replace(href as never),
+        platform: Platform.OS,
+      }),
+    [navigation],
+  );
+  const [redirectFailed, setRedirectFailed] = useState(false);
+  const [redirectAttempt, setRedirectAttempt] = useState(0);
+
   // Already-signed-in short-circuit — mirror of signin.tsx. A member with a
   // live session landing on /signup would otherwise be handed a form asking
   // them to create the account they already have. Route to whichever gate
@@ -51,28 +71,35 @@ export default function SignUp() {
   useEffect(() => {
     if (!ready || !user) return;
     let cancelled = false;
+    setRedirectFailed(false);
     (async () => {
       if (!user.emailVerified) {
         if (!cancelled) router.replace('/verify-email');
         return;
       }
-      const db = getFirebaseFirestore();
-      const profileSnap = await getDoc(doc(db, 'wsfMemberProfiles', user.uid));
-      if (cancelled) return;
-      if (!profileSnap.exists()) {
-        router.replace('/profile-setup');
+      let next: string;
+      try {
+        const db = getFirebaseFirestore();
+        const profileSnap = await getDoc(doc(db, 'wsfMemberProfiles', user.uid));
+        if (cancelled) return;
+        if (!profileSnap.exists()) {
+          router.replace('/profile-setup');
+          return;
+        }
+        // Waits for the pending join code to have been read (a phone reads it
+        // from storage at launch) and honours it only for this account.
+        next = await routeAfterAuth('/', user.uid);
+      } catch {
+        if (!cancelled) setRedirectFailed(true);
         return;
       }
-      // Waits for the pending join code to have been read (a phone reads it
-      // from storage at launch) and honours it only for this account.
-      const next = await routeAfterAuth('/', user.uid);
       if (cancelled) return;
-      router.replace(next as never);
+      land(next);
     })();
     return () => {
       cancelled = true;
     };
-  }, [ready, user]);
+  }, [ready, user, redirectAttempt, land]);
 
   if (!wsfAuthEnabled) {
     return <AuthFlagOffPanel title="Create your account" testID="wsf-signup-disabled" />;
@@ -81,6 +108,26 @@ export default function SignUp() {
   // Same-shape guard as signin — avoid flashing a "Create account" form to
   // someone the useEffect above is already about to redirect.
   if (!ready || user) {
+    if (user && redirectFailed && Platform.OS !== 'web') {
+      return (
+        <FormShell heading="Start moving together." testID="wsf-signup-redirect-failed">
+          <ErrorText testID="wsf-signup-redirect-error">{REDIRECT_FAILED_SENTENCE}</ErrorText>
+          <SubmitButton
+            label="Try again"
+            onPress={() => setRedirectAttempt((n) => n + 1)}
+            submitting={false}
+            testID="wsf-signup-redirect-retry"
+          />
+          <SubmitButton
+            label="Back to home"
+            variant="tertiary"
+            onPress={() => land('/')}
+            submitting={false}
+            testID="wsf-signup-redirect-home"
+          />
+        </FormShell>
+      );
+    }
     return (
       <FormShell heading="Start moving together." testID="wsf-signup-loading">
         <StatusText>Loading…</StatusText>
@@ -185,7 +232,9 @@ export default function SignUp() {
         autoCorrect={false}
         spellCheck={false}
         autoComplete="email"
-        textContentType="emailAddress"
+        // W16-7 (INT-24): iOS offers the saved sign-in for a 'username' field;
+        // autoComplete stays 'email' (the web's autocomplete attribute).
+        textContentType={Platform.OS === 'ios' ? 'username' : 'emailAddress'}
         inputMode="email"
         keyboardType="email-address"
         returnKeyType="next"
