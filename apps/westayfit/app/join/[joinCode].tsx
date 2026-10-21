@@ -1,8 +1,8 @@
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useWsfAuth } from '../../src/auth';
 import { AuthFlagOffPanel } from '../../src/AuthFlagOffPanel';
@@ -39,9 +39,11 @@ import {
   takeJoinEventContextWithin,
 } from '../../src/joinEventHandoff';
 import { routeAfterJoin } from '../../src/stationSession';
+import { landAfterAuth } from '../../src/ui/authLanding';
 import { readEventParam } from '../../src/ui/eventLinks';
 import { ButtonLink } from '../../src/ui/ButtonLink';
 import { DeviceChoice, SharedScreenNotice } from '../../src/ui/DeviceChoice';
+import { nativeErrorBoundary } from '../../src/ui/RouteErrorFallback';
 import {
   ACTION_GREEN,
   CREAM,
@@ -76,7 +78,13 @@ type JoinState =
   // one a lie.
   | { kind: 'error'; title: string; message: string };
 
+/** INT-01: a render error here shows the contained screen fallback on iOS and Android (nothing on the web). */
+export const ErrorBoundary = nativeErrorBoundary('screen');
+
 export default function JoinPage() {
+  // The root stack's navigation object (this route is one of its screens), for
+  // the finished join's landing (landAfterAuth).
+  const navigation = useNavigation();
   const params = useLocalSearchParams<{ joinCode: string; event?: string; activity?: string }>();
   const joinCode = typeof params.joinCode === 'string' ? params.joinCode.trim() : '';
   /**
@@ -323,8 +331,21 @@ export default function JoinPage() {
       // Keep the community destination above. Nothing is said to the member:
       // the join worked and they are about to arrive.
     }
-    router.replace(destination as never);
-  }, [joinCode, user]);
+    // W13-6a (INT-20): the finished join is a terminal hop, so it lands
+    // through landAfterAuth. On a phone the root stack is reset to Home only
+    // and the destination pushed over it: a `replace` from this root screen
+    // to a route inside the tabs swapped this screen for a SECOND (tabs)
+    // stack, and Back led into the stale one. A kiosk destination is still
+    // replaced (RV12-641-F1), and the web replaces, exactly as before. The
+    // shared-screen hops to the kiosk (onChooseShared, the notice's
+    // Continue) are gates, and keep `replace`.
+    landAfterAuth(destination, {
+      dispatch: (action) => navigation.dispatch(action as never),
+      push: (href) => router.push(href as never),
+      replace: (href) => router.replace(href as never),
+      platform: Platform.OS,
+    });
+  }, [joinCode, navigation, user]);
 
   if (!wsfAuthEnabled) {
     return <AuthFlagOffPanel title="Join a community" testID="wsf-join-disabled" />;
