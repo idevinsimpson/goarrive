@@ -6,7 +6,7 @@
  * merged. Its tests come with it, unchanged in substance, so the port is held
  * to exactly the behaviour that was reviewed.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
@@ -899,6 +899,17 @@ describe('camera settings', () => {
 });
 
 describe('the Playwright manual-flow fixture is test-harness only', () => {
+  /*
+    playwright.config.ts imports @playwright/test, a large external package. Loading it is the only
+    slow part of the storage test below: about 2 s at a load average of 12 (measured), and 6.8 s
+    and 8.9 s in two loaded full runs, against the 5 s test timeout. Node caches it and
+    vi.resetModules() does not unload it, so it is loaded once here, outside the timed test,
+    under an explicit timeout for that one import. The test then re-evaluates only the small
+    config module (about 16 ms), twice, as before.
+  */
+  beforeAll(async () => {
+    await import('@playwright/test');
+  }, 60_000);
   it('the product default stays ON/ON, and no product source reads the harness or the test default', () => {
     expect(DEFAULT_MOVE_CAMERA_SETTINGS).toEqual({ cameraCounter: true, stickFigure: true });
     const product = ['src/movement-camera/flow.ts', 'src/movement-camera/settingsStore.ts', 'src/movement-camera/MoveCameraSettingsSection.tsx', 'app/settings.tsx', 'app/contribute/[goalId].tsx'];
