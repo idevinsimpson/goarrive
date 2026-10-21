@@ -28,6 +28,8 @@ const fx = vi.hoisted(() => ({
   os: 'android' as 'ios' | 'android' | 'web',
   focused: [] as unknown[],
   spoken: [] as string[],
+  // W12-23 (RV17-641-F1): announcements and focus moves, in the order they happened.
+  events: [] as string[],
   registered: [] as string[],
 }));
 vi.mock('react-native', async () => {
@@ -46,9 +48,18 @@ vi.mock('react-native', async () => {
     AppState: { currentState: 'active', addEventListener: () => ({ remove: () => undefined }) },
     AccessibilityInfo: {
       ...actual.AccessibilityInfo,
-      setAccessibilityFocus: (node: unknown) => fx.focused.push(node),
-      announceForAccessibility: (message: string) => fx.spoken.push(message),
-      announceForAccessibilityWithOptions: (message: string) => fx.spoken.push(message),
+      setAccessibilityFocus: (node: unknown) => {
+        fx.focused.push(node);
+        fx.events.push(`focus:${(node as HTMLElement | null)?.textContent ?? ''}`);
+      },
+      announceForAccessibility: (message: string) => {
+        fx.spoken.push(message);
+        fx.events.push(`announce:${message}`);
+      },
+      announceForAccessibilityWithOptions: (message: string) => {
+        fx.spoken.push(message);
+        fx.events.push(`announce:${message}`);
+      },
     },
     InteractionManager: { runAfterInteractions: (cb: () => void) => (cb(), { cancel: () => undefined }) },
     findNodeHandle: (x: unknown) => x,
@@ -88,11 +99,18 @@ vi.mock('../src/ui/announce', async () => {
 });
 
 const params = { value: { goalId: 'g1' } as Record<string, string> };
+let navListeners: Record<string, Array<() => void>> = {};
 const router = { replace: vi.fn(), push: vi.fn(), back: vi.fn(), canGoBack: () => true, dismissTo: vi.fn(), navigate: vi.fn() };
 const navigation = {
   dispatch: vi.fn(),
   isFocused: () => true,
-  addListener: () => () => undefined,
+  // W12-23 (RV17-641-F3): recorded, so a test can say the sheet was covered (emitNav).
+  addListener: (event: string, cb: () => void) => {
+    (navListeners[event] ??= []).push(cb);
+    return () => {
+      navListeners[event] = (navListeners[event] ?? []).filter((x) => x !== cb);
+    };
+  },
   setOptions: vi.fn(),
   getParent: () => undefined,
   // Over the member's tabs: with mode=move this is MOVE's sheet, without it the page.
@@ -147,6 +165,7 @@ vi.mock('firebase/functions', () => ({
 const { clearMemberReads } = await import('../src/memberReads');
 const { IOS_FOCUS_DELAY_MS } = await import('../src/ui/accessibilityFocus');
 const { default: ContributeToGoal } = await import('../app/contribute/[goalId]');
+const { default: MoveResolver } = await import('../app/move/index');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -191,6 +210,9 @@ beforeEach(() => {
   fx.focused.length = 0;
   fx.spoken.length = 0;
   fx.registered.length = 0;
+  fx.events.length = 0;
+  navListeners = {};
+  router.replace.mockReset();
   params.value = { goalId: 'g1' };
   clearMemberReads();
   localStorage.clear();
@@ -290,7 +312,8 @@ describe('W12-20 on a phone: presented as the MOVE sheet, Close takes the focus 
     const close = byId('wsf-contribute-close');
     expect(close).not.toBeNull();
     expect(fx.focused).toEqual([close]);
-    expect(fx.registered).toContain('wsf-contribute-close');
+    // RV17-641-F4: no flow returns focus to it, so it is not a registered target.
+    expect(fx.registered).not.toContain('wsf-contribute-close');
     await press('wsf-contribute-done');
     await recordFromEntry();
     expect(texts().slice(0, 3)).toEqual(['Close', 'How many squats did you complete?', 'Review your contribution']);
@@ -335,9 +358,75 @@ describe('W12-20 on the web: no focus call (the sheet containment does it)', () 
   });
 });
 
+describe('W12-23 (heads-15) on a phone', () => {
+  const ONE_COMMUNITY = { items: [{ groupId: 'oak', displayName: 'Oak Grove Together' }] };
+  const ONE_GOAL = {
+    goals: [{ goalId: 'g1', title: '500 squats together', target: 5000, unit: 'squats', status: 'active', endsAt: '2030-01-01T00:00:00.000Z', sharedTotal: 1240 }],
+  };
+  const flush = async () => {
+    for (let i = 0; i < 10; i += 1) await act(async () => undefined);
+  };
+
+  it.each(['android', 'ios'] as const)('RV17-641-F2, %s: a cold-read hand-off focuses exactly once, on the contribution sheet\'s Close (MOVE\'s Close never)', async (os) => {
+    fx.os = os;
+    if (os === 'ios') vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    // MOVE opens with no record: it reads, and its communities read is still out.
+    let resolveMine!: (v: unknown) => void;
+    answers.wsfMyCommunities = () => new Promise((r) => (resolveMine = r));
+    answers.wsfListGoals = async () => ONE_GOAL;
+    act(() => root.render(<MoveResolver />));
+    await flush();
+    expect(byId('wsf-move-close')).not.toBeNull();
+    // Longer than iOS's 400 ms wait, shorter than MOVE's fallback: nothing is focused.
+    if (os === 'ios') act(() => vi.advanceTimersByTime(600));
+    expect(fx.focused).toEqual([]);
+    // The read finds one open goal: MOVE hands to its flow.
+    await act(async () => resolveMine(ONE_COMMUNITY));
+    await flush();
+    expect(router.replace).toHaveBeenCalledWith('/contribute/g1?groupId=oak&mode=move');
+    if (os === 'ios') act(() => vi.advanceTimersByTime(5_000));
+    expect(fx.focused).toEqual([]);
+    // The router puts the contribution sheet in MOVE's place.
+    act(() => root.unmount());
+    root = createRoot(container);
+    params.value = { goalId: 'g1', groupId: 'oak', mode: 'move' };
+    await render();
+    expect(fx.focused).toEqual([byId('wsf-contribute-close')]);
+    if (os === 'ios') act(() => vi.advanceTimersByTime(5_000));
+    expect(fx.focused).toHaveLength(1);
+  });
+
+  it('RV17-641-F3, iOS: something opening over the contribution sheet inside the 400 ms wait cancels its Close\'s focus', async () => {
+    fx.os = 'ios';
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    params.value = { goalId: 'g1', mode: 'move' };
+    act(() => root.render(<ContributeToGoal />));
+    await flush();
+    expect(byId('wsf-contribute-close')).not.toBeNull();
+    act(() => vi.advanceTimersByTime(200));
+    expect(fx.focused).toEqual([]);
+    act(() => (navListeners.blur ?? []).slice().forEach((cb) => cb()));
+    act(() => vi.advanceTimersByTime(5_000));
+    expect(fx.focused).toEqual([]);
+  });
+
+  it.each(['android', 'ios'] as const)('RV17-641-F1 (pinned, not changed), %s: the receipt is announced first and its headline focused after; whether the focus cuts the announcement short is a device check', async (os) => {
+    fx.os = os;
+    if (os === 'ios') vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    await render();
+    await recordFromEntry();
+    const announced = fx.events.findIndex((e) => e.startsWith('announce:Recorded:'));
+    const focused = fx.events.lastIndexOf(`focus:${headline()!.textContent}`);
+    expect(announced).toBeGreaterThanOrEqual(0);
+    expect(focused).toBeGreaterThan(announced);
+    expect(fx.events.filter((e) => e.startsWith('announce:Recorded:'))).toHaveLength(1);
+  });
+});
+
 describe('W12-20 site scan', () => {
   it('the receipt focus is keyed on the attempt the receipt confirms, member receipts only, on the headline TogetherCompletion is given', () => {
-    expect(ROUTE).toContain('useStepHeadingFocus(lastResult && !kiosk ? `receipt:${receiptAttemptId}` : null, togetherHeadingRef);');
+    // RV17-641-F4: no `!kiosk` term; the kiosk case above is the behavioural guard.
+    expect(ROUTE).toContain('useStepHeadingFocus(lastResult ? `receipt:${receiptAttemptId}` : null, togetherHeadingRef);');
     expect(ROUTE.match(/headingRef=\{togetherHeadingRef\}/g)).toHaveLength(1);
     expect(ROUTE.match(/setReceiptAttemptId\(/g)).toHaveLength(1);
   });

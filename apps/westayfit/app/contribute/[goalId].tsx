@@ -135,7 +135,7 @@ import {
 import { SheetPanel, SheetScrim } from '../../src/ui/sheetMotionNative';
 import { liveRegion, useAnnounce } from '../../src/ui/announce';
 import { modalPanelA11y } from '../../src/ui/modalA11y';
-import { focusSoon, registerFocusTarget } from '../../src/ui/focusTarget';
+import { focusSoon } from '../../src/ui/focusTarget';
 import { useStepHeadingFocus } from '../../src/ui/stepHeadingFocus';
 import { useReducedMotion, useReducedMotionPreference } from '../../src/ui/useReducedMotion';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -590,17 +590,15 @@ export default function ContributeToGoal() {
     The web's containment puts keyboard focus on the panel's first control,
     Close (useSheetFocusContainment, below); off the web it does nothing. MOVE
     with one open goal hands straight to this sheet, so on iOS and Android its
-    Close is a registered focus target (src/ui/focusTarget.ts) and takes the
-    screen reader's focus once, when the sheet first appears (after the
-    presentation settles; about 400 ms later on iOS). Something opening over
-    it first, or the sheet going, cancels that. The page mode has no Close and
-    keeps the platform's own arrival. Nothing on the web.
+    Close takes the screen reader's focus once, when the sheet first appears
+    (src/ui/focusTarget.ts: after the presentation settles; about 400 ms later
+    on iOS). Something opening over it first (a blur), or the sheet going,
+    cancels that. The page mode has no Close and keeps the platform's own
+    arrival. Nothing on the web. W12-23 (RV17-641-F4): it is not registered as
+    a focus target -- no flow returns focus to it (no opener or fallback names
+    it) -- so only this first focus acts.
   */
   const sheetCloseRef = useRef<View>(null);
-  useEffect(() => {
-    if (Platform.OS === 'web' || !asSheet) return undefined;
-    return registerFocusTarget('wsf-contribute-close', sheetCloseRef);
-  }, [asSheet]);
   useEffect(() => {
     if (Platform.OS === 'web' || !asSheet) return undefined;
     const cancel = focusSoon(sheetCloseRef);
@@ -1884,11 +1882,18 @@ export default function ContributeToGoal() {
     screen reader's focus, once per receipt (keyed on the attempt it
     confirms). The receipt's own announcement is unchanged: once, with the
     confirmed figures (TogetherCompletion's useAnnounce, INT-18). The kiosk's
-    plain receipt is not moved to. Nothing on the web, where the sheet
-    containment re-orients focus.
+    plain receipt is not moved to, because the ref reaches only the member
+    receipt's headline: TogetherCompletion, which a kiosk never renders.
+    W12-23 (RV17-641-F4): the key no longer repeats that as `!kiosk`, a term
+    nothing at run time depended on; the kiosk case in
+    tests/contribute-receipt-heading-focus.test.tsx fails if a kiosk receipt
+    ever gains this ref. Nothing on the web, where the sheet containment
+    re-orients focus. The announcement comes first and the headline's focus
+    after it (at once on Android, 400 ms later on iOS); whether the focus cuts
+    the announcement short is a device check (RV17-641-F1).
   */
   const togetherHeadingRef = useRef<Text>(null);
-  useStepHeadingFocus(lastResult && !kiosk ? `receipt:${receiptAttemptId}` : null, togetherHeadingRef);
+  useStepHeadingFocus(lastResult ? `receipt:${receiptAttemptId}` : null, togetherHeadingRef);
   /*
     W12-7 (INT-18, native). AN OUTCOME THAT REPLACES WHAT WAS ON SCREEN IS
     SPOKEN. iOS ignores aria-live and the entry error's alert role, so on a
