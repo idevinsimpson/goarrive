@@ -130,7 +130,7 @@ describe('W16-6 / MF-10: the challenge\'s "Back to community"', () => {
   ])('web, %s: still a link to /community/g1', async (_l, setup) => {
     setup();
     await render(<Challenge />);
-    const anchors = [...container.querySelectorAll('a')].filter((a) => a.textContent?.includes('Back to community'));
+    const anchors = Array.from(container.querySelectorAll('a')).filter((a) => a.textContent?.includes('Back to community'));
     expect(anchors).toHaveLength(1);
     expect(anchors[0]!.getAttribute('href')).toBe('/community/g1');
     expect(byId('wsf-challenge-none-back')).toBeNull();
