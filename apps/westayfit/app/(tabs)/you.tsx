@@ -340,6 +340,7 @@ function youFromRecord(uid: string): Screen | null {
 
 /** W13-12: the loading page, as a failed load sees another account's page (`shownRef` below). */
 const LOADING: Screen = { kind: 'loading' };
+const SIGNED_OUT: Screen = { kind: 'signedOut' };
 
 /**
  * RV15-639-N2. WHETHER A PAGE A FAILED LOAD WOULD KEEP IS ONE ITS FRESH READ
@@ -376,15 +377,27 @@ export default function You() {
     () => (ready && user ? youFromRecord(user.uid) : null) ?? { kind: 'loading' },
   );
   /*
+    W13-12 (privacy). THE ACCOUNT THE SCREEN WAS SET FOR: each load sets it
+    with the screen it starts on. A screen set for one account is never
+    drawn for another, or for nobody. Right after a switch, before the new
+    account's own load has set its screen, the page draws loading; signed
+    out, the signed-out card, from auth state alone. The previous account's
+    community or name is never drawn, and a load of the account that left,
+    landing late, draws nothing.
+  */
+  const [screenFor, setScreenFor] = useState<string | null>(() => (ready && user ? user.uid : null));
+  const uidNow = ready && user ? user.uid : null;
+  const drawn: Screen = ready && !user ? SIGNED_OUT : uidNow !== null && screenFor !== uidNow ? LOADING : screen;
+  /*
     W13-12 (RV16-C15-1). THE PAGE ON SCREEN and the account it is drawn for:
     what a failed load judges (`fail` below), not the page the load began on,
     which a focus may have redrawn since. Mirrored on every render (this tree
-    has no single setScreen to set it from), so it is the page last rendered;
+    has no single setScreen to set it from), so it is the page last drawn;
     a load reads it only after its own reads have answered, when its own
     first setScreen has long been rendered.
   */
   const shownRef = useRef<{ uid: string | null; screen: Screen }>({ uid: null, screen: LOADING });
-  shownRef.current = { uid: ready && user ? user.uid : null, screen };
+  shownRef.current = { uid: uidNow, screen: drawn };
   const [signingOut, setSigningOut] = useState(false);
   const [reloads, setReloads] = useState(0);
   // A page that came up before the phone's remembered community was read
@@ -475,6 +488,7 @@ export default function You() {
     const recorded = reloads > 0 ? null : youFromRecord(uid);
     const keep = keepOnScreen.current;
     keepOnScreen.current = false;
+    setScreenFor(uid);
     setScreen((prev) => recorded ?? (keep && prev.kind !== 'loading' ? prev : { kind: 'loading' }));
     setStale(false);
     setChecking(false);
@@ -630,7 +644,7 @@ export default function You() {
 
   return (
     <YouParityView
-      state={screen}
+      state={drawn}
       email={user?.email ?? null}
       signingOut={signingOut}
       refresh={{ checking, stale, onRetry: reload }}

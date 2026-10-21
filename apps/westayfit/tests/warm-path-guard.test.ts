@@ -25,8 +25,11 @@ import { assertNoUnhandledRejections, useUnhandledRejectionGuard } from './unhan
 
 const h = vi.hoisted(() => ({
   uid: 'member-a',
-  /** One object, as the real auth context keeps it: both routes' effects depend on its identity. */
-  user: { uid: 'member-a', email: null as string | null },
+  /**
+   * One object, as the real auth context keeps it: both routes' effects depend
+   * on its identity. A test that switches account or signs out replaces it.
+   */
+  user: { uid: 'member-a', email: null as string | null } as null | { uid: string; email: string | null },
   /** Every `state.kind` YouParityView was rendered with, in order (`member:<groupId>` for a member). */
   youFrames: [] as string[],
   /** Every current community CommunityParityView was rendered for, in order. */
@@ -45,6 +48,8 @@ const h = vi.hoisted(() => ({
   youRetry: null as null | (() => void),
   /** Whether You last said its figures are stale. */
   youStale: null as null | boolean,
+  /** Every state You drew, in order. */
+  youStates: [] as Array<{ kind: string; community?: { groupId: string }; profile?: { displayName: string | null } }>,
   /** The state You last drew (a failed page carries the community it failed in). */
   youState: null as null | { kind: string; community?: { groupId: string }; profile?: { displayName: string | null } },
   /** Communities whose goals read fails (RV15-639-N2). */
@@ -72,9 +77,9 @@ vi.mock('../src/memberReads', () => ({
     if (h.goalsFail.has(groupId)) throw new Error('offline');
     return { goals: [] };
   },
-  readMemberProfile: async () => {
+  readMemberProfile: async (uid: string) => {
     if (h.profileFail) throw new Error('offline');
-    return { displayName: h.profileName, createdAt: null };
+    return { displayName: uid === h.uid ? h.profileName : 'Bea', createdAt: null };
   },
   readOwnCredit: async () => ({ ownCredit: 0, unit: 'reps' }),
   wasRefused: (_uid: string | null, groupId: string) => h.refused.has(groupId),
@@ -156,7 +161,7 @@ vi.mock('../src/ui/CommunityParityView', () => ({
 }));
 vi.mock('../src/ui/YouParityView', () => ({
   YouParityView: (props: {
-    state: { kind: string; community?: { groupId: string } };
+    state: { kind: string; community?: { groupId: string }; profile?: { displayName: string | null } };
     actions?: { onRetry?: () => void };
     refresh?: { stale?: boolean };
   }) => {
@@ -164,6 +169,7 @@ vi.mock('../src/ui/YouParityView', () => ({
     h.youStale = props.refresh?.stale ?? null;
     const s = props.state;
     h.youState = s;
+    h.youStates.push(s);
     h.youFrames.push(s.kind === 'member' ? `member:${s.community?.groupId}` : s.kind);
     return null;
   },
@@ -236,6 +242,8 @@ beforeEach(() => {
   h.youRetry = null;
   h.youStale = null;
   h.youState = null;
+  h.youStates.length = 0;
+  h.user = { uid: h.uid, email: null };
   h.goalsFail.clear();
   h.goalsAsked.length = 0;
   h.focus = null;
@@ -347,6 +355,13 @@ async function render(route: 'community' | 'you') {
     testIds: () => {
       take(observer.takeRecords());
       return seen;
+    },
+    /** Render the route again (the auth context changed), inside act, and let what it starts land. */
+    rerender: async () => {
+      await React.act(async () => {
+        root.render(React.createElement(Screen));
+        for (let i = 0; i < 10; i += 1) await tick();
+      });
     },
     /** Run `fn` inside act and let what it starts land. */
     act: async (fn: () => void) => {
@@ -821,6 +836,71 @@ describe('RV16: a failed load judges the page on screen', () => {
     await you.settle();
     expect(h.youFrames.at(-1)).toBe('member:g2');
     expect(h.youState?.profile?.displayName).toBe('Bea');
+  });
+
+  /*
+    W13-12 (privacy). A load in flight when the account changes. Its failure
+    never keeps or draws the account that left; the account now signed in
+    sees loading or its own failed page, never the previous one's community
+    or name. (Only A has a record here; B's profile reads "Bea".)
+  */
+  itTimed('privacy: the account switches to B while A’s load is in flight: A’s page is never drawn for B; B’s failed page is B’s', async () => {
+    disk.map.set(REMEMBERED_KEY, 'g2');
+    const cc = await boot();
+    await cc.currentCommunityReady();
+    const you = await render('you');
+    expect(h.youFrames[0]).toBe('member:g2');
+    expect(h.youState?.profile?.displayName).toBe('Ann');
+    const from = h.youStates.length;
+    h.user = { uid: 'member-b', email: null };
+    await you.rerender();
+    expect(h.youStates.length).toBeGreaterThan(from);
+    expect(h.youStates.slice(from).every((st) => st.kind === 'loading')).toBe(true);
+    // A's and B's membership reads both fail.
+    h.fresh.fail(new Error('offline'));
+    await you.until(() => h.youFrames.at(-1) === 'failed', 'B’s failed page');
+    await you.settle();
+    const forB = h.youStates.slice(from);
+    expect(forB.some((st) => st.kind === 'member')).toBe(false);
+    expect(forB.some((st) => st.community?.groupId === 'g2')).toBe(false);
+    expect(forB.some((st) => st.profile?.displayName === 'Ann')).toBe(false);
+    expect(h.youState?.kind).toBe('failed');
+    expect(h.youState?.profile?.displayName).toBe('Bea');
+    expect(h.youStale).not.toBe(true);
+  });
+
+  itTimed('privacy: A signs out while A’s load is in flight: after the sign-out only the signed-out card is drawn, even when A’s load fails', async () => {
+    disk.map.set(REMEMBERED_KEY, 'g2');
+    const cc = await boot();
+    await cc.currentCommunityReady();
+    const you = await render('you');
+    expect(h.youFrames[0]).toBe('member:g2');
+    const from = h.youStates.length;
+    h.user = null;
+    await you.rerender();
+    h.fresh.fail(new Error('offline'));
+    await you.settle();
+    await you.settle();
+    const after = h.youStates.slice(from);
+    expect(after.length).toBeGreaterThan(0);
+    expect(after.map((st) => st.kind)).toEqual(after.map(() => 'signedOut'));
+  });
+
+  itTimed('privacy: A signs out while A’s load is in flight and A’s load then lands: still only the signed-out card', async () => {
+    disk.map.set(REMEMBERED_KEY, 'g2');
+    const cc = await boot();
+    await cc.currentCommunityReady();
+    const you = await render('you');
+    expect(h.youFrames[0]).toBe('member:g2');
+    const from = h.youStates.length;
+    h.user = null;
+    await you.rerender();
+    h.fresh.land({ items: TWO });
+    await you.settle();
+    await you.settle();
+    const after = h.youStates.slice(from);
+    expect(after.length).toBeGreaterThan(0);
+    expect(after.map((st) => st.kind)).toEqual(after.map(() => 'signedOut'));
   });
 });
 
