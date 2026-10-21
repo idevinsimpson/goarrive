@@ -174,6 +174,17 @@ export function kioskRemainingMs(startedAt: number, now: number, totalMs = KIOSK
 
 /** Whole seconds to show. Rounds UP, so "1 second" is on screen for the last
  * whole second rather than flicking to 0 while time is still left. */
+/**
+ * The countdown line, or null when the session clock is not running —
+ * nothing is going to end the session (a request in flight, a restore being
+ * retried), so nothing may say it is about to. `kioskRemainingSeconds` turns
+ * an unstarted clock (+Infinity) into 0, which would read "Finishing now…".
+ */
+export function kioskCountdownText(startedAt: number | null, now: number, totalMs: number = KIOSK_IDLE_MS): string | null {
+  if (startedAt == null) return null;
+  return kioskCountdownLabel(kioskRemainingSeconds(kioskRemainingMs(startedAt, now, totalMs)));
+}
+
 export function kioskRemainingSeconds(remainingMs: number): number {
   if (!Number.isFinite(remainingMs) || remainingMs <= 0) return 0;
   return Math.ceil(remainingMs / 1000);
@@ -251,7 +262,12 @@ export type KioskRestInput = {
  * signs out.
  */
 export function kioskScreenSettled(s: { stateKind: string; restoreFailed: boolean; beforeWrite: boolean }): boolean {
-  return s.stateKind === 'closed' || s.stateKind === 'notFound' || s.stateKind === 'error' || (s.restoreFailed && s.beforeWrite);
+  if (s.stateKind === 'closed' || s.stateKind === 'notFound' || s.stateKind === 'error') return true;
+  // The paused screen is only drawn over a READY goal (the loading,
+  // signed-out and other load states return before it), so the restore
+  // clause counts only there: the clock must not start under a screen that
+  // shows no Finish bar.
+  return s.stateKind === 'ready' && s.restoreFailed && s.beforeWrite;
 }
 
 export function kioskMayFinishUnattended(input: KioskRestInput): boolean {
