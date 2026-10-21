@@ -25,6 +25,8 @@ const fx = vi.hoisted(() => ({
   values: [] as Array<{ v: number }>,
   timings: [] as FakeTiming[],
   styles: {} as Record<string, unknown>,
+  props: {} as Record<string, Record<string, unknown>>,
+  focused: [] as unknown[],
 }));
 
 vi.mock('react-native', async () => {
@@ -61,6 +63,7 @@ vi.mock('react-native', async () => {
       ref: React.Ref<HTMLDivElement>,
     ) {
       fx.styles[props.testID ?? kind] = props.style;
+      fx.props[props.testID ?? kind] = props;
       return React.createElement(
         'div',
         {
@@ -87,8 +90,15 @@ vi.mock('react-native', async () => {
       select: (o: Record<string, unknown>) => (fx.os in o ? o[fx.os] : o.default),
     },
     Animated: { ...actual.Animated, Value, timing, View: AnimatedView, createAnimatedComponent: () => AnimatedPressable },
+    // W12-9: the screen reader's focus, recorded; interactions settle at once.
+    AccessibilityInfo: { ...actual.AccessibilityInfo, setAccessibilityFocus: (node: unknown) => fx.focused.push(node) },
+    InteractionManager: { runAfterInteractions: (cb: () => void) => (cb(), { cancel: () => undefined }) },
+    findNodeHandle: (x: unknown) => x,
   };
 });
+// W12-9: the phone's twins (Metro's resolution), not the web stubs vitest would load.
+vi.mock('../src/ui/modalA11y', async () => import('../src/ui/modalA11y.native'));
+vi.mock('../src/ui/stepHeadingFocus', async () => import('../src/ui/stepHeadingFocus.native'));
 
 const nav = vi.hoisted(() => ({ back: [] as string[], listeners: {} as Record<string, Array<() => void>>, focused: true }));
 const params = { value: { goalId: 'g1', mode: 'move' } as Record<string, string> };
@@ -181,6 +191,8 @@ beforeEach(() => {
   fx.values.length = 0;
   fx.timings.length = 0;
   fx.styles = {};
+  fx.props = {};
+  fx.focused.length = 0;
   nav.back = [];
   nav.listeners = {};
   nav.focused = true;
@@ -291,5 +303,47 @@ describe('3b: the web keeps its own sheet', () => {
     expect(nav.back).toEqual([]);
     act(() => vi.advanceTimersByTime(SHEET_OUT_MS));
     expect(nav.back).toEqual(['back']);
+  });
+});
+
+describe('W12-9 (INT-17) on the contribution sheet', () => {
+  const typeInto = (el: HTMLInputElement, value: string) => {
+    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set?.call(el, value);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  const press = async (id: string) => {
+    await act(async () => byId(id)!.click());
+    await settle();
+  };
+  const lastFocused = () => (fx.focused[fx.focused.length - 1] as HTMLElement | undefined)?.textContent;
+
+  it('iOS: the panel keeps VoiceOver inside it (accessibilityViewIsModal), alongside the web aria-modal spread', async () => {
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    const props = fx.props['wsf-contribute-sheet-panel']!;
+    expect(props.accessibilityViewIsModal).toBe(true);
+    expect(props['aria-modal']).toBe(true);
+    expect(props.role).toBe('dialog');
+  });
+
+  it('the web twin adds nothing (the web panel has aria-modal and an inert tab behind)', async () => {
+    const web = await vi.importActual<typeof import('../src/ui/modalA11y')>('../src/ui/modalA11y');
+    expect(web.modalPanelA11y).toEqual({});
+  });
+
+  it('Android: each new step moves the screen reader to its heading; never on the first mount', async () => {
+    fx.os = 'android';
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    expect(byId('wsf-contribute-move-screen')).not.toBeNull();
+    expect(fx.focused).toHaveLength(0);
+    await press('wsf-contribute-done');
+    expect(lastFocused()).toBe('How many squats did you complete?');
+    act(() => typeInto(byId('wsf-contribute-entry') as HTMLInputElement, '35'));
+    await press('wsf-contribute-review');
+    expect(lastFocused()).toBe('Review your contribution');
+    await press('wsf-contribute-edit');
+    expect(lastFocused()).toBe('How many squats did you complete?');
+    expect(fx.focused).toHaveLength(3);
   });
 });

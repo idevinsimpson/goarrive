@@ -1,14 +1,16 @@
 import { Tabs, useNavigation, useRouter } from 'expo-router';
 import { signOut } from 'firebase/auth';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Platform, View } from 'react-native';
 
 import { useWsfAuth } from '../../src/auth';
+import { useKioskLaunchHolding } from '../../src/kioskLaunchGuard';
 import { getFirebaseAuth } from '../../src/firebase';
 import { wsfTheme } from '../../src/theme';
 import { armTabsFocusReturnTo, useTabsFocusReturn } from '../../src/ui/focusReturn';
 import { useReducedMotion } from '../../src/ui/useReducedMotion';
 import { MemberTabBar } from '../../src/ui/MemberTabBar';
+import { isMoveSheetRoute, isOverMemberTabs } from '../../src/ui/moveSheetRoute';
 import {
   MemberShellActionsProvider,
   useMemberShellActions,
@@ -66,6 +68,18 @@ export default function MemberTabsLayout() {
     the next person to sign in on the same device.
   */
   const { user } = useWsfAuth();
+  /*
+    ST-05 (ESC-2). NEVER HOME FIRST ON A KIOSK RELAUNCH. Until the launch
+    guard (app/_layout.tsx, src/kioskLaunchGuard.ts) has decided whether this
+    phone was a kiosk mid-session, and acted on it, the member tabs draw only
+    the app's ground: no top bar, no tab, no member screen, nothing started.
+    The root Stack around this stays mounted (the guard's replace needs it).
+    Never on web: holding is false from the first render there.
+  */
+  const holding = useKioskLaunchHolding();
+  if (holding) {
+    return <View style={{ flex: 1, backgroundColor: wsfTheme.colors.background }} testID="wsf-member-tabs-holding" />;
+  }
   return (
     <MemberShellActionsProvider ownerUid={user?.uid ?? null}>
       <MemberShell />
@@ -112,6 +126,34 @@ function MemberShell() {
   // The root stack (this layout is its `(tabs)` screen): Home's wordmark and
   // the menu's Sign out both act on it.
   const rootNavigation = useNavigation();
+  /*
+    W12-9 (INT-17, native). WHILE A SHEET OR A PANEL COVERS THE TABS, THE
+    SCREEN READER CANNOT REACH THEM. MOVE, the contribution flow and Settings
+    are presented over this shell and leave it mounted; on the web the shell
+    is made inert (src/ui/focusReturn.ts), but on a phone VoiceOver and
+    TalkBack could still swipe into the tab behind. So when this screen loses
+    focus to a route over it (a MOVE sheet, or anything directly over the
+    tabs) it is hidden from them, and shown again when it is in front.
+  */
+  const [covered, setCovered] = useState(false);
+  useEffect(() => {
+    if (Platform.OS === 'web') return undefined;
+    type Route = { key: string; name: string; params?: object };
+    const nav = rootNavigation as unknown as {
+      addListener: (event: 'blur' | 'focus', cb: () => void) => () => void;
+      getState: () => { index?: number; routes: Route[] } | undefined;
+    };
+    const offBlur = nav.addListener('blur', () => {
+      const st = nav.getState();
+      const top = st?.routes?.[st.index ?? 0];
+      setCovered(Boolean(top) && (isMoveSheetRoute(top!, st) || isOverMemberTabs(top!, st)));
+    });
+    const offFocus = nav.addListener('focus', () => setCovered(false));
+    return () => {
+      offBlur();
+      offFocus();
+    };
+  }, [rootNavigation]);
 
   /**
    * THE MENU HOLDS THE QUIET GLOBAL UTILITIES, AND NOTHING THAT DOES NOT WORK.
@@ -194,7 +236,13 @@ function MemberShell() {
     } as never);
 
   return (
-    <View ref={shellRef} style={{ flex: 1, backgroundColor: wsfTheme.colors.background }}>
+    <View
+      ref={shellRef}
+      style={{ flex: 1, backgroundColor: wsfTheme.colors.background }}
+      {...(Platform.OS !== 'web' && covered
+        ? { accessibilityElementsHidden: true, importantForAccessibility: 'no-hide-descendants' as const }
+        : null)}
+    >
       {signedIn ? (
         <MemberTopBar
           menu={menu}

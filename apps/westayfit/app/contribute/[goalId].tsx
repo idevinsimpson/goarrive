@@ -132,6 +132,7 @@ import {
   useSheetFocusContainment,
 } from '../../src/ui/sheetMotion';
 import { SheetPanel, SheetScrim } from '../../src/ui/sheetMotionNative';
+import { modalPanelA11y } from '../../src/ui/modalA11y';
 import { useStepHeadingFocus } from '../../src/ui/stepHeadingFocus';
 import { numeralTextProps } from '../../src/ui/textScale';
 import { useReducedMotion, useReducedMotionPreference } from '../../src/ui/useReducedMotion';
@@ -1698,6 +1699,16 @@ export default function ContributeToGoal() {
     },
     edit: onEdit,
   };
+  /*
+    W12-9 (INT-17, native). The count and review steps replace each other in
+    place, taking the control the member pressed with them; the new step's
+    heading takes the screen reader's focus (src/ui/stepHeadingFocus.native.ts,
+    never on the first mount). The web's sheet containment already does this.
+  */
+  const enterHeadingRef = useRef<Text>(null);
+  const reviewHeadingRef = useRef<Text>(null);
+  useStepHeadingFocus(step === 'enter' ? 'enter' : null, enterHeadingRef);
+  useStepHeadingFocus(step === 'review' ? 'review' : null, reviewHeadingRef);
   useFocusEffect(
     useCallback(() => {
       if (Platform.OS !== 'android' || kiosk) return undefined;
@@ -2039,6 +2050,8 @@ export default function ContributeToGoal() {
           ]}
           testID="wsf-contribute-sheet-panel"
           {...({ role: 'dialog', 'aria-modal': true, 'aria-label': sheetTitle } as Record<string, unknown>)}
+          // W12-9 (INT-17): aria-modal does nothing on a phone; iOS keeps VoiceOver in the panel itself.
+          {...modalPanelA11y}
           {...(sheetData('panel', sheetPhase) as object)}
           phase={sheetPhase}
           preference={motionPreference}
@@ -3063,7 +3076,7 @@ export default function ContributeToGoal() {
         <View style={styles.sheet} testID="wsf-contribute-review-screen">
           {renderSheetHead(params.mode === 'move' ? 'Start moving' : 'Already moved')}
           <View style={styles.sheetBody}>
-            <Text style={styles.stepHeading} {...HEADING_1}>Review your contribution</Text>
+            <Text ref={reviewHeadingRef} style={styles.stepHeading} {...HEADING_1}>Review your contribution</Text>
             <View style={styles.reviewBox}>
               <Text style={styles.reviewQuantity} testID="wsf-contribute-review-quantity">
                 {formatCount(reviewCount)}
@@ -3348,7 +3361,7 @@ export default function ContributeToGoal() {
       {renderChrome(true)}
       {renderGoalAnchor()}
       <View style={styles.card} testID="wsf-contribute-entry-screen">
-        <Text style={styles.entryHeading} {...HEADING_1}>{`How many ${unit} did you complete?`}</Text>
+        <Text ref={enterHeadingRef} style={styles.entryHeading} {...HEADING_1}>{`How many ${unit} did you complete?`}</Text>
         {(() => {
           const minus = (
             <Pressable

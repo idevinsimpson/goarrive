@@ -22,6 +22,12 @@ const state = {
   /** Use the real readKioskSession (null on web) instead of the stub marker. */
   realMarker: false,
   ready: true,
+  /** false: a phone's device storage (the launch read is asynchronous, so the guard holds). */
+  syncStorage: true,
+  /** What the root Stack renders: nothing, or the member tabs layout (ESC-2 cases). */
+  stackChild: null as ReactNode,
+  /** Each time the member tabs rendered, how many replaces had been issued by then. */
+  tabsRenders: [] as number[],
 };
 const params = { value: { goalId: 'g1' } as Record<string, string> };
 const router = { replace: vi.fn(), push: vi.fn(), back: vi.fn(), canGoBack: () => true, dismissTo: vi.fn(), navigate: vi.fn() };
@@ -33,10 +39,17 @@ const navigation = {
   getState: () => ({ index: 1, routes: [{ name: '(tabs)' }, { name: 'contribute/[goalId]' }] }),
 };
 vi.mock('expo-router', () => {
-  const Stack = () => <div data-testid="root-stack" />;
+  const Stack = () => <div data-testid="root-stack">{state.stackChild}</div>;
   Stack.Screen = () => null;
+  // The member tabs navigator: records when it renders, relative to the guard's replace.
+  const Tabs = () => {
+    state.tabsRenders.push(router.replace.mock.calls.length);
+    return <div data-testid="member-tabs" />;
+  };
+  Tabs.Screen = () => null;
   return {
     Stack,
+    Tabs,
     Link: ({ href, children }: { href: string; children: ReactNode }) => <a href={href}>{children}</a>,
     router,
     useRouter: () => router,
@@ -51,6 +64,26 @@ vi.mock('react-native-safe-area-context', () => ({
   SafeAreaProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
   initialWindowMetrics: { insets: { top: 0, bottom: 0, left: 0, right: 0 }, frame: { x: 0, y: 0, width: 390, height: 844 } },
+}));
+vi.mock('../src/storage/syncRead', async () => {
+  const actual = await vi.importActual<typeof import('../src/storage/syncRead')>('../src/storage/syncRead');
+  return {
+    ...actual,
+    get HAS_SYNC_STORAGE() {
+      return state.syncStorage;
+    },
+  };
+});
+vi.mock('../src/ui/MemberTabBar', async () => {
+  const actual = await vi.importActual<typeof import('../src/ui/MemberTabBar')>('../src/ui/MemberTabBar');
+  return { ...actual, MemberTabBar: () => null };
+});
+vi.mock('../src/ui/TabSceneFade', () => ({ TabSceneFade: ({ children }: { children: ReactNode }) => <>{children}</> }));
+vi.mock('../src/ui/focusReturn', () => ({
+  armTabsFocusReturn: () => undefined,
+  armTabsFocusReturnTo: () => undefined,
+  useTabsFocusReturn: () => undefined,
+  useSheetFocusReturn: () => undefined,
 }));
 vi.mock('../src/crashContainment', () => ({}));
 vi.mock('../src/crashHarness', () => ({ fireAsyncCrashFaults: () => undefined, injectedRenderFault: () => undefined }));
@@ -97,6 +130,7 @@ vi.mock('../src/kioskSession', async () => {
 
 const { default: RootLayout } = await import('../app/_layout');
 const { resetKioskLaunchGuardForTests } = await import('../src/kioskLaunchGuard');
+const { default: MemberTabsLayout } = await import('../app/(tabs)/_layout');
 const { KIOSK_SESSION_MARKER_KEY } = await import('../src/kioskSession');
 const { clearMemberReads } = await import('../src/memberReads');
 const { default: ContributeToGoal } = await import('../app/contribute/[goalId]');
@@ -116,6 +150,9 @@ beforeEach(() => {
   state.marker = null;
   state.realMarker = false;
   state.ready = true;
+  state.syncStorage = true;
+  state.stackChild = null;
+  state.tabsRenders = [];
   auth.user = USER;
   params.value = { goalId: 'g1' };
   router.replace.mockClear();
@@ -136,14 +173,16 @@ afterEach(() => {
 });
 
 describe('W12-1: AppShell mounts the kiosk launch guard', () => {
-  it('(a) exactly once, inside AppShell (under WsfAuthProvider), not in RootLayout', () => {
+  it('(a) exactly once, in a component of its own that draws nothing, under WsfAuthProvider; not in AppShell (RV10-641-1)', () => {
     const layout = readFileSync(join(APP_ROOT, 'app/_layout.tsx'), 'utf8');
     expect(layout.match(/useKioskLaunchGuard\(\)/g)).toHaveLength(1);
+    expect(layout).toMatch(/function KioskLaunchGuard\(\) \{\s*useKioskLaunchGuard\(\);\s*return null;\s*\}/);
     const shell = layout.slice(layout.indexOf('function AppShell()'));
-    const rootLayout = layout.slice(layout.indexOf('export default function RootLayout()'), layout.indexOf('function AppShell()'));
-    expect(shell).toContain('useKioskLaunchGuard();');
-    expect(rootLayout).not.toContain('useKioskLaunchGuard');
-    expect(rootLayout.indexOf('<WsfAuthProvider>')).toBeLessThan(rootLayout.indexOf('<AppShell />'));
+    expect(shell).not.toContain('useKioskLaunchGuard');
+    expect(shell).not.toContain('KioskLaunchHolding');
+    const rootLayout = layout.slice(layout.indexOf('export default function RootLayout()'), layout.indexOf('function KioskLaunchGuard()'));
+    expect(rootLayout.indexOf('<WsfAuthProvider>')).toBeLessThan(rootLayout.indexOf('<KioskLaunchGuard />'));
+    expect(rootLayout.indexOf('<KioskLaunchGuard />')).toBeLessThan(rootLayout.indexOf('</WsfAuthProvider>'));
   });
 
   it('(b) native, a marker for g1: the launch replaces to /kiosk/g1 exactly once', async () => {
@@ -190,6 +229,71 @@ describe('W12-1: AppShell mounts the kiosk launch guard', () => {
     await settle();
     expect(router.replace).not.toHaveBeenCalled();
     sessionStorage.clear();
+  });
+});
+
+describe('ESC-2: the member tabs hold back until the launch decision; the Stack stays mounted', () => {
+  const tabs = () => container.querySelector('[data-testid="member-tabs"]');
+  const holdingGround = () => container.querySelector('[data-testid="wsf-member-tabs-holding"]');
+  const stack = () => container.querySelector('[data-testid="root-stack"]');
+  /** A phone: device storage, so the launch read is asynchronous and the guard holds. */
+  const phone = (os: 'ios' | 'android') => {
+    setOs(os);
+    state.syncStorage = false;
+    resetKioskLaunchGuardForTests();
+  };
+
+  it('kiosk relaunch (marker g1): no member content while holding, the Stack mounted; the replace comes before any tab', async () => {
+    phone('ios');
+    state.marker = 'g1';
+    state.stackChild = <MemberTabsLayout />;
+    act(() => root.render(<RootLayout />));
+    // The first frame: the ground only, inside a mounted root Stack.
+    expect(stack()).not.toBeNull();
+    expect(holdingGround()).not.toBeNull();
+    expect(tabs()).toBeNull();
+    expect(container.querySelector('[data-testid="wsf-member-topbar"]')).toBeNull();
+    await settle();
+    expect(router.replace).toHaveBeenCalledWith('/kiosk/g1');
+    // Every render of the member tabs came after the replace was issued.
+    expect(state.tabsRenders.every((replaces) => replaces >= 1)).toBe(true);
+  });
+
+  it('no marker: the member tabs render once the read has found nothing', async () => {
+    phone('android');
+    state.stackChild = <MemberTabsLayout />;
+    act(() => root.render(<RootLayout />));
+    expect(holdingGround()).not.toBeNull();
+    expect(tabs()).toBeNull();
+    await settle();
+    expect(router.replace).not.toHaveBeenCalled();
+    expect(holdingGround()).toBeNull();
+    expect(tabs()).not.toBeNull();
+  });
+
+  it('before auth has answered, still holding (nothing decided yet)', async () => {
+    phone('ios');
+    state.ready = false;
+    state.stackChild = <MemberTabsLayout />;
+    act(() => root.render(<RootLayout />));
+    await settle();
+    expect(holdingGround()).not.toBeNull();
+    expect(tabs()).toBeNull();
+  });
+
+  it('web: never holds; the member tabs are there from the first render, and nothing is replaced', async () => {
+    setOs('web');
+    state.syncStorage = true;
+    resetKioskLaunchGuardForTests();
+    state.stackChild = <MemberTabsLayout />;
+    act(() => root.render(<RootLayout />));
+    expect(holdingGround()).toBeNull();
+    expect(tabs()).not.toBeNull();
+    const first = container.innerHTML;
+    await settle();
+    expect(router.replace).not.toHaveBeenCalled();
+    expect(container.innerHTML).toBe(first);
+    expect(state.tabsRenders[0]).toBe(0);
   });
 });
 
