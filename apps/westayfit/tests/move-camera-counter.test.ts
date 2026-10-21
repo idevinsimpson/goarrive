@@ -915,6 +915,12 @@ describe('the Playwright manual-flow fixture is test-harness only', () => {
     const product = ['src/movement-camera/flow.ts', 'src/movement-camera/settingsStore.ts', 'src/movement-camera/MoveCameraSettingsSection.tsx', 'app/settings.tsx', 'app/contribute/[goalId].tsx'];
     for (const f of product) expect(read(f), f).not.toMatch(/playwright|storageState|MANUAL_SQUAT_FLOW/i);
   });
+  /*
+    W15-2: this test evaluates playwright.config twice under vi.resetModules(). That is real module work,
+    and its time grows with machine load: about 20 ms at a load average of 9, and up to 1.5 s with ten
+    copies of this file running at once (the @playwright/test import is already loaded above). So it gets
+    an explicit 20 s budget instead of the 5 s default, a wide margin over the worst case measured.
+  */
   it('the harness storage is pinned: one origin (the configured base URL), one key, one value, no cookies', async () => {
     const prev = process.env.WSF_PLAYWRIGHT_BASE_URL;
     process.env.WSF_PLAYWRIGHT_BASE_URL = 'http://127.0.0.1:5010/some/path';
@@ -939,7 +945,7 @@ describe('the Playwright manual-flow fixture is test-harness only', () => {
       else process.env.WSF_PLAYWRIGHT_BASE_URL = prev;
       vi.resetModules();
     }
-  });
+  }, 20_000);
   it('the harness default lives only in playwright.config.ts, as test-context storage', () => {
     const cfg = read('playwright.config.ts');
     expect(cfg).toMatch(/storageState: manualSquatFlow/);
