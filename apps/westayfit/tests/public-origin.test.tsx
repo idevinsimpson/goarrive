@@ -153,6 +153,10 @@ describe('W12-13: publicOriginOf, the one rule for a phone build\'s origin', () 
     ['https://wsf.example.com', NAMED],
     ['  https://WSF.Example.com/  ', NAMED],
     ['HTTPS://app.westayfit.com', 'https://app.westayfit.com'],
+    // Whole labels: a name that merely contains a special-use word is public.
+    ['https://test.westayfit.com', 'https://test.westayfit.com'],
+    ['https://wsf.example.org', 'https://wsf.example.org'],
+    ['https://alt.app', 'https://alt.app'],
   ])('accepts %j as %s', (value, origin) => {
     expect(publicOriginOf(value)).toBe(origin);
   });
@@ -181,6 +185,14 @@ describe('W12-13: publicOriginOf, the one rule for a phone build\'s origin', () 
     ['https://*.example.com'],
     ['wsf.example.com'],
     ['exp://192.168.1.20:8081'],
+    // RV16-641-2: the special-use names RFC 6761, 7686 and 9476 add (whole labels).
+    ['https://wsf.test'],
+    ['https://wsf.invalid'],
+    ['https://wsf.example'],
+    ['https://wsf.onion'],
+    ['https://abcdefghijklmnop.onion'],
+    ['https://wsf.alt'],
+    ['https://app.wsf.TEST'],
   ])('refuses %j', (value) => {
     expect(publicOriginOf(value)).toBeNull();
   });
@@ -189,6 +201,8 @@ describe('W12-13: publicOriginOf, the one rule for a phone build\'s origin', () 
     expect(isPublicHost('wsf.example.com')).toBe(true);
     expect(isPublicHost('localhost')).toBe(false);
     expect(isPublicHost('fritz.box')).toBe(false);
+    for (const tld of ['test', 'invalid', 'example', 'onion', 'alt']) expect(isPublicHost(`wsf.${tld}`), tld).toBe(false);
+    expect(isPublicHost('wsf.example.com')).toBe(true);
     expect(isDevTunnelHost('abc.trycloudflare.com')).toBe(true);
     expect(isDevTunnelHost('wsf.example.com')).toBe(false);
   });

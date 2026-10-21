@@ -19,11 +19,28 @@
  */
 const PUBLIC_HOST = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 /**
- * Names that never resolve on the public internet: special-use names (RFC
- * 6761, 6762, 8375; ICANN's .internal) and the undelegated names home and
- * office routers hand out (.localdomain, .lan, .home, fritz.box).
+ * Names that never resolve on the public internet: the special-use names
+ * (RFC 6761: .localhost, .test, .invalid, .example; RFC 6762: .local; RFC
+ * 7686: .onion; RFC 8375: home.arpa; RFC 9476: .alt; ICANN's .internal) and
+ * the undelegated names home and office routers hand out (.localdomain, .lan,
+ * .home, fritz.box). Whole labels: `wsf.example.com` is not under `example`.
+ * RV16-641-2 (heads-14) added test, invalid, example, onion and alt.
  */
-const NON_PUBLIC_SUFFIXES = ['localhost', 'local', 'internal', 'home.arpa', 'localdomain', 'lan', 'home', 'fritz.box'] as const;
+const NON_PUBLIC_SUFFIXES = [
+  'localhost',
+  'local',
+  'internal',
+  'home.arpa',
+  'localdomain',
+  'lan',
+  'home',
+  'fritz.box',
+  'test',
+  'invalid',
+  'example',
+  'onion',
+  'alt',
+] as const;
 
 /**
  * Domains that put a development machine on a public-looking https name:
