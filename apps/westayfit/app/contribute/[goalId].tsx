@@ -146,6 +146,8 @@ import {
 // functions-westayfit — a shorter poll pays a Firestore round-trip on every
 // tick, a longer poll wastes the cache window.
 const POLL_INTERVAL_MS = 2_000;
+// W12-2 (ST-06): how long a load waits for Auth to refresh a stale sign-in.
+const LOAD_SIGN_IN_REFRESH_MS = 8_000;
 
 // D-1. This screen is a sequence of whole-screen states, and each one states
 // what it is in a single sentence at the top. That sentence is the state's
@@ -538,6 +540,10 @@ export default function ContributeToGoal() {
   // the cold load and by every successful poll tick. Client receipt time, the
   // same fact (and the same wording) as Community Home and the public display.
   const [pulseAt, setPulseAt] = useState<Date | null>(null);
+  // W12-2 (INT-25, native): the last load failed while the screen was warm.
+  const [refreshFailed, setRefreshFailed] = useState(false);
+  // W12-2 (ST-06, native): this load has already refreshed the sign-in once.
+  const signInRetriedRef = useRef(false);
   const [context, setContext] = useState<ScreenContext>({ kind: 'none' });
   const [step, setStep] = useState<Step>(initialStep);
   /*
@@ -798,6 +804,9 @@ export default function ContributeToGoal() {
     setContext({ kind: 'none' });
     setState(recorded?.state ?? { kind: 'loading' });
     setPulseAt(null);
+    // W12-2: a new context starts with no failed refresh and a fresh sign-in retry.
+    setRefreshFailed(false);
+    signInRetriedRef.current = false;
     setTimerBase(0);
     setTimerStartedAt(null);
     setTimerRunning(false);
@@ -829,11 +838,27 @@ export default function ContributeToGoal() {
   */
   const [loadToken, setLoadToken] = useState(0);
   const retryLoad = useCallback(() => {
+    signInRetriedRef.current = false;
     setState({ kind: 'loading' });
+    setLoadToken((n) => n + 1);
+  }, []);
+  /*
+    W12-2 (INT-25, native). A REFRESH THAT FAILS KEEPS A WARM SCREEN. When the
+    screen already shows this goal (opened on the account's record, or loaded
+    before) and the load fails for a transient reason, it keeps the last
+    confirmed figures, the typed entry, the step and the timer, and says so
+    under the anchor with a Retry that loads again without passing through
+    loading. A cold failure is still the load error. Web is unchanged.
+  */
+  const quietRetry = useCallback(() => {
+    signInRetriedRef.current = false;
     setLoadToken((n) => n + 1);
   }, []);
   // INT-12 case 5: the pulse poll below runs only while the app is in front.
   const appInForeground = useAppInForeground();
+  // The load's catch reads whether the screen is warm when the failure lands.
+  const stateKindRef = useRef(state.kind);
+  stateKindRef.current = state.kind;
 
   useEffect(() => {
     if (!wsfAuthEnabled) return;
@@ -871,6 +896,8 @@ export default function ContributeToGoal() {
         );
         setRepeatPolicy(resolveRepeatPolicy(mineRes.data.repeatPolicy));
         setPulseAt(new Date());
+        setRefreshFailed(false);
+        signInRetriedRef.current = false;
         if (pulse.status !== 'active') {
           setState({ kind: 'closed', pulse, ownCredit });
           return;
@@ -895,17 +922,49 @@ export default function ContributeToGoal() {
         // password changed elsewhere) even though the client still holds a
         // user: that is the sign-in screen, not "Something went wrong" with
         // the server's sentence under it.
+        const loadError: LoadState = {
+          kind: 'error',
+          message: 'We couldn’t load this goal right now. Check your connection and try again.',
+        };
+        // W12-2 (native): keep a warm screen and say so; a cold one gets the error.
+        const failTransiently = () => {
+          const warm = stateKindRef.current === 'ready' || stateKindRef.current === 'closed';
+          setState((prev) => (prev.kind === 'ready' || prev.kind === 'closed' ? prev : loadError));
+          setRefreshFailed(warm);
+        };
         if (e instanceof FirebaseError && e.code === 'functions/unauthenticated') {
+          /*
+            ST-06 (W12-2, native). A token that went stale while the app slept
+            is not a sign-out. With a user still on this device the sign-in is
+            refreshed once: a fresh token loads again (once; the guard stops a
+            loop), no answer from Auth is a transient failure, and only Auth
+            saying the session is over is the sign-in screen. Web is unchanged.
+          */
+          const auth = Platform.OS === 'web' ? null : getFirebaseAuth();
+          if (auth?.currentUser && !signInRetriedRef.current) {
+            const refreshed = await refreshSignIn(auth, LOAD_SIGN_IN_REFRESH_MS);
+            if (cancelled) return;
+            if (refreshed === 'ok') {
+              signInRetriedRef.current = true;
+              setLoadToken((n) => n + 1);
+              return;
+            }
+            if (refreshed === 'offline') {
+              failTransiently();
+              return;
+            }
+          }
           setState({ kind: 'notSignedIn' });
           return;
         }
         // A1. The server's sentence is a developer fact, not member copy. It
         // is logged; the screen says what the member can act on.
         console.warn('[wsf] goal load failed', e);
-        setState({
-          kind: 'error',
-          message: 'We couldn’t load this goal right now. Check your connection and try again.',
-        });
+        if (Platform.OS === 'web') {
+          setState(loadError);
+          return;
+        }
+        failTransiently();
       }
     })();
     return () => {
@@ -963,8 +1022,14 @@ export default function ContributeToGoal() {
   // INT-12 case 5: and only while the app is in the foreground, so a count
   // entry left open in the background sends no pulses; the poll restarts on
   // return, and its first tick is the one refresh.
+  // W12-2 (native): after a failed refresh the poll runs too (no fresh read
+  // has landed), so a reconnect heals the screen; its first good tick clears
+  // the note. The before-write and foreground rules are unchanged.
   const shouldPoll =
-    beforeWrite && pulseAt !== null && (state.kind === 'ready' || state.kind === 'closed') && appInForeground;
+    beforeWrite &&
+    (pulseAt !== null || (Platform.OS !== 'web' && refreshFailed)) &&
+    (state.kind === 'ready' || state.kind === 'closed') &&
+    appInForeground;
   useEffect(() => {
     if (!wsfAuthEnabled) return;
     if (!ready || !user || !goalId) return;
@@ -1001,6 +1066,7 @@ export default function ContributeToGoal() {
         applied = seq;
         const pulse = result.data;
         setPulseAt(new Date());
+        setRefreshFailed(false);
         setState((prev) => {
           if (prev.kind === 'ready') {
             return pulse.status === 'active'
@@ -2177,7 +2243,26 @@ export default function ContributeToGoal() {
           honesty Community Home and the public display carry. No refresh
           control: nothing here is waiting to be asked.
         */}
-        {pulseAt && !anchorShort ? (
+        {/*
+          W12-2 (native): a failed refresh keeps the last confirmed figures
+          and says so, with a Retry, on short screens too (a kept figure is
+          never shown without saying it is kept: src/ui/RefreshNote.tsx).
+        */}
+        {refreshFailed ? (
+          <View style={styles.anchorStaleRow} testID="wsf-contribute-stale-note">
+            <Text style={[styles.anchorUpdated, styles.anchorStaleText]}>
+              Couldn’t check for updates just now. Showing the last confirmed figures.
+            </Text>
+            <Pressable
+              onPress={quietRetry}
+              accessibilityRole="button"
+              style={styles.anchorStaleRetry}
+              testID="wsf-contribute-stale-retry"
+            >
+              <Text style={styles.anchorStaleRetryText}>Retry</Text>
+            </Pressable>
+          </View>
+        ) : pulseAt && !anchorShort ? (
           <Text style={styles.anchorUpdated} testID="wsf-contribute-context-updated">
             {`Confirmed ${formatClock(pulseAt)}`}
           </Text>
@@ -3500,6 +3585,11 @@ const styles = StyleSheet.create({
   anchorPercent: { color: PROGRESS_GREEN, fontSize: 12.5, lineHeight: 17, fontWeight: '700' },
   anchorStatusLine: { color: HERO_MUTED, fontSize: 11.5, lineHeight: 16 },
   anchorUpdated: { color: HERO_MUTED, fontSize: 11, lineHeight: 15, letterSpacing: 0.3 },
+  // W12-2: the kept-figures note and its Retry (native only).
+  anchorStaleRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 },
+  anchorStaleText: { flexShrink: 1 },
+  anchorStaleRetry: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 8 },
+  anchorStaleRetryText: { color: CREAM, fontSize: 13, fontWeight: '700', textDecorationLine: 'underline' },
 
   // ---- the member's own part, previewed -----------------------------------
   yoursPanel: {
