@@ -128,11 +128,15 @@ const FORGOTTEN = 'forgotten';
  */
 export async function clearDeviceMode(): Promise<boolean> {
   // An answer given while a removal is outstanding is newer than the one
-  // being forgotten; the retry and the overwrite stop rather than erase it.
-  // (Compared with the forgotten value, not with null: on web the read is
-  // localStorage itself, which still holds the old answer after a refusal.)
+  // being forgotten — even the SAME answer, given again — so the retry and
+  // the overwrite stop rather than erase it. Decided by write generation
+  // (writes through this store in this process, which works on web too, where
+  // the read is localStorage itself and still holds the old answer after a
+  // refusal), and by a different value appearing (another tab).
+  const since = store.writeCount(DEVICE_MODE_KEY);
   const forgetting = store.read(DEVICE_MODE_KEY);
   const newerLanded = () => {
+    if (store.writeCount(DEVICE_MODE_KEY) !== since) return true;
     const now = store.read(DEVICE_MODE_KEY);
     return now !== null && now !== forgetting;
   };

@@ -439,3 +439,23 @@ describe('the mirror counts writes, not removals', () => {
     expect(mirror.writeCount('other')).toBe(0);
   });
 });
+
+describe('web (#639 follow-up): "this is my own phone" sticks when the browser refuses the removal', () => {
+  it('the removal is retried and then overwritten with a non-answer', async () => {
+    const dm = await import('../src/deviceMode');
+    await dm.saveDeviceMode('shared');
+    const realRemove = Storage.prototype.removeItem;
+    const spy = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (this: Storage, key: string) {
+      if (key === 'wsf.deviceMode') throw new DOMException('refused', 'SecurityError');
+      return realRemove.call(this, key);
+    });
+    try {
+      expect(await dm.clearDeviceMode()).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(window.localStorage.getItem('wsf.deviceMode')).toBe('forgotten');
+    expect(dm.readDeviceMode()).toBeNull();
+    window.localStorage.clear();
+  });
+});

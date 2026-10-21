@@ -114,12 +114,25 @@ export function definePostAuthDestination<V>(codec: DestinationCodec<V>): PostAu
     async discard() {
       // A write that lands while a removal is outstanding is NEWER than the
       // record being discarded (a fresh scan, say): once one has landed, the
-      // retry and the overwrite would destroy it, so they stop. "Newer" is a
-      // value other than the one being discarded — not merely non-null: on
-      // web `store.read` reads sessionStorage itself, and after a refused
-      // removal it still holds the old value.
+      // retry and the overwrite would destroy it, so they stop.
+      //
+      // "Newer" is decided by WRITE GENERATION, not by value: a re-stash of
+      // the identical record (a shared screen dropped the journey, then "use
+      // my own phone instead" stashed the same event again) is newer too, and
+      // a value comparison would destroy it. The count is of writes made
+      // through this store in this process, so it works on web as well, where
+      // `store.read` is sessionStorage itself and still holds the old value
+      // after a refused removal. A different value appearing without a write
+      // from here (another writer) counts as newer as well.
+      //
+      // RESIDUAL: a newer write that the device ALSO refuses still counts as
+      // newer, so the discard stops after one refused removal and the stale
+      // record can apply once more after a relaunch (src/joinEventHandoff.ts,
+      // ACCEPTED LIMITS).
+      const since = store.writeCount(codec.key);
       const discarding = store.read(codec.key);
       const newerLanded = () => {
+        if (store.writeCount(codec.key) !== since) return true;
         const now = store.read(codec.key);
         return now !== null && now !== discarding;
       };
