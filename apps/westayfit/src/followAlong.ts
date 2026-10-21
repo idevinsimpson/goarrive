@@ -361,22 +361,32 @@ export function pausesForInterruption(reason: unknown): boolean {
  * straight to background, dated to the event. `lastTickAt` caps a background
  * event delivered late (JavaScript can be suspended right after the app
  * leaves): the round cannot have run more than one tick past its last tick.
+ *
+ * A RING-SIZED WINDOW. The backdate reaches back at most RING_BACKDATE_MS
+ * (about how long a call rings before it goes to voicemail): a long inactive
+ * stretch that ends in the background — Control Center left open, then Home —
+ * gives back no more than that, so the round cannot reclaim minutes the
+ * screen already showed as gone. Within the window the inactive time is
+ * treated as part of the interruption (documented: Control Center for 20 s,
+ * then Home, returns those 20 s to the round).
  */
 export type AppLifecycle = { inactiveSince: number | null };
 export const ACTIVE_LIFECYCLE: AppLifecycle = { inactiveSince: null };
+export const RING_BACKDATE_MS = 30_000;
 
 export function appLifecycleStep(
   prev: AppLifecycle,
   next: string,
   now: number,
   lastTickAt: number | null = null,
-  tickMs = 250
+  tickMs = 250,
+  maxBackdateMs = RING_BACKDATE_MS
 ): { lifecycle: AppLifecycle; pauseAt: number | null } {
   if (next === 'inactive') {
     return { lifecycle: { inactiveSince: prev.inactiveSince ?? now }, pauseAt: null };
   }
   if (next === 'background') {
-    let pauseAt = Math.min(now, prev.inactiveSince ?? now);
+    let pauseAt = prev.inactiveSince === null ? now : Math.min(now, Math.max(prev.inactiveSince, now - maxBackdateMs));
     if (lastTickAt !== null && Number.isFinite(lastTickAt)) pauseAt = Math.min(pauseAt, lastTickAt + tickMs);
     return { lifecycle: ACTIVE_LIFECYCLE, pauseAt };
   }
