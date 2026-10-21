@@ -42,6 +42,8 @@ const h = vi.hoisted(() => ({
   },
   /** You's Retry, as the view was handed it. */
   youRetry: null as null | (() => void),
+  /** Whether You last said its figures are stale. */
+  youStale: null as null | boolean,
 }));
 
 vi.mock('../src/memberReads', () => ({
@@ -124,8 +126,10 @@ vi.mock('../src/ui/YouParityView', () => ({
   YouParityView: (props: {
     state: { kind: string; community?: { groupId: string } };
     actions?: { onRetry?: () => void };
+    refresh?: { stale?: boolean };
   }) => {
     h.youRetry = props.actions?.onRetry ?? null;
+    h.youStale = props.refresh?.stale ?? null;
     const s = props.state;
     h.youFrames.push(s.kind === 'member' ? `member:${s.community?.groupId}` : s.kind);
     return null;
@@ -186,6 +190,7 @@ beforeEach(() => {
   h.record.profile = { displayName: 'Ann', createdAt: null };
   freshRead();
   h.youRetry = null;
+  h.youStale = null;
 });
 
 afterEach(async () => {
@@ -432,6 +437,34 @@ describe('heads-9 N2: the read landing replaces only a loading frame', () => {
     await you.settle();
     expect(h.parityFrames).toEqual([]);
     expect(document.querySelector('[data-testid="wsf-community-index-retry"]')).not.toBeNull();
+    expect(h.youFrames.at(-1)).toBe('failed');
+  });
+});
+
+describe('heads-11 F2: a page the repaint drew survives the failed load it appeared during', () => {
+  itTimed('You keeps member:g2 and says it is stale; a Retry that fails is the failed page', async () => {
+    disk.map.set(REMEMBERED_KEY, 'g2');
+    const releaseReads = holdLaunchRead();
+    const cc = await boot();
+    const { settle, until } = await render('you');
+    expect(h.youFrames.at(-1)).toBe('loading');
+    releaseReads();
+    await cc.currentCommunityReady();
+    await until(() => h.youFrames.at(-1) === 'member:g2', 'the repainted member page');
+
+    // The launch's own fresh read fails: the repainted page stays, marked stale.
+    h.fresh.fail(new Error('offline'));
+    await until(() => h.youStale === true, 'the stale note');
+    expect(h.youFrames.at(-1)).toBe('member:g2');
+    expect(h.youFrames).not.toContain('failed');
+
+    // A Retry reads everything fresh: when that fails, nothing is carried over.
+    freshRead();
+    h.youRetry!();
+    await until(() => h.youFrames.at(-1) === 'loading', 'loading for the Retry');
+    h.fresh.fail(new Error('offline'));
+    await until(() => h.youFrames.at(-1) === 'failed', 'the failed page');
+    await settle();
     expect(h.youFrames.at(-1)).toBe('failed');
   });
 });
