@@ -307,8 +307,12 @@ export function gitRefusal(given, real, git = runGit) {
   return REFUSALS.git;
 }
 
-/** The file's realpath and null, or null and why it is refused, before anything is read. */
-export function placeFile(given, git = runGit) {
+/**
+ * The file's realpath and null, or null and why it is refused, before anything
+ * is read. `appRoot` is the app whose Expo env files are refused (this app;
+ * a test passes a fake one, so it never touches the real app directory).
+ */
+export function placeFile(given, git = runGit, appRoot = APP_ROOT) {
   let real;
   let st;
   try {
@@ -319,7 +323,7 @@ export function placeFile(given, git = runGit) {
   }
   if (!st.isFile()) return { real: null, refusal: REFUSALS.notFile };
   if (st.nlink > 1) return { real: null, refusal: REFUSALS.hardLinked };
-  if (isExpoLoaded(st)) return { real: null, refusal: REFUSALS.expoLoaded };
+  if (isExpoLoaded(st, appRoot)) return { real: null, refusal: REFUSALS.expoLoaded };
   const refusal = gitRefusal(given, real, git);
   return refusal ? { real: null, refusal } : { real, refusal: null };
 }
