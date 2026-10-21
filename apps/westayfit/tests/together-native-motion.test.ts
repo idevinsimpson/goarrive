@@ -139,7 +139,7 @@ describe('one decision at mount: decideTogetherPhase', () => {
     }
   });
 
-  it('no invented before total: without a trusted before there is no motion, and nothing to tween from', () => {
+  it('no invented before total — but a fresh receipt still plays its acknowledgment, with the fill held at after/target (MO-01)', () => {
     for (const opts of [
       { ...freshOpts, sharedBefore: null },
       { ...freshOpts, beforeTarget: 4000 },
@@ -147,11 +147,31 @@ describe('one decision at mount: decideTogetherPhase', () => {
     ]) {
       const p = togetherPresentation(receipt(), opts);
       expect(p.before).toBeNull();
-      expect(p.fromRatio).toBe(p.toRatio);
+      expect(p.fromRatio).toBe(p.toRatio); // nothing to tween from: the fill holds
+      expect(p.animate).toBe(true);
+      for (const platform of ['web', 'ios', 'android']) {
+        expect(decideTogetherPhase({ ...eligible, platform, animate: p.animate })).toBe('playing');
+        // Reduced motion at mount still settles it.
+        expect(decideTogetherPhase({ ...eligible, platform, animate: p.animate, reduced: true })).toBe('settled');
+      }
+    }
+    // A replay, or a receipt that is not fresh, stays static without a before too.
+    const replay = togetherPresentation(receipt({ alreadyRecorded: true }), { ...freshOpts, sharedBefore: null });
+    const notFresh = togetherPresentation(receipt(), { ...freshOpts, sharedBefore: null, fresh: false });
+    for (const p of [replay, notFresh]) {
+      expect(p.animate).toBe(false);
       for (const platform of ['web', 'ios', 'android']) {
         expect(decideTogetherPhase({ ...eligible, platform, animate: p.animate })).toBe('settled');
       }
     }
+    // The communal payoff is the server's crossing signal's alone.
+    const before = togetherPresentation(receipt({ sharedTotal: 5015, crossedTarget: true }), { ...freshOpts, sharedBefore: null });
+    expect(before.crossed).toBe(true);
+    expect(before.animate).toBe(true);
+    const unsignalled = togetherPresentation(receipt({ sharedTotal: 5015 }), { ...freshOpts, sharedBefore: null });
+    expect(unsignalled.crossed).toBe(false);
+    expect(unsignalled.payoff).not.toBe('WE did it. Together.');
+    expect(unsignalled.animate).toBe(false);
   });
 
   it('only pending can move, so a settled or playing instance never re-decides', () => {

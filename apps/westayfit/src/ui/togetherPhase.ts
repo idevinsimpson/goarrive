@@ -6,11 +6,11 @@
  * whether the decoration plays.
  *
  *   settled — the final receipt, still. The answer for anything not fresh, not
- *             `animate` (a replay, an own-only receipt, no trusted before
- *             total), reduced motion, or a backgrounded app.
+ *             `animate` (a replay, an own-only receipt, a reached or
+ *             post-target story), reduced motion, or a backgrounded app.
  *   playing — the one-time motion.
  *   pending — native only: eligible, but the reduced-motion preference has not
- *             been read yet. The mark shows the trusted before ratio (the same
+ *             been read yet. The mark shows the before ratio (the same
  *             frame `playing` opens on) and nothing moves until the answer
  *             arrives. Reduced → settled; not reduced → playing; a query that
  *             definitely failed → settled at once.
@@ -34,7 +34,7 @@ export const NATIVE_START_DEADLINE_MS = 500;
 export type TogetherPhaseInput = {
   /** The owner's freshness for THIS instance, read at mount. */
   fresh: boolean;
-  /** The presentation's `animate`: fresh, not a replay, shared, ordinary or crossed, trusted before. */
+  /** The presentation's `animate`: fresh, not a replay, shared, ordinary or crossed (the before total sets only the fill). */
   animate: boolean;
   /** Whether the reduced-motion preference has been read. Always true in effect on the web. */
   reducedKnown: boolean;

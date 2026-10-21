@@ -397,12 +397,18 @@ export type TogetherPresentation = {
  * Motion is allowed only when all of these hold:
  *   - fresh, and not an already-recorded replay;
  *   - the receipt carries shared state (never on an own-only receipt);
- *   - the story is `ordinary` (below target) or the server's `crossed`;
- *   - a reliable before exists: the confirmed total the screen showed for the
- *     SAME target, not above the confirmed after. It is never invented from
- *     `sharedTotal - addedCount`, and a missing one is not reconstructed.
+ *   - the story is `ordinary` (below target) or the server's `crossed`.
  * A reached-without-signal or post-target receipt is static: it may not stage
  * a crossing the server did not grant.
+ *
+ * THE BEFORE TOTAL DECIDES ONLY THE FILL, NOT WHETHER THE RECEIPT MOVES
+ * (MO-01, the 517b961a gate). A reliable before is the confirmed total the
+ * screen showed for the SAME target, not above the confirmed after; it is
+ * never invented from `sharedTotal - addedCount`, and a missing one is not
+ * reconstructed. With one, the fill tweens from it to the after. Without one,
+ * a fresh confirmation still gets its acknowledgment (gather, pulse, waves)
+ * and the fill simply holds at after/target (`fromRatio === toRatio`,
+ * `before === null`): no invented starting point, and no silent receipt.
  */
 export function togetherPresentation(
   r: ContributeReceipt,
@@ -435,11 +441,7 @@ export function togetherPresentation(
   const before = reliableBefore ? sharedBefore : null;
   const fromRatio = before != null ? fillRatio(before, r.target!) : toRatio;
   const animate =
-    opts.fresh &&
-    hasShared &&
-    !r.alreadyRecorded &&
-    before != null &&
-    (variant === 'ordinary' || variant === 'crossed');
+    opts.fresh && hasShared && !r.alreadyRecorded && (variant === 'ordinary' || variant === 'crossed');
 
   return {
     variant,

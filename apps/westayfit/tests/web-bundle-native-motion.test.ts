@@ -16,7 +16,8 @@ import { describe, expect, it } from 'vitest';
  * Without the variables these are skipped (no export in a plain test run).
  */
 
-const NATIVE_ONLY = ['wsf-together-native-layer', 'buildNativeTogetherTimeline', 'glowBands', 'piecesEndMs'];
+// The native Together driver, and (MO-04) the native tab fade, TabSceneFade.native.tsx.
+const NATIVE_ONLY = ['wsf-together-native-layer', 'buildNativeTogetherTimeline', 'glowBands', 'piecesEndMs', 'wsf-tab-scene-native'];
 const STUB_TEXT = 'The native Together motion does not run on the web.';
 
 function bundleText(dir: string, sub: string, ext: string): string {

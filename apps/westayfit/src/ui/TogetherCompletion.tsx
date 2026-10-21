@@ -52,7 +52,7 @@ import { useReducedMotionPreference } from './useReducedMotion';
  * NATIVE-MOTION-1. iOS and Android play the same timeline as the web
  * (togetherMotionNative.tsx, from togetherMotion.ts's numbers). Native differs
  * only in how it reaches the same one decision (togetherPhase.ts): it waits —
- * showing the trusted before ratio, moving nothing — until the reduced-motion
+ * showing the before ratio (the after ratio when there is no trusted before), moving nothing — until the reduced-motion
  * preference has been read and the stage is measured, then plays or settles;
  * anything not ready within NATIVE_START_DEADLINE_MS settles. Leaving the
  * foreground settles it for good. The web path is unchanged.
