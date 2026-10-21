@@ -1,10 +1,11 @@
-import { router, useLocalSearchParams, useNavigation, usePathname } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams, useNavigation, usePathname } from 'expo-router';
 import { FirebaseError } from 'firebase/app';
 import { signOut } from 'firebase/auth';
 import { httpsCallable } from 'firebase/functions';
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  BackHandler,
   Platform,
   Pressable,
   ScrollView,
@@ -52,6 +53,7 @@ import {
   type RefusalReason,
   type RepeatPolicy,
 } from '../../src/contributionFlow';
+import { contributeBackAction, type ContributeBackSnapshot } from '../../src/contributeBack';
 import { wsfAuthEnabled } from '../../src/featureFlags';
 import { getFirebaseAuth, getFirebaseFunctions, wsfUsingEmulators } from '../../src/firebase';
 import {
@@ -1659,6 +1661,45 @@ export default function ContributeToGoal() {
   */
   const closeSheet = () => exitSheet(() => returnToMemberContext(backHref));
   closeSheetRef.current = closeSheet;
+  /*
+    W12-3 (INT-19). ANDROID'S BACK, DECIDED STEP BY STEP (src/contributeBack.ts):
+    never while a request is out or when leaving would lose an attempt; a
+    settled screen closes like Close (a page goes back); review returns to
+    the entry with its count; an entry reached from the movement step returns
+    to it, timer still paused. Registered while this screen is focused, on
+    Android only and never on a kiosk (Finish is the only way out there).
+  */
+  const backRef = useRef<{ snapshot: ContributeBackSnapshot; edit: () => void } | null>(null);
+  backRef.current = {
+    snapshot: {
+      submitting,
+      pending,
+      pendingDurable,
+      restoreFailed,
+      hasResult: lastResult != null,
+      hasRefusal: refusal != null,
+      step,
+      initialStep: initialStep === 'move' ? 'move' : 'enter',
+      asSheet,
+    },
+    edit: onEdit,
+  };
+  useFocusEffect(
+    useCallback(() => {
+      if (Platform.OS !== 'android' || kiosk) return undefined;
+      const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+        const current = backRef.current;
+        if (!current) return false;
+        const action = contributeBackAction(current.snapshot);
+        if (action === 'pass') return false;
+        if (action === 'close') closeSheetRef.current();
+        else if (action === 'edit') current.edit();
+        else if (action === 'toMove') setStep('move');
+        return true;
+      });
+      return () => sub.remove();
+    }, [kiosk]),
+  );
   /*
     THE RECEIPT ON A SHORT PHONE. The mark was sized from WIDTH alone, so on a
     390x640 the celebration filled the viewport and pushed "Record more" and
