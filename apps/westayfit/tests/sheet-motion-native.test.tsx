@@ -609,7 +609,7 @@ describe('useSheetExit on iOS and Android', () => {
     expect(fx.timings.filter((t) => t.config.toValue === 0)).toHaveLength(0);
   });
 
-  it('a sheet with no native exit yet (the contribution sheet): navigates at once, as before', () => {
+  it('a sheet with no native parts mounted (a screen not yet swapped): navigates at once, as before', () => {
     const s = mountExit({ withNativeParts: false });
     s.exit();
     expect(s.went).toHaveLength(1);
