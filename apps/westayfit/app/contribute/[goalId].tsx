@@ -1314,9 +1314,11 @@ export default function ContributeToGoal() {
         again. After a warm load failed and no tick has landed, pulseAt is
         still null; without this, clearing the note above would stop the
         pulse poll (and its foreground return) for the rest of the screen's
-        life. Only a missing time is filled.
+        life. Only a missing time is filled, and only on a phone (RV14-641-1,
+        f03e909e track): the web has no refreshFailed term, so its poll gate
+        and its "Confirmed" line stay exactly as they were.
       */
-      setPulseAt((prev) => prev ?? new Date());
+      if (Platform.OS !== 'web') setPulseAt((prev) => prev ?? new Date());
       // Ready for the next fresh attempt.
       attemptRef.current = null;
       setEntry('');

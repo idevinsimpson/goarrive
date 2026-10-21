@@ -655,6 +655,30 @@ describe('W12-2: a failed refresh keeps a warm screen (INT-25); a stale sign-in 
     expect(byId('wsf-contribute-context-updated')!.textContent).toBe(`Confirmed Oct 20, ${sameDay.slice('Confirmed '.length)}`);
   });
 
+  it('N1 is a phone\'s: on the web a receipt before the load has landed leaves no confirmed time and starts no poll, as before', async () => {
+    windowOf(844);
+    await warm('web');
+    fakeAuth.currentUser = { uid: 'u1', getIdToken: async () => 't' };
+    // The goal's own load never lands; the screen opened warm from the account's record.
+    answers.wsfGoalPulse = () => new Promise(() => undefined);
+    answers.wsfContribute = async () => ({ addedCount: 35, ownCredit: 40, sharedTotal: 75, target: 100, unit: 'squats', status: 'active', alreadyRecorded: false });
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    act(() => typeInto(entry(), '35'));
+    await act(async () => byId('wsf-contribute-review')!.click());
+    await settle();
+    await act(async () => byId('wsf-contribute-submit')!.click());
+    await settle();
+    await act(async () => byId('wsf-contribute-record-more')!.click());
+    await settle();
+    expect(byId('wsf-contribute-shared-total')!.textContent).toContain('75');
+    expect(byId('wsf-contribute-context-updated')).toBeNull();
+    const sent = count('wsfGoalPulse');
+    await pollFor(6_000);
+    expect(count('wsfGoalPulse')).toBe(sent);
+  });
+
   it('web: a poll not-found still ends the screen, as before', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     act(() => root.render(<ContributeToGoal />));
