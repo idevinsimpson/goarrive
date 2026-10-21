@@ -1,10 +1,16 @@
 import { signOut } from 'firebase/auth';
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, useNavigation } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Platform } from 'react-native';
 
 import { useWsfAuth } from '../../src/auth';
 import { mapWithLimit } from '../../src/concurrency';
-import { currentCommunityReady, isCurrentCommunityReady, resolveCurrentCommunity } from '../../src/currentCommunity';
+import {
+  currentCommunityReady,
+  isCurrentCommunityReady,
+  resolveCurrentCommunity,
+  useCurrentCommunityReady,
+} from '../../src/currentCommunity';
 import { getFirebaseAuth } from '../../src/firebase';
 import { UNKNOWN_SHARED, knownShared } from '../../src/goalTruth';
 import {
@@ -21,8 +27,13 @@ import {
   type MemberProfileAnswer,
 } from '../../src/memberReads';
 import { formatEndedOn, formatEndsAt, hasWindowEnded } from '../../src/ui/dates';
+// W16-5 (INT-17): on a phone the native twin names the opener focus returns to.
+import { armTabsFocusReturnTo } from '../../src/ui/focusReturn';
 import { MOVE_HREF } from '../../src/ui/MemberTabBar';
-import { YouParityView } from '../../src/ui/YouParityView';
+import { nativeErrorBoundary } from '../../src/ui/RouteErrorFallback';
+import { signOutToSignedOutHome } from '../../src/ui/signOutReset';
+import { YOU_SETTINGS_TARGET, YouParityView } from '../../src/ui/YouParityView';
+import { RESUME_MIN_AWAY_MS, useResumeRefresh } from '../../src/useResumeRefresh';
 import type { YouGoal } from '../../src/youParity';
 
 /**
@@ -301,25 +312,31 @@ function composeMember(
   };
 }
 
+type ComposeArgs = Parameters<typeof composeMember>;
+
 /**
- * The page from this account's record alone, or `null` when the record does
- * not hold every fact the page needs (src/memberReads.ts).
+ * The page from this account's record alone, with the inputs a member page
+ * was composed from (heads-11 NB-3: kept, so a later failed revalidation can
+ * recompose THAT page against now), or `null` when the record does not hold
+ * every fact the page needs (src/memberReads.ts).
  */
-function youFromRecord(uid: string): Screen | null {
+function recordedYou(uid: string): { screen: Screen; args: ComposeArgs | null } | null {
   const mine = peekMyCommunities(uid);
   if (!mine) return null;
   const known = peekMemberProfile(uid);
   const profile: Profile = known ? toProfile(known) : { displayName: null, memberSince: null, pending: true };
   const communities = mine.items as unknown as Community[];
-  if (communities.length === 0) return { kind: 'noCommunity', profile };
-  // Not before the phone's remembered choice is read: "none chosen" would be a guess.
-  if (!isCurrentCommunityReady()) return null;
+  if (communities.length === 0) return { screen: { kind: 'noCommunity', profile }, args: null };
+  // Not before the phone's remembered choice is read, where it can change the
+  // answer: with several communities "none chosen" would be a guess. With one,
+  // the answer is that one either way.
+  if (communities.length > 1 && !isCurrentCommunityReady()) return null;
   const currentId = resolveCurrentCommunity(
     uid,
     communities.map((c) => c.groupId),
   );
   const community = communities.find((c) => c.groupId === currentId) ?? null;
-  if (!community) return { kind: 'pickCommunity', profile, count: communities.length };
+  if (!community) return { screen: { kind: 'pickCommunity', profile, count: communities.length }, args: null };
   const goals = peekGoals<Goal>(uid, community.groupId)?.goals;
   if (!goals) return null;
   const owned: Array<{ goal: Goal; own: Own }> = [];
@@ -328,18 +345,109 @@ function youFromRecord(uid: string): Screen | null {
     if (!own) return null;
     owned.push({ goal, own });
   }
-  return composeMember(profile, community, goals, owned, elsewhereFromRecord(uid, communities, community.groupId));
+  const args: ComposeArgs = [profile, community, goals, owned, elsewhereFromRecord(uid, communities, community.groupId)];
+  return { screen: composeMember(...args), args };
+}
+
+/*
+  NATIVE-MEMBER-1 F-1 (MF-03). A SCREEN BELONGS TO THE ACCOUNT IT WAS READ FOR.
+
+  The tab stays mounted across a menu Sign out (`freezeOnBlur: false`), so a
+  read still in flight when the account goes away used to land afterwards and
+  draw the previous account's name, community and amounts on a signed-out
+  screen, or under the next account's email. Two guards, each on its own:
+    · the effect's cleanup advances `live`, so a read issued for one session
+      neither lands nor issues the next read once that session has ended;
+    · every screen is stored with the uid it was composed for, and the page
+      draws it only while that uid is the signed-in one. Signed out it draws
+      the signed-out card, from auth state alone, from the very first frame.
+*/
+type Owned = { uid: string | null; screen: Screen };
+const LOADING: Screen = { kind: 'loading' };
+const SIGNED_OUT: Screen = { kind: 'signedOut' };
+
+/** What the page may draw now: never a screen read for another account, or for none. */
+function screenForAccount(ready: boolean, uid: string | null, held: Owned): Screen {
+  if (ready && !uid) return SIGNED_OUT;
+  if (uid && held.uid !== uid) return LOADING;
+  return held.screen;
+}
+
+/** NATIVE-MEMBER-1 W16-13 (INT-01 CS-4). On a phone a throw in You is contained inside the You tab, as Progress's is; undefined on the web. */
+export const ErrorBoundary = nativeErrorBoundary('tab');
+
+/**
+ * RV15-639-N2. WHETHER A PAGE A FAILED LOAD WOULD KEEP IS ONE ITS FRESH READ
+ * STILL SHOWS. A load that fails keeps a member page already on screen (one
+ * drawn at mount from the record, or by the readiness repaint) and marks it
+ * stale, rather than replacing it with the failed page. That is right only
+ * while nothing the load did read contradicts the page:
+ *   - `resolved` absent: the membership read itself failed, no fresh list was
+ *     read, and nothing contradicts the page: keep it;
+ *   - otherwise the list was read (`listed`) and resolved a community whose
+ *     goals then failed: keep the page only if that list still holds its
+ *     community AND it is the community resolved. A page for a community the
+ *     list no longer holds, or for another one, is not kept; the caller draws
+ *     the failed page for the resolved community.
+ * (`resolved` is taken from `listed`, so today the second condition implies
+ * the first.) Anything but a member page is never kept by this rule.
+ */
+function keptPageStillShown(
+  page: Screen | null,
+  resolved: Community | undefined,
+  listed: readonly Community[],
+): page is Extract<Screen, { kind: 'member' }> {
+  if (!page || page.kind !== 'member') return false;
+  if (!resolved) return true;
+  const groupId = page.community.groupId;
+  return listed.some((c) => c.groupId === groupId) && groupId === resolved.groupId;
 }
 
 export default function You() {
   const { ready, user } = useWsfAuth();
   // The first frame already stands on the account's record when it can: a
   // loading state painted for one frame and then replaced is still a flash.
-  const [screen, setScreen] = useState<Screen>(
-    () => (ready && user ? youFromRecord(user.uid) : null) ?? { kind: 'loading' },
-  );
+  const [firstRecord] = useState(() => (ready && user ? recordedYou(user.uid) : null));
+  const [held, setHeld] = useState<Owned>(() => ({
+    uid: ready && user ? user.uid : null,
+    screen: firstRecord?.screen ?? LOADING,
+  }));
+  /**
+   * W16-17 (RV16-C15-1): the page on screen and the account it is for,
+   * mirrored wherever `held` changes (only setScreen sets it), so a failed load
+   * can test the page ON SCREEN against its fresh read: a focus may have
+   * redrawn it since the load began, and fail() runs outside any updater.
+   */
+  const shownRef = useRef<Owned>(held);
+  /**
+   * Sets the screen for `uid`; an updater sees another account's screen as
+   * loading. W16-17: the next screen is worked out here, against the mirror,
+   * and the mirror is set at once; `held` follows it.
+   */
+  const setScreen = useCallback((uid: string | null, next: Screen | ((prev: Screen) => Screen)) => {
+    const base = shownRef.current.uid === uid ? shownRef.current.screen : LOADING;
+    const out: Owned = { uid, screen: typeof next === 'function' ? next(base) : next };
+    shownRef.current = out;
+    setHeld(out);
+  }, []);
   const [signingOut, setSigningOut] = useState(false);
   const [reloads, setReloads] = useState(0);
+  // A page that came up before the phone's remembered community was read
+  // shows loading (recordedYou above); once the read lands, the frame the
+  // record could not give then is given now. Not after a Retry, which reads
+  // everything fresh. The load below still replaces it.
+  const communityReady = useCurrentCommunityReady();
+  // heads-11 F2: what that repaint drew. It lets the load in flight keep the
+  // page on screen if it fails, under the same gate as a page drawn at mount
+  // (`fail` below).
+  const repainted = useRef<{ uid: string; screen: Screen } | null>(null);
+  useEffect(() => {
+    if (!communityReady || !ready || !user || reloads > 0) return;
+    const warmNow = recordedYou(user.uid)?.screen ?? null;
+    repainted.current = warmNow ? { uid: user.uid, screen: warmNow } : null;
+    const uid = user.uid;
+    setScreen(uid, (prev) => (prev.kind === 'loading' ? recordedYou(uid)?.screen ?? prev : prev));
+  }, [communityReady, ready, user, reloads, setScreen]);
   /** Guards a landed read against a newer one, and against an unmounted tree. */
   const live = useRef(0);
 
@@ -352,7 +460,7 @@ export default function You() {
     moment before. Now:
       · when this account's record (src/memberReads.ts) holds the member's
         communities, the current community's goals and the own part in each,
-        the page opens on them at once (`youFromRecord`); the name waits in
+        the page opens on them at once (`recordedYou`); the name waits in
         its place until the profile is read, it is never guessed;
       · every read runs through the same record, the profile alongside the
         rest instead of before it, and an answer from this load is reused;
@@ -377,6 +485,27 @@ export default function You() {
   */
   const [revalidate, setRevalidate] = useState(0);
   const keepOnScreen = useRef(false);
+  /** INT-12 (W16-2): the next revalidation reads fresh (a return to the app), not from the record. */
+  const freshNext = useRef(false);
+  /**
+   * INT-12 case 4 (review 1343247d-N3): what the member page on screen was
+   * composed from, when it came from a NETWORK read, for this account only,
+   * so a failed revalidation that keeps the page can recompose it against
+   * NOW. A goal whose end passed while the app slept must stop offering
+   * "Start moving" even when the server could not be asked (hasWindowEnded
+   * is pure). heads-10 F-1 and heads-11 NB-3: these are ALWAYS the inputs of
+   * the page on screen, whatever drew it: a network read, or the account's
+   * record (the focus path, the effect's recorded branch, which also covers
+   * the first frame's record page on the same mount, and a kept page
+   * recomposed from the record). So they are never older than the page, and
+   * a page drawn from the record can still be recomposed against now after
+   * the record has lost a fact.
+   */
+  const composedFrom = useRef<{ uid: string; args: ComposeArgs } | null>(null);
+  /** The page on screen was drawn from the record: its inputs become the record's. */
+  const drawnFromRecord = (uid: string, rec: { args: ComposeArgs | null }) => {
+    composedFrom.current = rec.args ? { uid, args: rec.args } : null;
+  };
   const focusedOnce = useRef(false);
   useFocusEffect(
     useCallback(() => {
@@ -386,32 +515,55 @@ export default function You() {
       }
       if (!ready || !user) return;
       const uid = user.uid;
-      const recorded = youFromRecord(uid);
-      if (recorded) {
-        setScreen(recorded);
-        return;
+      const rec = recordedYou(uid);
+      if (rec) {
+        drawnFromRecord(uid, rec);
+        // W16-25 (heads-16 RV18-642-M1): a record with no profile composes a
+        // pending head (the name waits for the profile read), and this path
+        // issues no read; drawn as is, the bar stood in place of the "You"
+        // header for good. A page with a head keeps it (the kept inputs take
+        // it too, NB-3); with none to keep (loading), the record counts as
+        // incomplete and is revalidated below, which reads the profile, so a
+        // read is behind the bar.
+        if (!('profile' in rec.screen) || rec.screen.profile.pending !== true) {
+          setScreen(uid, rec.screen);
+          return;
+        }
+        const shown = shownRef.current.uid === uid ? shownRef.current.screen : LOADING;
+        if ('profile' in shown && !shown.profile.pending) {
+          const head = shown.profile;
+          if (rec.args) composedFrom.current = { uid, args: [head, ...rec.args.slice(1)] as ComposeArgs };
+          setScreen(uid, { ...rec.screen, profile: head } as Screen);
+          return;
+        }
       }
-      setScreen((prev) =>
+      setScreen(uid, (prev) =>
         prev.kind === 'member' && wasRefused(uid, prev.community.groupId) ? { kind: 'loading' } : prev,
       );
       keepOnScreen.current = true;
       setRevalidate((n) => n + 1);
-    }, [ready, user]),
+    }, [ready, user, setScreen]),
   );
 
   useEffect(() => {
     if (!ready) return;
     if (!user) {
-      setScreen({ kind: 'signedOut' });
+      composedFrom.current = null;
+      setScreen(null, SIGNED_OUT);
       return;
     }
     const token = ++live.current;
+    repainted.current = null;
     const uid = user.uid;
-    const reuse = reloads > 0 ? 0 : SAME_LOAD_MS;
-    const recorded = reloads > 0 ? null : youFromRecord(uid);
+    const fresh = reloads > 0 || freshNext.current;
+    freshNext.current = false;
+    const reuse = fresh ? 0 : SAME_LOAD_MS;
+    const rec = fresh ? null : recordedYou(uid);
+    const recorded = rec?.screen ?? null;
     const keep = keepOnScreen.current;
     keepOnScreen.current = false;
-    setScreen((prev) => recorded ?? (keep && prev.kind !== 'loading' ? prev : { kind: 'loading' }));
+    if (rec) drawnFromRecord(uid, rec);
+    setScreen(uid, (prev) => recorded ?? (keep && prev.kind !== 'loading' ? prev : { kind: 'loading' }));
     setStale(false);
     setChecking(false);
     const slow = recorded || keep
@@ -428,24 +580,132 @@ export default function You() {
       // THE PROFILE ALONGSIDE THE REST. It is the member's own document and
       // needs no callable, so an identity is on screen even when every goal
       // read fails -- but nothing else has to wait for it.
-      const profileRead: Promise<Profile> = readMemberProfile(uid, reuse).then(toProfile, () => ({
-        displayName: null,
-        memberSince: null,
-      }));
+      // NB-4: whether this load's profile read answered (its failure fallback
+      // is not a profile, so a kept page does not take it for one).
+      let profileAnswered = false;
+      const profileRead: Promise<Profile> = readMemberProfile(uid, reuse).then(
+        (answer) => {
+          profileAnswered = true;
+          return toProfile(answer);
+        },
+        () => ({ displayName: null, memberSince: null }),
+      );
       const fail = async (community?: Community) => {
         const profile = await profileRead;
         if (live.current !== token) return;
         settle();
-        if (recorded && recorded.kind === 'member') {
-          setScreen({ ...recorded, profile });
+        /*
+          WHICH PAGE A FAILED LOAD KEEPS (RV16-C15-1, RV16-C15-2, RV16-639-1).
+          A load may keep what is on screen, marked stale, when it began on a
+          member page from the record (`recorded`), when the readiness repaint
+          drew a member page while it was in flight (`painted`, heads-11 F2),
+          or when it is a return's revalidation (`keep`). ONE GATE decides,
+          on the page ON SCREEN now (`shownRef`), not on the page the load
+          began on, which a focus may have replaced since:
+            · a member page is kept only while the fresh read still shows it
+              (`keptPageStillShown`, RV15-639-N2);
+            · pick, none and failed pages are kept only when NO community was
+              resolved, i.e. the membership read itself failed (W13-15,
+              heads-15 RV17-642-N1): once the fresh list resolved one whose
+              goals then failed, that community's failed page is the true
+              one. 'loading' is never kept: a skeleton is never left up as a
+              stale page (a refused community's page dropped to loading,
+              then a failed revalidation).
+          Otherwise the failed page for the resolved community, with Retry,
+          and nothing is marked stale. The condition is member's (W16-17),
+          with the repainted page added: only this tree keeps it apart.
+        */
+        const painted = !recorded && !keep && repainted.current?.uid === uid ? repainted.current.screen : null;
+        // Candidate-17 composition: the repainted page joins the one gate below
+        // (W13-12), so it is judged on the page on screen like the others and
+        // kept through member's keep body, whose head never falls back to the
+        // read's failure fallback (RV16-C15-3).
+        // heads-13 RV15-642-B2: a load that drew the record's member page
+        // fails the same way as a kept one. It used to put back the page it
+        // drew when it STARTED, so a focus that had since drawn a newer page
+        // or another community (a switch, a receipt) was undone, and a failed
+        // profile read replaced the recorded name with "You".
+        //
+        // W16-17 (RV15-639-N2, RV16-C15-1, RV16-C15-2): ONE GATE, ON THE PAGE
+        // ON SCREEN (a focus may have redrawn it since this load began; the
+        // keep body below keeps and recomposes that page, so it is the one
+        // tested). A member page is kept only while this load's fresh read
+        // still shows it (`keptPageStillShown`, above, verbatim from state-1
+        // c2992bef; with no list read nothing contradicts it); a page the
+        // fresh read contradicts falls through to the failed page for the
+        // community resolved, with Retry and no stale mark. A 'loading' page
+        // (the focus dropped a refused community's figures) is never kept: it
+        // falls through to the failed page with Retry, not a skeleton marked
+        // stale. Pick, none and failed pages are kept and marked stale only
+        // when no fresh list resolved a community (the membership read itself
+        // failed): W16-22 (heads-15 RV17-642-N1), a fresh list that RESOLVED
+        // one (whose goals then failed) contradicts them as surely as it does
+        // a member page, and they draw no stale mark and no Retry, so the
+        // failed page for the community resolved is drawn instead.
+        const shown = shownRef.current.uid === uid ? shownRef.current.screen : LOADING;
+        if (
+          (keep || (recorded && recorded.kind === 'member') || (painted && painted.kind === 'member')) &&
+          (shown.kind === 'member' ? keptPageStillShown(shown, community, communities) : shown.kind !== 'loading' && community === undefined)
+        ) {
+          // Kept, but recomposed against now (N3). heads-10 F-1: from the
+          // account's record first, which is never older than the page (a
+          // receipt, a focus and a switch all write or read it); only when it
+          // no longer holds every fact, from the inputs the page on screen was
+          // composed from (NB-3: never older than it). And only ever as the
+          // same community: a failed read never swaps the community on screen.
+          const from = composedFrom.current?.uid === uid ? composedFrom.current.args : null;
+          const rec = recordedYou(uid);
+          const again = rec?.screen ?? (from ? composeMember(...from) : null);
+          if (again?.kind === 'member') {
+            setScreen(uid, (prev) => {
+              if (prev.kind !== 'member' || prev.community.groupId !== again.community.groupId) return prev;
+              if (rec) drawnFromRecord(uid, rec);
+              // NB-4: the head is the freshest profile there is: this load's
+              // read if it answered, else the record's, else the one the page
+              // already shows. Never a pending bar over a name, or over the
+              // "You" header, on a page kept as last read. heads-13
+              // RV15-642-N1: "the record's" is the account's recorded profile
+              // even when the page was recomposed from `composedFrom` (the
+              // record could not), which may hold an older name; and those
+              // inputs take the head shown, so they stay the page's own.
+              // W16-20 (heads-14 RV16-642-N1): the chain never ends on a
+              // pending profile. A record with no profile composes a pending
+              // head, and so may the page on screen; with both pending, the
+              // head is this load's failure fallback (`profile`), the "You"
+              // header, not the pending bar.
+              const known = peekMemberProfile(uid);
+              const head = profileAnswered
+                ? profile
+                : known
+                  ? toProfile(known)
+                  : !again.profile.pending
+                    ? again.profile
+                    : !prev.profile.pending
+                      ? prev.profile
+                      : profile;
+              if (!rec && from) composedFrom.current = { uid, args: [head, ...from.slice(1)] as ComposeArgs };
+              return { ...again, profile: head };
+            });
+          } else {
+            // W16-25 (heads-16 RV18-642-M1): a kept pick, none or failed page
+            // keeps no pending head either (it draws no stale mark and no
+            // Retry, so nothing would ever replace the bar): this load's
+            // profile if it answered, else the account's recorded profile,
+            // else this load's fallback, the "You" header. A name on screen
+            // is never replaced by the fallback.
+            const known = peekMemberProfile(uid);
+            setScreen(uid, (prev) =>
+              prev.kind === 'member' || prev.kind === 'loading' || prev.kind === 'signedOut'
+                ? prev
+                : profileAnswered || prev.profile.pending
+                  ? { ...prev, profile: profileAnswered ? profile : known ? toProfile(known) : profile }
+                  : prev,
+            );
+          }
           setStale(true);
           return;
         }
-        if (keep) {
-          setStale(true);
-          return;
-        }
-        setScreen(community ? { kind: 'failed', profile, community } : { kind: 'failed', profile });
+        setScreen(uid, community ? { kind: 'failed', profile, community } : { kind: 'failed', profile });
       };
 
       let communities: Community[] = [];
@@ -461,7 +721,7 @@ export default function You() {
         const profile = await profileRead;
         if (live.current !== token) return;
         settle();
-        setScreen({ kind: 'noCommunity', profile });
+        setScreen(uid, { kind: 'noCommunity', profile });
         return;
       }
 
@@ -482,7 +742,7 @@ export default function You() {
         const profile = await profileRead;
         if (live.current !== token) return;
         settle();
-        setScreen({ kind: 'pickCommunity', profile, count: communities.length });
+        setScreen(uid, { kind: 'pickCommunity', profile, count: communities.length });
         return;
       }
 
@@ -505,29 +765,72 @@ export default function You() {
       const profile = await profileRead;
       if (live.current !== token) return;
       settle();
-      setScreen(
-        composeMember(
-          profile,
-          community,
-          goals,
-          owned.map((o) => (o.ok ? o.value : null)),
-          elsewhereFromRecord(uid, communities, community.groupId),
-        ),
-      );
+      const args: Parameters<typeof composeMember> = [
+        profile,
+        community,
+        goals,
+        owned.map((o) => (o.ok ? o.value : null)),
+        elsewhereFromRecord(uid, communities, community.groupId),
+      ];
+      composedFrom.current = { uid, args };
+      setScreen(uid, composeMember(...args));
     })();
     return () => {
+      // MF-03: whatever this run still has in flight belongs to a session or
+      // a load that is over -- the signed-out branch above takes no token.
+      live.current += 1;
       if (slow) clearTimeout(slow);
     };
-  }, [ready, user, reloads, revalidate]);
+  }, [ready, user, reloads, revalidate, setScreen]);
 
+  // NATIVE-MEMBER-1 SH-7 (INT-05). You's own Sign out lands where the menu's
+  // does: on a phone, after a SUCCESSFUL sign-out, the root stack is reset to
+  // signed-out Home as one route with nothing behind it
+  // (src/ui/signOutReset.ts). The reset goes to the root stack -- this tab's
+  // parent, the same navigation object the shell's menu dispatches on -- and
+  // a failed sign-out moves nothing. On the web You has always gone to Home
+  // after signing out; it still does, and only after a successful one.
+  const navigation = useNavigation();
   const onSignOut = useCallback(() => {
     setSigningOut(true);
-    void signOut(getFirebaseAuth())
-      .then(() => router.replace('/'))
+    void signOutToSignedOutHome({
+      signOut: () => signOut(getFirebaseAuth()),
+      dispatch: (action) => (navigation.getParent() ?? navigation).dispatch(action as never),
+      platform: Platform.OS,
+    })
+      .then((signedOut) => {
+        if (signedOut && Platform.OS === 'web') router.replace('/');
+      })
       .finally(() => setSigningOut(false));
-  }, []);
+  }, [navigation]);
 
   const reload = useCallback(() => setReloads((v) => v + 1), []);
+
+  const screen = screenForAccount(ready, user?.uid ?? null, held);
+
+  /*
+    NATIVE-MEMBER-1 W16-2 (INT-12). COMING BACK TO THE APP READS FRESH, as
+    Progress does (activity.tsx). A tab return recomposes from the account's
+    record; a return to the app after at least 30 s away
+    (src/useResumeRefresh.ts) asks the server, because a goal may have ended
+    while the app slept and You would otherwise keep offering "Start moving"
+    for it. What is on screen stays while it reads ("Checking…" after a
+    moment); a failed read keeps it, marked as last read, with Retry. A failed
+    screen is retried on any return.
+  */
+  useResumeRefresh(
+    () => {
+      if (!ready || !user) return;
+      if (screen.kind === 'failed') {
+        setReloads((n) => n + 1);
+        return;
+      }
+      freshNext.current = true;
+      keepOnScreen.current = true;
+      setRevalidate((n) => n + 1);
+    },
+    { minAwayMs: screen.kind === 'failed' ? 0 : RESUME_MIN_AWAY_MS },
+  );
 
   return (
     <YouParityView
@@ -536,7 +839,14 @@ export default function You() {
       signingOut={signingOut}
       refresh={{ checking, stale, onRetry: reload }}
       actions={{
-        onSettings: () => router.push('/settings'),
+        onSettings: () => {
+          // W16-5 (INT-17). On a phone, when Settings closes the screen
+          // reader's focus comes back to this row (YouHead registers it), not
+          // to the top bar's menu button. The web finds its own opener in the
+          // document and is left exactly as it was.
+          if (Platform.OS !== 'web') armTabsFocusReturnTo(YOU_SETTINGS_TARGET);
+          router.push('/settings');
+        },
         onSignOut,
         onSignIn: () => router.push('/signin'),
         onCommunity: () => router.push('/community'),

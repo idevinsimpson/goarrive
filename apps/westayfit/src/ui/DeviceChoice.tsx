@@ -1,4 +1,5 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSyncExternalStore } from 'react';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import {
   DEVICE_CHOICE_HEADING,
@@ -14,15 +15,21 @@ import {
   DEVICE_SHARED_FACTS,
   DEVICE_SHARED_RESET,
   DEVICE_SHARED_TITLE,
+  deviceModeMayBeRemembered,
+  isDeviceModeReady,
+  subscribeDeviceModeMayBeRemembered,
 } from '../deviceMode';
 import {
   ACTION_GREEN,
+  ACTION_GREEN_DEEP,
   HAIRLINE,
   INK_QUIET,
   NAVY,
+  OPTION_SELECTED_TINT,
   SURFACE,
   elevation,
   kit,
+  pressableStyle,
 } from './kit';
 
 /**
@@ -61,6 +68,11 @@ export type DeviceChoiceProps = {
   testID: string;
 };
 
+/** The device note may show: the launch read has answered (always, on the web) and the answer can be remembered. */
+function deviceNoteMayShow(): boolean {
+  return isDeviceModeReady() && deviceModeMayBeRemembered();
+}
+
 export function DeviceChoice({
   onChoosePersonal,
   onChooseShared,
@@ -71,6 +83,29 @@ export function DeviceChoice({
   const sharedDescription = signupAhead
     ? DEVICE_CHOICE_SHARED_DESCRIPTION_SIGNUP
     : DEVICE_CHOICE_SHARED_DESCRIPTION;
+  /*
+    W16-3 ST-04. THE NOTE SAYS THE ANSWER IS REMEMBERED ONLY WHEN IT CAN BE.
+    On a phone the device may refuse the save, or its stored answer may be
+    unreadable; then "remembered on this device only" would be untrue, so the
+    note is not shown (src/deviceMode.ts `deviceModeMayBeRemembered`, W13-3,
+    followed as it changes). On the web it is always true: the note stays.
+
+    RV14-642-N2: and not before the device's launch read has answered. Until
+    then nothing is known, and an unreadable store would flash the note on the
+    first render. The shipped routes render this only once the device mode is
+    read; this keeps the component honest for any caller. On the web the
+    store is always ready, so nothing changes there.
+  */
+  const remembered = useSyncExternalStore(
+    subscribeDeviceModeMayBeRemembered,
+    deviceNoteMayShow,
+    deviceNoteMayShow,
+  );
+  const note = remembered ? (
+    <Text style={kit.caption} testID={`${testID}-note`}>
+      {DEVICE_CHOICE_NOTE}
+    </Text>
+  ) : null;
 
   if (variant === 'sheet') {
     return (
@@ -84,33 +119,36 @@ export function DeviceChoice({
         */}
         <View style={styles.sheetCard}>
           <Text style={styles.sheetLabel}>{DEVICE_CHOICE_PERSONAL_LABEL}</Text>
-          <Text style={styles.sheetBody}>{DEVICE_CHOICE_PERSONAL_DESCRIPTION}</Text>
+          <Text style={styles.sheetBody} {...nativeHidden()}>
+            {DEVICE_CHOICE_PERSONAL_DESCRIPTION}
+          </Text>
           <Pressable
             onPress={onChoosePersonal}
-            style={styles.sheetPrimary}
+            // W16-12 (INT-33): pressed feedback on a phone; the web's style is unchanged.
+            {...pressableStyle(styles.sheetPrimary, ACTION_GREEN_DEEP)}
             testID={`${testID}-personal`}
             accessibilityRole="button"
-            accessibilityLabel={`${DEVICE_CHOICE_PERSONAL_LABEL}. ${DEVICE_CHOICE_PERSONAL_DESCRIPTION}`}
+            {...choiceA11y(SHEET_PERSONAL_ACTION, DEVICE_CHOICE_PERSONAL_DESCRIPTION, `${DEVICE_CHOICE_PERSONAL_LABEL}. ${DEVICE_CHOICE_PERSONAL_DESCRIPTION}`)}
           >
-            <Text style={styles.sheetPrimaryText}>This is my phone</Text>
+            <Text style={styles.sheetPrimaryText}>{SHEET_PERSONAL_ACTION}</Text>
           </Pressable>
         </View>
         <View style={styles.sheetCardQuiet}>
           <Text style={styles.sheetLabel}>{DEVICE_CHOICE_SHARED_LABEL}</Text>
-          <Text style={styles.sheetBody}>{sharedDescription}</Text>
+          <Text style={styles.sheetBody} {...nativeHidden()}>
+            {sharedDescription}
+          </Text>
           <Pressable
             onPress={onChooseShared}
-            style={styles.sheetSecondary}
+            {...pressableStyle(styles.sheetSecondary, OPTION_SELECTED_TINT)}
             testID={`${testID}-shared`}
             accessibilityRole="button"
-            accessibilityLabel={`${DEVICE_CHOICE_SHARED_LABEL}. ${sharedDescription}`}
+            {...choiceA11y(SHEET_SHARED_ACTION, sharedDescription, `${DEVICE_CHOICE_SHARED_LABEL}. ${sharedDescription}`)}
           >
-            <Text style={styles.sheetSecondaryText}>We’re sharing this screen</Text>
+            <Text style={styles.sheetSecondaryText}>{SHEET_SHARED_ACTION}</Text>
           </Pressable>
         </View>
-        <Text style={kit.caption} testID={`${testID}-note`}>
-          {DEVICE_CHOICE_NOTE}
-        </Text>
+        {note}
       </View>
     );
   }
@@ -139,11 +177,28 @@ export function DeviceChoice({
           testID={`${testID}-shared`}
         />
       </View>
-      <Text style={kit.caption} testID={`${testID}-note`}>
-        {DEVICE_CHOICE_NOTE}
-      </Text>
+      {note}
     </View>
   );
+}
+
+/** The sheet's two buttons, as they read: the visible words are the native label. */
+const SHEET_PERSONAL_ACTION = 'This is my phone';
+const SHEET_SHARED_ACTION = 'We’re sharing this screen';
+
+/**
+ * W16-3 (MF-18). On a phone a button is read by its label and then its hint,
+ * so the label is the words on the button and the hint is the description;
+ * the description's own Text is hidden there, so it is not read twice. The
+ * web keeps today's single aria-label ("<label>. <description>").
+ */
+function choiceA11y(visible: string, description: string, webLabel: string) {
+  return Platform.OS === 'web'
+    ? { accessibilityLabel: webLabel }
+    : { accessibilityLabel: visible, accessibilityHint: description };
+}
+function nativeHidden() {
+  return Platform.OS === 'web' ? {} : ({ accessible: false, importantForAccessibility: 'no' } as const);
 }
 
 function ChoiceCard({
@@ -160,15 +215,16 @@ function ChoiceCard({
   return (
     <Pressable
       onPress={onPress}
-      style={[kit.card, styles.choiceCard]}
+      // W16-12 (INT-33): pressed feedback on a phone; the web's style is unchanged.
+      {...pressableStyle([kit.card, styles.choiceCard], OPTION_SELECTED_TINT)}
       testID={testID}
       accessibilityRole="button"
-      accessibilityLabel={`${label}. ${description}`}
+      {...choiceA11y(label, description, `${label}. ${description}`)}
     >
       <Text style={[kit.cardTitle, styles.shrink]} testID={`${testID}-label`}>
         {label}
       </Text>
-      <Text style={[kit.cardMeta, styles.shrink]} testID={`${testID}-description`}>
+      <Text style={[kit.cardMeta, styles.shrink]} testID={`${testID}-description`} {...nativeHidden()}>
         {description}
       </Text>
     </Pressable>

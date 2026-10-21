@@ -17,7 +17,8 @@ import {
  * On the base a failed progress read left the figure and its "Confirmed h:mm"
  * standing with no word, so a member back from contributing could not tell a
  * fresh reading from a stale one. The contract, asserted here:
- *   · the retained figure stays, and so does its "Confirmed h:mm";
+ *   · the retained figure stays, and so does its time, now said as "Last
+ *     confirmed h:mm" (W16-14, INT-12; it was "Confirmed h:mm");
  *   · the hero's pill says "Last known", a polite line beside the figure says
  *     the refresh failed and offers Retry, and the own row says it is the
  *     last-known contribution;
@@ -151,7 +152,10 @@ test.describe('RETURN-CONTINUITY-1 · a failed refresh after a return is said', 
     await expect(page.locator(`[data-testid="wsf-community-goal-period-${featured}"]:visible`)).toHaveCount(0);
     await expect(shown(page, `wsf-community-your-part-${featured}`)).toContainText('Your last-known contribution');
     await expect(shown(page, `wsf-community-goal-total-${featured}`), 'the retained figure stays').toHaveText(total);
-    await expect(shown(page, 'wsf-community-progress-updated'), 'its stamp does not advance').toHaveText(stamp);
+    // W16-14 (INT-12): the stamp does not advance, and says it is the last confirmed one.
+    await expect(shown(page, 'wsf-community-progress-updated'), 'its stamp does not advance').toHaveText(
+      stamp.replace(/^Confirmed /, 'Last confirmed '),
+    );
     // The other open goal's card says it too.
     await expect(shown(page, `wsf-community-goal-stale-${other}`)).toBeVisible();
     // Retry, while the reads still fail: nothing changes, nothing breaks.
@@ -194,7 +198,7 @@ test.describe('RETURN-CONTINUITY-1 · a failed refresh after a return is said', 
     await expect(shown(page, `wsf-community-goal-last-known-${fx.goalIds[0]}`)).toHaveText('Last known');
     // The retained figure is the one confirmed before the member left.
     await expect(shown(page, `wsf-community-goal-total-${fx.goalIds[0]}`)).toContainText('1,847');
-    await expect(shown(page, 'wsf-community-progress-updated')).toHaveText(/^Confirmed \d{1,2}:\d{2}/);
+    await expect(shown(page, 'wsf-community-progress-updated')).toHaveText(/^Last confirmed \d{1,2}:\d{2}/);
   });
 });
 

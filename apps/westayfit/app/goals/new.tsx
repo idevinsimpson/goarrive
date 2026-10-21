@@ -50,7 +50,21 @@ import { AndroidKeyboardInsetView, KEYBOARD_SCROLL_PROPS } from '../../src/ui/ke
 import { MovementPicker } from '../../src/ui/MovementPicker';
 import { OptionGroup, OptionRow } from '../../src/ui/OptionRow';
 import { formatCount } from '../../src/ui/progressFormat';
+import { revealInScroll } from '../../src/ui/revealInScroll';
+// W16-11 (MF-20): a time zone in words, iOS-safe; shared with the combined setup.
+import { zoneInWords } from '../../src/zoneName';
+import { ScreenTopSpacer, useScreenTopInset } from '../../src/ui/useScreenTopInset';
 import { WsfWordmark } from '../../src/ui/WsfWordmark';
+import { nativeErrorBoundary } from '../../src/ui/RouteErrorFallback';
+
+/*
+  NATIVE-MEMBER-1 W16-13 (INT-01 CS-4). On a phone a render error here shows
+  the contained screen fallback (Try again remounts the route, Go to Home is
+  the way out; src/ui/RouteErrorFallback.native.tsx) instead of ending the
+  process. The web module returns undefined, so the web gets no boundary and
+  nothing changes there.
+*/
+export const ErrorBoundary = nativeErrorBoundary('screen');
 
 // Where a community Champion starts a shared goal. The community page sends
 // them here with the group it already knows (`?groupId=…`); they define the
@@ -61,10 +75,11 @@ import { WsfWordmark } from '../../src/ui/WsfWordmark';
 // This screen is HARD-GATED to the emulator + loopback host and to a staging
 // build via `wsfUsingEmulators` / `wsfIsStaging` (double-gated inside
 // firebase.ts). A production build cannot reach the form even if someone
-// navigates the URL directly. The environment it writes into is carried as a
-// non-visual `data-environment` attribute on the form, never as text a
-// Champion reads; the community it belongs to travels the same way
-// (`data-group-id`), never as an id on the page.
+// navigates the URL directly. That it writes into a synthetic environment is
+// carried as a non-visual `data-environment` attribute on the form (naming no
+// environment: W16-24), never as text a Champion reads; the community it
+// belongs to travels the same way (`data-group-id`), never as an id on the
+// page.
 //
 // Uses `wsfCreateGoal` (E4-A1) for the goal itself — the same callable the
 // browser specs drive. The request shape is unchanged: ISO instants for the
@@ -104,17 +119,16 @@ const REPEAT_OPTIONS: ReadonlyArray<{ key: RepeatPolicy; label: string; descript
   },
 ];
 
-// Names the environment this screen is actually writing into. Machine-readable
-// only (a data attribute on the form); it never renders as text.
-const SYNTHETIC_LABEL = wsfIsStaging ? 'STAGING SYNTHETIC TEST' : 'LOCAL SYNTHETIC TEST';
+// Marks the form as a synthetic environment's. Machine-readable only (a data
+// attribute on the form); it never renders as text. NATIVE-MEMBER-1 W16-24
+// (owner UI-copy request): one neutral label with no environment word, so
+// nothing of this screen names an environment, not even in the DOM; which
+// synthetic environment this is stays with `wsfUsingEmulators` and
+// `wsfIsStaging` (the gate below), never with copy.
+const SYNTHETIC_LABEL = 'SYNTHETIC TEST';
 
 const FALLBACK_COMMUNITY_NAME = 'Your community';
 const FALLBACK_TIME_ZONE = 'America/New_York';
-
-// A zone Intl names awkwardly reads better as its place. Arizona keeps
-// standard time all year, which Intl calls "Mountain Standard Time"; beside
-// "Mountain Time" that reads as a duplicate, so it is named for the place.
-const ZONE_LABELS: Readonly<Record<string, string>> = { 'America/Phoenix': 'Arizona Time' };
 
 // ---- dates: the datetime-local shape "2026-09-25T14:00", read in local time ----
 
@@ -238,38 +252,6 @@ function deviceTimeZone(): string {
   } catch {
     return FALLBACK_TIME_ZONE;
   }
-}
-
-/**
- * A time zone in words: "Eastern Time", "United Kingdom Time", "Coordinated
- * Universal Time". The generic name is preferred (it does not flip between
- * standard and daylight); zones the platform can only name as an offset fall
- * back to the specific name, and a zone it cannot name at all reads as its
- * identifier with the underscores taken out.
- */
-function zoneInWords(tz: string): string {
-  const named = ZONE_LABELS[tz];
-  if (named) return named;
-  const plain = tz.replace(/_/g, ' ');
-  const nameOf = (timeZoneName: 'long' | 'longGeneric'): string | null => {
-    try {
-      const part = new Intl.DateTimeFormat(undefined, {
-        timeZone: tz,
-        // 'longGeneric' is newer than the lib typings; older engines ignore it.
-        timeZoneName: timeZoneName as 'long',
-      })
-        .formatToParts(new Date())
-        .find((p) => p.type === 'timeZoneName');
-      return part && part.value.trim() ? part.value : null;
-    } catch {
-      return null;
-    }
-  };
-  const generic = nameOf('longGeneric');
-  // A bare offset ("GMT", "GMT+00:00") is not a name; the specific name
-  // ("Coordinated Universal Time") reads better when there is one.
-  if (generic && !/^(GMT|UTC)([+-].*)?$/.test(generic)) return generic;
-  return nameOf('long') ?? generic ?? plain;
 }
 
 /** "5,000 squats" — the goal as one phrase, numbers grouped for reading. */
@@ -436,6 +418,9 @@ export default function NewGoalPage() {
   // What a refused submit focuses and scrolls to: the input itself, and the
   // block (label, input, message) around it.
   const scrollRef = useRef<ScrollView>(null);
+  // W16-8 review c52faa1e-N-2: the top spacer scrolls with the content, so a
+  // revealed field parks below the inset as well as 12 pt down. 0 on web.
+  const topInset = useScreenTopInset();
 
   const titleRef = useRef<TextInput>(null);
   const targetRef = useRef<TextInput>(null);
@@ -537,15 +522,11 @@ export default function NewGoalPage() {
       const anchor = anchorRefs[key].current;
       const scroll = scrollRef.current;
       if (!anchor || !scroll) return;
-      const content = scroll.getInnerViewNode();
-      if (!content) return;
-      anchor.measureLayout(
-        content,
-        (_x, y) => scroll.scrollTo({ y: Math.max(0, y - 12), animated: true }),
-        () => {}
-      );
+      // MF-12: measured against the content's host instance, which Fabric can
+      // measure (src/ui/revealInScroll.ts); a numeric handle silently fails.
+      revealInScroll(scroll, anchor, 12 + topInset);
     },
-    [anchorRefs]
+    [anchorRefs, topInset]
   );
 
   const onSubmit = useCallback(async () => {
@@ -1411,6 +1392,8 @@ function Page({
       // NATIVE-INTEGRATOR-1 (INT-06): iOS keeps a focused field above the keyboard.
       {...KEYBOARD_SCROLL_PROPS}
     >
+      {/* NATIVE-MEMBER-1 W16-8 (INT-09): a root-stack screen clears the status bar itself; nothing on web. */}
+      <ScreenTopSpacer />
       <View
         style={kit.column}
         testID={testID}

@@ -1,4 +1,4 @@
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import {
   privacySaveErrorCopy,
@@ -7,6 +7,8 @@ import {
   type Visibility,
 } from './communityParityTypes';
 import { ACTION_GREEN, NAVY, PROGRESS_GREEN, SURFACE } from './kit';
+// W16-12 (INT-31): the knob's lift, per platform (W12-15, kit-base).
+import { lift } from './lift';
 
 /**
  * COMMUNITY PRIVACY PANEL VIEW — the frozen Lovable Settings panel
@@ -247,6 +249,9 @@ function ToggleRow({
       aria-disabled={disabled}
       aria-busy={saving}
       aria-describedby={hintId}
+      // W16-3 (MF-18): a phone has no aria-describedby; the hint (or
+      // "Saving…") is the switch's own accessibility hint there.
+      {...(Platform.OS !== 'web' ? { accessibilityHint: saving ? 'Saving…' : hint } : {})}
       accessibilityLabel={accessibilityLabel}
       style={s.toggleRow}
       testID={testID}
@@ -263,7 +268,9 @@ function ToggleRow({
         </Text>
       </View>
       <View style={[s.track, on ? s.trackOn : null, disabled ? s.trackBusy : null]}>
-        <View style={[s.knob, on ? s.knobOn : null]} />
+        {/* W16-12 (INT-31): Android draws no shadow from shadow*; lift.knob is
+            its elevation 2. iOS keeps the knob's own shadow; the web gets {}. */}
+        <View style={[s.knob, lift.knob, on ? s.knobOn : null]} />
       </View>
     </Pressable>
   );

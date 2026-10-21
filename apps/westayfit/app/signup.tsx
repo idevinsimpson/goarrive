@@ -1,8 +1,8 @@
-import { router } from 'expo-router';
+import { router, useNavigation } from 'expo-router';
 import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
-import { useEffect, useRef, useState } from 'react';
-import type { TextInput } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Platform, type TextInput } from 'react-native';
 
 import { useWsfAuth } from '../src/auth';
 import { AuthFlagOffPanel } from '../src/AuthFlagOffPanel';
@@ -21,8 +21,27 @@ import { authErrorCode, authErrorMessage, isEmailAlreadyInUse } from '../src/aut
 import { wsfAuthEnabled } from '../src/featureFlags';
 import { getFirebaseAuth, getFirebaseFirestore } from '../src/firebase';
 import { routeAfterAuth } from '../src/pendingJoinCode';
+import { landAfterAuth } from '../src/ui/authLanding';
+import { memberLandingDeps } from '../src/ui/memberLanding';
+import {
+  leaveRedirectFailed,
+  openKioskGoal,
+  REDIRECT_FAILED_SENTENCE,
+  REDIRECT_WAY_OUT_HOME,
+  REDIRECT_WAY_OUT_KIOSK,
+} from '../src/ui/authRedirect';
 import { requestVerificationEmail } from '../src/verificationEmail';
 import { beginVerificationSend, recordVerificationSend } from '../src/verificationSendState';
+import { nativeErrorBoundary } from '../src/ui/RouteErrorFallback';
+
+/*
+  NATIVE-MEMBER-1 W16-13 (INT-01 CS-4). On a phone a render error here shows
+  the contained screen fallback (Try again remounts the route, Go to Home is
+  the way out; src/ui/RouteErrorFallback.native.tsx) instead of ending the
+  process. The web module returns undefined, so the web gets no boundary and
+  nothing changes there.
+*/
+export const ErrorBoundary = nativeErrorBoundary('screen');
 
 export default function SignUp() {
   const { ready, user } = useWsfAuth();
@@ -34,6 +53,27 @@ export default function SignUp() {
   const [offerSignIn, setOfferSignIn] = useState(false);
   const emailRef = useRef<TextInput>(null);
   const passwordRef = useRef<TextInput>(null);
+  /*
+    NATIVE-MEMBER-1 W16-1 (MF-13). THE KEYBOARD'S GO/ENTER IS A SUBMIT TOO.
+    The password field's Go (native) and Enter (web: react-native-web turns
+    Enter into onSubmitEditing) call onSubmit directly, past the button's
+    disabled state. So onSubmit carries the guards itself: the same rule the
+    button shows, and a synchronous in-flight latch (a ref, not state: two
+    key presses in one tick both see the old state).
+  */
+  const inFlight = useRef(false);
+
+  // W16-7 (INT-20, MF-16): as signin.tsx. The terminal hop lands through
+  // landAfterAuth (on a phone, Home only with the destination pushed over it;
+  // on the web, replace as before), and an offline profile read has a way out
+  // on a phone. The web keeps its Loading branch.
+  const navigation = useNavigation();
+  // W16-19 (RV16-641-B1): the landing also reads the root stack and can
+  // dismiss into it, so a kiosk beneath is never reset away
+  // (src/ui/memberLanding.ts).
+  const land = useCallback((next: string) => landAfterAuth(next, memberLandingDeps(navigation)), [navigation]);
+  const [redirectFailed, setRedirectFailed] = useState(false);
+  const [redirectAttempt, setRedirectAttempt] = useState(0);
 
   // Already-signed-in short-circuit — mirror of signin.tsx. A member with a
   // live session landing on /signup would otherwise be handed a form asking
@@ -42,28 +82,35 @@ export default function SignUp() {
   useEffect(() => {
     if (!ready || !user) return;
     let cancelled = false;
+    setRedirectFailed(false);
     (async () => {
       if (!user.emailVerified) {
         if (!cancelled) router.replace('/verify-email');
         return;
       }
-      const db = getFirebaseFirestore();
-      const profileSnap = await getDoc(doc(db, 'wsfMemberProfiles', user.uid));
-      if (cancelled) return;
-      if (!profileSnap.exists()) {
-        router.replace('/profile-setup');
+      let next: string;
+      try {
+        const db = getFirebaseFirestore();
+        const profileSnap = await getDoc(doc(db, 'wsfMemberProfiles', user.uid));
+        if (cancelled) return;
+        if (!profileSnap.exists()) {
+          router.replace('/profile-setup');
+          return;
+        }
+        // Waits for the pending join code to have been read (a phone reads it
+        // from storage at launch) and honours it only for this account.
+        next = await routeAfterAuth('/', user.uid);
+      } catch {
+        if (!cancelled) setRedirectFailed(true);
         return;
       }
-      // Waits for the pending join code to have been read (a phone reads it
-      // from storage at launch) and honours it only for this account.
-      const next = await routeAfterAuth('/', user.uid);
       if (cancelled) return;
-      router.replace(next as never);
+      land(next);
     })();
     return () => {
       cancelled = true;
     };
-  }, [ready, user]);
+  }, [ready, user, redirectAttempt, land]);
 
   if (!wsfAuthEnabled) {
     return <AuthFlagOffPanel title="Create your account" testID="wsf-signup-disabled" />;
@@ -72,6 +119,34 @@ export default function SignUp() {
   // Same-shape guard as signin — avoid flashing a "Create account" form to
   // someone the useEffect above is already about to redirect.
   if (!ready || user) {
+    if (user && redirectFailed && Platform.OS !== 'web') {
+      // RV14-642-F1: as signin.tsx. Under an open kiosk session the way out
+      // goes back to the kiosk, never to member Home (src/ui/authRedirect.ts).
+      const kioskGoal = openKioskGoal(user.uid);
+      return (
+        <FormShell heading="Start moving together." testID="wsf-signup-redirect-failed">
+          <ErrorText testID="wsf-signup-redirect-error">{REDIRECT_FAILED_SENTENCE}</ErrorText>
+          <SubmitButton
+            label="Try again"
+            onPress={() => setRedirectAttempt((n) => n + 1)}
+            submitting={false}
+            testID="wsf-signup-redirect-retry"
+          />
+          <SubmitButton
+            label={kioskGoal ? REDIRECT_WAY_OUT_KIOSK : REDIRECT_WAY_OUT_HOME}
+            variant="tertiary"
+            onPress={() =>
+              leaveRedirectFailed(user.uid, kioskGoal, {
+                land,
+                dismissTo: (href) => router.dismissTo(href as never),
+              })
+            }
+            submitting={false}
+            testID={kioskGoal ? 'wsf-signup-redirect-kiosk' : 'wsf-signup-redirect-home'}
+          />
+        </FormShell>
+      );
+    }
     return (
       <FormShell heading="Start moving together." testID="wsf-signup-loading">
         <StatusText>Loading…</StatusText>
@@ -82,6 +157,8 @@ export default function SignUp() {
   const canSubmit = !!displayName.trim() && !!email.trim() && password.length >= 8;
 
   async function onSubmit() {
+    if (!canSubmit || inFlight.current) return;
+    inFlight.current = true;
     setError(null);
     setOfferSignIn(false);
     setSubmitting(true);
@@ -123,6 +200,11 @@ export default function SignUp() {
       // send round trip). A second replace at this point would pull a member
       // who has since tapped "I have verified" back off profile-setup.
     } catch (e) {
+      // MF-13 review N-1: the latch reopens only for an outcome the member can
+      // retry. A terminal one keeps it shut, so a Go/Enter that lands before
+      // the re-render (while the old closure still reads the old state) cannot
+      // submit again. The account exists once create resolves: success is terminal.
+      inFlight.current = false;
       setError(authErrorMessage(e, 'Sign-up failed.'));
       setOfferSignIn(isEmailAlreadyInUse(e));
     } finally {
@@ -169,7 +251,9 @@ export default function SignUp() {
         autoCorrect={false}
         spellCheck={false}
         autoComplete="email"
-        textContentType="emailAddress"
+        // W16-7 (INT-24): iOS offers the saved sign-in for a 'username' field;
+        // autoComplete stays 'email' (the web's autocomplete attribute).
+        textContentType={Platform.OS === 'ios' ? 'username' : 'emailAddress'}
         inputMode="email"
         keyboardType="email-address"
         returnKeyType="next"

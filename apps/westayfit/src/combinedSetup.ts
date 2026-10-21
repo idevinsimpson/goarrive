@@ -203,45 +203,9 @@ export function parseTargetInput(raw: string): number | null {
 }
 
 /**
- * Zones whose generic name the platform gets wrong or unhelpfully. The same
- * one exception `app/goals/new.tsx` carries; kept in step deliberately so a
- * Champion reads the same words on both forms.
+ * A time zone in words. NATIVE-MEMBER-1 W16-11 (MF-20): this used to be a copy
+ * of the goal form's helper; both now use the one in src/zoneName.ts, which
+ * reads the name correctly on iOS's Hermes as well. Re-exported here so this
+ * module's callers and tests keep their import.
  */
-const ZONE_LABELS: Readonly<Record<string, string>> = { 'America/Phoenix': 'Arizona Time' };
-
-/**
- * A time zone in words: "Eastern Time", "United Kingdom Time", "Coordinated
- * Universal Time". The generic name is preferred (it does not flip between
- * standard and daylight); zones the platform can only name as an offset fall
- * back to the specific name, and a zone it cannot name at all reads as its
- * identifier with the underscores taken out.
- *
- * A COPY of the goal form's helper, deliberately, and for the same reason
- * `kioskSession.ts` copies the display's two refusal strings: `app/goals/new.tsx`
- * is owner-reviewed and is not edited to export it. This module's unit test
- * asserts the behaviour, so the two cannot drift silently.
- */
-export function zoneInWords(tz: string): string {
-  const named = ZONE_LABELS[tz];
-  if (named) return named;
-  const plain = tz.replace(/_/g, ' ');
-  const nameOf = (timeZoneName: 'long' | 'longGeneric'): string | null => {
-    try {
-      const part = new Intl.DateTimeFormat(undefined, {
-        timeZone: tz,
-        // 'longGeneric' is newer than the lib typings; older engines ignore it.
-        timeZoneName: timeZoneName as 'long',
-      })
-        .formatToParts(new Date())
-        .find((p) => p.type === 'timeZoneName');
-      return part && part.value.trim() ? part.value : null;
-    } catch {
-      return null;
-    }
-  };
-  const generic = nameOf('longGeneric');
-  // A bare offset ("GMT", "GMT+00:00") is not a name; the specific name
-  // ("Coordinated Universal Time") reads better when there is one.
-  if (generic && !/^(GMT|UTC)([+-].*)?$/.test(generic)) return generic;
-  return nameOf('long') ?? generic ?? plain;
-}
+export { zoneInWords } from './zoneName';

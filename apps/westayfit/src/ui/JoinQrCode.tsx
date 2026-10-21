@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 // react-native-web maps a `dataSet` prop to `data-*` attributes on the DOM
 // element; react-native's own types omit it. Declared here the same way
@@ -13,7 +13,8 @@ declare module 'react-native' {
 }
 
 import { wsfTheme } from '../theme';
-import { encodeQr, qrSvgDataUriRaw } from './qr';
+import { encodeQr, renderQrSvg } from './qr';
+import { SvgMarkup } from './SvgMarkup';
 
 /**
  * The join link as a scannable QR, for the Champion tools sheet.
@@ -112,10 +113,12 @@ export function JoinQrCode({
     if (!url) return null;
     try {
       return {
-        // RAW markup: react-native-web's Image percent-encodes inline SVG
-        // itself. Pre-encoding it here would be encoded twice and render
-        // nothing. See qrSvgDataUriRaw.
-        uri: qrSvgDataUriRaw(encodeQr(url), {
+        // NATIVE-MEMBER-1 W16-10 (MF-05): the RAW markup, drawn by SvgMarkup.
+        // React Native's <Image> cannot decode an SVG data URI and showed an
+        // empty square; the native twin draws it with react-native-svg. On the
+        // web SvgMarkup is the same <Image> with the same raw data URI as
+        // before (react-native-web percent-encodes it itself).
+        markup: renderQrSvg(encodeQr(url), {
           dark: wsfTheme.colors.primary,
           light: '#FFFFFF',
         }),
@@ -161,10 +164,9 @@ export function JoinQrCode({
             // question than this attribute does.
             dataSet={{ qrUrl: url }}
           >
-            <Image
-              source={{ uri: encoded.uri }}
+            <SvgMarkup
+              markup={encoded.markup}
               style={styles.symbol}
-              resizeMode="contain"
               // It is a picture of the community's join link; the link
               // itself is never read out here (and, on the member-facing
               // card, never printed either).
