@@ -5,7 +5,12 @@ import { Platform } from 'react-native';
 
 import { useWsfAuth } from '../../src/auth';
 import { mapWithLimit } from '../../src/concurrency';
-import { currentCommunityReady, isCurrentCommunityReady, resolveCurrentCommunity } from '../../src/currentCommunity';
+import {
+  currentCommunityReady,
+  isCurrentCommunityReady,
+  resolveCurrentCommunity,
+  useCurrentCommunityReady,
+} from '../../src/currentCommunity';
 import { getFirebaseAuth } from '../../src/firebase';
 import { UNKNOWN_SHARED, knownShared } from '../../src/goalTruth';
 import {
@@ -317,8 +322,10 @@ function youFromRecord(uid: string): Screen | null {
   const profile: Profile = known ? toProfile(known) : { displayName: null, memberSince: null, pending: true };
   const communities = mine.items as unknown as Community[];
   if (communities.length === 0) return { kind: 'noCommunity', profile };
-  // Not before the phone's remembered choice is read: "none chosen" would be a guess.
-  if (!isCurrentCommunityReady()) return null;
+  // Not before the phone's remembered choice is read, where it can change the
+  // answer: with several communities "none chosen" would be a guess. With one,
+  // the answer is that one either way.
+  if (communities.length > 1 && !isCurrentCommunityReady()) return null;
   const currentId = resolveCurrentCommunity(
     uid,
     communities.map((c) => c.groupId),
@@ -377,6 +384,16 @@ export default function You() {
   }, []);
   const [signingOut, setSigningOut] = useState(false);
   const [reloads, setReloads] = useState(0);
+  // A page that came up before the phone's remembered community was read
+  // shows loading (youFromRecord above); once the read lands, the frame the
+  // record could not give then is given now. Not after a Retry, which reads
+  // everything fresh. The load below still replaces it.
+  const communityReady = useCurrentCommunityReady();
+  useEffect(() => {
+    if (!communityReady || !ready || !user || reloads > 0) return;
+    const uid = user.uid;
+    setScreen(uid, (prev) => (prev.kind === 'loading' ? youFromRecord(uid) ?? prev : prev));
+  }, [communityReady, ready, user, reloads, setScreen]);
   /** Guards a landed read against a newer one, and against an unmounted tree. */
   const live = useRef(0);
 
