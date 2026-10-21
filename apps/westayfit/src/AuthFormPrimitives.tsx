@@ -13,6 +13,7 @@ import {
 
 import { ButtonLink } from './ui/ButtonLink';
 import { KEYBOARD_SCROLL_PROPS, KeyboardInsetView } from './ui/keyboardAvoidance';
+import { ScreenStatusBar, useScreenTopInset } from './ui/useScreenTopInset';
 import {
   ACTION_GREEN,
   ACTION_GREEN_DEEP,
@@ -198,6 +199,9 @@ export function FormShell({
   */
   const fieldMinHeight =
     compact || !box ? undefined : Math.round(box.height * 0.38);
+  // INT-09: on a phone the navy field runs behind the status bar and its
+  // content starts below it, under light icons. 0 on web: nothing changes.
+  const topInset = useScreenTopInset();
   return (
     /*
       `testID` SITS ON THE WHOLE SCREEN, not on the sheet.
@@ -215,6 +219,7 @@ export function FormShell({
       are inert on web (src/ui/keyboardAvoidance.tsx).
     */
     <KeyboardInsetView style={shell.screen} onLayout={onLayout} testID={testID}>
+      <ScreenStatusBar tone="navy" />
       <ScrollView
         style={kit.scroll}
         contentContainerStyle={shell.body}
@@ -226,6 +231,7 @@ export function FormShell({
             shell.field,
             compact ? shell.fieldCompact : null,
             fieldMinHeight ? { minHeight: fieldMinHeight } : null,
+            topInset > 0 ? { paddingTop: (compact ? FIELD_TOP_COMPACT : FIELD_TOP) + topInset } : null,
           ]}
         >
           <FieldTexture width={box?.width ?? 0} />
@@ -285,6 +291,11 @@ export function FormShell({
   );
 }
 
+// The navy field's and the quiet page's own top padding, under any inset (INT-09).
+const FIELD_TOP = 28;
+const FIELD_TOP_COMPACT = 16;
+const QUIET_TOP = 22;
+
 const shell = StyleSheet.create({
   screen: { flex: 1, backgroundColor: CREAM },
   body: { flexGrow: 1 },
@@ -293,7 +304,7 @@ const shell = StyleSheet.create({
   field: {
     backgroundColor: NAVY,
     paddingHorizontal: 20,
-    paddingTop: 28,
+    paddingTop: FIELD_TOP,
     paddingBottom: 34,
     borderBottomLeftRadius: 30,
     borderBottomRightRadius: 30,
@@ -302,7 +313,7 @@ const shell = StyleSheet.create({
     overflow: 'hidden',
     ...elevation.hero,
   },
-  fieldCompact: { paddingTop: 16, paddingBottom: 22, gap: 5 },
+  fieldCompact: { paddingTop: FIELD_TOP_COMPACT, paddingBottom: 22, gap: 5 },
   texture: { ...StyleSheet.absoluteFillObject },
   band: {
     position: 'absolute',
@@ -435,11 +446,13 @@ export function QuietShell({
   foot?: ReactNode;
 }) {
   const { onLayout, compact } = useBox();
+  // INT-09: on a phone the cream page starts below the status bar. 0 on web.
+  const topInset = useScreenTopInset();
   return (
     <KeyboardInsetView style={quiet.screen} onLayout={onLayout} testID={testID}>
       <ScrollView
         style={kit.scroll}
-        contentContainerStyle={quiet.body}
+        contentContainerStyle={topInset > 0 ? [quiet.body, { paddingTop: QUIET_TOP + topInset }] : quiet.body}
         keyboardShouldPersistTaps="handled"
         {...KEYBOARD_SCROLL_PROPS}
       >
@@ -462,7 +475,7 @@ export function QuietShell({
 
 const quiet = StyleSheet.create({
   screen: { flex: 1, backgroundColor: CREAM },
-  body: { flexGrow: 1, paddingHorizontal: 20, paddingTop: 22, paddingBottom: 24, gap: 14 },
+  body: { flexGrow: 1, paddingHorizontal: 20, paddingTop: QUIET_TOP, paddingBottom: 24, gap: 14 },
   chrome: { alignItems: 'flex-start' },
   card: {
     backgroundColor: SURFACE,
