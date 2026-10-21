@@ -1,4 +1,4 @@
-import { isKioskFlag, kioskStartRoute } from '../kioskSession';
+import { isKioskFlag, kioskStartRoute, readKioskSession } from '../kioskSession';
 import { SIGNED_OUT_HOME_RESET } from './signOutReset';
 
 /**
@@ -36,6 +36,21 @@ import { SIGNED_OUT_HOME_RESET } from './signOutReset';
  * those two, or the web) the destination is REPLACED, as before: the last
  * sign-in screen's place is taken. The kiosk's start screen signs whoever it
  * finds out.
+ *
+ * HOME IS NOT A WAY OUT OF A KIOSK SESSION (RV15-642-N1). The post-auth hops
+ * fall back to '/' when no destination is armed, and the kiosk return lives
+ * two hours while the device's kiosk-session marker never expires. So on a
+ * phone, when the destination is Home and the marker names a goal, the
+ * landing goes to that kiosk's start screen instead (dismissed to when it is
+ * beneath, replaced otherwise, as any kiosk destination), never the Home
+ * reset. The start screen signs the visitor out.
+ *
+ * NOTHING RESETS A KIOSK AWAY (RV15-641-N1). A member destination reached
+ * while a kiosk start screen is somewhere in the stack (a join link opened
+ * over a kiosk session) is REPLACED, the shape before W13-6a, so Back still
+ * leads to the kiosk, which signs the visitor out; the Home reset would wipe
+ * it. Only callers that pass `routes` can see it (join, verify-email,
+ * profile-setup).
  *
  * Published for the member and state lanes' own post-auth hops.
  */
@@ -117,20 +132,52 @@ function decodeQueryPart(part: string): string {
   }
 }
 
-export function landAfterAuth(next: string, { dispatch, push, replace, platform, routes, dismissTo }: AuthLandingDeps): void {
+type StackRoutes = ReadonlyArray<{ name: string; params?: object }>;
+
+/** The caller's root-stack routes; 'unreadable' when reading them threw. */
+function readRoutes(routes: (() => StackRoutes | undefined) | undefined): StackRoutes | undefined | 'unreadable' {
+  if (!routes) return undefined;
+  try {
+    return routes();
+  } catch {
+    return 'unreadable';
+  }
+}
+
+/** The open kiosk session's goal (the device's marker; null on the web), never throwing. */
+function openKioskMarker(): string | null {
+  try {
+    return readKioskSession();
+  } catch {
+    return null;
+  }
+}
+
+export function landAfterAuth(target: string, { dispatch, push, replace, platform, routes, dismissTo }: AuthLandingDeps): void {
   if (platform === 'web') {
-    replace(next);
+    replace(target);
     return;
   }
+  // Home while a kiosk session is open: that kiosk's start screen instead (RV15-642-N1).
+  const marker = target === '/' ? openKioskMarker() : null;
+  const next = marker ? kioskStartRoute(marker) : target;
   if (isKioskDestination(next)) {
     // Never a reset under a kiosk destination. Back to the kiosk's own start
     // screen when it is the nearest kiosk beneath; otherwise replace.
     const kiosk = kioskGoalOf(next);
-    if (kiosk && dismissTo && routes && kioskStartIsBeneath(kiosk.goalId, routes())) {
+    const stack = readRoutes(routes);
+    if (kiosk && dismissTo && stack !== 'unreadable' && kioskStartIsBeneath(kiosk.goalId, stack)) {
       dismissTo(kioskStartRoute(kiosk.goalId));
       if (!kiosk.isStart) push(next);
       return;
     }
+    replace(next);
+    return;
+  }
+  // A kiosk start screen anywhere beneath is never reset away (RV15-641-N1);
+  // a stack that cannot be read fails closed the same way.
+  const stack = readRoutes(routes);
+  if (stack === 'unreadable' || stack?.some((route) => route.name === KIOSK_ROUTE)) {
     replace(next);
     return;
   }
