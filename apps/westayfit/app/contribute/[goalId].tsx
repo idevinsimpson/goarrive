@@ -1750,11 +1750,13 @@ export default function ContributeToGoal() {
         {kioskCountdown != null ? (
         <View style={styles.kioskCountdownRow}>
           {/* D-2. The countdown changes without anybody acting, so it
-              announces itself politely rather than interrupting. */}
+              announces itself politely rather than interrupting. On a phone
+              (W13-4b) it is said once per clock start, never per tick. */}
+          <SpokenOnce message={kioskCountdown} announceKey={`kiosk-countdown:${kioskStartedAt}`} />
           <Text
             style={[styles.caption, tone === 'dark' ? styles.captionOnDark : null]}
             testID="wsf-kiosk-countdown"
-            aria-live="polite"
+            {...liveRegion}
           >
             {kioskCountdown}
           </Text>
@@ -1780,8 +1782,11 @@ export default function ContributeToGoal() {
           <Text
             style={[styles.kioskError, tone === 'dark' ? styles.kioskErrorDark : null]}
             testID="wsf-kiosk-finish-error"
-            aria-live="polite"
+            {...liveRegion}
           >
+            {/* W13-4b: said on a phone each time a Finish fails (the line is
+                cleared when Finish is pressed, so each failure mounts it anew). */}
+            <SpokenOnce message={kioskError} announceKey="kiosk-finish-error" />
             {kioskError}
           </Text>
         ) : null}

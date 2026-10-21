@@ -88,6 +88,7 @@ vi.mock('firebase/functions', () => ({
 }));
 
 const { clearMemberReads } = await import('../src/memberReads');
+const { signOut } = await import('firebase/auth');
 const { default: ContributeToGoal } = await import('../app/contribute/[goalId]');
 
 const PULSE = { sharedTotal: 40, target: 100, unit: 'squats', status: 'active' };
@@ -251,6 +252,86 @@ describe('W13-4 on the web: the live regions are as they were, and nothing is po
     await settle();
     expect(byId('wsf-contribute-restore-failed')!.getAttribute('aria-live')).toBe('polite');
     expect(spoken).toEqual([]);
+  });
+});
+
+describe('W13-4b on a phone: the kiosk countdown and the Finish error', () => {
+  const COUNTDOWN = /^Finishing in \d+ seconds?$/;
+  const FINISH_ERROR = 'We couldn’t sign you out. Don’t leave this device signed in — try Finish again.';
+  const said = (re: RegExp | string) => spoken.filter((m) => (typeof re === 'string' ? m === re : re.test(m)));
+
+  it('the countdown is said once per clock start, never per tick; Stay starts it again', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+    try {
+      params.value = { goalId: 'g1', kiosk: '1' };
+      seedUnknown();
+      render();
+      await settle();
+      expect(byId('wsf-kiosk-countdown')).not.toBeNull();
+      expect(said(COUNTDOWN)).toHaveLength(1);
+      const first = byId('wsf-kiosk-countdown')!.textContent;
+      // Three ticks: the visible text moves, nothing more is said.
+      await act(async () => vi.advanceTimersByTime(3_000));
+      await settle();
+      expect(byId('wsf-kiosk-countdown')!.textContent).not.toBe(first);
+      expect(said(COUNTDOWN)).toHaveLength(1);
+      // Stay: a new deadline, said once.
+      await act(async () => byId('wsf-kiosk-stay')!.click());
+      await settle();
+      await act(async () => vi.advanceTimersByTime(1_000));
+      await settle();
+      expect(said(COUNTDOWN)).toHaveLength(2);
+      await act(async () => vi.advanceTimersByTime(2_000));
+      await settle();
+      expect(said(COUNTDOWN)).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a Finish whose sign-out fails is said, once per failure', async () => {
+    params.value = { goalId: 'g1', kiosk: '1' };
+    vi.mocked(signOut).mockRejectedValue(new Error('network'));
+    seedUnknown();
+    render();
+    await settle();
+    await act(async () => byId('wsf-kiosk-finish')!.click());
+    await settle();
+    expect(byId('wsf-kiosk-finish-error')).not.toBeNull();
+    expect(said(FINISH_ERROR)).toHaveLength(1);
+    render();
+    await settle();
+    expect(said(FINISH_ERROR)).toHaveLength(1);
+    await act(async () => byId('wsf-kiosk-finish')!.click());
+    await settle();
+    expect(said(FINISH_ERROR)).toHaveLength(2);
+    expect(byId('wsf-kiosk-finish-error')!.getAttribute('aria-live')).toBeNull();
+    expect(byId('wsf-kiosk-countdown')!.getAttribute('aria-live')).toBeNull();
+  });
+
+  it('web: both keep aria-live="polite", and nothing is posted', async () => {
+    mode.native = false;
+    params.value = { goalId: 'g1', kiosk: '1' };
+    vi.mocked(signOut).mockRejectedValue(new Error('network'));
+    seedUnknown();
+    render();
+    await settle();
+    expect(byId('wsf-kiosk-countdown')!.getAttribute('aria-live')).toBe('polite');
+    await act(async () => byId('wsf-kiosk-finish')!.click());
+    await settle();
+    expect(byId('wsf-kiosk-finish-error')!.getAttribute('aria-live')).toBe('polite');
+    expect(spoken).toEqual([]);
+  });
+
+  it('site scan: liveRegion and SpokenOnce at both, keyed on the clock start and the failure', () => {
+    const countdown = ROUTE.slice(ROUTE.indexOf('<View style={styles.kioskCountdownRow}>'), ROUTE.indexOf('testID="wsf-kiosk-stay"'));
+    expect(countdown).toContain('<SpokenOnce message={kioskCountdown} announceKey={`kiosk-countdown:${kioskStartedAt}`} />');
+    expect(countdown).toContain('{...liveRegion}');
+    expect(countdown).not.toContain('aria-live');
+    const error = ROUTE.slice(ROUTE.indexOf('testID="wsf-kiosk-finish-error"'), ROUTE.indexOf('{kioskError}\n'));
+    expect(error).toContain('{...liveRegion}');
+    expect(error).not.toContain('aria-live');
+    expect(error).toContain('<SpokenOnce message={kioskError} announceKey="kiosk-finish-error" />');
   });
 });
 
