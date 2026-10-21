@@ -96,6 +96,8 @@ function render(fresh: boolean) {
         actions={null}
         fresh={fresh}
         onFreshConsumed={() => undefined}
+        announce
+        onAnnounced={() => undefined}
         windowWidth={390}
         windowHeight={844}
       />

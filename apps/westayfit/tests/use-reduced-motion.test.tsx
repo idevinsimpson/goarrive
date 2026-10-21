@@ -205,6 +205,20 @@ describe('web: synchronous, live, unchanged', () => {
     };
   }
 
+  it('useReducedMotion() on the web: the media query on the first render, live, and silent when unchanged', async () => {
+    const media = fakeMatchMedia(true);
+    const hook = await freshHook();
+    const probe = mount(hook, 'boolean');
+    expect(probe.bools).toEqual([true]);
+    media.set(true); // a change event with the same value: no re-render
+    expect(probe.bools).toEqual([true]);
+    media.set(false);
+    expect(probe.bools).toEqual([true, false]);
+    expect(ax.queries).toHaveLength(0);
+    probe.unmount();
+    expect(media.listeners.size).toBe(0);
+  });
+
   it('is known on the first render from the media query, follows its changes, and never asks AccessibilityInfo', async () => {
     const media = fakeMatchMedia(true);
     const hook = await freshHook();

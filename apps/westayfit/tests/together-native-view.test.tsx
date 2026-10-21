@@ -158,6 +158,8 @@ function render(
         actions={opts.actions ?? null}
         fresh={fresh}
         onFreshConsumed={onFreshConsumed}
+        announce
+        onAnnounced={() => undefined}
         windowWidth={390}
         windowHeight={844}
       />
