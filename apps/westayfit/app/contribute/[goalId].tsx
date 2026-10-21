@@ -656,6 +656,10 @@ export default function ContributeToGoal() {
    * reconcile, and cleared with every context change.
    */
   const [freshAttempt, setFreshAttempt] = useState<string | null>(null);
+  // W13-8 (INT-18): the attempt the receipt on screen confirms, so a phone is
+  // told about each receipt once (the kiosk receipt below; the Together
+  // receipt speaks for itself).
+  const receiptAttemptRef = useRef<string | null>(null);
 
   // Optional timer on the movement screen. It measures nothing the app
   // records; it is a stopwatch for the member's own reference.
@@ -1084,6 +1088,7 @@ export default function ContributeToGoal() {
       // stored record is cleared by `settleAttempt` once this returns, under
       // the same context check (src/pendingContribution.ts).
       setPending(null);
+      receiptAttemptRef.current = attemptId;
       setLastResult(data);
       // Applied in the same batch as the receipt, so the receipt mounts already
       // knowing whether it may move. A replay of an attempt that had landed
@@ -2288,10 +2293,15 @@ export default function ContributeToGoal() {
             style={[styles.sheetBody, windowHeight < 700 ? styles.sheetBodyShort : null]}
             testID="wsf-contribute-receipt"
             // D-2. The outcome replaces the form in place rather than by
-            // navigating, so the receipt has to announce itself.
-            aria-live="polite"
+            // navigating, so the receipt has to announce itself: a polite live
+            // region on web; on a phone, said once per attempt and outcome.
+            {...liveRegion}
             {...({ dataSet: { variant } } as Record<string, unknown>)}
           >
+            <SpokenOnce
+              message={`${copy.headline} ${copy.subline}`}
+              announceKey={`${receiptAttemptRef.current}:${r.alreadyRecorded ? 'already' : 'recorded'}`}
+            />
             <View style={styles.badge}>
               <View style={styles.badgeCheck} />
               <Text style={styles.badgeText}>{r.alreadyRecorded ? 'Already recorded' : 'Recorded'}</Text>
