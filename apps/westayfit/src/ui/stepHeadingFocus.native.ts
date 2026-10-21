@@ -15,8 +15,10 @@ import { focusAccessibilitySoon } from './accessibilityFocus';
  * arrival is the platform's to announce. "A change" is judged against the
  * previous key (Object.is), not by counting effect runs, so React
  * StrictMode's development re-run of the mount effect is not a change. A
- * null key is no step. A change before the focus lands, or unmounting,
- * cancels it. The web twin is a no-op.
+ * null key is no step: nothing is focused for it, but it is recorded, so a
+ * step reached through null (a hook keyed `step === 'adjust' ? 'adjust' :
+ * null`, opened a second time) is a change and focuses again. A change before
+ * the focus lands, or unmounting, cancels it. The web twin is a no-op.
  */
 export function useStepHeadingFocus(stepKey: string | number | null | undefined, heading: RefObject<unknown>): void {
   const previous = useRef(stepKey);
