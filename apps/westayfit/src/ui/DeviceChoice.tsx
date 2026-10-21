@@ -1,3 +1,4 @@
+import { useSyncExternalStore } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import {
@@ -14,6 +15,8 @@ import {
   DEVICE_SHARED_FACTS,
   DEVICE_SHARED_RESET,
   DEVICE_SHARED_TITLE,
+  deviceModeMayBeRemembered,
+  subscribeDeviceModeMayBeRemembered,
 } from '../deviceMode';
 import {
   ACTION_GREEN,
@@ -71,6 +74,23 @@ export function DeviceChoice({
   const sharedDescription = signupAhead
     ? DEVICE_CHOICE_SHARED_DESCRIPTION_SIGNUP
     : DEVICE_CHOICE_SHARED_DESCRIPTION;
+  /*
+    W16-3 ST-04. THE NOTE SAYS THE ANSWER IS REMEMBERED ONLY WHEN IT CAN BE.
+    On a phone the device may refuse the save, or its stored answer may be
+    unreadable; then "remembered on this device only" would be untrue, so the
+    note is not shown (src/deviceMode.ts `deviceModeMayBeRemembered`, W13-3,
+    followed as it changes). On the web it is always true: the note stays.
+  */
+  const remembered = useSyncExternalStore(
+    subscribeDeviceModeMayBeRemembered,
+    deviceModeMayBeRemembered,
+    deviceModeMayBeRemembered,
+  );
+  const note = remembered ? (
+    <Text style={kit.caption} testID={`${testID}-note`}>
+      {DEVICE_CHOICE_NOTE}
+    </Text>
+  ) : null;
 
   if (variant === 'sheet') {
     return (
@@ -112,9 +132,7 @@ export function DeviceChoice({
             <Text style={styles.sheetSecondaryText}>{SHEET_SHARED_ACTION}</Text>
           </Pressable>
         </View>
-        <Text style={kit.caption} testID={`${testID}-note`}>
-          {DEVICE_CHOICE_NOTE}
-        </Text>
+        {note}
       </View>
     );
   }
@@ -143,9 +161,7 @@ export function DeviceChoice({
           testID={`${testID}-shared`}
         />
       </View>
-      <Text style={kit.caption} testID={`${testID}-note`}>
-        {DEVICE_CHOICE_NOTE}
-      </Text>
+      {note}
     </View>
   );
 }

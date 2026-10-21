@@ -9,7 +9,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 /**
  * NATIVE-MEMBER-1 W16-3 (MF-18, INT-18): native accessibility polish on the
  * community surfaces and DeviceChoice. ST-04 (the device note gated on
- * deviceModeMayBeRemembered) waits for W13-3 and is not here.
+ * deviceModeMayBeRemembered, W13-3) is tested over the native storage harness
+ * in tests/device-note-remembered-ui.test.tsx.
  *
  * Rendered with Platform.OS set per case and react-native's Pressable and Text
  * wrapped to read the props a phone acts on (react-native-web drops hitSlop,
