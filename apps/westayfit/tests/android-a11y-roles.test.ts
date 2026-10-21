@@ -136,7 +136,33 @@ function resolve(e: ts.Expression | undefined): Resolved {
 
 function propName(name: ts.PropertyName | ts.JsxAttributeName): string | null {
   if (ts.isIdentifier(name) || ts.isStringLiteral(name)) return name.text;
+  // A computed key written as a literal: `{ ['accessibilityRole']: … }` (#641 CS-3).
+  if (
+    ts.isComputedPropertyName(name) &&
+    (ts.isStringLiteral(name.expression) || ts.isNoSubstitutionTemplateLiteral(name.expression))
+  ) {
+    return name.expression.text;
+  }
   return null;
+}
+
+/** `const name = <initializer>` declarations in a file, for shorthand properties. */
+function constInitializers(sf: ts.SourceFile): Map<string, ts.Expression> {
+  const out = new Map<string, ts.Expression>();
+  const visit = (node: ts.Node) => {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.initializer &&
+      ts.isVariableDeclarationList(node.parent) &&
+      (node.parent.flags & ts.NodeFlags.Const) !== 0
+    ) {
+      out.set(node.name.text, node.initializer);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return out;
 }
 
 /** True when this object literal is spread straight into a JSX element. */
@@ -159,6 +185,7 @@ function scanSource(file: string, text: string): { sites: Site[]; findings: Find
   const sites: Site[] = [];
   const findings: Finding[] = [];
   const lineOf = (n: ts.Node) => sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1;
+  const consts = constInitializers(sf);
 
   const check = (node: ts.Node, prop: 'accessibilityRole' | 'role', values: Resolved, strict: boolean) => {
     const line = lineOf(node);
@@ -194,6 +221,14 @@ function scanSource(file: string, text: string): { sites: Site[]; findings: Find
       const name = propName(node.name);
       if (name === 'accessibilityRole') check(node, name, resolve(node.initializer), true);
       else if (name === 'role' && spreadIntoJsx(node.parent)) check(node, name, resolve(node.initializer), false);
+    } else if (ts.isShorthandPropertyAssignment(node) && ts.isObjectLiteralExpression(node.parent)) {
+      // `{ accessibilityRole }`: the value is whatever that name holds. A const
+      // in this file is resolved; anything else cannot be checked, so it fails (#641 CS-3).
+      const name = node.name.text;
+      const init = consts.get(name);
+      const values: Resolved = init ? resolve(init) : UNRESOLVED;
+      if (name === 'accessibilityRole') check(node, name, values, true);
+      else if (name === 'role' && spreadIntoJsx(node.parent)) check(node, name, values, false);
     }
     ts.forEachChild(node, visit);
   };
@@ -304,6 +339,26 @@ describe('INT-02: accessibility roles Android accepts', () => {
       expect(scan(`<InitialsAvatar role={m.role} />`)).toEqual([]);
       // Community roles held in data objects are not accessibility props.
       expect(scan(`const m = { role: 'foundingChampion' };`)).toEqual([]);
+    });
+
+    it('catches a shorthand or a computed accessibilityRole key too (#641 CS-3)', () => {
+      const scan = (src: string) => scanSource('x.tsx', src).findings.map((f) => f.problem);
+      // Shorthand: a const in the file is resolved and checked.
+      expect(scan(`const accessibilityRole = 'status'; const v = <View {...{ accessibilityRole }} />;`)).toEqual([
+        '"status" is not in Android\'s AccessibilityRole enum',
+      ]);
+      expect(scan(`const accessibilityRole = 'button'; const v = <View {...{ accessibilityRole }} />;`)).toEqual([]);
+      // Shorthand of anything else (a parameter, a let) cannot be checked: it fails.
+      expect(scan(`function F({ accessibilityRole }: P) { return <View {...{ accessibilityRole }} />; }`)).toEqual([
+        'value cannot be resolved to string literals',
+      ]);
+      // Shorthand `role` spread into an element is checked against the Role enum.
+      expect(scan(`const role = 'stauts'; const v = <View {...{ role }} />;`)).toHaveLength(1);
+      // Computed keys written as literals.
+      expect(scan(`const v = <View {...({ ['accessibilityRole']: 'status' } as object)} />;`)).toHaveLength(1);
+      expect(scan('const v = <View {...({ [`accessibilityRole`]: \'status\' } as object)} />;')).toHaveLength(1);
+      expect(scan(`const v = <View {...({ ['accessibilityRole']: 'button' } as object)} />;`)).toEqual([]);
+      expect(scan(`const v = <View {...({ ['role']: 'stauts' } as object)} />;`)).toHaveLength(1);
     });
   });
 });
