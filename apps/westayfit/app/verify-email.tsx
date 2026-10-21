@@ -1,7 +1,8 @@
-import { router } from 'expo-router';
+import { router, useNavigation } from 'expo-router';
 import { reload, signOut, type User } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { Platform } from 'react-native';
 
 import { useWsfAuth } from '../src/auth';
 import { AuthFlagOffPanel } from '../src/AuthFlagOffPanel';
@@ -21,7 +22,11 @@ import {
 import { authErrorCode, authErrorMessage } from '../src/authErrors';
 import { wsfAuthEnabled } from '../src/featureFlags';
 import { getFirebaseAuth, getFirebaseFirestore } from '../src/firebase';
-import { nextRouteAfterAuth } from '../src/pendingJoinCode';
+import { routeAfterAuth } from '../src/pendingJoinCode';
+import { landAfterAuth } from '../src/ui/authLanding';
+import { usePostAuthDestinationsReady } from '../src/postAuthDestination';
+import { useResumeRefresh } from '../src/useResumeRefresh';
+import { nativeErrorBoundary } from '../src/ui/RouteErrorFallback';
 import { requestVerificationEmail } from '../src/verificationEmail';
 import {
   beginVerificationSend,
@@ -33,9 +38,36 @@ import {
   type VerificationSendOutcome,
 } from '../src/verificationSendState';
 
+/** INT-01: a render error here shows the contained screen fallback on iOS and Android (nothing on the web). */
+export const ErrorBoundary = nativeErrorBoundary('screen');
+
+/** The one check in flight: whose it is, and its answer (true when it routed on). */
+type CheckClaim = { uid: string; promise: Promise<boolean> | null };
+
 export default function VerifyEmail() {
   const { ready, user } = useWsfAuth();
   const [checking, setChecking] = useState(false);
+  // ONE CHECK AT A TIME (RV12-641-N1). A tap, the unconfigured poll and a
+  // return to the app all claim this before checking: one that finds it held
+  // does not start a second check (a tick skips to its next turn, a return
+  // does nothing), and each releases only its own claim, also when its check
+  // fails. Two checks in flight would both route.
+  //
+  // A TAP IS ANSWERED (RV15-641-N2). A tap that finds a silent check in flight
+  // for the same account joins it: the button shows it is checking, and the
+  // tap reports that check's answer as its own would ("Still unverified…",
+  // or the error). A check still in flight for another account (the account
+  // changed meanwhile) is waited out, and then the tap checks for itself.
+  const checkClaim = useRef<CheckClaim | null>(null);
+  const claimCheck = useCallback((uid: string): CheckClaim | null => {
+    if (checkClaim.current !== null) return null;
+    const claim: CheckClaim = { uid, promise: null };
+    checkClaim.current = claim;
+    return claim;
+  }, []);
+  const releaseCheck = useCallback((claim: CheckClaim) => {
+    if (checkClaim.current === claim) checkClaim.current = null;
+  }, []);
   const [resending, setResending] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -45,6 +77,9 @@ export default function VerifyEmail() {
   // leave "Sending" on screen until some unrelated render happened to pick the
   // answer up.
   useSyncExternalStore(subscribeVerificationSend, verificationSendSnapshot, verificationSendSnapshot);
+  // Re-renders once a phone has read the post-auth destinations from storage,
+  // so the destination card is right on a cold start. No-op on web.
+  usePostAuthDestinationsReady();
 
   // Whose screen this is. When the account changes underneath — a sign-out, or
   // a different account signing in — every local claim on screen belonged to
@@ -72,6 +107,9 @@ export default function VerifyEmail() {
     decides whether that is worth showing — the tap says so, the passive poll
     stays silent.
   */
+  // INT-20: the terminal hop lands through landAfterAuth (on a phone, Home
+  // only with the destination pushed over it; on the web, replace as before).
+  const navigation = useNavigation();
   const passThroughIfVerified = useCallback(async (who: User): Promise<boolean> => {
     // THE UID THIS ATTEMPT BELONGS TO, captured before any await. A refresh
     // started for one account must never route another: a sign-out and a new
@@ -99,24 +137,50 @@ export default function VerifyEmail() {
     // already finished. A brand-new signup with a pending join code MUST still
     // hit profile-setup first so the profile exists before wsfJoinCommunity is
     // called; nextRouteAfterAuth is only safe on the terminal branch.
-    router.replace(nextRouteAfterAuth('/') as never);
+    const next = await routeAfterAuth('/', startedFor);
+    if (getFirebaseAuth().currentUser?.uid !== startedFor) return false;
+    landAfterAuth(next, {
+      dispatch: (action) => navigation.dispatch(action as never),
+      push: (href) => router.push(href as never),
+      replace: (href) => router.replace(href as never),
+      platform: Platform.OS,
+      // RV13-641-N2: a kiosk return pops back to the kiosk's start screen.
+      routes: () => (navigation.getState() as { routes?: ReadonlyArray<{ name: string; params?: object }> } | undefined)?.routes,
+      dismissTo: (href) => router.dismissTo(href as never),
+    });
     return true;
-  }, []);
+  }, [navigation]);
 
   const onCheck = useCallback(async () => {
     if (!user) return;
     setChecking(true);
     setError(null);
     setStatus(null);
+    let mine: CheckClaim | null = null;
     try {
-      const verified = await passThroughIfVerified(user);
+      let held = checkClaim.current;
+      if (held && held.uid !== user.uid) {
+        // Another account's check: let it finish, then check for this one.
+        await held.promise?.catch(() => undefined);
+        held = checkClaim.current;
+      }
+      let answer: Promise<boolean> | null = null;
+      if (held) {
+        answer = held.promise;
+      } else {
+        mine = claimCheck(user.uid);
+        if (mine) answer = mine.promise = passThroughIfVerified(user);
+      }
+      if (!answer) return;
+      const verified = await answer;
       if (!verified) setStatus('Still unverified. Check your inbox and try again.');
     } catch (e) {
       setError(authErrorMessage(e, 'Refresh failed.'));
     } finally {
+      if (mine) releaseCheck(mine);
       setChecking(false);
     }
-  }, [user, passThroughIfVerified]);
+  }, [user, passThroughIfVerified, claimCheck, releaseCheck]);
 
   /*
     THE SEND OUTCOME, DERIVED ONCE AND USED BY BOTH THE EFFECT AND THE RENDER.
@@ -174,15 +238,22 @@ export default function VerifyEmail() {
 
     const tick = async () => {
       if (stopped || hidden()) return schedule();
+      // Another check is in flight (a return to the app, or this poll's own
+      // visibility tick): skip this turn rather than check twice.
+      const claim = claimCheck(user.uid);
+      if (!claim) return schedule();
       try {
         // The uid is re-checked here as well as inside the shared path: this
         // is the cheap guard, that one is the one that cannot be skipped.
         if (getFirebaseAuth().currentUser?.uid !== startedFor) return;
-        const routed = await passThroughIfVerified(user);
+        claim.promise = passThroughIfVerified(user);
+        const routed = await claim.promise;
         if (routed) stopped = true;
       } catch {
         // Silent by design. A failed refresh is not news to anybody on this
         // screen, and the screen already says what is true.
+      } finally {
+        releaseCheck(claim);
       }
       if (!stopped) schedule();
     };
@@ -211,7 +282,30 @@ export default function VerifyEmail() {
         document.removeEventListener('visibilitychange', onVisible);
       }
     };
-  }, [sendOutcome, user, passThroughIfVerified]);
+  }, [sendOutcome, user, passThroughIfVerified, claimCheck, releaseCheck]);
+
+  /*
+    INT-13 (part A). ON A PHONE, COMING BACK TO THE APP CHECKS AGAIN.
+
+    The poll above waits on a visible document, which a phone does not have,
+    and it only runs on `unconfigured`; a member who left for their mail app
+    to tap the link came back to a screen that never asked. Any return from
+    the background (no minimum time away) checks once through the same path:
+    silently, like the poll (unverified says nothing, a failure says nothing),
+    never while another check is in flight (the one claim above), and never
+    routing for an account that changed meanwhile (passThroughIfVerified's uid
+    checks). The web keeps its own visibility path and does nothing here.
+  */
+  useResumeRefresh(
+    () => {
+      if (Platform.OS === 'web' || !user) return;
+      const claim = claimCheck(user.uid);
+      if (!claim) return;
+      claim.promise = passThroughIfVerified(user);
+      void claim.promise.catch(() => undefined).finally(() => releaseCheck(claim));
+    },
+    { minAwayMs: 0 },
+  );
 
   const onResend = useCallback(async () => {
     if (!user) return;
@@ -338,7 +432,7 @@ export default function VerifyEmail() {
   */
   const canResend = outcome !== 'unconfigured';
   const canVerifyHere = outcome !== 'unconfigured';
-  const destinationKind = readAuthDestinationKind();
+  const destinationKind = readAuthDestinationKind(user.uid);
 
   return (
     <FormShell

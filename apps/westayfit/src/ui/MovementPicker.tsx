@@ -64,7 +64,9 @@ export function MovementPicker({
     <View
       style={styles.group}
       testID={testID}
-      accessibilityRole={(single ? 'radiogroup' : 'group') as never}
+      // `role`, not `accessibilityRole`: Android's accessibilityRole enum has
+      // no "group" and throws on it (INT-02); the ARIA `role` enum takes both.
+      role={single ? 'radiogroup' : 'group'}
       accessibilityLabel={label}
     >
       <View style={styles.heading}>

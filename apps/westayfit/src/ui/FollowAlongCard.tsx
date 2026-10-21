@@ -27,7 +27,8 @@ import { demoPlaybackFor } from '../movementDemoMedia';
 import { wsfTheme } from '../theme';
 import { kit, NAVY, SAMPLE_TINT } from './kit';
 import { MovementDemoMedia } from './MovementDemoMedia';
-import { moveFigureLabel, moveFigureSvgDataUriRaw } from './moveFigure';
+import { moveFigureLabel, moveFigureSvg } from './moveFigure';
+import { SvgMarkup } from './SvgMarkup';
 
 export function FollowAlongCard({
   session,
@@ -143,15 +144,20 @@ export function FollowAlongCard({
   // THE DRAWN MOVEMENT GUIDE — this app's own figure, labelled as exactly
   // that. What every movement without an approved demonstration shows, and
   // where a demonstration that cannot load lands.
+  //
+  // MF-05: drawn through SvgMarkup. React Native's <Image> renders an SVG data
+  // URI as an empty box, so on iOS and Android the guide was blank; there the
+  // markup is drawn with react-native-svg (SvgMarkup.native.tsx). On the web
+  // SvgMarkup is the same <Image> with the same RAW data URI, style, label and
+  // testID as before.
   const illustration = (
     <>
-      <Image
+      <SvgMarkup
         // NAVY INK ON A NAVY WALL IS NO INK. The figure is drawn in
         // the brand's green on a venue screen — the same pairing the
         // rest of that screen already uses — and in navy on cream.
-        source={{ uri: moveFigureSvgDataUriRaw({ kind, pose, accent: venue }) }}
+        markup={moveFigureSvg({ kind, pose, accent: venue })}
         style={figureStyle}
-        resizeMode="contain"
         accessibilityLabel={moveFigureLabel(kind, pose)}
         testID={id('figure-image')}
       />
@@ -160,10 +166,9 @@ export function FollowAlongCard({
         positions are shown side by side instead, so the shape reads.
       */}
       {reducedMotion ? (
-        <Image
-          source={{ uri: moveFigureSvgDataUriRaw({ kind, pose: 'end', accent: !venue }) }}
+        <SvgMarkup
+          markup={moveFigureSvg({ kind, pose: 'end', accent: !venue })}
           style={figureStyle}
-          resizeMode="contain"
           accessibilityLabel={moveFigureLabel(kind, 'end')}
           testID={id('reduced-motion')}
         />

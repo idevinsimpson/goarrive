@@ -1,9 +1,24 @@
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
-import { Fragment } from 'react';
-import { Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Fragment, useEffect, useRef } from 'react';
+import { Platform, Pressable, StyleSheet, Text, useWindowDimensions, View, type AccessibilityRole } from 'react-native';
 
 import { isKioskFlag } from '../kioskSession';
-import { ACTION_GREEN, NAVY, ON_ACTION, PROGRESS_GREEN, TEXT_MUTED, elevation } from './kit';
+import { registerFocusTarget } from './focusTarget';
+import {
+  ACTION_GREEN,
+  ACTION_GREEN_DEEP,
+  NAVY,
+  ON_ACTION,
+  OPTION_SELECTED_TINT,
+  PROGRESS_GREEN,
+  TEXT_MUTED,
+  TEXT_SCALE_CAPS,
+  chromeTextProps,
+  effectiveWidth,
+  elevation,
+  lift,
+  pressableStyle,
+} from './kit';
 import { MEMBER_SHELL_GROUND, MEMBER_SHELL_RULE } from './memberShellMetrics';
 import { TabGlyph } from './TabGlyph';
 
@@ -160,8 +175,19 @@ export function shellAppliesTo(pathname: string, params?: ShellRouteParams): boo
  * rather than being a tab screen, which is what makes it structurally
  * incapable of ever rendering a selected state.
  */
+/** The MOVE label's cap on a phone: it sits in a fixed circle, so it grows less than the labels (W12-8). */
+const MOVE_TEXT_CAP = 1.1;
+/** The raised MOVE circle's radius (62 / 2), for its round Android ripple. */
+const MOVE_RADIUS = 31;
+
 export function MemberTabBar({ state, navigation, insets, onMove }: BottomTabBarProps & { onMove: () => void }) {
-  const { width } = useWindowDimensions();
+  const { width, fontScale } = useWindowDimensions();
+  const native = Platform.OS !== 'web';
+  // W12-9 (INT-17, native): where the screen reader's focus comes back when
+  // MOVE closes (src/ui/focusTarget.ts; nothing on the web, which finds the
+  // opener in the document itself).
+  const moveRef = useRef<View>(null);
+  useEffect(() => registerFocusTarget('wsf-member-tab-move', moveRef), []);
   /**
    * AT 200% TEXT ZOOM THE FOUR DESTINATIONS WRAP INSTEAD OF CLIPPING.
    *
@@ -170,14 +196,60 @@ export function MemberTabBar({ state, navigation, insets, onMove }: BottomTabBar
    * its own tab. Below 260px the bar becomes two rows of two: all four
    * destinations stay reachable and nothing runs off the screen.
    */
-  const narrow = width < 260;
+  /*
+    W12-8 (INT-15, native). ON A PHONE THE WIDTH THE TEXT HAS DECIDES IT. At
+    a large system text size a 390 pt phone has the room of a much narrower
+    one (effectiveWidth: width / fontScale), so the bar wraps there too, and
+    the wrapped bar keeps MOVE: a raised row above the two rows of two. The
+    web decides by its CSS width exactly as before (effectiveWidth is the
+    width there), and its wrapped bar is unchanged.
+  */
+  /*
+    Heads-11 N2 (native). AND WHEN A QUARTER CANNOT HOLD ITS LABEL. The labels
+    draw at the capped text size, so a phone can keep its effective width
+    and still not fit "Community" (about 60 pt bold at 11 pt) in a quarter of
+    the bar (4 tabs share the width less the 72 pt MOVE slot and the 8 pt of
+    padding): Android 360 dp at 1.3x, an iPhone mini at 1.353. With one line
+    per label it would end in an ellipsis, so the bar wraps instead. At 1x
+    this only reaches widths under 320; the web is unchanged.
+  */
+  const labelScale = native ? Math.min(Math.max(1, Number.isFinite(fontScale) ? fontScale : 1), TEXT_SCALE_CAPS.chrome) : 1;
+  const narrow = effectiveWidth(width, fontScale) < 260 || (native && (width - 80) / 4 < 60 * labelScale);
+  const moveButton = (
+    <Pressable
+      ref={moveRef}
+      onPress={onMove}
+      // W12-17 (INT-33): pressed feedback on a phone; the web's style is unchanged.
+      // RV14-641-N2: a round ripple, the circle's own radius, not its square bounds.
+      {...pressableStyle(styles.move, ACTION_GREEN_DEEP, { borderless: true, radius: MOVE_RADIUS })}
+      testID="wsf-member-tab-move"
+      accessibilityRole="button"
+      accessibilityLabel="Move: record what you did"
+    >
+      <Text style={styles.moveText} {...chromeTextProps} {...(native ? { maxFontSizeMultiplier: MOVE_TEXT_CAP } : null)}>
+        MOVE
+      </Text>
+    </Pressable>
+  );
   return (
     <View
       style={[styles.bar, { paddingBottom: 10 + insets.bottom }, narrow ? styles.barWrapped : null]}
       testID="wsf-member-tabs"
-      accessibilityRole={Platform.OS === 'web' ? ('navigation' as 'none') : undefined}
+      /*
+        W12-10 (INT-32). The web's landmark is a navigation. A phone's tab bar
+        is a tab bar: iOS's own 'tabbar' role, and Android's 'tablist' (its
+        accessibility enum has no 'tabbar' and throws on it).
+      */
+      accessibilityRole={
+        Platform.OS === 'web' ? ('navigation' as 'none') : Platform.select<AccessibilityRole>({ ios: 'tabbar', android: 'tablist' })
+      }
       accessibilityLabel="Main"
     >
+      {narrow && native ? (
+        <View style={styles.moveRow} testID="wsf-member-tab-move-row">
+          {moveButton}
+        </View>
+      ) : null}
       {MEMBER_TABS.map((tab, index) => {
         const routeIndex = state.routes.findIndex((r) => r.name === tab.name);
         const route = state.routes[routeIndex];
@@ -208,13 +280,16 @@ export function MemberTabBar({ state, navigation, insets, onMove }: BottomTabBar
           <Pressable
             onPress={select}
             {...enterSelects(select)}
-            style={[styles.tab, narrow ? styles.tabHalf : null]}
+            {...pressableStyle([styles.tab, narrow ? styles.tabHalf : null], OPTION_SELECTED_TINT)}
             testID={`wsf-member-tab-${tab.key}`}
-            accessibilityRole="link"
+            // W12-10 (INT-32): a tab on a phone, whose selected state the
+            // screen reader says itself; the web keeps its link and names the
+            // current destination in the label.
+            accessibilityRole={native ? 'tab' : 'link'}
             // The current destination is named as current for a screen
             // reader, not only coloured for a sighted one.
             accessibilityState={{ selected: active }}
-            accessibilityLabel={active ? `${tab.label}, current` : tab.label}
+            accessibilityLabel={!native && active ? `${tab.label}, current` : tab.label}
             // React Native Web renders `dataSet` as data-* attributes; a bare
             // `data-current` prop is dropped on a Pressable, which is how the
             // first version of this shipped an attribute the tests could not
@@ -230,26 +305,16 @@ export function MemberTabBar({ state, navigation, insets, onMove }: BottomTabBar
             <View style={[styles.glyphWrap, active ? styles.glyphWrapActive : null]}>
               <TabGlyph name={tab.key} color={active ? NAVY : TEXT_MUTED} />
             </View>
-            <Text style={[styles.label, active ? styles.labelActive : null]}>{tab.label}</Text>
+            <Text style={[styles.label, active ? styles.labelActive : null]} {...chromeTextProps}>
+              {tab.label}
+            </Text>
           </Pressable>
           {/*
             The raised control's slot. Without it the circle overlapped the
             destinations either side of the middle, because four tabs spread
             evenly leave a gap narrower than the control.
           */}
-          {!narrow && index === 1 ? (
-            <View style={styles.moveSlot}>
-              <Pressable
-                onPress={onMove}
-                style={styles.move}
-                testID="wsf-member-tab-move"
-                accessibilityRole="button"
-                accessibilityLabel="Move: record what you did"
-              >
-                <Text style={styles.moveText}>MOVE</Text>
-              </Pressable>
-            </View>
-          ) : null}
+          {!narrow && index === 1 ? <View style={styles.moveSlot}>{moveButton}</View> : null}
           </Fragment>
         );
       })}
@@ -298,6 +363,20 @@ function enterSelects(select: () => void): Record<string, unknown> {
 export const MEMBER_TAB_BAR_BODY = 6 + 48 + 10;
 export const MEMBER_TAB_MOVE_OVERHANG = 24;
 
+/**
+ * W12-16 (INT-30). WHAT A TAB SCREEN'S SCROLL CONTENT LEAVES FREE AT ITS END.
+ *
+ * On the web the bar covers the bottom of the scene, so the content clears
+ * the bar's body, the raised MOVE above it and the device inset: today's
+ * value, unchanged. On a phone the tab navigator lays the bar out BELOW the
+ * scene (it pads its own safe area), so only MOVE's overhang rises into the
+ * scene; reserving the whole bar there left 64 pt of dead space (Progress,
+ * and the Community tab when it adopts this; member, W16-12).
+ */
+export function tabContentBottomReserve(safeBottom: number, platform: string = Platform.OS): number {
+  return platform === 'web' ? MEMBER_TAB_BAR_BODY + MEMBER_TAB_MOVE_OVERHANG + safeBottom : MEMBER_TAB_MOVE_OVERHANG;
+}
+
 const styles = StyleSheet.create({
   /* The frozen reference's bar (Lovable `d4f60624`, measured): 75 tall with
      its rule, on the page's warm white; each glyph centred 33 under the rule
@@ -316,8 +395,14 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.06,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: -4 },
+    // W12-15 (INT-31): the same lift on Android, where the shadow props draw
+    // nothing and elevation cannot cast upward (an upward boxShadow); `{}` on
+    // iOS, which draws the props above, and on the web.
+    ...lift.tabBar,
   },
   barWrapped: { flexWrap: 'wrap' },
+  // W12-8 (native): the wrapped bar's MOVE, a full-width row above the two rows of two.
+  moveRow: { flexBasis: '100%', alignItems: 'center' },
   tab: { flex: 1, alignItems: 'center', gap: 2, paddingTop: 14, paddingBottom: 4, minHeight: 48, justifyContent: 'center' },
   // Two rows of two. `flexBasis` rather than `width` so the row still
   // distributes the leftover pixel instead of overflowing by it.
@@ -337,9 +422,9 @@ const styles = StyleSheet.create({
     // Raised ABOVE the bar's top edge, which is what makes it read as the
     // product's one action rather than a fifth destination.
     marginTop: -24,
-    width: 62,
-    height: 62,
-    borderRadius: 31,
+    width: MOVE_RADIUS * 2,
+    height: MOVE_RADIUS * 2,
+    borderRadius: MOVE_RADIUS,
     backgroundColor: ACTION_GREEN,
     alignItems: 'center',
     justifyContent: 'center',

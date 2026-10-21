@@ -1,5 +1,6 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { Platform } from 'react-native';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { UNKNOWN_SHARED, knownShared } from '../src/goalTruth';
@@ -231,6 +232,23 @@ describe('ProgressParityView — states', () => {
     expect(before('wsf-activity-partial', 'wsf-activity-rows')).toBe(true);
     click('wsf-activity-partial-retry');
     expect(actions.onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it('partial (INT-02, W12-7): role="status" on web exactly as before; no live region on Android either (it is announced instead)', () => {
+    render(ready({ finished: [], partial: true }));
+    expect(byId('wsf-activity-partial')!.getAttribute('role')).toBe('status');
+    // The web DOM is unchanged: no aria-live of its own (role=status is already polite).
+    expect(byId('wsf-activity-partial')!.hasAttribute('aria-live')).toBe(false);
+    const os = Platform.OS;
+    try {
+      (Platform as { OS: string }).OS = 'android';
+      render(ready({ finished: [], partial: true }));
+      expect(byId('wsf-activity-partial')!.getAttribute('role')).toBe('status');
+      // W12-7: Android's polite region would speak twice beside useAnnounce (tests/announce-sites.test.ts).
+      expect(byId('wsf-activity-partial')!.hasAttribute('aria-live')).toBe(false);
+    } finally {
+      (Platform as { OS: string }).OS = os;
+    }
   });
 
   it('partial with nothing loaded claims no "first" contribution', () => {

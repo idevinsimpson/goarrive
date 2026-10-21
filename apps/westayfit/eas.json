@@ -9,7 +9,8 @@
       "distribution": "internal",
       "environment": "development",
       "env": {
-        "EXPO_PUBLIC_WSF_ENV": "staging"
+        "EXPO_PUBLIC_WSF_ENV": "staging",
+        "EXPO_PUBLIC_WSF_AUTH_ENABLED": "1"
       },
       "android": {
         "buildType": "apk"
@@ -26,12 +27,19 @@
       "distribution": "internal",
       "environment": "preview",
       "env": {
-        "EXPO_PUBLIC_WSF_ENV": "staging"
+        "EXPO_PUBLIC_WSF_ENV": "staging",
+        "EXPO_PUBLIC_WSF_AUTH_ENABLED": "1"
       },
       "android": {
         "buildType": "apk"
       },
       "autoIncrement": true
+    },
+    "preview-simulator": {
+      "extends": "preview",
+      "ios": {
+        "simulator": true
+      }
     }
   }
 }

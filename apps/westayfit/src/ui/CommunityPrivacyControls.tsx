@@ -2,8 +2,9 @@ import { httpsCallable } from 'firebase/functions';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useWsfAuth } from '../auth';
+import { classifyCallableRefusal } from '../callableRefusal';
 import { getFirebaseFunctions } from '../firebase';
-import { currentFirst, resolveCurrentCommunity } from '../currentCommunity';
+import { currentFirstWhenReady, useCurrentCommunityReady } from '../currentCommunity';
 import { forgetCommunity, peekMemberProfile, readMyCommunities } from '../memberReads';
 import { isChampionRole } from './CommunityPresence';
 import { CommunityPrivacyPanelView } from './CommunityPrivacyPanelView';
@@ -21,9 +22,12 @@ import type { PrivacyCommunity, PrivacySaveErrorKind, Visibility } from './commu
  * A FAILED SAVE STAYS SAID (W7 Check 43). The stored values are re-read
  * QUIETLY after a failure, and the failure stays until the member retries or
  * makes another change, in one of three kinds:
- *   · `membershipRefused` — `not-found` / `permission-denied`: this account no
- *     longer belongs there; that community's record goes, and its block says
- *     so with no switches;
+ *   · `membershipRefused` — `not-found` / `permission-denied` WRITTEN BY THE
+ *     FUNCTION ("Members only."), and a quiet re-read of the memberships no
+ *     longer lists that community: this account no longer belongs there;
+ *     that community's record goes, and its block says so with no switches.
+ *     A body-less 403/404 (a block in front of the function, MF-04) or a
+ *     refusal the re-read does not confirm is classified as below instead;
  *   · `unconfirmed` — the re-read found the asked-for value stored (the write
  *     landed though its reply did not), or could not re-read at all;
  *   · `notSaved` — the re-read found the value unchanged.
@@ -69,6 +73,10 @@ const REFUSED = new Set(['functions/not-found', 'functions/permission-denied']);
 export function CommunityPrivacyControls({ compact = false }: { compact?: boolean }) {
   const { user, ready } = useWsfAuth();
   const uid = user?.uid ?? null;
+  // Re-renders when a phone's launch read of the remembered community lands
+  // (always true on web), so the order below is decided on what is
+  // remembered.
+  useCurrentCommunityReady();
   const [rows, setRows] = useState<CommunityRow[]>([]);
   const [phase, setPhase] = useState<'loading' | 'ready' | 'failed'>('loading');
   /** Per community: the last save's failure, kept until a retry or a new change. */
@@ -106,9 +114,23 @@ export function CommunityPrivacyControls({ compact = false }: { compact?: boolea
     setSaving(next);
   };
 
-  /** Re-reads what is stored. Returns the fresh rows, or null if it could not. */
+  const setFailure = (groupId: string, failure: Failure | null) => {
+    const next = { ...failuresRef.current };
+    if (failure) next[groupId] = failure;
+    else delete next[groupId];
+    failuresRef.current = next;
+    setFailures(next);
+  };
+
+  /**
+   * Re-reads what is stored. Returns the fresh rows, or null if it could not.
+   * `refusal`: the function refused a save on this community in its own
+   * words; if this read no longer lists the community, that is confirmed --
+   * it is forgotten and its refusal recorded before the rows are drawn, so
+   * its block stays on screen with the refusal said.
+   */
   const load = useCallback(
-    async ({ quiet }: { quiet: boolean }): Promise<CommunityRow[] | null> => {
+    async ({ quiet, refusal }: { quiet: boolean; refusal?: Failure & { groupId: string } }): Promise<CommunityRow[] | null> => {
       if (!uid) return null;
       const token = ++live.current;
       const ep = epoch.current;
@@ -119,6 +141,10 @@ export function CommunityPrivacyControls({ compact = false }: { compact?: boolea
         const answer = await readMyCommunities(uid);
         if (live.current !== token || epoch.current !== ep) return null;
         const fresh = (answer.items ?? []) as unknown as CommunityRow[];
+        if (refusal && !fresh.some((f) => f.groupId === refusal.groupId)) {
+          forgetCommunity(uid, refusal.groupId);
+          setFailure(refusal.groupId, { kind: 'membershipRefused', setting: refusal.setting, value: refusal.value });
+        }
         const merged = fresh.map((f) => {
           const shown = rowsRef.current.find((r) => r.groupId === f.groupId);
           if (!shown) return f;
@@ -158,14 +184,6 @@ export function CommunityPrivacyControls({ compact = false }: { compact?: boolea
     void load({ quiet: false });
   }, [ready, uid, load]);
 
-  const setFailure = (groupId: string, failure: Failure | null) => {
-    const next = { ...failuresRef.current };
-    if (failure) next[groupId] = failure;
-    else delete next[groupId];
-    failuresRef.current = next;
-    setFailures(next);
-  };
-
   const save = useCallback(
     async (groupId: string, setting: Setting, value: Visibility) => {
       if (!uid) return;
@@ -203,18 +221,24 @@ export function CommunityPrivacyControls({ compact = false }: { compact?: boolea
       } catch (e) {
         if (epoch.current !== ep) return;
         const code = (e as { code?: unknown } | null)?.code;
-        if (typeof code === 'string' && REFUSED.has(code)) {
-          forgetCommunity(uid, groupId);
-          setFailure(groupId, { kind: 'membershipRefused', setting, value });
-          setSavingFor(groupId, null);
-          await load({ quiet: true });
-          return;
-        }
-        // Re-read rather than guess -- quietly, and without clearing the failure.
+        // NATIVE-MEMBER-1 F-6 (MF-04). "No longer a member" is said, and the
+        // community forgotten, only when the FUNCTION refused in its own words
+        // and the memberships, re-read quietly, agree. A 403/404 without the
+        // handler's sentence (the staging block, a proxy, or the framework
+        // turning a token away) is not confirmed: it says nothing about
+        // membership, so it is a save that did not go through.
+        const refused =
+          typeof code === 'string' && REFUSED.has(code) && classifyCallableRefusal(e) === 'refused';
+        // Re-read rather than guess -- quietly, and without clearing the
+        // failure. ONE read answers both questions (N5): after the function's
+        // own refusal, is the community still listed; and did the value land.
         setSavingFor(groupId, null);
-        const fresh = await load({ quiet: true });
+        const fresh = await load({ quiet: true, refusal: refused ? { groupId, kind: 'membershipRefused', setting, value } : undefined });
+        if (epoch.current !== ep) return;
+        // Confirmed: load() has forgotten it and recorded the refusal.
+        if (refused && fresh !== null && !fresh.some((r) => r.groupId === groupId)) return;
         // The member has acted on this community since: that is the news now.
-        if (epoch.current !== ep || actions.current.get(groupId) !== action) return;
+        if (actions.current.get(groupId) !== action) return;
         const stored = fresh?.find((r) => r.groupId === groupId);
         const landed =
           stored !== undefined && (setting === 'name' ? stored.nameVisibility : stored.activityVisibility) === value;
@@ -228,11 +252,17 @@ export function CommunityPrivacyControls({ compact = false }: { compact?: boolea
 
   // The current community first, as on the Community tab (Director #506
   // `5845751705`); the rest in the order they were read.
-  const current = uid ? resolveCurrentCommunity(uid, rows.map((r) => r.groupId)) : null;
+  //
+  // NEVER A GUESS FIRST (NATIVE-STATE-2). On a phone the remembered community
+  // is read from storage at launch. Until that read has answered, `ordered`
+  // is null and the panel keeps saying it is loading, rather than drawing the
+  // list in some other order and then moving the member's community to the
+  // top under them. On web the read is synchronous and nothing changes.
+  const ordered = currentFirstWhenReady(uid, rows);
   // The member's own formatted name, only if it is ALREADY loaded (You reads
   // it): no read is added for a hint, and nothing is invented without it.
   const shownName = peekMemberProfile(uid)?.displayName?.trim() || null;
-  const communities: PrivacyCommunity[] = currentFirst(rows, current).map((r) => ({
+  const communities: PrivacyCommunity[] = (ordered ?? []).map((r) => ({
     groupId: r.groupId,
     displayName: r.displayName,
     shownName,
@@ -244,7 +274,7 @@ export function CommunityPrivacyControls({ compact = false }: { compact?: boolea
 
   return (
     <CommunityPrivacyPanelView
-      load={phase}
+      load={phase === 'ready' && ordered === null ? 'loading' : phase}
       communities={communities}
       compact={compact}
       onChange={(groupId, key, value) => void save(groupId, key, value)}

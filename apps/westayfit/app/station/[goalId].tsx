@@ -3,7 +3,6 @@ import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -59,10 +58,12 @@ import { PROGRESS_GREEN } from '../../src/ui/brandAssets';
 import { formatActiveWindowLabel, formatClock, formatPeriod } from '../../src/ui/dates';
 import { buildEventJoinUrlFromScreenedCode, buildEventUrl } from '../../src/ui/eventLinks';
 import { FollowAlongCard } from '../../src/ui/FollowAlongCard';
+import { currentOrigin } from '../../src/ui/kioskLink';
 import { kit } from '../../src/ui/kit';
 import { LivingWeProgress } from '../../src/ui/LivingWeProgress';
 import { formatCount, percentLabel, statusLine } from '../../src/ui/progressFormat';
-import { encodeQr, qrSvgDataUriRaw } from '../../src/ui/qr';
+import { encodeQr, renderQrSvg } from '../../src/ui/qr';
+import { SvgMarkup } from '../../src/ui/SvgMarkup';
 import { WsfWordmark } from '../../src/ui/WsfWordmark';
 
 /**
@@ -178,12 +179,13 @@ type StationStateResponse = {
 const QR_SIZE_PHONE = 168;
 const QR_SIZE_WIDE = 232;
 
-/** The symbol, or null when the encoder refuses the string. Never a partial
- * symbol: a truncated QR scans cleanly and sends the scanner somewhere wrong. */
-function qrUri(url: string | null): string | null {
+/** The symbol's RAW markup (drawn by SvgMarkup, W12-19), or null when the
+ * encoder refuses the string. Never a partial symbol: a truncated QR scans
+ * cleanly and sends the scanner somewhere wrong. */
+function qrMarkup(url: string | null): string | null {
   if (!url) return null;
   try {
-    return qrSvgDataUriRaw(encodeQr(url), { dark: wsfTheme.colors.primary, light: '#FFFFFF' });
+    return renderQrSvg(encodeQr(url), { dark: wsfTheme.colors.primary, light: '#FFFFFF' });
   } catch {
     return null;
   }
@@ -860,7 +862,8 @@ export default function StationScreen() {
   const callSentence = announceHallTurn(queue, label);
   const resultSentence = describeHallResult(turnResult);
 
-  const origin = typeof window === 'undefined' ? null : (window.location?.origin ?? null);
+  // The web's address; on a phone the origin the build names, or none (W12-13, INT-08).
+  const origin = currentOrigin();
   // The newcomer link exists only when the server handed this screen a code,
   // and it only does that for a community whose policy admits by link at all.
   //
@@ -893,11 +896,22 @@ export default function StationScreen() {
     activity: unit,
   });
   const joinBare = buildEventJoinUrlFromScreenedCode({ origin, joinCode, goalId });
-  const joinPreferredQr = qrUri(joinWithActivity);
+  const joinPreferredQr = qrMarkup(joinWithActivity);
   const joinUrl = joinPreferredQr ? joinWithActivity : joinBare;
-  const joinQr = joinPreferredQr ?? qrUri(joinBare);
+  const joinQr = joinPreferredQr ?? qrMarkup(joinBare);
   const eventUrl = buildEventUrl({ origin, goalId });
-  const eventQr = qrUri(eventUrl);
+  const eventQr = qrMarkup(eventUrl);
+  /*
+    RV16-641-1. NO ORIGIN IS NOT NO JOIN CODE. A phone build with no public
+    origin named (W12-13: EXPO_PUBLIC_WSF_PUBLIC_ORIGIN unset) can draw no
+    link, but the community may well admit by link: the server handed this
+    screen a code. Saying "This community isn't joined from a link" there is
+    false, so the join block is left out instead. The sentence stays for a
+    community that admits nobody by link (no code). No new wording.
+  */
+  const joinDrawn = Boolean(joinQr && joinUrl);
+  const joinHiddenForNoOrigin = !joinDrawn && Boolean(joinCode) && origin === null;
+  const memberDrawn = Boolean(eventQr && eventUrl);
 
   return (
     <StationSurface
@@ -1281,16 +1295,15 @@ export default function StationScreen() {
           {joinQr && joinUrl ? (
             <View style={styles.qrBlock} testID="wsf-station-qr-join" dataSet={{ qrUrl: joinUrl }}>
               <Text style={styles.qrHeading}>New here?</Text>
-              <Image
-                source={{ uri: joinQr }}
+              <SvgMarkup
+                markup={joinQr}
                 style={[styles.qrImage, { width: qrSize, height: qrSize }]}
-                resizeMode="contain"
                 accessibilityLabel="QR code that opens the page to join this community"
                 testID="wsf-station-qr-join-image"
               />
               <Text style={styles.qrCaption}>Scan to join, then add your part.</Text>
             </View>
-          ) : (
+          ) : joinHiddenForNoOrigin ? null : (
             <View style={styles.qrBlock} testID="wsf-station-qr-join-unavailable">
               <Text style={styles.qrHeading}>New here?</Text>
               {/*
@@ -1309,10 +1322,9 @@ export default function StationScreen() {
           {turnRunningWide ? null : eventQr && eventUrl ? (
             <View style={styles.qrBlock} testID="wsf-station-qr-member" dataSet={{ qrUrl: eventUrl }}>
               <Text style={styles.qrHeading}>Already a member?</Text>
-              <Image
-                source={{ uri: eventQr }}
+              <SvgMarkup
+                markup={eventQr}
                 style={[styles.qrImage, { width: qrSize, height: qrSize }]}
-                resizeMode="contain"
                 accessibilityLabel="QR code that opens this event on your own phone"
                 testID="wsf-station-qr-member-image"
               />
@@ -1322,8 +1334,8 @@ export default function StationScreen() {
         </View>
       </View>
 
-      {/* It explains the join codes, so it goes when they do. */}
-      {turnRunningWide ? null : (
+      {/* It explains the join codes, so it goes when they do, and when neither is drawn (RV16-641-1). */}
+      {turnRunningWide || !(joinDrawn || memberDrawn) ? null : (
         <Text style={styles.caption} testID="wsf-station-qr-note">
           These codes open the event on your own phone. This screen shows only the person whose
           turn it is, and their repetitions are entered after the round.

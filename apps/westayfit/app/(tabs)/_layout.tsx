@@ -1,20 +1,26 @@
 import { Tabs, useNavigation, useRouter } from 'expo-router';
 import { signOut } from 'firebase/auth';
-import { useRef, useState } from 'react';
-import { View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Platform, View } from 'react-native';
 
-import { useWsfAuth } from '../../src/auth';
+import { AuthConnectingNote, useWsfAuth } from '../../src/auth';
+import { useKioskLaunchHolding } from '../../src/kioskLaunchGuard';
 import { getFirebaseAuth } from '../../src/firebase';
 import { wsfTheme } from '../../src/theme';
 import { armTabsFocusReturnTo, useTabsFocusReturn } from '../../src/ui/focusReturn';
 import { useReducedMotion } from '../../src/ui/useReducedMotion';
 import { MemberTabBar } from '../../src/ui/MemberTabBar';
+import { isMoveSheetRoute, isOverMemberTabs } from '../../src/ui/moveSheetRoute';
 import {
   MemberShellActionsProvider,
   useMemberShellActions,
 } from '../../src/ui/memberShellActions';
 import { MemberTopBar, type MemberMenuItem } from '../../src/ui/MemberTopBar';
 import { TabSceneFade } from '../../src/ui/TabSceneFade';
+import { nativeErrorBoundary } from '../../src/ui/RouteErrorFallback';
+import { signOutToSignedOutHome } from '../../src/ui/signOutReset';
+import { kit } from '../../src/ui/kit';
+import { ScreenTopSpacer, TopCleared } from '../../src/ui/useScreenTopInset';
 
 /**
  * THE MEMBER SHELL: one persistent top bar, four real tabs, and MOVE as an
@@ -45,6 +51,13 @@ import { TabSceneFade } from '../../src/ui/TabSceneFade';
  * the smallest documented cost that works. The trade — three tab switches now
  * add two entries where they added one — was measured, reported and accepted.
  */
+/**
+ * INT-01. A throw in the shell itself (top bar, tab bar, a tab with no
+ * boundary of its own) is contained here, under the root stack, instead of
+ * ending the process. Tabs with their own boundary keep the shell alive.
+ */
+export const ErrorBoundary = nativeErrorBoundary('shell');
+
 export default function MemberTabsLayout() {
   /*
     THE SHELL'S ACTION REGISTRY WRAPS THE SHELL, NOT THE OTHER WAY AROUND.
@@ -55,7 +68,39 @@ export default function MemberTabsLayout() {
     account changes, so one person's Champion action can never be offered to
     the next person to sign in on the same device.
   */
-  const { user } = useWsfAuth();
+  const { user, slow } = useWsfAuth();
+  /*
+    ST-05 (ESC-2). NEVER HOME FIRST ON A KIOSK RELAUNCH. Until the launch
+    guard (app/_layout.tsx, src/kioskLaunchGuard.ts) has decided whether this
+    phone was a kiosk mid-session, and acted on it, the member tabs draw only
+    the app's ground: no top bar, no tab, no member screen, nothing started.
+    The root Stack around this stays mounted (the guard's replace needs it).
+    Never on web: holding is false from the first render there.
+  */
+  const holding = useKioskLaunchHolding();
+  if (holding) {
+    /*
+      RV12-641-F2 (INT-27 on a phone). The guard decides only after auth has
+      answered, so a stalled first auth answer holds here, and Home (inside
+      these tabs) never mounts to say so. Once auth is slow the ground says
+      "Connecting…" itself, below the status bar: still no member content, no
+      top bar and no tab. `slow` is never set on the web, which never holds.
+    */
+    return (
+      <View style={{ flex: 1, backgroundColor: wsfTheme.colors.background }} testID="wsf-member-tabs-holding">
+        {slow ? (
+          <>
+            <ScreenTopSpacer />
+            <View style={kit.page}>
+              <View style={kit.column}>
+                <AuthConnectingNote testID="wsf-member-tabs-connecting" />
+              </View>
+            </View>
+          </>
+        ) : null}
+      </View>
+    );
+  }
   return (
     <MemberShellActionsProvider ownerUid={user?.uid ?? null}>
       <MemberShell />
@@ -99,6 +144,37 @@ function MemberShell() {
   useTabsFocusReturn(shellRef);
   // Which tab was selected last, for the tab fade (src/ui/TabSceneFade.tsx).
   const lastSelectedTab = useRef<string | null>(null);
+  // The root stack (this layout is its `(tabs)` screen): Home's wordmark and
+  // the menu's Sign out both act on it.
+  const rootNavigation = useNavigation();
+  /*
+    W12-9 (INT-17, native). WHILE A SHEET OR A PANEL COVERS THE TABS, THE
+    SCREEN READER CANNOT REACH THEM. MOVE, the contribution flow and Settings
+    are presented over this shell and leave it mounted; on the web the shell
+    is made inert (src/ui/focusReturn.ts), but on a phone VoiceOver and
+    TalkBack could still swipe into the tab behind. So when this screen loses
+    focus to a route over it (a MOVE sheet, or anything directly over the
+    tabs) it is hidden from them, and shown again when it is in front.
+  */
+  const [covered, setCovered] = useState(false);
+  useEffect(() => {
+    if (Platform.OS === 'web') return undefined;
+    type Route = { key: string; name: string; params?: object };
+    const nav = rootNavigation as unknown as {
+      addListener: (event: 'blur' | 'focus', cb: () => void) => () => void;
+      getState: () => { index?: number; routes: Route[] } | undefined;
+    };
+    const offBlur = nav.addListener('blur', () => {
+      const st = nav.getState();
+      const top = st?.routes?.[st.index ?? 0];
+      setCovered(Boolean(top) && (isMoveSheetRoute(top!, st) || isOverMemberTabs(top!, st)));
+    });
+    const offFocus = nav.addListener('focus', () => setCovered(false));
+    return () => {
+      offBlur();
+      offFocus();
+    };
+  }, [rootNavigation]);
 
   /**
    * THE MENU HOLDS THE QUIET GLOBAL UTILITIES, AND NOTHING THAT DOES NOT WORK.
@@ -148,7 +224,13 @@ function MemberShell() {
       onPress: () => {
         if (signingOut) return;
         setSigningOut(true);
-        void signOut(getFirebaseAuth()).finally(() => setSigningOut(false));
+        // INT-05: on a phone, a successful sign-out lands on signed-out Home
+        // with nothing behind it (src/ui/signOutReset.ts). Web is unchanged.
+        void signOutToSignedOutHome({
+          signOut: () => signOut(getFirebaseAuth()),
+          dispatch: (action) => rootNavigation.dispatch(action as never),
+          platform: Platform.OS,
+        }).finally(() => setSigningOut(false));
       },
     },
   ];
@@ -168,7 +250,6 @@ function MemberShell() {
     its mounted screen, its scroll and its data. From Home it is a no-op, as
     the top bar has always promised.
   */
-  const rootNavigation = useNavigation();
   const goHome = () =>
     rootNavigation.dispatch({
       type: 'POP_TO',
@@ -176,7 +257,13 @@ function MemberShell() {
     } as never);
 
   return (
-    <View ref={shellRef} style={{ flex: 1, backgroundColor: wsfTheme.colors.background }}>
+    <View
+      ref={shellRef}
+      style={{ flex: 1, backgroundColor: wsfTheme.colors.background }}
+      {...(Platform.OS !== 'web' && covered
+        ? { accessibilityElementsHidden: true, importantForAccessibility: 'no-hide-descendants' as const }
+        : null)}
+    >
       {signedIn ? (
         <MemberTopBar
           menu={menu}
@@ -185,9 +272,15 @@ function MemberShell() {
           onHome={goHome}
         />
       ) : null}
+      {/* #641 F1: the top bar has cleared the status bar for every scene below it. */}
+      <TopCleared cleared={signedIn}>
       <View style={{ flex: 1 }}>
         <Tabs
           backBehavior="history"
+          // INT-14: on a phone a tab change, however it happens, finds the
+          // menu closed (its dismiss layer already blocks the tab bar while it
+          // is open). Web keeps its own behaviour.
+          screenListeners={Platform.OS === 'web' ? undefined : { focus: () => setMenuOpen(false) }}
           screenOptions={{
             headerShown: false,
             sceneStyle: { backgroundColor: wsfTheme.colors.background },
@@ -229,6 +322,7 @@ function MemberShell() {
           <Tabs.Screen name="you" />
         </Tabs>
       </View>
+      </TopCleared>
     </View>
   );
 }

@@ -1,8 +1,8 @@
-import { useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
 import { useCallback, useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 // react-native-web accepts a `dataSet` prop on Pressable / View that maps
 // to `data-*` attributes on the DOM element, but react-native's TypeScript
@@ -21,7 +21,7 @@ import { describeCallableError } from '../../../../../src/callableErrors';
 import { FormShell, SecondaryLink, TextField } from '../../../../../src/AuthFormPrimitives';
 import { wsfAuthEnabled } from '../../../../../src/featureFlags';
 import { getFirebaseFunctions } from '../../../../../src/firebase';
-import { CARD_BORDER, CREAM, SURFACE, TEXT_MUTED, kit } from '../../../../../src/ui/kit';
+import { CARD_BORDER, CREAM, NAVY, SURFACE, TEXT_MUTED, kit } from '../../../../../src/ui/kit';
 import { ButtonLink } from '../../../../../src/ui/ButtonLink';
 
 // Response shapes mirror wsfListChallenge / wsfCheckIn in functions-westayfit.
@@ -278,7 +278,7 @@ export default function ChallengePage() {
         intro="There is no challenge running here right now."
         testID="wsf-challenge-none"
       >
-        <SecondaryLink href={`/community/${groupId}` as never} label="Back to community" />
+        <BackToCommunity groupId={groupId} variant="secondary" nativeTestID="wsf-challenge-none-back" />
       </FormShell>
     );
   }
@@ -287,7 +287,7 @@ export default function ChallengePage() {
     return (
       <FormShell heading="Something went wrong" testID="wsf-challenge-error">
         <Text style={kit.errorText}>{state.message}</Text>
-        <SecondaryLink href={`/community/${groupId}` as never} label="Back to community" />
+        <BackToCommunity groupId={groupId} variant="secondary" nativeTestID="wsf-challenge-error-back" />
       </FormShell>
     );
   }
@@ -303,13 +303,7 @@ export default function ChallengePage() {
             carries it. The way back to the community stays: it is this
             screen's own destination, not chrome. */}
         <View style={kit.chrome}>
-          <ButtonLink
-            href={`/community/${groupId}`}
-            style={kit.chromeLink}
-            textStyle={kit.chromeLinkText}
-            testID="wsf-challenge-back"
-            label="Back to community"
-          />
+          <BackToCommunity groupId={groupId} variant="chrome" nativeTestID="wsf-challenge-back" />
         </View>
 
         {/* The hero: what the challenge is and where the shared number stands. */}
@@ -425,6 +419,54 @@ function MoveRow({
 
 // Layout that only this screen needs; every colour, shape and type style
 // above comes from the kit.
+/**
+ * NATIVE-MEMBER-1 W16-6 (MF-10). THE WAY BACK TO THE COMMUNITY.
+ * On a phone the community is already in the stack below this screen, and a
+ * link to it pushed a SECOND instance (its scroll and figures lost). There it
+ * dismisses back to the one that exists (`router.dismissTo`). On the web it
+ * stays the link it was, with its href, byte for byte.
+ */
+function BackToCommunity({
+  groupId,
+  variant,
+  nativeTestID,
+}: {
+  groupId: string;
+  variant: 'secondary' | 'chrome';
+  nativeTestID: string;
+}) {
+  const href = `/community/${groupId}`;
+  if (Platform.OS === 'web') {
+    return variant === 'chrome' ? (
+      <ButtonLink
+        href={href}
+        style={kit.chromeLink}
+        textStyle={kit.chromeLinkText}
+        testID="wsf-challenge-back"
+        label="Back to community"
+      />
+    ) : (
+      <SecondaryLink href={href as never} label="Back to community" />
+    );
+  }
+  return (
+    <Pressable
+      onPress={() => router.dismissTo(href as never)}
+      accessibilityRole="link"
+      style={variant === 'chrome' ? kit.chromeLink : backStyles.secondary}
+      testID={nativeTestID}
+    >
+      <Text style={variant === 'chrome' ? kit.chromeLinkText : backStyles.secondaryText}>Back to community</Text>
+    </Pressable>
+  );
+}
+
+/** The same box and type as SecondaryLink's (src/AuthFormPrimitives.tsx), for the native control. */
+const backStyles = StyleSheet.create({
+  secondary: { minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  secondaryText: { color: NAVY, fontSize: 14, fontWeight: '800' },
+});
+
 const styles = StyleSheet.create({
   // The shared number: the biggest thing on the hero, cream on navy.
   count: {

@@ -1,5 +1,6 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useWsfAuth } from '../../src/auth';
@@ -18,7 +19,10 @@ import {
 } from '../../src/memberReads';
 import type { ProgressGoal, ProgressState } from '../../src/progressParity';
 import { formatEndedOn, formatEndsAt, hasWindowEnded } from '../../src/ui/dates';
+import { injectedRenderFault } from '../../src/crashHarness';
 import { ProgressParityView } from '../../src/ui/ProgressParityView';
+import { nativeErrorBoundary } from '../../src/ui/RouteErrorFallback';
+import { RESUME_MIN_AWAY_MS, useResumeRefresh } from '../../src/useResumeRefresh';
 import { isReached } from '../../src/ui/progressFormat';
 
 /**
@@ -231,7 +235,12 @@ function progressFromRecord(uid: string): Ready | null {
   return composeProgress(owned, false);
 }
 
+/** INT-01. A throw in Progress is contained inside the Progress tab. */
+export const ErrorBoundary = nativeErrorBoundary('tab');
+
 export default function ActivityScreen() {
+  // A test build's Progress fault (src/crashHarness.ts); inert otherwise.
+  injectedRenderFault('progress');
   const { ready, user } = useWsfAuth();
   // The first frame already stands on the account's record when it can: a
   // loading state painted for one frame and then replaced is still a flash.
@@ -272,8 +281,22 @@ export default function ActivityScreen() {
     rest stay while a revalidation reads what is missing. A warm return with
     a whole record makes no call at all.
   */
+  /*
+    RV12-641-A3 (native). Whether Progress is the screen in front: its partial
+    note is spoken only then, never over MOVE or another tab while this
+    screen sits mounted behind them.
+  */
+  const [inFront, setInFront] = useState(false);
+  useFocusEffect(
+    useCallback(() => {
+      setInFront(true);
+      return () => setInFront(false);
+    }, []),
+  );
   const [revalidate, setRevalidate] = useState(0);
   const keepOnScreen = useRef(false);
+  /** INT-12: the next revalidation reads fresh (a return to the app), not from the record. */
+  const freshNext = useRef(false);
   const focusedOnce = useRef(false);
   useFocusEffect(
     useCallback(() => {
@@ -302,12 +325,37 @@ export default function ActivityScreen() {
     }, [ready, user]),
   );
 
+  /*
+    NATIVE-INTEGRATOR-1 (INT-12). COMING BACK TO THE APP READS FRESH.
+    Unlike a tab return, which recomposes from the account's record, a return
+    to the app after at least 30 s away (src/useResumeRefresh.ts) asks the
+    server: other devices may have recorded, and a goal may have ended while
+    the app slept. What is on screen stays while it reads ("Checking…" after a
+    moment); if the read fails the rows stay, marked as last read, with Retry.
+    An error on screen is retried on any return.
+  */
+  useResumeRefresh(
+    () => {
+      if (!ready || !user) return;
+      if (state.kind === 'error') {
+        setAttempt((n) => n + 1);
+        return;
+      }
+      freshNext.current = true;
+      keepOnScreen.current = true;
+      setRevalidate((n) => n + 1);
+    },
+    { minAwayMs: state.kind === 'error' ? 0 : RESUME_MIN_AWAY_MS },
+  );
+
   useEffect(() => {
     if (!ready || !user) return;
     const token = ++liveRef.current;
     const uid = user.uid;
-    const reuse = attempt > 0 ? 0 : SAME_LOAD_MS;
-    const recorded = attempt > 0 ? null : progressFromRecord(uid);
+    const fresh = attempt > 0 || freshNext.current;
+    freshNext.current = false;
+    const reuse = fresh ? 0 : SAME_LOAD_MS;
+    const recorded = fresh ? null : progressFromRecord(uid);
     const keep = keepOnScreen.current;
     keepOnScreen.current = false;
     setState((prev) => recorded ?? (keep && prev.kind === 'ready' ? prev : { kind: 'loading' }));
@@ -417,9 +465,12 @@ export default function ActivityScreen() {
       state={view}
       bottomInset={safeArea.bottom}
       refresh={{ checking, stale, onRetry: retry }}
+      inFront={inFront}
       actions={{
         onRetry: retry,
-        onStartMoving: () => router.replace('/move'),
+        // INT-20: on a phone MOVE is pushed over Progress, so closing it comes
+        // back here; the web replaces, as before.
+        onStartMoving: () => (Platform.OS === 'web' ? router.replace('/move') : router.push('/move')),
         onOpenCommunity: () => router.push('/community'),
         // No canonical receipt source exists; the view draws no receipt rows.
         onOpenReceipt: () => {},

@@ -20,14 +20,20 @@ import { readPendingJoinCode } from './pendingJoinCode';
  *
  * This READS only. Resolution and consumption stay in `nextRouteAfterAuth`,
  * on the terminal hop.
+ *
+ * `uid` is the account looking at the screen (null when signed out): a
+ * destination stashed under a different account is not this reader's and is
+ * not announced (src/postAuthDestination.ts). On a phone the destinations are
+ * read from storage at launch; a screen that renders this subscribes with
+ * `usePostAuthDestinationsReady` so it re-reads once that read has answered.
  */
 export type AuthDestinationKind = 'join' | 'event' | 'kiosk' | 'marker';
 
-export function readAuthDestinationKind(): AuthDestinationKind | null {
-  if (readPendingJoinCode()) return 'join';
-  if (readEventReturn()) return 'event';
-  if (readKioskReturnGoal()) return 'kiosk';
-  if (readMarkerReturn()) return 'marker';
+export function readAuthDestinationKind(uid: string | null = null): AuthDestinationKind | null {
+  if (readPendingJoinCode(uid)) return 'join';
+  if (readEventReturn(Date.now(), uid)) return 'event';
+  if (readKioskReturnGoal(uid)) return 'kiosk';
+  if (readMarkerReturn(Date.now(), uid)) return 'marker';
   return null;
 }
 

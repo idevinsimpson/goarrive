@@ -6,6 +6,7 @@
  * talks to the network or to storage.
  */
 
+import { describeCallableError } from './callableErrors';
 import { fillRatio, formatCount, isReached, totalOfTargetLabel } from './ui/progressFormat';
 
 export const MAX_COUNT = 100_000;
@@ -158,6 +159,124 @@ export function classifyContributeError(e: unknown): ContributeFailure {
     default:
       return { kind: 'unknown', message: message || 'No response.' };
   }
+}
+
+/**
+ * Whether a caught error is a DEFINITIVE refusal of this attempt — the one
+ * answer that retires its reminder.
+ *
+ * For a NEW attempt it is exactly `classifyContributeError`'s refusal: the
+ * attempt id has never been sent before, so a refusal of this request is a
+ * refusal of the attempt.
+ *
+ * A REPLAY is different in one case. `functions/unauthenticated` means the
+ * server never looked at the attempt at all — the replay went out without a
+ * usable sign-in — so it says nothing about whether the ORIGINAL request
+ * landed. That is "sign in and try again", not "this was not recorded": the
+ * reminder stays reconcilable for its owner, who replays it after signing in
+ * and gets the server's real answer. (Every other refusal is the server
+ * judging the attempt itself, and stays a refusal.)
+ */
+export function isDefiniteRefusal(e: unknown, attempt: 'new' | 'replay'): boolean {
+  const failure = classifyContributeError(e);
+  if (failure.kind !== 'refused') return false;
+  if (attempt === 'replay' && failure.reason === 'signedOut') return false;
+  return true;
+}
+
+// ---- the device's saved attempt (NATIVE-STATE-1) ---------------------------
+//
+// OWNER-VISIBLE WORDING, PENDING SIGN-OFF. Kept here, beside the rest of the
+// contribution copy, so the screen and its tests read the same sentences.
+
+/** The pending sheet when the device refused to save the attempt's record (replaces "You can leave this page…"). */
+export const NOT_SAVED_NOTICE =
+  'This device couldn’t save this attempt, so it won’t be here if you leave this page. Confirm it here.';
+
+/** The restore could not read this device's saved attempt; recording stays paused until it can. */
+export const RESTORE_FAILED_HEADING = 'Couldn’t read this device’s saved attempt.';
+export const RESTORE_FAILED_BODY =
+  'There may be an earlier contribution on this device that hasn’t been confirmed. Recording is paused so nothing replaces it.';
+export const RESTORE_RETRY_LABEL = 'Try again';
+
+/** Record found an earlier unconfirmed attempt on this device; the new one was not sent. */
+export const ATTEMPT_CONFLICT_NOTICE =
+  'An earlier attempt on this device hasn’t been confirmed yet. Confirm it first: what you just entered wasn’t sent.';
+
+/** Record or Confirm stopped because the account signed in on this device changed. */
+export const ATTEMPT_NOT_SENT_NOTICE =
+  'This wasn’t sent because the account signed in on this device changed. Check the account and try again.';
+
+/** A replay answered "not signed in": the reminder stays; this says why nothing moved. */
+export const REPLAY_SIGN_IN_NOTICE = 'Your sign-in has expired. Sign in again, then confirm this contribution.';
+
+/**
+ * A replay held because the device could not refresh its sign-in for lack of
+ * a connection: the app's existing connection sentence (src/callableErrors.ts),
+ * not new copy.
+ */
+export const REPLAY_OFFLINE_NOTICE = describeCallableError({ code: 'functions/unavailable' }, '');
+
+// ---- refreshing the sign-in before a replay (ST-06, native) ----------------
+
+/** How long a replay waits for a fresh sign-in token before treating the device as offline. */
+export const SIGN_IN_REFRESH_TIMEOUT_MS = 5_000;
+
+export type SignInRefresh = 'ok' | 'offline' | 'signedOut';
+
+/** Firebase Auth, reduced to what a refresh needs. */
+export type RefreshableAuth = { currentUser: { getIdToken(forceRefresh?: boolean): Promise<string> } | null };
+
+const SIGNED_OUT_CODES = new Set([
+  'auth/user-token-expired',
+  'auth/user-disabled',
+  'auth/invalid-user-token',
+  'auth/user-not-found',
+]);
+
+/**
+ * Refresh this device's sign-in before a replay is sent, and say what came
+ * back. On a phone a token that could not be refreshed in the background (no
+ * connection while the app was asleep) used to reach the server stale, and a
+ * validly signed-in member was told their sign-in had expired.
+ *
+ *   - 'ok'        — a fresh token: the replay may go.
+ *   - 'signedOut' — no signed-in user, or Auth says the account's session is
+ *                   over (expired, disabled, invalid, deleted).
+ *   - 'offline'   — the refresh could not reach Auth (network failure, or no
+ *                   answer within `ms`). ANY OTHER failure is treated the
+ *                   same way: it is not proof the member is signed out, so
+ *                   nothing is sent and the member can try again.
+ *
+ * Never rejects.
+ */
+export async function refreshSignIn(auth: RefreshableAuth, ms: number): Promise<SignInRefresh> {
+  const user = auth.currentUser;
+  if (!user) return 'signedOut';
+  const TIMED_OUT = Symbol('timedOut');
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      user.getIdToken(true),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(TIMED_OUT), ms);
+      }),
+    ]);
+    return 'ok';
+  } catch (e) {
+    if (e === TIMED_OUT) return 'offline';
+    const code = typeof (e as { code?: unknown })?.code === 'string' ? (e as { code: string }).code : '';
+    if (SIGNED_OUT_CODES.has(code)) return 'signedOut';
+    return 'offline';
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+/** Whether a caught error is the server saying the request carried no usable sign-in. */
+export function isSignInExpired(e: unknown): boolean {
+  const failure = classifyContributeError(e);
+  return failure.kind === 'refused' && failure.reason === 'signedOut';
 }
 
 export function refusalCopy(
@@ -397,12 +516,18 @@ export type TogetherPresentation = {
  * Motion is allowed only when all of these hold:
  *   - fresh, and not an already-recorded replay;
  *   - the receipt carries shared state (never on an own-only receipt);
- *   - the story is `ordinary` (below target) or the server's `crossed`;
- *   - a reliable before exists: the confirmed total the screen showed for the
- *     SAME target, not above the confirmed after. It is never invented from
- *     `sharedTotal - addedCount`, and a missing one is not reconstructed.
+ *   - the story is `ordinary` (below target) or the server's `crossed`.
  * A reached-without-signal or post-target receipt is static: it may not stage
  * a crossing the server did not grant.
+ *
+ * THE BEFORE TOTAL DECIDES ONLY THE FILL, NOT WHETHER THE RECEIPT MOVES
+ * (MO-01, the 517b961a gate). A reliable before is the confirmed total the
+ * screen showed for the SAME target, not above the confirmed after; it is
+ * never invented from `sharedTotal - addedCount`, and a missing one is not
+ * reconstructed. With one, the fill tweens from it to the after. Without one,
+ * a fresh confirmation still gets its acknowledgment (gather, pulse, waves)
+ * and the fill simply holds at after/target (`fromRatio === toRatio`,
+ * `before === null`): no invented starting point, and no silent receipt.
  */
 export function togetherPresentation(
   r: ContributeReceipt,
@@ -435,11 +560,7 @@ export function togetherPresentation(
   const before = reliableBefore ? sharedBefore : null;
   const fromRatio = before != null ? fillRatio(before, r.target!) : toRatio;
   const animate =
-    opts.fresh &&
-    hasShared &&
-    !r.alreadyRecorded &&
-    before != null &&
-    (variant === 'ordinary' || variant === 'crossed');
+    opts.fresh && hasShared && !r.alreadyRecorded && (variant === 'ordinary' || variant === 'crossed');
 
   return {
     variant,

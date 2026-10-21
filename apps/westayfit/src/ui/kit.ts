@@ -1,4 +1,12 @@
-import { StyleSheet } from 'react-native';
+import {
+  Platform,
+  StyleSheet,
+  type ColorValue,
+  type PressableAndroidRippleConfig,
+  type PressableStateCallbackType,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
 
 import { wsfTheme } from '../theme';
 import { PROGRESS_GREEN } from './brandAssets';
@@ -20,6 +28,32 @@ export const CARD_BORDER = '#E3E7E1';
 export const HERO_MUTED = 'rgba(247,245,240,0.78)';
 export const HERO_RULE = 'rgba(247,245,240,0.35)';
 export { PROGRESS_GREEN };
+/*
+  W12-8 (INT-15, INT-16, MF-17). ONE TEXT-SCALE POLICY, from kit for every
+  lane (src/ui/textScale(.native).ts): chrome labels and large numerals are
+  capped at 1.3x on a phone, a numeral shrinks to fit its line, and a layout
+  decides by the width its text actually has. Empty on the web.
+*/
+export {
+  TEXT_SCALE_CAPS,
+  chromeTextProps,
+  effectiveWidth,
+  numeralInputProps,
+  numeralTextProps,
+  type ChromeTextProps,
+  type NumeralInputProps,
+  type NumeralTextProps,
+} from './textScale';
+/**
+ * RV15-641-1, RV15-641-4. A line that MIXES a numeral with words (a total and
+ * its free-text unit, "N of M <unit>") takes the cap only: it still wraps at
+ * the default size, where `numeralTextProps` would force one line and shrink
+ * it (and cut a long unit off with an ellipsis). The cap is also the only
+ * text-scale prop a nested <Text> span hands to native, so a span inside such
+ * a line takes this too. `numeralTextProps` is for a count-only root <Text>.
+ * Empty on the web. (A re-export, so it stays the twin Metro picks.)
+ */
+export { numeralInputProps as numeralCapProps } from './textScale';
 // Contrast-checked at rgb(90,107,133); placeholders use it too. Do not change.
 export const TEXT_MUTED = wsfTheme.colors.textMuted;
 export const ERROR_RED = '#B4232C';
@@ -77,30 +111,118 @@ export const display = {
  * DEPTH. There was none: no shadow, elevation or gradient token anywhere, which
  * is why every surface in this product is a bordered rectangle.
  * react-native-web maps these to box-shadow.
+ *
+ * W12-15 (INT-21). EACH PLATFORM GETS THE SHADOW IT CAN DRAW.
+ *   · iOS clips `shadow*` on a view with `overflow: hidden` (the hero, the
+ *     contribute and MOVE panels, the sign-in field), so there each token is
+ *     one `boxShadow` with the same colour, offset and opacity, blur = the
+ *     shadowRadius. A boxShadow is drawn outside the clip (new architecture).
+ *   · Android and the web keep today's objects exactly: Android draws the
+ *     lift from `elevation` (tinted by shadowColor on API 28+), and
+ *     react-native-web maps the shadow props to the same box-shadow as before.
  */
+type ShadowSpec = Readonly<{
+  shadowColor: string;
+  shadowOpacity: number;
+  shadowRadius: number;
+  shadowOffset: Readonly<{ width: number; height: number }>;
+  elevation: number;
+}>;
+/** One CSS shadow from a `#RRGGBB` shadow set: `x y blur rgba(r,g,b,opacity)`. */
+function boxShadowOf(s: ShadowSpec): string {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(s.shadowColor.slice(i, i + 2), 16));
+  return `${s.shadowOffset.width}px ${s.shadowOffset.height}px ${s.shadowRadius}px rgba(${r},${g},${b},${s.shadowOpacity})`;
+}
+/** Only the depth keys (the shadow as a CSS string), so a token still spreads into a Text or Link style. */
+type ElevationStyle = Pick<ViewStyle, 'shadowColor' | 'shadowOpacity' | 'shadowRadius' | 'shadowOffset' | 'elevation'> & {
+  boxShadow?: string;
+};
+const perPlatform = (s: ShadowSpec): ElevationStyle =>
+  Platform.select<ElevationStyle>({ ios: { boxShadow: boxShadowOf(s) }, default: s });
 export const elevation = {
-  card: {
+  card: perPlatform({
     shadowColor: '#0B1F3A',
     shadowOpacity: 0.08,
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 6 },
     elevation: 3,
-  },
-  hero: {
+  }),
+  hero: perPlatform({
     shadowColor: '#0B1F3A',
     shadowOpacity: 0.22,
     shadowRadius: 28,
     shadowOffset: { width: 0, height: 14 },
     elevation: 8,
-  },
-  action: {
+  }),
+  action: perPlatform({
     shadowColor: ACTION_GREEN_DEEP,
     shadowOpacity: 0.32,
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 8 },
     elevation: 6,
-  },
+  }),
 };
+/*
+  RV13-641-N2. TURNING A TOKEN'S LIFT OFF (a disabled or done state over a
+  style that spreads one): spread ELEVATION_OFF, not a bare `shadowOpacity: 0`.
+  On iOS the token is a boxShadow, which shadowOpacity does not reach, so
+  there it is also cancelled ('none' parses to no shadow). On Android the
+  token lifts with `elevation` (3, 8, 6) and RN 0.81 has no shadowOpacity
+  there, so it is cancelled with `elevation: 0` (RV14-641-5); with no
+  elevation the shadowColor tints nothing. The web gets exactly
+  `{ shadowOpacity: 0 }`, as the bare key gave it.
+*/
+export const ELEVATION_OFF: ElevationStyle = Platform.select<ElevationStyle>({
+  ios: { shadowOpacity: 0, boxShadow: 'none' },
+  android: { shadowOpacity: 0, elevation: 0 },
+  default: { shadowOpacity: 0 },
+});
+/*
+  W12-15 (INT-21, INT-31). The lift tokens for surfaces that need more than
+  elevation.* (kit-base's src/ui/lift.ts): lift.panel for a side or bottom
+  panel, lift.tabBar (Android's upward shadow) and lift.knob. `{}` on the web.
+*/
+export { lift, PANEL_BOX_SHADOW_IOS, TAB_BAR_BOX_SHADOW_ANDROID, type LiftTokens } from './lift';
+
+/**
+ * NATIVE-INTEGRATOR-1 (INT-09). A text-glyph Back ("‹", about 10 pt wide)
+ * reaches the 44 pt minimum through its hit slop, without moving the row it
+ * sits in. A press target only: nothing is drawn, so web layout is unchanged.
+ */
+export const BACK_GLYPH_HIT_SLOP = { top: 8, bottom: 8, left: 17, right: 17 } as const;
+
+/*
+  W12-17 (INT-33). PRESSED FEEDBACK ON A PHONE. No control showed it: a tap
+  on iOS or Android looked like nothing happened until the next screen came.
+  pressableStyle(base, tint) gives a Pressable its style and feedback: on a
+  phone the style dims while pressed and clears on release (PRESSED), and
+  Android adds its ripple in `tint`. The web gets `base` itself, the same
+  object, so its DOM is unchanged. Spread it on a Pressable you own; never
+  on a <Link asChild> child or a ButtonLink, where Link merges the child's
+  style by object spread and a function style would blank the route.
+*/
+export type PressableFeedback = {
+  style: StyleProp<ViewStyle> | ((state: PressableStateCallbackType) => StyleProp<ViewStyle>);
+  android_ripple?: PressableAndroidRippleConfig;
+};
+/**
+ * A phone's pressed state. A plain object, not a StyleSheet entry: react-native-web
+ * writes every StyleSheet rule into the web's CSS, and the web never uses this.
+ */
+export const PRESSED: Readonly<ViewStyle> = Object.freeze({ opacity: 0.72 });
+/**
+ * `ripple` shapes Android's ripple (RV14-641-N2: a round control passes
+ * `{ borderless: true, radius }`, or the ripple paints its square bounds).
+ */
+export function pressableStyle(
+  base: StyleProp<ViewStyle>,
+  tint: ColorValue,
+  ripple?: Omit<PressableAndroidRippleConfig, 'color'>,
+): PressableFeedback {
+  if (Platform.OS === 'web') return { style: base };
+  const style = ({ pressed }: PressableStateCallbackType): StyleProp<ViewStyle> => [base, pressed && PRESSED];
+  return Platform.OS === 'android' ? { style, android_ripple: { color: tint, ...ripple } } : { style };
+}
 
 export const kit = StyleSheet.create({
   // ---- page ----

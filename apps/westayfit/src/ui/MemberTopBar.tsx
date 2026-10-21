@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { BackHandler, Dimensions, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { CARD_BORDER, CREAM, INK_QUIET, NAVY, TEXT_MUTED } from './kit';
+import { focusSoon, registerFocusTarget } from './focusTarget';
+import { CARD_BORDER, CREAM, INK_QUIET, NAVY, OPTION_SELECTED_TINT, TEXT_MUTED, pressableStyle } from './kit';
 import { MEMBER_SHELL_GROUND, MEMBER_SHELL_RULE, MEMBER_TOP_BAR_BODY } from './memberShellMetrics';
 import { WsfWordmark } from './WsfWordmark';
 
@@ -74,10 +75,67 @@ export function MemberTopBar({
   */
   const menuButtonRef = useRef<{ focus?: () => void } | null>(null);
   const wasOpen = useRef(menuOpen);
+  /*
+    RV12-641-A1 (native). A ROW THAT OPENS ANOTHER SURFACE KEEPS THE SCREEN
+    READER WITH IT. The phone's focus move is deferred (after interactions,
+    and 400 ms more on iOS), so after a row that opens Settings, Build details
+    or the Manage sheet it would land on this button behind the new surface,
+    in a shell that is hidden from the screen reader. So the button takes the
+    focus back only when the menu is dismissed without a choice (the button,
+    the layer, Android Back); a surface opened from a row returns focus on
+    its own close (Settings through the tabs' focus return). The web still
+    moves keyboard focus to the button either way, as before.
+  */
+  const closedByRow = useRef(false);
+  // W12-9 (INT-17, native): Settings, opened from this menu, returns the
+  // screen reader's focus here when it closes (src/ui/focusTarget.ts).
+  useEffect(() => registerFocusTarget('wsf-member-topbar-menu-button', menuButtonRef), []);
   useEffect(() => {
-    if (wasOpen.current && !menuOpen) menuButtonRef.current?.focus?.();
+    let cancel: (() => void) | undefined;
+    if (wasOpen.current && !menuOpen) {
+      // The web moves keyboard focus; on a phone `.focus()` does nothing for
+      // VoiceOver or TalkBack, so the screen reader's focus is moved instead.
+      if (Platform.OS === 'web') menuButtonRef.current?.focus?.();
+      else if (!closedByRow.current) cancel = focusSoon(menuButtonRef);
+    }
+    // Each opening starts undecided.
+    if (wasOpen.current !== menuOpen) closedByRow.current = false;
     wasOpen.current = menuOpen;
+    return cancel;
   }, [menuOpen]);
+
+  /*
+    NATIVE-INTEGRATOR-1 (INT-14). ON A PHONE THE OPEN MENU IS MODAL.
+    - The sheet hangs from the bar's hairline, which is `insets.top + 62`
+      down: an absolute child ignores the wrapper's padding, so `top: 62`
+      alone put the sheet over the bar itself on a notched phone, covering
+      the hamburger, and a second tap fired the first row.
+    - A transparent layer over everything else closes the menu, and the tap
+      that closes it activates nothing beneath it, the hamburger and wordmark
+      included. Tabs cannot be switched with the menu open, so a tab change
+      always finds it closed.
+    - Android Back closes it before any navigation.
+    On web none of this applies: the inset is 0, there is no layer and no
+    Back, so the menu behaves exactly as it did.
+  */
+  const native = Platform.OS !== 'web';
+  const { height: windowHeight } = useWindowDimensions();
+  /*
+    #641 NB-6: the layer is oversized so nothing below it can take the tap.
+    On Android edge-to-edge the window can be shorter than the screen it is
+    drawn on, and the tab bar sits in the difference; the layer starts at the
+    bar's top, so it reaches past the screen's bottom edge whatever the window
+    reports.
+  */
+  const layerHeight = Math.max(Dimensions.get('screen').height, windowHeight) + insets.top + insets.bottom;
+  useEffect(() => {
+    if (!menuOpen || Platform.OS !== 'android') return undefined;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      onMenuToggle(false);
+      return true;
+    });
+    return () => sub.remove();
+  }, [menuOpen, onMenuToggle]);
 
   return (
     <View
@@ -117,7 +175,8 @@ export function MemberTopBar({
         <Pressable
           ref={menuButtonRef as never}
           onPress={() => onMenuToggle(!menuOpen)}
-          style={styles.menuTap}
+          // W12-17 (INT-33): pressed feedback on a phone; the web's style is unchanged.
+          {...pressableStyle(styles.menuTap, OPTION_SELECTED_TINT)}
           accessibilityRole="button"
           accessibilityLabel={menuOpen ? 'Close menu' : 'Menu'}
           accessibilityState={{ expanded: menuOpen }}
@@ -134,8 +193,20 @@ export function MemberTopBar({
         </Pressable>
       </View>
 
+      {menuOpen && native ? (
+        <Pressable
+          onPress={() => onMenuToggle(false)}
+          style={[styles.dismiss, { height: layerHeight }]}
+          accessible={false}
+          importantForAccessibility="no"
+          testID="wsf-member-topbar-menu-dismiss"
+        />
+      ) : null}
       {menuOpen ? (
-        <View style={styles.sheet} testID="wsf-member-topbar-menu">
+        <View
+          style={[styles.sheet, native && insets.top > 0 ? { top: insets.top + MEMBER_TOP_BAR_BODY } : null]}
+          testID="wsf-member-topbar-menu"
+        >
           {menu.map((item) => {
             if (item.kind === 'slot') {
               return (
@@ -150,10 +221,11 @@ export function MemberTopBar({
               <Pressable
                 key={item.key}
                 onPress={() => {
+                  closedByRow.current = true;
                   onMenuToggle(false);
                   onPress();
                 }}
-                style={styles.menuRow}
+                {...pressableStyle(styles.menuRow, OPTION_SELECTED_TINT)}
                 accessibilityRole={item.kind === 'link' ? 'link' : 'button'}
                 accessibilityLabel={item.label}
                 testID={`wsf-member-topbar-menu-${item.key}`}
@@ -220,7 +292,12 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.14,
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 8 },
+    // Android draws no shadow* props: the same lift as elevation (INT-14, INT-31).
+    ...(Platform.OS === 'android' ? { elevation: 8 } : null),
   },
+  // INT-14: the layer that closes the menu, under the sheet and over the bar
+  // and the page. Native only.
+  dismiss: { position: 'absolute', top: 0, left: 0, right: 0 },
   menuRow: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 14 },
   menuLabel: { color: NAVY, fontSize: 15, fontWeight: '600' },
   slotRow: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 14, paddingVertical: 6, gap: 1 },

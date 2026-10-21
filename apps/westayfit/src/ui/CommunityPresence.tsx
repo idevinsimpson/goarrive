@@ -1,4 +1,5 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { useState, useSyncExternalStore } from 'react';
+import { AppState, StyleSheet, Text, View, type AppStateStatus } from 'react-native';
 
 import {
   CREAM,
@@ -12,6 +13,7 @@ import {
   SURFACE,
   TEXT_MUTED,
 } from './kit';
+import { formatCount } from './progressFormat';
 
 /**
  * THE SHARED SOCIAL PIECES — presence initials and the momentum list.
@@ -148,8 +150,72 @@ export function relativeWhen(at: string, nowMs: number = Date.now()): string {
   return days === 1 ? '1 day ago' : `${days} days ago`;
 }
 
+/*
+  W12-6 (INT-12). A COARSE "NOW" FOR RELATIVE LABELS. "3m ago" was computed
+  once, when the row rendered, and then stood still while the screen stayed
+  open. One shared ticker re-renders its readers every 60 s while the app is
+  in front, and once more on the return to it; in the background it holds no
+  timer at all, and with no reader it holds nothing. Its reader is Community
+  Home's momentum rows (HomeMomentumRow, RV15-641-3); this module's
+  MomentumRow reads it too, though no screen renders that row today.
+*/
+export const NOW_TICK_MS = 60_000;
+const tickReaders = new Set<() => void>();
+let tickNow = Date.now();
+let tickTimer: ReturnType<typeof setInterval> | null = null;
+let tickAppSub: { remove: () => void } | null = null;
+const inFront = (state: AppStateStatus | null | undefined) => state !== 'background' && state !== 'inactive';
+function tickOnce() {
+  tickNow = Date.now();
+  tickReaders.forEach((read) => read());
+}
+function startTicking() {
+  if (tickTimer === null) tickTimer = setInterval(tickOnce, NOW_TICK_MS);
+}
+function stopTicking() {
+  if (tickTimer !== null) {
+    clearInterval(tickTimer);
+    tickTimer = null;
+  }
+}
+function readTick(read: () => void): () => void {
+  tickReaders.add(read);
+  if (tickReaders.size === 1) {
+    tickNow = Date.now();
+    if (inFront(AppState.currentState)) startTicking();
+    tickAppSub = AppState.addEventListener('change', (state) => {
+      if (inFront(state)) {
+        // Back in front: the labels catch up at once, then tick again.
+        tickOnce();
+        startTicking();
+      } else {
+        stopTicking();
+      }
+    });
+  }
+  return () => {
+    tickReaders.delete(read);
+    if (tickReaders.size === 0) {
+      stopTicking();
+      tickAppSub?.remove();
+      tickAppSub = null;
+    }
+  };
+}
+/**
+ * The current time in ms, re-read every NOW_TICK_MS while the app is in front
+ * and on its return. RV15-641-5: the store's value is only as fresh as its
+ * last tick, and after a spell with no reader that can be hours old; a reader
+ * never paints a time earlier than its own mount.
+ */
+export function useNowTick(): number {
+  const [mountedAt] = useState(() => Date.now());
+  return Math.max(useSyncExternalStore(readTick, () => tickNow, () => tickNow), mountedAt);
+}
+
 /** One momentum row: who moved, how much, when. */
 export function MomentumRow({ row, first }: { row: ActivityRow; first: boolean }) {
+  const nowMs = useNowTick();
   const named = row.displayName !== null && row.displayName.trim() !== '';
   return (
     <View
@@ -168,9 +234,9 @@ export function MomentumRow({ row, first }: { row: ActivityRow; first: boolean }
           {named ? row.displayName : 'Anonymous member'}
         </Text>
         <Text style={styles.momentumWhat}>
-          added {row.amount.toLocaleString()}
+          added {formatCount(row.amount)}
           {row.unit ? ` ${row.unit}` : ''}
-          {row.at ? ` · ${relativeWhen(row.at)}` : ''}
+          {row.at ? ` · ${relativeWhen(row.at, nowMs)}` : ''}
         </Text>
       </View>
     </View>

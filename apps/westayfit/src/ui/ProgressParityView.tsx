@@ -14,9 +14,10 @@ import {
   type ProgressState,
   type ProgressStatus,
 } from '../progressParity';
-import { ACTION_GREEN, NAVY, PROGRESS_GREEN, SURFACE, elevation } from './kit';
-import { MEMBER_TAB_BAR_BODY, MEMBER_TAB_MOVE_OVERHANG } from './MemberTabBar';
+import { ACTION_GREEN, NAVY, PROGRESS_GREEN, SURFACE, elevation, numeralTextProps } from './kit';
+import { tabContentBottomReserve } from './MemberTabBar';
 import { RefreshNote, type RefreshState } from './RefreshNote';
+import { useAnnounce } from './announce';
 
 /**
  * PROGRESS PARITY VIEW — the accepted Lovable Progress reference (`09b8a73c`,
@@ -53,13 +54,21 @@ export type ProgressParityActions = {
 export type ProgressParityViewProps = {
   state: ProgressState;
   actions: ProgressParityActions;
-  /** The device's bottom safe area; the view already clears the tab bar. */
+  /**
+   * The device's bottom safe area; the view already clears the tab bar. Read
+   * on the web only: on a phone the tab bar below the scene pads it itself.
+   */
   bottomInset?: number;
   /**
    * The route's revalidation state (PERF-MOBILE-1): checking after a moment,
    * or stale with a Retry when a refresh failed. Shown in the ready state only.
    */
   refresh?: RefreshState;
+  /**
+   * RV12-641-A3: whether Progress is the screen in front (the route tracks its
+   * focus). The partial note is spoken on a phone only then. Default true.
+   */
+  inFront?: boolean;
 };
 
 /**
@@ -87,7 +96,7 @@ const n = (v: number) => v.toLocaleString('en-US');
 const CLARIFICATION =
   'This personal summary is only for you. Community activity follows your visibility settings.';
 
-export function ProgressParityView({ state, actions, bottomInset = 0, refresh }: ProgressParityViewProps) {
+export function ProgressParityView({ state, actions, bottomInset = 0, refresh, inFront = true }: ProgressParityViewProps) {
   const compact = useProgressCompact();
   const memberName = state.kind === 'failed' || state.kind === 'ready' ? state.memberName : null;
   const goals = state.kind === 'ready' ? orderedGoals(state.open, state.finished) : [];
@@ -105,7 +114,8 @@ export function ProgressParityView({ state, actions, bottomInset = 0, refresh }:
         contentContainerStyle={[
           s.body,
           compact && s.bodyCompact,
-          { paddingBottom: MEMBER_TAB_BAR_BODY + MEMBER_TAB_MOVE_OVERHANG + bottomInset },
+          // W12-16 (INT-30): the web clears the bar and the inset as before; a phone, only MOVE's overhang.
+          { paddingBottom: tabContentBottomReserve(bottomInset) },
         ]}
       >
         {/* THE HERO. Private to you, then what the page is, then — when there
@@ -144,7 +154,10 @@ export function ProgressParityView({ state, actions, bottomInset = 0, refresh }:
                     accessible
                     accessibilityLabel={`${n(t.total)} ${t.unit} recorded`}
                   >
-                    <Text style={s.totalNumber}>{n(t.total)}</Text>
+                    {/* W12-8 (INT-16): capped and shrinking to fit on a phone; nothing on the web. */}
+                    <Text style={s.totalNumber} {...numeralTextProps}>
+                      {n(t.total)}
+                    </Text>
                     <Text style={s.totalUnit}>{`${t.unit} recorded`}</Text>
                   </View>
                 ))}
@@ -185,7 +198,7 @@ export function ProgressParityView({ state, actions, bottomInset = 0, refresh }:
           </View>
         ) : null}
 
-        {state.kind === 'ready' && state.partial ? <Partial onRetry={actions.onRetry} /> : null}
+        {state.kind === 'ready' && state.partial ? <Partial onRetry={actions.onRetry} inFront={inFront} /> : null}
 
         {state.kind === 'ready' && body === 'firstEligible' ? (
           <View
@@ -263,10 +276,32 @@ export function ProgressParityView({ state, actions, bottomInset = 0, refresh }:
   );
 }
 
-/** The reference's `.progress-partial`: says the list is short, offers Retry. */
-function Partial({ onRetry }: { onRetry: () => void }) {
+/**
+ * The reference's `.progress-partial`: says the list is short, offers Retry.
+ *
+ * NATIVE-INTEGRATOR-1 (INT-02). `role`, never `accessibilityRole`, carries
+ * "status". Android parses `accessibilityRole` against a closed enum that has
+ * no STATUS and throws on anything else, which took the whole app down the
+ * moment a goal read failed. `role` goes through the separate, fault-tolerant
+ * ARIA enum, and react-native-web renders `role="status"` exactly as before.
+ * W12-7 (INT-18): on a phone the note is spoken once each time it appears
+ * (src/ui/announce.native.ts): iOS has no live region, and Android's polite
+ * region beside an explicit announcement would speak it twice, so that region
+ * is gone. The web keeps `role="status"`, which is already polite there.
+ */
+export const PARTIAL_SENTENCE = 'This list is partial. Some goals couldn’t be read, so they aren’t shown or counted above.';
+
+function Partial({ onRetry, inFront }: { onRetry: () => void; inFront: boolean }) {
+  /*
+    RV12-641-A3: spoken only while Progress is the screen in front. It stays
+    mounted under MOVE and behind other tabs, where a revalidation that lands
+    late would otherwise speak over them. Out of sight the key is null, which
+    leaves the once-only key unspent, so it is said once when Progress comes
+    back in front, and not again on later returns while it stays mounted.
+  */
+  useAnnounce(PARTIAL_SENTENCE, inFront ? 'partial' : null);
   return (
-    <View style={s.partial} testID="wsf-activity-partial" accessibilityRole={'status' as never}>
+    <View style={s.partial} testID="wsf-activity-partial" role="status">
       <Text style={s.partialText}>
         <Text style={s.partialStrong}>This list is partial.</Text> Some goals couldn’t be read, so they
         aren’t shown or counted above.

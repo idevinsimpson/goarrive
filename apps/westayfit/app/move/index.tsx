@@ -4,20 +4,23 @@ import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-n
 
 import { useWsfAuth } from '../../src/auth';
 import { describeCallableError } from '../../src/callableErrors';
-import { resolveCurrentCommunity } from '../../src/currentCommunity';
+import { currentCommunityReady, resolveCurrentCommunity } from '../../src/currentCommunity';
 import { wsfAuthEnabled } from '../../src/featureFlags';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ButtonLink } from '../../src/ui/ButtonLink';
 import { armTabsFocusReturn, useSheetFocusReturn } from '../../src/ui/focusReturn';
+import { focusSoon, registerFocusTarget } from '../../src/ui/focusTarget';
 import {
   SCRIM_PROPS,
   markSheetHandoff,
   sheetData,
+  sheetHoldsStill,
   useSheetExit,
   useSheetFocusContainment,
 } from '../../src/ui/sheetMotion';
-import { useReducedMotion } from '../../src/ui/useReducedMotion';
+import { SheetPanel, SheetScrim } from '../../src/ui/sheetMotionNative';
+import { useReducedMotionPreference } from '../../src/ui/useReducedMotion';
 import {
   ACTION_GREEN,
   CARD_BORDER,
@@ -36,6 +39,7 @@ import {
 } from '../../src/ui/kit';
 import { fillRatio, formatCount, totalOfTargetLabel } from '../../src/ui/progressFormat';
 import { SAME_LOAD_MS, peekGoals, peekMyCommunities, readGoals, readMyCommunities } from '../../src/memberReads';
+import { nativeErrorBoundary } from '../../src/ui/RouteErrorFallback';
 
 /**
  * MOVE. The shell's one action, resolved.
@@ -68,6 +72,13 @@ import { SAME_LOAD_MS, peekGoals, peekMyCommunities, readGoals, readMyCommunitie
  * do -- made the transparent presentation invisible and the whole thing read
  * as another page.
  */
+
+/**
+ * W12-23 (RV17-641-F2): MOVE's Close takes the screen reader's focus when the
+ * sheet has something to show; a read still out after this long focuses it
+ * anyway, so a hung read does not leave the screen reader on the tab behind.
+ */
+const MOVE_FIRST_FOCUS_FALLBACK_MS = 1_000;
 
 type ListedGoal = {
   goalId: string;
@@ -147,6 +158,9 @@ function resolveFromRecord(uid: string): Resolution | null {
   return { kind: 'choose', groupId, community, goals: open };
 }
 
+/** INT-01. A throw in the MOVE resolver is contained on this screen. */
+export const ErrorBoundary = nativeErrorBoundary('screen');
+
 export default function MoveResolver() {
   const { ready, user } = useWsfAuth();
   const safeArea = useSafeAreaInsets();
@@ -157,9 +171,54 @@ export default function MoveResolver() {
     APP-FEEL-PARITY-1. THE SHEET TRAVELS OUT BEFORE IT GOES: the reference's
     180 ms exit, then the same Close as before (`useSheetExit`: one exit, and
     none once something else is in front). Reduced motion goes straight there.
+    MO-02: on iOS and Android too (src/ui/sheetMotionNative.tsx), where a
+    preference not yet heard also means no travel and no wait.
   */
-  const reducedMotion = useReducedMotion();
+  const motionPreference = useReducedMotionPreference();
+  const reducedMotion = sheetHoldsStill(motionPreference);
   const { phase, exit, leaving } = useSheetExit(reducedMotion);
+  // NATIVE-INTEGRATOR-1 (INT-04 case 4): bumped by the error's Try again; the
+  // resolver reads again in place, fresh (INT-26: never joining a hung read).
+  const [reloadToken, setReloadToken] = useState(0);
+  /*
+    W12-23 (RV17-641-F2). MOVE'S FIRST FOCUS WAITS FOR THE RESOLUTION, AND A
+    HAND-OFF ENDS IT. It used to be moved at mount, so a cold read that then
+    handed to the one open goal's flow had already put the screen reader on
+    this sheet's Close (at once on Android; on iOS when the read took more than
+    about 400 ms), and the flow's own Close came second. Now it starts when
+    the sheet has something to show (the chooser, nothing open, an error), or
+    after MOVE_FIRST_FOCUS_FALLBACK_MS if the read is still out; a hand-off,
+    however it was decided (from the record on the first frame, or after a
+    read), ends it for good, and so does a blur. `fired` is set when the focus
+    is actually moved, so it is never repeated. Native only (the effects below
+    return at once on the web).
+  */
+  const closeRef = useRef<View>(null);
+  const firstFocus = useRef({
+    fired: false,
+    ended: false,
+    pending: null as null | (() => void),
+    timer: null as null | ReturnType<typeof setTimeout>,
+  }).current;
+  const stopFirstFocus = (forGood: boolean) => {
+    if (firstFocus.timer !== null) clearTimeout(firstFocus.timer);
+    firstFocus.timer = null;
+    firstFocus.pending?.();
+    firstFocus.pending = null;
+    if (forGood) firstFocus.ended = true;
+  };
+  const startFirstFocus = () => {
+    firstFocus.timer = null;
+    if (firstFocus.fired || firstFocus.ended || firstFocus.pending) return;
+    // Read only when the focus is moved: from then on it has happened.
+    const target = {
+      get current() {
+        firstFocus.fired = true;
+        return closeRef.current;
+      },
+    };
+    firstFocus.pending = focusSoon(target);
+  };
 
   useEffect(() => {
     if (!wsfAuthEnabled || !ready) return;
@@ -168,7 +227,8 @@ export default function MoveResolver() {
       return;
     }
     if (state.kind === 'handoff') {
-      // The sheet stays up across the hand-off (see below).
+      // The sheet stays up across the hand-off (see below). Its Close is not focused: the flow's is.
+      stopFirstFocus(true);
       markSheetHandoff();
       router.replace(state.href as never);
       return;
@@ -180,10 +240,16 @@ export default function MoveResolver() {
         // within this load (src/memberReads.ts). Decided from the record, this
         // only confirms it; the member is not shown "working" meanwhile.
         const mine = {
-          data: (await readMyCommunities(user.uid, SAME_LOAD_MS)) as unknown as { items: MyCommunityItem[] },
+          data: (await readMyCommunities(user.uid, reloadToken > 0 ? 0 : SAME_LOAD_MS)) as unknown as {
+            items: MyCommunityItem[];
+          },
         };
         if (cancelled || leaving()) return;
         const ids = mine.data.items.map((i) => i.groupId);
+        // On a phone the remembered choice is read from storage at launch;
+        // "not read yet" must not send the member to Home's chooser.
+        await currentCommunityReady();
+        if (cancelled || leaving()) return;
         const groupId = resolveCurrentCommunity(user.uid, ids);
         const community = mine.data.items.find((i) => i.groupId === groupId)?.displayName ?? null;
         // No community, or several with none chosen: Home already owns both of
@@ -200,7 +266,7 @@ export default function MoveResolver() {
           row. `readGoals` always asks with it (src/memberReads.ts). Closed
           goals arrive with it; actionableGoals drops them, as it always has.
         */
-        const listed = { data: await readGoals<ListedGoal>(user.uid, groupId, SAME_LOAD_MS) };
+        const listed = { data: await readGoals<ListedGoal>(user.uid, groupId, reloadToken > 0 ? 0 : SAME_LOAD_MS) };
         // `leaving()`: the member pressed Close while this was being read.
         // They are leaving, and the answer must not send them anywhere else.
         if (cancelled || leaving()) return;
@@ -213,7 +279,8 @@ export default function MoveResolver() {
           const g = open[0];
           // The sheet stays up across the hand-off: the flow it hands to is
           // the same sheet (app/_layout.tsx), and must not fade the dim in
-          // again from nothing.
+          // again from nothing. Its Close is not focused: the flow's is (RV17-641-F2).
+          stopFirstFocus(true);
           markSheetHandoff();
           router.replace(
             `/contribute/${g.goalId}?groupId=${encodeURIComponent(groupId)}&mode=move`,
@@ -232,7 +299,7 @@ export default function MoveResolver() {
     return () => {
       cancelled = true;
     };
-  }, [ready, user]);
+  }, [ready, user, reloadToken]);
 
   /*
     THE COMPOSITION. The approved target draws MOVE entry as a sheet rising
@@ -325,6 +392,46 @@ export default function MoveResolver() {
   // in front (F2: the outer root also holds the scrim).
   const panelRef = useRef<View>(null);
   useSheetFocusContainment(panelRef);
+  /*
+    W12-20 (INT-17, native). THE SCREEN READER STARTS ON CLOSE, AND COMES
+    BACK TO IT. On the web focus enters the panel on Close (the containment
+    above); off the web that hook does nothing, and VoiceOver or TalkBack
+    stayed on whatever the tab behind had. On iOS and Android, Close is a
+    registered focus target (src/ui/focusTarget.ts) -- the one
+    useSheetFocusReturn falls back to when a goal's flow closes over this
+    sheet -- and it takes the screen reader's focus once, when the sheet has
+    something to show (W12-23, `firstFocus` above): after the presentation
+    settles, and about 400 ms later on iOS (src/ui/accessibilityFocus.ts). A
+    goal's flow covering the sheet first, the sheet going, or a hand-off
+    cancels it; the flow's own Close is then the one focused. Nothing on the
+    web.
+  */
+  useEffect(() => {
+    if (Platform.OS === 'web') return undefined;
+    return registerFocusTarget('wsf-move-close', closeRef);
+  }, []);
+  useEffect(() => {
+    if (Platform.OS === 'web') return undefined;
+    const offBlur = navigation.addListener('blur', () => stopFirstFocus(true));
+    return () => {
+      // Unmounting cancels what is pending (a StrictMode rehearsal remounts and starts again).
+      stopFirstFocus(false);
+      offBlur();
+    };
+    // `stopFirstFocus` acts on the ref alone.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (Platform.OS === 'web' || firstFocus.fired || firstFocus.ended || state.kind === 'handoff') return;
+    if (state.kind !== 'working') {
+      if (firstFocus.timer !== null) clearTimeout(firstFocus.timer);
+      startFirstFocus();
+    } else if (firstFocus.timer === null && !firstFocus.pending) {
+      firstFocus.timer = setTimeout(startFirstFocus, MOVE_FIRST_FOCUS_FALLBACK_MS);
+    }
+    // The resolution decides; the helpers act on the ref alone.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.kind]);
 
   /*
     THE SHEET. The scrim covers the whole viewport, which is what keeps the tab
@@ -335,10 +442,16 @@ export default function MoveResolver() {
     own safe area. It used to reserve MEMBER_TAB_BAR_BODY plus the raised
     control's overhang: chrome belonging to a screen this one is no longer part
     of, and the empty lower field that reservation left behind.
+
+    MO-02: the scrim and the panel are SheetScrim and SheetPanel -- on the web
+    the same Pressable and View with the same props (the CSS motion keys on
+    their `dataSet`); on iOS and Android they fade and rise themselves. The
+    grabber is drawn on the web only: on a phone it looked draggable and was
+    not, so it is gone there rather than a promise the sheet does not keep.
   */
   const sheet = (children: ReactNode) => (
     <View ref={sheetRef} style={s.sheetRoot} testID="wsf-move-screen">
-      <Pressable
+      <SheetScrim
         style={s.scrim}
         onPress={close}
         testID="wsf-move-scrim"
@@ -346,16 +459,21 @@ export default function MoveResolver() {
         // is the pointer's only (F2: it was a Tab stop named "Close").
         {...SCRIM_PROPS}
         {...(sheetData('scrim', phase) as object)}
+        phase={phase}
+        preference={motionPreference}
       />
-      <View
+      <SheetPanel
         ref={panelRef}
         style={[s.sheet, { paddingBottom: safeArea.bottom + 16 }]}
         testID="wsf-move-sheet"
         {...(sheetData('panel', phase) as object)}
+        phase={phase}
+        preference={motionPreference}
       >
         <View style={s.sheetHead}>
-          <View pointerEvents="none" style={s.grabber} />
+          {Platform.OS === 'web' ? <View pointerEvents="none" style={s.grabber} /> : null}
           <Pressable
+            ref={closeRef}
             onPress={close}
             style={s.close}
             accessibilityRole="button"
@@ -366,7 +484,7 @@ export default function MoveResolver() {
           </Pressable>
         </View>
         <ScrollView contentContainerStyle={s.body}>{children}</ScrollView>
-      </View>
+      </SheetPanel>
     </View>
   );
 
@@ -474,10 +592,22 @@ export default function MoveResolver() {
           <Text style={s.hiddenProbe} testID="wsf-move-error">
             {state.message}
           </Text>
+          {/* INT-04 case 4: try again here, in place; Home stays the way out. */}
+          <Pressable
+            onPress={() => {
+              setState({ kind: 'working' });
+              setReloadToken((n) => n + 1);
+            }}
+            accessibilityRole="button"
+            style={s.cardAction}
+            testID="wsf-move-error-retry"
+          >
+            <Text style={s.cardActionText}>Try again</Text>
+          </Pressable>
           <ExitLink
             onGo={() => leaveTo('/')}
-            style={s.cardAction}
-            textStyle={s.cardActionText}
+            style={s.ghost}
+            textStyle={s.ghostText}
             testID="wsf-move-error-home"
             label="Go Home"
           />

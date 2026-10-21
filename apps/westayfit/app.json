@@ -1,11 +1,13 @@
 {
   "expo": {
     "name": "We Stay Fit",
-    "slug": "westayfit",
+    "owner": "devinsimpson",
+    "slug": "we-stay-fit-preview",
     "scheme": "westayfit",
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
+    "backgroundColor": "#F7F5F0",
     "newArchEnabled": true,
     "assetBundlePatterns": [
       "**/*"
@@ -51,6 +53,11 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "3288e568-daaa-4ead-afd2-826fbb59544a"
+      }
     }
   }
 }

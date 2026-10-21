@@ -1,20 +1,55 @@
-import { Stack } from 'expo-router';
+// INT-01: first in this file, so the global error handler is wrapped while
+// the route tree loads, before any timer, event or promise callback runs.
+// (expo-router evaluates some nested _layout files before this one, in the
+// same synchronous pass: src/crashContainment.native.ts.)
+import '../src/crashContainment';
+import { Stack, useNavigation } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
-import { View } from 'react-native';
+import { BackHandler, Platform, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { WsfAuthProvider } from '../src/auth';
 import { getFirebaseApp } from '../src/firebase';
 import { InAppBrowserBanner } from '../src/InAppBrowserBanner';
-import { StagingBanner } from '../src/StagingBanner';
+import { useKioskLaunchGuard } from '../src/kioskLaunchGuard';
+import { statusBarStyleFor } from '../src/ui/statusBarPolicy';
+import { fireAsyncCrashFaults, injectedRenderFault } from '../src/crashHarness';
 import { wsfTheme } from '../src/theme';
+import { coldBackHandler } from '../src/ui/coldBack';
 import { isMoveSheetRoute, isOverMemberTabs } from '../src/ui/moveSheetRoute';
+import { nativeErrorBoundary } from '../src/ui/RouteErrorFallback';
 import { useReducedMotion } from '../src/ui/useReducedMotion';
 
+/**
+ * INT-01. THE LAST-RESORT BOUNDARY. A throw anywhere in the shell that no
+ * route boundary below catches (the banners, the providers, the stack
+ * itself) renders this in place of the whole layout. It needs no provider:
+ * the safe-area and auth providers it would sit under are what just failed.
+ * Native only; web keeps its own behaviour (src/ui/RouteErrorFallback.tsx).
+ */
+export const ErrorBoundary = nativeErrorBoundary('root');
+
 export default function RootLayout() {
+  const navigation = useNavigation();
   useEffect(() => {
     getFirebaseApp();
+    // A test build's injected timer / rejection faults (src/crashHarness.ts).
+    fireAsyncCrashFaults();
+    // INT-28 (W12-14): Android Back from a lone cold-link route goes Home
+    // (src/ui/coldBack.ts). Registered here, once. expo-router's navigation
+    // container registers its own Back listener a commit EARLIER (it renders
+    // nothing until the initial URL and the safe-area insets have arrived),
+    // and Android calls the newest listener first, so this one is called
+    // BEFORE React Navigation's Back. That is safe: it consumes the press only
+    // when the root stack is one lone allowlisted route, which React
+    // Navigation cannot pop; with anything under it, it passes and React
+    // Navigation goes back. A screen's own handler registered through
+    // expo-router's useFocusEffect (INT-19 on the contribution screen)
+    // registers later still, so it runs first.
+    if (Platform.OS !== 'android') return undefined;
+    const sub = BackHandler.addEventListener('hardwareBackPress', coldBackHandler(navigation as never));
+    return () => sub.remove();
   }, []);
 
   return (
@@ -22,7 +57,11 @@ export default function RootLayout() {
        guessing at a phone's home indicator, so the provider is above it. */
     <SafeAreaProvider>
       <WsfAuthProvider>
-        <StatusBar style="dark" />
+        {/* INT-09: the default for cream screens. A navy screen sets light
+            icons while it is focused (src/ui/useScreenTopInset ScreenStatusBar;
+            the policy is src/ui/statusBarPolicy.ts). Nothing on web. */}
+        <StatusBar style={statusBarStyleFor('cream')} />
+        <KioskLaunchGuard />
         <AppShell />
       </WsfAuthProvider>
     </SafeAreaProvider>
@@ -65,14 +104,28 @@ export default function RootLayout() {
  * kiosk, the identity screens — is barless because of where it sits in the
  * tree, not because a predicate said so.
  */
+/**
+ * ST-05 (W12-1, ESC-2). A phone the OS killed mid kiosk session relaunches to
+ * that kiosk's start screen, not member Home signed in as the visitor. The
+ * guard runs here, once, inside the auth provider, in a component of its own
+ * that draws nothing (#641 RV10-641-1): its pathname and auth subscriptions
+ * re-render only this, never the root Stack below. While it decides, the
+ * member tabs hold back (app/(tabs)/_layout.tsx, useKioskLaunchHolding); the
+ * Stack itself stays mounted, because the replace needs it. Nothing on web.
+ */
+function KioskLaunchGuard() {
+  useKioskLaunchGuard();
+  return null;
+}
+
 function AppShell() {
   // Asked once, here, because both presented screens below answer to it.
   const reduced = useReducedMotion();
+  // A test build's root-shell fault (src/crashHarness.ts); inert otherwise.
+  injectedRenderFault('root-shell');
   return (
     <View style={{ flex: 1, backgroundColor: wsfTheme.colors.background }}>
-      <StagingBanner />
       <InAppBrowserBanner />
-      <View style={{ flex: 1 }}>
         <Stack
           screenOptions={{
             headerShown: false,
@@ -85,11 +138,14 @@ function AppShell() {
             options={{
               presentation: 'transparentModal',
               contentStyle: { backgroundColor: 'transparent' },
-              // Restrained, native-feeling and short. A sheet that slides is
-              // legible as "this came up over what I was doing"; anything more
-              // decorative is motion for its own sake. A member who has asked
-              // for reduced motion gets the sheet with none of the travel.
-              animation: reduced ? 'none' : 'slide_from_bottom',
+              // MO-02. Presented without the stack's travel: its slide moved
+              // the whole screen, the scrim with it as one dark block. The
+              // sheet moves itself instead (src/ui/sheetMotionNative.tsx): the
+              // scrim fades in place, the panel rises 28 pt over 240 ms and
+              // leaves in 180 ms, and a member who asked for reduced motion
+              // gets none of the travel. The web ignores this option and plays
+              // the same motion in CSS (src/ui/sheetMotion.ts).
+              animation: 'none',
             }}
           />
           {/*
@@ -120,7 +176,11 @@ function AppShell() {
                 ? {
                     presentation: 'transparentModal',
                     contentStyle: { backgroundColor: 'transparent' },
-                    animation: reduced ? 'none' : 'slide_from_bottom',
+                    // 3b (MO-02): no stack travel; the sheet fades and rises
+                    // itself on iOS and Android (SheetScrim/SheetPanel in the
+                    // route), and reduced motion gets none. The web ignores
+                    // this and plays its CSS (src/ui/sheetMotion.ts).
+                    animation: 'none',
                   }
                 : {}
             }
@@ -149,7 +209,6 @@ function AppShell() {
             }
           />
         </Stack>
-      </View>
     </View>
   );
 }

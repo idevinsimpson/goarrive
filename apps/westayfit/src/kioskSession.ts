@@ -17,9 +17,15 @@
  * proof, and no copy in this feature says or implies that it is.
  */
 
+import { definePostAuthDestination } from './postAuthDestination';
+import { deviceKv } from './storage/kv';
+import { createKeyMirror } from './storage/mirror';
+import { HAS_SYNC_STORAGE, readDeviceSync } from './storage/syncRead';
+
 /** sessionStorage, not localStorage: a closed tab must not carry a kiosk
  * destination into the next thing this browser does. Same lifetime choice,
- * and the same reasoning, as src/pendingJoinCode.ts. */
+ * and the same reasoning, as src/pendingJoinCode.ts (on a phone, the same
+ * two-hour bound instead: src/postAuthDestination.ts). */
 const KIOSK_RETURN_KEY = 'wsf.kioskReturnGoalId';
 
 /** Every browser-storage key this feature is allowed to own. Finish removes
@@ -97,38 +103,124 @@ export function isKioskFlag(value: unknown): boolean {
   return value === '1' || value === 'true';
 }
 
-export function setKioskReturnGoal(goalId: string): void {
-  try {
-    if (typeof window === 'undefined') return;
-    const storage = window.sessionStorage;
-    if (!storage) return;
-    if (!isGoalIdShape(goalId)) return;
-    storage.setItem(KIOSK_RETURN_KEY, goalId);
-  } catch {
-    // Private browsing / locked-down UA. The kiosk still works: the visitor
-    // lands on home after signing in instead of back on the contribution
-    // screen, which is a worse walk-up, not a broken or leaky one.
-  }
-}
-
-export function readKioskReturnGoal(): string | null {
-  try {
-    if (typeof window === 'undefined') return null;
-    const raw = window.sessionStorage?.getItem(KIOSK_RETURN_KEY);
-    if (raw == null) return null;
-    return isGoalIdShape(raw) ? raw : null;
-  } catch {
+/*
+  THE MEMBER-SIDE RETURN GOAL, kept like its siblings (src/postAuthDestination.ts):
+  sessionStorage on web exactly as before; AsyncStorage with a two-hour bound
+  on a phone. A bare goal id when stashed signed out — which is what the kiosk
+  start screen does, because a shared device is signed out by design before
+  anybody walks up — and `{"goalId":…,"owner":…}` only if an account stashed
+  it, in which case it is that account's alone and goes with its session.
+*/
+const kioskReturn = definePostAuthDestination<string>({
+  key: KIOSK_RETURN_KEY,
+  decode(raw) {
+    if (isGoalIdShape(raw)) return { value: raw, owner: null };
+    try {
+      const v = JSON.parse(raw) as { goalId?: unknown; owner?: unknown } | null;
+      if (v && typeof v.goalId === 'string' && isGoalIdShape(v.goalId) && typeof v.owner === 'string' && v.owner) {
+        return { value: v.goalId, owner: v.owner };
+      }
+    } catch {
+      // fall through
+    }
     return null;
-  }
+  },
+  encode(goalId, owner) {
+    return owner ? JSON.stringify({ goalId, owner }) : goalId;
+  },
+});
+
+/**
+ * Private browsing / locked-down UA: the write is reported as not kept and
+ * the kiosk still works — the visitor lands on home after signing in instead
+ * of back on the contribution screen, which is a worse walk-up, not a broken
+ * or leaky one.
+ */
+export function setKioskReturnGoal(goalId: string, ownerUid: string | null = null): Promise<boolean> {
+  if (!isGoalIdShape(goalId)) return Promise.resolve(false);
+  return kioskReturn.write(goalId, ownerUid);
 }
 
-export function clearKioskReturnGoal(): void {
-  try {
-    if (typeof window === 'undefined') return;
-    window.sessionStorage?.removeItem(KIOSK_RETURN_KEY);
-  } catch {
-    // ignore
-  }
+/** The goal for `uid` (null: a signed-out reader), or null if it is another account's. */
+export function readKioskReturnGoal(uid: string | null = null): string | null {
+  return kioskReturn.read(uid);
+}
+
+export function clearKioskReturnGoal(): Promise<boolean> {
+  return kioskReturn.clear();
+}
+
+/*
+  THE DURABLE KIOSK-SESSION MARKER (ST-05, native only).
+
+  The kiosk return above is a post-auth HANDOFF: it lives two hours and is
+  consumed by the sign-in hop. Nothing read it at launch. So a phone acting as
+  a kiosk that the OS killed mid-session — during verify-email, or on
+  /contribute?kiosk=1 — relaunched into member Home still signed in as the
+  visitor who walked up. This marker is the device's own record that a kiosk
+  session is open for `goalId`:
+
+    - device storage (AsyncStorage), NO expiry: a session left open
+      overnight is still a kiosk session in the morning;
+    - written when the kiosk's Contribute arms a session
+      (src/handoffArming.ts `armKioskReturn`; the contribute screen may write
+      it too);
+    - cleared only when the session is over, that is once nobody is signed
+      in: after Finish's sign-out has SUCCEEDED (kept if the sign-out failed —
+      the visitor may still be signed in), and by the kiosk start screen at
+      rest once auth answers with no user (app/kiosk/[goalId].tsx; never
+      before its own sign-out has landed);
+    - read at launch by src/kioskLaunchGuard.ts, which sends the device back
+      to the kiosk start screen (which resets, signs out, then clears it).
+
+  WEB: none of this. A tab that closes ends its session already, and nothing
+  here reads or writes browser storage.
+*/
+export const KIOSK_SESSION_MARKER_KEY = 'wsf.kioskSessionGoalId';
+
+const marker = createKeyMirror(deviceKv, readDeviceSync);
+let markerHydration: Promise<void> | null = null;
+
+/** Resolves once the marker has been read from the device (immediate on web). */
+export function kioskSessionReady(): Promise<void> {
+  if (HAS_SYNC_STORAGE) return Promise.resolve();
+  if (!markerHydration) markerHydration = marker.load(KIOSK_SESSION_MARKER_KEY);
+  return markerHydration;
+}
+// Native: read it at launch, before anything needs it.
+if (!HAS_SYNC_STORAGE) void kioskSessionReady();
+
+/** Record that a kiosk session is open for `goalId`. Native only; resolves whether the device kept it. */
+export function markKioskSession(goalId: string): Promise<boolean> {
+  if (HAS_SYNC_STORAGE || !isGoalIdShape(goalId)) return Promise.resolve(false);
+  return marker.write(KIOSK_SESSION_MARKER_KEY, goalId);
+}
+
+/** The session is over. Native only (true on web, where there is nothing to clear). */
+export function clearKioskSession(): Promise<boolean> {
+  if (HAS_SYNC_STORAGE) return Promise.resolve(true);
+  return marker.remove(KIOSK_SESSION_MARKER_KEY);
+}
+
+/** The goal of the open kiosk session, or null (always null on web, and before the launch read). */
+export function readKioskSession(): string | null {
+  if (HAS_SYNC_STORAGE) return null;
+  const raw = marker.read(KIOSK_SESSION_MARKER_KEY);
+  return raw && isGoalIdShape(raw) ? raw : null;
+}
+
+/**
+ * Whether the device's marker is UNKNOWN (RV17-641-N3): on a phone, the
+ * launch read has not landed yet, or the store could not be read (tried
+ * twice, src/storage/mirror.ts). `readKioskSession()` answers null then,
+ * which must not be taken for "no kiosk session": a caller that would route
+ * away from a kiosk on that null treats it as unreadable instead. An explicit
+ * write of the marker (a new kiosk session) makes it known again. Never true
+ * on the web, where there is no marker.
+ */
+export function kioskSessionUnknown(): boolean {
+  if (HAS_SYNC_STORAGE) return false;
+  return marker.unreadable(KIOSK_SESSION_MARKER_KEY) || !marker.loaded(KIOSK_SESSION_MARKER_KEY);
 }
 
 /** The keys Finish is allowed to remove. Nothing else in storage is touched:
@@ -154,6 +246,17 @@ export function kioskRemainingMs(startedAt: number, now: number, totalMs = KIOSK
   if (!(elapsed > 0)) return totalMs;
   const left = totalMs - elapsed;
   return left > 0 ? left : 0;
+}
+
+/**
+ * The countdown line, or null when the session clock is not running —
+ * nothing is going to end the session (a request in flight, a restore being
+ * retried), so nothing may say it is about to. `kioskRemainingSeconds` turns
+ * an unstarted clock (+Infinity) into 0, which would read "Finishing now…".
+ */
+export function kioskCountdownText(startedAt: number | null, now: number, totalMs: number = KIOSK_IDLE_MS): string | null {
+  if (startedAt == null) return null;
+  return kioskCountdownLabel(kioskRemainingSeconds(kioskRemainingMs(startedAt, now, totalMs)));
 }
 
 /** Whole seconds to show. Rounds UP, so "1 second" is on screen for the last
@@ -223,6 +326,26 @@ export type KioskRestInput = {
   loadSettled: boolean;
 };
 
+/**
+ * Whether the contribute screen a kiosk is on is a SETTLED screen with no
+ * attempt of its own — the `loadSettled` input above. The goal could not be
+ * shown (closed, not found, an error), or the device's saved attempt could
+ * not be read and nothing has been written since (the screen's fail-closed
+ * state). Without the second, a kiosk on that state had no deadline: nobody
+ * could record there, and nothing ended the session for whoever walked up
+ * next. Finishing from it clears nothing — no attempt was made, so there is
+ * no attempt id to clear, and the unread record stays for its owner — and
+ * signs out.
+ */
+export function kioskScreenSettled(s: { stateKind: string; restoreFailed: boolean; beforeWrite: boolean }): boolean {
+  if (s.stateKind === 'closed' || s.stateKind === 'notFound' || s.stateKind === 'error') return true;
+  // The paused screen is only drawn over a READY goal (the loading,
+  // signed-out and other load states return before it), so the restore
+  // clause counts only there: the clock must not start under a screen that
+  // shows no Finish bar.
+  return s.stateKind === 'ready' && s.restoreFailed && s.beforeWrite;
+}
+
 export function kioskMayFinishUnattended(input: KioskRestInput): boolean {
   if (input.attemptInFlight) return false;
   switch (input.outcome) {
@@ -254,8 +377,9 @@ export type KioskFinishPlan = {
  * IT USED TO PROMISE PORTABILITY IT CANNOT KEEP. The old wording — "Your
  * attempt is saved to your account; check it from your own device." — reads as
  * though the attempt travels with the account. It does not. The record that
- * makes the SAME attempt replayable lives in `localStorage` on the browser that
- * made it (src/pendingContribution.ts), keyed to that uid; a different device
+ * makes the SAME attempt replayable lives in the device store of the browser or
+ * phone that made it (src/pendingContribution.ts: localStorage on web,
+ * AsyncStorage on iOS and Android), keyed to that uid; a different device
  * signing into the same account finds no such record. W3's storage-level probe
  * confirmed it. A member's own credit total is durable and readable elsewhere,
  * but a total is not this attempt's outcome: somebody who does not already know
@@ -322,10 +446,13 @@ export type KioskFinishDeps = {
   /** firebase signOut, injected so the rule can be tested without auth. */
   signOut: () => Promise<void>;
   /** src/pendingContribution.ts `clearPendingIfAttempt` — the guarded clear
-   * that refuses when the stored record is a DIFFERENT attempt. */
-  clearPendingIfAttempt: (goalId: string, uid: string, attemptId: string) => boolean;
-  /** Removes this feature's own storage keys. */
-  clearKioskKeys: () => void;
+   * that refuses when the stored record is a DIFFERENT attempt. Asynchronous
+   * since the record moved behind the device storage boundary; it is awaited,
+   * so the clear completes while the uid it needs is still signed in. */
+  clearPendingIfAttempt: (goalId: string, uid: string, attemptId: string) => boolean | Promise<boolean>;
+  /** Removes this feature's own storage keys. Awaited when it is asynchronous,
+   * so the keys are gone before the sign-out that follows. */
+  clearKioskKeys: () => void | Promise<unknown>;
 };
 
 export type KioskFinishInput = {
@@ -362,13 +489,13 @@ export async function runKioskFinish(
   let clearedPendingDraft = false;
   if (plan.clearPendingDraft && input.uid && input.attemptId) {
     try {
-      clearedPendingDraft = deps.clearPendingIfAttempt(input.goalId, input.uid, input.attemptId);
+      clearedPendingDraft = await deps.clearPendingIfAttempt(input.goalId, input.uid, input.attemptId);
     } catch {
       clearedPendingDraft = false;
     }
   }
   try {
-    deps.clearKioskKeys();
+    await deps.clearKioskKeys();
   } catch {
     // best-effort; the keys are inert to every other surface.
   }
@@ -378,6 +505,15 @@ export async function runKioskFinish(
     signedOut = true;
   } catch {
     signedOut = false;
+  }
+  // The session is over only once nobody is signed in: a failed sign-out
+  // keeps the durable marker, so a relaunch still returns to the kiosk.
+  if (signedOut) {
+    try {
+      await clearKioskSession();
+    } catch {
+      // best-effort; the start screen clears it at rest once nobody is signed in.
+    }
   }
   return { ...plan, clearedPendingDraft, signedOut };
 }

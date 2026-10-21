@@ -1,8 +1,8 @@
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { doc, getDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { signOut } from 'firebase/auth';
 
@@ -29,7 +29,10 @@ import {
   authDestinationCard,
   readAuthDestinationKind,
 } from '../src/authDestination';
-import { nextRouteAfterAuth } from '../src/pendingJoinCode';
+import { routeAfterAuth } from '../src/pendingJoinCode';
+import { landAfterAuth } from '../src/ui/authLanding';
+import { nativeErrorBoundary } from '../src/ui/RouteErrorFallback';
+import { usePostAuthDestinationsReady } from '../src/postAuthDestination';
 
 type ExistingProfile = {
   displayName?: string;
@@ -37,10 +40,29 @@ type ExistingProfile = {
   acceptedPrivacyVersion?: string;
 };
 
+/** INT-01: a render error here shows the contained screen fallback on iOS and Android (nothing on the web). */
+export const ErrorBoundary = nativeErrorBoundary('screen');
+
 export default function ProfileSetup() {
   const { ready, user } = useWsfAuth();
+  // Re-renders once a phone has read the post-auth destinations from storage,
+  // so the destination card below is right on a cold start. No-op on web.
+  usePostAuthDestinationsReady();
   const params = useLocalSearchParams<{ edit?: string }>();
   const editMode = params.edit === '1';
+  // INT-20: the two terminal hops land through landAfterAuth (on a phone, Home
+  // only with the destination pushed over it; on the web, replace as before).
+  const navigation = useNavigation();
+  const land = (next: string) =>
+    landAfterAuth(next, {
+      dispatch: (action) => navigation.dispatch(action as never),
+      push: (href) => router.push(href as never),
+      replace: (href) => router.replace(href as never),
+      platform: Platform.OS,
+      // RV13-641-N2: a kiosk return pops back to the kiosk's start screen.
+      routes: () => (navigation.getState() as { routes?: ReadonlyArray<{ name: string; params?: object }> } | undefined)?.routes,
+      dismissTo: (href) => router.dismissTo(href as never),
+    });
   const [displayName, setDisplayName] = useState('');
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -68,7 +90,9 @@ export default function ProfileSetup() {
           setExisting(data);
           if (!editMode) {
             // Existing profile + no ?edit=1 → home (or pending join code).
-            router.replace(nextRouteAfterAuth('/') as never);
+            const next = await routeAfterAuth('/', user.uid);
+            if (cancelled) return;
+            land(next);
             return;
           }
           if (data.displayName) setDisplayName(data.displayName);
@@ -154,7 +178,7 @@ export default function ProfileSetup() {
       // wsfJoinCommunity's guards pass — verified + profile exists — so this is
       // the correct hop to hand the flow back to /join/<code>. Anyone without a
       // pending code falls through to the signed-in home.
-      router.replace(nextRouteAfterAuth('/') as never);
+      land(await routeAfterAuth('/', user.uid));
     } catch (e) {
       setError(describeCallableError(e, 'We couldn’t save your profile. Try again.'));
     } finally {
@@ -162,7 +186,7 @@ export default function ProfileSetup() {
     }
   }
 
-  const destinationKind = readAuthDestinationKind();
+  const destinationKind = readAuthDestinationKind(user.uid);
 
   async function onSignOut() {
     await signOut(getFirebaseAuth());

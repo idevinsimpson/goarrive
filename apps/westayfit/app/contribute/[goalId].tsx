@@ -1,10 +1,12 @@
-import { router, useLocalSearchParams, useNavigation, usePathname } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams, useNavigation, usePathname } from 'expo-router';
 import { FirebaseError } from 'firebase/app';
 import { signOut } from 'firebase/auth';
 import { httpsCallable } from 'firebase/functions';
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  BackHandler,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -25,8 +27,20 @@ import {
 import { useWsfAuth } from '../../src/auth';
 import { AuthFlagOffPanel } from '../../src/AuthFlagOffPanel';
 import {
+  ATTEMPT_CONFLICT_NOTICE,
+  ATTEMPT_NOT_SENT_NOTICE,
+  NOT_SAVED_NOTICE,
+  REPLAY_OFFLINE_NOTICE,
+  REPLAY_SIGN_IN_NOTICE,
+  RESTORE_FAILED_BODY,
+  RESTORE_FAILED_HEADING,
+  RESTORE_RETRY_LABEL,
   canAddMore,
   classifyContributeError,
+  isDefiniteRefusal,
+  isSignInExpired,
+  refreshSignIn,
+  SIGN_IN_REFRESH_TIMEOUT_MS,
   parseEntry,
   recordMoreLabel,
   refusalCopy,
@@ -39,6 +53,7 @@ import {
   type RefusalReason,
   type RepeatPolicy,
 } from '../../src/contributionFlow';
+import { contributeBackAction, type ContributeBackSnapshot } from '../../src/contributeBack';
 import { wsfAuthEnabled } from '../../src/featureFlags';
 import { getFirebaseAuth, getFirebaseFunctions, wsfUsingEmulators } from '../../src/firebase';
 import {
@@ -48,10 +63,11 @@ import {
   clearKioskReturnGoal,
   isKioskFlag,
   kioskMayFinishUnattended,
+  markKioskSession,
+  kioskScreenSettled,
   kioskCountdownExpired,
-  kioskCountdownLabel,
+  kioskCountdownText,
   kioskRemainingMs,
-  kioskRemainingSeconds,
   runKioskFinish,
   type KioskOutcome,
 } from '../../src/kioskSession';
@@ -67,21 +83,26 @@ import {
 } from '../../src/memberReads';
 import { moveAttemptIdFor } from '../../src/moveSession';
 import { cameraEntryAllowed, clampReps, ADJUST_MAX } from '../../src/movement-camera/flow';
-import { useMoveCameraSettings } from '../../src/movement-camera/settingsStore';
+import { useMoveCameraSettings, useMoveCameraSettingsLoaded } from '../../src/movement-camera/settingsStore';
 import { cameraCounterSupported } from '../../src/movement-camera/support';
 import {
   clearPendingIfAttempt,
   isSameContext,
-  loadPending,
-  retireLegacyPending,
-  savePendingNew,
-  updatePendingIfAttempt,
+  mayBeginNewAttempt,
+  mayFireAs,
+  openAttempt,
+  replayAttempt,
+  restorePendingAttempt,
+  settleAttempt,
   type PendingContribution,
+  type RequestContext,
+  type RestoredAttempt,
 } from '../../src/pendingContribution';
 import { wsfTheme } from '../../src/theme';
 import { PROGRESS_GREEN } from '../../src/ui/brandAssets';
-import { ButtonLink } from '../../src/ui/ButtonLink';
-import { formatClock } from '../../src/ui/dates';
+import { SignInLink } from '../../src/ui/SignInLink';
+import { useNowTick } from '../../src/ui/CommunityPresence';
+import { formatConfirmedAt } from '../../src/ui/dates';
 import { LivingWeProgress } from '../../src/ui/LivingWeProgress';
 import { TogetherCompletion } from '../../src/ui/TogetherCompletion';
 import { TOGETHER_COLORS } from '../../src/ui/togetherMotion';
@@ -95,7 +116,7 @@ import {
   totalOfTargetParts,
 } from '../../src/ui/progressFormat';
 
-import { ACTION_GREEN, ACTION_GREEN_DEEP, ON_ACTION, elevation } from '../../src/ui/kit';
+import { ACTION_GREEN, ACTION_GREEN_DEEP, ON_ACTION, elevation, numeralCapProps, numeralInputProps, numeralTextProps } from '../../src/ui/kit';
 import {
   MEMBER_TAB_MOVE_OVERHANG,
   shellAppliesTo,
@@ -105,19 +126,63 @@ import { isMoveSheetRoute } from '../../src/ui/moveSheetRoute';
 import {
   ensureSheetMotionCss,
   sheetData,
+  sheetHoldsStill,
   takeSheetHandoff,
   SCRIM_PROPS,
   useSheetExit,
   useSheetFocusContainment,
 } from '../../src/ui/sheetMotion';
-import { useReducedMotion } from '../../src/ui/useReducedMotion';
+import { SheetPanel, SheetScrim } from '../../src/ui/sheetMotionNative';
+import { liveRegion, useAnnounce } from '../../src/ui/announce';
+import { modalPanelA11y } from '../../src/ui/modalA11y';
+import { focusSoon } from '../../src/ui/focusTarget';
+import { useStepHeadingFocus } from '../../src/ui/stepHeadingFocus';
+import { useReducedMotion, useReducedMotionPreference } from '../../src/ui/useReducedMotion';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { nativeErrorBoundary } from '../../src/ui/RouteErrorFallback';
+import { useAppInForeground } from '../../src/useResumeRefresh';
+import { ScreenStatusBar, useScreenTopInset } from '../../src/ui/useScreenTopInset';
+import {
+  KEYBOARD_SCROLL_PROPS,
+  KeyboardInsetView,
+  SHEET_DISMISS_PROPS,
+  sheetBottomPadding,
+  useKeyboardHeight,
+} from '../../src/ui/keyboardAvoidance';
 
 // Poll wsfGoalPulse at the server cache TTL so a peer's contribution
 // surfaces without a manual refresh. Matches GOAL_PULSE_CACHE_TTL_MS in
 // functions-westayfit — a shorter poll pays a Firestore round-trip on every
 // tick, a longer poll wastes the cache window.
 const POLL_INTERVAL_MS = 2_000;
+/**
+ * RV18-641-F2 (heads-16, native): while the sign-in-offline guard is set, a
+ * landed tick asks for the full load this often (the first ask at once).
+ */
+const GUARD_RELOAD_EVERY_MS = 30_000;
+/**
+ * RV15-641-2: the poll has landed nothing for this long while it should be
+ * running, so the figures are the last confirmed ones. The line is re-read on
+ * the 60 s tick (or any re-render), so it says so within about a minute of
+ * this, not at it (RV16-641-4).
+ */
+const CONFIRMED_STALE_AFTER_MS = 3 * POLL_INTERVAL_MS;
+// W12-2 (ST-06): how long a load waits for Auth to refresh a stale sign-in.
+const LOAD_SIGN_IN_REFRESH_MS = 8_000;
+
+/**
+ * RV12-641-4: the one failure a goal load acts on, of the reads that failed.
+ * "Unauthenticated" from either decides first (the public pulse's not-found
+ * is anonymous then), then a refusal, then the first failure.
+ */
+function loadFailure(reasons: unknown[]): unknown {
+  const code = (e: unknown) => (e instanceof FirebaseError ? e.code : null);
+  return (
+    reasons.find((e) => code(e) === 'functions/unauthenticated') ??
+    reasons.find((e) => code(e) === 'functions/not-found' || code(e) === 'functions/invalid-argument') ??
+    reasons[0]
+  );
+}
 
 // D-1. This screen is a sequence of whole-screen states, and each one states
 // what it is in a single sentence at the top. That sentence is the state's
@@ -348,6 +413,32 @@ function enterActivates(go: () => void): Record<string, unknown> {
 }
 
 /** Looks like `ButtonLink`; lands on the member's mounted tabs. */
+/*
+  RV15-641-2 (W12-6, INT-12). The anchor's "Confirmed <time>". It re-renders on
+  the shared 60 s tick (useNowTick), so with the screen left open it names the
+  day once midnight has passed, though no state changed. It reads "Last
+  confirmed" after a load that failed (W12-2, native), and also, within about
+  a minute, once the 2 s poll has landed nothing for CONFIRMED_STALE_AFTER_MS
+  (6 s) while it should be running: staleness is judged when the line
+  renders, on the 60 s tick or any other re-render, not by a timer of its own
+  (RV16-641-4: the wording, not the timing, was corrected). A failed or hung
+  tick changes no state, so before this the line kept saying "Confirmed". `pollSince` is when the poll last started (null
+  while it is stopped), so a return to the app does not read as stale before
+  its first tick could land. It is a ref, read when the line renders: the
+  poll starting or stopping re-renders nothing.
+*/
+function ConfirmedLine({ at, refreshFailed, pollSince }: { at: Date; refreshFailed: boolean; pollSince: { current: number | null } }) {
+  useNowTick();
+  const nowMs = Date.now();
+  const since = pollSince.current;
+  const stale = since !== null && nowMs - Math.max(at.getTime(), since) > CONFIRMED_STALE_AFTER_MS;
+  return (
+    <Text style={styles.anchorUpdated} testID="wsf-contribute-context-updated">
+      {formatConfirmedAt(at, new Date(nowMs), { failed: refreshFailed || stale })}
+    </Text>
+  );
+}
+
 function ReturnButton({
   href,
   style,
@@ -376,6 +467,13 @@ function ReturnButton({
   );
 }
 
+/**
+ * INT-01. A throw here is contained on this screen. Its fallback never says
+ * "recorded": whether an attempt landed is unknown from there, so it says the
+ * contribution is not confirmed and points to Progress.
+ */
+export const ErrorBoundary = nativeErrorBoundary('contribute');
+
 export default function ContributeToGoal() {
   const params = useLocalSearchParams<{
     goalId: string;
@@ -395,6 +493,16 @@ export default function ContributeToGoal() {
   // starts at result entry, the most direct path.
   const initialStep: Step = params.mode === 'move' ? 'move' : 'enter';
   const { ready, user } = useWsfAuth();
+  // ST-05 (W12-1): on a phone, a signed-in kiosk session records that it is
+  // open (idempotent), so a relaunch after the OS kills it mid-session goes
+  // back to this kiosk's start screen (src/kioskLaunchGuard.ts). Finish clears
+  // it only after its sign-out succeeds (runKioskFinish). Web: nothing; a
+  // closed tab ends its session.
+  const kioskUid = user?.uid ?? null;
+  useEffect(() => {
+    if (Platform.OS === 'web' || !kiosk || !kioskUid || typeof goalId !== 'string' || !goalId) return;
+    void markKioskSession(goalId).catch(() => false);
+  }, [kiosk, kioskUid, goalId]);
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   /*
     THE SHELL'S BAR IS BELOW THIS SCREEN, NOT OVER IT -- EXCEPT FOR THE RAISED
@@ -467,12 +575,46 @@ export default function ContributeToGoal() {
     return takeSheetHandoff();
   });
   const reducedMotion = useReducedMotion();
+  /*
+    3b (MO-02, contribute half). On iOS and Android the sheet plays its own
+    motion (src/ui/sheetMotionNative.tsx: the scrim fades in place, the panel
+    rises 28 pt; 180 ms out), and the stack presents it without travel
+    (`animation: 'none'`, app/_layout.tsx). While those parts are mounted,
+    Close waits out the exit; reduced motion, or a preference not yet heard
+    on a phone, means no travel and no wait. The web is unchanged.
+  */
+  const motionPreference = useReducedMotionPreference();
   const safeArea = useSafeAreaInsets();
-  const { phase: sheetPhase, exit: exitSheet } = useSheetExit(reducedMotion);
+  const { phase: sheetPhase, exit: exitSheet } = useSheetExit(sheetHoldsStill(motionPreference));
   const sheetRef = useRef<View>(null);
   // The dialog panel itself: focus enters, stays and re-orients here (F2).
   const sheetPanelRef = useRef<View>(null);
   const closeSheetRef = useRef<() => void>(() => undefined);
+  /*
+    W12-20 (INT-17, native). IN THE SHEET, THE SCREEN READER STARTS ON CLOSE.
+    The web's containment puts keyboard focus on the panel's first control,
+    Close (useSheetFocusContainment, below); off the web it does nothing. MOVE
+    with one open goal hands straight to this sheet, so on iOS and Android its
+    Close takes the screen reader's focus once, when the sheet first appears
+    (src/ui/focusTarget.ts: after the presentation settles; about 400 ms later
+    on iOS). Something opening over it first (a blur), or the sheet going,
+    cancels that. The page mode has no Close and keeps the platform's own
+    arrival. Nothing on the web. W12-23 (RV17-641-F4): it is not registered as
+    a focus target -- no flow returns focus to it (no opener or fallback names
+    it) -- so only this first focus acts.
+  */
+  const sheetCloseRef = useRef<View>(null);
+  useEffect(() => {
+    if (Platform.OS === 'web' || !asSheet) return undefined;
+    const cancel = focusSoon(sheetCloseRef);
+    const offBlur = rootNavigation.addListener('blur', cancel);
+    return () => {
+      cancel();
+      offBlur();
+    };
+    // The first mount only (`asSheet` is fixed for the screen's life).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   /*
     ESCAPE IS CLOSE, while this sheet is the screen in front: the same path as
     the Close control and the scrim.
@@ -493,6 +635,34 @@ export default function ContributeToGoal() {
   // the cold load and by every successful poll tick. Client receipt time, the
   // same fact (and the same wording) as Community Home and the public display.
   const [pulseAt, setPulseAt] = useState<Date | null>(null);
+  // W12-2 (INT-25, native): the last load failed while the screen was warm.
+  const [refreshFailed, setRefreshFailed] = useState(false);
+  // RV15-641-2: when the poll last started (null while it is not running), for the anchor's "Last confirmed".
+  const pollSinceRef = useRef<number | null>(null);
+  /*
+    RV12-641-5 (native): a load's sign-in refresh could not reach Auth, so the
+    requests since may go out without a token. While it is set, a heal tick's
+    refusal is not a verdict (RV11-641-1); when it was never set (an ordinary
+    failure with a good token) an authorized not-found stands. Set with that
+    failure; cleared only by an authorized answer -- a full load (its
+    own-credit read, wsfMyContribution, refuses a request without a token) or
+    a receipt (wsfContribute likewise) -- or a new context. RV16-641-2: a
+    tick is NOT an authorized answer. wsfGoalPulse answers anyone, token or
+    not, when the goal is on a display (aggregateDisplayAuthorized), so a tick
+    that succeeds says nothing about the sign-in: it keeps the guard and asks
+    for the full load instead (`guardLoadAskedAtRef`): at once, then about
+    every GUARD_RELOAD_EVERY_MS while the guard stays set (RV18-641-F2: when
+    Auth comes back nothing else re-runs the load, because `user` does not
+    change on a token refresh, the foreground only restarts the poll, and a
+    landed tick hides the note's Retry). RV14-641-1: a later failure in
+    transport (an internal or deadline answer) says nothing about the token,
+    so it does not clear it either.
+  */
+  const signInOfflineRef = useRef(false);
+  // RV16-641-2, RV18-641-F2: when a landed tick last asked for the full load while the guard was set (null: not yet).
+  const guardLoadAskedAtRef = useRef<number | null>(null);
+  // W12-2 (ST-06, native): this load has already refreshed the sign-in once.
+  const signInRetriedRef = useRef(false);
   const [context, setContext] = useState<ScreenContext>({ kind: 'none' });
   const [step, setStep] = useState<Step>(initialStep);
   /*
@@ -503,6 +673,9 @@ export default function ContributeToGoal() {
     camera does not reopen behind them.
   */
   const moveCameraSettings = useMoveCameraSettings();
+  // NATIVE-STATE-1: on a phone the preference is read from device storage at
+  // launch. Until it has been, the camera does not open on the defaults.
+  const moveCameraLoaded = useMoveCameraSettingsLoaded();
   const [cameraSupported] = useState(() => cameraCounterSupported());
   const [cameraDeclined, setCameraDeclined] = useState(false);
   const [cameraEstimate, setCameraEstimate] = useState<number | null>(null);
@@ -518,12 +691,52 @@ export default function ContributeToGoal() {
   const [guideOpen, setGuideOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [lastResult, setLastResult] = useState<ContributeResult | null>(null);
+  // W12-20: the attempt the receipt on screen confirms (set with it; the
+  // attempt ref is cleared before the receipt goes). Keys the heading focus.
+  const [receiptAttemptId, setReceiptAttemptId] = useState<string | null>(null);
+  const announcedReceiptRef = useRef<ContributeResult | null>(null); // NATIVE-MOTION-1: receipt already announced
   // The goal's repeat policy, from the member-authorized read. 'once' until
   // the server answers — not the resolved default, because before the answer
   // arrives the screen knows nothing. Nothing that depends on it renders
   // before the load completes, so this value is never the one on screen.
   const [repeatPolicy, setRepeatPolicy] = useState<RepeatPolicy>(() => known?.policy ?? 'once');
   const [pending, setPending] = useState<PendingContribution | null>(null);
+  /*
+    NATIVE-STATE-1. The pending record lives behind the device storage
+    boundary now (AsyncStorage on a phone), so reading it back takes a moment.
+    `restoreSettled` is false from every context change until this account's
+    stored attempt for this goal has been read; until then no NEW attempt may
+    begin (Record, or the camera that leads to one), because it would overwrite
+    a reminder the member has not reconciled yet.
+
+    `pendingDurable` says whether the attempt on screen is actually on the
+    device. A new attempt's record is written and CONFIRMED before its request
+    fires; if the device refused it, the request still goes (recording is never
+    blocked on storage), but the screen does not promise the attempt will be
+    here after leaving. A restored attempt is durable by definition.
+  */
+  const [restoreSettled, setRestoreSettled] = useState(false);
+  // The restore could not read the slot (an error, or no answer within the
+  // storage bound). FAIL CLOSED: Record and the camera stay disabled and the
+  // screen says so, with Retry, because the slot may hold an unresolved
+  // attempt nobody has seen. `restoreSettled` is still set, and that screen
+  // counts as a settled kiosk screen (`kioskScreenSettled`), so a kiosk's
+  // deadline runs there and Finish clears nothing; Retry pauses it (the
+  // restore is unsettled again) and a repeat failure starts it afresh.
+  const [restoreFailed, setRestoreFailed] = useState(false);
+  // Only the LATEST restore's answer applies: a double tap on Retry, or a
+  // retry racing the first read, cannot apply an older answer over a newer.
+  const restoreTokenRef = useRef(0);
+  // A Try again in flight. The ref refuses a second tap delivered in the same
+  // task (before a re-render can disable the button); the state disables the
+  // button while the paused screen stays up. `restoreFailed` is left set until
+  // the read answers.
+  const retryingRef = useRef(false);
+  const [retrying, setRetrying] = useState(false);
+  // One line under Record or Confirm when it ended without sending, or a
+  // replay came back "not signed in". Cleared by the next action.
+  const [attemptNotice, setAttemptNotice] = useState<string | null>(null);
+  const [pendingDurable, setPendingDurable] = useState(true);
   const [refusal, setRefusal] = useState<Refusal | null>(null);
   // Ref instead of state — the in-flight attempt id must NOT trigger a
   // re-render (would risk generating a new id mid-submit and defeat
@@ -607,7 +820,68 @@ export default function ContributeToGoal() {
   // A -> B -> A while a request is in flight, both pass a uid check.
   const generationRef = useRef(0);
   const contextRef = useRef<{ uid: string | null; goalId: string | undefined }>({ uid, goalId });
+  // What the screen is showing NOW, as a request context. Read from refs, so a
+  // request started earlier compares against the live screen, never its own
+  // closure.
+  const currentContext = useCallback(
+    (): RequestContext => ({
+      generation: generationRef.current,
+      uid: contextRef.current.uid,
+      goalId: contextRef.current.goalId,
+    }),
+    []
+  );
   const [legacyOrphan, setLegacyOrphan] = useState<PendingContribution | null>(null);
+
+  // Read this account's stored attempt for this goal and settle the screen on
+  // the answer. Called on every context change (below) and by Retry on the
+  // "couldn't read" state.
+  //
+  // A record written before the key carried a uid belongs to an account we
+  // cannot identify. It is retired, never adopted and never resubmitted.
+  //
+  // This account's own unconfirmed attempt comes back as `unknown`, and the
+  // escalation is persisted so a second reload shows the same screen even
+  // if the user does nothing. Restoring it NEVER makes it confirmed, never
+  // shows a receipt and never opens the camera; only a server response
+  // confirms anything (src/pendingContribution.ts `restorePendingAttempt`).
+  //
+  // The read is asynchronous (device storage), so its answer is applied
+  // only if this is still the context that asked: a sign-out, account
+  // switch, goal switch or unmount meanwhile bumps the generation and the
+  // answer is dropped — it can never restore one account's attempt into
+  // another's session.
+  //
+  // It settles on every path. `restorePendingAttempt` does not reject (and a
+  // storage call that never answers is bounded), but if it ever did, the
+  // screen settles exactly as for a failed read.
+  //
+  // A FAILED READ FAILS CLOSED. "Nothing stored" and "could not read" are
+  // different answers: on the second, new attempts stay disabled
+  // (`restoreFailed`) until Retry reads the slot.
+  //
+  // A RETRY leaves the failed state on screen while it reads (Try again is
+  // disabled, because the restore is unsettled), rather than flashing back to
+  // entry with Record inert; the answer then sets it either way.
+  const startRestore = useCallback((forGoal: string, forUid: string | null) => {
+    const restoringFor = generationRef.current;
+    const token = ++restoreTokenRef.current;
+    setRestoreSettled(false);
+    void restorePendingAttempt(forGoal, forUid)
+      .catch((): RestoredAttempt => ({ pending: null, orphan: null, readFailed: true }))
+      .then(({ pending: restored, orphan, readFailed }) => {
+        if (generationRef.current !== restoringFor || restoreTokenRef.current !== token) return;
+        if (orphan) setLegacyOrphan(orphan);
+        if (restored) {
+          setPending(restored);
+          setPendingDurable(true);
+        }
+        setRestoreFailed(!!readFailed);
+        setRestoreSettled(true);
+        retryingRef.current = false;
+        setRetrying(false);
+      });
+  }, []);
 
   // Restore this ACCOUNT's unconfirmed attempt for this goal, and clear
   // everything on sign-out, an account switch or a goal switch. Both the
@@ -627,6 +901,12 @@ export default function ContributeToGoal() {
     // `knownGoal`); nothing, for a context it does not know.
     const recorded = knownGoal(uid, goalId, groupIdHint);
     setPending(null);
+    setPendingDurable(true);
+    setRestoreSettled(false);
+    setRestoreFailed(false);
+    retryingRef.current = false;
+    setRetrying(false);
+    setAttemptNotice(null);
     setLastResult(null);
     setRepeatPolicy(recorded?.policy ?? 'once');
     setLegacyOrphan(null);
@@ -647,26 +927,21 @@ export default function ContributeToGoal() {
     setContext({ kind: 'none' });
     setState(recorded?.state ?? { kind: 'loading' });
     setPulseAt(null);
+    // W12-2: a new context starts with no failed refresh and a fresh sign-in retry.
+    setRefreshFailed(false);
+    signInOfflineRef.current = false;
+    signInRetriedRef.current = false;
     setTimerBase(0);
     setTimerStartedAt(null);
     setTimerRunning(false);
 
-    if (!goalId) return;
-
-    // A record written before the key carried a uid belongs to an account we
-    // cannot identify. It is retired, never adopted and never resubmitted.
-    const orphaned = retireLegacyPending(goalId);
-    if (orphaned) setLegacyOrphan(orphaned);
-
-    if (!uid) return;
-    const existing = loadPending(goalId, uid);
-    if (existing) {
-      setPending({ ...existing, state: 'unknown' });
-      // Persist the escalated state so a second reload shows the same screen
-      // even if the user does nothing. Restoring it NEVER makes it confirmed;
-      // only a server response does that.
-      updatePendingIfAttempt({ ...existing, state: 'unknown' }, uid, existing.attemptId);
+    if (!goalId) {
+      setRestoreSettled(true);
+      return;
     }
+
+    // This account's stored attempt, read and applied by `startRestore`.
+    startRestore(goalId, uid);
 
     return () => {
       // Navigating away invalidates everything outstanding, so a response that
@@ -678,6 +953,36 @@ export default function ContributeToGoal() {
     // the same goal is not a context change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [goalId, uid]);
+
+  /*
+    NATIVE-INTEGRATOR-1 (INT-04 case 4). TRY AGAIN, IN PLACE. Bumped by the
+    load error's Try again: the goal loads again on this same screen. Both of
+    its reads are fresh: the pulse is a direct call, and readOwnCredit asks the
+    server (INT-26: it never joins a read that may be hung).
+  */
+  const [loadToken, setLoadToken] = useState(0);
+  const retryLoad = useCallback(() => {
+    signInRetriedRef.current = false;
+    setState({ kind: 'loading' });
+    setLoadToken((n) => n + 1);
+  }, []);
+  /*
+    W12-2 (INT-25, native). A REFRESH THAT FAILS KEEPS A WARM SCREEN. When the
+    screen already shows this goal (opened on the account's record, or loaded
+    before) and the load fails for a transient reason, it keeps the last
+    confirmed figures, the typed entry, the step and the timer, and says so
+    under the anchor with a Retry that loads again without passing through
+    loading. A cold failure is still the load error. Web is unchanged.
+  */
+  const quietRetry = useCallback(() => {
+    signInRetriedRef.current = false;
+    setLoadToken((n) => n + 1);
+  }, []);
+  // INT-12 case 5: the pulse poll below runs only while the app is in front.
+  const appInForeground = useAppInForeground();
+  // The load's catch reads whether the screen is warm when the failure lands.
+  const stateKindRef = useRef(state.kind);
+  stateKindRef.current = state.kind;
 
   useEffect(() => {
     if (!wsfAuthEnabled) return;
@@ -703,11 +1008,26 @@ export default function ContributeToGoal() {
         // authorized correction never shows a stale or invented number. It is
         // read through this account's record (src/memberReads.ts): fresh, and
         // the answer is then the record every surface opens on.
-        const [pulseRes, mineRes] = await Promise.all([
+        /*
+          RV12-641-4. Both answers, then one verdict. With a stale token and
+          Auth unreachable both calls go out without one: the public pulse
+          answers the anonymous "not found" and the own-credit read
+          "unauthenticated". Whichever landed first used to decide, so a fast
+          anonymous not-found could evict the screen and forget the community
+          without the sign-in ever being refreshed. Now "unauthenticated" from
+          either read decides first (refresh, ST-06); then a refusal (not found,
+          invalid id); then the first failure.
+        */
+        const [pulseSettled, mineSettled] = await Promise.allSettled([
           pulseFn({ goalId }),
           readOwnCredit(user.uid, goalId).then((data) => ({ data: data as unknown as MyContribution })),
         ]);
         if (cancelled) return;
+        if (pulseSettled.status === 'rejected' || mineSettled.status === 'rejected') {
+          throw loadFailure([pulseSettled, mineSettled].flatMap((r) => (r.status === 'rejected' ? [r.reason] : [])));
+        }
+        const pulseRes = pulseSettled.value;
+        const mineRes = mineSettled.value;
         const pulse = pulseRes.data;
         const ownCredit = mineRes.data.ownCredit;
         setActivityGuideKey(
@@ -715,6 +1035,9 @@ export default function ContributeToGoal() {
         );
         setRepeatPolicy(resolveRepeatPolicy(mineRes.data.repeatPolicy));
         setPulseAt(new Date());
+        setRefreshFailed(false);
+        signInOfflineRef.current = false;
+        signInRetriedRef.current = false;
         if (pulse.status !== 'active') {
           setState({ kind: 'closed', pulse, ownCredit });
           return;
@@ -739,23 +1062,59 @@ export default function ContributeToGoal() {
         // password changed elsewhere) even though the client still holds a
         // user: that is the sign-in screen, not "Something went wrong" with
         // the server's sentence under it.
+        const loadError: LoadState = {
+          kind: 'error',
+          message: 'We couldn’t load this goal right now. Check your connection and try again.',
+        };
+        // W12-2 (native): keep a warm screen and say so; a cold one gets the error.
+        const failTransiently = () => {
+          const warm = stateKindRef.current === 'ready' || stateKindRef.current === 'closed';
+          setState((prev) => (prev.kind === 'ready' || prev.kind === 'closed' ? prev : loadError));
+          setRefreshFailed(warm);
+        };
         if (e instanceof FirebaseError && e.code === 'functions/unauthenticated') {
+          /*
+            ST-06 (W12-2, native). A token that went stale while the app slept
+            is not a sign-out. With a user still on this device the sign-in is
+            refreshed once: a fresh token loads again (once; the guard stops a
+            loop), no answer from Auth is a transient failure, and only Auth
+            saying the session is over is the sign-in screen. Web is unchanged.
+          */
+          const auth = Platform.OS === 'web' ? null : getFirebaseAuth();
+          if (auth?.currentUser && !signInRetriedRef.current) {
+            const refreshed = await refreshSignIn(auth, LOAD_SIGN_IN_REFRESH_MS);
+            if (cancelled) return;
+            if (refreshed === 'ok') {
+              signInRetriedRef.current = true;
+              setLoadToken((n) => n + 1);
+              return;
+            }
+            if (refreshed === 'offline') {
+              // RV12-641-5: until an authorized answer, the heal ticks go out token-less.
+              // RV16-641-2: newly set, the next landed tick asks for the full load at once.
+              if (!signInOfflineRef.current) guardLoadAskedAtRef.current = null;
+              signInOfflineRef.current = true;
+              failTransiently();
+              return;
+            }
+          }
           setState({ kind: 'notSignedIn' });
           return;
         }
         // A1. The server's sentence is a developer fact, not member copy. It
         // is logged; the screen says what the member can act on.
         console.warn('[wsf] goal load failed', e);
-        setState({
-          kind: 'error',
-          message: 'We couldn’t load this goal right now. Check your connection and try again.',
-        });
+        if (Platform.OS === 'web') {
+          setState(loadError);
+          return;
+        }
+        failTransiently();
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [ready, user, goalId, groupIdHint]);
+  }, [ready, user, goalId, groupIdHint, loadToken]);
 
   // Optional labels, verified server-side before they are shown together.
   // Independent of the goal load: a failure here only means the generic
@@ -773,11 +1132,14 @@ export default function ContributeToGoal() {
           `wsfListGoals` (which refuses a non-member, exactly as before) and
           its communities from `wsfMyCommunities` (which lists only this
           account's active memberships). A read from this load is reused; a
-          cold link reads them.
+          cold link reads them. The load error's Try again re-runs this too,
+          and fresh (#641 NB-1, INT-26): whatever failed the goal load usually
+          failed these as well.
         */
+        const reuse = loadToken > 0 ? 0 : SAME_LOAD_MS;
         const [listed, mine] = await Promise.all([
-          readGoals<ListedGoal>(user.uid, groupIdHint, SAME_LOAD_MS),
-          readMyCommunities(user.uid, SAME_LOAD_MS),
+          readGoals<ListedGoal>(user.uid, groupIdHint, reuse),
+          readMyCommunities(user.uid, reuse),
         ]);
         if (cancelled) return;
         const goal = listed.goals.find((g) => g.goalId === goalId);
@@ -792,7 +1154,7 @@ export default function ContributeToGoal() {
     return () => {
       cancelled = true;
     };
-  }, [ready, user, goalId, groupIdHint]);
+  }, [ready, user, goalId, groupIdHint, loadToken]);
 
   // Poll wsfGoalPulse only while the member is still before the write. Once
   // an attempt is in flight, unknown, refused or confirmed, the screen shows
@@ -801,7 +1163,17 @@ export default function ContributeToGoal() {
   // The poll starts once this screen's own fresh read has landed (`pulseAt`),
   // exactly as before PERF-MOBILE-1: opening on the account's record must not
   // send a second identical pulse alongside the fresh one (measured).
-  const shouldPoll = beforeWrite && pulseAt !== null && (state.kind === 'ready' || state.kind === 'closed');
+  // INT-12 case 5: and only while the app is in the foreground, so a count
+  // entry left open in the background sends no pulses; the poll restarts on
+  // return, and its first tick is the one refresh.
+  // W12-2 (native): after a failed refresh the poll runs too (no fresh read
+  // has landed), so a reconnect heals the screen; its first good tick clears
+  // the note. The before-write and foreground rules are unchanged.
+  const shouldPoll =
+    beforeWrite &&
+    (pulseAt !== null || (Platform.OS !== 'web' && refreshFailed)) &&
+    (state.kind === 'ready' || state.kind === 'closed') &&
+    appInForeground;
   useEffect(() => {
     if (!wsfAuthEnabled) return;
     if (!ready || !user || !goalId) return;
@@ -838,6 +1210,28 @@ export default function ContributeToGoal() {
         applied = seq;
         const pulse = result.data;
         setPulseAt(new Date());
+        setRefreshFailed(false);
+        /*
+          RV16-641-2 (native). A TICK IS NOT AN AUTHORIZED ANSWER. While the
+          sign-in could not be refreshed this tick may have gone out without a
+          token, and the public pulse answers that too when the goal is on a
+          display. So the guard stays: a later anonymous not-found (the display
+          turned off) must still evict nothing (RV11-641-1). The tick asks for
+          the full load instead, whose own-credit read needs the sign-in: at
+          once, and again about every GUARD_RELOAD_EVERY_MS while the guard
+          stays set (RV18-641-F2: if that asked load fails while Auth is still
+          down, nothing else re-runs it once Auth is back). The first
+          authorized load clears the guard.
+        */
+        if (Platform.OS !== 'web' && signInOfflineRef.current) {
+          const askedAt = guardLoadAskedAtRef.current;
+          if (askedAt === null || Date.now() - askedAt >= GUARD_RELOAD_EVERY_MS) {
+            guardLoadAskedAtRef.current = Date.now();
+            quietRetry();
+          }
+        } else {
+          signInOfflineRef.current = false;
+        }
         setState((prev) => {
           if (prev.kind === 'ready') {
             return pulse.status === 'active'
@@ -853,6 +1247,19 @@ export default function ContributeToGoal() {
         });
       } catch (e) {
         if (cancelled) return;
+        /*
+          RV11-641-1 (native). WHILE THE SIGN-IN COULD NOT BE REFRESHED, A
+          TICK'S REFUSAL IS NOT A VERDICT. After a sign-in refresh that could
+          not reach Auth, the SDK sends these ticks with no Authorization, and
+          the public pulse answers the anonymous "not found": evicting the warm
+          screen and forgetting the community on that would be ST-06's own
+          scenario made worse. No authorized read has landed since, so the kept
+          figures and their note stay, and a Retry's full load decides.
+          RV12-641-5: only then. When no refresh has failed (an ordinary
+          failure with a good token), an authorized not-found ends the screen
+          as below; a later transport failure keeps the guard (RV14-641-1).
+        */
+        if (Platform.OS !== 'web' && signInOfflineRef.current) return;
         // A refusal is not transient: the server has decided this member no
         // longer has a route to the goal (membership lost, goal gone). The
         // screen must not keep painting a total it is no longer entitled to,
@@ -878,11 +1285,13 @@ export default function ContributeToGoal() {
       }
     };
     timer = setInterval(tick, POLL_INTERVAL_MS);
+    pollSinceRef.current = Date.now();
     return () => {
       cancelled = true;
       if (timer) clearInterval(timer);
+      pollSinceRef.current = null;
     };
-  }, [ready, user, goalId, shouldPoll]);
+  }, [ready, user, goalId, shouldPoll, quietRetry]);
 
   // Timer tick, only while running.
   useEffect(() => {
@@ -950,10 +1359,12 @@ export default function ContributeToGoal() {
         return;
       }
       const data = result.data;
-      // Server truth received — the pending row is no longer needed.
-      clearPendingIfAttempt(goalId as string, owner, attemptId);
+      // Server truth received — the pending row is no longer needed. The
+      // stored record is cleared by `settleAttempt` once this returns, under
+      // the same context check (src/pendingContribution.ts).
       setPending(null);
       setLastResult(data);
+      setReceiptAttemptId(attemptId);
       // Applied in the same batch as the receipt, so the receipt mounts already
       // knowing whether it may move. A replay of an attempt that had landed
       // (`alreadyRecorded`) is never fresh.
@@ -1002,6 +1413,19 @@ export default function ContributeToGoal() {
         },
         ownCredit: data.ownCredit,
       });
+      // RV11-641-5: these figures are confirmed now; the kept-figures note is no longer true.
+      setRefreshFailed(false);
+      signInOfflineRef.current = false;
+      /*
+        Heads-11 N1: and they are a confirmed read, so the poll's gate holds
+        again. After a warm load failed and no tick has landed, pulseAt is
+        still null; without this, clearing the note above would stop the
+        pulse poll (and its foreground return) for the rest of the screen's
+        life. Only a missing time is filled, and only on a phone (RV14-641-1,
+        f03e909e track): the web has no refreshFailed term, so its poll gate
+        and its "Confirmed" line stay exactly as they were.
+      */
+      if (Platform.OS !== 'web') setPulseAt((prev) => prev ?? new Date());
       // Ready for the next fresh attempt.
       attemptRef.current = null;
       setEntry('');
@@ -1059,19 +1483,23 @@ export default function ContributeToGoal() {
     if (state.kind !== 'ready') return;
     if (submitting) return;
     if (reviewCount == null) return;
+    // Not before this account's stored attempt has been read back (device
+    // storage answers asynchronously): a new attempt now could overwrite a
+    // reminder the member has not reconciled.
+    if (!mayBeginNewAttempt({ restoreSettled, restoreFailed, pending, settled: refusal != null || lastResult != null })) return;
     inFlightRef.current = true;
     const count = reviewCount;
     setEntryError(null);
+    setAttemptNotice(null);
     setSubmitting(true);
     sharedBeforeRef.current = state.pulse.sharedTotal;
     beforeTargetRef.current = state.pulse.target;
 
     if (!attemptRef.current) attemptRef.current = takeRoundAttemptId() ?? mintAttemptId();
     const attemptId = attemptRef.current;
+    // The follow-along round's id, if this attempt is it (src/moveSession.ts).
+    const roundAttemptId = moveAttemptIdFor(params.attempt, uid);
 
-    // Persist BEFORE sending. If the tab crashes mid-flight, a reload sees
-    // this record and offers reconcile with the SAME attemptId — the
-    // server-side idempotency check will count it exactly once.
     const pendingRow: PendingContribution = {
       goalId: goalId as string,
       attemptId,
@@ -1079,47 +1507,86 @@ export default function ContributeToGoal() {
       ts: Date.now(),
       state: 'sending',
     };
-    savePendingNew(pendingRow, uid as string);
     setPending(pendingRow);
 
-    const generation = generationRef.current;
     const owner = uid as string;
-    const startedGoal = goalId;
-    const stillCurrent = () =>
-      isSameContext(
-        { generation, uid: owner, goalId: startedGoal },
-        {
-          generation: generationRef.current,
-          uid: contextRef.current.uid,
-          goalId: contextRef.current.goalId,
-        }
-      );
+    const started: RequestContext = { generation: generationRef.current, uid: owner, goalId };
+    const stillCurrent = () => isSameContext(started, currentContext());
+    // The request may only go out as the account that pressed Record. The
+    // callable authenticates as whoever is signed in WHEN IT IS CALLED, and
+    // the server keys idempotency on that uid, so the live auth user is
+    // checked too — not only this screen's record of it, which follows auth a
+    // render later. `settleAttempt` asks this immediately before it sends,
+    // with nothing awaited in between (src/pendingContribution.ts `mayFireAs`).
+    const mayFire = () => mayFireAs(owner, started, currentContext(), getFirebaseAuth().currentUser?.uid ?? null);
+    const isRefusal = (e: unknown) => isDefiniteRefusal(e, 'new');
 
     try {
+      // Persist BEFORE sending, and wait for the device's answer. If the app
+      // is killed mid-flight, the next launch restores this record and offers
+      // reconcile with the SAME attemptId — the server-side idempotency check
+      // counts it exactly once. If the device refused the write, the request
+      // still goes, but the screen will not promise the attempt survives
+      // leaving it (`pendingDurable`).
+      const opened = await openAttempt(pendingRow, owner, mayFire);
+      if (opened.conflict) {
+        // The slot already held a DIFFERENT, unresolved attempt this screen
+        // had not shown. Nothing was written and nothing was sent: that
+        // attempt is what the member confirms first.
+        if (stillCurrent()) {
+          setPending({ ...opened.conflict, state: 'unknown' });
+          setPendingDurable(true);
+          attemptRef.current = null;
+          // A round's attempt id is put back, not spent: once the earlier
+          // attempt is resolved, the round's count is still the round's, and
+          // must keep its id so finishing the same round on a second device
+          // still counts once.
+          if (roundAttemptId != null && attemptId === roundAttemptId) roundAttemptRef.current = attemptId;
+          setAttemptNotice(ATTEMPT_CONFLICT_NOTICE);
+        }
+        return;
+      }
+      if (!opened.fire) {
+        // The context or the signed-in account moved on while the record was
+        // being written: nothing was sent, and the record has been retired.
+        // A new context has already reset this screen; if it has not, the
+        // member is back on review and told why.
+        if (stillCurrent()) {
+          setPending(null);
+          setAttemptNotice(ATTEMPT_NOT_SENT_NOTICE);
+        }
+        return;
+      }
+      if (stillCurrent()) setPendingDurable(opened.durable);
       // The ONE path that can produce a fresh receipt: the first confirmed
       // answer to this Record, in this uninterrupted flow.
-      await sendContribute(attemptId, count, true);
-    } catch (e) {
-      const failure = classifyContributeError(e);
-      if (failure.kind === 'refused') {
+      // The attempt id and count sent are the row's own (`settleAttempt`
+      // passes them); nothing here chooses them again.
+      const settled = await settleAttempt(pendingRow, owner, {
+        send: (id, n) => sendContribute(id, n, true),
+        isRefusal,
+        stillCurrent,
+        mayFire,
+      });
+      if (!stillCurrent()) return;
+      if (settled.kind === 'notSent') {
+        // The live account was not the one that pressed Record at the moment
+        // of sending: nothing left the device, and the record is retired.
+        setPending(null);
+        setAttemptNotice(ATTEMPT_NOT_SENT_NOTICE);
+      } else if (settled.kind === 'refused') {
         // The server ran the request and refused it: nothing was recorded and
-        // nothing will be. The reminder would only ask the member to replay a
-        // request that will be refused again, so it is retired — under the
-        // ORIGINAL account, and only if the slot is still this attempt.
-        clearPendingIfAttempt(goalId as string, owner, attemptId);
-        if (!stillCurrent()) return;
+        // nothing will be. The reminder has been retired under the ORIGINAL
+        // account (only if the slot was still this attempt). Distinct from
+        // unknown, always.
+        const failure = classifyContributeError(settled.error);
         setPending(null);
         attemptRef.current = null;
-        setRefusal({ reason: failure.reason, count });
-      } else {
-        // Unknown outcome: the persisted row is escalated under the ORIGINAL
-        // account, so the attempt stays reconcilable even if the context has
-        // moved on. Conditional: this failure may only touch the record if
-        // the slot is still ITS attempt.
-        const escalated: PendingContribution = { ...pendingRow, state: 'unknown' };
-        updatePendingIfAttempt(escalated, owner, attemptId);
-        if (!stillCurrent()) return;
-        setPending(escalated);
+        if (failure.kind === 'refused') setRefusal({ reason: failure.reason, count });
+      } else if (settled.kind === 'unknown') {
+        // Unknown outcome: the stored row was escalated under the ORIGINAL
+        // account, conditionally, so the attempt stays reconcilable.
+        setPending({ ...pendingRow, state: 'unknown' });
       }
     } finally {
       inFlightRef.current = false;
@@ -1127,7 +1594,21 @@ export default function ContributeToGoal() {
       // form, which the new context already reset.
       if (stillCurrent()) setSubmitting(false);
     }
-  }, [state, submitting, reviewCount, goalId, uid, sendContribute, takeRoundAttemptId]);
+  }, [
+    state,
+    submitting,
+    reviewCount,
+    goalId,
+    uid,
+    sendContribute,
+    currentContext,
+    takeRoundAttemptId,
+    restoreSettled,
+    restoreFailed,
+    pending,
+    refusal,
+    lastResult,
+  ]);
 
   // Replay the SAME attempt. The server keys idempotency on goal, account and
   // attemptId and returns the original receipt if the earlier call landed.
@@ -1140,6 +1621,7 @@ export default function ContributeToGoal() {
     inFlightRef.current = true;
     setSubmitting(true);
     setEntryError(null);
+    setAttemptNotice(null);
     attemptRef.current = pending.attemptId;
     // A replay has NO trustworthy "before". The total on screen was captured
     // before the unknown period, polling is off for the whole of it, and the
@@ -1150,47 +1632,79 @@ export default function ContributeToGoal() {
     // whenever the confirmed total the server returns is at or beyond target.
     sharedBeforeRef.current = null;
     beforeTargetRef.current = null;
-    const generation = generationRef.current;
     const owner = uid as string;
-    const startedGoal = goalId;
-    const stillCurrent = () =>
-      isSameContext(
-        { generation, uid: owner, goalId: startedGoal },
-        {
-          generation: generationRef.current,
-          uid: contextRef.current.uid,
-          goalId: contextRef.current.goalId,
-        }
-      );
+    const started: RequestContext = { generation: generationRef.current, uid: owner, goalId };
+    const replay = pending;
+    const stillCurrent = () => isSameContext(started, currentContext());
+    // Same gate as Record, asked immediately before the replay is sent: a
+    // replay of A's attempt sent while B is the live auth user would book a
+    // NEW contribution credited to B.
+    const mayFire = () => mayFireAs(owner, started, currentContext(), getFirebaseAuth().currentUser?.uid ?? null);
 
-    // Flip the persisted state to 'sending' during the replay so a further
-    // crash mid-replay still lands us on the pending screen.
-    updatePendingIfAttempt({ ...pending, state: 'sending' }, owner, pending.attemptId);
-    setPending({ ...pending, state: 'sending' });
+    // The persisted state flips to 'sending' during the replay (queued on the
+    // record ahead of whatever the outcome writes, and only if the record is
+    // still this attempt) so a further crash mid-replay still lands us on the
+    // pending screen.
+    setPending({ ...replay, state: 'sending' });
 
     try {
-      await sendContribute(pending.attemptId, pending.count);
-    } catch (e) {
-      const failure = classifyContributeError(e);
-      if (failure.kind === 'refused') {
-        clearPendingIfAttempt(goalId as string, owner, pending.attemptId);
-        if (!stillCurrent()) return;
+      // The SAME attempt: `replayAttempt` sends the restored row's own id and
+      // count. A refusal of a replay is judged as a replay — an
+      // unauthenticated answer keeps the reminder (src/contributionFlow.ts).
+      //
+      // NATIVE: the sign-in is refreshed first (ST-06). A token that went
+      // stale while the app slept would otherwise reach the server and tell a
+      // validly signed-in member their sign-in expired. Awaited inside
+      // `replayAttempt`, ahead of its gate, so the gate stays next to the
+      // send. Web is unchanged (the browser SDK refreshes as it always has).
+      const settled = await replayAttempt(
+        replay,
+        owner,
+        {
+          send: (id, n) => sendContribute(id, n),
+          isRefusal: (e: unknown) => isDefiniteRefusal(e, 'replay'),
+          stillCurrent,
+          mayFire,
+        },
+        Platform.OS === 'web' ? undefined : () => refreshSignIn(getFirebaseAuth(), SIGN_IN_REFRESH_TIMEOUT_MS)
+      );
+      if (!stillCurrent()) return;
+      if (settled.kind === 'held') {
+        // Nothing was sent and the record is untouched: still the same
+        // unconfirmed attempt, with the reason in one line.
+        setPending({ ...replay, state: 'unknown' });
+        setAttemptNotice(settled.reason === 'offline' ? REPLAY_OFFLINE_NOTICE : REPLAY_SIGN_IN_NOTICE);
+      } else if (settled.kind === 'notSent') {
+        // Not sent: the record is untouched, and the reminder stays.
+        setPending({ ...replay, state: 'unknown' });
+        setAttemptNotice(ATTEMPT_NOT_SENT_NOTICE);
+      } else if (settled.kind === 'refused') {
+        const failure = classifyContributeError(settled.error);
         setPending(null);
         attemptRef.current = null;
-        setRefusal({ reason: failure.reason, count: pending.count });
-      } else {
-        const escalated: PendingContribution = { ...pending, state: 'unknown' };
+        if (failure.kind === 'refused') setRefusal({ reason: failure.reason, count: replay.count });
+      } else if (settled.kind === 'unknown') {
         // Conditional, for the same reason as onRecord: an old replay failure
         // must not overwrite a newer attempt's record.
-        updatePendingIfAttempt(escalated, owner, pending.attemptId);
-        if (!stillCurrent()) return;
-        setPending(escalated);
+        setPending({ ...replay, state: 'unknown' });
+        // "Not signed in" keeps the reminder (it says nothing about whether
+        // the original landed), so say why nothing moved.
+        if (isSignInExpired(settled.error)) setAttemptNotice(REPLAY_SIGN_IN_NOTICE);
       }
     } finally {
       inFlightRef.current = false;
       if (stillCurrent()) setSubmitting(false);
     }
-  }, [pending, submitting, goalId, uid, sendContribute]);
+  }, [pending, submitting, goalId, uid, sendContribute, currentContext]);
+
+  // Retry on the "couldn't read this device's saved attempt" state: the same
+  // restore, again, for the same context.
+  const onRetryRestore = useCallback(() => {
+    if (!goalId || retryingRef.current) return;
+    retryingRef.current = true;
+    setRetrying(true);
+    startRestore(goalId, uid);
+  }, [goalId, uid, startRestore]);
 
   // There is deliberately no control that discards an unresolved attempt's
   // reminder: it is the only recovery context for effort whose outcome is
@@ -1233,10 +1747,15 @@ export default function ContributeToGoal() {
     not answered.
   */
   const kioskAttemptInFlight = submitting || (pending != null && pending.state === 'sending');
-  const kioskLoadSettled =
-    state.kind === 'closed' || state.kind === 'notFound' || state.kind === 'error';
+  // Settled: the goal could not be shown, or the saved attempt could not be
+  // read and nothing has been written (src/kioskSession.ts
+  // `kioskScreenSettled`) — so the fail-closed screen has a deadline too.
+  const kioskLoadSettled = kioskScreenSettled({ stateKind: state.kind, restoreFailed, beforeWrite });
   const kioskTerminal =
     kiosk &&
+    // Not before the stored attempt has been read back: the deadline must
+    // know whether there is an unresolved attempt before it can run.
+    restoreSettled &&
     kioskMayFinishUnattended({
       outcome: kioskOutcome,
       attemptInFlight: kioskAttemptInFlight,
@@ -1311,6 +1830,7 @@ export default function ContributeToGoal() {
 
   const kioskRemaining =
     kioskStartedAt == null ? Number.POSITIVE_INFINITY : kioskRemainingMs(kioskStartedAt, kioskNow);
+  const kioskCountdown = kioskCountdownText(kioskStartedAt, kioskNow);
 
   useEffect(() => {
     if (!kioskTerminal) return;
@@ -1333,6 +1853,102 @@ export default function ContributeToGoal() {
   */
   const closeSheet = () => exitSheet(() => returnToMemberContext(backHref));
   closeSheetRef.current = closeSheet;
+  /*
+    W12-3 (INT-19). ANDROID'S BACK, DECIDED STEP BY STEP (src/contributeBack.ts):
+    never while a request is out or when leaving would lose an attempt; a
+    settled screen closes like Close (a page goes back); review returns to
+    the entry with its count; an entry reached from the movement step returns
+    to it, timer still paused. Registered while this screen is focused, on
+    Android only and never on a kiosk (Finish is the only way out there).
+  */
+  const backRef = useRef<{ snapshot: ContributeBackSnapshot; edit: () => void } | null>(null);
+  backRef.current = {
+    snapshot: {
+      submitting,
+      pending,
+      pendingDurable,
+      restoreFailed,
+      hasResult: lastResult != null,
+      hasRefusal: refusal != null,
+      step,
+      initialStep: initialStep === 'move' ? 'move' : 'enter',
+      asSheet,
+      // The closed, not-found, sign-in, error and loading screens, and the
+      // unreadable-attempt screen, all render in front of the step.
+      stepShown: state.kind === 'ready' && !(restoreFailed && beforeWrite),
+    },
+    edit: onEdit,
+  };
+  /*
+    W12-9 (INT-17, native). The count and review steps replace each other in
+    place, taking the control the member pressed with them; the new step's
+    heading takes the screen reader's focus (src/ui/stepHeadingFocus.native.ts,
+    never on the first mount). The web's sheet containment already does this.
+  */
+  const enterHeadingRef = useRef<Text>(null);
+  const reviewHeadingRef = useRef<Text>(null);
+  useStepHeadingFocus(step === 'enter' ? 'enter' : null, enterHeadingRef);
+  useStepHeadingFocus(step === 'review' ? 'review' : null, reviewHeadingRef);
+  /*
+    W12-20 (INT-17, native). The member's receipt replaces the step they were
+    on too, so its headline (TogetherCompletion's level-1 heading) takes the
+    screen reader's focus, once per receipt (keyed on the attempt it
+    confirms). The receipt's own announcement is unchanged: once, with the
+    confirmed figures (TogetherCompletion's useAnnounce, INT-18). The kiosk's
+    plain receipt is not moved to, because the ref reaches only the member
+    receipt's headline: TogetherCompletion, which a kiosk never renders.
+    W12-23 (RV17-641-F4): the key no longer repeats that as `!kiosk`, a term
+    nothing at run time depended on; the kiosk case in
+    tests/contribute-receipt-heading-focus.test.tsx fails if a kiosk receipt
+    ever gains this ref. Nothing on the web, where the sheet containment
+    re-orients focus. The announcement comes first and the headline's focus
+    after it (at once on Android, 400 ms later on iOS); whether the focus cuts
+    the announcement short is a device check (RV17-641-F1).
+  */
+  const togetherHeadingRef = useRef<Text>(null);
+  useStepHeadingFocus(lastResult ? `receipt:${receiptAttemptId}` : null, togetherHeadingRef);
+  /*
+    W12-7 (INT-18, native). AN OUTCOME THAT REPLACES WHAT WAS ON SCREEN IS
+    SPOKEN. iOS ignores aria-live and the entry error's alert role, so on a
+    phone the refusal and the entry error announce their visible sentence,
+    once each time they appear (src/ui/announce.native.ts). The web keeps the
+    refusal's polite live region (liveRegion) and the error's alert role, and
+    useAnnounce does nothing there. One key per appearance: the refusal
+    object, and a token made whenever the error's text changes.
+  */
+  const announceIds = useRef(new WeakMap<object, number>());
+  const announceNext = useRef(0);
+  const announceKeyFor = (o: object | null): number | null => {
+    if (!o) return null;
+    let k = announceIds.current.get(o);
+    if (k === undefined) {
+      k = (announceNext.current += 1);
+      announceIds.current.set(o, k);
+    }
+    return k;
+  };
+  const refusalSpoken = refusal
+    ? refusalCopy(refusal.reason, refusal.count, state.kind === 'ready' || state.kind === 'closed' ? state.pulse.unit : '')
+    : null;
+  useAnnounce(refusalSpoken ? `Not recorded. ${refusalSpoken.headline} ${refusalSpoken.body}` : null, announceKeyFor(refusal));
+  const entryErrorToken = useMemo(() => (entryError ? {} : null), [entryError]);
+  useAnnounce(entryError, announceKeyFor(entryErrorToken));
+  useFocusEffect(
+    useCallback(() => {
+      if (Platform.OS !== 'android' || kiosk) return undefined;
+      const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+        const current = backRef.current;
+        if (!current) return false;
+        const action = contributeBackAction(current.snapshot);
+        if (action === 'pass') return false;
+        if (action === 'close') closeSheetRef.current();
+        else if (action === 'edit') current.edit();
+        else if (action === 'toMove') setStep('move');
+        return true;
+      });
+      return () => sub.remove();
+    }, [kiosk]),
+  );
   /*
     THE RECEIPT ON A SHORT PHONE. The mark was sized from WIDTH alone, so on a
     390x640 the celebration filled the viewport and pushed "Record more" and
@@ -1517,6 +2133,10 @@ export default function ContributeToGoal() {
         >
           Finish signs you out and returns this device to its start screen.
         </Text>
+        {/* Only while the session clock runs (`kioskCountdownText`): with no
+            clock — a request in flight, a restore being retried — the row
+            would read "Finishing now…" over a Stay that does nothing. */}
+        {kioskCountdown != null ? (
         <View style={styles.kioskCountdownRow}>
           {/* D-2. The countdown changes without anybody acting, so it
               announces itself politely rather than interrupting. */}
@@ -1525,7 +2145,7 @@ export default function ContributeToGoal() {
             testID="wsf-kiosk-countdown"
             aria-live="polite"
           >
-            {kioskCountdownLabel(kioskRemainingSeconds(kioskRemaining))}
+            {kioskCountdown}
           </Text>
           <Pressable
             onPress={() => setKioskStay((n) => n + 1)}
@@ -1541,6 +2161,7 @@ export default function ContributeToGoal() {
             </Text>
           </Pressable>
         </View>
+        ) : null}
         {/* The one string on a shared device that has to be read: the device
             did not sign the last visitor out. At #8A1C1C on navy it measured
             1.47:1 -- present, and barely readable. */}
@@ -1588,6 +2209,20 @@ export default function ContributeToGoal() {
       </Text>
     ) : null;
 
+  /*
+    NATIVE-INTEGRATOR-1 (INT-07). THE COUNT ENTRY STAYS USABLE WITH THE NUMBER
+    PAD UP. The sheet's panel is bottom-anchored, so on a phone the number pad
+    covered "Review my contribution" (iPhone 14: Review at ~646-773 pt, the pad
+    and its Done bar from ~550 pt). The panel now pads its bottom by the
+    keyboard, so its content rises above it and scrolls, and a drag in the
+    sheet puts the keyboard away. The page mode gets the form treatment
+    (src/ui/keyboardAvoidance.tsx). All of it is inert on web.
+  */
+  const keyboardHeight = useKeyboardHeight();
+  // INT-09: the page mode is a root-stack screen with no header; on a phone it
+  // starts below the status bar (the sheet is bottom-anchored). 0 on web.
+  const topInset = useScreenTopInset();
+
   // The community/goal labels, shown together only when verified.
   /**
    * `tone: 'dark'` paints the WHOLE page navy rather than putting a navy card
@@ -1613,27 +2248,36 @@ export default function ContributeToGoal() {
         takes the step's tone: the confirmed receipt is navy here too.
       */
       <View ref={sheetRef} style={styles.sheetRoot} testID="wsf-contribute-sheet">
-        <Pressable
+        <SheetScrim
           style={[styles.sheetScrim, overMoveSheet ? styles.sheetScrimClear : null]}
           onPress={closeSheet}
           {...SCRIM_PROPS}
           testID="wsf-contribute-scrim"
           {...(sheetData('scrim', sheetPhase === 'out' ? 'out' : sheetHandoff ? 'rest' : 'in') as object)}
+          phase={sheetPhase}
+          preference={motionPreference}
+          handoff={sheetHandoff}
         />
-        <View
+        <SheetPanel
           ref={sheetPanelRef}
           style={[
             styles.sheetPanel,
             tone === 'dark' ? styles.sheetPanelDark : null,
             together,
-            { paddingBottom: safeArea.bottom + 8 },
+            { paddingBottom: sheetBottomPadding(safeArea.bottom, keyboardHeight) },
           ]}
           testID="wsf-contribute-sheet-panel"
           {...({ role: 'dialog', 'aria-modal': true, 'aria-label': sheetTitle } as Record<string, unknown>)}
+          // W12-9 (INT-17): aria-modal does nothing on a phone; iOS keeps VoiceOver in the panel itself.
+          {...modalPanelA11y}
           {...(sheetData('panel', sheetPhase) as object)}
+          phase={sheetPhase}
+          preference={motionPreference}
         >
           <View style={[styles.sheetBar, tone === 'dark' ? styles.sheetBarDark : null]}>
-            <View pointerEvents="none" style={styles.sheetGrabber} />
+            {/* MO-02 case 5: drawn on the web only, as MOVE's is (app/move/index.tsx):
+                on a phone it looked draggable and was not. */}
+            {Platform.OS === 'web' ? <View pointerEvents="none" style={styles.sheetGrabber} /> : null}
             <Text
               style={[styles.sheetBarTitle, tone === 'dark' ? styles.sheetBarTitleDark : null]}
               testID="wsf-contribute-sheet-title"
@@ -1651,6 +2295,7 @@ export default function ContributeToGoal() {
               reading the first `wsf-contribute-back` got "Close").
             */}
             <Pressable
+              ref={sheetCloseRef}
               onPress={closeSheet}
               accessibilityRole="button"
               accessibilityLabel="Close"
@@ -1672,11 +2317,12 @@ export default function ContributeToGoal() {
               together,
             ]}
             keyboardShouldPersistTaps="handled"
+            {...SHEET_DISMISS_PROPS}
             testID={testID}
           >
             <View style={styles.inner}>{children}</View>
           </ScrollView>
-        </View>
+        </SheetPanel>
       </View>
     ) : (
     /*
@@ -1685,7 +2331,10 @@ export default function ContributeToGoal() {
       when the scroll view ran underneath it -- the receipt stays navy to the
       bar's edge -- and only the overlap is gone.
     */
-    <View style={[styles.screen, tone === 'dark' ? styles.screenDark : null, together]}>
+    <KeyboardInsetView style={[styles.screen, tone === 'dark' ? styles.screenDark : null, together]}>
+      {/* INT-09: light icons over the navy receipt while it is in front; dark
+          again on any cream screen. Nothing on web. */}
+      <ScreenStatusBar tone={tone === 'dark' ? 'navy' : 'cream'} />
       <ScrollView
         ref={scrollRef}
         style={[
@@ -1694,13 +2343,19 @@ export default function ContributeToGoal() {
           together,
           shellBarShown ? styles.scrollAboveMove : null,
         ]}
-        contentContainerStyle={[styles.container, tone === 'dark' ? styles.containerDark : null, together]}
+        contentContainerStyle={[
+          styles.container,
+          tone === 'dark' ? styles.containerDark : null,
+          together,
+          topInset > 0 ? { paddingTop: CONTAINER_TOP + topInset } : null,
+        ]}
         keyboardShouldPersistTaps="handled"
+        {...KEYBOARD_SCROLL_PROPS}
         testID={testID}
       >
         <View style={styles.inner}>{children}</View>
       </ScrollView>
-    </View>
+    </KeyboardInsetView>
   ));
   };
 
@@ -1727,8 +2382,9 @@ export default function ContributeToGoal() {
           <Text style={styles.body}>
             Contributions are recorded to your account, so sign in before you record one.
           </Text>
-          <ButtonLink
-            href="/signin"
+          {/* INT-29: from the sheet on a phone, close it and push /signin (SignInLink). */}
+          <SignInLink
+            fromSheet={asSheet}
             style={styles.primaryButton}
             textStyle={styles.primaryButtonText}
             testID="wsf-contribute-signin-link"
@@ -1750,6 +2406,21 @@ export default function ContributeToGoal() {
         <View style={styles.card} testID="wsf-contribute-load-error">
           <Text style={styles.heading} {...HEADING_1}>Something went wrong</Text>
           <Text style={styles.body}>{state.message}</Text>
+          {/* INT-04 case 4: try again here, in place. Not on a kiosk (#641
+              NB-2): there this error is a rest state with a 90-second Finish,
+              and a retry would pass through loading and clear that deadline
+              while it waited, leaving the shared device as the last visitor
+              left it. A kiosk gets Finish alone, as before. */}
+          {kiosk ? null : (
+            <Pressable
+              onPress={retryLoad}
+              accessibilityRole="button"
+              style={styles.primaryButton}
+              testID="wsf-contribute-load-retry"
+            >
+              <Text style={styles.primaryButtonText}>Try again</Text>
+            </Pressable>
+          )}
           {/* NOT ON A SHARED DEVICE. "Back to home" is the member home of the
               account signed in right now, so on a kiosk it is a door out of the
               session and into somebody's account for whoever walks up next.
@@ -1873,11 +2544,33 @@ export default function ContributeToGoal() {
           honesty Community Home and the public display carry. No refresh
           control: nothing here is waiting to be asked.
         */}
-        {pulseAt && !anchorShort ? (
-          <Text style={styles.anchorUpdated} testID="wsf-contribute-context-updated">
-            {`Confirmed ${formatClock(pulseAt)}`}
-          </Text>
+        {/*
+          W12-2 (native): a failed refresh keeps the last confirmed figures
+          and says so, with a Retry, on short screens too (a kept figure is
+          never shown without saying it is kept: src/ui/RefreshNote.tsx).
+        */}
+        {refreshFailed ? (
+          <View style={styles.anchorStaleRow} testID="wsf-contribute-stale-note">
+            <Text style={[styles.anchorUpdated, styles.anchorStaleText]}>
+              Couldn’t check for updates just now. Showing the last confirmed figures.
+            </Text>
+            <Pressable
+              onPress={quietRetry}
+              accessibilityRole="button"
+              style={styles.anchorStaleRetry}
+              testID="wsf-contribute-stale-retry"
+            >
+              <Text style={styles.anchorStaleRetryText}>Retry</Text>
+            </Pressable>
+          </View>
         ) : null}
+        {/*
+          W12-6 (INT-12), RV15-641-2: the confirmed time names its day when it
+          is not today, re-read every minute, and reads "Last confirmed" after a
+          load that failed (beside the note above) or once the poll has landed
+          nothing for a while (ConfirmedLine).
+        */}
+        {pulseAt && !anchorShort ? <ConfirmedLine at={pulseAt} refreshFailed={refreshFailed} pollSince={pollSinceRef} /> : null}
       </View>
     </View>
     );
@@ -1901,7 +2594,7 @@ export default function ContributeToGoal() {
         {pending != null && pending > 0 ? (
           <>
             <Text style={styles.yoursArrow}>→</Text>
-            <Text style={styles.yoursNext} testID="wsf-contribute-your-part-next">
+            <Text style={styles.yoursNext} testID="wsf-contribute-your-part-next" {...numeralTextProps}>
               {formatCount(anchorOwnCredit + pending)}
             </Text>
           </>
@@ -1972,10 +2665,13 @@ export default function ContributeToGoal() {
             <View
               style={styles.togetherBody}
               testID="wsf-contribute-receipt"
-              aria-live="polite"
+              // Web: a polite live region. Native: off — TogetherCompletion
+              // announces the confirmed receipt once itself (NATIVE-MOTION-1).
+              aria-live={Platform.OS === 'web' ? 'polite' : undefined}
               {...({ dataSet: { variant } } as Record<string, unknown>)}
             >
               <TogetherCompletion
+                headingRef={togetherHeadingRef}
                 presentation={together}
                 eyebrow={r.alreadyRecorded ? 'Already recorded' : 'Recorded'}
                 amountText={r.alreadyRecorded ? formatCount(r.addedCount) : `+${formatCount(r.addedCount)}`}
@@ -2031,6 +2727,8 @@ export default function ContributeToGoal() {
                 }
                 fresh={freshAttempt != null}
                 onFreshConsumed={() => setFreshAttempt(null)}
+                announce={announcedReceiptRef.current !== r}
+                onAnnounced={() => (announcedReceiptRef.current = r)}
                 windowWidth={windowWidth}
                 windowHeight={windowHeight}
               />
@@ -2069,7 +2767,7 @@ export default function ContributeToGoal() {
               <View style={styles.tile}>
                 <Text style={styles.tileLabel}>Your addition</Text>
                 {/* The exact number recorded -- theirs, not the community's. */}
-                <Text style={styles.tileValue} testID="wsf-contribute-result-amount">
+                <Text style={styles.tileValue} testID="wsf-contribute-result-amount" {...numeralTextProps}>
                   {r.alreadyRecorded ? formatCount(r.addedCount) : `+${formatCount(r.addedCount)}`}
                 </Text>
               </View>
@@ -2077,7 +2775,7 @@ export default function ContributeToGoal() {
                   and the figure are one line for every reader and spec. */}
               <View style={styles.tile} testID="wsf-contribute-own-credit">
                 <Text style={styles.tileLabel}>{'Your total on this goal: '}</Text>
-                <Text style={styles.tileValue}>
+                <Text style={styles.tileValue} {...numeralCapProps}>
                   {formatCount(r.ownCredit)}
                   {ownUnit ? <Text style={styles.tileUnit}>{` ${ownUnit}`}</Text> : null}
                 </Text>
@@ -2100,8 +2798,8 @@ export default function ContributeToGoal() {
                     <Text style={styles.sharedLabel}>
                       {context.kind === 'verified' ? `Shared total · ${context.goalTitle}` : 'Shared total'}
                     </Text>
-                    <Text style={styles.sharedTotal} testID="wsf-contribute-shared-total">
-                      <Text style={styles.sharedCount}>
+                    <Text style={styles.sharedTotal} testID="wsf-contribute-shared-total" {...numeralCapProps}>
+                      <Text style={styles.sharedCount} {...numeralCapProps}>
                         {totalOfTargetParts(r.sharedTotal, r.target, r.unit).count}
                       </Text>
                       {' '}
@@ -2210,7 +2908,7 @@ export default function ContributeToGoal() {
         <View
           style={styles.sheet}
           testID="wsf-contribute-refused"
-          aria-live="polite"
+          {...liveRegion}
           {...({ dataSet: { reason: refusal.reason } } as Record<string, unknown>)}
         >
           {renderSheetHead('Your attempt')}
@@ -2237,8 +2935,8 @@ export default function ContributeToGoal() {
               renderKioskFinish('refused')
             ) : (
               refusal.reason === 'signedOut' ? (
-                <ButtonLink
-                  href="/signin"
+                <SignInLink
+                  fromSheet={asSheet}
                   style={styles.primaryButton}
                   textStyle={styles.primaryButtonText}
                   testID="wsf-contribute-back"
@@ -2320,6 +3018,11 @@ export default function ContributeToGoal() {
             <Text style={styles.stepBody}>
               We don’t know whether this effort was recorded. Don’t record it again.
             </Text>
+            {attemptNotice ? (
+              <Text style={styles.stepBody} testID="wsf-contribute-attempt-notice">
+                {attemptNotice}
+              </Text>
+            ) : null}
             <View style={styles.sheetActionsInline}>
               <Pressable
                 onPress={onReconcile}
@@ -2337,9 +3040,17 @@ export default function ContributeToGoal() {
             {/* Not true on a shared device: the visitor is about to be signed
                 out of it. The kiosk says where the attempt actually is instead
                 (KIOSK_UNRESOLVED_NOTICE, on the Finish bar below). */}
-            {kiosk ? null : (
+            {/* NATIVE-STATE-1: only when the device actually kept the record.
+                If it refused the write, the attempt exists on this screen and
+                nowhere else, and saying it will be here later would be a
+                promise nothing keeps. */}
+            {kiosk ? null : pendingDurable ? (
               <Text style={styles.stepBody}>
                 You can leave this page. The same attempt will be here when you come back.
+              </Text>
+            ) : (
+              <Text style={styles.stepBody} testID="wsf-contribute-not-saved">
+                {NOT_SAVED_NOTICE}
               </Text>
             )}
           </View>
@@ -2480,7 +3191,8 @@ export default function ContributeToGoal() {
             />
           </View>
           <View style={styles.heroFacts}>
-            <Text style={styles.heroTotal} testID="wsf-contribute-shared-total">
+            {/* RV15-641-1: "N of M <unit>" is a words line (the unit is free text up to 40 characters): capped, and it still wraps. */}
+            <Text style={styles.heroTotal} testID="wsf-contribute-shared-total" {...numeralCapProps}>
               {totalOfTargetLabel(pulse.sharedTotal, pulse.target, unit)}
             </Text>
             {/*
@@ -2527,6 +3239,54 @@ export default function ContributeToGoal() {
     );
   }
 
+  // ---- the device's saved attempt could not be read --------------------------
+  // FAIL CLOSED (NATIVE-STATE-1). The restore could not read this account's
+  // slot, so it may hold an unresolved attempt nobody has seen. Entry, review
+  // and the camera are not offered — a new attempt could replace that one —
+  // until Retry reads it. A kiosk keeps its Finish and its 90-second deadline
+  // (`kioskLoadSettled` counts this screen as settled); Finish clears nothing
+  // and signs out.
+  if (restoreFailed && beforeWrite) {
+    return screen(
+      <>
+        {renderChrome(false)}
+        <View style={styles.sheet} testID="wsf-contribute-restore-failed" aria-live="polite">
+          {renderSheetHead('Your attempt')}
+          <View style={styles.sheetBody}>
+            <Text style={styles.stepHeading} {...HEADING_1}>{RESTORE_FAILED_HEADING}</Text>
+            <Text style={styles.stepBody}>{RESTORE_FAILED_BODY}</Text>
+            <View style={styles.sheetActionsInline}>
+              <Pressable
+                onPress={onRetryRestore}
+                disabled={retrying || !restoreSettled}
+                accessibilityRole="button"
+                style={styles.primaryButton}
+                testID="wsf-contribute-restore-retry"
+              >
+                <Text style={styles.primaryButtonText}>{RESTORE_RETRY_LABEL}</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+        <View style={styles.actions}>
+          {kiosk ? (
+            renderKioskFinish(kioskOutcome)
+          ) : (
+            <ReturnButton
+              href={backHref}
+              style={styles.tertiaryButton}
+              textStyle={styles.tertiaryButtonText}
+              testID="wsf-contribute-back"
+              label={backLabel}
+            />
+          )}
+        </View>
+        {renderTestNote()}
+      </>,
+      'wsf-contribute-screen'
+    );
+  }
+
   // ---- review ---------------------------------------------------------------
   if (step === 'review' && reviewCount != null) {
     return screen(
@@ -2543,9 +3303,10 @@ export default function ContributeToGoal() {
         <View style={styles.sheet} testID="wsf-contribute-review-screen">
           {renderSheetHead(params.mode === 'move' ? 'Start moving' : 'Already moved')}
           <View style={styles.sheetBody}>
-            <Text style={styles.stepHeading} {...HEADING_1}>Review your contribution</Text>
+            <Text ref={reviewHeadingRef} style={styles.stepHeading} {...HEADING_1}>Review your contribution</Text>
             <View style={styles.reviewBox}>
-              <Text style={styles.reviewQuantity} testID="wsf-contribute-review-quantity">
+              {/* W12-8 (INT-16), RV15-641-1: the count and its free-text unit are one paragraph, so it is capped, never shrunk to one line (state's range neighbours this line). */}
+              <Text style={styles.reviewQuantity} testID="wsf-contribute-review-quantity" {...numeralCapProps}>
                 {formatCount(reviewCount)}
                 <Text style={styles.reviewUnit}>{` ${unit}`}</Text>
               </Text>
@@ -2553,6 +3314,11 @@ export default function ContributeToGoal() {
                 {repeatNotice(repeatPolicy)}
               </Text>
             </View>
+            {attemptNotice ? (
+              <Text style={styles.stepBody} testID="wsf-contribute-attempt-notice">
+                {attemptNotice}
+              </Text>
+            ) : null}
             <View style={[styles.sheetActionsInline, styles.pair]}>
               <Pressable
                 onPress={onEdit}
@@ -2598,6 +3364,11 @@ export default function ContributeToGoal() {
     !kiosk &&
     beforeWrite &&
     !legacyOrphan &&
+    // NATIVE-STATE-1: not before the stored attempt has been read back (a
+    // restored attempt must never be overtaken by the camera), and not on
+    // default settings the member may have turned off on this device.
+    mayBeginNewAttempt({ restoreSettled, restoreFailed, pending, settled: refusal != null || lastResult != null }) &&
+    moveCameraLoaded &&
     state.kind === 'ready' &&
     cameraEntryAllowed({
       settings: moveCameraSettings,
@@ -2606,6 +3377,32 @@ export default function ContributeToGoal() {
       resumed: roundAttemptRef.current != null,
       supported: cameraSupported,
     });
+  /*
+    While either of those two answers is still on its way (milliseconds), a
+    member the camera WOULD open for sees the camera's own loading frame — the
+    one the lazy camera screen shows anyway — rather than a flash of the manual
+    screen. The camera itself does not mount until both have answered, so a
+    restored attempt is never covered by it, even for a frame.
+  */
+  const cameraWaiting =
+    !cameraOpen &&
+    (!restoreSettled || !moveCameraLoaded) &&
+    step === 'move' &&
+    !cameraDeclined &&
+    !kiosk &&
+    beforeWrite &&
+    !legacyOrphan &&
+    state.kind === 'ready' &&
+    cameraEntryAllowed({
+      settings: moveCameraSettings,
+      unit,
+      mode: params.mode === 'move' ? 'start' : 'already',
+      resumed: roundAttemptRef.current != null,
+      supported: cameraSupported,
+    });
+  if (cameraWaiting) {
+    return <View style={styles.cameraLoading} testID="wsf-camera-loading" />;
+  }
   if (cameraOpen) {
     return (
       <Suspense fallback={<View style={styles.cameraLoading} testID="wsf-camera-loading" />}>
@@ -2731,6 +3528,8 @@ export default function ContributeToGoal() {
             <Text
               style={[styles.timerClock, windowHeight < 700 ? styles.timerClockShort : null]}
               testID="wsf-contribute-timer-clock"
+              // INT-16: the policy's cap and shrink-to-fit on a phone; nothing on the web.
+              {...numeralTextProps}
             >
               {formatElapsed(timerElapsed)}
             </Text>
@@ -2791,7 +3590,7 @@ export default function ContributeToGoal() {
       {renderChrome(true)}
       {renderGoalAnchor()}
       <View style={styles.card} testID="wsf-contribute-entry-screen">
-        <Text style={styles.entryHeading} {...HEADING_1}>{`How many ${unit} did you complete?`}</Text>
+        <Text ref={enterHeadingRef} style={styles.entryHeading} {...HEADING_1}>{`How many ${unit} did you complete?`}</Text>
         {(() => {
           const minus = (
             <Pressable
@@ -2830,6 +3629,8 @@ export default function ContributeToGoal() {
               placeholderTextColor={wsfTheme.colors.textMuted}
               accessibilityLabel={`Number of ${unit} completed`}
               testID="wsf-contribute-entry"
+              // W12-8 (INT-16): the entry's numeral is capped on a phone; nothing on the web.
+              {...numeralInputProps}
             />
           );
           // On a very narrow screen (or at 200% zoom) the two round buttons
@@ -2929,6 +3730,9 @@ const CREAM = wsfTheme.colors.background;
 const CARD_BORDER = '#E3E7E1';
 const HERO_MUTED = 'rgba(247,245,240,0.78)';
 
+// The page container's own top padding, under the status bar on a phone (INT-09).
+const CONTAINER_TOP = 16;
+
 const styles = StyleSheet.create({
   // ---- kiosk -----------------------------------------------------------
   kioskBar: { gap: 10 },
@@ -3024,7 +3828,7 @@ const styles = StyleSheet.create({
   container: {
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingTop: 16,
+    paddingTop: CONTAINER_TOP,
     // Ordinary end padding. The bar is below the scroll view, not over it,
     // so the content owes it nothing beyond its own rhythm.
     paddingBottom: 48,
@@ -3096,6 +3900,11 @@ const styles = StyleSheet.create({
   anchorPercent: { color: PROGRESS_GREEN, fontSize: 12.5, lineHeight: 17, fontWeight: '700' },
   anchorStatusLine: { color: HERO_MUTED, fontSize: 11.5, lineHeight: 16 },
   anchorUpdated: { color: HERO_MUTED, fontSize: 11, lineHeight: 15, letterSpacing: 0.3 },
+  // W12-2: the kept-figures note and its Retry (native only).
+  anchorStaleRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 },
+  anchorStaleText: { flexShrink: 1 },
+  anchorStaleRetry: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 8 },
+  anchorStaleRetryText: { color: CREAM, fontSize: 13, fontWeight: '700', textDecorationLine: 'underline' },
 
   // ---- the member's own part, previewed -----------------------------------
   yoursPanel: {

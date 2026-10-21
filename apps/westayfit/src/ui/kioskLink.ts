@@ -22,11 +22,10 @@ export function buildKioskUrl(opts: {
 }
 
 /**
- * The origin this build is actually being served from, or null off-web.
- * Kept here so a caller never reaches for `window` directly and never has to
- * remember that server rendering has no location.
+ * The origin this build is actually being served from, or null. Kept here so
+ * a caller never reaches for `window` directly and never has to remember that
+ * server rendering has no location. The web reads the page's address; a phone
+ * reads the origin its build names (W12-13: `currentOrigin.native.ts`, never
+ * `window.location`).
  */
-export function currentOrigin(): string | null {
-  if (typeof window === 'undefined') return null;
-  return window.location?.origin ?? null;
-}
+export { currentOrigin } from './currentOrigin';

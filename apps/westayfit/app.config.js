@@ -12,6 +12,9 @@
  * the staging-values check below applies only to builds that embed their JS,
  * and only a development client may rely on the emulator flag alone.
  */
+const fs = require('fs');
+const path = require('path');
+
 const STAGING_KEYS = [
   'EXPO_PUBLIC_WSF_STAGING_API_KEY',
   'EXPO_PUBLIC_WSF_STAGING_AUTH_DOMAIN',
@@ -27,9 +30,63 @@ const STAGING_KEYS = [
 // missing from this list is treated as embedding its JS, the stricter check.
 const DEV_CLIENT_PROFILES = ['development', 'development-simulator'];
 
+// NATIVE-INTEGRATOR-1 (INT-10). The binary's own build stamp, carried in its
+// app config (`extra.wsfBuild`) and read by src/nativeBuildInfo.native.ts, so
+// the staging strip and Build details stop reading "build dev". The commit is
+// the one EAS checked out; the time is when the config was evaluated during the
+// build. Shaped like the web build's stamp (package.json `build:web`).
+function buildStampOf(env, now) {
+  const sha = typeof env.EAS_BUILD_GIT_COMMIT_HASH === 'string' ? env.EAS_BUILD_GIT_COMMIT_HASH.trim().toLowerCase() : '';
+  return {
+    commit: /^[0-9a-f]{7,40}$/.test(sha) ? sha.slice(0, 7) : undefined,
+    builtAt: now.toISOString().replace(/\.\d{3}Z$/, 'Z'),
+  };
+}
+
 // Same rule as src/firebase.ts isEmulatorFlagOn.
 function isEmulatorFlagOn(raw) {
   return raw === '1' || (typeof raw === 'string' && raw.trim().toLowerCase() === 'true');
+}
+
+// NATIVE-INTEGRATOR-1 (INT-11). The sign-in switch as src/featureFlags.ts reads
+// it ('1' / 'true' is on), plus an explicit off ('0' / 'false'). Anything else,
+// unset included, is not a decision.
+function authFlagOf(raw) {
+  const v = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  if (v === '1' || v === 'true') return 'on';
+  if (v === '0' || v === 'false') return 'off';
+  return 'unset';
+}
+
+// NATIVE-INTEGRATOR-1 (W12-13, INT-08 preparation). A phone build names its
+// public origin in EXPO_PUBLIC_WSF_PUBLIC_ORIGIN (src/publicOrigin.ts); the app
+// reads that, never window.location, for its QR codes and share links. The
+// rules live once, in src/publicOrigin.ts and src/publicHost.ts. This file runs
+// in plain Node, so it compiles those two modules in memory with the TypeScript
+// already in node_modules (as scripts/check-staging-env.mjs does for
+// src/stagingEnv.ts): never a second copy of the rules.
+function loadSrcModule(name, cache = {}) {
+  const file = path.join(__dirname, 'src', `${name}.ts`);
+  if (cache[file]) return cache[file].exports;
+  const ts = require('typescript');
+  const js = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2019 },
+    fileName: file,
+  }).outputText;
+  const mod = { exports: {} };
+  cache[file] = mod;
+  const localRequire = (spec) => (spec.startsWith('./') ? loadSrcModule(spec.slice(2), cache) : require(spec));
+  new Function('exports', 'module', 'require', js)(mod.exports, mod, localRequire);
+  return mod.exports;
+}
+
+// The hosts an EXPO_PUBLIC_WSF_INVITE_HOSTS value lists, as the app splits it
+// (comma- or space-separated, case-folded).
+function inviteHostsOf(raw) {
+  return (raw || '')
+    .split(/[\s,]+/)
+    .filter((e) => e !== '')
+    .map((e) => e.toLowerCase());
 }
 
 module.exports = ({ config }) => {
@@ -56,6 +113,15 @@ module.exports = ({ config }) => {
         );
       }
     }
+    // NATIVE-INTEGRATOR-1 (INT-01): the injected-throw test harness
+    // (src/crashHarness.ts) is inert in production at runtime too; a
+    // production build that names it is a mistake, so it does not build.
+    if (env === 'production' && (process.env.EXPO_PUBLIC_WSF_CRASH_HARNESS || '').trim()) {
+      throw new Error(
+        `WSF native build refused: EXPO_PUBLIC_WSF_CRASH_HARNESS is set for a production ${platform} build. ` +
+          `The injected-throw harness is for staging test builds only; unset it.`
+      );
+    }
     if (env === 'staging' && embedsJs) {
       const missing = STAGING_KEYS.filter((k) => !(process.env[k] || '').trim());
       if (missing.length) {
@@ -65,6 +131,64 @@ module.exports = ({ config }) => {
         );
       }
     }
+    // NATIVE-INTEGRATOR-1 (INT-11): a build that embeds its JS must say whether
+    // sign-in is on. With EXPO_PUBLIC_WSF_AUTH_ENABLED unset the binary renders
+    // "Accounts are opening soon" on every entry screen and the whole member
+    // loop is unreachable (src/featureFlags.ts defaults it off: the launch
+    // switch). Staging must have it on; production may switch it off, but only
+    // by saying 0. A development client takes the flag from the local dev
+    // server's environment, not this build's.
+    if (embedsJs) {
+      const raw = process.env.EXPO_PUBLIC_WSF_AUTH_ENABLED;
+      const auth = authFlagOf(raw);
+      if (auth === 'unset') {
+        throw new Error(
+          `WSF native build refused: profile "${profile}" embeds its JavaScript, but EXPO_PUBLIC_WSF_AUTH_ENABLED is not ` +
+            `set to 1 or 0 (got "${raw === undefined ? '' : raw}"). This ${platform} build would ship with sign-in switched ` +
+            `off. Set it to 1; only a production build may say 0.`
+        );
+      }
+      if (auth === 'off' && env !== 'production') {
+        throw new Error(
+          `WSF native build refused: EXPO_PUBLIC_WSF_AUTH_ENABLED is off for a ${env} ${platform} build, which would ship ` +
+            `with sign-in switched off and could not be tested. Set it to 1.`
+        );
+      }
+    }
+    // NATIVE-INTEGRATOR-1 (W12-13, INT-08): the origin a build that embeds its
+    // JS names. A development client takes its JS, and so its origin, from the
+    // local dev server instead.
+    if (embedsJs) {
+      const originSet = (process.env.EXPO_PUBLIC_WSF_PUBLIC_ORIGIN || '').trim() !== '';
+      const origin = originSet || env === 'production' ? loadSrcModule('publicOrigin').configuredPublicOrigin() : null;
+      if (originSet && !origin) {
+        throw new Error(
+          `WSF native build refused: EXPO_PUBLIC_WSF_PUBLIC_ORIGIN is not an https origin on a public host ` +
+            `(no port, path, IP address, local name or development tunnel).`
+        );
+      }
+      if (!origin && env === 'production') {
+        throw new Error(
+          `WSF native build refused: a production ${platform} build needs EXPO_PUBLIC_WSF_PUBLIC_ORIGIN, the public ` +
+            `https origin its QR codes and share links name.`
+        );
+      }
+      const hosts = inviteHostsOf(process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS);
+      if (origin && hosts.length > 0 && !hosts.includes(origin.slice('https://'.length))) {
+        throw new Error(
+          `WSF native build refused: the host of EXPO_PUBLIC_WSF_PUBLIC_ORIGIN is not in EXPO_PUBLIC_WSF_INVITE_HOSTS, ` +
+            `so this build would hand out links it does not read as its own.`
+        );
+      }
+      if (!origin && env === 'staging') {
+        // Staging only warns: the owner's preview builds run before the host is named (E#1).
+        console.warn(
+          `WSF native build warning: EXPO_PUBLIC_WSF_PUBLIC_ORIGIN is not set for this staging ${platform} build, so its ` +
+            `MOVE handoff and station QR codes stay off (INT-08).`
+        );
+      }
+    }
+    return { ...config, extra: { ...(config.extra || {}), wsfBuild: buildStampOf(process.env, new Date()) } };
   }
   return config;
 };
