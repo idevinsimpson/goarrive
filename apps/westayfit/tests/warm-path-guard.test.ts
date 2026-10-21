@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { bootNative, createFakeAsyncStorage, type FakeAsyncStorage } from './nativeStorageHarness';
 
@@ -42,6 +42,8 @@ const h = vi.hoisted(() => ({
   },
   /** You's Retry, as the view was handed it. */
   youRetry: null as null | (() => void),
+  /** Whether You last said its figures are stale. */
+  youStale: null as null | boolean,
 }));
 
 vi.mock('../src/memberReads', () => ({
@@ -106,10 +108,18 @@ vi.mock('expo-router', () => {
 vi.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
+// The shell's measurements and routes, as the tabs import them (the real
+// module draws the bar). Kept to the shell's surface so a tab that starts
+// using another of its exports does not throw here: on the integrated tree
+// Community reserves its bottom space through tabContentBottomReserve.
 vi.mock('../src/ui/MemberTabBar', () => ({
   MEMBER_TAB_BAR_BODY: 56,
   MEMBER_TAB_MOVE_OVERHANG: 16,
   MOVE_HREF: '/move',
+  MEMBER_TABS: [],
+  tabContentBottomReserve: (safeBottom: number) => 56 + 16 + safeBottom,
+  shellAppliesTo: () => false,
+  MemberTabBar: () => null,
 }));
 vi.mock('../src/ui/CommunityPrivacyControls', () => ({
   onPrivacySettled: () => () => undefined,
@@ -124,8 +134,10 @@ vi.mock('../src/ui/YouParityView', () => ({
   YouParityView: (props: {
     state: { kind: string; community?: { groupId: string } };
     actions?: { onRetry?: () => void };
+    refresh?: { stale?: boolean };
   }) => {
     h.youRetry = props.actions?.onRetry ?? null;
+    h.youStale = props.refresh?.stale ?? null;
     const s = props.state;
     h.youFrames.push(s.kind === 'member' ? `member:${s.community?.groupId}` : s.kind);
     return null;
@@ -167,7 +179,24 @@ const TEST_MS = 20_000;
 const UNTIL_MS = 8_000;
 const itTimed = (name: string, fn: () => Promise<void>) => it(name, fn, TEST_MS);
 
+/*
+  NO PROMISE OUTLIVES ITS TEST UNSEEN. A rejection nobody handles (a screen's
+  load bound to a mock without the call it makes, say) used to surface only
+  as a run-level "Unhandled Rejection" after every test had passed, naming no
+  test. Each one raised while a test runs is collected here and fails that
+  test, after its pending work has been drained (afterEach).
+*/
+const unhandled: unknown[] = [];
+const onUnhandled = (reason: unknown) => {
+  unhandled.push(reason);
+};
+
+afterAll(() => {
+  process.off('unhandledRejection', onUnhandled);
+});
+
 beforeAll(async () => {
+  process.on('unhandledRejection', onUnhandled);
   disk = createFakeAsyncStorage();
   await boot();
   await import('react');
@@ -186,6 +215,7 @@ beforeEach(() => {
   h.record.profile = { displayName: 'Ann', createdAt: null };
   freshRead();
   h.youRetry = null;
+  h.youStale = null;
 });
 
 afterEach(async () => {
@@ -195,6 +225,8 @@ afterEach(async () => {
   // the next test boots a fresh process and re-mocks its modules: no late
   // continuation from this test may run against the next test's mocks.
   for (let i = 0; i < 20; i += 1) await new Promise<void>((resolve) => setImmediate(resolve));
+  const seen = unhandled.splice(0).map((r) => (r instanceof Error ? r.message : String(r)));
+  expect(seen, 'unhandled rejections raised during this test').toEqual([]);
 });
 
 /**
@@ -432,6 +464,34 @@ describe('heads-9 N2: the read landing replaces only a loading frame', () => {
     await you.settle();
     expect(h.parityFrames).toEqual([]);
     expect(document.querySelector('[data-testid="wsf-community-index-retry"]')).not.toBeNull();
+    expect(h.youFrames.at(-1)).toBe('failed');
+  });
+});
+
+describe('heads-11 F2: a page the repaint drew survives the failed load it appeared during', () => {
+  itTimed('You keeps member:g2 and says it is stale; a Retry that fails is the failed page', async () => {
+    disk.map.set(REMEMBERED_KEY, 'g2');
+    const releaseReads = holdLaunchRead();
+    const cc = await boot();
+    const { settle, until } = await render('you');
+    expect(h.youFrames.at(-1)).toBe('loading');
+    releaseReads();
+    await cc.currentCommunityReady();
+    await until(() => h.youFrames.at(-1) === 'member:g2', 'the repainted member page');
+
+    // The launch's own fresh read fails: the repainted page stays, marked stale.
+    h.fresh.fail(new Error('offline'));
+    await until(() => h.youStale === true, 'the stale note');
+    expect(h.youFrames.at(-1)).toBe('member:g2');
+    expect(h.youFrames).not.toContain('failed');
+
+    // A Retry reads everything fresh: when that fails, nothing is carried over.
+    freshRead();
+    h.youRetry!();
+    await until(() => h.youFrames.at(-1) === 'loading', 'loading for the Retry');
+    h.fresh.fail(new Error('offline'));
+    await until(() => h.youFrames.at(-1) === 'failed', 'the failed page');
+    await settle();
     expect(h.youFrames.at(-1)).toBe('failed');
   });
 });

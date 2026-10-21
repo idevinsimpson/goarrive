@@ -389,8 +389,13 @@ export default function You() {
   // record could not give then is given now. Not after a Retry, which reads
   // everything fresh. The load below still replaces it.
   const communityReady = useCurrentCommunityReady();
+  // heads-11 F2: what that repaint drew, for the load in flight to keep if it
+  // fails (`fail` below), as it keeps a page drawn at mount.
+  const repainted = useRef<{ uid: string; screen: Screen } | null>(null);
   useEffect(() => {
     if (!communityReady || !ready || !user || reloads > 0) return;
+    const warmNow = youFromRecord(user.uid);
+    repainted.current = warmNow ? { uid: user.uid, screen: warmNow } : null;
     const uid = user.uid;
     setScreen(uid, (prev) => (prev.kind === 'loading' ? youFromRecord(uid) ?? prev : prev));
   }, [communityReady, ready, user, reloads, setScreen]);
@@ -474,6 +479,7 @@ export default function You() {
       return;
     }
     const token = ++live.current;
+    repainted.current = null;
     const uid = user.uid;
     const fresh = reloads > 0 || freshNext.current;
     freshNext.current = false;
@@ -507,6 +513,15 @@ export default function You() {
         const profile = await profileRead;
         if (live.current !== token) return;
         settle();
+        // heads-11 F2: a page the readiness repaint drew while this load was
+        // in flight (it began on loading) is kept and marked stale, exactly
+        // like one drawn at mount, rather than replaced by the failed page.
+        const painted = !recorded && !keep && repainted.current?.uid === uid ? repainted.current.screen : null;
+        if (painted && painted.kind === 'member') {
+          setScreen(uid, { ...painted, profile });
+          setStale(true);
+          return;
+        }
         if (recorded && recorded.kind === 'member') {
           setScreen(uid, { ...recorded, profile });
           setStale(true);

@@ -341,6 +341,113 @@ describe('W13-4b on a phone: the kiosk countdown and the Finish error', () => {
   });
 });
 
+describe('W13-8 (INT-18): the kiosk receipt is said once per attempt on a phone', () => {
+  const RECEIPT = {
+    alreadyRecorded: false,
+    sharedTotal: 46,
+    target: 100,
+    unit: 'squats',
+    status: 'active',
+    addedCount: 6,
+    ownCredit: 11,
+  };
+  /** The receipt's own two sentences, as drawn. */
+  const drawnSentence = () =>
+    `${byId('wsf-contribute-result-headline')!.textContent} ${byId('wsf-contribute-result-subline')!.textContent}`;
+  it('said once, and not again on a re-render or as the kiosk clock ticks', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+    try {
+      params.value = { goalId: 'g1', kiosk: '1' };
+      seedUnknown();
+      render();
+      await settle();
+      await act(async () => byId('wsf-contribute-reconcile')!.click());
+      await settle();
+      await act(async () => contribute!.resolve(RECEIPT));
+      await settle();
+      expect(byId('wsf-contribute-receipt')).not.toBeNull();
+      // The kiosk keeps the ordinary receipt (no Together completion here, and
+      // no Record more: Finish ends a kiosk visit).
+      expect(container.querySelector('[data-together-phase]')).toBeNull();
+      const sentence = drawnSentence();
+      expect(spoken.filter((m) => m === sentence)).toHaveLength(1);
+      render();
+      await settle();
+      await act(async () => vi.advanceTimersByTime(3_000));
+      await settle();
+      expect(spoken.filter((m) => m === sentence)).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('another attempt’s receipt is its own announcement', async () => {
+    params.value = { goalId: 'g1', kiosk: '1' };
+    seedUnknown('att-a');
+    render();
+    await settle();
+    await act(async () => byId('wsf-contribute-reconcile')!.click());
+    await settle();
+    await act(async () => contribute!.resolve(RECEIPT));
+    await settle();
+    const first = drawnSentence();
+    act(() => root.unmount());
+    root = createRoot(container);
+    localStorage.clear();
+    seedUnknown('att-b');
+    render();
+    await settle();
+    await act(async () => byId('wsf-contribute-reconcile')!.click());
+    await settle();
+    await act(async () => contribute!.resolve({ ...RECEIPT, alreadyRecorded: true }));
+    await settle();
+    const second = drawnSentence();
+    expect(second).not.toBe(first);
+    expect(spoken.filter((m) => m === first)).toHaveLength(1);
+    expect(spoken.filter((m) => m === second)).toHaveLength(1);
+  });
+
+  it('the member’s own (Together) receipt is never doubled by it', async () => {
+    seedUnknown();
+    render();
+    await settle();
+    await act(async () => byId('wsf-contribute-reconcile')!.click());
+    await settle();
+    spoken.length = 0;
+    await act(async () => contribute!.resolve(RECEIPT));
+    await settle();
+    expect(container.querySelector('[data-together-phase]')).not.toBeNull();
+    // Nothing from the kiosk receipt's announcement: the Together receipt speaks for itself.
+    expect(spoken.filter((m) => /^You added|^This contribution was already recorded/.test(m))).toEqual([]);
+  });
+
+  it('web: aria-live="polite" as before, and nothing posted', async () => {
+    mode.native = false;
+    params.value = { goalId: 'g1', kiosk: '1' };
+    seedUnknown();
+    render();
+    await settle();
+    await act(async () => byId('wsf-contribute-reconcile')!.click());
+    await settle();
+    await act(async () => contribute!.resolve(RECEIPT));
+    await settle();
+    expect(byId('wsf-contribute-receipt')!.getAttribute('aria-live')).toBe('polite');
+    expect(spoken).toEqual([]);
+  });
+
+  it('site scan: liveRegion, no raw aria-live, and the announcement keyed by attempt and outcome', () => {
+    const at = ROUTE.indexOf('style={[styles.sheetBody, windowHeight < 700 ? styles.sheetBodyShort : null]}');
+    expect(at).toBeGreaterThan(-1);
+    const tag = ROUTE.slice(at, ROUTE.indexOf('<View style={styles.badge}>', at));
+    expect(tag).toContain('testID="wsf-contribute-receipt"');
+    expect(tag).toContain('{...liveRegion}');
+    expect(tag).not.toMatch(/aria-live=/);
+    expect(tag).toContain('message={`${copy.headline} ${copy.subline}`}');
+    expect(tag).toContain("announceKey={`${receiptAttemptRef.current}:${r.alreadyRecorded ? 'already' : 'recorded'}`}");
+    expect(ROUTE).toContain('      receiptAttemptRef.current = attemptId;\n      setLastResult(data);');
+  });
+});
+
 describe('W13-4 site scan (app/contribute/[goalId].tsx)', () => {
   /** The opening tag and first children of the sheet with this testID. */
   const sheet = (testId: string) => {
