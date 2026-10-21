@@ -5,15 +5,23 @@ import { SIGNED_OUT_HOME_RESET } from './signOutReset';
  *
  * A westayfit:// link (a join, a marker, Settings, a contribution) opened with
  * the app closed starts the root stack with that one route and nothing under
- * it, so Android Back left the app. React Navigation handles Back first; only
- * when it has nothing to go back to does the app's own lowest-priority
- * listener ask this: is the root stack one lone route a member reaches from
- * Home? Then it is reset to (tabs)/Home (the same RESET as the signed-out
- * reset, src/ui/signOutReset.ts). Anything else is left alone, and Back leaves
- * as Android expects: the venue and kiosk surfaces (kiosk, station, display,
- * queue, event, combined), the sign-in gates that route on by themselves
- * (verify-email, profile-setup), the tabs themselves, and any deeper stack.
+ * it, so Android Back left the app. The root layout's listener asks one
+ * question: is the root stack one lone route a member reaches from Home? Then
+ * it is reset to (tabs)/Home (the same RESET as the signed-out reset,
+ * src/ui/signOutReset.ts) and the press is consumed. Anything else is passed
+ * on: the venue and kiosk surfaces (kiosk, station, display, queue, event,
+ * combined), the sign-in gates that route on by themselves (verify-email,
+ * profile-setup), the tabs themselves, and any deeper stack.
  * Never a change to initialRouteName.
+ *
+ * THE ORDER, AS IT REALLY IS (RV13-641-F2). expo-router's navigation
+ * container registers its Back listener a commit before the root layout
+ * mounts, and Android calls the newest listener first, so this listener is
+ * called BEFORE React Navigation's own Back. That is safe because it consumes
+ * only a lone allowlisted leaf route, which React Navigation cannot pop; any
+ * deeper stack is passed on, and React Navigation goes back. Screen handlers
+ * registered through expo-router's useFocusEffect (INT-19 on the contribution
+ * screen) register after both, so they still run first.
  */
 
 /** The root routes a member reaches from Home, by their expo-router names. */
@@ -72,8 +80,9 @@ export type ColdBackAction = typeof SIGNED_OUT_HOME_RESET & { target: string };
  * (its screen in expo-router's internal root navigator): resets a lone
  * allowlisted root route to Home (the RESET addressed to the app's root
  * Stack by its state key, which React Navigation hands down to that child
- * navigator) and consumes the press; otherwise lets Android handle it
- * (returns false). Nothing while the Stack's state has no key yet.
+ * navigator) and consumes the press; otherwise passes it on (returns false)
+ * to the next listener, React Navigation's, and then Android. Nothing while
+ * the Stack's state has no key yet.
  */
 export function coldBackHandler(navigation: {
   getState: () => ColdBackRootState;
