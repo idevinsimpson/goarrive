@@ -28,6 +28,17 @@ const ctl = vi.hoisted(() => ({
   verifiedAfterReload: true,
   /** The root stack's state as the screen's navigation object reports it. */
   rootState: undefined as undefined | { routes: Array<{ name: string; params?: object }> },
+  /** The device's kiosk-session marker (RV16-641-B1), or a read that throws (RV16-641-N2). */
+  marker: null as string | null,
+  markerThrows: false,
+}));
+
+vi.mock('../src/kioskSession', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  readKioskSession: () => {
+    if (ctl.markerThrows) throw new Error('marker unreadable');
+    return ctl.marker;
+  },
 }));
 
 vi.mock('react-native', async () => {
@@ -138,6 +149,8 @@ beforeEach(() => {
   ctl.profileExists = true;
   ctl.verifiedAfterReload = true;
   ctl.rootState = undefined;
+  ctl.marker = null;
+  ctl.markerThrows = false;
   USER.emailVerified = false;
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -305,6 +318,48 @@ describe('RV12-641-F1: a kiosk destination is never reset to Home', () => {
         ['dispatch', HOME_ONLY_RESET],
         ['push', '/community/oak'],
       ]);
+    }
+  });
+
+  it('RV16-641-B1, native: a caller that passes NO routes (Sign in, Create account) with a kiosk marker open: a member destination is replaced, never reset', () => {
+    ctl.marker = 'g1';
+    for (const platform of ['ios', 'android']) {
+      for (const next of ['/join/AbCdEf', '/event/g9', '/go/oak-hall-01', '/community/oak']) {
+        ctl.calls = [];
+        landAfterAuth(next, { ...deps(), platform });
+        expect([platform, ctl.calls]).toEqual([platform, [['replace', next]]]);
+      }
+      // '/' with the marker: that kiosk's start screen (replaced, with no stack to pop back to).
+      ctl.calls = [];
+      landAfterAuth('/', { ...deps(), platform });
+      expect(ctl.calls).toEqual([['replace', '/kiosk/g1']]);
+    }
+    // Control: no marker, no routes: the Home reset and the push, as before.
+    ctl.marker = null;
+    ctl.calls = [];
+    landAfterAuth('/join/AbCdEf', { ...deps(), platform: 'ios' });
+    expect(ctl.calls).toEqual([
+      ['dispatch', HOME_ONLY_RESET],
+      ['push', '/join/AbCdEf'],
+    ]);
+    // The web: replace, whatever the marker says.
+    ctl.marker = 'g1';
+    ctl.calls = [];
+    landAfterAuth('/join/AbCdEf', { ...deps(), platform: 'web' });
+    expect(ctl.calls).toEqual([['replace', '/join/AbCdEf']]);
+  });
+
+  it('RV16-641-N2, native: a marker read that throws counts as open: replaced, never the Home reset, with or without a stack', () => {
+    ctl.markerThrows = true;
+    for (const platform of ['ios', 'android']) {
+      for (const next of ['/join/AbCdEf', '/']) {
+        ctl.calls = [];
+        landAfterAuth(next, { ...deps(), platform });
+        expect([platform, next, ctl.calls]).toEqual([platform, next, [['replace', next]]]);
+        ctl.calls = [];
+        landAfterAuth(next, { ...deps(), routes: () => [{ name: '(tabs)' }, { name: 'signin' }], platform });
+        expect([platform, next, ctl.calls]).toEqual([platform, next, [['replace', next]]]);
+      }
     }
   });
 
