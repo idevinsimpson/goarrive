@@ -184,6 +184,15 @@ async function render(route: 'community' | 'you') {
     },
     /** Let queued work land, inside act. */
     settle: () => React.act(() => flush()),
+    /**
+     * Settle until `done()` holds, up to ~10 s. A loaded worker can need more
+     * than one settle for the fresh load to land; only an outcome that never
+     * arrives fails.
+     */
+    async until(done: () => boolean): Promise<void> {
+      const end = Date.now() + 10_000;
+      while (!done() && Date.now() < end) await React.act(() => flush());
+    },
   };
 }
 
@@ -192,7 +201,7 @@ describe('ST-03: before the launch read answers, no warm frame says "none chosen
     disk.map.set(REMEMBERED_KEY, 'g2');
     const releaseReads = disk.holdReads();
     const cc = await boot();
-    const { testIds, settle } = await render('community');
+    const { testIds, settle, until } = await render('community');
 
     expect(cc.isCurrentCommunityReady()).toBe(false);
     expect(testIds().has(LOADING)).toBe(true);
@@ -207,7 +216,7 @@ describe('ST-03: before the launch read answers, no warm frame says "none chosen
     expect(h.parityFrames).toEqual([]);
 
     h.fresh.land({ items: TWO });
-    await settle();
+    await until(() => h.parityFrames.length > 0);
     expect(h.parityFrames.at(-1)).toBe('g2');
     expect(testIds().has(CHOOSER)).toBe(false);
   });
@@ -216,7 +225,7 @@ describe('ST-03: before the launch read answers, no warm frame says "none chosen
     disk.map.set(REMEMBERED_KEY, 'g2');
     const releaseReads = disk.holdReads();
     const cc = await boot();
-    const { settle } = await render('you');
+    const { settle, until } = await render('you');
 
     expect(cc.isCurrentCommunityReady()).toBe(false);
     expect(h.youFrames.length).toBeGreaterThan(0);
@@ -228,7 +237,7 @@ describe('ST-03: before the launch read answers, no warm frame says "none chosen
     expect(h.youFrames).not.toContain('pickCommunity');
 
     h.fresh.land({ items: TWO });
-    await settle();
+    await until(() => h.youFrames.at(-1) !== 'loading');
     expect(h.youFrames.at(-1)).toBe('member:g2');
     expect(h.youFrames).not.toContain('pickCommunity');
   });
