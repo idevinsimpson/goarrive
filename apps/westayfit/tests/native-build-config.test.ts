@@ -232,6 +232,23 @@ describe('NATIVE-BUILD-1: app.config.js build-time backend refusals', () => {
     });
   });
 
+  describe('NATIVE-PREVIEW-IOS-1 (PRV-3): the iOS preview build leaves the camera module out, and only on iOS', () => {
+    const pkg = () => JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf8')) as Record<string, any>;
+
+    it('expo.autolinking.ios.exclude is exactly ["wsf-pose-camera"]', () => {
+      expect(pkg().expo.autolinking.ios.exclude).toEqual(['wsf-pose-camera']);
+    });
+
+    it('nothing else in autolinking: no top-level exclude, no apple block, no android block', () => {
+      const autolinking = pkg().expo.autolinking as Record<string, unknown>;
+      expect(Object.keys(autolinking)).toEqual(['ios']);
+      expect(autolinking.exclude).toBeUndefined();
+      expect(autolinking.apple).toBeUndefined();
+      expect(autolinking.android).toBeUndefined();
+      expect(Object.keys(autolinking.ios as Record<string, unknown>)).toEqual(['exclude']);
+    });
+  });
+
   describe('NATIVE-INTEGRATOR-1 (I-8a): the preview EAS project, and an iOS simulator build with no Apple account', () => {
     type Profile = { extends?: string; env?: Record<string, string>; ios?: Record<string, unknown>; android?: Record<string, unknown>; [k: string]: unknown };
     const readJson = (f: string) => JSON.parse(readFileSync(join(__dirname, '..', f), 'utf8'));
