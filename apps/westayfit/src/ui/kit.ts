@@ -156,11 +156,15 @@ export const elevation = {
   RV13-641-N2. TURNING A TOKEN'S LIFT OFF (a disabled or done state over a
   style that spreads one): spread ELEVATION_OFF, not a bare `shadowOpacity: 0`.
   On iOS the token is a boxShadow, which shadowOpacity does not reach, so
-  there it is also cancelled ('none' parses to no shadow). The web and
-  Android get exactly `{ shadowOpacity: 0 }`, as the bare key gave them.
+  there it is also cancelled ('none' parses to no shadow). On Android the
+  token lifts with `elevation` (3, 8, 6) and RN 0.81 has no shadowOpacity
+  there, so it is cancelled with `elevation: 0` (RV14-641-5); with no
+  elevation the shadowColor tints nothing. The web gets exactly
+  `{ shadowOpacity: 0 }`, as the bare key gave it.
 */
 export const ELEVATION_OFF: ElevationStyle = Platform.select<ElevationStyle>({
   ios: { shadowOpacity: 0, boxShadow: 'none' },
+  android: { shadowOpacity: 0, elevation: 0 },
   default: { shadowOpacity: 0 },
 });
 /*
@@ -196,10 +200,18 @@ export type PressableFeedback = {
  * writes every StyleSheet rule into the web's CSS, and the web never uses this.
  */
 export const PRESSED: Readonly<ViewStyle> = Object.freeze({ opacity: 0.72 });
-export function pressableStyle(base: StyleProp<ViewStyle>, tint: ColorValue): PressableFeedback {
+/**
+ * `ripple` shapes Android's ripple (RV14-641-N2: a round control passes
+ * `{ borderless: true, radius }`, or the ripple paints its square bounds).
+ */
+export function pressableStyle(
+  base: StyleProp<ViewStyle>,
+  tint: ColorValue,
+  ripple?: Omit<PressableAndroidRippleConfig, 'color'>,
+): PressableFeedback {
   if (Platform.OS === 'web') return { style: base };
   const style = ({ pressed }: PressableStateCallbackType): StyleProp<ViewStyle> => [base, pressed && PRESSED];
-  return Platform.OS === 'android' ? { style, android_ripple: { color: tint } } : { style };
+  return Platform.OS === 'android' ? { style, android_ripple: { color: tint, ...ripple } } : { style };
 }
 
 export const kit = StyleSheet.create({

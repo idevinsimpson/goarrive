@@ -19,7 +19,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  *     from the code before the change (the twin's props are {}):
  *     tests/fixtures/contribute-numerals-web-before-int16.json. The snapshot
  *     was recorded once with WSF_RECORD_INT16=1, which writes only a missing
- *     file and never replaces one.
+ *     file and never replaces one. Absolute asset paths are held from
+ *     `assets/` on, as `<APP_ROOT>/assets/…` (`portable`), so any checkout
+ *     compares the same.
  *   · A scan: every style of 24 pt or more in contribute is classified, and
  *     every use of a numeral style spreads the policy (another lane's numeral
  *     shows as a todo until it does).
@@ -198,17 +200,45 @@ async function kioskReceipt(): Promise<HTMLElement> {
   return byId('wsf-contribute-receipt')!;
 }
 
+/*
+  Candidate-12 run 1: vitest gives an imported image the absolute path of its
+  file in this checkout (…/apps/westayfit/assets/brand/derived/…png), and the
+  receipt and closed screens draw such images. So the DOM is compared with
+  every absolute path into an assets directory written from `assets/` on, as
+  `<APP_ROOT>/assets/…`: the same in any checkout, CI or temporary merge. A
+  URL with a scheme (https://…) is left as it is. Nothing else in the DOM is
+  touched.
+*/
+const ASSET_PATH = /(url\(&quot;|url\(|src="|srcset=")([^"&()\s]*?)\/assets\//g;
+const portable = (html: string) =>
+  html.replace(ASSET_PATH, (match, open: string, before: string) => (before.includes('://') ? match : `${open}<APP_ROOT>/assets/`));
+
 describe('INT-16: the web\'s screens are the DOM they were before', () => {
   const recorded: Record<string, string> = existsSync(FIXTURE) ? JSON.parse(readFileSync(FIXTURE, 'utf8')) : {};
   const record = process.env.WSF_RECORD_INT16 === '1' && !existsSync(FIXTURE);
   const fresh: Record<string, string> = {};
+
+  it('portable: an absolute asset path becomes <APP_ROOT>/assets/, and nothing else changes', () => {
+    const at = (root: string) => `<div style="background-image: url(&quot;${root}/assets/brand/derived/monogram-fill-green.png&quot;);"></div><img src="${root}/assets/a.png">`;
+    expect(portable(at('/tmp/x/ga-int1/apps/westayfit'))).toBe(at('<APP_ROOT>'));
+    expect(portable(at('/home/runner/work/goarrive/apps/westayfit'))).toBe(portable(at('/dev/shm/cand-merge/apps/westayfit')));
+    const other = '<img src="https://example.com/assets/a.png"><p>assets/ 1,275 squats</p>';
+    expect(portable(other)).toBe(other);
+  });
+
+  it('the snapshot holds no path into a checkout', () => {
+    for (const html of Object.values(recorded)) {
+      expect(portable(html)).toBe(html);
+      expect(html).not.toMatch(/apps\/westayfit\//);
+    }
+  });
 
   it.each(SNAPSHOT_SCREENS)('%s: identical to the snapshot', async (name) => {
     (Platform as { OS: string }).OS = 'web';
     const el = await SCREENS[name]!();
     expect(el).not.toBeNull();
     if (record) {
-      fresh[name] = el.outerHTML;
+      fresh[name] = portable(el.outerHTML);
       if (Object.keys(fresh).length === SNAPSHOT_SCREENS.length) {
         // Written once, before the change, and never over an existing file.
         writeFileSync(FIXTURE, `${JSON.stringify(fresh, null, 2)}\n`, { flag: 'wx' });
@@ -216,7 +246,7 @@ describe('INT-16: the web\'s screens are the DOM they were before', () => {
       return;
     }
     expect(Object.keys(recorded).sort()).toEqual([...SNAPSHOT_SCREENS].sort());
-    expect(el.outerHTML).toBe(recorded[name]);
+    expect(portable(el.outerHTML)).toBe(recorded[name]);
   });
 });
 

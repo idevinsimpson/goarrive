@@ -532,6 +532,30 @@ describe('W12-2: a failed refresh keeps a warm screen (INT-25); a stale sign-in 
     expect(peekGoals('u1', 'oak')).toBeUndefined();
   });
 
+  it('RV14-641-1 (probe PA): Auth unreachable, then a Retry while Functions is down too; a token-less not-found tick still evicts nothing', async () => {
+    await warm('ios');
+    fakeAuth.currentUser = { uid: 'u1', getIdToken: async () => 't' };
+    refresh.result = 'offline';
+    answers.wsfGoalPulse = UNAUTHENTICATED;
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    expect(byId('wsf-contribute-stale-note')).not.toBeNull();
+    // A full outage: both of the Retry's reads fail in transport (internal), which says nothing about the token.
+    answers.wsfGoalPulse = INTERNAL;
+    answers.wsfMyContribution = INTERNAL;
+    await act(async () => byId('wsf-contribute-stale-retry')!.click());
+    await settle();
+    expect(byId('wsf-contribute-stale-note')).not.toBeNull();
+    // Functions is back before Auth: the tick goes out token-less and the public pulse answers the anonymous not-found.
+    answers.wsfGoalPulse = NOT_FOUND;
+    await pollFor(4_000);
+    expect(byId('wsf-contribute-not-found')).toBeNull();
+    expect(byId('wsf-contribute-entry-screen')).not.toBeNull();
+    expect(byId('wsf-contribute-stale-note')).not.toBeNull();
+    expect(peekGoals('u1', 'oak')).toBeDefined();
+  });
+
   it('RV12-641-5: Auth unreachable, then the note\'s Retry loads with a good token; a later not-found tick is a verdict again', async () => {
     await warm('ios');
     fakeAuth.currentUser = { uid: 'u1', getIdToken: async () => 't' };
@@ -629,6 +653,30 @@ describe('W12-2: a failed refresh keeps a warm screen (INT-25); a stale sign-in 
     act(() => typeInto(entry(), '3'));
     await settle();
     expect(byId('wsf-contribute-context-updated')!.textContent).toBe(`Confirmed Oct 20, ${sameDay.slice('Confirmed '.length)}`);
+  });
+
+  it('N1 is a phone\'s: on the web a receipt before the load has landed leaves no confirmed time and starts no poll, as before', async () => {
+    windowOf(844);
+    await warm('web');
+    fakeAuth.currentUser = { uid: 'u1', getIdToken: async () => 't' };
+    // The goal's own load never lands; the screen opened warm from the account's record.
+    answers.wsfGoalPulse = () => new Promise(() => undefined);
+    answers.wsfContribute = async () => ({ addedCount: 35, ownCredit: 40, sharedTotal: 75, target: 100, unit: 'squats', status: 'active', alreadyRecorded: false });
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    act(() => typeInto(entry(), '35'));
+    await act(async () => byId('wsf-contribute-review')!.click());
+    await settle();
+    await act(async () => byId('wsf-contribute-submit')!.click());
+    await settle();
+    await act(async () => byId('wsf-contribute-record-more')!.click());
+    await settle();
+    expect(byId('wsf-contribute-shared-total')!.textContent).toContain('75');
+    expect(byId('wsf-contribute-context-updated')).toBeNull();
+    const sent = count('wsfGoalPulse');
+    await pollFor(6_000);
+    expect(count('wsfGoalPulse')).toBe(sent);
   });
 
   it('web: a poll not-found still ends the screen, as before', async () => {

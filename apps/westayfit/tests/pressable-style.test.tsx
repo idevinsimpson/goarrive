@@ -111,21 +111,22 @@ describe('the integrator\'s controls use it', () => {
       ),
     );
   }
-  const CONTROLS: Array<[string, string]> = [
-    ['opt', OPTION_SELECTED_TINT],
-    ['wsf-member-topbar-menu-button', OPTION_SELECTED_TINT],
-    ['wsf-member-topbar-menu-settings', OPTION_SELECTED_TINT],
-    ['wsf-member-tab-home', OPTION_SELECTED_TINT],
-    ['wsf-member-tab-move', ACTION_GREEN_DEEP],
+  const CONTROLS: Array<[string, Record<string, unknown>]> = [
+    ['opt', { color: OPTION_SELECTED_TINT }],
+    ['wsf-member-topbar-menu-button', { color: OPTION_SELECTED_TINT }],
+    ['wsf-member-topbar-menu-settings', { color: OPTION_SELECTED_TINT }],
+    ['wsf-member-tab-home', { color: OPTION_SELECTED_TINT }],
+    // RV14-641-N2: the round MOVE button's ripple is round, its own radius.
+    ['wsf-member-tab-move', { color: ACTION_GREEN_DEEP, borderless: true, radius: 31 }],
   ];
 
   it('Android: each takes a pressed-style function and its ripple', () => {
     setOs('android');
     renderAll();
-    for (const [id, tint] of CONTROLS) {
+    for (const [id, ripple] of CONTROLS) {
       const props = pressableProps(byId(id)!);
       expect(typeof props.style, id).toBe('function');
-      expect(props.android_ripple, id).toEqual({ color: tint });
+      expect(props.android_ripple, id).toEqual(ripple);
     }
   });
 
@@ -201,7 +202,8 @@ describe('never on a ButtonLink or a <Link asChild> child', () => {
     expect(found).toEqual([]);
     // The sites that do use it are where they should be.
     const users = files.filter((f) => /\bpressableStyle\s*\(/.test(readFileSync(f, 'utf8'))).map((f) => relative(APP_ROOT, f)).sort();
-    // W16-12 (INT-33, member): DeviceChoice's buttons adopt it, as W12-17 routes.
-    expect(users).toEqual(['src/ui/DeviceChoice.tsx', 'src/ui/MemberTabBar.tsx', 'src/ui/MemberTopBar.tsx', 'src/ui/OptionRow.tsx']);
+    // The integrator's three, and any other shared control under src/ui (member's DeviceChoice, W16-12; RV14-641-N7).
+    expect(users).toEqual(expect.arrayContaining(['src/ui/MemberTabBar.tsx', 'src/ui/MemberTopBar.tsx', 'src/ui/OptionRow.tsx']));
+    expect(users.filter((f) => !f.startsWith('src/ui/'))).toEqual([]);
   }, 60_000);
 });

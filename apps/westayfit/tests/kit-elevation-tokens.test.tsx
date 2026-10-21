@@ -100,11 +100,17 @@ describe('W12-15: elevation.* per platform', () => {
 });
 
 describe('RV13-641-N2: turning a token\'s lift off', () => {
-  it('web and Android: exactly the bare key the off states had ({ shadowOpacity: 0 })', async () => {
-    for (const os of ['web', 'android'] as const) {
-      const { kit } = await on(os);
-      expect(kit.ELEVATION_OFF).toEqual({ shadowOpacity: 0 });
-      expect(Object.keys(kit.ELEVATION_OFF)).toEqual(['shadowOpacity']);
+  it('web: exactly the bare key the off states had ({ shadowOpacity: 0 })', async () => {
+    const { kit } = await on('web');
+    expect(kit.ELEVATION_OFF).toEqual({ shadowOpacity: 0 });
+    expect(Object.keys(kit.ELEVATION_OFF)).toEqual(['shadowOpacity']);
+  });
+
+  it('Android (RV14-641-5, deliberately changed): elevation 0 as well, so a token followed by it draws no lift', async () => {
+    const { kit, StyleSheet } = await on('android');
+    expect(kit.ELEVATION_OFF).toEqual({ shadowOpacity: 0, elevation: 0 });
+    for (const token of Object.values(kit.elevation)) {
+      expect(StyleSheet.flatten([token, kit.ELEVATION_OFF] as never)).toMatchObject({ elevation: 0 });
     }
   });
 
