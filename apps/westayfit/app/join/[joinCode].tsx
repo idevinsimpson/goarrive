@@ -51,6 +51,7 @@ import {
   SURFACE,
   elevation,
 } from '../../src/ui/kit';
+import { ScreenTopSpacer } from '../../src/ui/useScreenTopInset';
 import { WsfWordmark } from '../../src/ui/WsfWordmark';
 
 type Preview = {
@@ -760,6 +761,8 @@ const JOINING_MEANS: readonly string[] = [
 function JoinSkeleton() {
   return (
     <View style={skeleton.screen} testID="wsf-join-loading">
+      {/* // NATIVE-MEMBER-1 W16-8 (INT-09): a root-stack screen clears the status bar itself; nothing on web. */}
+      <ScreenTopSpacer />
       <View style={skeleton.chrome}>
         <WsfWordmark variant="navy" height={21} testID="wsf-join-wordmark" />
       </View>

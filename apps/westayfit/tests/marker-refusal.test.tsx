@@ -2,6 +2,8 @@ import { act, useEffect, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { Platform } from 'react-native';
+
 import type { MarkerResolver, ResolvedMarker } from '../src/markerEntry';
 
 /**
@@ -131,5 +133,31 @@ describe('join', () => {
     await render(resolverOf(() => Promise.resolve(MARKER), notFound));
     await pressJoin();
     expect(byId('wsf-marker-invalid')).not.toBeNull();
+  });
+});
+
+describe('W16-8 / MF-19: an inactive code, in the app and on the web', () => {
+  const WEB = 'It isn’t pointing at a challenge right now. Ask someone at the event, or open the app to find your communities.';
+  const APP = 'It isn’t pointing at a challenge right now. Ask someone at the event, or go to Home to find your communities.';
+  const notFound = () => resolverOf(() => Promise.reject(fnError('not-found', 'This link is not valid.')));
+  const os = Platform.OS;
+  afterEach(() => {
+    (Platform as { OS: string }).OS = os;
+  });
+
+  it('web keeps its sentence byte for byte', async () => {
+    await render(notFound());
+    const card = byId('wsf-marker-invalid')!;
+    expect(card.textContent).toContain(WEB);
+    expect(card.textContent).not.toContain('go to Home');
+  });
+
+  it.each(['ios', 'android'])('%s never tells a member already in the app to open it, and names Home', async (platform) => {
+    (Platform as { OS: string }).OS = platform;
+    await render(notFound());
+    const card = byId('wsf-marker-invalid')!;
+    expect(card.textContent).toContain(APP);
+    expect(card.textContent).not.toMatch(/open the app/i);
+    expect(byId('wsf-marker-home')).not.toBeNull();
   });
 });

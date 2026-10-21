@@ -4,8 +4,9 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { useWsfAuth } from '../../src/auth';
 import { CommunityPrivacyControls } from '../../src/ui/CommunityPrivacyControls';
-import { NAVY, PROGRESS_GREEN, CREAM, TEXT_MUTED } from '../../src/ui/kit';
+import { BACK_GLYPH_HIT_SLOP, NAVY, PROGRESS_GREEN, CREAM, TEXT_MUTED } from '../../src/ui/kit';
 import { MEMBER_TAB_BAR_BODY } from '../../src/ui/MemberTabBar';
+import { ScreenTopSpacer } from '../../src/ui/useScreenTopInset';
 
 /**
  * PRIVACY — how you appear in each of your communities.
@@ -42,12 +43,15 @@ export default function PrivacySettingsScreen() {
 
   return (
     <View style={st.screen} testID="wsf-privacy-screen">
+      {/* // NATIVE-MEMBER-1 W16-8 (INT-09): a root-stack screen clears the status bar itself; nothing on web. */}
+      <ScreenTopSpacer />
       <View style={st.head}>
         <View style={st.chrome}>
           <Pressable
             onPress={() => router.replace('/settings')}
             accessibilityRole="link"
             accessibilityLabel="Back to Settings"
+            hitSlop={BACK_GLYPH_HIT_SLOP}
             testID="wsf-privacy-back"
           >
             <Text style={st.back}>‹</Text>

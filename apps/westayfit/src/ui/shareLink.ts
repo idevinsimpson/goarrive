@@ -9,7 +9,9 @@
  * when the browser has it, otherwise `navigator.clipboard.writeText`, a
  * rejected copy reported as a failure and a dismissed sheet reported as
  * nothing. The app gets `shareLink.native.ts`: expo-clipboard and React
- * Native's Share API, offered only for an absolute https link.
+ * Native's Share API, offered only for an https link whose host is exactly
+ * one of configuredInviteHosts(EXPO_PUBLIC_WSF_INVITE_HOSTS); never when
+ * unconfigured or configured-but-empty.
  */
 import { shareRoute, type ShareRoute } from '../shareGoalDisplay';
 

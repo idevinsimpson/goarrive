@@ -7,12 +7,14 @@ import { useWsfAuth } from '../src/auth';
 import { MoveCameraSettingsSection } from '../src/movement-camera/MoveCameraSettingsSection';
 import { CommunityPrivacyControls } from '../src/ui/CommunityPrivacyControls';
 import {
+  BACK_GLYPH_HIT_SLOP,
   CREAM,
   NAVY,
 } from '../src/ui/kit';
 import { isOverMemberTabs } from '../src/ui/moveSheetRoute';
 import { SCRIM_PROPS, sheetData, useSheetExit, useSheetFocusContainment } from '../src/ui/sheetMotion';
 import { useReducedMotion } from '../src/ui/useReducedMotion';
+import { ScreenTopSpacer } from '../src/ui/useScreenTopInset';
 
 /**
  * SETTINGS — the hub.
@@ -157,11 +159,14 @@ export default function SettingsScreen() {
 
   return (
     <View style={st.screen} testID="wsf-settings-screen">
+      {/* // NATIVE-MEMBER-1 W16-8 (INT-09): a root-stack screen clears the status bar itself; nothing on web. */}
+      <ScreenTopSpacer />
       <View style={[st.chrome, st.pageChrome]}>
         <Pressable
           onPress={() => router.replace('/you')}
           accessibilityRole="link"
           accessibilityLabel="Back to You"
+          hitSlop={BACK_GLYPH_HIT_SLOP}
           testID="wsf-settings-back"
         >
           <Text style={st.back}>‹</Text>

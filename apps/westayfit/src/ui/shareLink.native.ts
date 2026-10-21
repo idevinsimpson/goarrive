@@ -9,8 +9,10 @@
  *   · Share is React Native's Share API: iOS gets `{ url }` (and the title as
  *     the message when there is one), Android gets `{ message: url }`.
  *     Dismissing the sheet changes nothing on screen.
- *   · Both are offered, and act, only for an absolute https link
- *     (`isShareableHttpsUrl`): never a development build's Metro address or
+ *   · Both are offered, and act, only for an https link whose host is
+ *     exactly one of configuredInviteHosts(EXPO_PUBLIC_WSF_INVITE_HOSTS)
+ *     (`isShareableHttpsUrl`); never when unconfigured or
+ *     configured-but-empty. So never a development build's Metro address or
  *     tunnel, never a half-built or relative one.
  *
  * EXPO-CLIPBOARD IS OPTIONAL (review F3-N1). Importing it calls
@@ -31,7 +33,9 @@ import { isShareableHttpsUrl, shareRoute, type ShareRoute } from '../shareGoalDi
 
 export type CopyOutcome = 'copied' | 'failed';
 
-/** Whether Copy or Share may be offered for this link: absolute https only. */
+/**
+ * Whether Copy or Share may be offered for this link: an https link whose host is exactly one of configuredInviteHosts(EXPO_PUBLIC_WSF_INVITE_HOSTS); never when unconfigured or configured-but-empty.
+ */
 export function offerableLink(url: string | null | undefined): url is string {
   return isShareableHttpsUrl(url);
 }
@@ -55,7 +59,11 @@ export function hasShareSheet(): boolean {
   return true;
 }
 
-/** The public display control's route: `nativeShare` once there is an https origin. */
+/**
+ * The public display control's route: `nativeShare` only for an https origin
+ * whose host is exactly one of configuredInviteHosts(EXPO_PUBLIC_WSF_INVITE_HOSTS);
+ * never when unconfigured or configured-but-empty.
+ */
 export function linkShareRoute(): ShareRoute {
   return shareRoute(typeof navigator === 'undefined' ? null : navigator);
 }
