@@ -188,6 +188,10 @@ export function isDefiniteRefusal(e: unknown, attempt: 'new' | 'replay'): boolea
 // OWNER-VISIBLE WORDING, PENDING SIGN-OFF. Kept here, beside the rest of the
 // contribution copy, so the screen and its tests read the same sentences.
 
+/** The pending sheet when the device refused to save the attempt's record (replaces "You can leave this page…"). */
+export const NOT_SAVED_NOTICE =
+  'This device couldn’t save this attempt, so it won’t be here if you leave this page. Confirm it here.';
+
 /** The restore could not read this device's saved attempt; recording stays paused until it can. */
 export const RESTORE_FAILED_HEADING = 'Couldn’t read this device’s saved attempt.';
 export const RESTORE_FAILED_BODY =
