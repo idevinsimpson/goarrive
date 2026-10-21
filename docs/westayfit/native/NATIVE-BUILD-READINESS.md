@@ -62,7 +62,7 @@ This document is preparation only. No build ran from the sprint sandbox and no s
 
 ## Owner actions (exact)
 1. **EAS project: done, by link.** The project exists under `devinsimpson` and `app.json` names it (see the top of this document). Do not run `eas init`. Before any account command, from `apps/westayfit`, run `[ACCOUNT] npx eas-cli@25.3.0 login` as `devinsimpson`. To confirm the link, run `[RO] npx eas-cli@25.3.0 project:info`, which needs that login.
-2. **EAS environment variables:** set the six `EXPO_PUBLIC_WSF_STAGING_*` values from the `westayfit-staging` Firebase Web App config in both the `preview` and `development` environments. One command per name: `[ACCOUNT] npx eas-cli@25.3.0 env:set --name <NAME> --value <value> --environment preview --environment development --visibility plaintext --scope project`. Use **Plain text** or **Sensitive** visibility, **not Secret**: `eas env:pull` cannot read Secret values outside EAS servers and writes them only as comments (`# NAME=***** (secret)`; eas-cli 25.3.0 `build/commands/env/pull.js`), so the development client would be missing them and refuse to start. They are public client identifiers, so Plain text is fine. Also add `EXPO_PUBLIC_WSF_ENV=staging` and `EXPO_PUBLIC_WSF_AUTH_ENABLED=1` to the `development` environment, so `env:pull` writes the selector (step 2 above) and a development client can sign in.
+2. **EAS environment variables:** set the six `EXPO_PUBLIC_WSF_STAGING_*` values from the `westayfit-staging` Firebase Web App config in both the `preview` and `development` environments. Retrieve, verify and upload them as in "Staging values: retrieve, verify, upload" below. The owner verified on 21 Oct (03:39Z, read-only) that the project has **no environment variables in any environment** yet. Use **Plain text** or **Sensitive** visibility, **not Secret**: `eas env:pull` cannot read Secret values outside EAS servers and writes them only as comments (`# NAME=***** (secret)`; eas-cli 25.3.0 `build/commands/env/pull.js`), so the development client would be missing them and refuse to start. They are public client identifiers, so Plain text is fine. Also add `EXPO_PUBLIC_WSF_ENV=staging` and `EXPO_PUBLIC_WSF_AUTH_ENABLED=1` to the `development` environment, so `env:pull` writes the selector (step 2 above) and a development client can sign in.
 3. **Android internal test:** run `npx eas-cli@25.3.0 build -p android --profile preview`.
    - On the first build, accept the EAS-generated keystore. That is the Android signing credential, and EAS manages it.
    - Install the APK by link or QR, allowing "install unknown apps" for the browser that opens it.
@@ -72,6 +72,27 @@ This document is preparation only. No build ran from the sprint sandbox and no s
    - On the phone, turn on Developer Mode (Settings › Privacy & Security › Developer Mode, iOS 16 and later) before the build will launch.
    - The bundle id `com.westayfit.app` must be free in that Apple team.
 5. **Staging backend reachability:** the 13 platform-auth-required callables (#629) refuse native callers too, until the separately authorized IAM repair is done.
+
+## Staging values: retrieve, verify, upload (owner only)
+Agents never see, set or upload a value. The owner runs these steps on their own machine; the tags are as in the next section. Use a private temporary directory, for example `TMP=$(mktemp -d)`.
+1. **Retrieve** `[RO, the owner's Firebase login]`: `npx firebase-tools@15.30.1 apps:sdkconfig WEB --project westayfit-staging --json > "$TMP/sdkconfig.json"`.
+2. **Shape** `[LOCAL]`: `node .github/wsf-staging/prepare-staging.mjs "$TMP/sdkconfig.json" "$TMP/wsf-staging.env" westayfit-staging`. It writes the six names at mode 0600 and echoes nothing. That script lives on `main` and is reused from there, not copied into this branch, so run it from a checkout of `main`.
+3. **Remove the raw config** `[LOCAL]`: `rm -f "$TMP/sdkconfig.json"`.
+4. **Verify before uploading** `[LOCAL]`: from `apps/westayfit`, run `npm run check:staging-env -- "$TMP/wsf-staging.env" --platform ios` (`scripts/check-staging-env.mjs`).
+   - It checks the file with the app's own rules: `resolveStagingConfig` and `nativeTargetProblem` from `src/stagingEnv.ts` (a release build, so `__DEV__` is false), and `app.config.js` run as an EAS `preview` build would run it. It adds `EXPO_PUBLIC_WSF_ENV=staging` and `EXPO_PUBLIC_WSF_AUTH_ENABLED=1` unless the file sets them.
+   - It prints **only names**: the six names as present or missing, PASS or FAIL per check, and for each failure a rule label (for example "AUTH_DOMAIN must equal <PROJECT_ID>.firebaseapp.com") with the names involved. It never prints a value, even though the app's own refusal messages quote values. Exit 0 means PASS, 1 means FAIL.
+   - It refuses a file that git tracks.
+   - Upload only on PASS.
+5. **Upload** `[ACCOUNT, owner only; never run by an agent]`, one of:
+   - `npx eas-cli@25.3.0 env:push preview --path "$TMP/wsf-staging.env"`. Note: eas-cli 25.3.0 `env:push` gives every `EXPO_PUBLIC_*` name **plaintext ("Public")** visibility (`build/commands/env/push.js:185`), so `env:list` will show those values in clear.
+   - Or one name at a time: `npx eas-cli@25.3.0 env:set preview --name <NAME> --type string --visibility sensitive --scope project`. Leave out `--value`: eas-cli then prompts for it, and nothing lands in shell history.
+   - Repeat for the `development` environment if a development client will use EAS-pulled values.
+6. **Confirm** `[RO, the owner's EAS login]`: `npx eas-cli@25.3.0 env:list preview --format short`. Sensitive values stay masked unless `--include-sensitive` is given; plaintext ("Public") values are shown as they are.
+7. **For path A (Expo Go or the dev server)** `[LOCAL]`:
+   - `cp "$TMP/wsf-staging.env" apps/westayfit/.env.development.local`, then append `EXPO_PUBLIC_WSF_ENV=staging` and `EXPO_PUBLIC_WSF_AUTH_ENABLED=1` to that copy;
+   - confirm `git check-ignore -v apps/westayfit/.env.development.local` reports it ignored (`.env*.local` in `apps/westayfit/.gitignore`);
+   - then `npm run check:staging-env -- .env.development.local` from `apps/westayfit`.
+8. **Clean up** `[LOCAL]`: `rm -f "$TMP/wsf-staging.env"`.
 
 ## iPhone testing without a paid Apple membership
 The owner's Apple account offers only "Enroll Today": there is **no paid Apple Developer Program membership**, and enrolling is a purchase that is not authorized. These are the paths that remain, each command tagged:
