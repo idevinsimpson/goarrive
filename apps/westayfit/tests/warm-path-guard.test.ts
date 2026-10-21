@@ -585,6 +585,19 @@ describe('RV15-639-N2: a page is kept on a failed load only while the fresh read
     expect(h.youFrames).not.toContain('failed');
   });
 
+  itTimed('a page that is not a member page (pickCommunity, drawn at mount) is never kept: the failed page', async () => {
+    // Several communities, none remembered, the launch read answered.
+    const cc = await boot();
+    await cc.currentCommunityReady();
+    const you = await render('you');
+    expect(h.youFrames[0]).toBe('pickCommunity');
+    h.fresh.fail(new Error('offline'));
+    await you.until(() => h.youFrames.at(-1) === 'failed', 'the failed page');
+    await you.settle();
+    expect(h.youFrames.at(-1)).toBe('failed');
+    expect(h.youStale).not.toBe(true);
+  });
+
   itTimed('control: drawn at mount on member:g2; the fresh list holds g2 and g2’s goals fail: member:g2 kept, marked stale', async () => {
     h.goalsFail.add('g2');
     const { you } = await drawnOnG2AtMount();

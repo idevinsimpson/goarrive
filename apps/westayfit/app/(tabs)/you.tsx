@@ -338,6 +338,33 @@ function youFromRecord(uid: string): Screen | null {
   return composeMember(profile, community, goals, owned, elsewhereFromRecord(uid, communities, community.groupId));
 }
 
+/**
+ * RV15-639-N2. WHETHER A PAGE A FAILED LOAD WOULD KEEP IS ONE ITS FRESH READ
+ * STILL SHOWS. A load that fails keeps a member page already on screen (one
+ * drawn at mount from the record, or by the readiness repaint) and marks it
+ * stale, rather than replacing it with the failed page. That is right only
+ * while nothing the load did read contradicts the page:
+ *   - `resolved` absent: the membership read itself failed, no fresh list was
+ *     read, and nothing contradicts the page: keep it;
+ *   - otherwise the list was read (`listed`) and resolved a community whose
+ *     goals then failed: keep the page only if that list still holds its
+ *     community AND it is the community resolved. A page for a community the
+ *     list no longer holds, or for another one, is not kept; the caller draws
+ *     the failed page for the resolved community.
+ * (`resolved` is taken from `listed`, so today the second condition implies
+ * the first.) Anything but a member page is never kept by this rule.
+ */
+function keptPageStillShown(
+  page: Screen | null,
+  resolved: Community | undefined,
+  listed: readonly Community[],
+): page is Extract<Screen, { kind: 'member' }> {
+  if (!page || page.kind !== 'member') return false;
+  if (!resolved) return true;
+  const groupId = page.community.groupId;
+  return listed.some((c) => c.groupId === groupId) && groupId === resolved.groupId;
+}
+
 export default function You() {
   const { ready, user } = useWsfAuth();
   // The first frame already stands on the account's record when it can: a
@@ -463,24 +490,14 @@ export default function You() {
         // in flight (it began on loading) is kept and marked stale, exactly
         // like one drawn at mount, rather than replaced by the failed page.
         const painted = !recorded && !keep && repainted.current?.uid === uid ? repainted.current.screen : null;
-        // RV15-639-N2: a page is kept only while the fresh read still shows it.
-        // When the membership was read (a community was resolved, and then its
-        // goals failed), a page for a community that list no longer holds, or
-        // for another community than the one resolved, is not kept: the
-        // failed page for the resolved community is drawn instead. With no
-        // fresh list (the membership read itself failed, `community` absent),
-        // nothing contradicts the page. (The resolved community comes from
-        // that list, so today the second clause implies the first.)
-        const stillShown = (shown: Extract<Screen, { kind: 'member' }>) =>
-          !community ||
-          (communities.some((c) => c.groupId === shown.community.groupId) &&
-            shown.community.groupId === community.groupId);
-        if (painted && painted.kind === 'member' && stillShown(painted)) {
+        // RV15-639-N2: either is kept only while the fresh read still shows it
+        // (`keptPageStillShown`); otherwise the failed page below.
+        if (keptPageStillShown(painted, community, communities)) {
           setScreen({ ...painted, profile });
           setStale(true);
           return;
         }
-        if (recorded && recorded.kind === 'member' && stillShown(recorded)) {
+        if (keptPageStillShown(recorded, community, communities)) {
           setScreen({ ...recorded, profile });
           setStale(true);
           return;
