@@ -65,11 +65,22 @@ describe('GF(256) arithmetic', () => {
       }
       return result;
     };
+    // Every one of the 65,536 pairs is still compared. They are collected and
+    // asserted once: an expect() per pair made this the suite's slowest body
+    // (about 1.2 s alone) and it timed out at 5 s under parallel load.
+    const wrong: string[] = [];
+    let compared = 0;
     for (let a = 0; a < 256; a += 1) {
       for (let b = 0; b < 256; b += 1) {
-        expect(gfMul(a, b)).toBe(slowMul(a, b));
+        const got = gfMul(a, b);
+        const want = slowMul(a, b);
+        if (got !== want) wrong.push(`gfMul(${a}, ${b}) = ${got}, expected ${want}`);
+        compared += 1;
       }
     }
+    expect(compared).toBe(65_536);
+    expect(wrong.slice(0, 10)).toEqual([]);
+    expect(wrong).toHaveLength(0);
   });
 
   it('has 1 as a multiplicative identity and no zero divisors', () => {
