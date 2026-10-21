@@ -153,6 +153,17 @@ export const elevation = {
   }),
 };
 /*
+  RV13-641-N2. TURNING A TOKEN'S LIFT OFF (a disabled or done state over a
+  style that spreads one): spread ELEVATION_OFF, not a bare `shadowOpacity: 0`.
+  On iOS the token is a boxShadow, which shadowOpacity does not reach, so
+  there it is also cancelled ('none' parses to no shadow). The web and
+  Android get exactly `{ shadowOpacity: 0 }`, as the bare key gave them.
+*/
+export const ELEVATION_OFF: ElevationStyle = Platform.select<ElevationStyle>({
+  ios: { shadowOpacity: 0, boxShadow: 'none' },
+  default: { shadowOpacity: 0 },
+});
+/*
   W12-15 (INT-21, INT-31). The lift tokens for surfaces that need more than
   elevation.* (kit-base's src/ui/lift.ts): lift.panel for a side or bottom
   panel, lift.tabBar (Android's upward shadow) and lift.knob. `{}` on the web.

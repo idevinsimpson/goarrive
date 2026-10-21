@@ -18,6 +18,7 @@ import {
   SURFACE,
   display,
   elevation,
+  ELEVATION_OFF,
 } from '../kit';
 
 /**
@@ -1945,7 +1946,7 @@ const s = StyleSheet.create({
     marginTop: 4,
     ...elevation.action,
   },
-  primaryOff: { backgroundColor: '#CDE8D5', shadowOpacity: 0 },
+  primaryOff: { backgroundColor: '#CDE8D5', ...ELEVATION_OFF },
   primaryText: { color: ON_ACTION, fontSize: 17, fontWeight: '900' },
   primaryTextOff: { color: '#6B8A76' },
   /** Drawn, not animated: a target is a still frame. */

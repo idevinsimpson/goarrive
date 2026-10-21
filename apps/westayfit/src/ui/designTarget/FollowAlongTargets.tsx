@@ -16,6 +16,7 @@ import {
   SURFACE,
   display,
   elevation,
+  ELEVATION_OFF,
 } from '../kit';
 
 /**
@@ -505,7 +506,7 @@ const s = StyleSheet.create({
     backgroundColor: 'rgba(247,245,240,0.07)',
     borderWidth: 1,
     borderColor: 'rgba(247,245,240,0.16)',
-    shadowOpacity: 0,
+    ...ELEVATION_OFF,
   },
   figure: { alignItems: 'center', justifyContent: 'center' },
   figureDim: { opacity: 0.45 },
@@ -580,7 +581,7 @@ const s = StyleSheet.create({
     gap: 12,
     backgroundColor: 'rgba(0,0,0,0.26)',
     borderWidth: 0,
-    shadowOpacity: 0,
+    ...ELEVATION_OFF,
   },
   panelEyebrowOnNavy: { color: PROGRESS_GREEN },
   panelStatusOnNavy: { color: ON_NAVY },
