@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * here (that path: tests/kiosk-escape-real-stack.test.tsx).
  */
 
-const r = vi.hoisted(() => ({ calls: [] as string[], dismissThrows: false }));
+const r = vi.hoisted(() => ({ calls: [] as string[], dismissThrows: false, markerThrows: false, returnGoal: null as string | null }));
 vi.mock('expo-router', () => ({
   router: {
     navigate: (h: string) => r.calls.push(`navigate ${h}`),
@@ -31,8 +31,11 @@ vi.mock('react-native-safe-area-context', async () => {
 vi.mock('../src/firebase', () => ({ getFirebaseAuth: () => ({ currentUser: null }) }));
 vi.mock('../src/kioskSession', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  readKioskSession: () => null,
-  readKioskReturnGoal: () => null,
+  readKioskSession: () => {
+    if (r.markerThrows) throw new Error('marker unreadable');
+    return null;
+  },
+  readKioskReturnGoal: () => r.returnGoal,
 }));
 
 import { RouteErrorFallback, type FallbackVariant } from '../src/ui/RouteErrorFallback.native';
@@ -45,6 +48,8 @@ beforeEach(() => {
   vi.useFakeTimers();
   r.calls = [];
   r.dismissThrows = false;
+  r.markerThrows = false;
+  r.returnGoal = null;
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -83,5 +88,23 @@ describe('Go to Home, per variant (RV15-634-N1)', () => {
     for (const variant of ['tab', 'root', 'shell', 'homeTab'] as FallbackVariant[]) {
       expect([variant, pressHome(variant)]).toEqual([variant, ['navigate /']]);
     }
+  });
+});
+
+describe('RV16-641-N2: a marker read that throws does not fail open', () => {
+  it('the kiosk return still names the kiosk: "Back to the kiosk", and the press goes there', () => {
+    r.markerThrows = true;
+    r.returnGoal = 'g1';
+    act(() => root.render(<RouteErrorFallback error={new Error('x')} retry={() => undefined} variant="screen" />));
+    const home = container.querySelector('[data-testid="wsf-route-error-home"]') as HTMLElement;
+    expect(home.textContent).toBe('Back to the kiosk');
+    act(() => home.click());
+    act(() => vi.runAllTimers());
+    expect(r.calls).toEqual(['dismissTo /kiosk/g1']);
+  });
+
+  it('with no kiosk return either: Go to Home, as before', () => {
+    r.markerThrows = true;
+    expect(pressHome('screen')).toEqual(['dismissTo /']);
   });
 });

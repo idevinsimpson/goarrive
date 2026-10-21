@@ -45,12 +45,15 @@ import { SIGNED_OUT_HOME_RESET } from './signOutReset';
  * beneath, replaced otherwise, as any kiosk destination), never the Home
  * reset. The start screen signs the visitor out.
  *
- * NOTHING RESETS A KIOSK AWAY (RV15-641-N1). A member destination reached
- * while a kiosk start screen is somewhere in the stack (a join link opened
- * over a kiosk session) is REPLACED, the shape before W13-6a, so Back still
- * leads to the kiosk, which signs the visitor out; the Home reset would wipe
- * it. Only callers that pass `routes` can see it (join, verify-email,
- * profile-setup).
+ * NOTHING RESETS A KIOSK AWAY (RV15-641-N1, RV16-641-B1). A member
+ * destination reached while a kiosk start screen is somewhere in the stack (a
+ * join link opened over a kiosk session) is REPLACED, the shape before
+ * W13-6a, so Back still leads to the kiosk, which signs the visitor out; the
+ * Home reset would wipe it. Callers that pass `routes` (join, verify-email,
+ * profile-setup) are judged by the stack itself. A caller that passes NONE
+ * (Sign in and Create account) cannot be checked, so while the device's kiosk
+ * marker is open it is replaced too, never reset; and a marker that cannot
+ * be read counts as open.
  *
  * Published for the member and state lanes' own post-auth hops.
  */
@@ -144,12 +147,16 @@ function readRoutes(routes: (() => StackRoutes | undefined) | undefined): StackR
   }
 }
 
-/** The open kiosk session's goal (the device's marker; null on the web), never throwing. */
-function openKioskMarker(): string | null {
+/**
+ * The open kiosk session's goal (the device's marker; null on the web), or
+ * 'unreadable' when reading it threw: never throwing, and an unreadable
+ * marker counts as possibly open (RV16-641-N2).
+ */
+function openKioskMarker(): string | null | 'unreadable' {
   try {
     return readKioskSession();
   } catch {
-    return null;
+    return 'unreadable';
   }
 }
 
@@ -158,9 +165,9 @@ export function landAfterAuth(target: string, { dispatch, push, replace, platfor
     replace(target);
     return;
   }
+  const marker = openKioskMarker();
   // Home while a kiosk session is open: that kiosk's start screen instead (RV15-642-N1).
-  const marker = target === '/' ? openKioskMarker() : null;
-  const next = marker ? kioskStartRoute(marker) : target;
+  const next = target === '/' && marker !== null && marker !== 'unreadable' ? kioskStartRoute(marker) : target;
   if (isKioskDestination(next)) {
     // Never a reset under a kiosk destination. Back to the kiosk's own start
     // screen when it is the nearest kiosk beneath; otherwise replace.
@@ -174,10 +181,19 @@ export function landAfterAuth(target: string, { dispatch, push, replace, platfor
     replace(next);
     return;
   }
-  // A kiosk start screen anywhere beneath is never reset away (RV15-641-N1);
-  // a stack that cannot be read fails closed the same way.
+  // A kiosk start screen anywhere beneath is never reset away (RV15-641-N1).
+  // It fails closed the same way when the stack cannot be read, when the
+  // caller gives no stack while a kiosk session is open (RV16-641-B1: Sign in
+  // and Create account pass none, and a pending join, event or /go return
+  // outranks the kiosk return, so '/join/<code>' arrives here over a kiosk),
+  // and when the kiosk marker itself cannot be read (RV16-641-N2).
   const stack = readRoutes(routes);
-  if (stack === 'unreadable' || stack?.some((route) => route.name === KIOSK_ROUTE)) {
+  if (
+    stack === 'unreadable' ||
+    marker === 'unreadable' ||
+    (stack === undefined && marker !== null) ||
+    stack?.some((route) => route.name === KIOSK_ROUTE)
+  ) {
     replace(next);
     return;
   }

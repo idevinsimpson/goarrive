@@ -213,6 +213,10 @@ vi.mock('expo-router', async () => {
     m = path!.match(/^\/join\/([^/]+)$/);
     if (m) return ['join/[joinCode]', { joinCode: decodeURIComponent(m[1]!), ...params }];
     // A route inside the tabs: expo-router addresses it to the root stack as (tabs).
+    m = path!.match(/^\/event\/([^/]+)$/);
+    if (m) return ['event/[goalId]', { goalId: decodeURIComponent(m[1]!), ...params }];
+    m = path!.match(/^\/go\/([^/]+)$/);
+    if (m) return ['go/[markerSlug]', { markerSlug: decodeURIComponent(m[1]!), ...params }];
     m = path!.match(/^\/community\/([^/]+)$/);
     if (m) return ['(tabs)', { community: decodeURIComponent(m[1]!) }];
     return [path!.slice(1), Object.keys(params).length ? params : undefined];
@@ -529,8 +533,8 @@ describe.each(['ios', 'android'] as const)('1. RV15-642-F1 on %s: a crash fallba
     await submitSignIn();
     const label = await pressFocusedWayOut();
     expect(label).toBe('Go to Home');
-    expect(nav.log).toContain('dismissTo /');
-    expect(nav.log.some((l) => l.startsWith('dismissTo /kiosk'))).toBe(false);
+    // Through the screen's own navigator (POP_TO (tabs), the Home tab as it stands; RV16-641-N1): the router is not asked.
+    expect(nav.log.some((l) => l.startsWith('dismissTo') || l.startsWith('navigate'))).toBe(false);
     // Popped back to the tabs beneath: never a second (tabs) above the fallback.
     expect(names()).toEqual(['(tabs)']);
     expect(focusedRoute()).toBe('(tabs)');
@@ -616,6 +620,9 @@ describe.runIf(MEMBER_SIGNIN).each(['ios', 'android'] as const)('2. RV15-642-N1 
     await submitSignIn();
     await flush();
     expect(focusedRoute()).toBe('kiosk/[goalId]');
+    // The stack itself keeps the kiosk, not only the focused route (RV16-641-B1).
+    expect(names()).toContain('kiosk/[goalId]');
+    expect(names()).not.toContain('(tabs)');
     expectBackAtTheKioskSignedOut();
   });
 
@@ -629,6 +636,8 @@ describe.runIf(MEMBER_SIGNIN).each(['ios', 'android'] as const)('2. RV15-642-N1 
     await click('wsf-signin-redirect-retry');
     await flush();
     expect(focusedRoute()).toBe('kiosk/[goalId]');
+    expect(names()).toContain('kiosk/[goalId]');
+    expect(names()).not.toContain('(tabs)');
     expectBackAtTheKioskSignedOut();
   });
 });
@@ -682,6 +691,159 @@ describe.each(['ios', 'android'] as const)('3. RV15-641-N1 on %s: a join finishe
     await flush();
     expect(nav.log).toContain('push /community/oak');
     expect(names()).toEqual(['(tabs)', '(tabs)']); // this flat probe stack has no nested (home): the push lands at its root
+  });
+});
+
+// ---- RV16-641-B1 (heads-14, owner order): a member return opened at the kiosk's Sign in ----
+const { routeAfterAuth } = await import('../src/pendingJoinCode');
+const { setEventReturn } = await import('../src/eventReturn');
+const { setMarkerReturn } = await import('../src/markerEntry');
+const { useNavigation: useRouteNavigation } = await import('expo-router');
+const { Platform: RNPlatform } = await import('react-native');
+
+/**
+ * Member's Sign in as composed (app/signin.tsx on the member lane): its terminal
+ * hop lands through landAfterAuth with dispatch, push and replace ONLY, no
+ * routes and no dismissTo. Modelled here, so the case runs on this branch too.
+ */
+function MemberDepsSignIn() {
+  const navigation = useRouteNavigation();
+  return (
+    <button
+      data-testid="probe-member-signin-submit"
+      onClick={async () => {
+        const u = makeUser(true);
+        setUser(u);
+        const next = await routeAfterAuth('/', u.uid);
+        landAfterAuth(next, {
+          dispatch: (action) => navigation.dispatch(action as never),
+          push: (href) => router.push(href as never),
+          replace: (href) => router.replace(href as never),
+          platform: RNPlatform.OS,
+        });
+      }}
+    >
+      Sign in
+    </button>
+  );
+}
+const EventStandIn = () => <div data-testid="probe-event">event</div>;
+const MarkerStandIn = () => <div data-testid="probe-marker">marker</div>;
+function MemberDepsApp({ initial }: { initial: { name: string; params?: object }[] }) {
+  return (
+    <BaseNavigationContainer
+      ref={ref as never}
+      initialState={{ index: initial.length - 1, routes: initial } as never}
+      onStateChange={(st) => stacks.push(((st as NavigationState | undefined)?.routes ?? []).map((r) => r.name))}
+    >
+      <Stack.Navigator>
+        <Stack.Screen name="(tabs)" component={MemberHome} />
+        <Stack.Screen name="kiosk/[goalId]" component={KioskGoal as never} />
+        <Stack.Screen name="contribute/[goalId]" component={ContributeKioskGate} />
+        <Stack.Screen name="signin" component={MemberDepsSignIn} />
+        <Stack.Screen name="join/[joinCode]" component={JoinPage as never} />
+        <Stack.Screen name="event/[goalId]" component={EventStandIn} />
+        <Stack.Screen name="go/[markerSlug]" component={MarkerStandIn} />
+      </Stack.Navigator>
+    </BaseNavigationContainer>
+  );
+}
+/** The kiosk's Contribute, then its Sign in gate, with member's Sign in. */
+async function kioskVisitorAtMemberSignIn(): Promise<void> {
+  act(() => root.render(<MemberDepsApp initial={[KIOSK_START]} />));
+  await flush();
+  await click('wsf-kiosk-start');
+  await click('probe-contribute-signin');
+  expect(names()).toEqual(['kiosk/[goalId]', 'signin']);
+  expect(session.readKioskSession()).toBe('goal-1');
+}
+async function pressFocused(id: string): Promise<void> {
+  const el = focusedEl().querySelector(`[data-testid="${id}"]`) as HTMLElement | null;
+  expect(el, `${id} on the focused screen`).not.toBeNull();
+  await act(async () => {
+    el!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+  await flush();
+}
+
+describe.each(['ios', 'android'] as const)('RV16-641-B1 on %s: a return opened at the kiosk Sign in, then a Sign in that passes no routes', (os) => {
+  beforeEach(() => {
+    platform.OS = os;
+  });
+
+  it('a join link: Sign in → [kiosk, signin, join], never reset; Join → [kiosk, signin, (tabs)]; Back, Back reaches the kiosk, which signs out', async () => {
+    await kioskVisitorAtMemberSignIn();
+    // The join link arrives; signed out, the join screen stashes its code (it outranks the kiosk return).
+    act(() => router.push('/join/OakGroveTogether01' as never));
+    await flush();
+    expect(focusedEl().querySelector('[data-testid="wsf-join-signed-out"]')).not.toBeNull();
+    // Its "Already have an account? Sign in" replaces it.
+    act(() => router.replace('/signin' as never));
+    await flush();
+    expect(names()).toEqual(['kiosk/[goalId]', 'signin', 'signin']);
+    nav.log = [];
+    await pressFocused('probe-member-signin-submit');
+    await flush();
+    expect(nav.log).toEqual(['replace /join/OakGroveTogether01']);
+    expect(names()).toEqual(['kiosk/[goalId]', 'signin', 'join/[joinCode]']);
+    expect(stacks.some((st) => !st.includes('kiosk/[goalId]'))).toBe(false);
+    // The visitor joins (join passes its routes: the kiosk beneath is kept).
+    await pressFocused('wsf-join-submit');
+    await flush();
+    expect(names()).toEqual(['kiosk/[goalId]', 'signin', '(tabs)']);
+    expect(fb.signOutCalls).toBe(0);
+    // Back, Back: the kiosk start screen, which signs the visitor out and clears the marker.
+    act(() => (ref as unknown as { goBack: () => void }).goBack());
+    await flush();
+    act(() => (ref as unknown as { goBack: () => void }).goBack());
+    await flush();
+    expect(focusedRoute()).toBe('kiosk/[goalId]');
+    expect(fb.signOutCalls).toBe(1);
+    expect(authStore.state.user).toBeNull();
+    expect(session.readKioskSession()).toBeNull();
+  });
+
+  it('an event return (it outranks the kiosk return): Sign in replaces itself → [kiosk, event], never reset', async () => {
+    await kioskVisitorAtMemberSignIn();
+    await act(async () => {
+      await setEventReturn('goal-ev');
+    });
+    nav.log = [];
+    await pressFocused('probe-member-signin-submit');
+    await flush();
+    expect(nav.log).toEqual(['replace /event/goal-ev']);
+    expect(names()).toEqual(['kiosk/[goalId]', 'event/[goalId]']);
+    expect(stacks.some((st) => st.includes('(tabs)'))).toBe(false);
+    expect(memberHomeRenders).toBe(0);
+  });
+
+  it('a /go marker return (the marker screen clears the older kiosk return when it arms its own): Sign in replaces itself → [kiosk, go], never reset', async () => {
+    await kioskVisitorAtMemberSignIn();
+    await act(async () => {
+      await session.clearKioskReturnGoal();
+      await setMarkerReturn('oak-hall-01');
+    });
+    expect(session.readKioskSession()).toBe('goal-1'); // the device's marker stays open
+    nav.log = [];
+    await pressFocused('probe-member-signin-submit');
+    await flush();
+    expect(nav.log).toEqual(['replace /go/oak-hall-01']);
+    expect(names()).toEqual(['kiosk/[goalId]', 'go/[markerSlug]']);
+    expect(stacks.some((st) => st.includes('(tabs)'))).toBe(false);
+    expect(memberHomeRenders).toBe(0);
+  });
+
+  it('control, no kiosk session: the same Sign in from Home with a join waiting → the Home reset and the push, as before', async () => {
+    act(() => root.render(<MemberDepsApp initial={[{ name: '(tabs)' }, { name: 'join/[joinCode]', params: { joinCode: 'OakGroveTogether01' } }]} />));
+    await flush();
+    act(() => router.replace('/signin' as never));
+    await flush();
+    expect(session.readKioskSession()).toBeNull();
+    nav.log = [];
+    await pressFocused('probe-member-signin-submit');
+    await flush();
+    expect(nav.log).toEqual(['push /join/OakGroveTogether01']);
+    expect(names()).toEqual(['(tabs)', 'join/[joinCode]']);
   });
 });
 

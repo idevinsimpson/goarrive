@@ -27,8 +27,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * useOnAction); the nested (tabs) and (home) states stay partial until they
  * render. So the push to the community comes out as an untargeted NAVIGATE.
  * The queued actions then run as the container's effect runs them, after the
- * remounted navigators have rendered: an untargeted action goes to the root
- * navigator first, then down the focused children until one handles it.
+ * remounted navigators have rendered: an untargeted action goes to the
+ * DEEPEST focused navigator first and bubbles up until one handles it
+ * (@react-navigation/core 7.21.13: the container dispatches through its focus
+ * listener, the deepest focused navigator's, and an unhandled action goes on
+ * to the parent; RV16-641-N4).
  */
 
 const ctl = vi.hoisted(() => ({
@@ -301,15 +304,16 @@ function actionStateFor(href: string): object {
   throw new Error(`no route for ${href}`);
 }
 
-/** An action dispatched from the container: the root navigator first, then down the focused children. */
+/** An action dispatched from the container: the deepest focused navigator first, bubbling up until one handles it. */
 function dispatchUntargeted(state: NavState, action: Queued, parentRouteName: string | null = null): NavState | null {
+  const focused = state.routes[state.index]!;
+  if (focused.state) {
+    const child = dispatchUntargeted(focused.state, action, focused.name);
+    if (child) return { ...state, routes: state.routes.map((r, i) => (i === state.index ? { ...r, state: child } : r)) };
+  }
   const level = levelOf(parentRouteName);
   const next = level.router.getStateForAction(state as never, action as never, opts(level.routeNames) as never);
-  if (next) return hydrate(next, parentRouteName);
-  const focused = state.routes[state.index]!;
-  if (!focused.state) return null;
-  const child = dispatchUntargeted(focused.state, action, focused.name);
-  return child ? { ...state, routes: state.routes.map((r, i) => (i === state.index ? { ...r, state: child } : r)) } : null;
+  return next ? hydrate(next, parentRouteName) : null;
 }
 
 /** The tabs mounted (Home's index), with the join screen over them: where a join is finished. */
