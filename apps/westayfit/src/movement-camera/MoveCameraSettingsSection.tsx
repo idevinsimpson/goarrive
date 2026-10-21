@@ -4,14 +4,29 @@
  * shown only while the counter is on, "Show stick figure". The stick-figure
  * value is kept while hidden; it has no effect when the counter is off,
  * because the camera never opens.
+ *
+ * NATIVE (CAM-02): on iOS/Android the section is drawn only where the counter
+ * can run. `./support` resolves to support.native.ts there, which is false
+ * until the telemetry gate is approved and the module is linked, so Settings
+ * never offers a camera counter the phone does not have. The stored values are
+ * kept. Web is unchanged: it always draws the section, as before.
  */
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ACTION_GREEN, NAVY, PROGRESS_GREEN, SURFACE } from '../ui/kit';
 import { useMoveCameraSettings, writeMoveCameraSettings } from './settingsStore';
+import { cameraCounterSupported } from './support';
+
+/** Web always shows the MOVE switches; native only while the counter can run there. */
+export function moveCameraSettingsShown(os: string, supported: () => boolean): boolean {
+  return os === 'web' || supported();
+}
 
 export function MoveCameraSettingsSection() {
   const settings = useMoveCameraSettings();
+  const [shown] = useState(() => moveCameraSettingsShown(Platform.OS, cameraCounterSupported));
+  if (!shown) return null;
   return (
     <View style={s.section} testID="wsf-settings-move">
       <Text style={s.heading} {...({ role: 'heading', 'aria-level': 3 } as Record<string, unknown>)}>

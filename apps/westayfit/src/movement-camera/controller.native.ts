@@ -239,6 +239,9 @@ export class RepCounterController implements NativeCameraHost {
     }
     const run = this.begin();
     this.orch.setCamera('starting'); this.emit();
+    // A listener that threw on 'starting' has already failed this run closed (emit → fail):
+    // stop here, before the OS is asked for the camera.
+    if (!this.owns(run)) return;
     let granted = false;
     try {
       granted = (await mod.requestCameraPermissionAsync())?.granted === true;

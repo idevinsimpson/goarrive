@@ -76,6 +76,7 @@ import {
   type AppStateLike,
 } from '../src/movement-camera/controller.native';
 import { MEDIAPIPE_VERSION, MODEL_URL } from '../src/movement-camera/engine';
+import { MoveCameraSettingsSection, moveCameraSettingsShown } from '../src/movement-camera/MoveCameraSettingsSection';
 import { figureGeometry } from '../src/movement-camera/figure';
 import {
   isNativeCameraHost,
@@ -101,47 +102,141 @@ import { NativeCameraPreview as WebNativeCameraPreview } from '../src/ui/NativeC
 const APP = nodePath.resolve(__dirname, '..');
 const MOD = 'modules/wsf-pose-camera';
 const read = (p: string) => readFileSync(nodePath.join(APP, p), 'utf8');
+/** The source kinds the comment stripper models, each with its own string syntax. */
+type Lang = 'swift' | 'kotlin' | 'groovy' | 'java' | 'objc' | 'ts';
+const langOf = (f: string): Lang => {
+  if (f.endsWith('.swift')) return 'swift';
+  if (f.endsWith('.kt')) return 'kotlin';
+  if (f.endsWith('.gradle')) return 'groovy';
+  if (f.endsWith('.java')) return 'java';
+  if (/\.(m|mm|h)$/.test(f)) return 'objc';
+  if (/\.tsx?$/.test(f)) return 'ts';
+  throw new Error(`strip: no source kind for ${f}`);
+};
+interface StringForm {
+  quote: string;
+  multiline: boolean;
+  escapes: boolean;
+  interpolation?: { open: string; close: string };
+}
+const SWIFT_INTERPOLATION = { open: '\\(', close: ')' };
+const DOLLAR_INTERPOLATION = { open: '${', close: '}' };
+/** Per source kind, longest delimiter first. */
+const STRING_FORMS: Record<Lang, StringForm[]> = {
+  swift: [
+    { quote: '"""', multiline: true, escapes: true, interpolation: SWIFT_INTERPOLATION },
+    { quote: '"', multiline: false, escapes: true, interpolation: SWIFT_INTERPOLATION },
+  ],
+  kotlin: [
+    { quote: '"""', multiline: true, escapes: false, interpolation: DOLLAR_INTERPOLATION }, // raw: no escapes
+    { quote: '"', multiline: false, escapes: true, interpolation: DOLLAR_INTERPOLATION },
+    { quote: "'", multiline: false, escapes: true },
+  ],
+  groovy: [
+    { quote: "'''", multiline: true, escapes: true },
+    { quote: '"""', multiline: true, escapes: true, interpolation: DOLLAR_INTERPOLATION },
+    { quote: "'", multiline: false, escapes: true },
+    { quote: '"', multiline: false, escapes: true, interpolation: DOLLAR_INTERPOLATION },
+  ],
+  java: [
+    { quote: '"""', multiline: true, escapes: true },
+    { quote: '"', multiline: false, escapes: true },
+    { quote: "'", multiline: false, escapes: true },
+  ],
+  objc: [
+    { quote: '"', multiline: false, escapes: true },
+    { quote: "'", multiline: false, escapes: true },
+  ],
+  ts: [
+    { quote: '`', multiline: true, escapes: true, interpolation: DOLLAR_INTERPOLATION },
+    { quote: "'", multiline: false, escapes: true },
+    { quote: '"', multiline: false, escapes: true },
+  ],
+};
 /**
- * Code without comments, for the static scans. A small scanner that knows string literals ("…",
- * '…', `…` and Swift/Kotlin """…"""), so a comment marker inside a string ("a//b", "/*")
- * hides nothing, and a code line that starts with `*` (a continued expression) is kept. Block
- * comments are not treated as nested (Swift and Kotlin allow nesting): an inner close ends the
- * comment early, which can only leave more text for the scan, never less. Strings are kept.
+ * Code without comments, for the static scans. A small scanner that knows each source kind's
+ * string literals, so a comment marker inside a string ("a//b", "/*") hides nothing, and a code
+ * line that starts with `*` (a continued expression) is kept. Strings are kept.
+ *
+ * It follows STRING INTERPOLATION (delta review NB-3): Swift `\(…)`, Kotlin and Groovy `${…}`, and
+ * TS template `${…}`. Inside one it scans code again (nested strings, comments, brackets) up to the
+ * matching `)` or `}`, so a quote inside an interpolation (`"\("//")"`) cannot end the outer string
+ * early and turn the rest of the line into a "comment". Escapes are honoured (`\${` and `\\(` open
+ * nothing), and only the source kind's own forms count, so Kotlin `"${"` interpolates while TS
+ * `"${"` is plain text.
+ *
+ * Not modelled: nested block comments (Swift and Kotlin allow them; an inner close ends the comment
+ * early, which can only leave more text for the scan, never less), Swift raw strings (`#"…"#`),
+ * Swift and TS regex literals, Groovy slashy strings and JSX text. The scan test checks that the
+ * scanned Swift and Groovy files contain no raw-string or slashy-string delimiters.
  */
-function strip(c: string): string {
+function strip(c: string, lang: Lang): string {
+  const forms = STRING_FORMS[lang];
   let out = '';
   let i = 0;
-  while (i < c.length) {
-    if (c.startsWith('//', i)) {
-      const nl = c.indexOf('\n', i);
-      i = nl < 0 ? c.length : nl;
-    } else if (c.startsWith('/*', i)) {
-      const end = c.indexOf('*/', i + 2);
-      const stop = end < 0 ? c.length : end + 2;
-      out += c.slice(i, stop).replace(/[^\n]/g, '');
-      i = stop;
-    } else if (c.startsWith('"""', i)) {
-      const end = c.indexOf('"""', i + 3);
-      const stop = end < 0 ? c.length : end + 3;
-      out += c.slice(i, stop);
-      i = stop;
-    } else if (c[i] === '"' || c[i] === "'" || c[i] === '`') {
-      const q = c[i];
-      let j = i + 1;
-      while (j < c.length && c[j] !== q && (q === '`' || c[j] !== '\n')) j += c[j] === '\\' ? 2 : 1;
-      const stop = Math.min(c.length, j + 1);
-      out += c.slice(i, stop);
-      i = stop;
-    } else {
-      out += c[i];
-      i += 1;
+  // Code up to the end, or (inside an interpolation) up to its unmatched closing bracket, left for the caller.
+  const code = (close: string | null): void => {
+    const open = close === ')' ? '(' : close === '}' ? '{' : null;
+    let depth = 0;
+    while (i < c.length) {
+      const form = forms.find((f) => c.startsWith(f.quote, i));
+      if (c.startsWith('//', i)) {
+        const nl = c.indexOf('\n', i);
+        i = nl < 0 ? c.length : nl;
+      } else if (c.startsWith('/*', i)) {
+        const end = c.indexOf('*/', i + 2);
+        const stop = end < 0 ? c.length : end + 2;
+        out += c.slice(i, stop).replace(/[^\n]/g, '');
+        i = stop;
+      } else if (form) {
+        string(form);
+      } else {
+        if (close !== null && c[i] === close) {
+          if (depth === 0) return;
+          depth -= 1;
+        } else if (open !== null && c[i] === open) {
+          depth += 1;
+        }
+        out += c[i];
+        i += 1;
+      }
     }
-  }
+  };
+  const string = (f: StringForm): void => {
+    out += f.quote;
+    i += f.quote.length;
+    while (i < c.length) {
+      if (c.startsWith(f.quote, i)) {
+        out += f.quote;
+        i += f.quote.length;
+        return;
+      }
+      if (!f.multiline && c[i] === '\n') return; // an unterminated one-line string ends with its line
+      if (f.interpolation && c.startsWith(f.interpolation.open, i)) {
+        out += f.interpolation.open;
+        i += f.interpolation.open.length;
+        code(f.interpolation.close);
+        if (i < c.length) {
+          out += c[i]; // the closing bracket
+          i += 1;
+        }
+      } else if (f.escapes && c[i] === '\\') {
+        out += c.slice(i, i + 2);
+        i += 2;
+      } else {
+        out += c[i];
+        i += 1;
+      }
+    }
+  };
+  code(null);
   return out
     .split('\n')
     .filter((line) => line.trim() !== '')
     .join('\n');
 }
+/** A module or app source file, comments removed, by its own source kind. */
+const codeOf = (f: string) => strip(read(f), langOf(f));
 /** Swift imports, including indented, attributed (`@preconcurrency`), access-level and kind (`import struct M.T`) forms. */
 const SWIFT_IMPORT =
   /(?:^|;)[ \t]*(?:@\w+(?:\([^)\n]*\))?[ \t]+)*(?:(?:public|package|internal|fileprivate|private)[ \t]+)?import[ \t]+(?:(?:typealias|struct|class|enum|protocol|let|var|func)[ \t]+)?(\w+)/gm;
@@ -890,6 +985,29 @@ describe('controller.native — one run, one owner; released on every way out', 
     ctl.dispose();
   });
 
+  it('a listener that throws on "starting" fails the run closed before the OS is asked for the camera (delta review NB-2)', async () => {
+    const f = fakeModule();
+    const { ctl, bindings } = controller({ mod: f.mod });
+    let armed = true;
+    const seen: string[] = [];
+    ctl.subscribe((s) => {
+      seen.push(s.camera);
+      if (armed && s.camera === 'starting') throw new Error('render boom');
+    });
+    await expect(ctl.startCamera(null)).resolves.toBeUndefined();
+    expect(f.calls.request).toBe(0);
+    expect(ctl.snapshot).toMatchObject({ camera: 'failed', failure: 'inference' });
+    expect(seen.slice(1)).toEqual(['starting', 'failed']); // [0] is the snapshot at subscribe
+    expect(ctl.active).toBe(false);
+    expect(bindings.some((b) => b.active)).toBe(false);
+    // The next start, with the listener healthy again, asks once and opens the camera for run 2.
+    armed = false;
+    await ctl.startCamera(null);
+    expect(f.calls.request).toBe(1);
+    expect(bindings.at(-1)).toEqual({ active: true, runId: 2 });
+    ctl.dispose();
+  });
+
   it(`a native side that sends only rejected frames (no timestampUnit) fails the run after ${MAX_INVALID_STREAK} in a row instead of looking live forever`, async () => {
     const { ctl, bindings } = controller();
     await ctl.startCamera(null);
@@ -997,6 +1115,63 @@ describe('support.native — fail closed: the telemetry gate, then the linked mo
     expect(open).toBeGreaterThan(0);
     expect(mount).toBeGreaterThan(open);
     expect(mount - open).toBeLessThan(200);
+  });
+
+  it('Settings offers Camera rep counter on native only where the counter can run (CAM-02, delta review NB-4); web is unchanged', () => {
+    // The decision: web always (support is never consulted there); iOS/Android only when supported.
+    const asked = vi.fn(() => false);
+    expect(moveCameraSettingsShown('web', asked)).toBe(true);
+    expect(asked).not.toHaveBeenCalled();
+    for (const os of ['ios', 'android']) {
+      expect(moveCameraSettingsShown(os, () => false), os).toBe(false);
+      expect(moveCameraSettingsShown(os, () => true), os).toBe(true);
+    }
+    // Wired to the real native probe: with the module linked, hidden while the gate is off, shown once it is on.
+    const req = vi.mocked(requireOptionalNativeModule);
+    const platform = RNPlatform as { OS: string };
+    const was = platform.OS;
+    req.mockReturnValue(linked);
+    try {
+      for (const os of ['ios', 'android'] as const) {
+        platform.OS = os;
+        for (const off of [null, false] as const) {
+          gateState.approved = off; // null = the real constant (false)
+          expect(moveCameraSettingsShown(os, nativeSupport.cameraCounterSupported), `${os} gate ${off}`).toBe(false);
+        }
+        gateState.approved = true;
+        expect(moveCameraSettingsShown(os, nativeSupport.cameraCounterSupported), `${os} gate on`).toBe(true);
+      }
+    } finally {
+      gateState.approved = null;
+      req.mockReturnValue(null);
+      platform.OS = was;
+    }
+    // The component. Under vitest './support' is the web file, false off web, so 'ios' renders
+    // nothing; Metro gives native support.native.ts (pinned below). Web draws both switches even
+    // though jsdom has no getUserMedia: exactly as before this change.
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      platform.OS = 'ios';
+      act(() => root.render(createElement(MoveCameraSettingsSection)));
+      expect(container.innerHTML).toBe('');
+      act(() => root.unmount());
+      platform.OS = was;
+      expect(platform.OS).toBe('web');
+      const webRoot = createRoot(container);
+      act(() => webRoot.render(createElement(MoveCameraSettingsSection)));
+      expect(container.querySelector('[data-testid="wsf-settings-move"]')).not.toBeNull();
+      expect(container.querySelector('[data-testid="wsf-settings-camera-counter"]')?.textContent).toContain('Camera rep counter');
+      expect(container.querySelector('[data-testid="wsf-settings-stick-figure"]')).not.toBeNull();
+      act(() => webRoot.unmount());
+    } finally {
+      platform.OS = was;
+      container.remove();
+    }
+    const section = read('src/movement-camera/MoveCameraSettingsSection.tsx');
+    expect(section).toContain("import { cameraCounterSupported } from './support';");
+    expect(section).toContain('  const [shown] = useState(() => moveCameraSettingsShown(Platform.OS, cameraCounterSupported));\n  if (!shown) return null;\n');
   });
 
   it('once approved, support still needs the linked module on iOS/Android (both gate states covered)', () => {
@@ -1293,9 +1468,9 @@ describe('native sources: header, settings, wiring and versions (static; the cod
     for (const need of ['mpImage.close()', 'if (rotated !== bitmap) bitmap.recycle()', 'observeCameraState(camera.cameraInfo.cameraState)',
       'cameraState?.removeObserver(observer)', 'CameraState.ERROR_CAMERA_IN_USE', 'CameraState.ErrorType.CRITICAL']) expect(krun, need).toContain(need);
     // Delta review A1: every PoseLandmarker.close() goes through closeQuietly (a graph error rethrows from close()).
-    expect(strip(krun).match(/\.close\(\)/g)).toEqual(['.close()', '.close()', '.close()']); // landmarker (in closeQuietly), mpImage, image
-    expect(strip(krun)).toContain('    try {\n      landmarker.close()\n    } catch (error: Throwable) {');
-    expect(strip(krun).match(/closeQuietly\(/g)).toHaveLength(4); // the definition + stop, loadModel when stopped, failed inference
+    expect(strip(krun, 'kotlin').match(/\.close\(\)/g)).toEqual(['.close()', '.close()', '.close()']); // landmarker (in closeQuietly), mpImage, image
+    expect(strip(krun, 'kotlin')).toContain('    try {\n      landmarker.close()\n    } catch (error: Throwable) {');
+    expect(strip(krun, 'kotlin').match(/closeQuietly\(/g)).toHaveLength(4); // the definition + stop, loadModel when stopped, failed inference
     expect(krun.indexOf('        landmarker = null\n        closeQuietly(current)\n        send("onCameraError", mapOf("stage" to "inference"')).toBeGreaterThan(0);
     const kmodel = kt('WsfPoseModel.kt');
     expect(kmodel).toContain('} catch (gpuError: Throwable) {');
@@ -1308,9 +1483,9 @@ describe('native sources: header, settings, wiring and versions (static; the cod
     // Delta review A2: Recents follows the view's attachment, not the run; a black cover, not PreviewView visibility.
     expect(kview).toContain('  override fun onAttachedToWindow() {\n    super.onAttachedToWindow()\n    setRecentsScreenshot(false)\n  }');
     expect(kview).toContain('    super.onDetachedFromWindow()\n    setRecentsScreenshot(true)\n');
-    expect(strip(kview).match(/setRecentsScreenshot\((true|false)\)/g)).toEqual(['setRecentsScreenshot(true)', 'setRecentsScreenshot(false)', 'setRecentsScreenshot(true)']);
+    expect(strip(kview, 'kotlin').match(/setRecentsScreenshot\((true|false)\)/g)).toEqual(['setRecentsScreenshot(true)', 'setRecentsScreenshot(false)', 'setRecentsScreenshot(true)']);
     expect(kview).toContain('cover.visibility = if (run != null && hasWindowFocus()) View.INVISIBLE else View.VISIBLE');
-    expect(strip(kview)).not.toMatch(/previewView\.visibility/);
+    expect(strip(kview, 'kotlin')).not.toMatch(/previewView\.visibility/);
     expect(read(`${MOD}/android/proguard-rules.pro`)).toContain('-keep class com.google.common.flogger.** { *; }');
     const run = swift('WsfPoseRun.swift');
     expect(run).toContain('private static let sessionQueue = DispatchQueue(');
@@ -1325,8 +1500,8 @@ describe('native sources: header, settings, wiring and versions (static; the cod
       'CATransaction.setDisableActions(true)', 'if wanted == startedRunId { return }', 'nonisolated(unsafe) private var run: WsfPoseRun?']) expect(view, need).toContain(need);
     // Delta review N1: the preview shows only while a run is open and the app is active (read at init).
     for (const need of ['appActive = UIApplication.shared.applicationState == .active', 'setPreviewHidden(!(appActive && run != nil))']) expect(view, need).toContain(need);
-    expect(strip(view).match(/setPreviewHidden\(/g)).toHaveLength(2); // the definition + updatePreviewVisibility
-    expect(strip(view).match(/updatePreviewVisibility\(\)/g)).toHaveLength(6); // definition, init, resign, become, run start, stopRun
+    expect(strip(view, 'swift').match(/setPreviewHidden\(/g)).toHaveLength(2); // the definition + updatePreviewVisibility
+    expect(strip(view, 'swift').match(/updatePreviewVisibility\(\)/g)).toHaveLength(6); // definition, init, resign, become, run start, stopRun
   });
 
   it('MediaPipe versions: iOS = web 0.10.35; Android pinned to the nearest confirmed 0.10.x and kept in step; never 1.x', () => {
@@ -1411,21 +1586,43 @@ describe('privacy: the module records, stores and sends nothing itself; the SDK 
     const code = filesUnder(MOD).filter((f) => /\.(swift|kt|java|m|mm|h|ts|tsx)$/.test(f) && !f.includes('/android/src/test/'));
     expect(code.length).toBe(12);
     for (const f of code) {
-      const c = strip(read(f));
+      const c = codeOf(f);
       expect(c, f).not.toMatch(NATIVE_FORBIDDEN);
       expect(c, f).not.toMatch(FQN_FORBIDDEN);
     }
+    // What the stripper does not model is absent from what it scans: no Swift raw strings or
+    // regex literals (`#"`, `#/`), no Groovy slashy strings (`$/`).
+    for (const f of code.filter((x) => x.endsWith('.swift'))) expect(read(f), f).not.toMatch(/#"|#\//);
+    expect(read(`${MOD}/android/build.gradle`)).not.toMatch(/\$\//);
     // A '//' inside a string no longer hides the rest of the line from the scan.
-    expect(strip('let s = "a//b"; let x = AVCaptureMovieFileOutput()')).toMatch(NATIVE_FORBIDDEN);
-    expect(strip('// AVCaptureMovieFileOutput in a comment')).not.toMatch(NATIVE_FORBIDDEN);
-    expect(strip('let a = 1 // AVCaptureMovieFileOutput after code, in a comment')).not.toMatch(NATIVE_FORBIDDEN);
-    expect(strip('/** KDoc\n * URLSession in a doc comment\n */\nval a = 1')).not.toMatch(NATIVE_FORBIDDEN);
+    expect(strip('let s = "a//b"; let x = AVCaptureMovieFileOutput()', 'swift')).toMatch(NATIVE_FORBIDDEN);
+    expect(strip('// AVCaptureMovieFileOutput in a comment', 'swift')).not.toMatch(NATIVE_FORBIDDEN);
+    expect(strip('let a = 1 // AVCaptureMovieFileOutput after code, in a comment', 'swift')).not.toMatch(NATIVE_FORBIDDEN);
+    expect(strip('/** KDoc\n * URLSession in a doc comment\n */\nval a = 1', 'kotlin')).not.toMatch(NATIVE_FORBIDDEN);
     // Delta review N3 (a): a code line that starts with `*` (a continued expression) is scanned.
-    expect(strip('let t = 2\n    * Double(URLSession.shared.configuration.timeoutIntervalForRequest)')).toMatch(NATIVE_FORBIDDEN);
-    expect(strip('val n = 2\n  * java.net.URL("x").openConnection().hashCode()')).toMatch(FQN_FORBIDDEN);
+    expect(strip('let t = 2\n    * Double(URLSession.shared.configuration.timeoutIntervalForRequest)', 'swift')).toMatch(NATIVE_FORBIDDEN);
+    expect(strip('val n = 2\n  * java.net.URL("x").openConnection().hashCode()', 'kotlin')).toMatch(FQN_FORBIDDEN);
     // (b) comment markers inside strings do not open or close a comment.
-    expect(strip('let wsfA = "/*"; let wsfO = URLSession.shared; let wsfB = "*/"')).toMatch(NATIVE_FORBIDDEN);
-    expect(strip('val s = """ /* """; val o = java.net.URL("x"); val e = """ */ """')).toMatch(FQN_FORBIDDEN);
+    expect(strip('let wsfA = "/*"; let wsfO = URLSession.shared; let wsfB = "*/"', 'swift')).toMatch(NATIVE_FORBIDDEN);
+    expect(strip('val s = """ /* """; val o = java.net.URL("x"); val e = """ */ """', 'kotlin')).toMatch(FQN_FORBIDDEN);
+    // Delta review NB-3: a quote inside a string interpolation does not end the outer string, so a
+    // '//' or '/*' inside the interpolation's own string cannot hide the rest of the line.
+    expect(strip('let a = "\\("//")"; let s = URLSession.shared', 'swift')).toMatch(NATIVE_FORBIDDEN);
+    expect(strip('let a = "\\(f(a) + "//")"; let s = URLSession.shared', 'swift')).toMatch(NATIVE_FORBIDDEN); // nested brackets
+    expect(strip('val a = "${run { 1 } + "//"}"; val u = java.net.URL("x")', 'kotlin')).toMatch(FQN_FORBIDDEN);
+    expect(strip('let a = """\n\\("/*")\n"""\nlet s = URLSession.shared\nlet b = "*/"', 'swift')).toMatch(NATIVE_FORBIDDEN);
+    expect(strip('val a = "${"//"}"; val u = java.net.URL("x")', 'kotlin')).toMatch(FQN_FORBIDDEN);
+    expect(strip('val a = "${m["k"] ?: "//"}"; val u = java.net.URL("x")', 'kotlin')).toMatch(FQN_FORBIDDEN);
+    expect(strip('val a = """${"/*"}"""; val u = java.net.URL("x"); val e = "*/"', 'kotlin')).toMatch(FQN_FORBIDDEN);
+    expect(strip('def a = "${"//"}"; exclude group: "com.google.android.datatransport"', 'groovy')).toMatch(/datatransport/);
+    expect(strip('const a = `${`//`}`; fetch(u)', 'ts')).toMatch(NATIVE_FORBIDDEN);
+    // Escapes open nothing, and only the source kind's own forms interpolate.
+    expect(strip('val a = "\\${"; val b = "//"; val u = java.net.URL("x")', 'kotlin')).toMatch(FQN_FORBIDDEN);
+    expect(strip('let a = "\\\\("; let b = "//"; let s = URLSession.shared', 'swift')).toMatch(NATIVE_FORBIDDEN);
+    expect(strip('const a = "${"; const b = "//"; fetch(u)', 'ts')).toMatch(NATIVE_FORBIDDEN);
+    expect(strip('const a = `\\${`; const b = "//"; fetch(u)', 'ts')).toMatch(NATIVE_FORBIDDEN);
+    // A comment inside an interpolation is still a comment.
+    expect(strip('val a = "${b /* URLSession */}"', 'kotlin')).not.toMatch(NATIVE_FORBIDDEN);
   });
 
   it('imports are pinned: Swift only the reviewed frameworks; Kotlin exactly the reviewed set', () => {
@@ -1433,10 +1630,10 @@ describe('privacy: the module records, stores and sends nothing itself; the SDK 
     for (const line of [' import Network', '@preconcurrency import Network', '@_implementationOnly import Network', 'public import Network',
       'import struct Network.NWConnection', 'import UIKit; import Network']) expect(importsOf(line, SWIFT_IMPORT), line).toContain('Network');
     expect(importsOf('  import java.net.URL', KOTLIN_IMPORT)).toEqual(['java.net.URL']);
-    const swiftImports = new Set(filesUnder(MOD).filter((f) => f.endsWith('.swift')).flatMap((f) => importsOf(strip(read(f)), SWIFT_IMPORT)));
+    const swiftImports = new Set(filesUnder(MOD).filter((f) => f.endsWith('.swift')).flatMap((f) => importsOf(codeOf(f), SWIFT_IMPORT)));
     expect([...swiftImports].sort()).toEqual(['AVFoundation', 'CoreMedia', 'CoreVideo', 'CryptoKit', 'ExpoModulesCore', 'Foundation', 'MediaPipeTasksVision', 'UIKit']);
     const ktImports = [
-      ...new Set(filesUnder(MOD).filter((f) => f.endsWith('.kt') && !f.includes('/src/test/')).flatMap((f) => importsOf(strip(read(f)), KOTLIN_IMPORT))),
+      ...new Set(filesUnder(MOD).filter((f) => f.endsWith('.kt') && !f.includes('/src/test/')).flatMap((f) => importsOf(codeOf(f), KOTLIN_IMPORT))),
     ].sort();
     expect(ktImports).toEqual([
       'android.Manifest',
@@ -1503,6 +1700,14 @@ describe('privacy: the module records, stores and sends nothing itself; the SDK 
       'iOS version, bundle id and app version', 'What the Clearcut client itself adds to each request on iOS is NOT confirmed',
       'What the Clearcut client adds to each request is not confirmed', "device's IP address"]) expect(podspec, need).toContain(need);
     expect(podspec).not.toContain('Nothing is recorded, stored or uploaded');
+    // Second delta review NB-1: the owner's A/B text keeps the iOS Clearcut additions explicitly
+    // unconfirmed; finding no device or carrier references is not presented as evidence.
+    const qa = readFileSync(nodePath.resolve(APP, '../../docs/westayfit/qa/move-camera-native-adapter-1.md'), 'utf8');
+    expect(qa).toContain('**What the Clearcut client adds to each request on iOS: unconfirmed (no device run, no decoded upload).**');
+    const options = qa.slice(qa.indexOf('**Options for the owner.**'), qa.indexOf('**First EAS build checks'));
+    expect(options.match(/unconfirmed \(no device run, no decoded upload\)/g)).toHaveLength(2); // read-first line + App Store label
+    expect(options).toContain('is not proof that none are sent');
+    expect(qa).not.toMatch(/suggests no device or carrier fields/);
     const gradle = read(`${MOD}/android/build.gradle`);
     const gradleText = oneLine(gradle);
     for (const need of ['com.google.android.datatransport', 'RemoteLoggingClient', 'MediaPipe itself does not read the OS version',
@@ -1514,24 +1719,24 @@ describe('privacy: the module records, stores and sends nothing itself; the SDK 
     expect(gradleText).not.toMatch(/That adds ACCESS_NETWORK_STATE/);
     expect(gradle).not.toMatch(/Never 1\.x without/);
     // Excluding the uploader would crash: RemoteLoggingClient throws NoClassDefFoundError.
-    const gradleCode = strip(gradle); // the warning comment itself names the forbidden line
+    const gradleCode = strip(gradle, 'groovy'); // the warning comment itself names the forbidden line
     expect(gradleCode).not.toMatch(/datatransport/);
     expect(gradleCode).not.toMatch(/\bexclude\b/);
   });
 
   it('the only inputs are the front camera (video) and the bundled model; permission is CAMERA / video only', () => {
-    const run = strip(read(`${MOD}/ios/WsfPoseRun.swift`));
+    const run = codeOf(`${MOD}/ios/WsfPoseRun.swift`);
     expect(run.match(/AVCaptureDeviceInput\(/g)).toHaveLength(1);
     expect(run.match(/addOutput\(/g)).toHaveLength(1);
     expect(run).toContain('AVCaptureVideoDataOutput()');
-    const mod = strip(read(`${MOD}/ios/WsfPoseCameraModule.swift`));
+    const mod = codeOf(`${MOD}/ios/WsfPoseCameraModule.swift`);
     expect(mod.match(/for: \.video/g)?.length).toBe(3);
-    const kmod = strip(read(`${MOD}/android/src/main/java/expo/modules/wsfposecamera/WsfPoseCameraModule.kt`));
+    const kmod = codeOf(`${MOD}/android/src/main/java/expo/modules/wsfposecamera/WsfPoseCameraModule.kt`);
     expect(kmod.match(/Manifest\.permission\.[A-Z_]+/g)).toEqual(['Manifest.permission.CAMERA', 'Manifest.permission.CAMERA']);
-    const krun = strip(read(`${MOD}/android/src/main/java/expo/modules/wsfposecamera/WsfPoseRun.kt`));
+    const krun = codeOf(`${MOD}/android/src/main/java/expo/modules/wsfposecamera/WsfPoseRun.kt`);
     expect(krun).toMatch(/bindToLifecycle\(owner, selector, preview, analysis\)/);
     // The model is read from the app's own assets / bundle, never fetched.
-    expect(strip(read(`${MOD}/android/src/main/java/expo/modules/wsfposecamera/WsfPoseModel.kt`))).toMatch(/context\.assets\.open\(WsfPoseContract\.MODEL_FILE\)/);
+    expect(codeOf(`${MOD}/android/src/main/java/expo/modules/wsfposecamera/WsfPoseModel.kt`)).toMatch(/context\.assets\.open\(WsfPoseContract\.MODEL_FILE\)/);
   });
 
   it('the app config blocks the microphone and explains the camera honestly (owned by NATIVE-BUILD-1; checked by meaning, not wording)', () => {
@@ -1565,7 +1770,7 @@ describe('privacy: the module records, stores and sends nothing itself; the SDK 
       'src/ui/NativeCameraPreview.native.tsx',
     ];
     for (const f of files) {
-      expect(strip(read(f)), f).not.toMatch(/MediaRecorder|captureStream|toDataURL|toBlob|getImageData|fetch\s*\(|XMLHttpRequest|sendBeacon|WebSocket|localStorage|sessionStorage|indexedDB|AsyncStorage|httpsCallable|firebase|firestore|odml\.pa\.googleapis|contributionFlow|pendingContribution/i);
+      expect(codeOf(f), f).not.toMatch(/MediaRecorder|captureStream|toDataURL|toBlob|getImageData|fetch\s*\(|XMLHttpRequest|sendBeacon|WebSocket|localStorage|sessionStorage|indexedDB|AsyncStorage|httpsCallable|firebase|firestore|odml\.pa\.googleapis|contributionFlow|pendingContribution/i);
     }
   });
 
@@ -1584,7 +1789,7 @@ describe('privacy: the module records, stores and sends nothing itself; the SDK 
       'src/movement-camera/support.native.ts',
     ]);
     for (const f of importers.filter((x) => !x.includes('.native.'))) {
-      for (const line of strip(read(f)).split('\n').filter((l) => l.includes('modules/wsf-pose-camera'))) {
+      for (const line of codeOf(f).split('\n').filter((l) => l.includes('modules/wsf-pose-camera'))) {
         expect(line, f).toMatch(/^} from|^import type/);
       }
       expect(read(f), f).toMatch(/^import type \{[^}]*\} from '\.\.\/\.\.\/modules\/wsf-pose-camera\/src\/WsfPoseCamera\.types';/m);
