@@ -1,8 +1,8 @@
-import { router } from 'expo-router';
+import { router, useNavigation } from 'expo-router';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
-import { useEffect, useRef, useState } from 'react';
-import type { TextInput } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Platform, type TextInput } from 'react-native';
 
 import { useWsfAuth } from '../src/auth';
 import { AuthFlagOffPanel } from '../src/AuthFlagOffPanel';
@@ -29,6 +29,8 @@ import { wsfAuthEnabled } from '../src/featureFlags';
 import { getFirebaseAuth, getFirebaseFirestore } from '../src/firebase';
 import { routeAfterAuth } from '../src/pendingJoinCode';
 import { isPostAuthDestinationsReady, usePostAuthDestinationsReady } from '../src/postAuthDestination';
+import { landAfterAuth } from '../src/ui/authLanding';
+import { REDIRECT_FAILED_SENTENCE } from '../src/ui/authRedirect';
 
 export default function SignIn() {
   const { ready, user } = useWsfAuth();
@@ -77,6 +79,48 @@ export default function SignIn() {
     ? authReturnHeading(destinationKind)
     : { heading: 'Welcome back.', intro: 'Sign in to your community.' };
 
+  /*
+    NATIVE-MEMBER-1 W16-7 (INT-20). THE TERMINAL HOP LANDS, IT DOES NOT
+    REPLACE. On a phone `router.replace` swaps only the top of the root stack,
+    so the (tabs) under this screen and the one the hop opened piled up
+    (src/ui/authLanding.ts). The terminal hop goes through landAfterAuth: on a
+    phone Home only with the destination pushed over it; on the web replace,
+    exactly as before. The /verify-email and /profile-setup gate hops keep
+    replace.
+  */
+  const navigation = useNavigation();
+  const land = useCallback(
+    (next: string) =>
+      landAfterAuth(next, {
+        dispatch: (action) => navigation.dispatch(action as never),
+        push: (href) => router.push(href as never),
+        replace: (href) => router.replace(href as never),
+        platform: Platform.OS,
+      }),
+    [navigation],
+  );
+  // A successful submit also flips `user`, so the redirect effect below and
+  // onSubmit can both reach the terminal hop with the same destination (it is
+  // read, not consumed). It lands once per account: on a phone a second
+  // landing would reset and push the destination again.
+  const landedFor = useRef<string | null>(null);
+  const landOnce = useCallback(
+    (uid: string, next: string) => {
+      if (landedFor.current === uid) return;
+      landedFor.current = uid;
+      land(next);
+    },
+    [land],
+  );
+  /*
+    W16-7 (MF-16). AN OFFLINE REDIRECT HAS A WAY OUT. The profile read below
+    could reject (no connection) and left "Loading…" with nothing to press. It
+    is caught now; on a phone the screen says so, with Try again (the same
+    reads) and Back to home. The web keeps today's Loading branch.
+  */
+  const [redirectFailed, setRedirectFailed] = useState(false);
+  const [redirectAttempt, setRedirectAttempt] = useState(0);
+
   // Already-signed-in short-circuit. E3.5 §3C C5: a member who taps the app
   // icon after their session survived (verified, profile written) must not
   // see a signin form asking them for the credentials they already used —
@@ -86,26 +130,33 @@ export default function SignIn() {
   useEffect(() => {
     if (!ready || !user) return;
     let cancelled = false;
+    setRedirectFailed(false);
     (async () => {
       if (!user.emailVerified) {
         if (!cancelled) router.replace('/verify-email');
         return;
       }
-      const db = getFirebaseFirestore();
-      const profileSnap = await getDoc(doc(db, 'wsfMemberProfiles', user.uid));
-      if (cancelled) return;
-      if (!profileSnap.exists()) {
-        router.replace('/profile-setup');
+      let next: string;
+      try {
+        const db = getFirebaseFirestore();
+        const profileSnap = await getDoc(doc(db, 'wsfMemberProfiles', user.uid));
+        if (cancelled) return;
+        if (!profileSnap.exists()) {
+          router.replace('/profile-setup');
+          return;
+        }
+        next = await routeAfterAuth('/', user.uid);
+      } catch {
+        if (!cancelled) setRedirectFailed(true);
         return;
       }
-      const next = await routeAfterAuth('/', user.uid);
       if (cancelled) return;
-      router.replace(next as never);
+      landOnce(user.uid, next);
     })();
     return () => {
       cancelled = true;
     };
-  }, [ready, user]);
+  }, [ready, user, redirectAttempt, landOnce]);
 
   if (!wsfAuthEnabled) {
     return <AuthFlagOffPanel title="Sign in" testID="wsf-signin-disabled" />;
@@ -115,6 +166,26 @@ export default function SignIn() {
   // flight — otherwise a signed-in member sees a flash of "Sign in" with
   // their own creds prompted, which is exactly the confusion C5 fixes.
   if (!ready || user) {
+    if (user && redirectFailed && Platform.OS !== 'web') {
+      return (
+        <FormShell heading="Sign in" testID="wsf-signin-redirect-failed">
+          <ErrorText testID="wsf-signin-redirect-error">{REDIRECT_FAILED_SENTENCE}</ErrorText>
+          <SubmitButton
+            label="Try again"
+            onPress={() => setRedirectAttempt((n) => n + 1)}
+            submitting={false}
+            testID="wsf-signin-redirect-retry"
+          />
+          <SubmitButton
+            label="Back to home"
+            variant="tertiary"
+            onPress={() => land('/')}
+            submitting={false}
+            testID="wsf-signin-redirect-home"
+          />
+        </FormShell>
+      );
+    }
     return (
       <FormShell heading="Sign in" testID="wsf-signin-loading">
         <StatusText>Loading…</StatusText>
@@ -165,7 +236,7 @@ export default function SignIn() {
         router.replace('/profile-setup');
         return;
       }
-      router.replace(await routeAfterAuth('/', credential.user.uid));
+      landOnce(credential.user.uid, await routeAfterAuth('/', credential.user.uid));
     } catch (e) {
       // MF-13 review N-1: the latch reopens only for an outcome the member can
       // retry. A terminal one keeps it shut, so a Go/Enter that lands before
@@ -223,7 +294,9 @@ export default function SignIn() {
         autoCorrect={false}
         spellCheck={false}
         autoComplete="email"
-        textContentType="emailAddress"
+        // W16-7 (INT-24): iOS offers the saved sign-in for a 'username' field;
+        // autoComplete stays 'email' (the web's autocomplete attribute).
+        textContentType={Platform.OS === 'ios' ? 'username' : 'emailAddress'}
         inputMode="email"
         keyboardType="email-address"
         returnKeyType="next"
