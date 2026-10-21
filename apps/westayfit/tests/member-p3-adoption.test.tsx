@@ -6,16 +6,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 /**
  * NATIVE-MEMBER-1 W16-12: the member halves of the integrator's P3 helpers.
  *
- * INT-33 (here now): the privacy switch's knob takes kit-base's lift.knob
- * (W12-15). Android draws no shadow from shadow* props, so the knob lifts by
- * elevation 2 there; iOS keeps the knob's own shadow; the web's style is
- * today's.
+ * INT-31 (heads-11 NB-1; cb36c792 labelled it INT-33): the privacy switch's
+ * knob takes kit-base's lift.knob (W12-15). Android draws no shadow from
+ * shadow* props, so the knob lifts by elevation 2 there; iOS keeps the knob's
+ * own shadow; the web's style is today's.
  *
  * INT-36: Community Home's momentum amounts go through formatCount (W12-18):
  * en-US on a phone ("4,999"; a German phone printed "4.999", which reads as
  * four point nine), and the browser's own locale on the web, as before. The
- * device locale is stubbed to de-DE. INT-30 and INT-31 wait for W12-16 and
- * W12-17, which have not landed.
+ * device locale is stubbed to de-DE. INT-30 (the tab-bar reserve) and INT-33
+ * (DeviceChoice press feedback) wait for W12-16 and W12-17, which have not
+ * landed.
  *
  * lift.ts picks its tokens at import (Platform.select), so each platform
  * imports the view afresh with the platform set first, and Platform.select
@@ -163,7 +164,7 @@ const KNOB = {
   shadowOffset: { width: 0, height: 2 },
 };
 
-describe('W16-12 / INT-33: the privacy switch knob lifts on every platform', () => {
+describe('W16-12 / INT-31: the privacy switch knob lifts on every platform', () => {
   it('Android: elevation 2 (lift.knob) on both knobs, on and off', async () => {
     const [on, off] = await knobsOn('android');
     expect(on).toEqual({ ...KNOB, elevation: 2, marginLeft: 24 });

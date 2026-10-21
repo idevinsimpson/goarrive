@@ -7,7 +7,7 @@ import {
   type Visibility,
 } from './communityParityTypes';
 import { ACTION_GREEN, NAVY, PROGRESS_GREEN, SURFACE } from './kit';
-// W16-12 (INT-33): the knob's lift, per platform (W12-15, kit-base).
+// W16-12 (INT-31): the knob's lift, per platform (W12-15, kit-base).
 import { lift } from './lift';
 
 /**
@@ -268,7 +268,7 @@ function ToggleRow({
         </Text>
       </View>
       <View style={[s.track, on ? s.trackOn : null, disabled ? s.trackBusy : null]}>
-        {/* W16-12 (INT-33): Android draws no shadow from shadow*; lift.knob is
+        {/* W16-12 (INT-31): Android draws no shadow from shadow*; lift.knob is
             its elevation 2. iOS keeps the knob's own shadow; the web gets {}. */}
         <View style={[s.knob, lift.knob, on ? s.knobOn : null]} />
       </View>
