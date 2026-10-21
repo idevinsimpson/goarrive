@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import * as nodePath from 'node:path';
 
-import { act, useRef, type MutableRefObject, type ReactNode } from 'react';
+import { act, StrictMode, useRef, type MutableRefObject, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Text } from 'react-native';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -16,7 +16,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * value records what it is set to, and each timing records its config, whether
  * it was started or stopped, and finishes only when the test says so. What is
  * tested is the component's decision — values, duration, easing, driver, the
- * blur reset, stop on re-trigger and unmount — not react-native-web's player.
+ * blur reset, stop on re-trigger, unmount and a StrictMode re-run — not
+ * react-native-web's player.
  */
 
 type FakeTiming = {
@@ -221,6 +222,34 @@ describe('the scene', () => {
     act(() => root.unmount());
     expect(run.stopped).toBe(true);
     root = createRoot(container);
+  });
+});
+
+describe('React StrictMode (development) re-runs effects', () => {
+  /** As the tab navigator mounts scenes: a tab's scene mounts on its first visit. */
+  function LazyShell({ visited }: { visited: Tab[] }) {
+    const lastSelected = useRef<string | null>(null);
+    const selected = visited[visited.length - 1];
+    return (
+      <StrictMode>
+        {TABS.filter((tab) => visited.includes(tab)).map((tab) => (
+          <TabSceneFade key={tab} routeKey={tab} selectedKey={selected} lastSelected={lastSelected} reducedMotion={false}>
+            <Text>{tab}</Text>
+          </TabSceneFade>
+        ))}
+      </StrictMode>
+    );
+  }
+
+  it('a tab’s first visit never sticks part-faded: its fade is stopped at full opacity when the effect is re-run', () => {
+    act(() => root.render(<LazyShell visited={['home']} />));
+    act(() => root.render(<LazyShell visited={['home', 'community']} />)); // Community mounts on its first visit
+    const runs = fx.timings;
+    expect(runs.length).toBeGreaterThan(0);
+    const community = runs[0]!.value;
+    // Every fade StrictMode's re-run left behind was stopped, and the scene is at full opacity.
+    expect(runs.every((r) => r.value !== community || r.stopped || r.value.v === 1)).toBe(true);
+    expect(community.v).toBe(1);
   });
 });
 

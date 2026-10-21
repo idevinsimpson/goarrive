@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, type MutableRefObject, type ReactNode } from 'react';
+import { useLayoutEffect, useRef, type MutableRefObject, type ReactNode } from 'react';
 import { Animated, Easing } from 'react-native';
 
 import { TAB_FADE_EASING, TAB_FADE_FROM, TAB_FADE_MS, tabFadeOnSelect } from './tabFade';
@@ -16,11 +16,13 @@ import { TAB_FADE_EASING, TAB_FADE_FROM, TAB_FADE_MS, tabFadeOnSelect } from './
  * from MOVE or Settings (the selected tab did not change, so the effect does
  * not run). Reduced motion: no fade.
  *
- * A FADE NEVER OUTLIVES ITS TAB'S FOCUS. Every visited tab stays mounted
- * (`freezeOnBlur: false`), so a scene left mid-fade is stopped and set straight
- * to full opacity when it blurs, reduced motion turned on mid-fade ends it at
- * once, and unmounting stops it: a fast Home → Community → Progress leaves
- * every scene at full opacity.
+ * A FADE NEVER OUTLIVES THE EFFECT THAT STARTED IT. Every visited tab stays
+ * mounted (`freezeOnBlur: false`), so the fade is the effect's to clean up:
+ * when the scene blurs, when reduced motion is turned on, when it unmounts --
+ * and when React StrictMode re-runs the effect in development -- the fade is
+ * stopped and the scene set straight to full opacity. A fast Home → Community
+ * → Progress leaves every scene at full opacity, and no scene is ever left
+ * part-faded.
  */
 export function TabSceneFade({
   routeKey,
@@ -38,33 +40,13 @@ export function TabSceneFade({
   const opacityRef = useRef<Animated.Value | null>(null);
   if (opacityRef.current === null) opacityRef.current = new Animated.Value(1);
   const opacity = opacityRef.current;
-  const running = useRef<Animated.CompositeAnimation | null>(null);
-
-  const stop = () => {
-    running.current?.stop();
-    running.current = null;
-  };
 
   // A layout effect, so the new tab's first painted frame is already faded.
   useLayoutEffect(() => {
-    if (selectedKey !== routeKey) {
-      // Blurred: never left part-faded.
-      stop();
-      opacity.setValue(1);
-      return;
-    }
+    if (selectedKey !== routeKey) return undefined;
     const previous = lastSelected.current;
     lastSelected.current = routeKey;
-    if (!tabFadeOnSelect({ previous, routeKey, reducedMotion })) {
-      // Reduced motion asked for while this scene is fading: end it at once.
-      if (reducedMotion) {
-        stop();
-        opacity.setValue(1);
-      }
-      return;
-    }
-    // No running fade to stop here: a scene starts one only after it blurred
-    // (which stopped any) or on its first selection (which does not fade).
+    if (!tabFadeOnSelect({ previous, routeKey, reducedMotion })) return undefined;
     opacity.setValue(TAB_FADE_FROM);
     const fade = Animated.timing(opacity, {
       toValue: 1,
@@ -72,16 +54,14 @@ export function TabSceneFade({
       easing: Easing.bezier(...TAB_FADE_EASING),
       useNativeDriver: true,
     });
-    running.current = fade;
-    fade.start(({ finished }) => {
-      if (finished && running.current === fade) running.current = null;
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedKey, routeKey, lastSelected, reducedMotion]);
-
-  // No fade outlives the scene.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => () => stop(), []);
+    fade.start();
+    // Blurred, reduced motion asked for, unmounted, or re-run by StrictMode:
+    // stopped, and never left part-faded.
+    return () => {
+      fade.stop();
+      opacity.setValue(1);
+    };
+  }, [selectedKey, routeKey, lastSelected, reducedMotion, opacity]);
 
   return (
     <Animated.View style={{ flex: 1, opacity }} testID="wsf-tab-scene-native">
