@@ -21,7 +21,8 @@ import {
 import { authErrorCode, authErrorMessage } from '../src/authErrors';
 import { wsfAuthEnabled } from '../src/featureFlags';
 import { getFirebaseAuth, getFirebaseFirestore } from '../src/firebase';
-import { nextRouteAfterAuth } from '../src/pendingJoinCode';
+import { routeAfterAuth } from '../src/pendingJoinCode';
+import { usePostAuthDestinationsReady } from '../src/postAuthDestination';
 import { requestVerificationEmail } from '../src/verificationEmail';
 import {
   beginVerificationSend,
@@ -45,6 +46,9 @@ export default function VerifyEmail() {
   // leave "Sending" on screen until some unrelated render happened to pick the
   // answer up.
   useSyncExternalStore(subscribeVerificationSend, verificationSendSnapshot, verificationSendSnapshot);
+  // Re-renders once a phone has read the post-auth destinations from storage,
+  // so the destination card is right on a cold start. No-op on web.
+  usePostAuthDestinationsReady();
 
   // Whose screen this is. When the account changes underneath — a sign-out, or
   // a different account signing in — every local claim on screen belonged to
@@ -99,7 +103,9 @@ export default function VerifyEmail() {
     // already finished. A brand-new signup with a pending join code MUST still
     // hit profile-setup first so the profile exists before wsfJoinCommunity is
     // called; nextRouteAfterAuth is only safe on the terminal branch.
-    router.replace(nextRouteAfterAuth('/') as never);
+    const next = await routeAfterAuth('/', startedFor);
+    if (getFirebaseAuth().currentUser?.uid !== startedFor) return false;
+    router.replace(next as never);
     return true;
   }, []);
 
@@ -338,7 +344,7 @@ export default function VerifyEmail() {
   */
   const canResend = outcome !== 'unconfigured';
   const canVerifyHere = outcome !== 'unconfigured';
-  const destinationKind = readAuthDestinationKind();
+  const destinationKind = readAuthDestinationKind(user.uid);
 
   return (
     <FormShell

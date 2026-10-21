@@ -11,13 +11,11 @@
  * that needs the record to exist before acting (a pending attempt before its
  * request) must check the result rather than assume it.
  */
-export type DeviceKv = {
-  getItem(key: string): Promise<string | null>;
-  setItem(key: string, value: string): Promise<boolean>;
-  removeItem(key: string): Promise<boolean>;
-  /** Keys starting with the prefix. Used to clear account-scoped records. */
-  keysWithPrefix(prefix: string): Promise<string[]>;
-};
+import type { DeviceKv } from './kvTypes';
+
+// The contract lives in a module with NO platform sibling (src/storage/kvTypes.ts):
+// re-exported here so every `from './kv'` importer is unchanged.
+export type { DeviceKv, KvRead } from './kvTypes';
 
 function webStorage(): Storage | null {
   try {
@@ -34,6 +32,22 @@ export const deviceKv: DeviceKv = {
       return webStorage()?.getItem(key) ?? null;
     } catch {
       return null;
+    }
+  },
+  async readItem(key) {
+    const s = webStorage();
+    // NO STORAGE OBJECT AT ALL (storage disabled, or a getter that throws):
+    // nothing is stored and nothing can be — `setItem` reports false — so
+    // there is no record here to protect. "Nothing stored" is the true
+    // answer, and the screen records honestly as not durable rather than
+    // failing closed for good on a read that can never succeed.
+    if (!s) return { ok: true, value: null };
+    try {
+      return { ok: true, value: s.getItem(key) };
+    } catch {
+      // A Storage that is THERE but refuses this read may hold the record:
+      // unreadable, not empty.
+      return { ok: false };
     }
   },
   async setItem(key, value) {
