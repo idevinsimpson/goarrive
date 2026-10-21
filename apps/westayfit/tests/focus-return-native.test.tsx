@@ -406,6 +406,22 @@ describe('useStepHeadingFocus', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it('a step reached through null is a change: step → null → the same step focuses again (RV13-KIT-N1)', () => {
+    mount(<Step step="count" />);
+    mount(<Step step="review" />);
+    interactionsDone();
+    advance(400);
+    expect(rn.focused).toEqual([31]);
+    mount(<Step step={null} />); // the step is left: nothing to focus
+    interactionsDone();
+    advance(400);
+    expect(rn.focused).toEqual([31]);
+    mount(<Step step="review" />); // the same step, opened again
+    interactionsDone();
+    advance(400);
+    expect(rn.focused).toEqual([31, 31]);
+  });
+
   it('the web twin never moves focus', () => {
     rn.os = 'web';
     mount(<WebStep step="count" />);
