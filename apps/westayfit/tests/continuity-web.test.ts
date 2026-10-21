@@ -328,3 +328,26 @@ describe('web (NATIVE-STATE-2 review): an owned record found after a same-tab re
     window.sessionStorage.clear();
   });
 });
+
+describe('web (#639 delta): a refused removal still discards the join context', () => {
+  it('the removal is retried and then overwritten, so the context does not apply a second time', async () => {
+    const je = await import('../src/joinEventHandoff');
+    const { DISCARDED_RECORD } = await import('../src/postAuthDestination');
+    const JOIN = 'JoinCodeForGroupA_01';
+    void je.setPendingEventGoal('goal_1', JOIN);
+    void je.setPendingEventActivity('squats', 'goal_1', JOIN);
+    const realRemove = Storage.prototype.removeItem;
+    const spy = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (this: Storage, key: string) {
+      if (key.startsWith('wsf.pendingEvent')) throw new DOMException('refused', 'SecurityError');
+      return realRemove.call(this, key);
+    });
+    try {
+      expect(await je.takeJoinEventContext('uid-a', JOIN)).toEqual({ goalId: 'goal_1', activity: 'squats' });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(window.sessionStorage.getItem('wsf.pendingEventGoalId')).toBe(DISCARDED_RECORD);
+    expect(await je.takeJoinEventContext('uid-a', JOIN)).toEqual({ goalId: null, activity: null });
+    window.sessionStorage.clear();
+  });
+});

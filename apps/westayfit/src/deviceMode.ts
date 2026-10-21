@@ -127,8 +127,19 @@ const FORGOTTEN = 'forgotten';
  * not forget it (this session still reads it as forgotten).
  */
 export async function clearDeviceMode(): Promise<boolean> {
+  // An answer given while a removal is outstanding is newer than the one
+  // being forgotten; the retry and the overwrite stop rather than erase it.
+  // (Compared with the forgotten value, not with null: on web the read is
+  // localStorage itself, which still holds the old answer after a refusal.)
+  const forgetting = store.read(DEVICE_MODE_KEY);
+  const newerLanded = () => {
+    const now = store.read(DEVICE_MODE_KEY);
+    return now !== null && now !== forgetting;
+  };
   if (await store.remove(DEVICE_MODE_KEY)) return true;
+  if (newerLanded()) return true;
   if (await store.remove(DEVICE_MODE_KEY)) return true;
+  if (newerLanded()) return true;
   const kept = await store.write(DEVICE_MODE_KEY, FORGOTTEN);
   return kept;
 }

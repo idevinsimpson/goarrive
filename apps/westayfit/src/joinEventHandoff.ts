@@ -231,11 +231,21 @@ const NO_CONTEXT: JoinEventContext = { goalId: null, activity: null };
  * code, within the expiry.
  */
 export async function takeJoinEventContext(uid: string | null, joinCode: string): Promise<JoinEventContext> {
+  const context = await readJoinEventContext(uid, joinCode);
+  await discardJoinEventContext();
+  return context;
+}
+
+/** The context for (uid, joinCode), after the native launch read. Reads only. */
+async function readJoinEventContext(uid: string | null, joinCode: string): Promise<JoinEventContext> {
   await postAuthDestinationsReady();
   const goalId = readPendingEventGoal(uid, joinCode);
   const activity = goalId ? readPendingEventActivity(uid, joinCode, goalId) : null;
-  await Promise.all([pendingEvent.discard(), pendingActivity.discard()]);
   return { goalId, activity };
+}
+
+function discardJoinEventContext(): Promise<unknown> {
+  return Promise.all([pendingEvent.discard(), pendingActivity.discard()]);
 }
 
 /**
@@ -247,9 +257,12 @@ export async function takeJoinEventContext(uid: string | null, joinCode: string)
 export const JOIN_CONTEXT_WAIT_MS = 1_500;
 
 /**
- * `takeJoinEventContext`, but never later than `ms`: past that, no context
- * (the community destination). A take that finishes later still consumes the
- * context, so it cannot apply to some later join instead. Never rejects.
+ * `takeJoinEventContext`, for the join route: only the READ is waited for,
+ * and never longer than `ms` (past that, no context — the community
+ * destination). The discards run in the background once the read has
+ * answered, so a slow removal never costs the member their event. Whatever
+ * the read found, it is still consumed, so it cannot apply to some later join
+ * instead. Never rejects.
  */
 export function takeJoinEventContextWithin(
   uid: string | null,
@@ -265,7 +278,11 @@ export function takeJoinEventContextWithin(
       resolve(context);
     };
     const timer = setTimeout(() => finish(NO_CONTEXT), ms);
-    takeJoinEventContext(uid, joinCode).then(finish, () => finish(NO_CONTEXT));
+    readJoinEventContext(uid, joinCode)
+      .then(finish, () => finish(NO_CONTEXT))
+      .finally(() => {
+        void discardJoinEventContext();
+      });
   });
 }
 

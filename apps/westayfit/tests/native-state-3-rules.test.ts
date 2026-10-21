@@ -277,3 +277,85 @@ describe('the two-hour expiry holds for the join context in a process that outli
     expect(await finishJoin(m, A)).toBe(`/community/${GROUP}`);
   });
 });
+
+describe('#639 N1/N2 (delta review)', () => {
+  it('N1: a prompt read with a 2 s removal still routes to the event; the discards finish afterwards', async () => {
+    let m = await launch();
+    await scan(m, G1, 'Squats');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    m = await launch();
+    await m.pad.postAuthDestinationsReady();
+    const realRemove = disk.api.removeItem;
+    disk.api.removeItem = async (key: string) => {
+      await new Promise((r) => setTimeout(r, 2_000));
+      return realRemove(key);
+    };
+    try {
+      let answer: unknown = 'waiting';
+      void m.je.takeJoinEventContextWithin(A, CODE).then((c) => (answer = c));
+      await vi.advanceTimersByTimeAsync(10);
+      expect(answer).toEqual({ goalId: G1, activity: 'Squats' });
+      await vi.advanceTimersByTimeAsync(2_100);
+      expect(disk.map.has(EVENT_KEY)).toBe(false);
+      expect(disk.map.has(ACTIVITY_KEY)).toBe(false);
+    } finally {
+      disk.api.removeItem = realRemove;
+    }
+  });
+
+  function refuseRemovalsWhile(during: () => void) {
+    const real = disk.api.removeItem;
+    let first = true;
+    disk.api.removeItem = async () => {
+      if (first) {
+        first = false;
+        during(); // a newer write lands while the removal is outstanding
+      }
+      throw new Error('storage refused the removal');
+    };
+    return () => {
+      disk.api.removeItem = real;
+    };
+  }
+
+  it('N2: a newer scan that lands during a refused removal is not retried away or overwritten', async () => {
+    let m = await launch();
+    await scan(m, G1, 'Squats');
+    m = await launch();
+    await m.pad.postAuthDestinationsReady();
+    const mm = m;
+    const restore = refuseRemovalsWhile(() => {
+      void mm.je.setPendingEventGoal(G2, CODE, null);
+    });
+    try {
+      await m.je.dropJoinJourney();
+    } finally {
+      restore();
+    }
+    await new Promise((r) => setTimeout(r, 0));
+    expect(m.je.readPendingEventGoal(null, CODE)).toBe(G2);
+    m = await launch();
+    expect(await m.je.takeJoinEventContext(A, CODE)).toMatchObject({ goalId: G2 });
+  });
+
+  it('N2: a device answer given during a refused removal is not overwritten with "forgotten"', async () => {
+    let m = await launch();
+    await m.dm.saveDeviceMode('shared');
+    m = await launch();
+    await m.dm.deviceModeReady();
+    const mm = m;
+    const restore = refuseRemovalsWhile(() => {
+      void mm.dm.saveDeviceMode('personal');
+    });
+    try {
+      await m.dm.clearDeviceMode();
+    } finally {
+      restore();
+    }
+    await new Promise((r) => setTimeout(r, 0));
+    expect(m.dm.readDeviceMode()).toBe('personal');
+    m = await launch();
+    await m.dm.deviceModeReady();
+    expect(m.dm.readDeviceMode()).toBe('personal');
+  });
+});

@@ -112,8 +112,21 @@ export function definePostAuthDestination<V>(codec: DestinationCodec<V>): PostAu
       return store.remove(codec.key);
     },
     async discard() {
+      // A write that lands while a removal is outstanding is NEWER than the
+      // record being discarded (a fresh scan, say): once one has landed, the
+      // retry and the overwrite would destroy it, so they stop. "Newer" is a
+      // value other than the one being discarded — not merely non-null: on
+      // web `store.read` reads sessionStorage itself, and after a refused
+      // removal it still holds the old value.
+      const discarding = store.read(codec.key);
+      const newerLanded = () => {
+        const now = store.read(codec.key);
+        return now !== null && now !== discarding;
+      };
       if (await store.remove(codec.key)) return true;
+      if (newerLanded()) return true;
       if (await store.remove(codec.key)) return true;
+      if (newerLanded()) return true;
       return store.write(codec.key, DISCARDED_RECORD);
     },
   };
