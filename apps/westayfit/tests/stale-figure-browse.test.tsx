@@ -18,7 +18,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * open goal. The figure loads, then a return to the app after 30 s finds the
  * network down, which is the RETURN-CONTINUITY-1 path. Text is wrapped to read
  * the props a phone acts on. No device.
+ *
+ * NATIVE-MEMBER-1 W16-14 (INT-12, member half): the freshness line under the
+ * figure ("Confirmed …") names the day when it is not today and says "Last
+ * confirmed" while the figure is the kept one, against a fixed now (fake
+ * timers) in a pinned zone (UTC) and the en-US clock.
  */
+
+// The freshness line is in the reader's zone: pinned so the strings are exact.
+process.env.TZ = 'UTC';
 
 const SENTENCE = 'Couldn’t refresh. This is the last confirmed figure.';
 // The props each copy of the sentence was last rendered with: the region's
@@ -100,14 +108,22 @@ const PULSE = {
   endsAt: new Date(NOW + 5 * 86_400_000).toISOString(),
   timezone: 'UTC',
 };
-const net: { down: boolean; pulseDownFor: string | null } = { down: false, pulseDownFor: null };
+// `holdFor`: that goal's pulse answers only when `release()` runs (it answers last).
+const net: { down: boolean; pulseDownFor: string | null; holdFor: string | null; held: Array<() => void> } = {
+  down: false,
+  pulseDownFor: null,
+  holdFor: null,
+  held: [],
+};
 const offline = () => Promise.reject(Object.assign(new Error('offline'), { code: 'functions/unavailable' }));
 vi.mock('firebase/functions', () => ({
   httpsCallable: (_f: unknown, name: string) => (req?: { goalId?: string }) =>
     net.down || (name === 'wsfGoalPulse' && req?.goalId === net.pulseDownFor)
       ? offline()
       : name === 'wsfGoalPulse'
-        ? Promise.resolve({ data: PULSE })
+        ? req?.goalId === net.holdFor
+          ? new Promise((resolve) => net.held.push(() => resolve({ data: PULSE })))
+          : Promise.resolve({ data: PULSE })
         : offline(),
 }));
 vi.mock('../src/firebase', () => ({ getFirebaseFirestore: () => ({}), getFirebaseFunctions: () => ({}) }));
@@ -154,6 +170,8 @@ beforeEach(() => {
   vi.useFakeTimers({ now: NOW });
   net.down = false;
   net.pulseDownFor = null;
+  net.holdFor = null;
+  net.held = [];
   goals.two = false;
   spoken = [];
   const say = (m: string) => {
@@ -298,6 +316,71 @@ describe('heads-9 N-3: one announcement per failure wave, for the whole page', (
   });
 });
 
+describe('heads-13 RV15-642-B1: a recovery is never spoken as a failure', () => {
+  /** R1: g2's pulse fails alone (wave t1). R2: everything fails (g1 joins at t2, a new wave). */
+  async function twoWaves(): Promise<void> {
+    goals.two = true;
+    (Platform as { OS: string }).OS = 'ios';
+    act(() => root.render(<CommunityPage />));
+    await flush();
+    expect(byId('wsf-community-goal-total-g2')).not.toBeNull();
+    net.pulseDownFor = 'g2';
+    await returnToApp();
+    expect(byId('wsf-community-goal-stale-g1')).toBeNull();
+    expect(byId('wsf-community-goal-stale-g2')).not.toBeNull();
+    expect(spoken).toEqual([SENTENCE]);
+    net.down = true;
+    await returnToApp();
+    expect(byId('wsf-community-goal-stale-g1')).not.toBeNull();
+    expect(spoken).toEqual([SENTENCE, SENTENCE]);
+  }
+
+  it('iOS: the newer wave’s goal (g1) recovers while g2 still fails: nothing is spoken; a later new failure still speaks', async () => {
+    await twoWaves();
+    // R3: g1 reads again, g2's pulse still fails (its wave, t1, was spoken in R1).
+    net.down = false;
+    net.pulseDownFor = 'g2';
+    await returnToApp();
+    expect(byId('wsf-community-goal-stale-g1')).toBeNull();
+    expect(byId('wsf-community-goal-stale-g2')).not.toBeNull();
+    expect(spoken).toEqual([SENTENCE, SENTENCE]);
+    // R4: a new outage fails g1 again: a new wave, spoken.
+    net.down = true;
+    await returnToApp();
+    expect(byId('wsf-community-goal-stale-g1')).not.toBeNull();
+    expect(spoken).toEqual([SENTENCE, SENTENCE, SENTENCE]);
+  });
+
+  it('iOS: the older wave’s goal (g2) recovers while g1 stays stale: nothing new', async () => {
+    await twoWaves();
+    net.down = false;
+    net.pulseDownFor = 'g1';
+    await returnToApp();
+    expect(byId('wsf-community-goal-stale-g1')).not.toBeNull();
+    expect(byId('wsf-community-goal-stale-g2')).toBeNull();
+    expect(spoken).toEqual([SENTENCE, SENTENCE]);
+  });
+
+  it('iOS: a round in which every read succeeds, with g2 answering last: nothing is spoken', async () => {
+    await twoWaves();
+    net.down = false;
+    net.pulseDownFor = null;
+    net.holdFor = 'g2';
+    await returnToApp();
+    // g1 has answered; g2 (the older wave) is still stale and waiting.
+    expect(byId('wsf-community-goal-stale-g1')).toBeNull();
+    expect(byId('wsf-community-goal-stale-g2')).not.toBeNull();
+    expect(spoken).toEqual([SENTENCE, SENTENCE]);
+    net.holdFor = null;
+    await act(async () => {
+      for (const release of net.held.splice(0)) release();
+    });
+    await flush();
+    expect(byId('wsf-community-goal-stale-g2')).toBeNull();
+    expect(spoken).toEqual([SENTENCE, SENTENCE]);
+  });
+});
+
 describe('heads-9 B-1: the stale-figure sentence stays browsable on a phone', () => {
   it('iOS: the visible sentence has no accessible:false; the hidden region’s copy is the one hidden', async () => {
     await failARefresh('ios');
@@ -331,5 +414,49 @@ describe('heads-9 B-1: the stale-figure sentence stays browsable on a phone', ()
     // For the before/after web DOM comparison (heads-9 B-1): the whole page.
     const dump = process.env.WSF_DUMP_STALE_DOM;
     if (dump) (await import('node:fs')).writeFileSync(dump, container.innerHTML);
+  });
+});
+
+describe('W16-14 / INT-12: the freshness line names the day, and says when the figure is the kept one', () => {
+  const line = () => byId('wsf-community-progress-updated')!.textContent;
+  const DAY = 86_400_000;
+
+  it.each(['ios', 'web'] as const)('%s: the same day reads as before ("Confirmed 3:00 PM")', async (os) => {
+    (Platform as { OS: string }).OS = os;
+    act(() => root.render(<CommunityPage />));
+    await flush();
+    expect(line()).toBe('Confirmed 3:00 PM');
+  });
+
+  it.each(['ios', 'web'] as const)('%s: a figure confirmed on another day names the day ("Confirmed Oct 21, 3:00 PM")', async (os) => {
+    (Platform as { OS: string }).OS = os;
+    act(() => root.render(<CommunityPage />));
+    await flush();
+    expect(line()).toBe('Confirmed 3:00 PM');
+    // The next day, before any read lands: the page draws again and the same figure names its day.
+    vi.setSystemTime(NOW + DAY + 41 * 60_000);
+    act(() => root.render(<CommunityPage />));
+    expect(line()).toBe('Confirmed Oct 21, 3:00 PM');
+  });
+
+  it.each(['ios', 'web'] as const)('%s: a refresh that failed reads "Last confirmed" with the kept time', async (os) => {
+    await failARefresh(os);
+    expect(line()).toBe('Last confirmed 3:00 PM');
+  });
+
+  it('iOS: failed and from another day: "Last confirmed Oct 21, 3:00 PM"', async () => {
+    await failARefresh('ios');
+    vi.setSystemTime(NOW + DAY);
+    act(() => root.render(<CommunityPage />));
+    expect(line()).toBe('Last confirmed Oct 21, 3:00 PM');
+  });
+
+  it('iOS: once a read lands again, the line is "Confirmed" with the new time', async () => {
+    await failARefresh('ios');
+    expect(line()).toBe('Last confirmed 3:00 PM');
+    net.down = false;
+    await returnToApp();
+    expect(byId('wsf-community-goal-stale-g1')).toBeNull();
+    expect(line()).toMatch(/^Confirmed 3:01 PM$/);
   });
 });

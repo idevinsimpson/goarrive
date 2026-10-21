@@ -15,6 +15,11 @@ import { bootNative, createFakeAsyncStorage, flush, type FakeAsyncStorage } from
  * Native cases run over state's native storage harness (the real kv.native
  * and syncRead.native over a fake AsyncStorage: a simulated process start),
  * so this is not a device run. Both variants of the question are rendered.
+ *
+ * RV14-642-N2: rendered before the launch read has answered, the note waits:
+ * hidden until the read lands, then shown if the answer can be remembered,
+ * and never shown (no flash on the first render) when the store is
+ * unreadable.
  */
 
 let disk: FakeAsyncStorage;
@@ -57,6 +62,17 @@ async function launchNative() {
   return { dm, DeviceChoice };
 }
 
+/** A process start whose launch read is held: the question is rendered before the device has answered. */
+async function launchNativeBeforeRead() {
+  const release = disk.holdReads();
+  bootNative(disk);
+  const { Platform } = await import('react-native');
+  (Platform as { OS: string }).OS = 'ios';
+  const dm = await import('../src/deviceMode');
+  const { DeviceChoice } = await import('../src/ui/DeviceChoice');
+  return { dm, DeviceChoice, release };
+}
+
 describe.each(['legacy', 'sheet'] as const)('W16-3 ST-04: the device note (%s), on a phone', (variant) => {
   const id = `wsf-dc-${variant}`;
 
@@ -77,6 +93,38 @@ describe.each(['legacy', 'sheet'] as const)('W16-3 ST-04: the device note (%s), 
       await flush();
     });
     expect(note(id)).not.toBeNull();
+  });
+
+  it('RV14-642-N2: rendered before the launch read answers, hidden until it does; then shown', async () => {
+    const { dm, DeviceChoice, release } = await launchNativeBeforeRead();
+    act(() => root.render(<DeviceChoice onChoosePersonal={() => {}} onChooseShared={() => {}} variant={variant} testID={id} />));
+    expect(dm.isDeviceModeReady()).toBe(false);
+    expect(note(id)).toBeNull();
+    await act(async () => {
+      release();
+      await dm.deviceModeReady();
+      await flush();
+    });
+    expect(dm.isDeviceModeReady()).toBe(true);
+    expect(note(id)?.textContent).toBe(dm.DEVICE_CHOICE_NOTE);
+  });
+
+  it('RV14-642-N2: rendered before the launch read answers, with the store unreadable: never shown, not even on the first render', async () => {
+    disk.map.set('wsf.deviceMode', 'shared');
+    disk.state.failReads = true;
+    const { dm, DeviceChoice, release } = await launchNativeBeforeRead();
+    const seen: boolean[] = [];
+    act(() => root.render(<DeviceChoice onChoosePersonal={() => {}} onChooseShared={() => {}} variant={variant} testID={id} />));
+    seen.push(note(id) !== null);
+    await act(async () => {
+      release();
+      await dm.deviceModeReady();
+      await flush();
+    });
+    seen.push(note(id) !== null);
+    expect(dm.isDeviceModeReady()).toBe(true);
+    expect(dm.deviceModeMayBeRemembered()).toBe(false);
+    expect(seen).toEqual([false, false]);
   });
 
   it('never shown while the stored answer cannot be read', async () => {

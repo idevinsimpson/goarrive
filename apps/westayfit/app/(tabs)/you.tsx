@@ -548,12 +548,12 @@ export default function You() {
           setStale(true);
           return;
         }
-        if (recorded && recorded.kind === 'member') {
-          setScreen(uid, { ...recorded, profile });
-          setStale(true);
-          return;
-        }
-        if (keep) {
+        // heads-13 RV15-642-B2: a load that drew the record's member page
+        // fails the same way as a kept one. It used to put back the page it
+        // drew when it STARTED, so a focus that had since drawn a newer page
+        // or another community (a switch, a receipt) was undone, and a failed
+        // profile read replaced the recorded name with "You".
+        if (keep || (recorded && recorded.kind === 'member')) {
           // Kept, but recomposed against now (N3). heads-10 F-1: from the
           // account's record first, which is never older than the page (a
           // receipt, a focus and a switch all write or read it); only when it
@@ -570,8 +570,20 @@ export default function You() {
               // NB-4: the head is the freshest profile there is: this load's
               // read if it answered, else the record's, else the one the page
               // already shows. Never a pending bar over a name, or over the
-              // "You" header, on a page kept as last read.
-              const head = profileAnswered ? profile : again.profile.pending ? prev.profile : again.profile;
+              // "You" header, on a page kept as last read. heads-13
+              // RV15-642-N1: "the record's" is the account's recorded profile
+              // even when the page was recomposed from `composedFrom` (the
+              // record could not), which may hold an older name; and those
+              // inputs take the head shown, so they stay the page's own.
+              const known = peekMemberProfile(uid);
+              const head = profileAnswered
+                ? profile
+                : known
+                  ? toProfile(known)
+                  : again.profile.pending
+                    ? prev.profile
+                    : again.profile;
+              if (!rec && from) composedFrom.current = { uid, args: [head, ...from.slice(1)] as ComposeArgs };
               return { ...again, profile: head };
             });
           }

@@ -109,7 +109,7 @@ import {
 } from '../../../../../src/stationSession';
 import {
   formatActiveWindowLabel,
-  formatClock,
+  formatConfirmedAt,
   formatMonthYear,
   formatPeriod,
   formatReachedOn,
@@ -2154,7 +2154,10 @@ export default function CommunityPage() {
     round that fails several goals speaks once, a figure that fails again
     while already stale says nothing new, and (heads-11 NB-2) a later round
     that fails a goal which had recovered speaks again, even while another
-    goal stays stale. Each card still says so in words where it is seen.
+    goal stays stale. When the newest wave's goal recovers first this value
+    falls back to an older wave; the announcer keys on the newest wave it has
+    seen, so a recovery is never spoken as a failure (heads-13 RV15-642-B1).
+    Each card still says so in words where it is seen.
   */
   let staleWave: number | null = null;
   for (const g of activeGoals) {
@@ -2814,11 +2817,17 @@ export default function CommunityPage() {
   // — when the number was last confirmed and how to ask again — and it was
   // sitting inside the emotional payoff. Its colours move with it: on cream it
   // needs the page's muted text, not the hero's light-on-dark muted.
+  //
+  // NATIVE-MEMBER-1 W16-14 (INT-12, member half). The line names the day when
+  // the figure was confirmed on another day ("Confirmed Oct 20, 3:41 PM"; a
+  // bare clock reads as today), and says "Last confirmed" while a later read
+  // has failed and the figure is the kept one (W12-6 formatConfirmedAt, read
+  // against now at each render). The same day reads as before.
   const renderFreshness = (p: GoalProgress) =>
     p.kind === 'ok' ? (
       <View style={styles.freshnessUtilityRow}>
         <Text style={styles.freshnessUtilityText} testID="wsf-community-progress-updated">
-          {`Confirmed ${formatClock(p.at)}`}
+          {formatConfirmedAt(p.at, new Date(), { failed: p.refreshFailed === true })}
         </Text>
         <Pressable
           onPress={refreshProgress}

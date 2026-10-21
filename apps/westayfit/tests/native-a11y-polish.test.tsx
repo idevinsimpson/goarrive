@@ -216,6 +216,21 @@ describe('W16-3 (INT-18): the stale-figure sentence is spoken once per failure w
     expect(spoken).toEqual([STALE_FIGURE_SENTENCE, STALE_FIGURE_SENTENCE, STALE_FIGURE_SENTENCE]);
   });
 
+  // heads-13 RV15-642-B1: the newest wave's goal recovers first, so the page's
+  // latest stale round falls back to an older wave already spoken.
+  it('a wave falling back to an older one says nothing (100, 300, 100 speaks twice); a newer one still speaks', async () => {
+    await render(<StaleAnnouncer wave={null} />);
+    await render(<StaleAnnouncer wave={100} />);
+    await render(<StaleAnnouncer wave={300} />);
+    expect(spoken).toEqual([STALE_FIGURE_SENTENCE, STALE_FIGURE_SENTENCE]);
+    await render(<StaleAnnouncer wave={100} />);
+    expect(spoken).toEqual([STALE_FIGURE_SENTENCE, STALE_FIGURE_SENTENCE]);
+    await render(<StaleAnnouncer wave={null} />);
+    expect(spoken).toEqual([STALE_FIGURE_SENTENCE, STALE_FIGURE_SENTENCE]);
+    await render(<StaleAnnouncer wave={400} />);
+    expect(spoken).toEqual([STALE_FIGURE_SENTENCE, STALE_FIGURE_SENTENCE, STALE_FIGURE_SENTENCE]);
+  });
+
   // heads-9 N-3: a failure that predates the mount is not a new one.
   it('mounting on a wave says nothing; a later wave then speaks', async () => {
     await render(<StaleAnnouncer wave={100} />);

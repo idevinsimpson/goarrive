@@ -326,7 +326,10 @@ for (const device of DEVICES) {
       measure(`${device.key} refresh failed · before`, before);
       measure(`${device.key} refresh failed · after`, after);
       expect(after.total, 'the retained figure stays').toBe(before.total);
-      expect(after.updated, 'the confirmation stamp does not advance').toBe(before.updated);
+      // W16-14 (INT-12): on the candidate the kept stamp says it is the last confirmed one.
+      expect(after.updated, 'the confirmation stamp does not advance').toBe(
+        CANDIDATE ? (before.updated ?? '').replace(/^Confirmed /, 'Last confirmed ') : before.updated,
+      );
       if (CANDIDATE) {
         expect(after.pageText, 'the member is told the refresh did not happen').toMatch(/last known/i);
       } else {
