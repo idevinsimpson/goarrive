@@ -131,7 +131,6 @@ let cleanup: Array<() => void> = [];
 // file's afterAll (tests/unhandledRejectionGuard.ts).
 useUnhandledRejectionGuard();
 
-/** A fresh process over `disk`; Firebase is mocked after the harness's own mocks have landed. */
 /**
  * A fresh WEB process: the web storage implementations (localStorage, read
  * synchronously, so the remembered community is answered at load), with the
@@ -155,6 +154,7 @@ async function bootWeb() {
   return import('../src/currentCommunity');
 }
 
+/** A fresh process over `disk`; Firebase is mocked after the harness's own mocks have landed. */
 async function boot() {
   bootNative(disk);
   await import('../src/storage/syncRead');

@@ -57,14 +57,13 @@ const h = vi.hoisted(() => ({
   /** Every community whose goals were asked for, in order. */
   goalsAsked: [] as string[],
   /**
-   * Every focus effect the rendered screens registered, by its source (the
-   * latest callback of each). A screen may register more than one: on the
-   * integrated tree You's resume watch (src/useResumeRefresh.ts) registers its
-   * own after You's, so "the last one" is not You's.
+   * Every focus effect the rendered screens have in force, by its source (the
+   * latest callback of each), with the blur it returned. A screen may register
+   * more than one: on the integrated tree You's resume watch
+   * (src/useResumeRefresh.ts) registers its own after You's, so "the last
+   * one" is not You's.
    */
-  focus: new Map<string, () => void | (() => void)>(),
-  /** The focus effects already given their mount's focus (by source). */
-  focusMounted: new Set<string>(),
+  focus: new Map<string, { effect: () => void | (() => void); blur: (() => void) | undefined }>(),
   /** Communities a fresh server answer refused (`wasRefused`). */
   refused: new Set<string>(),
   /** The member profile read: fails, or answers with this name. */
@@ -100,13 +99,18 @@ vi.mock('firebase/functions', () => ({
 /*
   A hand-built `expo-router`: the real package ships untranspiled JSX that
   jsdom's loader refuses (tests/start-community-outcomes.test.tsx), so
-  `importOriginal` is not an option. Focus effects are not part of the first
-  frame: the callback is only kept (`h.focus`), and a test that needs a
-  return to the screen calls it. The rest is the minimal surface screens
-  reach for (the integrated You signs out through `useNavigation`), so a
-  screen that grows a navigation call does not break this file.
+  `importOriginal` is not an option. `useFocusEffect` is the real one's shape
+  (expo-router 6.0.24, build/useFocusEffect.js): a React effect keyed on the
+  callback, run while the screen is focused (always, here), whose returned
+  cleanup is the blur. So the mount's own focus is given, and a callback that
+  changes (an account switch) is blurred and focused again, as on a device.
+  Every effect in force is kept (`h.focus`), so a test can give the screen a
+  return (`returnTo`). The rest is the minimal surface screens reach for (the
+  integrated You signs out through `useNavigation`), so a screen that grows a
+  navigation call does not break this file.
 */
-vi.mock('expo-router', () => {
+vi.mock('expo-router', async () => {
+  const React = await import('react');
   const router = {
     push: () => undefined,
     replace: () => undefined,
@@ -132,7 +136,16 @@ vi.mock('expo-router', () => {
     useRouter: () => router,
     useNavigation: () => navigation,
     useFocusEffect: (callback: () => void | (() => void)) => {
-      h.focus.set(callback.toString(), callback);
+      React.useEffect(() => {
+        if (!navigation.isFocused()) return undefined;
+        const source = callback.toString();
+        const blur = callback();
+        h.focus.set(source, { effect: callback, blur: typeof blur === 'function' ? blur : undefined });
+        return () => {
+          h.focus.get(source)?.blur?.();
+          h.focus.delete(source);
+        };
+      }, [callback]);
     },
     usePathname: () => '/',
     useLocalSearchParams: () => ({}),
@@ -254,7 +267,6 @@ beforeEach(() => {
   h.goalsFail.clear();
   h.goalsAsked.length = 0;
   h.focus.clear();
-  h.focusMounted.clear();
   h.refused.clear();
   h.profileFail = false;
   h.profileName = 'Ann';
@@ -690,21 +702,17 @@ describe('RV16: a failed load judges the page on screen', () => {
 
   /**
    * A return to the mounted screen, as expo-router gives one: every focus
-   * effect of the screen is blurred (its cleanup runs) and focused again.
-   * Each one is first given the focus its mount had (the mock does not run
-   * focus effects on mount), so the screen sees a RETURN, not a first focus.
+   * effect in force is blurred (its cleanup runs) and focused again. The
+   * mount's own focus was given by the mock's effect, so the screen sees a
+   * RETURN, not a first focus.
    */
   async function returnTo(you: Awaited<ReturnType<typeof render>>) {
     expect(h.focus.size).toBeGreaterThan(0);
     await you.act(() => {
-      for (const [source, effect] of h.focus) {
-        if (!h.focusMounted.has(source)) {
-          h.focusMounted.add(source);
-          const blur = effect();
-          if (typeof blur === 'function') blur();
-        }
-        const blur = effect();
-        if (typeof blur === 'function') cleanup.push(blur);
+      for (const [source, { effect, blur }] of [...h.focus]) {
+        blur?.();
+        const next = effect();
+        h.focus.set(source, { effect, blur: typeof next === 'function' ? next : undefined });
       }
     });
   }
@@ -950,6 +958,60 @@ describe('RV16: a failed load judges the page on screen', () => {
     expect(h.youState?.kind).toBe('failed');
     expect(h.youState?.profile?.displayName).toBe('Bea');
     expect(h.youStale).not.toBe(true);
+  });
+
+  /*
+    W13-16 (heads-16 RV18-639-S1). THE SWITCH SEEN THROUGH A FOCUS. With You
+    focused, a change of account re-runs its focus callback (the real hook is
+    keyed on it) BEFORE the load effect: the callback keeps the page on screen
+    for a return. That page must never be the previous account's: for the
+    account now signed in, the screen it inherits is loading.
+  */
+  itTimed('privacy: A settled on member:g2 with You focused; the account switches to B (no record): B sees loading, then B’s own page; never A’s', async () => {
+    const { you } = await settledOnG2();
+    const from = h.youStates.length;
+    freshRead();
+    h.user = { uid: 'member-b', email: null };
+    await you.rerender();
+    expect(h.youStates.length).toBeGreaterThan(from);
+    expect(h.youStates.slice(from).every((st) => st.kind === 'loading')).toBe(true);
+    h.fresh.fail(new Error('offline'));
+    await you.until(() => h.youFrames.at(-1) === 'failed', 'B’s failed page');
+    await you.settle();
+    const forB = h.youStates.slice(from);
+    expect(forB.some((st) => st.kind === 'member')).toBe(false);
+    expect(forB.some((st) => st.community?.groupId === 'g2')).toBe(false);
+    expect(forB.some((st) => st.profile?.displayName === 'Ann')).toBe(false);
+    expect(h.youState?.profile?.displayName).toBe('Bea');
+    expect(h.youStale).not.toBe(true);
+  });
+
+  itTimed('privacy: A signs out while A’s load is in flight, A’s load lands late, then B signs in: B sees loading, then B’s own page; never A’s', async () => {
+    disk.map.set(REMEMBERED_KEY, 'g2');
+    const cc = await boot();
+    await cc.currentCommunityReady();
+    const you = await render('you');
+    expect(h.youFrames[0]).toBe('member:g2');
+    h.user = null;
+    await you.rerender();
+    // A's membership read lands after the sign-out: whatever it writes is A's.
+    h.fresh.land({ items: TWO });
+    await you.settle();
+    await you.settle();
+    const from = h.youStates.length;
+    freshRead();
+    h.user = { uid: 'member-b', email: null };
+    await you.rerender();
+    expect(h.youStates.length).toBeGreaterThan(from);
+    expect(h.youStates.slice(from).every((st) => st.kind === 'loading')).toBe(true);
+    h.fresh.fail(new Error('offline'));
+    await you.until(() => h.youFrames.at(-1) === 'failed', 'B’s failed page');
+    await you.settle();
+    const forB = h.youStates.slice(from);
+    expect(forB.some((st) => st.kind === 'member')).toBe(false);
+    expect(forB.some((st) => st.community?.groupId === 'g2')).toBe(false);
+    expect(forB.some((st) => st.profile?.displayName === 'Ann')).toBe(false);
+    expect(h.youState?.profile?.displayName).toBe('Bea');
   });
 
   itTimed('privacy: A signs out while A’s load is in flight: after the sign-out only the signed-out card is drawn, even when A’s load fails', async () => {
