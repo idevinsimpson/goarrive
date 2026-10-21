@@ -2,7 +2,7 @@ import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { FirebaseError } from 'firebase/app';
 import { signOut } from 'firebase/auth';
 import { httpsCallable } from 'firebase/functions';
-import { useCallback, useEffect, useState, type SetStateAction } from 'react';
+import { useCallback, useEffect, useRef, useState, type SetStateAction } from 'react';
 import { Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 import { useWsfAuth } from '../../src/auth';
@@ -60,6 +60,10 @@ const POLL_INTERVAL_MS = 2_000;
 export default function KioskGoal() {
   const params = useLocalSearchParams<{ goalId: string }>();
   const goalId = params.goalId;
+  // Read by the start-screen focus effect without re-running it on a new id
+  // (its timing on the web is unchanged).
+  const goalIdRef = useRef(goalId);
+  goalIdRef.current = goalId;
   const { width: windowWidth } = useWindowDimensions();
   const { user } = useWsfAuth();
 
@@ -104,7 +108,7 @@ export default function KioskGoal() {
   useFocusEffect(
     useCallback(() => {
       clearKioskReturnGoal();
-      const decision = decideKioskStart(Platform.OS, !!user);
+      const decision = decideKioskStart(Platform.OS, !!user, goalIdRef.current);
       setAskSignOut(decision === 'ask');
       if (decision !== 'signOut') return;
       void signOut(getFirebaseAuth()).catch(() => {
@@ -196,7 +200,7 @@ export default function KioskGoal() {
   const onContribute = useCallback(() => {
     if (!goalId) return;
     setKioskReturnGoal(goalId);
-    noteKioskHandoff();
+    noteKioskHandoff(goalId);
     router.push(kioskContributeRoute(goalId) as never);
   }, [goalId]);
 

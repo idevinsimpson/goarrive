@@ -15,30 +15,52 @@
  * kiosk's own "Contribute" hand-off in this process? Then it is a kiosk
  * visitor and goes, as on the web. Otherwise the screen asks first.
  *
- * The note lives in memory only and is spent on each arrival at the start
- * screen, so it never outlives the visitor it was made for. It holds no
- * account id and nothing about anybody.
+ * The note lives in memory only and holds no account id and nothing about
+ * anybody: just which kiosk handed off, and when. It counts only
+ *   · back at the start screen of THE SAME goal, and
+ *   · within KIOSK_HANDOFF_TTL_MS of the Contribute press,
+ * and it is spent on the next arrival at any kiosk start screen. So a
+ * visitor who taps Contribute and then ends up somewhere else (in the app,
+ * after sign-in, ST-05 lands them on member Home, not back here) leaves no
+ * note that could later skip the question for an account opening another
+ * kiosk link, or the same one long after.
  */
 
-let handedOff = false;
+/**
+ * 15 minutes: a walk-up sign-in (or new account) and one self-counted entry.
+ * Past that the account at the start screen is no longer clearly the visitor
+ * this kiosk handed off, and the screen asks. Asking is the safe failure: a
+ * confirmation, never a silent sign-out.
+ */
+export const KIOSK_HANDOFF_TTL_MS = 15 * 60 * 1000;
 
-/** The start screen's Contribute: the next account to arrive is a kiosk visitor. */
-export function noteKioskHandoff(): void {
-  handedOff = true;
+let handoff: { goalId: string; at: number } | null = null;
+
+/** The start screen's Contribute for `goalId`: an account arriving back here soon is a kiosk visitor. */
+export function noteKioskHandoff(goalId: string, now: number = Date.now()): void {
+  handoff = { goalId, at: now };
 }
 
 export type KioskStartDecision = 'none' | 'signOut' | 'ask';
 
 /**
- * What the start screen does on arrival. Spends the hand-off note.
+ * What the start screen for `goalId` does on arrival. Spends the hand-off note.
  *   none     nobody is signed in;
- *   signOut  the web, or a visitor who came through this kiosk's hand-off;
- *   ask      the app, with an account that did not: confirm before signing out.
+ *   signOut  the web, or a visitor who came through this goal's kiosk hand-off
+ *            within KIOSK_HANDOFF_TTL_MS;
+ *   ask      the app, with any other account: confirm before signing out.
  */
-export function decideKioskStart(os: string, signedIn: boolean): KioskStartDecision {
-  const visitor = handedOff;
-  handedOff = false;
+export function decideKioskStart(
+  os: string,
+  signedIn: boolean,
+  goalId: string | null | undefined,
+  now: number = Date.now(),
+): KioskStartDecision {
+  const note = handoff;
+  handoff = null;
   if (!signedIn) return 'none';
-  if (os === 'web' || visitor) return 'signOut';
-  return 'ask';
+  if (os === 'web') return 'signOut';
+  const age = note ? now - note.at : -1;
+  const visitor = note !== null && typeof goalId === 'string' && note.goalId === goalId && age >= 0 && age <= KIOSK_HANDOFF_TTL_MS;
+  return visitor ? 'signOut' : 'ask';
 }

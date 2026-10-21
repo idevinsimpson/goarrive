@@ -60,6 +60,7 @@ const back = vi.fn();
 let canGoBack = true;
 let focused = true;
 let focusEpoch = 0;
+let routeGoalId = 'goal-1';
 vi.mock('expo-router', () => ({
   router: {
     push: (...a: unknown[]) => push(...a),
@@ -67,7 +68,7 @@ vi.mock('expo-router', () => ({
     back: () => back(),
     canGoBack: () => canGoBack,
   },
-  useLocalSearchParams: () => ({ goalId: 'goal-1' }),
+  useLocalSearchParams: () => ({ goalId: routeGoalId }),
   // A focused screen runs the callback on focus and whenever it changes.
   useFocusEffect: (cb: () => void | (() => void)) => {
     const epoch = focusEpoch;
@@ -76,7 +77,7 @@ vi.mock('expo-router', () => ({
 }));
 
 const { default: KioskGoal } = await import('../app/kiosk/[goalId]');
-const { decideKioskStart } = await import('../src/kioskSignOutGuard');
+const { decideKioskStart, KIOSK_HANDOFF_TTL_MS } = await import('../src/kioskSignOutGuard');
 
 let container: HTMLDivElement;
 let root: Root;
@@ -87,8 +88,9 @@ beforeEach(() => {
   back.mockReset();
   canGoBack = true;
   focused = true;
+  routeGoalId = 'goal-1';
   auth = { ready: true, user: null };
-  decideKioskStart('web', false); // spend any hand-off note a previous test left
+  decideKioskStart('web', false, null); // spend any hand-off note a previous test left
   window.sessionStorage.clear();
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -97,6 +99,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  vi.restoreAllMocks();
 });
 const byId = (id: string) => container.querySelector(`[data-testid="${id}"]`) as HTMLElement | null;
 const flush = () =>
@@ -116,6 +119,14 @@ async function press(id: string): Promise<void> {
     el!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
   });
   await flush();
+}
+/** A kiosk link opened afresh: a new start screen for `goalId`. */
+async function openKiosk(goalId: string): Promise<void> {
+  act(() => root.unmount());
+  root = createRoot(container);
+  routeGoalId = goalId;
+  focused = true;
+  await render();
 }
 /** The device comes back to the start screen. */
 async function refocus(): Promise<void> {
@@ -190,6 +201,49 @@ describe('the kiosk start screen in the app (MF-08 case 1)', () => {
     await refocus();
     expect(signOut).toHaveBeenCalledTimes(1);
     expect(byId('wsf-kiosk-confirm-signout')).not.toBeNull();
+  });
+
+  // N1: on native, ST-05 drops the kiosk return, so a visitor who taps
+  // Contribute and signs in lands on member Home and this start screen is
+  // never focused again. The note must not let a later kiosk link skip the
+  // question.
+  it('Contribute, sign in, land elsewhere, then another goal\'s kiosk: it asks', async () => {
+    await render();
+    await press('wsf-kiosk-start');
+    focused = false;
+    act(() => setUser({ uid: 'visitor-1' }));
+    await flush();
+    await openKiosk('goal-2');
+    expect(signOut).not.toHaveBeenCalled();
+    expect(byId('wsf-kiosk-confirm-signout')).not.toBeNull();
+  });
+
+  it('Contribute, sign in, land elsewhere, then the same kiosk after the window: it asks', async () => {
+    const T0 = 1_800_000_000_000;
+    const now = vi.spyOn(Date, 'now').mockReturnValue(T0);
+    await render();
+    await press('wsf-kiosk-start');
+    focused = false;
+    act(() => setUser({ uid: 'visitor-1' }));
+    await flush();
+    now.mockReturnValue(T0 + KIOSK_HANDOFF_TTL_MS + 1);
+    await openKiosk('goal-1');
+    expect(signOut).not.toHaveBeenCalled();
+    expect(byId('wsf-kiosk-confirm-signout')).not.toBeNull();
+  });
+
+  it('the same kiosk within the window is still the visitor it handed off', async () => {
+    const T0 = 1_800_000_000_000;
+    const now = vi.spyOn(Date, 'now').mockReturnValue(T0);
+    await render();
+    await press('wsf-kiosk-start');
+    focused = false;
+    act(() => setUser({ uid: 'visitor-1' }));
+    await flush();
+    now.mockReturnValue(T0 + KIOSK_HANDOFF_TTL_MS);
+    await openKiosk('goal-1');
+    expect(signOut).toHaveBeenCalledTimes(1);
+    expect(byId('wsf-kiosk-confirm-signout')).toBeNull();
   });
 
   it('signed out, the kiosk shows as before', async () => {

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { decideKioskStart, noteKioskHandoff } from '../src/kioskSignOutGuard';
+import { decideKioskStart, KIOSK_HANDOFF_TTL_MS, noteKioskHandoff } from '../src/kioskSignOutGuard';
 import { linkAvailabilityCopy } from '../src/ui/linkAvailabilityCopy';
 
 /**
@@ -99,31 +99,69 @@ describe('community detail uses it, and the relative Open actions are outside th
 });
 
 describe('kioskSignOutGuard (MF-08 interim)', () => {
+  const T0 = 1_800_000_000_000;
   beforeEach(() => {
-    decideKioskStart('web', false); // spend any note a previous test left
+    decideKioskStart('web', false, null); // spend any note a previous test left
   });
 
   it('the web signs out whoever is attached, as before', () => {
-    expect(decideKioskStart('web', true)).toBe('signOut');
-    expect(decideKioskStart('web', false)).toBe('none');
+    expect(decideKioskStart('web', true, 'goal-1')).toBe('signOut');
+    expect(decideKioskStart('web', true, null)).toBe('signOut');
+    expect(decideKioskStart('web', false, 'goal-1')).toBe('none');
   });
 
   it("the app asks before signing out an account that did not come through this kiosk", () => {
-    expect(decideKioskStart('ios', true)).toBe('ask');
-    expect(decideKioskStart('android', true)).toBe('ask');
-    expect(decideKioskStart('ios', false)).toBe('none');
+    expect(decideKioskStart('ios', true, 'goal-1')).toBe('ask');
+    expect(decideKioskStart('android', true, 'goal-1')).toBe('ask');
+    expect(decideKioskStart('ios', false, 'goal-1')).toBe('none');
   });
 
-  it("a visitor who came through this kiosk's hand-off is signed out without asking, once", () => {
-    noteKioskHandoff();
-    expect(decideKioskStart('ios', true)).toBe('signOut');
+  it("a visitor back at the same goal's start screen in time is signed out without asking, once", () => {
+    noteKioskHandoff('goal-1', T0);
+    expect(decideKioskStart('ios', true, 'goal-1', T0 + 60_000)).toBe('signOut');
     // The note is spent: the next account to arrive is asked.
-    expect(decideKioskStart('ios', true)).toBe('ask');
+    expect(decideKioskStart('ios', true, 'goal-1', T0 + 61_000)).toBe('ask');
+  });
+
+  it('the window is KIOSK_HANDOFF_TTL_MS (15 minutes), inclusive', () => {
+    expect(KIOSK_HANDOFF_TTL_MS).toBe(15 * 60 * 1000);
+    noteKioskHandoff('goal-1', T0);
+    expect(decideKioskStart('android', true, 'goal-1', T0 + KIOSK_HANDOFF_TTL_MS)).toBe('signOut');
+    noteKioskHandoff('goal-1', T0);
+    expect(decideKioskStart('android', true, 'goal-1', T0 + KIOSK_HANDOFF_TTL_MS + 1)).toBe('ask');
+  });
+
+  it("another goal's kiosk never counts as this hand-off (N1)", () => {
+    noteKioskHandoff('goal-1', T0);
+    expect(decideKioskStart('ios', true, 'goal-2', T0 + 1_000)).toBe('ask');
+    noteKioskHandoff('goal-1', T0);
+    expect(decideKioskStart('ios', true, null, T0 + 1_000)).toBe('ask');
+    noteKioskHandoff('goal-1', T0);
+    expect(decideKioskStart('ios', true, undefined, T0 + 1_000)).toBe('ask');
+  });
+
+  it('a clock that went backwards does not count either', () => {
+    noteKioskHandoff('goal-1', T0);
+    expect(decideKioskStart('ios', true, 'goal-1', T0 - 1)).toBe('ask');
+  });
+
+  it('a later Contribute replaces the earlier note', () => {
+    noteKioskHandoff('goal-1', T0);
+    noteKioskHandoff('goal-2', T0 + 5_000);
+    expect(decideKioskStart('ios', true, 'goal-1', T0 + 6_000)).toBe('ask');
+    noteKioskHandoff('goal-1', T0);
+    noteKioskHandoff('goal-2', T0 + 5_000);
+    expect(decideKioskStart('ios', true, 'goal-2', T0 + 6_000)).toBe('signOut');
   });
 
   it('arriving signed out spends the note too', () => {
-    noteKioskHandoff();
-    expect(decideKioskStart('android', false)).toBe('none');
-    expect(decideKioskStart('android', true)).toBe('ask');
+    noteKioskHandoff('goal-1', T0);
+    expect(decideKioskStart('android', false, 'goal-1', T0 + 1_000)).toBe('none');
+    expect(decideKioskStart('android', true, 'goal-1', T0 + 2_000)).toBe('ask');
+  });
+
+  it('the default clock is Date.now()', () => {
+    noteKioskHandoff('goal-1');
+    expect(decideKioskStart('ios', true, 'goal-1')).toBe('signOut');
   });
 });
