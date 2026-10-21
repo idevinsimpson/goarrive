@@ -22,7 +22,13 @@ import { wsfAuthEnabled } from '../src/featureFlags';
 import { getFirebaseAuth, getFirebaseFirestore } from '../src/firebase';
 import { routeAfterAuth } from '../src/pendingJoinCode';
 import { landAfterAuth } from '../src/ui/authLanding';
-import { REDIRECT_FAILED_SENTENCE } from '../src/ui/authRedirect';
+import {
+  leaveRedirectFailed,
+  openKioskGoal,
+  REDIRECT_FAILED_SENTENCE,
+  REDIRECT_WAY_OUT_HOME,
+  REDIRECT_WAY_OUT_KIOSK,
+} from '../src/ui/authRedirect';
 import { requestVerificationEmail } from '../src/verificationEmail';
 import { beginVerificationSend, recordVerificationSend } from '../src/verificationSendState';
 import { nativeErrorBoundary } from '../src/ui/RouteErrorFallback';
@@ -119,6 +125,9 @@ export default function SignUp() {
   // someone the useEffect above is already about to redirect.
   if (!ready || user) {
     if (user && redirectFailed && Platform.OS !== 'web') {
+      // RV14-642-F1: as signin.tsx. Under an open kiosk session the way out
+      // goes back to the kiosk, never to member Home (src/ui/authRedirect.ts).
+      const kioskGoal = openKioskGoal(user.uid);
       return (
         <FormShell heading="Start moving together." testID="wsf-signup-redirect-failed">
           <ErrorText testID="wsf-signup-redirect-error">{REDIRECT_FAILED_SENTENCE}</ErrorText>
@@ -129,11 +138,16 @@ export default function SignUp() {
             testID="wsf-signup-redirect-retry"
           />
           <SubmitButton
-            label="Back to home"
+            label={kioskGoal ? REDIRECT_WAY_OUT_KIOSK : REDIRECT_WAY_OUT_HOME}
             variant="tertiary"
-            onPress={() => land('/')}
+            onPress={() =>
+              leaveRedirectFailed(user.uid, kioskGoal, {
+                land,
+                dismissTo: (href) => router.dismissTo(href as never),
+              })
+            }
             submitting={false}
-            testID="wsf-signup-redirect-home"
+            testID={kioskGoal ? 'wsf-signup-redirect-kiosk' : 'wsf-signup-redirect-home'}
           />
         </FormShell>
       );

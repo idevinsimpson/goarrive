@@ -30,7 +30,13 @@ import { getFirebaseAuth, getFirebaseFirestore } from '../src/firebase';
 import { routeAfterAuth } from '../src/pendingJoinCode';
 import { isPostAuthDestinationsReady, usePostAuthDestinationsReady } from '../src/postAuthDestination';
 import { landAfterAuth } from '../src/ui/authLanding';
-import { REDIRECT_FAILED_SENTENCE } from '../src/ui/authRedirect';
+import {
+  leaveRedirectFailed,
+  openKioskGoal,
+  REDIRECT_FAILED_SENTENCE,
+  REDIRECT_WAY_OUT_HOME,
+  REDIRECT_WAY_OUT_KIOSK,
+} from '../src/ui/authRedirect';
 import { nativeErrorBoundary } from '../src/ui/RouteErrorFallback';
 
 /*
@@ -126,7 +132,8 @@ export default function SignIn() {
     W16-7 (MF-16). AN OFFLINE REDIRECT HAS A WAY OUT. The profile read below
     could reject (no connection) and left "Loading…" with nothing to press. It
     is caught now; on a phone the screen says so, with Try again (the same
-    reads) and Back to home. The web keeps today's Loading branch.
+    reads) and Back to home (Back to the kiosk while a kiosk session is open,
+    RV14-642-F1). The web keeps today's Loading branch.
   */
   const [redirectFailed, setRedirectFailed] = useState(false);
   const [redirectAttempt, setRedirectAttempt] = useState(0);
@@ -177,6 +184,10 @@ export default function SignIn() {
   // their own creds prompted, which is exactly the confusion C5 fixes.
   if (!ready || user) {
     if (user && redirectFailed && Platform.OS !== 'web') {
+      // RV14-642-F1: under an open kiosk session the way out goes back to the
+      // kiosk (which signs the visitor out), never to member Home
+      // (src/ui/authRedirect.ts).
+      const kioskGoal = openKioskGoal(user.uid);
       return (
         <FormShell heading="Sign in" testID="wsf-signin-redirect-failed">
           <ErrorText testID="wsf-signin-redirect-error">{REDIRECT_FAILED_SENTENCE}</ErrorText>
@@ -187,11 +198,16 @@ export default function SignIn() {
             testID="wsf-signin-redirect-retry"
           />
           <SubmitButton
-            label="Back to home"
+            label={kioskGoal ? REDIRECT_WAY_OUT_KIOSK : REDIRECT_WAY_OUT_HOME}
             variant="tertiary"
-            onPress={() => land('/')}
+            onPress={() =>
+              leaveRedirectFailed(user.uid, kioskGoal, {
+                land,
+                dismissTo: (href) => router.dismissTo(href as never),
+              })
+            }
             submitting={false}
-            testID="wsf-signin-redirect-home"
+            testID={kioskGoal ? 'wsf-signin-redirect-kiosk' : 'wsf-signin-redirect-home'}
           />
         </FormShell>
       );
