@@ -26,6 +26,12 @@ describe('revealInScroll (MF-12)', () => {
     expect(scrollTo).toHaveBeenCalledWith({ y: 288, animated: true });
   });
 
+  it('with a top inset (a phone), the anchor parks below it too', () => {
+    const scrollTo = vi.fn();
+    revealInScroll({ getInnerViewRef: () => HOST, scrollTo }, { measureLayout: (_r: unknown, ok: (x: number, y: number) => void) => ok(0, 300) } as never, 12 + 59);
+    expect(scrollTo).toHaveBeenCalledWith({ y: 229, animated: true });
+  });
+
   it('never scrolls above the top', () => {
     const scrollTo = vi.fn();
     revealInScroll({ getInnerViewRef: () => HOST, scrollTo }, { measureLayout: (_r: unknown, ok: (x: number, y: number) => void) => ok(0, 5) } as never);
@@ -52,7 +58,8 @@ describe('Goal setup reveals its first refused field through it', () => {
     const start = src.indexOf('const revealField = useCallback(');
     expect(start).toBeGreaterThan(0);
     const body = src.slice(start, src.indexOf('[anchorRefs]', start));
-    expect(body).toContain('revealInScroll(scroll, anchor);');
+    // Review c52faa1e-N-2: the spacer scrolls with the content, so the inset is added.
+    expect(body).toContain('revealInScroll(scroll, anchor, 12 + topInset);');
     expect(body).not.toContain('measureLayout');
   });
 });

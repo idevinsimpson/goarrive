@@ -51,7 +51,7 @@ import { MovementPicker } from '../../src/ui/MovementPicker';
 import { OptionGroup, OptionRow } from '../../src/ui/OptionRow';
 import { formatCount } from '../../src/ui/progressFormat';
 import { revealInScroll } from '../../src/ui/revealInScroll';
-import { ScreenTopSpacer } from '../../src/ui/useScreenTopInset';
+import { ScreenTopSpacer, useScreenTopInset } from '../../src/ui/useScreenTopInset';
 import { WsfWordmark } from '../../src/ui/WsfWordmark';
 
 // Where a community Champion starts a shared goal. The community page sends
@@ -438,6 +438,9 @@ export default function NewGoalPage() {
   // What a refused submit focuses and scrolls to: the input itself, and the
   // block (label, input, message) around it.
   const scrollRef = useRef<ScrollView>(null);
+  // W16-8 review c52faa1e-N-2: the top spacer scrolls with the content, so a
+  // revealed field parks below the inset as well as 12 pt down. 0 on web.
+  const topInset = useScreenTopInset();
 
   const titleRef = useRef<TextInput>(null);
   const targetRef = useRef<TextInput>(null);
@@ -541,9 +544,9 @@ export default function NewGoalPage() {
       if (!anchor || !scroll) return;
       // MF-12: measured against the content's host instance, which Fabric can
       // measure (src/ui/revealInScroll.ts); a numeric handle silently fails.
-      revealInScroll(scroll, anchor);
+      revealInScroll(scroll, anchor, 12 + topInset);
     },
-    [anchorRefs]
+    [anchorRefs, topInset]
   );
 
   const onSubmit = useCallback(async () => {
@@ -1409,7 +1412,7 @@ function Page({
       // NATIVE-INTEGRATOR-1 (INT-06): iOS keeps a focused field above the keyboard.
       {...KEYBOARD_SCROLL_PROPS}
     >
-      {/* // NATIVE-MEMBER-1 W16-8 (INT-09): a root-stack screen clears the status bar itself; nothing on web. */}
+      {/* NATIVE-MEMBER-1 W16-8 (INT-09): a root-stack screen clears the status bar itself; nothing on web. */}
       <ScreenTopSpacer />
       <View
         style={kit.column}

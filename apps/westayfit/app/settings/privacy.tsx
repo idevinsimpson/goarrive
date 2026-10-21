@@ -43,7 +43,7 @@ export default function PrivacySettingsScreen() {
 
   return (
     <View style={st.screen} testID="wsf-privacy-screen">
-      {/* // NATIVE-MEMBER-1 W16-8 (INT-09): a root-stack screen clears the status bar itself; nothing on web. */}
+      {/* NATIVE-MEMBER-1 W16-8 (INT-09): a root-stack screen clears the status bar itself; nothing on web. */}
       <ScreenTopSpacer />
       <View style={st.head}>
         <View style={st.chrome}>

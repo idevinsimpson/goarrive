@@ -53,7 +53,7 @@ import {
   SURFACE,
   elevation,
 } from '../../src/ui/kit';
-import { ScreenTopSpacer } from '../../src/ui/useScreenTopInset';
+import { useScreenTopInset } from '../../src/ui/useScreenTopInset';
 import { WsfWordmark } from '../../src/ui/WsfWordmark';
 
 type Preview = {
@@ -720,10 +720,16 @@ const JOINING_MEANS: readonly string[] = [
  * which is the only safe thing to show while the preview is still open.
  */
 function JoinSkeleton() {
+  // NATIVE-MEMBER-1 W16-8 (INT-09): a root-stack screen clears the status bar
+  // itself, in its top padding as FormShell and QuietShell do (review
+  // c52faa1e-N-1: a spacer child would add the column's 10 pt gap on top).
+  // 0 on web: nothing changes.
+  const topInset = useScreenTopInset();
   return (
-    <View style={skeleton.screen} testID="wsf-join-loading">
-      {/* // NATIVE-MEMBER-1 W16-8 (INT-09): a root-stack screen clears the status bar itself; nothing on web. */}
-      <ScreenTopSpacer />
+    <View
+      style={topInset > 0 ? [skeleton.screen, { paddingTop: SKELETON_TOP + topInset }] : skeleton.screen}
+      testID="wsf-join-loading"
+    >
       <View style={skeleton.chrome}>
         <WsfWordmark variant="navy" height={21} testID="wsf-join-wordmark" />
       </View>
@@ -743,9 +749,11 @@ function JoinSkeleton() {
 }
 
 const SKELETON_FILL = '#E8E4DC';
+/** The skeleton's own top padding (skeleton.screen), to which a phone adds the top inset. */
+const SKELETON_TOP = 22;
 
 const skeleton = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: CREAM, paddingHorizontal: 20, paddingTop: 22, gap: 10 },
+  screen: { flex: 1, backgroundColor: CREAM, paddingHorizontal: 20, paddingTop: SKELETON_TOP, gap: 10 },
   chrome: { alignItems: 'flex-start', marginBottom: 12 },
   bar: { height: 13, width: '68%', borderRadius: 7, backgroundColor: SKELETON_FILL },
   title: { height: 42, width: '90%', borderRadius: 12, backgroundColor: SKELETON_FILL },

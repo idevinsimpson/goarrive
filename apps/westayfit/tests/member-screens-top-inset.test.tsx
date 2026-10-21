@@ -113,7 +113,6 @@ const never = { resolve: () => new Promise<never>(() => {}), join: vi.fn() };
 const SCREENS: [string, () => ReactNode, string, () => void][] = [
   ['Settings (page)', () => <Settings />, 'wsf-settings-screen', () => {}],
   ['Privacy', () => <Privacy />, 'wsf-privacy-screen', () => {}],
-  ['the join skeleton', () => <Join />, 'wsf-join-loading', () => (params.joinCode = 'Ab3_dE-fGh1JkLmN0pQrSt')],
   ['the marker screen', () => <MarkerEntryScreen slug="flag-01" resolver={never as never} />, 'wsf-marker-loading', () => {}],
   ['Goal setup', () => <NewGoal />, 'wsf-new-goal-gated-off', () => (params.groupId = 'oak')],
 ];
@@ -132,6 +131,26 @@ describe('W16-8 / INT-09: member screens clear the top inset on a phone', () => 
     const first = firstTagged();
     expect(first === spacer || (first === screen && screen!.firstElementChild === spacer)).toBe(true);
     expect((spacer as HTMLElement).style.height).toBe('59px');
+  });
+
+  // Review c52faa1e-N-1: the skeleton is a gapped column, so it takes the
+  // inset in its top padding (22 + inset), as FormShell and QuietShell do.
+  it('the join skeleton clears the inset in its top padding, with no spacer child', async () => {
+    params.joinCode = 'Ab3_dE-fGh1JkLmN0pQrSt';
+    await render(<Join />);
+    const screen = container.querySelector('[data-testid="wsf-join-loading"]') as HTMLElement;
+    expect(screen).not.toBeNull();
+    expect(container.querySelector(SPACER)).toBeNull();
+    expect(screen.style.paddingTop).toBe('81px');
+  });
+
+  it('web: the join skeleton keeps its stylesheet padding (no inline override)', async () => {
+    mode.native = false;
+    params.joinCode = 'Ab3_dE-fGh1JkLmN0pQrSt';
+    await render(<Join />);
+    const screen = container.querySelector('[data-testid="wsf-join-loading"]') as HTMLElement;
+    expect(screen.style.paddingTop).toBe('');
+    expect(container.querySelector(SPACER)).toBeNull();
   });
 
   it.each(SCREENS)('web: %s draws no spacer', async (_l, node, screenId, setup) => {
