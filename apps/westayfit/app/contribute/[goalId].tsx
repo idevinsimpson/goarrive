@@ -1262,6 +1262,8 @@ export default function ContributeToGoal() {
         },
         ownCredit: data.ownCredit,
       });
+      // RV11-641-5: these figures are confirmed now; the kept-figures note is no longer true.
+      setRefreshFailed(false);
       // Ready for the next fresh attempt.
       attemptRef.current = null;
       setEntry('');

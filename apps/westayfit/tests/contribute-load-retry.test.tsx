@@ -455,6 +455,28 @@ describe('W12-2: a failed refresh keeps a warm screen (INT-25); a stale sign-in 
     expect(byId('wsf-contribute-stale-note')).toBeNull();
   });
 
+  it('RV11-641-5: a confirmed receipt clears the kept-figures note (Record more shows the confirmed anchor)', async () => {
+    await warm('ios');
+    // The live account the send is checked against (mayFireAs).
+    fakeAuth.currentUser = { uid: 'u1', getIdToken: async () => 't' };
+    answers.wsfGoalPulse = INTERNAL;
+    answers.wsfContribute = async () => ({ addedCount: 35, ownCredit: 40, sharedTotal: 75, target: 100, unit: 'squats', status: 'active', alreadyRecorded: false });
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    expect(byId('wsf-contribute-stale-note')).not.toBeNull();
+    act(() => typeInto(entry(), '35'));
+    await act(async () => byId('wsf-contribute-review')!.click());
+    await settle();
+    await act(async () => byId('wsf-contribute-submit')!.click());
+    await settle();
+    expect(byId('wsf-contribute-receipt')).not.toBeNull();
+    await act(async () => byId('wsf-contribute-record-more')!.click());
+    await settle();
+    expect(byId('wsf-contribute-entry-screen')).not.toBeNull();
+    expect(byId('wsf-contribute-stale-note')).toBeNull();
+    expect(byId('wsf-contribute-shared-total')!.textContent).toContain('75');
+  });
+
   it('web: a poll not-found still ends the screen, as before', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     act(() => root.render(<ContributeToGoal />));
