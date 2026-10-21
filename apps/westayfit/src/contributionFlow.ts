@@ -6,6 +6,7 @@
  * talks to the network or to storage.
  */
 
+import { describeCallableError } from './callableErrors';
 import { fillRatio, formatCount, isReached, totalOfTargetLabel } from './ui/progressFormat';
 
 export const MAX_COUNT = 100_000;
@@ -208,6 +209,69 @@ export const ATTEMPT_NOT_SENT_NOTICE =
 
 /** A replay answered "not signed in": the reminder stays; this says why nothing moved. */
 export const REPLAY_SIGN_IN_NOTICE = 'Your sign-in has expired. Sign in again, then confirm this contribution.';
+
+/**
+ * A replay held because the device could not refresh its sign-in for lack of
+ * a connection: the app's existing connection sentence (src/callableErrors.ts),
+ * not new copy.
+ */
+export const REPLAY_OFFLINE_NOTICE = describeCallableError({ code: 'functions/unavailable' }, '');
+
+// ---- refreshing the sign-in before a replay (ST-06, native) ----------------
+
+/** How long a replay waits for a fresh sign-in token before treating the device as offline. */
+export const SIGN_IN_REFRESH_TIMEOUT_MS = 5_000;
+
+export type SignInRefresh = 'ok' | 'offline' | 'signedOut';
+
+/** Firebase Auth, reduced to what a refresh needs. */
+export type RefreshableAuth = { currentUser: { getIdToken(forceRefresh?: boolean): Promise<string> } | null };
+
+const SIGNED_OUT_CODES = new Set([
+  'auth/user-token-expired',
+  'auth/user-disabled',
+  'auth/invalid-user-token',
+  'auth/user-not-found',
+]);
+
+/**
+ * Refresh this device's sign-in before a replay is sent, and say what came
+ * back. On a phone a token that could not be refreshed in the background (no
+ * connection while the app was asleep) used to reach the server stale, and a
+ * validly signed-in member was told their sign-in had expired.
+ *
+ *   - 'ok'        — a fresh token: the replay may go.
+ *   - 'signedOut' — no signed-in user, or Auth says the account's session is
+ *                   over (expired, disabled, invalid, deleted).
+ *   - 'offline'   — the refresh could not reach Auth (network failure, or no
+ *                   answer within `ms`). ANY OTHER failure is treated the
+ *                   same way: it is not proof the member is signed out, so
+ *                   nothing is sent and the member can try again.
+ *
+ * Never rejects.
+ */
+export async function refreshSignIn(auth: RefreshableAuth, ms: number): Promise<SignInRefresh> {
+  const user = auth.currentUser;
+  if (!user) return 'signedOut';
+  const TIMED_OUT = Symbol('timedOut');
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      user.getIdToken(true),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(TIMED_OUT), ms);
+      }),
+    ]);
+    return 'ok';
+  } catch (e) {
+    if (e === TIMED_OUT) return 'offline';
+    const code = typeof (e as { code?: unknown })?.code === 'string' ? (e as { code: string }).code : '';
+    if (SIGNED_OUT_CODES.has(code)) return 'signedOut';
+    return 'offline';
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
 
 /** Whether a caught error is the server saying the request carried no usable sign-in. */
 export function isSignInExpired(e: unknown): boolean {

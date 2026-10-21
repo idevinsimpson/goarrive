@@ -508,6 +508,11 @@ export type AttemptIo<T> = {
 
 export type AttemptSettlement<T> =
   | { kind: 'notSent' }
+  /**
+   * A replay held BEFORE anything was sent, because its preflight (a fresh
+   * sign-in, on native) did not come back 'ok'. The record is untouched.
+   */
+  | { kind: 'held'; reason: 'offline' | 'signedOut' }
   | { kind: 'confirmed'; data: T; current: boolean }
   | { kind: 'refused'; error: unknown }
   | { kind: 'unknown'; error: unknown };
@@ -580,12 +585,53 @@ export function settleAttempt<T>(
  * record untouched. What counts as a refusal of a REPLAY is the caller's
  * `isRefusal` (src/contributionFlow.ts `isDefiniteRefusal`, 'replay').
  */
-export function replayAttempt<T>(
+export async function replayAttempt<T>(
   row: PendingContribution,
   uid: string,
-  io: AttemptIo<T>
+  io: AttemptIo<T>,
+  /**
+   * Run BEFORE the replay's gate and send (on native: refresh the sign-in,
+   * src/contributionFlow.ts `refreshSignIn`). Anything but 'ok' holds the
+   * replay with nothing sent and the record untouched. Awaited here, ahead
+   * of `settle`, so the live-account gate stays immediately next to the send.
+   */
+  preflight?: () => Promise<'ok' | 'offline' | 'signedOut'>
 ): Promise<AttemptSettlement<T>> {
+  if (preflight) {
+    let fresh: 'ok' | 'offline' | 'signedOut';
+    try {
+      fresh = await preflight();
+    } catch {
+      fresh = 'offline';
+    }
+    if (fresh !== 'ok') return { kind: 'held', reason: fresh };
+  }
   return settle(row, uid, io, true);
+}
+
+/**
+ * WHETHER LEAVING THE SCREEN NOW WOULD PUT THE ATTEMPT AT RISK (ST-02) — the
+ * one rule for "leaving loses it", for Android Back and any other way out.
+ * True when:
+ *   - a request is in flight (`submitting`), or the attempt is `sending`;
+ *   - the outcome is unknown AND the device did not keep the record
+ *     (`!pendingDurable`): it exists on this screen and nowhere else;
+ *   - the stored attempt could not be read (`restoreFailed`): an unseen
+ *     attempt may be waiting, and this screen is the one saying so.
+ * A durable unknown attempt is NOT at risk: it will be here when the member
+ * comes back.
+ */
+export function attemptAtRiskOnLeave(s: {
+  pending: PendingContribution | null;
+  pendingDurable: boolean;
+  submitting: boolean;
+  restoreFailed: boolean;
+}): boolean {
+  if (s.submitting) return true;
+  if (s.restoreFailed) return true;
+  if (!s.pending) return false;
+  if (s.pending.state === 'sending') return true;
+  return s.pending.state === 'unknown' && !s.pendingDurable;
 }
 
 /**

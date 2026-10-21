@@ -5,6 +5,7 @@ import { httpsCallable } from 'firebase/functions';
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -28,6 +29,7 @@ import {
   ATTEMPT_CONFLICT_NOTICE,
   ATTEMPT_NOT_SENT_NOTICE,
   NOT_SAVED_NOTICE,
+  REPLAY_OFFLINE_NOTICE,
   REPLAY_SIGN_IN_NOTICE,
   RESTORE_FAILED_BODY,
   RESTORE_FAILED_HEADING,
@@ -36,6 +38,8 @@ import {
   classifyContributeError,
   isDefiniteRefusal,
   isSignInExpired,
+  refreshSignIn,
+  SIGN_IN_REFRESH_TIMEOUT_MS,
   parseEntry,
   recordMoreLabel,
   refusalCopy,
@@ -1338,14 +1342,30 @@ export default function ContributeToGoal() {
       // The SAME attempt: `replayAttempt` sends the restored row's own id and
       // count. A refusal of a replay is judged as a replay — an
       // unauthenticated answer keeps the reminder (src/contributionFlow.ts).
-      const settled = await replayAttempt(replay, owner, {
-        send: (id, n) => sendContribute(id, n),
-        isRefusal: (e: unknown) => isDefiniteRefusal(e, 'replay'),
-        stillCurrent,
-        mayFire,
-      });
+      //
+      // NATIVE: the sign-in is refreshed first (ST-06). A token that went
+      // stale while the app slept would otherwise reach the server and tell a
+      // validly signed-in member their sign-in expired. Awaited inside
+      // `replayAttempt`, ahead of its gate, so the gate stays next to the
+      // send. Web is unchanged (the browser SDK refreshes as it always has).
+      const settled = await replayAttempt(
+        replay,
+        owner,
+        {
+          send: (id, n) => sendContribute(id, n),
+          isRefusal: (e: unknown) => isDefiniteRefusal(e, 'replay'),
+          stillCurrent,
+          mayFire,
+        },
+        Platform.OS === 'web' ? undefined : () => refreshSignIn(getFirebaseAuth(), SIGN_IN_REFRESH_TIMEOUT_MS)
+      );
       if (!stillCurrent()) return;
-      if (settled.kind === 'notSent') {
+      if (settled.kind === 'held') {
+        // Nothing was sent and the record is untouched: still the same
+        // unconfirmed attempt, with the reason in one line.
+        setPending({ ...replay, state: 'unknown' });
+        setAttemptNotice(settled.reason === 'offline' ? REPLAY_OFFLINE_NOTICE : REPLAY_SIGN_IN_NOTICE);
+      } else if (settled.kind === 'notSent') {
         // Not sent: the record is untouched, and the reminder stays.
         setPending({ ...replay, state: 'unknown' });
         setAttemptNotice(ATTEMPT_NOT_SENT_NOTICE);
