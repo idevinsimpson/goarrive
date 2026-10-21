@@ -1,4 +1,4 @@
-import { act } from 'react';
+import { act, useLayoutEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { AppState } from 'react-native';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -80,6 +80,24 @@ describe('W12-6: the momentum rows\' relative times move on', () => {
     expect(vi.getTimerCount()).toBe(0);
     setApp('active');
     expect(vi.getTimerCount()).toBe(1);
+  });
+
+  it('RV15-641-5: a row that mounts after hours with no reader paints the time now, not the last tick', () => {
+    act(() => root.render(<MomentumRow row={ROW as never} first />));
+    act(() => root.render(<div />));
+    // Three hours pass with no reader: no timer runs, so the shared value is not refreshed.
+    vi.setSystemTime(T0 + 3 * 3_600_000);
+    const firstPaint: string[] = [];
+    function Probe() {
+      useLayoutEffect(() => {
+        firstPaint.push(label() ?? '');
+      }, []);
+      return null;
+    }
+    act(() => root.render(<><MomentumRow row={ROW as never} first /><Probe /></>));
+    expect(firstPaint).toHaveLength(1);
+    expect(firstPaint[0]).toContain('3h ago');
+    expect(label()).toContain('3h ago');
   });
 
   it('with no row left: no timer and no AppState listener', () => {

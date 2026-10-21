@@ -649,10 +649,12 @@ describe('W12-2: a failed refresh keeps a warm screen (INT-25); a stale sign-in 
     const sameDay = byId('wsf-contribute-context-updated')!.textContent!;
     expect(sameDay).toMatch(/^Confirmed \d{1,2}:\d{2}/);
     // A day and an hour later, with no tick landed (the poll is not advanced), anything that renders names the day.
+    // RV15-641-2 (changed deliberately): the poll should be running and nothing has landed for a day, so it is
+    // also marked as the last confirmed time.
     vi.setSystemTime(Date.UTC(2026, 9, 21, 16, 41));
     act(() => typeInto(entry(), '3'));
     await settle();
-    expect(byId('wsf-contribute-context-updated')!.textContent).toBe(`Confirmed Oct 20, ${sameDay.slice('Confirmed '.length)}`);
+    expect(byId('wsf-contribute-context-updated')!.textContent).toBe(`Last confirmed Oct 20, ${sameDay.slice('Confirmed '.length)}`);
   });
 
   it('N1 is a phone\'s: on the web a receipt before the load has landed leaves no confirmed time and starts no poll, as before', async () => {
