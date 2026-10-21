@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Platform, View } from 'react-native';
 
 import { useWsfAuth } from '../../src/auth';
+import { useKioskLaunchHolding } from '../../src/kioskLaunchGuard';
 import { getFirebaseAuth } from '../../src/firebase';
 import { wsfTheme } from '../../src/theme';
 import { armTabsFocusReturnTo, useTabsFocusReturn } from '../../src/ui/focusReturn';
@@ -67,6 +68,18 @@ export default function MemberTabsLayout() {
     the next person to sign in on the same device.
   */
   const { user } = useWsfAuth();
+  /*
+    ST-05 (ESC-2). NEVER HOME FIRST ON A KIOSK RELAUNCH. Until the launch
+    guard (app/_layout.tsx, src/kioskLaunchGuard.ts) has decided whether this
+    phone was a kiosk mid-session, and acted on it, the member tabs draw only
+    the app's ground: no top bar, no tab, no member screen, nothing started.
+    The root Stack around this stays mounted (the guard's replace needs it).
+    Never on web: holding is false from the first render there.
+  */
+  const holding = useKioskLaunchHolding();
+  if (holding) {
+    return <View style={{ flex: 1, backgroundColor: wsfTheme.colors.background }} testID="wsf-member-tabs-holding" />;
+  }
   return (
     <MemberShellActionsProvider ownerUid={user?.uid ?? null}>
       <MemberShell />

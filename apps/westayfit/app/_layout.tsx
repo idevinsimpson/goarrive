@@ -49,6 +49,7 @@ export default function RootLayout() {
             and over a native staging build's red strip they are light
             everywhere (src/ui/statusBarPolicy.ts). Nothing on web. */}
         <StatusBar style={statusBarStyleFor('cream', STAGING_STRIP_UNDER_STATUS_BAR)} />
+        <KioskLaunchGuard />
         <AppShell />
       </WsfAuthProvider>
     </SafeAreaProvider>
@@ -91,11 +92,21 @@ export default function RootLayout() {
  * kiosk, the identity screens — is barless because of where it sits in the
  * tree, not because a predicate said so.
  */
-function AppShell() {
-  // ST-05 (W12-1): a phone the OS killed mid kiosk session relaunches to that
-  // kiosk's start screen, not member Home signed in as the visitor. Once,
-  // here, inside the auth provider; a no-op on web (src/kioskLaunchGuard.ts).
+/**
+ * ST-05 (W12-1, ESC-2). A phone the OS killed mid kiosk session relaunches to
+ * that kiosk's start screen, not member Home signed in as the visitor. The
+ * guard runs here, once, inside the auth provider, in a component of its own
+ * that draws nothing (#641 RV10-641-1): its pathname and auth subscriptions
+ * re-render only this, never the root Stack below. While it decides, the
+ * member tabs hold back (app/(tabs)/_layout.tsx, useKioskLaunchHolding); the
+ * Stack itself stays mounted, because the replace needs it. Nothing on web.
+ */
+function KioskLaunchGuard() {
   useKioskLaunchGuard();
+  return null;
+}
+
+function AppShell() {
   // Asked once, here, because both presented screens below answer to it.
   const reduced = useReducedMotion();
   // A test build's root-shell fault (src/crashHarness.ts); inert otherwise.
