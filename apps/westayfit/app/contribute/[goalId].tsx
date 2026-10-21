@@ -125,12 +125,14 @@ import { isMoveSheetRoute } from '../../src/ui/moveSheetRoute';
 import {
   ensureSheetMotionCss,
   sheetData,
+  sheetHoldsStill,
   takeSheetHandoff,
   SCRIM_PROPS,
   useSheetExit,
   useSheetFocusContainment,
 } from '../../src/ui/sheetMotion';
-import { useReducedMotion } from '../../src/ui/useReducedMotion';
+import { SheetPanel, SheetScrim } from '../../src/ui/sheetMotionNative';
+import { useReducedMotion, useReducedMotionPreference } from '../../src/ui/useReducedMotion';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { nativeErrorBoundary } from '../../src/ui/RouteErrorFallback';
 import { useAppInForeground } from '../../src/useResumeRefresh';
@@ -516,8 +518,17 @@ export default function ContributeToGoal() {
     return takeSheetHandoff();
   });
   const reducedMotion = useReducedMotion();
+  /*
+    3b (MO-02, contribute half). On iOS and Android the sheet plays its own
+    motion (src/ui/sheetMotionNative.tsx: the scrim fades in place, the panel
+    rises 28 pt; 180 ms out), and the stack presents it without travel
+    (`animation: 'none'`, app/_layout.tsx). While those parts are mounted,
+    Close waits out the exit; reduced motion, or a preference not yet heard
+    on a phone, means no travel and no wait. The web is unchanged.
+  */
+  const motionPreference = useReducedMotionPreference();
   const safeArea = useSafeAreaInsets();
-  const { phase: sheetPhase, exit: exitSheet } = useSheetExit(reducedMotion);
+  const { phase: sheetPhase, exit: exitSheet } = useSheetExit(sheetHoldsStill(motionPreference));
   const sheetRef = useRef<View>(null);
   // The dialog panel itself: focus enters, stays and re-orients here (F2).
   const sheetPanelRef = useRef<View>(null);
@@ -2000,14 +2011,17 @@ export default function ContributeToGoal() {
         takes the step's tone: the confirmed receipt is navy here too.
       */
       <View ref={sheetRef} style={styles.sheetRoot} testID="wsf-contribute-sheet">
-        <Pressable
+        <SheetScrim
           style={[styles.sheetScrim, overMoveSheet ? styles.sheetScrimClear : null]}
           onPress={closeSheet}
           {...SCRIM_PROPS}
           testID="wsf-contribute-scrim"
           {...(sheetData('scrim', sheetPhase === 'out' ? 'out' : sheetHandoff ? 'rest' : 'in') as object)}
+          phase={sheetPhase}
+          preference={motionPreference}
+          handoff={sheetHandoff}
         />
-        <View
+        <SheetPanel
           ref={sheetPanelRef}
           style={[
             styles.sheetPanel,
@@ -2018,6 +2032,8 @@ export default function ContributeToGoal() {
           testID="wsf-contribute-sheet-panel"
           {...({ role: 'dialog', 'aria-modal': true, 'aria-label': sheetTitle } as Record<string, unknown>)}
           {...(sheetData('panel', sheetPhase) as object)}
+          phase={sheetPhase}
+          preference={motionPreference}
         >
           <View style={[styles.sheetBar, tone === 'dark' ? styles.sheetBarDark : null]}>
             <View pointerEvents="none" style={styles.sheetGrabber} />
@@ -2064,7 +2080,7 @@ export default function ContributeToGoal() {
           >
             <View style={styles.inner}>{children}</View>
           </ScrollView>
-        </View>
+        </SheetPanel>
       </View>
     ) : (
     /*

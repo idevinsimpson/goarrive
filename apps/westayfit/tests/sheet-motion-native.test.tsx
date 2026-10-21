@@ -648,8 +648,10 @@ describe('app/_layout.tsx presents MOVE without the stack’s travel', () => {
     expect(block).not.toContain('slide_from_bottom');
   });
 
-  it('the contribution sheet and Settings keep the stack’s travel until their screens swap', () => {
-    expect(screen('contribute/[goalId]')).toContain("animation: reduced ? 'none' : 'slide_from_bottom'");
+  // 3b (integrator): the contribution sheet has swapped to SheetScrim/SheetPanel, so it too moves itself.
+  it('the contribution sheet: `animation: none` (its screen swapped); Settings keeps the stack’s travel until it swaps', () => {
+    expect(screen('contribute/[goalId]')).toMatch(/animation: 'none',/);
+    expect(screen('contribute/[goalId]')).not.toContain('slide_from_bottom');
     expect(screen('settings')).toContain("animation: reduced ? 'none' : 'slide_from_right'");
   });
 });

@@ -160,7 +160,11 @@ function AppShell() {
                 ? {
                     presentation: 'transparentModal',
                     contentStyle: { backgroundColor: 'transparent' },
-                    animation: reduced ? 'none' : 'slide_from_bottom',
+                    // 3b (MO-02): no stack travel; the sheet fades and rises
+                    // itself on iOS and Android (SheetScrim/SheetPanel in the
+                    // route), and reduced motion gets none. The web ignores
+                    // this and plays its CSS (src/ui/sheetMotion.ts).
+                    animation: 'none',
                   }
                 : {}
             }
