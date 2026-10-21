@@ -29,8 +29,9 @@ import { Platform } from 'react-native';
  * scrim and all, and left at once on Close. MOVE's resolver now plays the same
  * numbers on iOS and Android itself (src/ui/sheetMotionNative.tsx: the scrim
  * fades in place, the panel rises 28 pt, the exit takes 180 ms), presented
- * without the stack's travel. The contribution sheet and Settings keep the
- * stack's animation until their screens make the same swap.
+ * without the stack's travel. Settings' side panel does the same (W14-5:
+ * app/settings.tsx). The contribution sheet keeps the stack's animation until
+ * its screen makes the same swap.
  */
 
 export const SHEET_IN_MS = 240;
@@ -145,9 +146,9 @@ export function claimNativeSheetExit(navigation: object): () => void {
  *
  * MO-02. On iOS and Android, a sheet that plays its exit there (its native
  * parts claimed the screen: `claimNativeSheetExit`) waits the same 180 ms,
- * with the same guards. A sheet that does not yet (the contribution sheet and
- * Settings, until their screens swap to SheetScrim and SheetPanel) still
- * navigates at once on native. The web is unchanged.
+ * with the same guards (MOVE, and Settings since W14-5). A sheet that does not
+ * yet (the contribution sheet, until its screen swaps to SheetScrim and
+ * SheetPanel) still navigates at once on native. The web is unchanged.
  */
 export function useSheetExit(reducedMotion: boolean): {
   phase: SheetPhase;

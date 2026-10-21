@@ -190,7 +190,15 @@ vi.mock('../src/ui/modalA11y', () => ({
 }));
 
 import SettingsScreen from '../app/settings';
-import { SHEET_IN_EASING, SHEET_OUT_EASING, SIDE_FLICK_VX, SIDE_SWIPE_CLOSE_PT } from '../src/ui/sheetMotionNative';
+import {
+  SHEET_IN_EASING,
+  SHEET_OUT_EASING,
+  SHEET_PREFERENCE_WAIT_MS,
+  SIDE_FLICK_MIN_PT,
+  SIDE_FLICK_VX,
+  SIDE_SWIPE_CLAIM_PT,
+  SIDE_SWIPE_CLOSE_PT,
+} from '../src/ui/sheetMotionNative';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -267,23 +275,79 @@ describe('iOS and Android: the side panel moves itself', () => {
     press('wsf-settings-close');
     expect(fx.back).toEqual(['back']);
   });
+
+  for (const os of ['ios', 'android'] as const) {
+    it(`${os}: a preference not heard yet: the panel is held unseen, and Close goes at once (no exit nobody sees; sheetHoldsStill, as MOVE) (RV12-634-F1)`, () => {
+      fx.os = os;
+      fx.pref = { reduced: false, known: false, failed: false };
+      show();
+      expect(fx.timings).toHaveLength(0);
+      press('wsf-settings-close');
+      expect(outs()).toHaveLength(0);
+      expect(fx.back).toEqual(['back']);
+    });
+
+    it(`${os}: a preference whose read failed: at rest, no travel, and Close goes at once`, () => {
+      fx.os = os;
+      fx.pref = { reduced: false, known: false, failed: true };
+      show();
+      expect(fx.timings).toHaveLength(0);
+      press('wsf-settings-close');
+      expect(outs()).toHaveLength(0);
+      expect(fx.back).toEqual(['back']);
+    });
+
+    it(`${os}: a preference that never answers: at rest after the wait, and Close still goes at once`, () => {
+      fx.os = os;
+      fx.pref = { reduced: false, known: false, failed: false };
+      show();
+      advance(SHEET_PREFERENCE_WAIT_MS);
+      expect(motionOf('wsf-settings-panel').opacity.v).toBe(1);
+      press('wsf-settings-close');
+      expect(outs()).toHaveLength(0);
+      expect(fx.back).toEqual(['back']);
+    });
+  }
+
+  it('the web: a preference read is never pending there, so Close waits out the CSS exit exactly as before', () => {
+    fx.os = 'web';
+    fx.pref = { reduced: false, known: false, failed: false };
+    show();
+    press('wsf-settings-close');
+    advance(179);
+    expect(fx.back).toEqual([]);
+    advance(1);
+    expect(fx.back).toEqual(['back']);
+  });
+
+  it('Close reads the preference through sheetHoldsStill, as MOVE does; the bare boolean is gone', () => {
+    const src = readFileSync(nodePath.resolve(__dirname, '../app/settings.tsx'), 'utf8');
+    expect(src).toMatch(/useSheetExit\(sheetHoldsStill\(motionPreference\)\)/);
+    expect(src).not.toMatch(/useReducedMotion\(\)/);
+  });
 });
 
 describe('a rightward swipe closes it (native only)', () => {
-  it('claims a clearly rightward drag, and never a vertical scroll or a leftward drag', () => {
+  it('claims a clearly rightward drag (past 16 pt, more than twice as far across as down), and never a vertical scroll or a leftward drag', () => {
+    expect(SIDE_SWIPE_CLAIM_PT).toBe(16);
     show();
     const claims = (g: { dx: number; dy: number }) => fx.pan!.onMoveShouldSetPanResponder!({}, g);
     expect(claims({ dx: 20, dy: 3 })).toBe(true);
+    expect(claims({ dx: 17, dy: 0 })).toBe(true);
+    expect(claims({ dx: 16, dy: 0 })).toBe(false);
     expect(claims({ dx: 5, dy: 0 })).toBe(false);
+    expect(claims({ dx: 20, dy: 10 })).toBe(false);
+    expect(claims({ dx: 21, dy: -10 })).toBe(true);
     expect(claims({ dx: 20, dy: 30 })).toBe(false);
     expect(claims({ dx: -40, dy: 0 })).toBe(false);
   });
 
-  it('released past about 60 pt, or flicked, it closes through Close (the same 180 ms exit); short and slow, it stays', () => {
+  const release = (g: { dx: number; vx: number }) => act(() => fx.pan!.onPanResponderRelease!({}, { dy: 0, ...g }));
+
+  it('released past 60 pt, or flicked past 30 pt, it closes through Close (the same 180 ms exit); short and slow, it stays', () => {
     expect(SIDE_SWIPE_CLOSE_PT).toBe(60);
     show();
     ins().forEach((t) => t.finish());
-    const release = (g: { dx: number; vx: number }) => act(() => fx.pan!.onPanResponderRelease!({}, { dy: 0, ...g }));
     release({ dx: 40, vx: 0.2 });
     release({ dx: 60, vx: 0 });
     expect(outs()).toHaveLength(0);
@@ -293,11 +357,34 @@ describe('a rightward swipe closes it (native only)', () => {
     expect(fx.back).toEqual(['back']);
   });
 
-  it('a fast flick closes it short of the distance', () => {
+  it('a fast flick past 30 pt closes it short of the distance', () => {
+    expect(SIDE_FLICK_MIN_PT).toBe(30);
     show();
-    act(() => fx.pan!.onPanResponderRelease!({}, { dx: 24, dy: 0, vx: SIDE_FLICK_VX + 0.1 }));
+    ins().forEach((t) => t.finish());
+    release({ dx: 31, vx: SIDE_FLICK_VX + 0.1 });
     advance(180);
     expect(fx.back).toEqual(['back']);
+  });
+
+  it('a flick no longer than a switch’s slide (24 pt or less, up to 30 pt) never closes it (RV12-634-F3)', () => {
+    show();
+    ins().forEach((t) => t.finish());
+    for (const dx of [8, 16, 24, 30]) release({ dx, vx: 2 });
+    release({ dx: 30, vx: SIDE_FLICK_VX + 0.1 });
+    expect(outs()).toHaveLength(0);
+    advance(1000);
+    expect(fx.back).toEqual([]);
+  });
+
+  it('a leftward release never closes it, however fast the flick reads (RV12-634-F7)', () => {
+    show();
+    ins().forEach((t) => t.finish());
+    release({ dx: -10, vx: 0.9 });
+    release({ dx: -80, vx: 0.9 });
+    release({ dx: 0, vx: 0.9 });
+    expect(outs()).toHaveLength(0);
+    advance(1000);
+    expect(fx.back).toEqual([]);
   });
 
   it('the panel carries the swipe’s handlers on iOS and Android; on the web it has none', () => {
