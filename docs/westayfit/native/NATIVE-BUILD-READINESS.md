@@ -1,6 +1,10 @@
 # Native build readiness (NATIVE-BUILD-1)
 
-This document is preparation only. No EAS project was created, no build ran, and no signing credential was made. Each of those is an owner account action, listed below.
+This document is preparation only. No build ran from the sprint sandbox and no signing credential was made: each is an owner account action, listed below.
+
+**EAS project (I-8a).** The owner's Expo account is **`devinsimpson`** (Free plan: 15 iOS and 15 Android builds a month). The app is linked to the owner's separate project **"We Stay Fit Preview"** (`devinsimpson/we-stay-fit-preview`) through `apps/westayfit/app.json`: `owner`, `slug` and `extra.eas.projectId` (`3288e568-daaa-4ead-afd2-826fbb59544a`). `eas init` is therefore **not needed**. The app's name, its link scheme (`westayfit`) and its bundle id and package (`com.westayfit.app`) are unchanged. No code, test, script or workflow reads the old slug `westayfit` (checked by grep), and the web export's output paths do not depend on it.
+
+**eas-cli version.** Every `eas` command here is pinned to `npx eas-cli@25.3.0`. Each subcommand and flag was checked against that package's own source from npm (`build/commands/**`). In 25.3.0, `env:set` creates or updates a variable; `env:create` and `env:update` are marked deprecated.
 
 ## Profiles (`apps/westayfit/eas.json`)
 | Profile | Artifact | Where its JavaScript comes from | Backend | Who may install it |
@@ -8,8 +12,9 @@ This document is preparation only. No EAS project was created, no build ran, and
 | `development` | Development client: Android APK, iOS device build (Debug) | **The developer's local `npx expo start`.** Nothing is embedded. | Whatever the local dev server's env says (see below). | Developer devices only |
 | `development-simulator` | iOS simulator development client | The local dev server | Same as above | Developers only |
 | `preview` | Standalone internal build: Android APK, iOS ad hoc (Release) | **Embedded at build time** | staging (`EXPO_PUBLIC_WSF_ENV=staging` plus the EAS `preview` environment) | Testers |
+| `preview-simulator` | iOS Simulator build (Release): extends `preview`, `ios.simulator: true` | **Embedded at build time** (the same checks as `preview`) | staging, as `preview` | Anyone with a Mac and Xcode's Simulator. **No Apple account needed; it cannot be installed on an iPhone.** |
 
-- All three profiles set `EXPO_PUBLIC_WSF_ENV=staging` and `EXPO_PUBLIC_WSF_AUTH_ENABLED=1`. There is **no production profile**: a bare `eas build` defaults to `production` and fails with `MissingProfileError`. Production publishing and store submission stay held. NATIVE-INTEGRATOR-1 task I-0 listed a production profile; it is **deferred to the owner** with production publishing (the production value of `EXPO_PUBLIC_WSF_AUTH_ENABLED` at launch is also an owner decision, NATIVE-PARITY-TARGET-1 Appendix E item 8).
+- All four profiles set `EXPO_PUBLIC_WSF_ENV=staging` and `EXPO_PUBLIC_WSF_AUTH_ENABLED=1` (`preview-simulator` and `development-simulator` inherit them). No profile sets a `resourceClass`: every build uses the free default worker (tests/native-build-config.test.ts guards this). There is **no production profile**: a bare `eas build` defaults to `production` and fails with `MissingProfileError`. Production publishing and store submission stay held. NATIVE-INTEGRATOR-1 task I-0 listed a production profile; it is **deferred to the owner** with production publishing (the production value of `EXPO_PUBLIC_WSF_AUTH_ENABLED` at launch is also an owner decision, NATIVE-PARITY-TARGET-1 Appendix E item 8).
 - **Sign-in must be stated (INT-11).** Every build that embeds its JavaScript refuses at config time unless `EXPO_PUBLIC_WSF_AUTH_ENABLED` is `1` (or `true`), or `0` (or `false`) on a production build only. With it unset the binary would show "Accounts are opening soon" on every entry screen, and a staging build with it off could not be tested. Development clients take the value from the local dev server instead, so add `EXPO_PUBLIC_WSF_AUTH_ENABLED=1` to the EAS `development` environment (owner action 2) or to `.env.development.local`.
 - **Invite and share hosts (`EXPO_PUBLIC_WSF_INVITE_HOSTS`, NATIVE-MEMBER-1 #642).** The allowlist of canonical public hosts for invite and share links: plain host names, comma- or space-separated, https only, with no scheme, port or wildcard (an entry that is not a public DNS name is ignored; `apps/westayfit/src/joinInput.ts`). **It is not set today**, in any profile or EAS environment, because no canonical public origin is settled yet (INT-08, owner input I-4). Until it is set, a pasted `https://<host>/join/<code>` invite link is not read in the app (it says "not a valid code"; `westayfit:` links and bare codes still work), and an https share link is accepted from any public host except a development tunnel. Set it in the `preview` and `development` EAS environments, next to `EXPO_PUBLIC_WSF_ENV`, with the hosts INT-08 settles on: the staging host for staging builds, and the production host for a production build.
 - **Build stamp (INT-10).** An EAS build stamps its own commit (`EAS_BUILD_GIT_COMMIT_HASH`, short) and build time in its app config (`extra.wsfBuild`, `app.config.js`). The staging strip and Build details read that stamp instead of "build dev", and nothing needs setting for it. A local or development-client build has no stamp and still says "dev".
@@ -21,7 +26,7 @@ This document is preparation only. No EAS project was created, no build ran, and
 - **`preview`:** EAS merges the EAS `preview` environment's variables with the profile's `env` at build time and embeds the result. The build itself refuses (`app.config.js`) when `EXPO_PUBLIC_WSF_ENV=staging` and any of the six `EXPO_PUBLIC_WSF_STAGING_*` values is missing. If one were still missing at runtime, the app would refuse to start (`resolveStagingConfig`). It never falls back to production. The build also refuses when it names no backend and carries only `EXPO_PUBLIC_WSF_USE_EMULATORS`: a release binary never uses the emulator (`src/firebase.ts` honours the flag on native only in `__DEV__`).
 - **Which profiles count as development clients:** only those listed in `DEV_CLIENT_PROFILES` in `app.config.js` (`development`, `development-simulator`). Every other profile is checked as one that embeds its JS. A new `developmentClient` profile in `eas.json` must be added to that list.
 - **`development` / `development-simulator`:** the profile's `env` only gets the build-time check past. The JavaScript and its `EXPO_PUBLIC_*` values come from the machine running `npx expo start`:
-  1. In `apps/westayfit`, run `npx eas-cli@latest env:pull --environment development --path .env.development.local`. This writes the EAS `development` variables to `.env.development.local`, which is git-ignored. Every development-mode Expo command loads it (`expo start`, including `--web`, plus `expo config`, `expo prebuild` and debug `expo run`); the production `expo export` (`npm run build:web`) never does. **Do not pull into `.env.local`:** Expo also loads `.env.local` for `expo export`, so a later `npm run build:web` from that checkout would quietly build a web bundle aimed at staging.
+  1. In `apps/westayfit`, run `npx eas-cli@25.3.0 env:pull --environment development --path .env.development.local`. This writes the EAS `development` variables to `.env.development.local`, which is git-ignored. Every development-mode Expo command loads it (`expo start`, including `--web`, plus `expo config`, `expo prebuild` and debug `expo run`); the production `expo export` (`npm run build:web`) never does. **Do not pull into `.env.local`:** Expo also loads `.env.local` for `expo export`, so a later `npm run build:web` from that checkout would quietly build a web bundle aimed at staging.
   2. Make sure `.env.development.local` contains `EXPO_PUBLIC_WSF_ENV=staging`. `env:pull` does not copy the profile's `env`. **Recommended:** store `EXPO_PUBLIC_WSF_ENV=staging` as an EAS environment variable in the `development` environment (owner action 2), so `env:pull` writes it. Adding the line by hand is only a fallback: every re-pull rewrites the file from the EAS variables alone and drops it.
   3. Run `npx expo start`. If `EXPO_PUBLIC_WSF_ENV` is not set, the app refuses to start (`nativeTargetProblem`).
   4. For the local emulator suite instead, first rename `.env.development.local`, for example to `.env.development.local.off` (also git-ignored). The selector and all six staging values must be absent: with the selector the app refuses because staging and the emulator flag are both set, and with the staging values alone it refuses because they are supplied without the selector. Then set `EXPO_PUBLIC_WSF_USE_EMULATORS=1` and `EXPO_PUBLIC_WSF_EMULATOR_HOST` to the computer's LAN address, or to `10.0.2.2` on the Android emulator.
@@ -45,17 +50,76 @@ This document is preparation only. No EAS project was created, no build ran, and
 - **So the evidence today is** JavaScript bundle export plus prebuild configuration, **not** a built, installed or launched binary.
 
 ## Owner actions (exact)
-1. **Create the WSF EAS project under `idevinsimpson`.** GoArrive already uses project `dd72ba84-…` there; do not reuse that one. From `apps/westayfit`, run `npx eas-cli@latest login`, then `npx eas-cli@latest init --account idevinsimpson`. This writes `extra.eas.projectId` and `owner` into `app.json`; commit that change.
-2. **EAS environment variables:** set the six `EXPO_PUBLIC_WSF_STAGING_*` values from the `westayfit-staging` Firebase Web App config in both the `preview` and `development` environments. Use **Plain text** or **Sensitive** visibility, **not Secret**: `eas env:pull` cannot read Secret values outside EAS servers and writes them only as comments (`# NAME=***** (secret)`; eas-cli 25.3.0 `build/commands/env/pull.js`), so the development client would be missing them and refuse to start. They are public client identifiers, so Plain text is fine. Also add `EXPO_PUBLIC_WSF_ENV=staging` and `EXPO_PUBLIC_WSF_AUTH_ENABLED=1` to the `development` environment, so `env:pull` writes the selector (step 2 above) and a development client can sign in.
-3. **Android internal test:** run `npx eas-cli@latest build -p android --profile preview`.
+1. **EAS project: done, by link.** The project exists under `devinsimpson` and `app.json` names it (see the top of this document). Do not run `eas init`. Before any account command, from `apps/westayfit`, run `[ACCOUNT] npx eas-cli@25.3.0 login` as `devinsimpson`. To confirm the link, run `[RO] npx eas-cli@25.3.0 project:info`, which needs that login.
+2. **EAS environment variables:** set the six `EXPO_PUBLIC_WSF_STAGING_*` values from the `westayfit-staging` Firebase Web App config in both the `preview` and `development` environments. One command per name: `[ACCOUNT] npx eas-cli@25.3.0 env:set --name <NAME> --value <value> --environment preview --environment development --visibility plaintext --scope project`. Use **Plain text** or **Sensitive** visibility, **not Secret**: `eas env:pull` cannot read Secret values outside EAS servers and writes them only as comments (`# NAME=***** (secret)`; eas-cli 25.3.0 `build/commands/env/pull.js`), so the development client would be missing them and refuse to start. They are public client identifiers, so Plain text is fine. Also add `EXPO_PUBLIC_WSF_ENV=staging` and `EXPO_PUBLIC_WSF_AUTH_ENABLED=1` to the `development` environment, so `env:pull` writes the selector (step 2 above) and a development client can sign in.
+3. **Android internal test:** run `npx eas-cli@25.3.0 build -p android --profile preview`.
    - On the first build, accept the EAS-generated keystore. That is the Android signing credential, and EAS manages it.
    - Install the APK by link or QR, allowing "install unknown apps" for the browser that opens it.
 4. **iPhone:** a **paid Apple Developer Program** membership is required for both `preview` and `development` device builds, because both use internal (ad hoc) distribution.
-   - Register each test iPhone with `npx eas-cli@latest device:create`.
-   - Run `npx eas-cli@latest build -p ios --profile preview`.
+   - Register each test iPhone with `npx eas-cli@25.3.0 device:create`.
+   - Run `npx eas-cli@25.3.0 build -p ios --profile preview`.
    - On the phone, turn on Developer Mode (Settings › Privacy & Security › Developer Mode, iOS 16 and later) before the build will launch.
    - The bundle id `com.westayfit.app` must be free in that Apple team.
 5. **Staging backend reachability:** the 13 platform-auth-required callables (#629) refuse native callers too, until the separately authorized IAM repair is done.
+
+## iPhone testing without a paid Apple membership
+The owner's Apple account offers only "Enroll Today": there is **no paid Apple Developer Program membership**, and enrolling is a purchase that is not authorized. These are the paths that remain, each command tagged:
+- **[RO]** reads only (some need a login session);
+- **[LOCAL]** runs on the owner's own machine, with no account;
+- **[ACCOUNT]** acts on the owner's Expo or Apple account, and only the owner runs it.
+
+Run every command from `apps/westayfit`.
+
+**(A) Expo Go on the iPhone. Feasible only if Expo Go supports SDK 54.**
+- This app is Expo SDK 54 (`expo` 54.0.37). Expo Go runs only projects on an SDK it supports. Sources conflict on whether the current App Store Expo Go is still SDK 54 or has moved to 57, so the owner checks the supported SDK in **Expo Go › Settings**. If it is not 54, this path is closed: the App Store offers only the current Expo Go.
+- Put the staging values in the git-ignored `.env.development.local` (names in the table below). Get them in one of two ways:
+  - from the Firebase web app config, `[RO] firebase apps:sdkconfig WEB --project <staging project>` (firebase-tools; not part of this repo, so not checked here);
+  - or, if they are already in EAS, `[ACCOUNT] npx eas-cli@25.3.0 env:pull --environment development --path .env.development.local` (read-only on the account). Never pull into `.env.local` (see "How the backend is chosen").
+- `[LOCAL] npx expo start --go`. The repo has `expo-dev-client`, so `--go` is required: without it the CLI serves the development client instead of Expo Go.
+- Use the default LAN connection, with the iPhone on the same Wi-Fi, and scan the QR with the iPhone Camera. **Do not add `--tunnel` by default:** a tunnel exposes the dev server through a third-party service.
+- What differs in Expo Go: the camera rep counter's native module (`wsf-pose-camera`) is not in Expo Go. The app fails closed to the manual count (`cameraCounterSupported()` is false), and no MediaPipe is present at all.
+
+**(B) EAS iOS Simulator build. [ACCOUNT, owner]**
+- `[ACCOUNT] npx eas-cli@25.3.0 build -p ios --profile preview-simulator`.
+- No Apple account is needed: a simulator build is not signed for devices. It uses 1 of the 15 free iOS builds.
+- The EAS `preview` environment must hold the six staging values; the build refuses at config time otherwise.
+- It runs only in the Xcode iOS Simulator on a Mac: `[ACCOUNT] npx eas-cli@25.3.0 build:run -p ios --latest` (read-only on the account). **It cannot be installed on an iPhone.**
+
+**(C) Local Simulator build on a Mac. [LOCAL]**
+- `[LOCAL] npx expo run:ios`. This needs Xcode and its Simulator, and no EAS and no Apple account.
+- It is a Debug build: its JavaScript comes from the local dev server, with `.env.development.local` as in (A).
+
+**(D) A physical iPhone through Xcode's free Personal Team, on a Mac. [ACCOUNT, owner]**
+- Sign in to Xcode › Settings › Accounts with the owner's Apple ID. Xcode creates a free development certificate under that Apple ID; that is the account action.
+- `[LOCAL] npx expo prebuild -p ios`, then open `ios/*.xcworkspace` and choose the Personal Team under Signing & Capabilities. If `com.westayfit.app` cannot be registered there, use a personal bundle id for this local build only, and commit nothing from `ios/`.
+- Turn on Developer Mode on the iPhone (Settings › Privacy & Security › Developer Mode).
+- Then do one of these:
+  - `[LOCAL] npx expo run:ios --device`: a Debug build that needs the Mac's dev server on the same Wi-Fi, with `.env.development.local` as in (A).
+  - Or `[LOCAL] npx expo run:ios --device --configuration Release`: this embeds the JavaScript. A production-mode build reads `.env.production.local` or `.env.local`, not `.env.development.local`, and either of those files would also leak into `npm run build:web`. So pass the values in the shell for that one command instead of in a file.
+- Free-provisioning limits, as Apple applies them (not verifiable from this sandbox): the profile expires after 7 days, at most 3 apps per device.
+
+**(E) EAS internal distribution (`preview` or `development` on an iPhone). Blocked.**
+- Ad hoc provisioning needs the paid membership. Owner action 4 below stays open until the owner decides to enrol, which is not authorized.
+
+**(F) This sandbox. No iOS compile.**
+- It runs on Linux, with no Xcode. Evidence here is limited to JavaScript export, `expo prebuild --no-install` and autolinking resolution.
+
+**Not recommended or authorized:** a third-party installer such as "sign.expo.dev" asks for the owner's Apple ID credentials. Whether to use anything like it is the owner's decision alone.
+
+### Where each variable must exist, per path (names only; never commit a value)
+| Variable | (A) Expo Go | (B) EAS Simulator build | (C) Local Simulator | (D) Personal Team device |
+|---|---|---|---|---|
+| `EXPO_PUBLIC_WSF_ENV` | `.env.development.local` | `eas.json` (`preview`, inherited) | `.env.development.local` | `.env.development.local` (Debug) or the shell (Release) |
+| `EXPO_PUBLIC_WSF_AUTH_ENABLED` | `.env.development.local` | `eas.json` (`preview`, inherited) | `.env.development.local` | as above |
+| `EXPO_PUBLIC_WSF_STAGING_API_KEY` | `.env.development.local` | EAS `preview` environment | `.env.development.local` | as above |
+| `EXPO_PUBLIC_WSF_STAGING_AUTH_DOMAIN` | same | same | same | same |
+| `EXPO_PUBLIC_WSF_STAGING_PROJECT_ID` | same | same | same | same |
+| `EXPO_PUBLIC_WSF_STAGING_STORAGE_BUCKET` | same | same | same | same |
+| `EXPO_PUBLIC_WSF_STAGING_SENDER_ID` | same | same | same | same |
+| `EXPO_PUBLIC_WSF_STAGING_APP_ID` | same | same | same | same |
+| `EXPO_PUBLIC_WSF_INVITE_HOSTS` | optional; unset today | optional; unset today | optional | optional |
+| `EXPO_PUBLIC_WSF_USE_EMULATORS` | **absent** | **absent** (no `preview*` profile sets it) | **absent** | **absent** |
+| `EXPO_PUBLIC_WSF_CRASH_HARNESS` | absent | **absent** (no `preview*` profile sets it) | absent | absent |
 
 ## What a run proves
 - **Build success:** a binary exists.

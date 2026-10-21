@@ -232,6 +232,69 @@ describe('NATIVE-BUILD-1: app.config.js build-time backend refusals', () => {
     });
   });
 
+  describe('NATIVE-INTEGRATOR-1 (I-8a): the preview EAS project, and an iOS simulator build with no Apple account', () => {
+    type Profile = { extends?: string; env?: Record<string, string>; ios?: Record<string, unknown>; android?: Record<string, unknown>; [k: string]: unknown };
+    const readJson = (f: string) => JSON.parse(readFileSync(join(__dirname, '..', f), 'utf8'));
+    const app = () => readJson('app.json').expo as Record<string, any>;
+    const eas = () => readJson('eas.json') as { build: Record<string, Profile> };
+    const resolvedEnv = (build: Record<string, Profile>, name: string): Record<string, string> => {
+      const p = build[name]!;
+      return { ...(p.extends ? resolvedEnv(build, p.extends) : {}), ...(p.env ?? {}) };
+    };
+
+    it('app.json is linked to the owner\'s "We Stay Fit Preview" project, with the app\'s identity unchanged', () => {
+      const expo = app();
+      expect(expo.owner).toBe('devinsimpson');
+      expect(expo.slug).toBe('we-stay-fit-preview');
+      expect(expo.extra.eas.projectId).toBe('3288e568-daaa-4ead-afd2-826fbb59544a');
+      // Unchanged: what a member sees, the link scheme, and the store identities.
+      expect(expo.name).toBe('We Stay Fit');
+      expect(expo.scheme).toBe('westayfit');
+      expect(expo.ios.bundleIdentifier).toBe('com.westayfit.app');
+      expect(expo.android.package).toBe('com.westayfit.app');
+    });
+
+    it('preview-simulator extends preview, builds for the iOS Simulator, and inherits staging with sign-in on', () => {
+      const { build } = eas();
+      expect(build['preview-simulator']).toEqual({ extends: 'preview', ios: { simulator: true } });
+      const env = resolvedEnv(build, 'preview-simulator');
+      expect(env.EXPO_PUBLIC_WSF_ENV).toBe('staging');
+      expect(env.EXPO_PUBLIC_WSF_AUTH_ENABLED).toBe('1');
+    });
+
+    it('it embeds its JavaScript: refused without the six staging values, accepted with them', () => {
+      const sim = (extra: Record<string, string>) =>
+        run({ EAS_BUILD_PLATFORM: 'ios', EAS_BUILD_PROFILE: 'preview-simulator', ...resolvedEnv(eas().build, 'preview-simulator'), ...extra });
+      expect(sim({})).toThrow(/profile "preview-simulator" embeds its JavaScript with EXPO_PUBLIC_WSF_ENV=staging, but these staging values are missing from the EAS environment: EXPO_PUBLIC_WSF_STAGING_API_KEY/);
+      expect(sim(COMPLETE_STAGING)()).toEqual(BUILT);
+      // Not a development client: the stricter, embedded-JS checks apply to it.
+      expect(readFileSync(join(__dirname, '..', 'app.config.js'), 'utf8')).toMatch(
+        /const DEV_CLIENT_PROFILES = \['development', 'development-simulator'\];/,
+      );
+    });
+
+    it('paid fallback off: no profile asks for a paid build resource', () => {
+      const text = readFileSync(join(__dirname, '..', 'eas.json'), 'utf8');
+      expect(text).not.toMatch(/resourceClass/);
+      for (const [name, p] of Object.entries(eas().build)) {
+        expect(p.resourceClass, name).toBeUndefined();
+        expect(p.ios?.resourceClass, name).toBeUndefined();
+        expect(p.android?.resourceClass, name).toBeUndefined();
+      }
+    });
+
+    it('no preview profile carries the emulator flag or the injected-throw harness', () => {
+      const { build } = eas();
+      const previews = Object.keys(build).filter((n) => n.startsWith('preview'));
+      expect(previews.sort()).toEqual(['preview', 'preview-simulator']);
+      for (const name of previews) {
+        const env = resolvedEnv(build, name);
+        expect(env.EXPO_PUBLIC_WSF_USE_EMULATORS, name).toBeUndefined();
+        expect(env.EXPO_PUBLIC_WSF_CRASH_HARNESS, name).toBeUndefined();
+      }
+    });
+  });
+
   describe('NATIVE-INTEGRATOR-1 (INT-10): an EAS build stamps its own commit and build time', () => {
     const staging = (extra: Record<string, string> = {}) =>
       run({
