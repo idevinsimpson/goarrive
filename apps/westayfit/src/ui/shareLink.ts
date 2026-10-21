@@ -20,6 +20,14 @@ export function offerableLink(url: string | null | undefined): url is string {
   return typeof url === 'string' && url !== '';
 }
 
+/**
+ * Whether the Copy controls are drawn. On the web, always, exactly as before;
+ * in the app, only with expo-clipboard's native module (shareLink.native.ts).
+ */
+export function offersCopy(): boolean {
+  return true;
+}
+
 /** Whether a copy can be attempted at all (no navigator: a server render). */
 export function canAttemptCopy(): boolean {
   return typeof navigator !== 'undefined';

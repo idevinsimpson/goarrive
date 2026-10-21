@@ -71,6 +71,7 @@ import {
   hasShareSheet,
   linkShareRoute,
   offerableLink,
+  offersCopy,
   shareLinkSheet,
 } from '../../../../../src/ui/shareLink';
 import { buildStationUrl } from '../../../../../src/ui/eventLinks';
@@ -2438,7 +2439,7 @@ export default function CommunityPage() {
               ? 'Open this on the screen at your event.'
               : 'Authorize public display under Goals below, or that screen will say the goal is not available.'}
           </Text>
-          {offerableLink(kioskUrlFor(goal.goalId)) ? (
+          {offerableLink(kioskUrlFor(goal.goalId)) && (LINK_COPY.offersOpenKiosk || offersCopy()) ? (
             /*
               ONE ACTION, THEN THE UTILITY. Opening the kiosk is the thing a
               Champion came here to do, so it carries the one green primary
@@ -2462,19 +2463,21 @@ export default function CommunityPage() {
                   testID={`wsf-kiosk-setup-open-${goal.goalId}`}
                 />
               ) : null}
-              <Pressable
-                onPress={() => onCopyKiosk(goal.goalId)}
-                style={styles.tertiaryButton}
-                testID={`wsf-kiosk-setup-copy-${goal.goalId}`}
-                accessibilityRole="button"
-                accessibilityLabel={`${goal.title}: copy the kiosk link`}
-              >
-                <Text style={styles.tertiaryButtonText}>
-                  {kioskCopy.goalId === goal.goalId && kioskCopy.state === 'copied'
-                    ? 'Copied'
-                    : 'Copy kiosk link'}
-                </Text>
-              </Pressable>
+              {offersCopy() ? (
+                <Pressable
+                  onPress={() => onCopyKiosk(goal.goalId)}
+                  style={styles.tertiaryButton}
+                  testID={`wsf-kiosk-setup-copy-${goal.goalId}`}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${goal.title}: copy the kiosk link`}
+                >
+                  <Text style={styles.tertiaryButtonText}>
+                    {kioskCopy.goalId === goal.goalId && kioskCopy.state === 'copied'
+                      ? 'Copied'
+                      : 'Copy kiosk link'}
+                  </Text>
+                </Pressable>
+              ) : null}
             </View>
           ) : (
             <Text style={styles.body} testID={`wsf-kiosk-setup-unavailable-${goal.goalId}`}>
@@ -2567,7 +2570,7 @@ export default function CommunityPage() {
             textStyle={UTILITY_LINK_TEXT}
             testID={`wsf-kiosk-stations-open-${goal.goalId}`}
           />
-          {offerableLink(stationUrlFor(goal.goalId)) ? (
+          {offerableLink(stationUrlFor(goal.goalId)) && offersCopy() ? (
             <Pressable
               onPress={() => onCopyStation(goal.goalId)}
               style={[styles.tertiaryButton, styles.rowButton]}
@@ -3213,7 +3216,7 @@ export default function CommunityPage() {
                           textStyle={styles.primaryButtonText}
                           testID="wsf-combined-open"
                         />
-                        {offerableLink(combinedUrl) ? (
+                        {offerableLink(combinedUrl) && offersCopy() ? (
                           <Pressable
                             onPress={() => void onCopyCombined()}
                             style={styles.tertiaryButton}
@@ -4563,20 +4566,22 @@ export default function CommunityPage() {
                     Share this community with people you want to move with.
                   </Text>
                   <View style={styles.inviteActions}>
-                    <Pressable
-                      onPress={onCopyInvite}
-                      style={[styles.secondaryButton, styles.rowButton]}
-                      testID="wsf-community-invite-copy"
-                      accessibilityRole="button"
-                    >
-                      <Text style={[styles.secondaryButtonText, styles.rowButtonText]}>
-                        {copyStatus === 'copied'
-                          ? 'Copied'
-                          : copyStatus === 'failed'
-                            ? 'Copy failed — use the QR code'
-                            : 'Copy invite'}
-                      </Text>
-                    </Pressable>
+                    {offersCopy() ? (
+                      <Pressable
+                        onPress={onCopyInvite}
+                        style={[styles.secondaryButton, styles.rowButton]}
+                        testID="wsf-community-invite-copy"
+                        accessibilityRole="button"
+                      >
+                        <Text style={[styles.secondaryButtonText, styles.rowButtonText]}>
+                          {copyStatus === 'copied'
+                            ? 'Copied'
+                            : copyStatus === 'failed'
+                              ? 'Copy failed — use the QR code'
+                              : 'Copy invite'}
+                        </Text>
+                      </Pressable>
+                    ) : null}
                     {hasShareApi ? (
                       <Pressable
                         onPress={onShareInvite}

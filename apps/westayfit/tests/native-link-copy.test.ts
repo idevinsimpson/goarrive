@@ -83,7 +83,7 @@ describe('community detail uses it, and the relative Open actions are outside th
     // The only URL conditional around the station actions comes after Open.
     const blockStart = src.lastIndexOf('testID={`wsf-kiosk-stations-intro-', open);
     // The Copy conditional, plain or behind offerableLink (F-3), comes after Open.
-    const copyGate = /\{(?:offerableLink\()?stationUrlFor\(goal\.goalId\)\)? \? \(/;
+    const copyGate = /\{(?:offerableLink\()?stationUrlFor\(goal\.goalId\)\)?(?: && offersCopy\(\))? \? \(/;
     expect(src.slice(blockStart, open)).not.toMatch(copyGate);
     expect(src.slice(open, open + 2000)).toMatch(copyGate);
   });
@@ -92,7 +92,7 @@ describe('community detail uses it, and the relative Open actions are outside th
     const open = src.indexOf('label="Open combined screen"');
     const blockStart = src.lastIndexOf('testID="wsf-combined-created"', open);
     expect(blockStart).toBeGreaterThan(0);
-    const copyGate = /\{(?:offerableLink\()?combinedUrl\)? \? \(/;
+    const copyGate = /\{(?:offerableLink\()?combinedUrl\)?(?: && offersCopy\(\))? \? \(/;
     expect(src.slice(blockStart, open)).not.toMatch(copyGate);
     expect(src.slice(open, open + 2000)).toMatch(copyGate);
   });

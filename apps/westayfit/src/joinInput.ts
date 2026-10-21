@@ -86,15 +86,25 @@ export type JoinInput = {
  */
 export function inviteOriginsFor(os: string, configuredHosts: string | undefined, ownOrigin: string | null): string[] {
   const origins = new Set<string>();
-  for (const entry of (configuredHosts ?? '').split(/[\s,]+/)) {
-    const host = entry.toLowerCase();
-    if (PUBLIC_HOST.test(host)) origins.add(`https://${host}`);
-  }
+  for (const host of configuredInviteHosts(configuredHosts)) origins.add(`https://${host}`);
   if (os === 'web' && typeof ownOrigin === 'string') {
     const origin = ownOrigin.toLowerCase();
     if (PAGE_ORIGIN.test(origin) && HOST.test(origin.slice(origin.indexOf('//') + 2))) origins.add(origin);
   }
   return [...origins];
+}
+
+/**
+ * The canonical hosts named in an `EXPO_PUBLIC_WSF_INVITE_HOSTS` value:
+ * lower-cased, de-duplicated, plain public host names only. Empty today.
+ */
+export function configuredInviteHosts(value: string | undefined): string[] {
+  const hosts = new Set<string>();
+  for (const entry of (value ?? '').split(/[\s,]+/)) {
+    const host = entry.toLowerCase();
+    if (PUBLIC_HOST.test(host)) hosts.add(host);
+  }
+  return [...hosts];
 }
 
 /** Our origins here and now (see the module comment). */

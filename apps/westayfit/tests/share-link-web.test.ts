@@ -2,8 +2,16 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { isShareableHttpsUrl, shareControlLabel, shareRoute } from '../src/shareGoalDisplay';
-import { canAttemptCopy, copyLink, hasShareSheet, linkShareRoute, offerableLink, shareLinkSheet } from '../src/ui/shareLink';
+import { DEV_TUNNEL_DOMAINS, isShareableHttpsUrl, shareControlLabel, shareRoute } from '../src/shareGoalDisplay';
+import {
+  canAttemptCopy,
+  copyLink,
+  hasShareSheet,
+  linkShareRoute,
+  offerableLink,
+  offersCopy,
+  shareLinkSheet,
+} from '../src/ui/shareLink';
 
 /**
  * NATIVE-MEMBER-1 F-3 (MF-01): the web's half of the copy and share helper is
@@ -131,10 +139,10 @@ describe('every copy and share call site goes through the helper (MF-01 wiring)'
     expect(src).toContain('const showInviteCard = isChampion || (linkJoinable && offerableLink(inviteUrl));');
     for (const gate of [
       'offerableLink(inviteUrl) ? (\n                  <JoinQrCode url={inviteUrl} caveat={MANAGE_QR_CAVEAT} />',
-      '{offerableLink(kioskUrlFor(goal.goalId)) ? (',
-      '{offerableLink(stationUrlFor(goal.goalId)) ? (',
+      '{offerableLink(kioskUrlFor(goal.goalId)) && (LINK_COPY.offersOpenKiosk || offersCopy()) ? (',
+      '{offerableLink(stationUrlFor(goal.goalId)) && offersCopy() ? (',
       '{offerableLink(stationUrlFor(goal.goalId)) ? null : (',
-      '{offerableLink(combinedUrl) ? (',
+      '{offerableLink(combinedUrl) && offersCopy() ? (',
       '{offerableLink(combinedUrl) ? null : (',
     ]) {
       expect(src, gate).toContain(gate);
@@ -144,5 +152,81 @@ describe('every copy and share call site goes through the helper (MF-01 wiring)'
     const branch = src.indexOf('offerableLink(inviteUrl) ? (', card);
     expect(branch).toBeGreaterThan(card);
     expect(src.indexOf('testID="wsf-community-invite-copy"', card)).toBeGreaterThan(branch);
+  });
+
+  // F3-N1: in the app Copy is drawn only when expo-clipboard's native module
+  // is present. Each Copy control sits directly behind offersCopy().
+  it.each([
+    ['wsf-community-invite-copy', 'testID="wsf-community-invite-copy"'],
+    ['wsf-kiosk-setup-copy', 'testID={`wsf-kiosk-setup-copy-${goal.goalId}`}'],
+    ['wsf-kiosk-stations-copy', 'testID={`wsf-kiosk-stations-copy-${goal.goalId}`}'],
+    ['wsf-combined-copy', 'testID="wsf-combined-copy"'],
+  ])('%s is drawn only when offersCopy()', (_l, testId) => {
+    const at = src.indexOf(testId);
+    expect(at, testId).toBeGreaterThan(0);
+    const pressable = src.lastIndexOf('<Pressable', at);
+    const gate = src.lastIndexOf('offersCopy()', pressable);
+    expect(gate, `${testId} gate`).toBeGreaterThan(0);
+    // Nothing else opens between the gate and this control.
+    expect(src.slice(gate, pressable)).toMatch(/^offersCopy\(\) \? \(\s*$/);
+  });
+
+  it('the web helper always offers Copy, so the web draws exactly what it did', () => {
+    expect(offersCopy()).toBe(true);
+  });
+});
+
+describe('F3-N2: a development tunnel is never a shareable origin', () => {
+  const saved = process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS;
+    else process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS = saved;
+  });
+
+  it.each([
+    ['expo start --tunnel', 'https://abc123-anonymous-8081.exp.direct'],
+    ['a tunnel link with a path', 'https://abc123-8081.exp.direct/join/Ab3_dE-fGh1JkLmN0pQrSt'],
+    ['exp.direct itself', 'https://exp.direct'],
+    ['upper case', 'https://ABC-8081.EXP.DIRECT'],
+    ['exp.host', 'https://exp.host/@someone/app'],
+    ['ngrok.io', 'https://1a2b3c.ngrok.io'],
+    ['ngrok-free.app', 'https://1a2b-203-0-113-7.ngrok-free.app'],
+    ['ngrok.app', 'https://x.ngrok.app'],
+    ['ngrok-free.dev', 'https://x.ngrok-free.dev'],
+    ['ngrok.dev', 'https://x.ngrok.dev'],
+  ])('%s is refused with nothing configured', (_l, url) => {
+    delete process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS;
+    expect(isShareableHttpsUrl(url)).toBe(false);
+    expect(shareRoute({ product: 'ReactNative' }, url)).toBe('unavailable');
+  });
+
+  it('every listed tunnel domain is refused, and only as a whole label', () => {
+    delete process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS;
+    for (const d of DEV_TUNNEL_DOMAINS) expect(isShareableHttpsUrl(`https://x.${d}`), d).toBe(false);
+    // A host that merely ends in the same letters is not a tunnel.
+    expect(isShareableHttpsUrl('https://notexp.direct.example')).toBe(true);
+    expect(isShareableHttpsUrl('https://myexp.direct')).toBe(true);
+  });
+
+  it('once the canonical hosts are configured, only those hosts are shareable, exactly', () => {
+    process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS = 'westayfit.app, staging.westayfit.app';
+    expect(isShareableHttpsUrl('https://westayfit.app/join/Ab3_dE-fGh1JkLmN0pQrSt')).toBe(true);
+    expect(isShareableHttpsUrl('https://STAGING.westayfit.app/kiosk/g1')).toBe(true);
+    for (const url of [
+      'https://evil.example/join/x',
+      'https://a.westayfit.app/join/x',
+      'https://westayfit.app.evil.example/',
+      'https://abc-8081.exp.direct',
+    ]) {
+      expect(isShareableHttpsUrl(url), url).toBe(false);
+    }
+    expect(shareRoute({ product: 'ReactNative' }, 'https://westayfit.app')).toBe('nativeShare');
+    expect(shareRoute({ product: 'ReactNative' }, 'https://goarrive.web.app')).toBe('unavailable');
+  });
+
+  it('a configured value with no valid host leaves the tunnel rule in force', () => {
+    process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS = 'https://westayfit.app, *.x';
+    expect(isShareableHttpsUrl('https://abc-8081.exp.direct')).toBe(false);
+    expect(isShareableHttpsUrl('https://westayfit.app')).toBe(true);
   });
 });

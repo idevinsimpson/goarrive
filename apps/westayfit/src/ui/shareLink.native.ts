@@ -10,11 +10,21 @@
  *     the message when there is one), Android gets `{ message: url }`.
  *     Dismissing the sheet changes nothing on screen.
  *   · Both are offered, and act, only for an absolute https link
- *     (`isShareableHttpsUrl`): never a development build's Metro address,
- *     never a half-built or relative one.
+ *     (`isShareableHttpsUrl`): never a development build's Metro address or
+ *     tunnel, never a half-built or relative one.
+ *
+ * EXPO-CLIPBOARD IS OPTIONAL (review F3-N1). Importing it calls
+ * `requireNativeModule('ExpoClipboard')`, which THROWS in a binary or
+ * development client built before the dependency was added -- and with
+ * routes loaded eagerly in development, one throwing import stops the whole
+ * app from starting. So it is never imported up front: `offersCopy()` asks
+ * whether the native module is present (`requireOptionalNativeModule`, which
+ * does not throw), and `copyLink` imports expo-clipboard only then. Without
+ * the module, Copy is simply not offered; Share does not need it.
+ *
  * Same exports as `shareLink.ts`, which the web and the test runner get.
  */
-import * as Clipboard from 'expo-clipboard';
+import { requireOptionalNativeModule } from 'expo';
 import { Platform, Share } from 'react-native';
 
 import { isShareableHttpsUrl, shareRoute, type ShareRoute } from '../shareGoalDisplay';
@@ -26,9 +36,18 @@ export function offerableLink(url: string | null | undefined): url is string {
   return isShareableHttpsUrl(url);
 }
 
-/** The app can always attempt a copy; whether it may is `offerableLink`. */
+/** Whether this binary has expo-clipboard's native module. Never throws. */
+export function offersCopy(): boolean {
+  try {
+    return requireOptionalNativeModule('ExpoClipboard') != null;
+  } catch {
+    return false;
+  }
+}
+
+/** A copy can be attempted only with the clipboard module present. */
 export function canAttemptCopy(): boolean {
-  return true;
+  return offersCopy();
 }
 
 /** The OS share sheet is always there; whether it may be offered is `offerableLink`. */
@@ -42,8 +61,9 @@ export function linkShareRoute(): ShareRoute {
 }
 
 export async function copyLink(url: string): Promise<CopyOutcome> {
-  if (!isShareableHttpsUrl(url)) return 'failed';
+  if (!isShareableHttpsUrl(url) || !offersCopy()) return 'failed';
   try {
+    const Clipboard = await import('expo-clipboard');
     return (await Clipboard.setStringAsync(url)) === false ? 'failed' : 'copied';
   } catch {
     return 'failed';
