@@ -3,10 +3,10 @@
 // (expo-router evaluates some nested _layout files before this one, in the
 // same synchronous pass: src/crashContainment.native.ts.)
 import '../src/crashContainment';
-import { Stack } from 'expo-router';
+import { Stack, useNavigation } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
-import { View } from 'react-native';
+import { BackHandler, Platform, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { WsfAuthProvider } from '../src/auth';
@@ -19,6 +19,7 @@ import { StagingStackFrame, stagingScreenLayout } from '../src/stagingShell';
 import { statusBarStyleFor } from '../src/ui/statusBarPolicy';
 import { fireAsyncCrashFaults, injectedRenderFault } from '../src/crashHarness';
 import { wsfTheme } from '../src/theme';
+import { coldBackHandler } from '../src/ui/coldBack';
 import { isMoveSheetRoute, isOverMemberTabs } from '../src/ui/moveSheetRoute';
 import { nativeErrorBoundary } from '../src/ui/RouteErrorFallback';
 import { useReducedMotion } from '../src/ui/useReducedMotion';
@@ -33,10 +34,19 @@ import { useReducedMotion } from '../src/ui/useReducedMotion';
 export const ErrorBoundary = nativeErrorBoundary('root');
 
 export default function RootLayout() {
+  const navigation = useNavigation();
   useEffect(() => {
     getFirebaseApp();
     // A test build's injected timer / rejection faults (src/crashHarness.ts).
     fireAsyncCrashFaults();
+    // INT-28 (W12-14): Android Back from a lone cold-link route goes Home
+    // (src/ui/coldBack.ts). Registered here, once: this effect runs before the
+    // navigation container's (a parent's effects run after its children's),
+    // and Android calls the newest listener first, so React Navigation's own
+    // Back runs first and this only when it has nothing to go back to.
+    if (Platform.OS !== 'android') return undefined;
+    const sub = BackHandler.addEventListener('hardwareBackPress', coldBackHandler(navigation as never));
+    return () => sub.remove();
   }, []);
 
   return (
