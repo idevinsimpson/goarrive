@@ -246,14 +246,22 @@ const codeOf = (f: string) => strip(read(f), langOf(f));
 /** Configuration names that declare a Gradle dependency: main, test, variant, annotation-processor and buildscript scopes. */
 const GRADLE_CONFIG = /\b(\w*(?:[iI]mplementation|[aA]pi|[cC]ompileOnly|[rR]untimeOnly)|kapt|ksp|annotationProcessor|classpath)\b(?![ \t]*[=.])/g;
 /**
- * Every dependency declaration in a build.gradle (review PRE-1), in any configuration and any
- * placement (own line, inline `dependencies { … }`, parentheses). `declared` lists
- * `<configuration> <coordinate>` for each `<configuration> 'coordinate'` / `<configuration>("…")`.
- * `malformed` lists every configuration name (found with string text blanked, so a coordinate
- * that contains "api" is not one; a name followed by `=` or `.` is an assignment or a member, not
- * a call) that is not exactly one string literal ending the statement: map notation, project(),
- * files(), platform(), a variable, or two coordinates in one call. A form this does not read
- * therefore fails the test instead of passing unseen.
+ * A readable diagnostic of a build.gradle's literal dependency declarations (review PRE-1), in
+ * any placement (own line, inline `dependencies { … }`, parentheses). `declared` lists
+ * `<configuration> <coordinate>` for each `<configuration> 'coordinate'` / `<configuration>("…")`
+ * whose configuration name GRADLE_CONFIG matches. `malformed` lists every such name (found with
+ * string text blanked, so a coordinate that contains "api" is not one; a name followed by `=` or
+ * `.` is an assignment or a member, not a call) that is not exactly one string literal ending the
+ * statement: map notation, project(), files(), platform(), a variable, or two coordinates in one
+ * call.
+ *
+ * It is NOT complete (review F1). It does not see a configuration name it does not list
+ * (`coreLibraryDesugaring`, `lintChecks`, a custom configuration joined with `extendsFrom`), a
+ * name built at run time (`dependencies.add(…)`, `'imple' + 'mentation'`, `delegate."implementation"(…)`),
+ * `afterEvaluate`, `apply plugin` / `apply from`, or a plugin written `id(…)`, and its count
+ * cross-check can be balanced by a decoy string (`"${'coordinate'}"` plus a quoted declaration,
+ * review F2). The completeness guard is the exact pin of the comment-stripped code
+ * (PINNED_GRADLE_CODE): any added or changed statement fails it, whatever its form.
  */
 const gradleDependencies = (gradle: string) => {
   const code = strip(gradle, 'groovy');
@@ -1598,10 +1606,11 @@ describe('native sources: header, settings, wiring and versions (static; the cod
   it('dependencies are exactly ExpoModulesCore + MediaPipe (iOS) and MediaPipe + CameraX core/camera2/lifecycle/view (Android)', () => {
     const deps = read(`${MOD}/WsfPoseCamera.podspec`).match(/s\.dependency [^\n]+/g);
     expect(deps).toEqual(["s.dependency 'ExpoModulesCore'", "s.dependency 'MediaPipeTasksVision', '0.10.35'"]);
-    // Review PRE-1: every declaration in every configuration and placement is read, not just lines
-    // that start with `implementation `. The main scope is exactly the reviewed five; no other scope
-    // (test, variant, kapt/ksp, annotationProcessor, buildscript classpath) declares anything today,
-    // and any form the reader cannot parse is reported as malformed.
+    // Review PRE-1, as a readable diagnostic: the literal declarations in the configurations
+    // GRADLE_CONFIG names, in any placement, not just lines that start with `implementation `. The
+    // main scope is exactly the reviewed five; no other listed scope (test, variant, kapt/ksp,
+    // annotationProcessor, buildscript classpath) declares anything. The reader does not see every
+    // form; the exact pin of the stripped code (next test, review F1) is what fails any change.
     const gradle = gradleDependencies(read(`${MOD}/android/build.gradle`));
     expect(gradle.malformed).toEqual([]);
     const isMain = (d: string) => !/^(?:test|androidTest|testFixtures|debug|release|kapt|ksp|annotationProcessor|classpath)/i.test(d);
@@ -1613,7 +1622,8 @@ describe('native sources: header, settings, wiring and versions (static; the cod
       'implementation androidx.camera:camera-view:${cameraxVersion}',
     ]);
     expect(gradle.declared.filter((d) => !isMain(d))).toEqual([]);
-    // The plugins are pinned too: a plugin can add dependencies of its own.
+    // The own-line `id '…'` plugin lines, as a diagnostic (a plugin can add dependencies of its own).
+    // `id(…)`, two ids on one line and `apply plugin` are caught by the exact pin (review F3).
     expect(strip(read(`${MOD}/android/build.gradle`), 'groovy').match(/^\s*id\s+['"][^'"]+['"]/gm)?.map((l) => l.trim())).toEqual(["id 'com.android.library'", "id 'expo-module-gradle-plugin'"]);
     // Self-tests of the reader: each of these declares something it must see.
     const OK = 'com.squareup.okhttp3:okhttp:4.12.0';
@@ -1639,6 +1649,101 @@ describe('native sources: header, settings, wiring and versions (static; the cod
       "def v = 'com.example:some-api:1'"]) {
       expect(gradleDependencies(src), src).toEqual({ declared: [], malformed: [] });
     }
+  });
+
+  it('build.gradle code is pinned exactly, so any added or changed statement fails, in any form (review F1)', () => {
+    // Everything outside comments, as strip() reads it: strings kept, blank lines dropped. The
+    // version, dependency and plugin checks above are readable diagnostics; this pin is the guard.
+    const PINNED_GRADLE_CODE = [
+      'plugins {',
+      "  id 'com.android.library'",
+      "  id 'expo-module-gradle-plugin'",
+      '}',
+      "group = 'expo.modules.wsfposecamera'",
+      "version = '0.1.0'",
+      "def mediapipeTasksVisionVersion = '0.10.29'",
+      "def cameraxVersion = '1.4.2'",
+      'android {',
+      "  namespace 'expo.modules.wsfposecamera'",
+      '  defaultConfig {',
+      '    versionCode 1',
+      "    versionName '0.1.0'",
+      "    consumerProguardFiles 'proguard-rules.pro'",
+      '  }',
+      '  sourceSets {',
+      '    main {',
+      "      assets.srcDirs += ['../assets']",
+      '    }',
+      '  }',
+      '}',
+      'dependencies {',
+      '  implementation "com.google.mediapipe:tasks-vision:${mediapipeTasksVisionVersion}"',
+      '  implementation "androidx.camera:camera-core:${cameraxVersion}"',
+      '  implementation "androidx.camera:camera-camera2:${cameraxVersion}"',
+      '  implementation "androidx.camera:camera-lifecycle:${cameraxVersion}"',
+      '  implementation "androidx.camera:camera-view:${cameraxVersion}"',
+      '}',
+    ].join('\n');
+    // What strip() drops as a comment must be what Gradle drops. strip() ends a `//` comment only
+    // at `\n` and never decodes `\uXXXX`; Groovy also ends one at a lone `\r`, and a Java-style
+    // reader turns `\u000a` into a line break before lexing. Neither may appear in the file.
+    const pinned = (src: string) => strip(src, 'groovy') === PINNED_GRADLE_CODE && !/\r|\\u/.test(src);
+    const raw = read(`${MOD}/android/build.gradle`);
+    expect(strip(raw, 'groovy')).toBe(PINNED_GRADLE_CODE);
+    expect(raw).not.toMatch(/\r|\\u/);
+    expect(pinned(raw)).toBe(true);
+    expect(pinned(raw.replace('// CameraX:', '// CameraX (edited):')), 'a comment edit is not a code change').toBe(true);
+    // Self-tests: the heads-8 review's mutants (M01-M05, M14-M16) and its verifier's (A, C), each
+    // applied to the real file. The 91353808 suite passed every one; the pin fails each.
+    const OK = 'com.squareup.okhttp3:okhttp:4.12.0';
+    const swap = (from: string, to: string) => {
+      expect(raw.split(from), from).toHaveLength(2);
+      return raw.replace(from, to);
+    };
+    const append = (text: string) => `${raw}${text}\n`;
+    const end = raw.lastIndexOf('}'); // closes dependencies { … }
+    const inDeps = (line: string) => `${raw.slice(0, end)}${line}\n${raw.slice(end)}`;
+    const plugin = "  id 'expo-module-gradle-plugin'\n";
+    const mutants: Record<string, string> = {
+      M01: append(`dependencies.add("implementation", '${OK}')`),
+      M02: append(`dependencies.add('imple' + 'mentation', '${OK}')`),
+      M03: inDeps(`  delegate."implementation"('${OK}')`),
+      M04: append(`configurations { wsfNet }\nconfigurations.implementation.extendsFrom(configurations.wsfNet)\ndependencies { wsfNet '${OK}' }`),
+      M05: swap(
+        '  implementation "androidx.camera:camera-view:${cameraxVersion}"\n',
+        `  def wsfNote = 'implementation "androidx.camera:camera-view:\${cameraxVersion}"'\n  implementation "\${'${OK}'}"\n`,
+      ),
+      M14: swap(plugin, `${plugin}  id('com.google.firebase.crashlytics')\n`),
+      M15: swap(plugin, "  id 'expo-module-gradle-plugin'; id 'com.google.firebase.crashlytics'\n"),
+      M16: append("apply plugin: 'com.google.firebase.crashlytics'"),
+      A: append(
+        [
+          '',
+          "apply plugin: 'com.example.net'",
+          "apply from: 'https://example.invalid/net.gradle'",
+          'configurations { wsfNet }',
+          'configurations.implementation.extendsFrom(configurations.wsfNet)',
+          'dependencies {',
+          `  wsfNet '${OK}'`,
+          `  coreLibraryDesugaring '${OK}'`,
+          `  lintChecks '${OK}'`,
+          '}',
+          `dependencies.add("implementation", '${OK}')`,
+          `afterEvaluate { project.dependencies.add("runtimeOnly", '${OK}') }`,
+        ].join('\n'),
+      ),
+      C: swap(plugin, `${plugin}  id("com.example.net")\n`),
+      // A declaration hidden after a `//` comment by a lone \r, or by \u000a.
+      CR: append(`// note\rimplementation '${OK}'`),
+      U000A: append(`// note \\u000aimplementation '${OK}'`),
+    };
+    for (const [name, src] of Object.entries(mutants)) {
+      expect(src, name).not.toBe(raw);
+      expect(pinned(src), name).toBe(false);
+    }
+    // The last two pass the stripped-code pin alone; the raw check is what fails them.
+    expect(strip(mutants.CR, 'groovy')).toBe(PINNED_GRADLE_CODE);
+    expect(strip(mutants.U000A, 'groovy')).toBe(PINNED_GRADLE_CODE);
   });
 });
 
