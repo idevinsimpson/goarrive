@@ -29,8 +29,6 @@ const ALLOWED: Record<string, string> = {
   'src/platformHost.ts': 'platform-checked',
   // The in-app-browser banner returns before reading it unless Platform.OS is 'web'.
   'src/InAppBrowserBanner.tsx': 'web-gated',
-  // The member lane's community page builds its own share origin until W16 delegates it to currentOrigin.
-  'app/(tabs)/(home)/community/[groupId]/index.tsx': 'W16 (delegates to currentOrigin)',
 };
 
 const APP_ROOT = join(__dirname, '..');
