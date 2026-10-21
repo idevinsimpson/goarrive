@@ -2154,7 +2154,10 @@ export default function CommunityPage() {
     round that fails several goals speaks once, a figure that fails again
     while already stale says nothing new, and (heads-11 NB-2) a later round
     that fails a goal which had recovered speaks again, even while another
-    goal stays stale. Each card still says so in words where it is seen.
+    goal stays stale. When the newest wave's goal recovers first this value
+    falls back to an older wave; the announcer keys on the newest wave it has
+    seen, so a recovery is never spoken as a failure (heads-13 RV15-642-B1).
+    Each card still says so in words where it is seen.
   */
   let staleWave: number | null = null;
   for (const g of activeGoals) {

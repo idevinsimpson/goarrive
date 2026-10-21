@@ -108,14 +108,22 @@ const PULSE = {
   endsAt: new Date(NOW + 5 * 86_400_000).toISOString(),
   timezone: 'UTC',
 };
-const net: { down: boolean; pulseDownFor: string | null } = { down: false, pulseDownFor: null };
+// `holdFor`: that goal's pulse answers only when `release()` runs (it answers last).
+const net: { down: boolean; pulseDownFor: string | null; holdFor: string | null; held: Array<() => void> } = {
+  down: false,
+  pulseDownFor: null,
+  holdFor: null,
+  held: [],
+};
 const offline = () => Promise.reject(Object.assign(new Error('offline'), { code: 'functions/unavailable' }));
 vi.mock('firebase/functions', () => ({
   httpsCallable: (_f: unknown, name: string) => (req?: { goalId?: string }) =>
     net.down || (name === 'wsfGoalPulse' && req?.goalId === net.pulseDownFor)
       ? offline()
       : name === 'wsfGoalPulse'
-        ? Promise.resolve({ data: PULSE })
+        ? req?.goalId === net.holdFor
+          ? new Promise((resolve) => net.held.push(() => resolve({ data: PULSE })))
+          : Promise.resolve({ data: PULSE })
         : offline(),
 }));
 vi.mock('../src/firebase', () => ({ getFirebaseFirestore: () => ({}), getFirebaseFunctions: () => ({}) }));
@@ -162,6 +170,8 @@ beforeEach(() => {
   vi.useFakeTimers({ now: NOW });
   net.down = false;
   net.pulseDownFor = null;
+  net.holdFor = null;
+  net.held = [];
   goals.two = false;
   spoken = [];
   const say = (m: string) => {
@@ -303,6 +313,71 @@ describe('heads-9 N-3: one announcement per failure wave, for the whole page', (
     await failARefresh('web');
     expect(spoken).toEqual([]);
     expect(byId('wsf-community-goal-stale-status-g2')!.getAttribute('aria-live')).toBe('polite');
+  });
+});
+
+describe('heads-13 RV15-642-B1: a recovery is never spoken as a failure', () => {
+  /** R1: g2's pulse fails alone (wave t1). R2: everything fails (g1 joins at t2, a new wave). */
+  async function twoWaves(): Promise<void> {
+    goals.two = true;
+    (Platform as { OS: string }).OS = 'ios';
+    act(() => root.render(<CommunityPage />));
+    await flush();
+    expect(byId('wsf-community-goal-total-g2')).not.toBeNull();
+    net.pulseDownFor = 'g2';
+    await returnToApp();
+    expect(byId('wsf-community-goal-stale-g1')).toBeNull();
+    expect(byId('wsf-community-goal-stale-g2')).not.toBeNull();
+    expect(spoken).toEqual([SENTENCE]);
+    net.down = true;
+    await returnToApp();
+    expect(byId('wsf-community-goal-stale-g1')).not.toBeNull();
+    expect(spoken).toEqual([SENTENCE, SENTENCE]);
+  }
+
+  it('iOS: the newer wave’s goal (g1) recovers while g2 still fails: nothing is spoken; a later new failure still speaks', async () => {
+    await twoWaves();
+    // R3: g1 reads again, g2's pulse still fails (its wave, t1, was spoken in R1).
+    net.down = false;
+    net.pulseDownFor = 'g2';
+    await returnToApp();
+    expect(byId('wsf-community-goal-stale-g1')).toBeNull();
+    expect(byId('wsf-community-goal-stale-g2')).not.toBeNull();
+    expect(spoken).toEqual([SENTENCE, SENTENCE]);
+    // R4: a new outage fails g1 again: a new wave, spoken.
+    net.down = true;
+    await returnToApp();
+    expect(byId('wsf-community-goal-stale-g1')).not.toBeNull();
+    expect(spoken).toEqual([SENTENCE, SENTENCE, SENTENCE]);
+  });
+
+  it('iOS: the older wave’s goal (g2) recovers while g1 stays stale: nothing new', async () => {
+    await twoWaves();
+    net.down = false;
+    net.pulseDownFor = 'g1';
+    await returnToApp();
+    expect(byId('wsf-community-goal-stale-g1')).not.toBeNull();
+    expect(byId('wsf-community-goal-stale-g2')).toBeNull();
+    expect(spoken).toEqual([SENTENCE, SENTENCE]);
+  });
+
+  it('iOS: a round in which every read succeeds, with g2 answering last: nothing is spoken', async () => {
+    await twoWaves();
+    net.down = false;
+    net.pulseDownFor = null;
+    net.holdFor = 'g2';
+    await returnToApp();
+    // g1 has answered; g2 (the older wave) is still stale and waiting.
+    expect(byId('wsf-community-goal-stale-g1')).toBeNull();
+    expect(byId('wsf-community-goal-stale-g2')).not.toBeNull();
+    expect(spoken).toEqual([SENTENCE, SENTENCE]);
+    net.holdFor = null;
+    await act(async () => {
+      for (const release of net.held.splice(0)) release();
+    });
+    await flush();
+    expect(byId('wsf-community-goal-stale-g2')).toBeNull();
+    expect(spoken).toEqual([SENTENCE, SENTENCE]);
   });
 });
 

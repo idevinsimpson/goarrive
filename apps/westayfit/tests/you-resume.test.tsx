@@ -398,3 +398,127 @@ describe('heads-11 NB-3, NB-4: the kept You page', () => {
     expect(byId('wsf-you-name')?.textContent).toBe('Alex B.');
   });
 });
+
+/*
+  heads-13 RV15-642-B2: the effect's RECORDED branch (a load that drew the
+  account's whole record first) put back, on failure, the page it drew when it
+  STARTED: a focus that had since drawn another community or a newer own part
+  was undone, and a failed profile read turned the recorded name into "You".
+  It now fails the way a kept page does: recomposed from the record first,
+  never as another community, with the NB-4 head.
+  heads-13 RV15-642-N1: a kept page recomposed from its inputs (the record
+  could not) took those inputs' older name over the account's recorded one.
+*/
+describe('heads-13 RV15-642-B2, N1: a load that drew the record fails like a kept page', () => {
+  const OWN = (n: number) => ({ ownCredit: n, unit: 'squats' });
+  const OFFLINE = () => Object.assign(new Error('x'), { code: 'functions/unavailable' });
+  const ELM = { groupId: 'elm', displayName: 'Elm Park', role: 'member', memberCount: 9 };
+  const ELM_GOAL = { ...goal('active'), goalId: 'e1', title: '300 lunges', unit: 'lunges', target: 300 };
+  /** The first load's communities read: it hangs until `fail()` is called. */
+  function hangCommunities(): { fail: () => Promise<void> } {
+    let reject!: (e: unknown) => void;
+    readMyCommunities.mockImplementationOnce(() => new Promise((_res, rej) => (reject = rej)));
+    return {
+      fail: async () => {
+        await act(async () => reject(OFFLINE()));
+        await flush();
+      },
+    };
+  }
+
+  it('B2: Oak Grove drawn from the record, its read hangs, a switch to Elm Park is drawn on focus; the hung read fails and Elm Park stays', async () => {
+    rememberCurrentCommunity('u1', 'oak');
+    record = {
+      communities: { items: [COMMUNITY, ELM] },
+      profile: { displayName: 'Alex', createdAt: null },
+      goals: { oak: { goals: [goal('active')] } },
+      own: { g1: OWN(10) },
+    };
+    const read = hangCommunities();
+    await render();
+    expect(byId('wsf-you-community')!.textContent).toContain('Oak Grove');
+    rememberCurrentCommunity('u1', 'elm');
+    record = { ...record, goals: { ...record.goals, elm: { goals: [ELM_GOAL] } }, own: { ...record.own, e1: OWN(12) } };
+    refocus();
+    await flush();
+    expect(byId('wsf-you-community')!.textContent).toContain('Elm Park');
+    await read.fail();
+    expect(byId('wsf-you-stale')).not.toBeNull();
+    expect(byId('wsf-you-community')!.textContent).toContain('Elm Park');
+    expect(byId('wsf-you-community')!.textContent).not.toContain('Oak Grove');
+  });
+
+  it('B2: own part 10 from the record, its read hangs, a receipt records 25 and focus draws it; the hung read fails and 25 stays', async () => {
+    record = { communities: { items: [COMMUNITY] }, profile: { displayName: 'Alex', createdAt: null }, goals: { oak: { goals: [goal('active')] } }, own: { g1: OWN(10) } };
+    const read = hangCommunities();
+    await render();
+    expect(byId('wsf-you-lead-own')!.textContent).toBe('10 squats');
+    record = { ...record, own: { g1: OWN(25) } };
+    refocus();
+    await flush();
+    expect(byId('wsf-you-lead-own')!.textContent).toBe('25 squats');
+    await read.fail();
+    expect(byId('wsf-you-stale')).not.toBeNull();
+    expect(byId('wsf-you-lead-own')!.textContent).toBe('25 squats');
+  });
+
+  it("B2: a whole record named Alex, and on mount both the profile and the communities reads fail: 'Alex' stays (never 'You')", async () => {
+    record = { communities: { items: [COMMUNITY] }, profile: { displayName: 'Alex', createdAt: null }, goals: { oak: { goals: [goal('active')] } }, own: { g1: OWN(25) } };
+    readMemberProfile.mockRejectedValueOnce(OFFLINE());
+    readMyCommunities.mockRejectedValueOnce(OFFLINE());
+    await render();
+    expect(byId('wsf-you-stale')).not.toBeNull();
+    expect(byId('wsf-you-member')).not.toBeNull();
+    expect(byId('wsf-you-name')?.textContent).toBe('Alex');
+  });
+
+  it('N1: recomposed from its inputs twice (the record cannot), after a resume read the new name; the second failed resume keeps it, never the older one', async () => {
+    await render();
+    expect(byId('wsf-you-name')?.textContent).toBe('Alex');
+    // Resume 1: the profile read answers a new name (and records it); the communities read fails.
+    readMemberProfile.mockImplementationOnce(async () => {
+      record = { ...record, profile: { displayName: 'Alexandra', createdAt: null } };
+      return { displayName: 'Alexandra', createdAt: null };
+    });
+    readMyCommunities.mockRejectedValueOnce(OFFLINE());
+    await returnAfter(RESUME_MIN_AWAY_MS + 1_000);
+    await flush();
+    expect(byId('wsf-you-stale')).not.toBeNull();
+    expect(byId('wsf-you-name')?.textContent).toBe('Alexandra');
+    // Resume 2: everything fails.
+    readMemberProfile.mockRejectedValueOnce(OFFLINE());
+    readMyCommunities.mockRejectedValueOnce(OFFLINE());
+    await returnAfter(RESUME_MIN_AWAY_MS + 1_000);
+    await flush();
+    expect(byId('wsf-you-name')?.textContent).toBe('Alexandra');
+  });
+
+  it("N1: recomposed from its inputs, the account's recorded name (written elsewhere) comes before the inputs' older one when this load's read fails", async () => {
+    await render();
+    expect(byId('wsf-you-name')?.textContent).toBe('Alex');
+    // Another surface read the profile and recorded a new name; the record holds nothing else.
+    record = { ...record, profile: { displayName: 'Alexandra', createdAt: null } };
+    readMemberProfile.mockRejectedValueOnce(OFFLINE());
+    readMyCommunities.mockRejectedValueOnce(OFFLINE());
+    await returnAfter(RESUME_MIN_AWAY_MS + 1_000);
+    await flush();
+    expect(byId('wsf-you-stale')).not.toBeNull();
+    expect(byId('wsf-you-name')?.textContent).toBe('Alexandra');
+  });
+
+  it('N1: the kept inputs take the head shown, so with no recorded profile a second failed resume still shows the newer name', async () => {
+    await render();
+    expect(byId('wsf-you-name')?.textContent).toBe('Alex');
+    // Resume 1: the profile read answers a new name, which this record does not hold.
+    readMemberProfile.mockResolvedValueOnce({ displayName: 'Alexandra', createdAt: null });
+    readMyCommunities.mockRejectedValueOnce(OFFLINE());
+    await returnAfter(RESUME_MIN_AWAY_MS + 1_000);
+    await flush();
+    expect(byId('wsf-you-name')?.textContent).toBe('Alexandra');
+    readMemberProfile.mockRejectedValueOnce(OFFLINE());
+    readMyCommunities.mockRejectedValueOnce(OFFLINE());
+    await returnAfter(RESUME_MIN_AWAY_MS + 1_000);
+    await flush();
+    expect(byId('wsf-you-name')?.textContent).toBe('Alexandra');
+  });
+});
