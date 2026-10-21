@@ -857,3 +857,74 @@ describe('review follow-ups (#636 round 2)', () => {
     expect(commits - settled).toBeLessThanOrEqual(1);
   });
 });
+
+describe('MO-06: the clip re-syncs to the round on every foreground', () => {
+  it('backgrounded mid-round: the player pauses; the round comes back held, the clip holds its frame; Resume plays it again', () => {
+    render('running');
+    const p = player();
+    emit('playingChange', { isPlaying: true });
+    firstFrame();
+    expect(state()).toBe('playing');
+    appGoes('background');
+    expect(p.calls.at(-1)).toBe('pause');
+    emit('playingChange', { isPlaying: false }); // the OS stopped it too
+    render('held'); // MO-05: the round paused itself while the app was away
+    appGoes('active');
+    expect(state()).toBe('paused'); // demo-state 'paused': the frame, not the poster
+    expect(el('fa-poster')).toBeNull();
+    const plays = p.count('play');
+    expect(p.calls.at(-1)).not.toBe('play'); // a held round does not play on foreground
+    render('running'); // Resume
+    expect(p.count('play')).toBe(plays + 1);
+    emit('playingChange', { isPlaying: true });
+    expect(state()).toBe('playing');
+  });
+
+  it('back in front while the round is still running: play() is re-asserted on "active"', () => {
+    render('running');
+    const p = player();
+    emit('playingChange', { isPlaying: true });
+    firstFrame();
+    appGoes('background');
+    emit('playingChange', { isPlaying: false });
+    const plays = p.count('play');
+    appGoes('active');
+    expect(p.count('play')).toBe(plays + 1);
+    expect(p.calls.at(-1)).toBe('play');
+  });
+
+  it('Control Center (inactive) pauses the clip and "active" resumes it while the round runs', () => {
+    render('running');
+    const p = player();
+    appGoes('inactive');
+    expect(p.calls.at(-1)).toBe('pause');
+    appGoes('active');
+    expect(p.calls.at(-1)).toBe('play');
+  });
+
+  it('reduced motion: the poster across every background/foreground cycle, and no player ever has the clip', () => {
+    render('running', true);
+    for (let i = 0; i < 3; i += 1) {
+      appGoes('background');
+      appGoes('active');
+      expect(state()).toBe('static');
+      expect(el('fa-poster')).not.toBeNull();
+    }
+    expect(ctl.players.every((pl) => pl.source === null && pl.count('play') === 0)).toBe(true);
+  });
+
+  it('never takes the audio session or shows Now Playing, never plays in the background, and leaving releases the player', () => {
+    render('running');
+    const p = player();
+    expect(p).toMatchObject({
+      muted: true,
+      volume: 0,
+      audioMixingMode: 'mixWithOthers',
+      showNowPlayingNotification: false,
+      staysActiveInBackground: false,
+    });
+    act(() => root.unmount());
+    expect(p.released).toBe(true);
+    root = createRoot(container);
+  });
+});
