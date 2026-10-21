@@ -287,6 +287,12 @@ function appConfigFindings(env, platform) {
   }
 }
 
+// TODO(RV8-642-N3): refuse a SET EXPO_PUBLIC_WSF_INVITE_HOSTS whose
+// configuredInviteHosts() is [] (configured but empty: native Copy and Share
+// would disappear). Import the member lane's parser from src/joinInput.ts once
+// this branch has it (it lands with candidate-5); never a copy of its rules.
+// TODO(RV8-642-N4, with W12-13): assert host(EXPO_PUBLIC_WSF_PUBLIC_ORIGIN)
+// is in configuredInviteHosts() when both are set.
 export async function check(fileEnv, platforms) {
   const env = { ...fileEnv };
   const added = [];

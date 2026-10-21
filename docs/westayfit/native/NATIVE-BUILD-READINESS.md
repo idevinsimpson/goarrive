@@ -64,13 +64,13 @@ This document is preparation only. No build ran from the sprint sandbox and no s
 1. **EAS project: done, by link.** The project exists under `devinsimpson` and `app.json` names it (see the top of this document). Do not run `eas init`. Before any account command, from `apps/westayfit`, run `[ACCOUNT] npx eas-cli@25.3.0 login` as `devinsimpson`. To confirm the link, run `[RO] npx eas-cli@25.3.0 project:info`, which needs that login.
 2. **EAS environment variables:** set the six `EXPO_PUBLIC_WSF_STAGING_*` values from the `westayfit-staging` Firebase Web App config in both the `preview` and `development` environments. Retrieve, verify and upload them as in "Staging values: retrieve, verify, upload" below. The owner verified on 21 Oct (03:39Z, read-only) that the project has **no environment variables in any environment** yet. Use **Plain text** or **Sensitive** visibility, **not Secret**: `eas env:pull` cannot read Secret values outside EAS servers and writes them only as comments (`# NAME=***** (secret)`; eas-cli 25.3.0 `build/commands/env/pull.js`), so the development client would be missing them and refuse to start. They are public client identifiers, so Plain text is fine. Also add `EXPO_PUBLIC_WSF_ENV=staging` and `EXPO_PUBLIC_WSF_AUTH_ENABLED=1` to the `development` environment, so `env:pull` writes the selector (step 2 above) and a development client can sign in.
 3. **Android internal test** `[ACCOUNT]`:
-   - First, `[RO] npx eas-cli@25.3.0 env:list preview --format short` must list all six `EXPO_PUBLIC_WSF_STAGING_*` names. eas-cli never runs the `app.config.js` refusal locally, so a missing value otherwise shows up only on the build worker, after the upload. Plaintext values print in clear; sensitive ones stay masked.
+   - First, `[RO] npx eas-cli@25.3.0 env:list preview --format short | cut -d= -f1` (names only) must list all six `EXPO_PUBLIC_WSF_STAGING_*` names. eas-cli never runs the `app.config.js` refusal locally, so a missing value otherwise shows up only on the build worker, after the upload. Without the `cut`, plaintext values print in clear (sensitive ones stay masked). Do not paste the output anywhere.
    - Then `[ACCOUNT] npx eas-cli@25.3.0 build -p android --profile preview`.
    - On the first build, accept the EAS-generated keystore. That is the Android signing credential, and EAS manages it.
    - Install the APK by link or QR, allowing "install unknown apps" for the browser that opens it.
 4. **iPhone** `[ACCOUNT]`: **BLOCKED until the Apple Developer Program membership shows Active; it is currently Pending (owner, 03:32Z).** A paid membership is required for both `preview` and `development` device builds, because both use internal (ad hoc) distribution. Once it is Active:
    - Register each test iPhone with `[ACCOUNT] npx eas-cli@25.3.0 device:create`.
-   - Check the values first, as in action 3: `[RO] npx eas-cli@25.3.0 env:list preview --format short`.
+   - Check the names first, as in action 3: `[RO] npx eas-cli@25.3.0 env:list preview --format short | cut -d= -f1`. Do not paste the output anywhere.
    - Run `[ACCOUNT] npx eas-cli@25.3.0 build -p ios --profile preview`.
    - On the phone, turn on Developer Mode (Settings › Privacy & Security › Developer Mode, iOS 16 and later) before the build will launch.
    - The bundle id `com.westayfit.app` must be free in that Apple team.
@@ -90,7 +90,7 @@ Agents never see, set or upload a value. The owner runs these steps on their own
    - `npx eas-cli@25.3.0 env:push preview --path "$TMP/wsf-staging.env"`. Note: eas-cli 25.3.0 `env:push` gives every `EXPO_PUBLIC_*` name **plaintext ("Public")** visibility (`build/commands/env/push.js:185`), so `env:list` will show those values in clear.
    - Or one name at a time: `npx eas-cli@25.3.0 env:set preview --name <NAME> --type string --visibility sensitive --scope project`. Leave out `--value`: eas-cli then prompts for it, and nothing lands in shell history.
    - Repeat for the `development` environment if a development client will use EAS-pulled values.
-6. **Confirm** `[RO, the owner's EAS login]`: `npx eas-cli@25.3.0 env:list preview --format short`. Sensitive values stay masked unless `--include-sensitive` is given; plaintext ("Public") values are shown as they are.
+6. **Confirm** `[RO, the owner's EAS login]`: `npx eas-cli@25.3.0 env:list preview --format short | cut -d= -f1` lists the names only. Without the `cut`, plaintext ("Public") values are shown as they are, and sensitive values stay masked unless `--include-sensitive` is given. Do not paste the output anywhere.
 7. **For path A (Expo Go or the dev server)** `[LOCAL]`:
    - `cp "$TMP/wsf-staging.env" apps/westayfit/.env.development.local`, then append `EXPO_PUBLIC_WSF_ENV=staging` and `EXPO_PUBLIC_WSF_AUTH_ENABLED=1` to that copy;
    - confirm `git check-ignore -v apps/westayfit/.env.development.local` reports it ignored (`.env*.local` in `apps/westayfit/.gitignore`);
@@ -111,13 +111,13 @@ Run every command from `apps/westayfit`.
   - from the Firebase web app config, `[RO] firebase apps:sdkconfig WEB --project <staging project>` (firebase-tools; not part of this repo, so not checked here);
   - or, if they are already in EAS, `[ACCOUNT] npx eas-cli@25.3.0 env:pull --environment development --path .env.development.local` (read-only on the account). Never pull into `.env.local` (see "How the backend is chosen").
 - `[LOCAL] npx expo start --go`. The repo has `expo-dev-client`, so `--go` is required: without it the CLI serves the development client instead of Expo Go.
-  - **If you are logged in to Expo** (`eas login` or `expo login`), Expo CLI fetches a development code-signing certificate for the linked project the first time Expo Go asks for the manifest. This is an account action on the owner's project (`@expo/cli` `utils/codesigning.js`, `fetchAndCacheNewDevelopmentCodeSigningInfoAsync`).
+  - **If you are logged in to Expo** (`eas login` or `expo login`) and online, Expo CLI fetches a new development code-signing certificate for the linked project **on every manifest request** from Expo Go, generating a new key pair each time. The cached certificate is used only offline (`EXPO_OFFLINE`) or when the fetch fails. Each fetch is an account action on the owner's project (`@expo/cli` 54.0.27 `build/src/utils/codesigning.js:225-266`, `getExpoRootDevelopmentCodeSigningInfoAsync`, and `:367-384`, `fetchAndCacheNewDevelopmentCodeSigningInfoAsync`).
   - **Logged out, it works without one**: the CLI skips signing when no user is signed in.
 - Use the default LAN connection, with the iPhone on the same Wi-Fi, and scan the QR with the iPhone Camera. **Do not add `--tunnel` by default:** a tunnel exposes the dev server through a third-party service.
 - What differs in Expo Go: the camera rep counter's native module (`wsf-pose-camera`) is not in Expo Go. The app fails closed to the manual count (`cameraCounterSupported()` is false), and no MediaPipe is present at all.
 
 **(B) EAS iOS Simulator build. [ACCOUNT, owner]**
-- First, `[RO] npx eas-cli@25.3.0 env:list preview --format short` must list all six `EXPO_PUBLIC_WSF_STAGING_*` names. eas-cli never runs the refusal locally, so a missing value otherwise shows up only on the worker, after the upload.
+- First, `[RO] npx eas-cli@25.3.0 env:list preview --format short | cut -d= -f1` (names only) must list all six `EXPO_PUBLIC_WSF_STAGING_*` names. eas-cli never runs the refusal locally, so a missing value otherwise shows up only on the worker, after the upload. Do not paste the output anywhere.
 - `[ACCOUNT] npx eas-cli@25.3.0 build -p ios --profile preview-simulator`.
 - No Apple account is needed: a simulator build is not signed for devices. It uses 1 of the 15 free iOS builds.
 - The EAS `preview` environment must hold the six staging values; the build refuses at config time otherwise.
