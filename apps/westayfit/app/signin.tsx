@@ -30,6 +30,7 @@ import { getFirebaseAuth, getFirebaseFirestore } from '../src/firebase';
 import { routeAfterAuth } from '../src/pendingJoinCode';
 import { isPostAuthDestinationsReady, usePostAuthDestinationsReady } from '../src/postAuthDestination';
 import { landAfterAuth } from '../src/ui/authLanding';
+import { memberLandingDeps } from '../src/ui/memberLanding';
 import {
   leaveRedirectFailed,
   openKioskGoal,
@@ -105,16 +106,10 @@ export default function SignIn() {
     replace.
   */
   const navigation = useNavigation();
-  const land = useCallback(
-    (next: string) =>
-      landAfterAuth(next, {
-        dispatch: (action) => navigation.dispatch(action as never),
-        push: (href) => router.push(href as never),
-        replace: (href) => router.replace(href as never),
-        platform: Platform.OS,
-      }),
-    [navigation],
-  );
+  // W16-19 (RV16-641-B1): the landing also reads the root stack and can
+  // dismiss into it, so a kiosk beneath is never reset away
+  // (src/ui/memberLanding.ts).
+  const land = useCallback((next: string) => landAfterAuth(next, memberLandingDeps(navigation)), [navigation]);
   // A successful submit also flips `user`, so the redirect effect below and
   // onSubmit can both reach the terminal hop with the same destination (it is
   // read, not consumed). It lands once per account: on a phone a second

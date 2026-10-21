@@ -37,7 +37,10 @@ vi.mock('../src/kioskSession', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   readKioskSession: () => kioskMarker.goal,
 }));
-const navigation = { dispatch: vi.fn(), isFocused: () => true, setParams: vi.fn() };
+// W16-19: the screens read the root stack at the landing (landAfterAuth's
+// kiosk-beneath guard). Here they were opened over Home, with no kiosk.
+const ROOT_STACK = { index: 1, routes: [{ name: '(tabs)' }, { name: 'signin' }] };
+const navigation = { dispatch: vi.fn(), isFocused: () => true, setParams: vi.fn(), getState: () => ROOT_STACK };
 vi.mock('expo-router', () => ({
   router,
   Link: ({ href, children }: { href: string; children: ReactNode }) => <a href={href}>{children}</a>,

@@ -412,12 +412,23 @@ export default function You() {
     uid: ready && user ? user.uid : null,
     screen: firstRecord?.screen ?? LOADING,
   }));
-  /** Sets the screen for `uid`; an updater sees another account's screen as loading. */
+  /**
+   * W16-17 (RV16-C15-1): the page on screen and the account it is for,
+   * mirrored wherever `held` changes (only setScreen sets it), so a failed load
+   * can test the page ON SCREEN against its fresh read: a focus may have
+   * redrawn it since the load began, and fail() runs outside any updater.
+   */
+  const shownRef = useRef<Owned>(held);
+  /**
+   * Sets the screen for `uid`; an updater sees another account's screen as
+   * loading. W16-17: the next screen is worked out here, against the mirror,
+   * and the mirror is set at once; `held` follows it.
+   */
   const setScreen = useCallback((uid: string | null, next: Screen | ((prev: Screen) => Screen)) => {
-    setHeld((prev) => ({
-      uid,
-      screen: typeof next === 'function' ? next(prev.uid === uid ? prev.screen : LOADING) : next,
-    }));
+    const base = shownRef.current.uid === uid ? shownRef.current.screen : LOADING;
+    const out: Owned = { uid, screen: typeof next === 'function' ? next(base) : next };
+    shownRef.current = out;
+    setHeld(out);
   }, []);
   const [signingOut, setSigningOut] = useState(false);
   const [reloads, setReloads] = useState(0);
@@ -583,7 +594,24 @@ export default function You() {
         // drew when it STARTED, so a focus that had since drawn a newer page
         // or another community (a switch, a receipt) was undone, and a failed
         // profile read replaced the recorded name with "You".
-        if (keep || keptPageStillShown(recorded, community, communities)) {
+        //
+        // W16-17 (RV15-639-N2, RV16-C15-1, RV16-C15-2): ONE GATE, ON THE PAGE
+        // ON SCREEN (a focus may have redrawn it since this load began; the
+        // keep body below keeps and recomposes that page, so it is the one
+        // tested). A member page is kept only while this load's fresh read
+        // still shows it (`keptPageStillShown`, above, verbatim from state-1
+        // c2992bef; with no list read nothing contradicts it); a page the
+        // fresh read contradicts falls through to the failed page for the
+        // community resolved, with Retry and no stale mark. A 'loading' page
+        // (the focus dropped a refused community's figures) is never kept: it
+        // falls through to the failed page with Retry, not a skeleton marked
+        // stale. Pick, none and failed pages are kept and marked stale, as
+        // before.
+        const shown = shownRef.current.uid === uid ? shownRef.current.screen : LOADING;
+        if (
+          (keep || (recorded && recorded.kind === 'member')) &&
+          (shown.kind === 'member' ? keptPageStillShown(shown, community, communities) : shown.kind !== 'loading')
+        ) {
           // Kept, but recomposed against now (N3). heads-10 F-1: from the
           // account's record first, which is never older than the page (a
           // receipt, a focus and a switch all write or read it); only when it

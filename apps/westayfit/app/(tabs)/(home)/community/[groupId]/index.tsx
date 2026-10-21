@@ -175,6 +175,20 @@ function linkOrigin(): string | null {
   return currentOrigin();
 }
 
+/**
+ * NATIVE-MEMBER-1 W16-18 (MF-08 criterion 3). ON A PHONE, "OPEN STATION
+ * SCREEN" AND "OPEN COMBINED SCREEN" TURN THIS PHONE INTO THE VENUE SCREEN.
+ * They are in-app routes: the phone in the Champion's hand becomes the screen
+ * at the venue (the account stays signed in; neither route signs anybody out).
+ * A screen reader now says so, in the label and a hint; the visible label is
+ * unchanged, and nothing changes on the web. Both strings await the owner's
+ * wording sign-off.
+ */
+const VENUE_SCREEN_HINT = 'Turns this phone into the venue screen';
+function venueScreenOpenA11y(label: string): { accessibilityLabel?: string; accessibilityHint?: string } {
+  return Platform.OS === 'web' ? {} : { accessibilityLabel: label, accessibilityHint: VENUE_SCREEN_HINT };
+}
+
 type GroupDoc = {
   displayName: string;
   groupType: string;
@@ -2657,6 +2671,7 @@ export default function CommunityPage() {
             style={UTILITY_LINK}
             textStyle={UTILITY_LINK_TEXT}
             testID={`wsf-kiosk-stations-open-${goal.goalId}`}
+            {...venueScreenOpenA11y(`${goal.title}: open the station screen on this phone`)}
           />
           {offerableLink(stationUrlFor(goal.goalId)) && offersCopy() ? (
             <Pressable
@@ -3385,6 +3400,7 @@ export default function CommunityPage() {
                           style={styles.primaryButton}
                           textStyle={styles.primaryButtonText}
                           testID="wsf-combined-open"
+                          {...venueScreenOpenA11y(`${combinedCreated.title}: open the combined screen on this phone`)}
                         />
                         {offerableLink(combinedUrl) && offersCopy() ? (
                           <Pressable

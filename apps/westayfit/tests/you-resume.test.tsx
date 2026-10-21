@@ -522,3 +522,84 @@ describe('heads-13 RV15-642-B2, N1: a load that drew the record fails like a kep
     expect(byId('wsf-you-name')?.textContent).toBe('Alexandra');
   });
 });
+
+/*
+  W16-17 (RV15-639-N2 follow-up, with RV15-642-B2). A refocus load (it keeps
+  what is on screen) whose FRESH list no longer holds the member page's
+  community, or resolves another one, and whose goals then fail, used to keep
+  the old community's page, marked stale: the fresh read contradicted it and
+  nothing said so. A member page is now kept only while the fresh read still
+  shows it (keptPageStillShown); otherwise the failed page for the community
+  resolved. A page that is not a member page is kept and marked stale on a
+  kept load, as before, and with no list read nothing contradicts a page.
+*/
+describe('W16-17: a kept You page needs its fresh read to still show it', () => {
+  const OFFLINE = () => Object.assign(new Error('x'), { code: 'functions/unavailable' });
+  const ELM = { groupId: 'elm', displayName: 'Elm Park', role: 'member', memberCount: 9 };
+  /** Elm Park on screen from the network (the record holds nothing, so a refocus revalidates and keeps). */
+  async function elmOnScreen(): Promise<void> {
+    rememberCurrentCommunity('u1', 'elm');
+    readMyCommunities.mockResolvedValue({ items: [COMMUNITY, ELM] });
+    await render();
+    expect(byId('wsf-you-community')!.textContent).toContain('Elm Park');
+  }
+  async function refocusAndFlush(): Promise<void> {
+    refocus();
+    await flush();
+    await flush();
+  }
+
+  it("(a) Elm Park on screen; the refocus list is [Oak Grove] alone and Oak's goals fail: the failed page for Oak Grove, not Elm marked stale", async () => {
+    await elmOnScreen();
+    readMyCommunities.mockResolvedValueOnce({ items: [COMMUNITY] });
+    readGoals.mockRejectedValueOnce(OFFLINE());
+    await refocusAndFlush();
+    expect(byId('wsf-you-member')).toBeNull();
+    expect(byId('wsf-you-failed')).not.toBeNull();
+    // The failed page for a resolved community (it says the community is still there).
+    expect(byId('wsf-you-failed')!.textContent).toContain('Your identity and community are still here');
+    expect(byId('wsf-you-stale')).toBeNull();
+    expect(container.textContent).not.toContain('Elm Park');
+  });
+
+  it('(a2) Elm Park on screen; the refocus list still holds it but resolves Oak Grove (switched elsewhere), whose goals fail: the failed page for Oak Grove', async () => {
+    await elmOnScreen();
+    rememberCurrentCommunity('u1', 'oak');
+    readGoals.mockRejectedValueOnce(OFFLINE());
+    await refocusAndFlush();
+    expect(byId('wsf-you-member')).toBeNull();
+    expect(byId('wsf-you-failed')!.textContent).toContain('Your identity and community are still here');
+    expect(byId('wsf-you-stale')).toBeNull();
+    expect(container.textContent).not.toContain('Elm Park');
+  });
+
+  it('(b) control: the refocus resolves the same community and its goals fail: Elm Park is kept, marked stale', async () => {
+    await elmOnScreen();
+    readGoals.mockRejectedValueOnce(OFFLINE());
+    await refocusAndFlush();
+    expect(byId('wsf-you-member')).not.toBeNull();
+    expect(byId('wsf-you-community')!.textContent).toContain('Elm Park');
+    expect(byId('wsf-you-stale')).not.toBeNull();
+    expect(byId('wsf-you-failed')).toBeNull();
+  });
+
+  // (The stale note is drawn for a member page only; the kept page is what shows.)
+  it('(c) control: a page that is not a member page (no community) is kept when the refocus read fails, as before', async () => {
+    readMyCommunities.mockResolvedValue({ items: [] });
+    await render();
+    expect(byId('wsf-you-no-community')).not.toBeNull();
+    readMyCommunities.mockRejectedValueOnce(OFFLINE());
+    await refocusAndFlush();
+    expect(byId('wsf-you-no-community')).not.toBeNull();
+    expect(byId('wsf-you-failed')).toBeNull();
+  });
+
+  it('(d) the membership read itself fails (no list read): Elm Park is kept, marked stale, as before', async () => {
+    await elmOnScreen();
+    readMyCommunities.mockRejectedValueOnce(OFFLINE());
+    await refocusAndFlush();
+    expect(byId('wsf-you-community')!.textContent).toContain('Elm Park');
+    expect(byId('wsf-you-stale')).not.toBeNull();
+    expect(byId('wsf-you-failed')).toBeNull();
+  });
+});

@@ -22,6 +22,7 @@ import { wsfAuthEnabled } from '../src/featureFlags';
 import { getFirebaseAuth, getFirebaseFirestore } from '../src/firebase';
 import { routeAfterAuth } from '../src/pendingJoinCode';
 import { landAfterAuth } from '../src/ui/authLanding';
+import { memberLandingDeps } from '../src/ui/memberLanding';
 import {
   leaveRedirectFailed,
   openKioskGoal,
@@ -67,16 +68,10 @@ export default function SignUp() {
   // on the web, replace as before), and an offline profile read has a way out
   // on a phone. The web keeps its Loading branch.
   const navigation = useNavigation();
-  const land = useCallback(
-    (next: string) =>
-      landAfterAuth(next, {
-        dispatch: (action) => navigation.dispatch(action as never),
-        push: (href) => router.push(href as never),
-        replace: (href) => router.replace(href as never),
-        platform: Platform.OS,
-      }),
-    [navigation],
-  );
+  // W16-19 (RV16-641-B1): the landing also reads the root stack and can
+  // dismiss into it, so a kiosk beneath is never reset away
+  // (src/ui/memberLanding.ts).
+  const land = useCallback((next: string) => landAfterAuth(next, memberLandingDeps(navigation)), [navigation]);
   const [redirectFailed, setRedirectFailed] = useState(false);
   const [redirectAttempt, setRedirectAttempt] = useState(0);
 

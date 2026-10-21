@@ -150,6 +150,17 @@ describe('W16-9 / MF-09: the Manage sheet on a phone', () => {
     expect(byId('wsf-community-manage-panel')).toBeNull();
   });
 
+  // W16-18 (MF-09 criterion 4): Android Back closes the sheet. The hardware
+  // Back reaches the sheet as the Modal's onRequestClose; react-native-web's
+  // Modal calls that same prop on a document Escape keyup
+  // (react-native-web/dist/exports/Modal/ModalContent.js), so no Modal mock.
+  it('android: Back (the Modal\'s onRequestClose, fired here by Escape) closes the sheet', async () => {
+    await openSheet('android');
+    act(() => document.dispatchEvent(new KeyboardEvent('keyup', { key: 'Escape', bubbles: true })));
+    await settle();
+    expect(byId('wsf-community-manage-panel')).toBeNull();
+  });
+
   // heads-9 N-1: one keyboard mechanism on iOS. The scroll view's
   // automaticallyAdjustKeyboardInsets takes the keyboard (wiring case below);
   // the panel's bottom edge does not move, so that native inset stays exact.
