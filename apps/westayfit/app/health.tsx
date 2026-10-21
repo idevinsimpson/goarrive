@@ -1,4 +1,4 @@
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { WSF_BUILD_STAMP } from '../src/buildStamp';
 import { wsfIsStaging } from '../src/firebase';
@@ -59,6 +59,8 @@ function Row({ label, value, testID }: { label: string; value: string; testID?: 
 }
 
 const styles = StyleSheet.create({
-  // Build stamps are identifiers, read character by character.
-  stamp: { fontFamily: 'monospace' },
+  // Build stamps are identifiers, read character by character. INT-35:
+  // 'monospace' names no font on iOS (it fell back to the proportional
+  // system font); iOS has its own monospaced system family. Web unchanged.
+  stamp: { fontFamily: Platform.OS === 'ios' ? 'ui-monospace' : 'monospace' },
 });

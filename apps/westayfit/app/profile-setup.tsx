@@ -1,8 +1,8 @@
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { doc, getDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { signOut } from 'firebase/auth';
 
@@ -30,6 +30,7 @@ import {
   readAuthDestinationKind,
 } from '../src/authDestination';
 import { routeAfterAuth } from '../src/pendingJoinCode';
+import { landAfterAuth } from '../src/ui/authLanding';
 import { usePostAuthDestinationsReady } from '../src/postAuthDestination';
 
 type ExistingProfile = {
@@ -45,6 +46,16 @@ export default function ProfileSetup() {
   usePostAuthDestinationsReady();
   const params = useLocalSearchParams<{ edit?: string }>();
   const editMode = params.edit === '1';
+  // INT-20: the two terminal hops land through landAfterAuth (on a phone, Home
+  // only with the destination pushed over it; on the web, replace as before).
+  const navigation = useNavigation();
+  const land = (next: string) =>
+    landAfterAuth(next, {
+      dispatch: (action) => navigation.dispatch(action as never),
+      push: (href) => router.push(href as never),
+      replace: (href) => router.replace(href as never),
+      platform: Platform.OS,
+    });
   const [displayName, setDisplayName] = useState('');
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -74,7 +85,7 @@ export default function ProfileSetup() {
             // Existing profile + no ?edit=1 → home (or pending join code).
             const next = await routeAfterAuth('/', user.uid);
             if (cancelled) return;
-            router.replace(next as never);
+            land(next);
             return;
           }
           if (data.displayName) setDisplayName(data.displayName);
@@ -160,7 +171,7 @@ export default function ProfileSetup() {
       // wsfJoinCommunity's guards pass — verified + profile exists — so this is
       // the correct hop to hand the flow back to /join/<code>. Anyone without a
       // pending code falls through to the signed-in home.
-      router.replace((await routeAfterAuth('/', user.uid)) as never);
+      land(await routeAfterAuth('/', user.uid));
     } catch (e) {
       setError(describeCallableError(e, 'We couldn’t save your profile. Try again.'));
     } finally {

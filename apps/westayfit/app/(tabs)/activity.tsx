@@ -1,5 +1,6 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useWsfAuth } from '../../src/auth';
@@ -454,7 +455,9 @@ export default function ActivityScreen() {
       refresh={{ checking, stale, onRetry: retry }}
       actions={{
         onRetry: retry,
-        onStartMoving: () => router.replace('/move'),
+        // INT-20: on a phone MOVE is pushed over Progress, so closing it comes
+        // back here; the web replaces, as before.
+        onStartMoving: () => (Platform.OS === 'web' ? router.replace('/move') : router.push('/move')),
         onOpenCommunity: () => router.push('/community'),
         // No canonical receipt source exists; the view draws no receipt rows.
         onOpenReceipt: () => {},

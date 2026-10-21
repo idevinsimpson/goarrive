@@ -1,7 +1,8 @@
-import { router } from 'expo-router';
+import { router, useNavigation } from 'expo-router';
 import { reload, signOut, type User } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { Platform } from 'react-native';
 
 import { useWsfAuth } from '../src/auth';
 import { AuthFlagOffPanel } from '../src/AuthFlagOffPanel';
@@ -22,7 +23,9 @@ import { authErrorCode, authErrorMessage } from '../src/authErrors';
 import { wsfAuthEnabled } from '../src/featureFlags';
 import { getFirebaseAuth, getFirebaseFirestore } from '../src/firebase';
 import { routeAfterAuth } from '../src/pendingJoinCode';
+import { landAfterAuth } from '../src/ui/authLanding';
 import { usePostAuthDestinationsReady } from '../src/postAuthDestination';
+import { useResumeRefresh } from '../src/useResumeRefresh';
 import { requestVerificationEmail } from '../src/verificationEmail';
 import {
   beginVerificationSend,
@@ -37,6 +40,8 @@ import {
 export default function VerifyEmail() {
   const { ready, user } = useWsfAuth();
   const [checking, setChecking] = useState(false);
+  // A check in flight (a tap, or a return to the app): a return does not start another.
+  const checkingRef = useRef(false);
   const [resending, setResending] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -76,6 +81,9 @@ export default function VerifyEmail() {
     decides whether that is worth showing — the tap says so, the passive poll
     stays silent.
   */
+  // INT-20: the terminal hop lands through landAfterAuth (on a phone, Home
+  // only with the destination pushed over it; on the web, replace as before).
+  const navigation = useNavigation();
   const passThroughIfVerified = useCallback(async (who: User): Promise<boolean> => {
     // THE UID THIS ATTEMPT BELONGS TO, captured before any await. A refresh
     // started for one account must never route another: a sign-out and a new
@@ -105,12 +113,18 @@ export default function VerifyEmail() {
     // called; nextRouteAfterAuth is only safe on the terminal branch.
     const next = await routeAfterAuth('/', startedFor);
     if (getFirebaseAuth().currentUser?.uid !== startedFor) return false;
-    router.replace(next as never);
+    landAfterAuth(next, {
+      dispatch: (action) => navigation.dispatch(action as never),
+      push: (href) => router.push(href as never),
+      replace: (href) => router.replace(href as never),
+      platform: Platform.OS,
+    });
     return true;
-  }, []);
+  }, [navigation]);
 
   const onCheck = useCallback(async () => {
     if (!user) return;
+    checkingRef.current = true;
     setChecking(true);
     setError(null);
     setStatus(null);
@@ -120,6 +134,7 @@ export default function VerifyEmail() {
     } catch (e) {
       setError(authErrorMessage(e, 'Refresh failed.'));
     } finally {
+      checkingRef.current = false;
       setChecking(false);
     }
   }, [user, passThroughIfVerified]);
@@ -218,6 +233,31 @@ export default function VerifyEmail() {
       }
     };
   }, [sendOutcome, user, passThroughIfVerified]);
+
+  /*
+    INT-13 (part A). ON A PHONE, COMING BACK TO THE APP CHECKS AGAIN.
+
+    The poll above waits on a visible document, which a phone does not have,
+    and it only runs on `unconfigured`; a member who left for their mail app
+    to tap the link came back to a screen that never asked. Any return from
+    the background (no minimum time away) checks once through the same path:
+    silently, like the poll (unverified says nothing, a failure says nothing),
+    never while a tap's check is in flight, and never routing for an account
+    that changed meanwhile (passThroughIfVerified's uid checks). The web keeps
+    its own visibility path and does nothing here.
+  */
+  useResumeRefresh(
+    () => {
+      if (Platform.OS === 'web' || !user || checkingRef.current) return;
+      checkingRef.current = true;
+      void passThroughIfVerified(user)
+        .catch(() => undefined)
+        .finally(() => {
+          checkingRef.current = false;
+        });
+    },
+    { minAwayMs: 0 },
+  );
 
   const onResend = useCallback(async () => {
     if (!user) return;

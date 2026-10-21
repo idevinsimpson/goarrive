@@ -3,7 +3,7 @@ import { signOut } from 'firebase/auth';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { useWsfAuth } from '../../../src/auth';
+import { AuthConnectingNote, useWsfAuth } from '../../../src/auth';
 import { describeCallableError } from '../../../src/callableErrors';
 import { resolveCurrentCommunity, useCurrentCommunityReady } from '../../../src/currentCommunity';
 import { wsfAuthEnabled } from '../../../src/featureFlags';
@@ -75,7 +75,7 @@ type CardGoalState =
 const JOIN_CODE_SHAPE = /^[A-Za-z0-9_-]{16,128}$/;
 
 export default function BrandShell() {
-  const { ready, user } = useWsfAuth();
+  const { ready, user, slow } = useWsfAuth();
   const [myCommunities, setMyCommunities] = useState<MyCommunitiesState>({ kind: 'idle' });
   const [goalsByGroup, setGoalsByGroup] = useState<Record<string, CardGoalState>>({});
   const [joinCodeInput, setJoinCodeInput] = useState('');
@@ -325,7 +325,8 @@ export default function BrandShell() {
           // No hero while auth settles: a returning member must not watch a
           // marketing hero appear and vanish before their communities show.
           <View testID="wsf-home-loading" data-state="loading">
-            <Text style={kit.statusText}>Loading…</Text>
+            {/* INT-27 (native): the first auth answer is slow; say so, still loading. */}
+            {slow ? <AuthConnectingNote testID="wsf-home-connecting" /> : <Text style={kit.statusText}>Loading…</Text>}
           </View>
         ) : showSignedIn ? (
           <SignedInHome
