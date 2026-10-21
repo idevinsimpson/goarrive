@@ -12,6 +12,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { WsfAuthProvider } from '../src/auth';
 import { getFirebaseApp } from '../src/firebase';
 import { InAppBrowserBanner } from '../src/InAppBrowserBanner';
+import { KioskFlowExitGuard } from '../src/kioskFlowExit';
 import { useKioskLaunchGuard } from '../src/kioskLaunchGuard';
 import { StagingBanner } from '../src/StagingBanner';
 import { STAGING_STRIP_UNDER_STATUS_BAR } from '../src/stagingStrip';
@@ -60,6 +61,7 @@ export default function RootLayout() {
        guessing at a phone's home indicator, so the provider is above it. */
     <SafeAreaProvider>
       <WsfAuthProvider>
+        <KioskFlowExitGuard />
         {/* INT-09: the default for cream screens. A navy screen sets light
             icons while it is focused (src/ui/useScreenTopInset ScreenStatusBar),
             and over a native staging build's red strip they are light

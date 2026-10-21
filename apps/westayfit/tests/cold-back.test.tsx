@@ -64,6 +64,8 @@ vi.mock('expo-router', async () => {
       return ctl.rootState;
     },
     dispatch: (a: unknown) => ctl.dispatched.push(a),
+    // W14-O: the kiosk-flow exit guard subscribes to state changes; inert here (no kiosk marker on the web-like store).
+    addListener: () => () => undefined,
   };
   // The root Stack renders its focused route (the test's stand-in screen).
   const Stack = Object.assign(
@@ -84,7 +86,11 @@ vi.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
 vi.mock('../src/crashContainment', () => ({}));
-vi.mock('../src/auth', () => ({ WsfAuthProvider: ({ children }: { children?: ReactNode }) => <>{children}</> }));
+vi.mock('../src/auth', () => ({
+  WsfAuthProvider: ({ children }: { children?: ReactNode }) => <>{children}</>,
+  // W14-O: read by the kiosk-flow exit guard the root layout mounts; nobody signed in here.
+  useWsfAuth: () => ({ ready: true, user: null }),
+}));
 vi.mock('../src/firebase', () => ({ getFirebaseApp: () => ({}), wsfIsStaging: false }));
 vi.mock('../src/InAppBrowserBanner', () => ({ InAppBrowserBanner: () => null }));
 vi.mock('../src/StagingBanner', () => ({ StagingBanner: () => null }));

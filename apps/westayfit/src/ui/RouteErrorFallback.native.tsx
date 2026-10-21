@@ -42,8 +42,11 @@ import type { BoundaryProps, FallbackVariant } from './routeErrorTypes';
  * screen itself shows only fixed copy, never the error's own text.
  *
  * ALWAYS A WAY OUT (#641 CS-4). Try again remounts what failed, and a route
- * that throws every time throws again. So every variant also offers Go to
- * Home. Where the fallback stands in for a navigator (root, shell, homeTab),
+ * that throws every time throws again. So every variant also offers a way
+ * out besides Try again: Go to Home, or Back to the kiosk while a kiosk
+ * session is open, with ONE exception (RV17-641-N3, below): while the marker
+ * is unknown and no kiosk return names a kiosk, only Try again is offered.
+ * Where the fallback stands in for a navigator (root, shell, homeTab),
  * that navigator is unmounted and React Navigation has dropped its state; Go
  * to Home first asks for '/' (expo-router queues it for the navigator that is
  * still mounted, so the remounted one opens on Home rather than on whatever
