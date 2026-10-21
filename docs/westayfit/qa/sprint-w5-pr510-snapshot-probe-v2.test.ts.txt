@@ -1,0 +1,391 @@
+/**
+ * W5 THROWAWAY PROBE — independent QA of wsfMyMemberSnapshot at b71cf07f.
+ * Lives only in a detached worktree; never committed.
+ * Modelled on tests/callable/wsf-my-member-snapshot.test.ts (same seed shapes,
+ * `.run(request)` in-process against the Firestore emulator).
+ */
+process.env.GCLOUD_PROJECT = 'demo-wsf-local';
+process.env.FIRESTORE_EMULATOR_HOST = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080';
+
+import { randomBytes } from 'crypto';
+import { Firestore, Query } from '@google-cloud/firestore';
+import { FieldPath, FieldValue, getFirestore, Timestamp } from 'firebase-admin/firestore';
+import { HttpsError } from 'firebase-functions/v2/https';
+import { wsfMyMemberSnapshot } from '../../src/index';
+
+type Goal = Record<string, unknown> & { goalId: string; sharedTotal: number | null; ownCredit: number | null };
+type Community = Record<string, unknown> & { groupId: string; goals: Goal[] | null; partial: boolean };
+type Snapshot = { schemaVersion: number; communities: Community[]; truncated: { communities: boolean; goals: boolean }; nextCursor: string | null };
+
+const tag = () => randomBytes(5).toString('hex');
+const DAY = 86_400_000;
+const log = (label: string, v: unknown) => console.log(`W5PROBE ${label} ${JSON.stringify(v)}`);
+
+async function seedGroup(name: string, extra: Record<string, unknown> = {}): Promise<string> {
+  const ref = getFirestore().collection('wsfCommunityGroups').doc(`w5-${tag()}`);
+  await ref.set({
+    displayName: name, groupType: 'custom', joinPolicy: 'private', joinCode: `JCSECRET${tag()}`,
+    lifecycleStatus: 'active', isSample: false, createdByUserId: 'creator-secret-uid', ...extra,
+  });
+  return ref.id;
+}
+async function seedMember(groupId: string, uid: string, membershipStatus = 'active', role = 'member') {
+  await getFirestore().doc(`wsfMemberships/${groupId}_${uid}`).set({
+    groupId, userId: uid, role, membershipStatus, nameVisibility: 'private', email: 'member-secret@example.com',
+  });
+}
+async function seedGoal(groupId: string, opts: { status?: 'active' | 'closed'; total?: number; endsInDays?: number; id?: string; extra?: Record<string, unknown> } = {}) {
+  const db = getFirestore();
+  const ref = db.collection('wsfGoals').doc(opts.id ?? `g-${tag()}`);
+  const now = Date.now();
+  const doc: Record<string, unknown> = {
+    ownerUid: 'champion-secret-uid', communityGroupId: groupId, title: `Goal ${ref.id}`, target: 500, unit: 'squats',
+    status: opts.status ?? 'active', startsAt: Timestamp.fromMillis(now - 7 * DAY),
+    endsAt: Timestamp.fromMillis(now + (opts.endsInDays ?? 7) * DAY), timezone: 'America/New_York',
+    aggregateDisplayAuthorized: true, reachedAttemptId: null, ...(opts.extra ?? {}),
+  };
+  if (opts.status === 'closed') doc.closedAt = Timestamp.fromMillis(now - DAY);
+  await ref.set(doc);
+  if (opts.total) await db.doc(`wsfGoalCounters/${ref.id}/shards/3`).set({ count: opts.total });
+  return ref.id;
+}
+async function seedOwnTs(goalId: string, uid: string, total: unknown, updatedAt: Timestamp | FieldValue) {
+  await getFirestore().doc(`wsfGoalMemberTotals/${goalId}_${uid}`).set({ goalId, userId: uid, total, contributionCount: 1, updatedAt });
+}
+const seedOwn = (g: string, u: string, total: unknown, ms: number) => seedOwnTs(g, u, total, Timestamp.fromMillis(ms));
+
+function call(uid: string | null, data: unknown = {}): Promise<Snapshot> {
+  const request = { data, auth: uid ? { uid, token: {} } : undefined, rawRequest: {} } as never;
+  return (wsfMyMemberSnapshot as unknown as { run: (r: never) => Promise<Snapshot> }).run(request);
+}
+async function outcome(p: Promise<unknown>): Promise<string> {
+  try { await p; return 'RESOLVED'; } catch (e) {
+    return e instanceof HttpsError ? `HttpsError:${e.code}` : `NonHttpsError:${(e as Error)?.constructor?.name}:${(e as Error)?.message}`;
+  }
+}
+const goalsOf = (s: Snapshot) => s.communities.flatMap((c) => c.goals ?? []);
+const byId = (s: Snapshot) => new Map(goalsOf(s).map((g) => [g.goalId, g]));
+
+function keyPaths(v: unknown, path = ''): string[] {
+  if (Array.isArray(v)) return v.flatMap((x) => keyPaths(x, `${path}[]`));
+  if (v && typeof v === 'object') {
+    return Object.entries(v as Record<string, unknown>).flatMap(([k, x]) => {
+      const p = path ? `${path}.${k}` : k;
+      return [p, ...keyPaths(x, p)];
+    });
+  }
+  return [];
+}
+const ALLOWED = new Set([
+  'schemaVersion', 'communities', 'nextCursor', 'truncated', 'truncated.communities', 'truncated.goals',
+  ...['groupId', 'displayName', 'groupType', 'role', 'memberCount', 'isSample', 'goals', 'partial'].map((k) => `communities[].${k}`),
+  ...['goalId', 'title', 'unit', 'target', 'status', 'startsAt', 'endsAt', 'timezone', 'reachedAt', 'closedAt', 'sharedTotal', 'ownCredit'].map((k) => `communities[].goals[].${k}`),
+]);
+
+// ── read instrumentation (in-process: .run executes in this Jest process) ──
+const origGetAll = Firestore.prototype.getAll;
+const origQueryGet = Query.prototype.get;
+const origCount = Query.prototype.count;
+function instrument() {
+  const r = { rpcs: 0, docs: 0, byKind: {} as Record<string, { rpcs: number; docs: number }> };
+  const bump = (k: string, docs: number) => {
+    r.rpcs += 1; r.docs += docs;
+    const e = (r.byKind[k] ??= { rpcs: 0, docs: 0 }); e.rpcs += 1; e.docs += docs;
+  };
+  const a = jest.spyOn(Firestore.prototype, 'getAll').mockImplementation(async function (this: Firestore, ...refs: Array<{ path: string }>) {
+    const out = await origGetAll.apply(this, refs as never);
+    const kinds = new Set(refs.map((x) => x.path.split('/')[0]));
+    bump(`getAll:${[...kinds].join('+')}`, out.length);
+    return out;
+  } as never);
+  const g = jest.spyOn(Query.prototype, 'get').mockImplementation(async function (this: Query) {
+    const out = await origQueryGet.apply(this);
+    bump(`query:${(this as unknown as { _queryOptions: { collectionId: string } })._queryOptions.collectionId}`, Math.max(out.size, 1));
+    return out;
+  } as never);
+  const c = jest.spyOn(Query.prototype, 'count').mockImplementation(function (this: Query) {
+    const coll = (this as unknown as { _queryOptions: { collectionId: string } })._queryOptions.collectionId;
+    const agg = origCount.apply(this);
+    const aggGet = agg.get.bind(agg);
+    (agg as { get: unknown }).get = async () => { bump(`count:${coll}`, 1); return aggGet(); };
+    return agg;
+  } as never);
+  return { r, restore: () => { a.mockRestore(); g.mockRestore(); c.mockRestore(); } };
+}
+
+describe('W5 probes', () => {
+  it('P1 anonymous + request-field widening', async () => {
+    log('P1.anon', await outcome(call(null)));
+    log('P1.anonWithData', await outcome(call(null, { uid: 'x', userId: 'x' })));
+    const a = `w5a-${tag()}`;
+    const b = `w5b-${tag()}`;
+    const mine = await seedGroup('A Home');
+    const bOnly = await seedGroup('B Only');
+    const shared = await seedGroup('Shared');
+    await seedMember(mine, a); await seedMember(shared, a);
+    await seedMember(bOnly, b); await seedMember(shared, b);
+    const gMine = await seedGoal(mine, { total: 11 });
+    const gShared = await seedGoal(shared, { total: 200 });
+    const gB = await seedGoal(bOnly, { total: 333 });
+    const gBclosed = await seedGoal(shared, { status: 'closed', total: 44, endsInDays: -2 });
+    await seedOwn(gMine, a, 7, Date.now() - 5000);
+    await seedOwn(gShared, b, 9871, Date.now());
+    await seedOwn(gB, b, 6543, Date.now());
+    await seedOwn(gBclosed, b, 4321, Date.now());
+    const s = await call(a, { uid: b, userId: b, groupId: bOnly, cursor: undefined });
+    const json = JSON.stringify(s);
+    const res = {
+      communities: s.communities.map((c) => c.groupId).sort(), expected: [mine, shared].sort(),
+      goals: goalsOf(s).map((g) => ({ id: g.goalId, own: g.ownCredit, shared: g.sharedTotal })),
+      leaks: { bUid: json.includes(b), bOnlyGroup: json.includes(bOnly), gB: json.includes(gB), gBclosed: json.includes(gBclosed), n9871: json.includes('9871'), n6543: json.includes('6543'), n4321: json.includes('4321') },
+    };
+    log('P1.widen', res);
+    expect(res.communities).toEqual(res.expected);
+    expect(Object.values(res.leaks).every((x) => x === false)).toBe(true);
+    expect(byId(s).get(gShared)!.ownCredit).toBe(0);
+  });
+
+  it('P2 departed community (left / other non-active)', async () => {
+    const uid = `w5d-${tag()}`;
+    const out: Record<string, unknown> = {};
+    for (const status of ['left', 'removed', 'pending', 'banned']) {
+      const x = await seedGroup(`Departed ${status}`);
+      await seedMember(x, uid, status);
+      const gx = await seedGoal(x, { total: 50 });
+      const gxc = await seedGoal(x, { status: 'closed', total: 5, endsInDays: -1 });
+      await seedOwn(gx, uid, 9, Date.now());
+      await seedOwn(gxc, uid, 3, Date.now() - 1);
+      out[status] = { x, gx, gxc };
+    }
+    const stay = await seedGroup('Stay');
+    await seedMember(stay, uid);
+    const gs = await seedGoal(stay, { total: 1 });
+    await seedOwn(gs, uid, 1, Date.now() - 100);
+    const s = await call(uid);
+    const json = JSON.stringify(s);
+    const found = Object.fromEntries(Object.entries(out).map(([k, v]) => {
+      const ids = v as { x: string; gx: string; gxc: string };
+      return [k, { groupInJson: json.includes(ids.x), activeGoalInJson: json.includes(ids.gx), closedGoalInJson: json.includes(ids.gxc) }];
+    }));
+    log('P2', { communities: s.communities.map((c) => c.groupId), stay, found, truncated: s.truncated });
+    expect(s.communities.map((c) => c.groupId)).toEqual([stay]);
+    expect(json.includes('"ownCredit":9')).toBe(false);
+  });
+
+  it('P3 recursive key allowlist with private fields seeded', async () => {
+    const uid = `w5k-${tag()}`;
+    const g = await seedGroup('Keys', { email: 'group-secret@example.com', ownerUid: 'group-owner-secret' });
+    await seedMember(g, uid, 'active', 'foundingChampion');
+    const extra = { ownerUid: 'goal-owner-secret', joinCode: 'GOALJOINSECRET', createdByUserId: 'goal-creator-secret', email: 'goal-secret@example.com', privateNote: 'PRIVNOTE' };
+    const ga = await seedGoal(g, { total: 3, extra });
+    const gc = await seedGoal(g, { status: 'closed', total: 4, endsInDays: -1, extra: { ...extra, reachedAt: Timestamp.fromMillis(Date.now() - 2 * DAY) } });
+    await getFirestore().doc(`wsfGoalMemberTotals/${gc}_${uid}`).set({ goalId: gc, userId: uid, total: 2, contributionCount: 1, updatedAt: Timestamp.now(), email: 'row-secret@example.com', displayName: 'ROWNAME' });
+    await seedOwn(ga, uid, 1, Date.now() - 10);
+    const s = await call(uid);
+    const paths = [...new Set(keyPaths(s))].sort();
+    const bad = paths.filter((p) => !ALLOWED.has(p));
+    const json = JSON.stringify(s);
+    const secrets = ['JCSECRET', 'creator-secret-uid', 'group-secret', 'group-owner-secret', 'goal-owner-secret', 'GOALJOINSECRET', 'goal-creator-secret', 'goal-secret@', 'PRIVNOTE', 'champion-secret-uid', 'member-secret@', 'row-secret@', 'ROWNAME', 'nameVisibility', 'contributionCount', 'aggregateDisplayAuthorized', 'reachedAttemptId', 'communityGroupId', 'userId', uid];
+    const leaked = secrets.filter((x) => json.includes(x));
+    log('P3', { paths, notAllowlisted: bad, leakedStrings: leaked });
+    expect(bad).toEqual([]);
+    expect(leaked).toEqual([]);
+  });
+
+  it('P4 zero vs unknown', async () => {
+    const uid = `w5z-${tag()}`;
+    const g = await seedGroup('Zero');
+    await seedMember(g, uid);
+    const noRow = await seedGoal(g, { total: 20, endsInDays: 1 });
+    const abc = await seedGoal(g, { status: 'closed', total: 5, endsInDays: -1 });
+    const neg = await seedGoal(g, { status: 'closed', total: 5, endsInDays: -1 });
+    const inf = await seedGoal(g, { status: 'closed', total: 5, endsInDays: -1 });
+    const noShard = await seedGoal(g, { status: 'closed', endsInDays: -1 });
+    await seedOwn(abc, uid, 'abc', Date.now());
+    await seedOwn(neg, uid, -5, Date.now() - 1);
+    await seedOwn(inf, uid, Infinity, Date.now() - 2);
+    await seedOwn(noShard, uid, 4, Date.now() - 3);
+    const empty = await seedGroup('Empty');
+    await seedMember(empty, uid);
+    const s = await call(uid);
+    const m = byId(s);
+    const ec = s.communities.find((c) => c.groupId === empty)!;
+    const res = {
+      a_noRow_ownCredit: m.get(noRow)?.ownCredit, a_noRow_shared: m.get(noRow)?.sharedTotal,
+      b_abc_ownCredit: m.get(abc)?.ownCredit, b_neg5_ownCredit: m.get(neg)?.ownCredit, b_inf_ownCredit: m.get(inf)?.ownCredit,
+      c_noShard_sharedTotal: m.get(noShard)?.sharedTotal, c_noShard_ownCredit: m.get(noShard)?.ownCredit,
+      d_empty: { goals: ec.goals, partial: ec.partial, memberCount: ec.memberCount },
+    };
+    log('P4', res);
+    expect(res.a_noRow_ownCredit).toBe(0);
+    expect(res.b_abc_ownCredit).toBeNull();
+    expect(res.b_neg5_ownCredit).toBeNull();
+    expect(res.d_empty.goals).toEqual([]);
+    expect(res.d_empty.partial).toBe(false);
+  });
+
+  it('P5 cursor validation + valid resume', async () => {
+    const uid = `w5c-${tag()}`;
+    const b64 = (s: string) => Buffer.from(s, 'utf8').toString('base64url');
+    const cases: Array<[string, unknown]> = [
+      ['%%%', '%%%'], ['abc', 'abc'], ['t=-1', b64('{"t":-1,"id":"x"}')], ['id=a/b', b64('{"t":1,"id":"a/b"}')],
+      ['t=1.5', b64('{"t":1.5,"id":"x"}')], ['401chars', 'x'.repeat(401)], ['number5', 5], ['object', { t: 1, id: 'x' }],
+      ['emptyString', ''], ['array', ['x']], ['true', true],
+      ['t=MAX_SAFE_INTEGER', b64(`{"t":${Number.MAX_SAFE_INTEGER},"id":"x"}`)],
+      ['t=1e13 (year 2286)', b64('{"t":10000000000000,"id":"x"}')],
+      ['t=3e14 (beyond Timestamp max)', b64('{"t":300000000000000,"id":"x"}')],
+      ['id=" x" (trim mismatch)', b64('{"t":1,"id":" x"}')],
+      ['valid-forged t=1 id=x', b64('{"t":1,"id":"x"}')],
+      ['null', null],
+    ];
+    const out: Record<string, string> = {};
+    for (const [k, v] of cases) out[k] = await outcome(call(uid, { cursor: v }));
+    log('P5.cases', out);
+    // valid resume
+    const g = await seedGroup('Pager5');
+    await seedMember(g, uid);
+    const ids: string[] = [];
+    for (let i = 0; i < 27; i += 1) {
+      const id = await seedGoal(g, { status: 'closed', total: 1, endsInDays: -1 });
+      await seedOwn(id, uid, 1, 1_700_000_000_000 + i * 1000);
+      ids.push(id);
+    }
+    const p1 = await call(uid);
+    const p2 = await call(uid, { cursor: p1.nextCursor });
+    const a = goalsOf(p1).map((x) => x.goalId);
+    const b = goalsOf(p2).map((x) => x.goalId);
+    log('P5.resume', { p1: a.length, p2: b.length, union: new Set([...a, ...b]).size, dup: a.filter((x) => b.includes(x)).length, p2cursor: p2.nextCursor, cursor1Decoded: Buffer.from(p1.nextCursor!, 'base64url').toString() });
+    expect(new Set([...a, ...b]).size).toBe(27);
+  });
+
+  async function runP6(label: string, sameInstant: (k: number) => Timestamp | FieldValue, opts: { batch?: boolean } = {}) {
+    const uid = `w5p6-${tag()}`;
+    const g = await seedGroup(`P6 ${label}`);
+    await seedMember(g, uid);
+    const seeded: string[] = [];
+    for (let i = 1; i <= 22; i += 1) {
+      const id = await seedGoal(g, { status: 'closed', total: 1, endsInDays: -1 });
+      await seedOwnTs(id, uid, i, new Timestamp(1890000100 - i, 0));
+      seeded.push(id);
+    }
+    const tail: string[] = [];
+    for (let k = 0; k < 8; k += 1) tail.push(await seedGoal(g, { status: 'closed', total: 1, endsInDays: -1 }));
+    if (opts.batch) {
+      const batch = getFirestore().batch();
+      tail.forEach((id, k) => batch.set(getFirestore().doc(`wsfGoalMemberTotals/${id}_${uid}`), { goalId: id, userId: uid, total: 23 + k, contributionCount: 1, updatedAt: sameInstant(k) }));
+      await batch.commit();
+    } else {
+      for (let k = 0; k < 8; k += 1) await seedOwnTs(tail[k]!, uid, 23 + k, sameInstant(k));
+    }
+    seeded.push(...tail);
+    // Ground truth: the callable's own order, no limit.
+    const truth = await getFirestore().collection('wsfGoalMemberTotals').where('userId', '==', uid)
+      .orderBy('updatedAt', 'desc').orderBy(FieldPath.documentId(), 'desc').get();
+    const truthOrder = truth.docs.map((d) => d.get('goalId') as string);
+    const stored = truth.docs.map((d) => { const t = d.get('updatedAt') as Timestamp; return { goal: (d.get('goalId') as string), s: t.seconds, ns: t.nanoseconds }; });
+    const p1 = await call(uid);
+    const p2 = p1.nextCursor ? await call(uid, { cursor: p1.nextCursor }) : null;
+    const a = goalsOf(p1).map((x) => x.goalId);
+    const b = p2 ? goalsOf(p2).map((x) => x.goalId) : [];
+    const got = new Set([...a, ...b]);
+    const skipped = seeded.filter((x) => !got.has(x));
+    const dup = a.filter((x) => b.includes(x));
+    const res = {
+      label, seeded: seeded.length, page1: a.length, page2: b.length, unionReturned: got.size,
+      skippedCount: skipped.length, skippedTruthPositions: skipped.map((x) => truthOrder.indexOf(x) + 1).sort((x, y) => x - y),
+      skippedTails: skipped.map((x) => tail.indexOf(x)),
+      duplicated: dup.length, page2NextCursor: p2?.nextCursor ?? null,
+      cursor: p1.nextCursor ? Buffer.from(p1.nextCursor, 'base64url').toString() : null,
+      row25: stored[24], tailStoredPrecision: stored.slice(22),
+      page1EqualsTruthPrefix: JSON.stringify(a) === JSON.stringify(truthOrder.slice(0, 25)),
+      page2Order: b.map((x) => truthOrder.indexOf(x) + 1),
+    };
+    log(`P6.${label}`, res);
+    return res;
+  }
+
+  it('P6a identical sub-ms instant (seconds+nanos equal)', async () => {
+    const r = await runP6('identical', () => new Timestamp(1790000000, 123456789));
+    expect(r.skippedCount).toBe(0);
+  });
+  it('P6b same ms, different microseconds', async () => {
+    const r = await runP6('sameMsDiffUs', (k) => new Timestamp(1790000000, 123456000 + k * 1000));
+    expect(r.skippedCount).toBe(0);
+  });
+  it('P6c control: identical but whole-ms instant (nanos 123000000)', async () => {
+    const r = await runP6('identicalWholeMs', () => new Timestamp(1790000000, 123000000));
+    expect(r.skippedCount).toBe(0);
+  });
+  it('P6d production write path: FieldValue.serverTimestamp() in one batch', async () => {
+    const r = await runP6('serverTimestampBatch', () => FieldValue.serverTimestamp(), { batch: true });
+    expect(r.skippedCount).toBe(0);
+  });
+  it('P6e production write path: serverTimestamp, sequential individual writes (newest group)', async () => {
+    // tail rows sequential writes with serverTimestamp: they are the NEWEST rows here (now > 1790000100?)
+    const r = await runP6('serverTimestampSequential', () => FieldValue.serverTimestamp());
+    expect(r.skippedCount).toBe(0);
+  });
+
+  it('P7 community cap with 25 active memberships', async () => {
+    const uid = `w5cap-${tag()}`;
+    for (let i = 0; i < 25; i += 1) await seedMember(await seedGroup(`Cap ${String(i).padStart(2, '0')}`), uid);
+    const { r, restore } = instrument();
+    let s: Snapshot;
+    try { s = await call(uid); } finally { restore(); }
+    log('P7', { communities: s!.communities.length, truncated: s!.truncated, lastName: s!.communities.at(-1)!.displayName, reads: r });
+    expect(s!.communities).toHaveLength(20);
+    expect(s!.truncated.communities).toBe(true);
+  });
+
+  it('P8 receipt fixture 20 communities / 4 active each / 25 owned', async () => {
+    const uid = `w5r-${tag()}`;
+    const gs: string[] = [];
+    for (let i = 0; i < 20; i += 1) { const g = await seedGroup(`Receipt ${i}`); await seedMember(g, uid); gs.push(g); }
+    const activeIds: string[] = [];
+    for (let i = 0; i < 80; i += 1) activeIds.push(await seedGoal(gs[i % 20]!, { total: 3 }));
+    for (let i = 0; i < 25; i += 1) await seedOwn(activeIds[i]!, uid, 1, Date.now() - i * 1000);
+    const { r, restore } = instrument();
+    let s: Snapshot;
+    try { s = await call(uid); } finally { restore(); }
+    const json = JSON.stringify(s!);
+    const envelope = JSON.stringify({ result: s! });
+    log('P8', {
+      goals: goalsOf(s!).length, perCommunity: s!.communities.map((c) => (c.goals ?? []).length), truncated: s!.truncated,
+      nextCursor: s!.nextCursor, reads: r, jsonLength: json.length, utf8Bytes: Buffer.byteLength(json, 'utf8'), httpsCallableEnvelopeBytes: Buffer.byteLength(envelope, 'utf8'),
+    });
+    // Page 2 of the same fixture
+    if (s!.nextCursor) {
+      const i2 = instrument();
+      let s2: Snapshot;
+      try { s2 = await call(uid, { cursor: s!.nextCursor }); } finally { i2.restore(); }
+      log('P8.page2', { goals: goalsOf(s2!).length, reads: i2.r, bytes: Buffer.byteLength(JSON.stringify(s2!)) });
+    }
+  }, 180_000);
+});
+
+describe('W5 F2 successor probes', () => {
+  it('F2 cursor range/shape → invalid-argument, never internal', async () => {
+    const b64 = (o: unknown) => Buffer.from(JSON.stringify(o), 'utf8').toString('base64url');
+    const cases: Array<[string, unknown]> = [
+      ['s>max', b64({ s: 253402300800, n: 0, id: 'x' })],
+      ['s<min', b64({ s: -62135596801, n: 0, id: 'x' })],
+      ['s huge', b64({ s: 9007199254740991, n: 0, id: 'x' })],
+      ['n<0', b64({ s: 1, n: -1, id: 'x' })],
+      ['n>999999999', b64({ s: 1, n: 1_000_000_000, id: 'x' })],
+      ['n fractional', b64({ s: 1, n: 1.5, id: 'x' })],
+      ['s fractional', b64({ s: 1.5, n: 0, id: 'x' })],
+      ['legacy t', b64({ t: 1790000000123, id: 'x' })],
+      ['legacy t huge', b64({ t: 9007199254740991, id: 'x' })],
+      ['id path', b64({ s: 1, n: 0, id: 'a/b' })],
+      ['missing n', b64({ s: 1, id: 'x' })],
+    ];
+    const out: Record<string, string> = {};
+    for (const [k, c] of cases) out[k] = await outcome(call('f2-caller', { cursor: c }));
+    out['valid edge max'] = await outcome(call('f2-caller', { cursor: b64({ s: 253402300799, n: 999999999, id: 'x' }) }));
+    out['valid edge min'] = await outcome(call('f2-caller', { cursor: b64({ s: -62135596800, n: 0, id: 'x' }) }));
+    console.log('F2', JSON.stringify(out));
+    for (const k of cases.map(([k]) => k)) expect(out[k]).toBe('HttpsError:invalid-argument');
+    expect(out['valid edge max']).toBe('RESOLVED');
+    expect(out['valid edge min']).toBe('RESOLVED');
+  });
+});

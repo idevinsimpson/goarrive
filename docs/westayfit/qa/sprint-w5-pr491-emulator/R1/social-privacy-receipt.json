@@ -1,0 +1,64 @@
+{
+  "target": "emulator",
+  "project": "demo-wsf-local",
+  "runTag": "e5p-muhl80ch-17f3ff",
+  "transport": {
+    "wsfSetCommunityVisibility": "shut",
+    "wsfCommunityMembers": "open",
+    "wsfCommunityActivity": "open"
+  },
+  "rows": {
+    "row1": "BLOCKED",
+    "row2": "BLOCKED",
+    "row3": "BLOCKED",
+    "row4": "BLOCKED",
+    "row5": "BLOCKED",
+    "row6": "BLOCKED",
+    "row7": "BLOCKED"
+  },
+  "detail": {
+    "row1": [
+      {
+        "status": "BLOCKED",
+        "note": "wsfsetcommunityvisibility transport is shut; nothing was written"
+      }
+    ],
+    "row2": [
+      {
+        "status": "BLOCKED",
+        "note": "wsfsetcommunityvisibility transport is shut; nothing was written"
+      }
+    ],
+    "row3": [
+      {
+        "status": "BLOCKED",
+        "note": "wsfsetcommunityvisibility transport is shut; nothing was written"
+      }
+    ],
+    "row4": [
+      {
+        "status": "BLOCKED",
+        "note": "wsfsetcommunityvisibility transport is shut; nothing was written"
+      }
+    ],
+    "row5": [
+      {
+        "status": "BLOCKED",
+        "note": "wsfsetcommunityvisibility transport is shut; nothing was written"
+      }
+    ],
+    "row6": [
+      {
+        "status": "BLOCKED",
+        "note": "wsfsetcommunityvisibility transport is shut; nothing was written"
+      }
+    ],
+    "row7": [
+      {
+        "status": "BLOCKED",
+        "note": "wsfsetcommunityvisibility transport is shut; nothing was written"
+      }
+    ]
+  },
+  "verdict": "blocked"
+}

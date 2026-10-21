@@ -1,0 +1,168 @@
+{
+  "target": "emulator",
+  "project": "demo-wsf-local",
+  "runTag": "e5p-muhl6g9o-38c7e0",
+  "transport": {
+    "wsfSetCommunityVisibility": "open",
+    "wsfCommunityMembers": "open",
+    "wsfCommunityActivity": "open"
+  },
+  "rows": {
+    "row1": "PASS",
+    "row2": "PASS",
+    "row3": "PASS",
+    "row4": "PASS",
+    "row5": "PASS",
+    "row6": "PASS",
+    "row7": "PASS"
+  },
+  "detail": {
+    "row1": [
+      {
+        "status": "PASS",
+        "note": "setter answered {\"groupId\":\"e5grp-e5p-muhl6g9o-38c7e0-a\",\"name\":\"private\",\"activity\":\"visible\"}"
+      },
+      {
+        "status": "PASS",
+        "note": "after a reload wsfMyCommunities says name=private"
+      },
+      {
+        "status": "PASS",
+        "note": "the membership stores communityNameVisibility=private"
+      }
+    ],
+    "row2": [
+      {
+        "status": "PASS",
+        "note": "setter answered {\"groupId\":\"e5grp-e5p-muhl6g9o-38c7e0-a\",\"name\":\"private\",\"activity\":\"private\"}"
+      },
+      {
+        "status": "PASS",
+        "note": "after a reload wsfMyCommunities says name=private activity=private"
+      },
+      {
+        "status": "PASS",
+        "note": "the membership stores communityActivityVisibility=private"
+      }
+    ],
+    "row3": [
+      {
+        "status": "PASS",
+        "note": "the member is not listed by name; the champion still is"
+      },
+      {
+        "status": "PASS",
+        "note": "the member's 17 shows with no name"
+      },
+      {
+        "status": "PASS",
+        "note": "no name or uid of the member anywhere in the activity payload"
+      }
+    ],
+    "row4": [
+      {
+        "status": "PASS",
+        "note": "B still reads name=visible activity=visible"
+      },
+      {
+        "status": "PASS",
+        "note": "B's membership carries no privacy field"
+      },
+      {
+        "status": "PASS",
+        "note": "B setter answered {\"groupId\":\"e5grp-e5p-muhl6g9o-38c7e0-b\",\"name\":\"private\",\"activity\":\"visible\"}"
+      },
+      {
+        "status": "PASS",
+        "note": "A is unchanged by the change in B"
+      }
+    ],
+    "row5": [
+      {
+        "status": "PASS",
+        "note": "outsider setter answered PERMISSION_DENIED"
+      },
+      {
+        "status": "PASS",
+        "note": "outsider wsfCommunityMembers answered PERMISSION_DENIED"
+      },
+      {
+        "status": "PASS",
+        "note": "outsider wsfCommunityActivity answered PERMISSION_DENIED"
+      },
+      {
+        "status": "PASS",
+        "note": "no membership was created for the outsider"
+      },
+      {
+        "status": "PASS",
+        "note": "an anonymous setter call answered UNAUTHENTICATED"
+      }
+    ],
+    "row6": [
+      {
+        "status": "PASS",
+        "note": "default: the member is listed by name"
+      },
+      {
+        "status": "PASS",
+        "note": "default: the member's 17 shows with their name"
+      },
+      {
+        "status": "PASS",
+        "note": "activity OFF: the member's 17 is not in the feed"
+      },
+      {
+        "status": "PASS",
+        "note": "the champion's own row is unaffected"
+      },
+      {
+        "status": "PASS",
+        "note": "people moved today still counts the member (got 2)"
+      },
+      {
+        "status": "PASS",
+        "note": "the member count stays truthful (got 2)"
+      },
+      {
+        "status": "PASS",
+        "note": "the goal total still includes the member (got 22)"
+      },
+      {
+        "status": "PASS",
+        "note": "restoring answered {\"groupId\":\"e5grp-e5p-muhl6g9o-38c7e0-a\",\"name\":\"visible\",\"activity\":\"visible\"}"
+      },
+      {
+        "status": "PASS",
+        "note": "restored: listed by name again"
+      },
+      {
+        "status": "PASS",
+        "note": "restored: the 17 shows with the name again"
+      }
+    ],
+    "row7": [
+      {
+        "status": "PASS",
+        "note": "wsfGoalPulse (anonymous) carries no member name, uid or email"
+      },
+      {
+        "status": "PASS",
+        "note": "wsfGoalRecentAdditions (anonymous) carries no member name, uid or email"
+      },
+      {
+        "status": "PASS",
+        "note": "wsfSetCommunityVisibility without a member identity answered UNAUTHENTICATED"
+      },
+      {
+        "status": "PASS",
+        "note": "wsfCommunityMembers without a member identity answered UNAUTHENTICATED"
+      },
+      {
+        "status": "PASS",
+        "note": "wsfCommunityActivity without a member identity answered UNAUTHENTICATED"
+      }
+    ]
+  },
+  "verdict": "pass"
+}

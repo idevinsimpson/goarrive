@@ -1,0 +1,286 @@
+/**
+ * W5 INDEPENDENT QA — PR #390 (claude/wsf-community-visibility) at
+ * e982ddc78267355cda057c0a04b0134b2acf1928.
+ *
+ * NOT COMMITTED TO THE REVIEWED BRANCH. This file is run from a throwaway
+ * detached worktree of that head; #390 is reviewed read-only and is never
+ * written to.
+ *
+ * The three questions W5 was asked about this PR, answered against the running
+ * callables rather than against the source comments:
+ *
+ *   1. A visibility change is the member's OWN, in ONE community.
+ *   2. Coming back resets it — a rejoin and a Champion reinstatement both
+ *      return the membership to `private` and re-ask the question.
+ *   3. The directory publishes a name only for someone who chose it, and
+ *      publishes nothing else about them.
+ *
+ * Plus the boundary the whole feature rests on: the CALLER must be an active
+ * member of the community they are asking about, and every negative case must
+ * be the same refusal so the pair cannot be used to enumerate community ids.
+ */
+
+process.env.METADATA_SERVER_DETECTION = process.env.METADATA_SERVER_DETECTION || 'none';
+process.env.GCLOUD_PROJECT = 'demo-wsf-local';
+process.env.FIRESTORE_EMULATOR_HOST = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080';
+
+import { getFirestore } from 'firebase-admin/firestore';
+import { HttpsError } from 'firebase-functions/v2/https';
+import {
+  wsfCommunityMembers,
+  wsfJoinCommunity,
+  wsfLeaveCommunity,
+  wsfReinstateMember,
+  wsfRemoveMember,
+  wsfSetCommunityVisibility,
+} from '../../src/index';
+
+function uniq(p: string): string {
+  return `${p}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+function req(uid: string | null, data: Record<string, unknown>): any {
+  return {
+    auth: uid ? ({ uid, token: { email_verified: true } as any } as any) : undefined,
+    data: data as any,
+    rawRequest: {} as any,
+    acceptsStreaming: false,
+  } as any;
+}
+async function call<T>(fn: { run: (r: any) => Promise<T> }, uid: string | null, data: Record<string, unknown>) {
+  try {
+    return { ok: true as const, value: await fn.run(req(uid, data)) };
+  } catch (e) {
+    return { ok: false as const, error: e as HttpsError };
+  }
+}
+
+const CHAMP = uniq('w5champ');
+const ALPHA = uniq('w5alpha');
+const BRAVO = uniq('w5bravo');
+const OUTSIDER = uniq('w5outsider');
+
+const NAME = {
+  [CHAMP]: `W5CHAMPNAME${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
+  [ALPHA]: `W5ALPHANAME${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
+  [BRAVO]: `W5BRAVONAME${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
+} as Record<string, string>;
+
+let groupA = '';
+let groupB = '';
+
+async function seedMember(groupId: string, uid: string, role: string, status = 'active') {
+  await getFirestore().doc(`wsfMemberships/${groupId}_${uid}`).set(
+    { groupId, userId: uid, role, membershipStatus: status, createdAt: new Date(), updatedAt: new Date() },
+    { merge: true }
+  );
+}
+async function readMembership(groupId: string, uid: string) {
+  const s = await getFirestore().doc(`wsfMemberships/${groupId}_${uid}`).get();
+  return (s.data() ?? {}) as Record<string, unknown>;
+}
+async function names(uid: string, groupId: string): Promise<string[]> {
+  const r = await call(wsfCommunityMembers, uid, { groupId });
+  if (!r.ok) return [`__REFUSED:${r.error.code}`];
+  return (r.value as { members: { displayName: string }[] }).members.map((m) => m.displayName).sort();
+}
+
+describe('W5 probe — #390 visibility is per-community, self-only, and reset on return', () => {
+  beforeAll(async () => {
+    const db = getFirestore();
+    await db.doc('_warmup/sprint-w5-390').set({ at: Date.now() });
+    groupA = uniq('w5gA');
+    groupB = uniq('w5gB');
+    for (const g of [groupA, groupB]) {
+      await db.doc(`wsfCommunityGroups/${g}`).set({
+        displayName: `W5 ${g}`,
+        groupType: 'custom',
+        joinPolicy: 'public',
+        joinCode: uniq('CODE').slice(0, 12),
+        lifecycleStatus: 'active',
+        isSample: false,
+        createdAt: new Date(),
+      });
+      await seedMember(g, CHAMP, 'foundingChampion');
+      await seedMember(g, ALPHA, 'member');
+      await seedMember(g, BRAVO, 'member');
+    }
+    for (const uid of [CHAMP, ALPHA, BRAVO]) {
+      await db.doc(`wsfMemberProfiles/${uid}`).set({ displayName: NAME[uid], updatedAt: new Date() });
+    }
+  }, 60_000);
+
+  test('a fresh membership is private: the directory names nobody', async () => {
+    expect(await names(ALPHA, groupA)).toEqual([]);
+  }, 30_000);
+
+  test('opting in names you in THAT community and nowhere else', async () => {
+    const set = await call(wsfSetCommunityVisibility, ALPHA, { groupId: groupA, visibility: 'visible' });
+    expect(set.ok).toBe(true);
+    if (set.ok) expect(set.value).toEqual({ groupId: groupA, visibility: 'visible' });
+
+    expect(await names(ALPHA, groupA)).toEqual([NAME[ALPHA]]);
+    // THE ISOLATION THAT MATTERS: the same person, the same account, the other
+    // community. One choice must not publish them everywhere they belong.
+    expect(await names(ALPHA, groupB)).toEqual([]);
+  }, 30_000);
+
+  test('there is no targetUid: a Champion cannot publish somebody else', async () => {
+    /*
+      The Champion action family in this file shares the shape
+      { groupId, targetUid }. This callable deliberately has no targetUid, so
+      the field is inert — the write must land on the CALLER's own row, and
+      BRAVO must still be unnamed.
+    */
+    const attempt = await call(wsfSetCommunityVisibility, CHAMP, {
+      groupId: groupA,
+      targetUid: BRAVO,
+      visibility: 'visible',
+    });
+    expect(attempt.ok).toBe(true);
+    const listed = await names(ALPHA, groupA);
+    expect(listed).not.toContain(NAME[BRAVO]);
+    // It published the CALLER instead, which is the only row it may touch.
+    expect(listed).toContain(NAME[CHAMP]);
+    expect((await readMembership(groupA, BRAVO)).visibility).toBeUndefined();
+  }, 30_000);
+
+  test('only the two literals are accepted; nothing malformed publishes anybody', async () => {
+    for (const bad of [true, 1, 'Visible', ' visible', null, {}, ['visible'], undefined]) {
+      const r = await call(wsfSetCommunityVisibility, BRAVO, { groupId: groupA, visibility: bad });
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error.code).toBe('invalid-argument');
+    }
+    expect(await names(ALPHA, groupA)).not.toContain(NAME[BRAVO]);
+  }, 30_000);
+
+  test('turning it back off removes the name again', async () => {
+    const off = await call(wsfSetCommunityVisibility, ALPHA, { groupId: groupA, visibility: 'private' });
+    expect(off.ok).toBe(true);
+    expect(await names(CHAMP, groupA)).not.toContain(NAME[ALPHA]);
+    // Answering 'private' is still an ANSWER, so the prompt is stamped.
+    expect((await readMembership(groupA, ALPHA)).visibilityPromptedAt).toBeDefined();
+  }, 30_000);
+
+  test('REINSTATEMENT RESETS TO PRIVATE and re-asks, even though the Champion acted', async () => {
+    await call(wsfSetCommunityVisibility, ALPHA, { groupId: groupA, visibility: 'visible' });
+    expect(await names(CHAMP, groupA)).toContain(NAME[ALPHA]);
+
+    const removed = await call(wsfRemoveMember, CHAMP, { groupId: groupA, targetUid: ALPHA });
+    expect(removed.ok).toBe(true);
+    // Removed: gone from the directory immediately.
+    expect(await names(CHAMP, groupA)).not.toContain(NAME[ALPHA]);
+
+    const back = await call(wsfReinstateMember, CHAMP, { groupId: groupA, targetUid: ALPHA });
+    expect(back.ok).toBe(true);
+
+    const row = await readMembership(groupA, ALPHA);
+    expect(row.membershipStatus).toBe('active');
+    // THE POINT: a status change by somebody else must not republish a name.
+    expect(row.visibility).toBe('private');
+    expect(row.visibilityPromptedAt).toBeUndefined();
+    expect(await names(CHAMP, groupA)).not.toContain(NAME[ALPHA]);
+  }, 30_000);
+
+  test('the directory is refused to a non-member, and to a signed-out caller', async () => {
+    const out = await call(wsfCommunityMembers, OUTSIDER, { groupId: groupA });
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.error.code).toBe('permission-denied');
+
+    const anon = await call(wsfCommunityMembers, null, { groupId: groupA });
+    expect(anon.ok).toBe(false);
+    if (!anon.ok) expect(anon.error.code).toBe('unauthenticated');
+
+    // A community that does not exist gets the SAME refusal a real one the
+    // caller is not in gets, so the pair cannot enumerate ids.
+    const ghost = await call(wsfCommunityMembers, OUTSIDER, { groupId: 'w5-no-such-group-at-all' });
+    expect(ghost.ok).toBe(false);
+    if (!ghost.ok && !out.ok) {
+      expect(ghost.error.code).toBe(out.error.code);
+      expect(ghost.error.message).toBe(out.error.message);
+    }
+  }, 30_000);
+
+  test('a removed or departed member is never listed, however visible they were', async () => {
+    await call(wsfSetCommunityVisibility, BRAVO, { groupId: groupA, visibility: 'visible' });
+    expect(await names(CHAMP, groupA)).toContain(NAME[BRAVO]);
+    for (const status of ['removed', 'departed', '', 'Active', 'pending']) {
+      await getFirestore()
+        .doc(`wsfMemberships/${groupA}_${BRAVO}`)
+        .set({ membershipStatus: status }, { merge: true });
+      expect(await names(CHAMP, groupA)).not.toContain(NAME[BRAVO]);
+    }
+    await seedMember(groupA, BRAVO, 'member', 'active');
+  }, 30_000);
+
+  test('a legacy or malformed visibility value is never a publication', async () => {
+    /*
+      Rows written before this feature have no `visibility` at all; an import
+      could carry 'Visible', ' visible' or `true`. The exclusion is at the
+      index, so none of them may match.
+    */
+    for (const v of ['Visible', ' visible', true, 1, 'VISIBLE', null]) {
+      await getFirestore()
+        .doc(`wsfMemberships/${groupA}_${BRAVO}`)
+        .set({ visibility: v as any }, { merge: true });
+      expect(await names(CHAMP, groupA)).not.toContain(NAME[BRAVO]);
+    }
+  }, 30_000);
+
+  test('a listed row carries a name and a role and NOTHING else — no uid, no email', async () => {
+    await call(wsfSetCommunityVisibility, BRAVO, { groupId: groupA, visibility: 'visible' });
+    const r = await call(wsfCommunityMembers, ALPHA, { groupId: groupA });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const { members } = r.value as { members: Record<string, unknown>[] };
+    expect(members.length).toBeGreaterThan(0);
+    for (const m of members) {
+      expect(Object.keys(m).sort()).toEqual(['displayName', 'role']);
+      expect(['foundingChampion', 'member']).toContain(m.role);
+    }
+    const blob = JSON.stringify(r.value);
+    for (const uid of [CHAMP, ALPHA, BRAVO, OUTSIDER]) expect(blob).not.toContain(uid);
+    expect(blob).not.toContain('@');
+  }, 30_000);
+
+  test('REJOINING AFTER LEAVING RESETS TO PRIVATE and re-asks the question', async () => {
+    /*
+      The other way back in, and the one a member does to themselves. They were
+      visible, they left, they returned through the ordinary link. Consent to
+      be named must not have survived the round trip: `{ merge: true }` on the
+      reactivation would preserve it silently, and they would be listed again
+      without ever being asked.
+    */
+    const db = getFirestore();
+    // 16-128 chars, base64url alphabet - the shape normalizeJoinCode() requires.
+    const code = ('W5RJ' + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)).slice(0, 24);
+    const g = uniq('w5gRejoin');
+    await db.doc(`wsfCommunityGroups/${g}`).set({
+      displayName: 'W5 rejoin community',
+      groupType: 'custom',
+      joinPolicy: 'public',
+      joinCode: code,
+      lifecycleStatus: 'active',
+      isSample: false,
+      createdAt: new Date(),
+    });
+    await seedMember(g, CHAMP, 'foundingChampion');
+    await seedMember(g, ALPHA, 'member');
+
+    await call(wsfSetCommunityVisibility, ALPHA, { groupId: g, visibility: 'visible' });
+    expect(await names(CHAMP, g)).toContain(NAME[ALPHA]);
+    expect((await readMembership(g, ALPHA)).visibilityPromptedAt).toBeDefined();
+
+    const left = await call(wsfLeaveCommunity, ALPHA, { groupId: g });
+    expect(left.ok).toBe(true);
+    expect((await readMembership(g, ALPHA)).membershipStatus).toBe('departed');
+
+    const rejoin = await call(wsfJoinCommunity, ALPHA, { joinCode: code });
+    expect(rejoin.ok).toBe(true);
+
+    const row = await readMembership(g, ALPHA);
+    expect(row.membershipStatus).toBe('active');
+    expect(row.visibility).toBe('private');
+    expect(row.visibilityPromptedAt).toBeUndefined();
+    expect(await names(CHAMP, g)).not.toContain(NAME[ALPHA]);
+  }, 30_000);
+});

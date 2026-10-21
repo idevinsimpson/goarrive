@@ -1,0 +1,154 @@
+import { writeFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
+import { test, type Browser, type Page } from '@playwright/test';
+import { seedActiveGoal, seedCommunity, seedProfile, seedVerifiedUser, stampId } from './helpers/mobile';
+
+// THROWAWAY W5 QA PROBE — never committed. Evaluates the smoke's Manage helpers verbatim.
+const BASE = process.env.WSF_PLAYWRIGHT_BASE_URL!;
+const HELPERS = process.env.W5_HELPERS!;
+const OUT = process.env.W5_OUT!;
+const CONTEXT_OPTIONS = { locale: 'en-US' };
+const PHONE_CONTEXT = { ...CONTEXT_OPTIONS, viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true };
+
+type R = { id: string; expect: 'resolve' | 'reject'; outcome: 'PASS' | 'FAIL'; detail: string; ms: number; extra?: unknown };
+const results: R[] = [];
+
+async function run(id: string, expect: 'resolve' | 'reject', fn: () => Promise<unknown>, extraFn?: () => Promise<unknown>) {
+  const t0 = Date.now();
+  let ok = true; let msg = ''; let val: unknown;
+  try { val = await fn(); } catch (e) { ok = false; msg = (e as Error).message.split('\n').slice(0, 4).join(' | '); }
+  const ms = Date.now() - t0;
+  const extra = extraFn ? await extraFn().catch((e) => `extra failed: ${(e as Error).message}`) : undefined;
+  const pass = expect === 'resolve' ? ok : !ok;
+  results.push({ id, expect, outcome: pass ? 'PASS' : 'FAIL', detail: ok ? `resolved${val !== undefined ? ` -> ${JSON.stringify(val)}` : ''}` : `rejected: ${msg}`, ms, extra });
+  console.log(`[${id}] ${pass ? 'PASS' : 'FAIL'} (${ms}ms) ${ok ? 'resolved ' + JSON.stringify(val ?? null) : 'rejected: ' + msg} ${extra ? JSON.stringify(extra) : ''}`);
+}
+
+async function signInPage(page: Page, email: string, password: string) {
+  await page.goto(`${BASE}/signin`, { waitUntil: 'domcontentloaded' });
+  await page.getByTestId('wsf-signin-email').waitFor({ state: 'visible', timeout: 20_000 });
+  await page.getByTestId('wsf-signin-email').fill(email);
+  await page.getByTestId('wsf-signin-password').fill(password);
+  await page.getByTestId('wsf-signin-submit').click();
+  await page.waitForURL(/\/(profile-setup)?$/, { timeout: 20_000 });
+}
+
+async function counts(page: Page) {
+  const ids = ['wsf-member-topbar', 'wsf-member-topbar-menu-button', 'wsf-member-topbar-menu', 'wsf-member-topbar-menu-manage-community', 'wsf-community-wordmark', 'wsf-community-manage', 'wsf-community-manage-panel'];
+  const o: Record<string, number> = {};
+  for (const id of ids) o[id] = await page.getByTestId(id).count();
+  return o;
+}
+
+/** Polls whether the shell menu is visible while `fn` runs. */
+async function watchMenu(page: Page, fn: () => Promise<unknown>) {
+  let seenVisible = 0; let polls = 0; let stop = false;
+  const poll = (async () => {
+    while (!stop) {
+      polls += 1;
+      if (await page.getByTestId('wsf-member-topbar-menu').first().isVisible().catch(() => false)) seenVisible += 1;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  })();
+  try { return await fn(); } finally {
+    stop = true; await poll;
+    (watchMenu as any).last = { menuVisiblePolls: seenVisible, polls };
+  }
+}
+
+test('W5 manage helper probe', async ({ browser }) => {
+  test.setTimeout(420_000);
+  const H = await import(pathToFileURL(HELPERS).href);
+  const tag = stampId();
+  const pw = 'Sup3rSecret!23';
+  const chEmail = `w5probe-ch-${tag}@example.com`;
+  const mbEmail = `w5probe-mb-${tag}@example.com`;
+  const chUid = await seedVerifiedUser(chEmail, pw);
+  const mbUid = await seedVerifiedUser(mbEmail, pw);
+  await seedProfile(chUid, 'Alex Rivera');
+  await seedProfile(mbUid, 'Sam Ortiz');
+  const groupId = `w5probe-${tag}`;
+  await seedCommunity({ groupId, displayName: 'W5 Probe Movers', joinPolicy: 'private', members: [{ uid: chUid, role: 'foundingChampion' }, { uid: mbUid, role: 'member' }] });
+  const goalId = `w5probegoal-${tag}`;
+  await seedActiveGoal({ goalId, groupId, ownerUid: chUid, title: 'W5 Probe Squats', target: 5000, unit: 'squats', total: 1200 });
+  const url = `${BASE}/community/${groupId}`;
+  const ready = async (p: Page) => {
+    try { await p.getByTestId(`wsf-community-goal-link-${goalId}`).waitFor({ state: 'visible', timeout: 40_000 }); }
+    catch (e) { console.log('READY FAIL url=', p.url(), 'counts=', JSON.stringify(await counts(p)), 'text=', (await p.locator('body').innerText()).slice(0, 1500).replace(/\n/g, ' / ')); await p.screenshot({ path: OUT + '.readyfail.png' }); throw e; }
+  };
+
+  for (const [label, opts] of [['desktop', CONTEXT_OPTIONS], ['phone', PHONE_CONTEXT]] as const) {
+    const chCtx = await browser.newContext(opts);
+    const mbCtx = await browser.newContext(opts);
+    const ch = await chCtx.newPage();
+    const mb = await mbCtx.newPage();
+    try {
+      await signInPage(ch, chEmail, pw);
+      await signInPage(mb, mbEmail, pw);
+
+      // P1: exactly as the smoke does it — goto, then openManage with no extra ready wait.
+      await ch.goto(url);
+      await run(`${label} P1 champion openManage`, 'resolve', async () => {
+        await H.openManage(ch);
+        const vis = await ch.getByTestId(H.MANAGE_PANEL).isVisible();
+        if (!vis) throw new Error('panel not visible after openManage');
+        return { panelVisible: vis };
+      }, async () => ({ surface: await H.manageSurface(ch, 1000), counts: await counts(ch) }));
+
+      // P2: member after goal-link ready (as the smoke does)
+      await mb.goto(url);
+      await ready(mb);
+      const before = await counts(mb);
+      await run(`${label} P2 member assertMemberHasNoManage`, 'resolve', () => watchMenu(mb, () => H.assertMemberHasNoManage(mb)), async () => ({
+        surface: await H.manageSurface(mb, 1000), before, watch: (watchMenu as any).last,
+        menuVisibleAfter: await mb.getByTestId('wsf-member-topbar-menu').first().isVisible().catch(() => false), countsAfter: await counts(mb),
+      }));
+
+      if (label === 'phone') continue;
+
+      // N1: champion, fresh load, must reject
+      await ch.goto(url);
+      await ready(ch);
+      await run(`${label} N1 champion assertMemberHasNoManage`, 'reject', () => H.assertMemberHasNoManage(ch), async () => ({ counts: await counts(ch) }));
+
+      // N2: member openManage 5s must reject
+      await mb.goto(url);
+      await ready(mb);
+      await run(`${label} N2 member openManage{timeout:5000}`, 'reject', () => H.openManage(mb, { timeout: 5000 }), async () => ({ counts: await counts(mb) }));
+
+      // N3a: about:blank
+      const blank = await chCtx.newPage();
+      await blank.goto('about:blank');
+      await run(`${label} N3a about:blank manageSurface(3000)`, 'reject', () => H.manageSurface(blank, 3000));
+      await run(`${label} N3a about:blank openManage{timeout:3000}`, 'reject', () => H.openManage(blank, { timeout: 3000 }));
+      await blank.close();
+      // N3b: sign-in page, signed out (fresh context)
+      const anonCtx = await browser.newContext(opts);
+      const anon = await anonCtx.newPage();
+      await anon.goto(`${BASE}/signin`);
+      await anon.getByTestId('wsf-signin-email').waitFor({ state: 'visible', timeout: 20_000 });
+      await run(`${label} N3b /signin signed-out openManage{timeout:3000}`, 'reject', () => H.openManage(anon, { timeout: 3000 }), async () => ({ counts: await counts(anon) }));
+      await anon.goto(`${BASE}/`);
+      await anon.waitForTimeout(4000);
+      await run(`${label} N3c / signed-out manageSurface(3000)`, 'reject', () => H.manageSurface(anon, 3000), async () => ({ url: anon.url(), counts: await counts(anon) }));
+      await anonCtx.close();
+
+      // N4: both markers injected into the real champion page
+      await ch.goto(url);
+      await ready(ch);
+      const injected = await ch.evaluate(() => {
+        const hasShell = !!document.querySelector('[data-testid="wsf-member-topbar"]');
+        const d = document.createElement('div');
+        d.setAttribute('data-testid', hasShell ? 'wsf-community-wordmark' : 'wsf-member-topbar');
+        d.textContent = 'probe';
+        document.body.appendChild(d);
+        return d.getAttribute('data-testid');
+      });
+      await run(`${label} N4 both markers (injected ${injected}) openManage`, 'reject', () => H.openManage(ch, { timeout: 5000 }), async () => ({ counts: await counts(ch) }));
+    } finally {
+      await chCtx.close();
+      await mbCtx.close();
+    }
+  }
+  writeFileSync(OUT, JSON.stringify({ browserVersion: browser.version(), results }, null, 2));
+});
