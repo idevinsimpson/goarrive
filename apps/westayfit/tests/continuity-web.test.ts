@@ -227,6 +227,77 @@ describe('web (NATIVE-STATE-2): event, marker and kiosk returns under the same o
   });
 });
 
+describe('web (NATIVE-STATE-3): the join QR event context and the device-mode answer', () => {
+  const JOIN_A = 'JoinCodeForGroupA_01';
+  const JOIN_B = 'JoinCodeForGroupB_02';
+
+  it('a signed-out stash is stored with the join code it arrived on', async () => {
+    const { setPendingEventActivity, setPendingEventGoal } = await import('../src/stationSession');
+    void setPendingEventGoal('goal_1', JOIN_A);
+    void setPendingEventActivity('squats', 'goal_1', JOIN_A);
+    expect(window.sessionStorage.getItem('wsf.pendingEventGoalId')).toBe(
+      JSON.stringify({ goalId: 'goal_1', joinCode: JOIN_A })
+    );
+    expect(window.sessionStorage.getItem('wsf.pendingEventActivity')).toBe(
+      JSON.stringify({ activity: 'squats', goalId: 'goal_1', joinCode: JOIN_A })
+    );
+    expect(window.localStorage.length).toBe(0);
+  });
+
+  it("a member's stash carries its owner and is not applied to another account's join", async () => {
+    const je = await import('../src/joinEventHandoff');
+    void je.setPendingEventGoal('goal_1', JOIN_A, A);
+    void je.setPendingEventActivity('squats', 'goal_1', JOIN_A, A);
+    expect(JSON.parse(window.sessionStorage.getItem('wsf.pendingEventGoalId') as string)).toEqual({
+      goalId: 'goal_1',
+      joinCode: JOIN_A,
+      owner: A,
+    });
+    expect(await je.takeJoinEventContext(B, JOIN_A)).toEqual({ goalId: null, activity: null });
+    expect(window.sessionStorage.getItem('wsf.pendingEventGoalId')).toBeNull();
+  });
+
+  it('the same account takes its own context for the same code, once', async () => {
+    const je = await import('../src/joinEventHandoff');
+    void je.setPendingEventGoal('goal_1', JOIN_A, A);
+    void je.setPendingEventActivity('squats', 'goal_1', JOIN_A, A);
+    expect(await je.takeJoinEventContext(A, JOIN_A)).toEqual({ goalId: 'goal_1', activity: 'squats' });
+    expect(await je.takeJoinEventContext(A, JOIN_A)).toEqual({ goalId: null, activity: null });
+  });
+
+  it('an abandoned event scan for join A does not redirect a later join B in the same tab', async () => {
+    const je = await import('../src/joinEventHandoff');
+    const { routeAfterJoin } = await import('../src/stationSession');
+    void je.setPendingEventGoal('goal_1', JOIN_A);
+    void je.setPendingEventActivity('squats', 'goal_1', JOIN_A);
+    const context = await je.takeJoinEventContext(A, JOIN_B);
+    expect(context).toEqual({ goalId: null, activity: null });
+    expect(routeAfterJoin('group_b', context.goalId, context.activity)).toBe('/community/group_b');
+    expect(window.sessionStorage.getItem('wsf.pendingEventGoalId')).toBeNull();
+    expect(window.sessionStorage.getItem('wsf.pendingEventActivity')).toBeNull();
+  });
+
+  it('a bare event or activity left in the tab from before the code was kept is discarded, never routed', async () => {
+    const je = await import('../src/joinEventHandoff');
+    window.sessionStorage.setItem('wsf.pendingEventGoalId', 'goal_1');
+    window.sessionStorage.setItem('wsf.pendingEventActivity', 'squats');
+    expect(await je.takeJoinEventContext(A, JOIN_A)).toEqual({ goalId: null, activity: null });
+    expect(window.sessionStorage.length).toBe(0);
+  });
+
+  it('the device-mode answer stays the bare word in localStorage, readable at once', async () => {
+    const dm = await import('../src/deviceMode');
+    expect(dm.isDeviceModeReady()).toBe(true);
+    expect(await dm.saveDeviceMode('shared')).toBe(true);
+    expect(window.localStorage.getItem('wsf.deviceMode')).toBe('shared');
+    expect(dm.readDeviceMode()).toBe('shared');
+    // Not an account's: an auth change leaves it alone.
+    for (const l of authListeners) l(null);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(dm.readDeviceMode()).toBe('shared');
+  });
+});
+
 describe('web (NATIVE-STATE-2 review): an owned record found after a same-tab reload is still cleared at sign-out', () => {
   it('the session watch starts when the module loads over an owned record, and sign-out clears it', async () => {
     window.sessionStorage.setItem(
@@ -254,6 +325,29 @@ describe('web (NATIVE-STATE-2 review): an owned record found after a same-tab re
     await import('../src/pendingJoinCode');
     await new Promise((r) => setTimeout(r, 0));
     expect(authListeners.length).toBe(before);
+    window.sessionStorage.clear();
+  });
+});
+
+describe('web (#639 delta): a refused removal still discards the join context', () => {
+  it('the removal is retried and then overwritten, so the context does not apply a second time', async () => {
+    const je = await import('../src/joinEventHandoff');
+    const { DISCARDED_RECORD } = await import('../src/postAuthDestination');
+    const JOIN = 'JoinCodeForGroupA_01';
+    void je.setPendingEventGoal('goal_1', JOIN);
+    void je.setPendingEventActivity('squats', 'goal_1', JOIN);
+    const realRemove = Storage.prototype.removeItem;
+    const spy = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (this: Storage, key: string) {
+      if (key.startsWith('wsf.pendingEvent')) throw new DOMException('refused', 'SecurityError');
+      return realRemove.call(this, key);
+    });
+    try {
+      expect(await je.takeJoinEventContext('uid-a', JOIN)).toEqual({ goalId: 'goal_1', activity: 'squats' });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(window.sessionStorage.getItem('wsf.pendingEventGoalId')).toBe(DISCARDED_RECORD);
+    expect(await je.takeJoinEventContext('uid-a', JOIN)).toEqual({ goalId: null, activity: null });
     window.sessionStorage.clear();
   });
 });
@@ -343,5 +437,25 @@ describe('the mirror counts writes, not removals', () => {
     await mirror.write('k', 'a');
     expect(mirror.writeCount('k')).toBe(2);
     expect(mirror.writeCount('other')).toBe(0);
+  });
+});
+
+describe('web (#639 follow-up): "this is my own phone" sticks when the browser refuses the removal', () => {
+  it('the removal is retried and then overwritten with a non-answer', async () => {
+    const dm = await import('../src/deviceMode');
+    await dm.saveDeviceMode('shared');
+    const realRemove = Storage.prototype.removeItem;
+    const spy = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (this: Storage, key: string) {
+      if (key === 'wsf.deviceMode') throw new DOMException('refused', 'SecurityError');
+      return realRemove.call(this, key);
+    });
+    try {
+      expect(await dm.clearDeviceMode()).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(window.localStorage.getItem('wsf.deviceMode')).toBe('forgotten');
+    expect(dm.readDeviceMode()).toBeNull();
+    window.localStorage.clear();
   });
 });

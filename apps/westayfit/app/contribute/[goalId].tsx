@@ -29,11 +29,13 @@ import {
   ATTEMPT_CONFLICT_NOTICE,
   ATTEMPT_NOT_SENT_NOTICE,
   NOT_SAVED_NOTICE,
+  RECORDING_HEADING,
   REPLAY_OFFLINE_NOTICE,
   REPLAY_SIGN_IN_NOTICE,
   RESTORE_FAILED_BODY,
   RESTORE_FAILED_HEADING,
   RESTORE_RETRY_LABEL,
+  UNKNOWN_OUTCOME_HEADING,
   canAddMore,
   classifyContributeError,
   isDefiniteRefusal,
@@ -100,6 +102,7 @@ import { PROGRESS_GREEN } from '../../src/ui/brandAssets';
 import { ButtonLink } from '../../src/ui/ButtonLink';
 import { formatClock } from '../../src/ui/dates';
 import { LivingWeProgress } from '../../src/ui/LivingWeProgress';
+import { SpokenOnce } from '../../src/ui/SpokenOnce';
 import { TogetherCompletion } from '../../src/ui/TogetherCompletion';
 import { TOGETHER_COLORS } from '../../src/ui/togetherMotion';
 import {
@@ -127,6 +130,8 @@ import {
   useSheetExit,
   useSheetFocusContainment,
 } from '../../src/ui/sheetMotion';
+import { liveRegion } from '../../src/ui/announce';
+import { useStepHeadingFocus } from '../../src/ui/stepHeadingFocus';
 import { useReducedMotion } from '../../src/ui/useReducedMotion';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -545,6 +550,17 @@ export default function ContributeToGoal() {
   const [repeatPolicy, setRepeatPolicy] = useState<RepeatPolicy>(() => known?.policy ?? 'once');
   const [pending, setPending] = useState<PendingContribution | null>(null);
   /*
+    W13-5 (INT-17, native). The in-flight and unknown-outcome screens replace
+    what was on screen in place (the count or review step, a restore, Confirm
+    and its answer), taking the control the member pressed with it. When the
+    attempt or its state changes, the heading of the screen now showing takes
+    the screen reader's focus (src/ui/stepHeadingFocus.native.ts: never on the
+    first mount; a later change cancels a pending one). A no-op on web, where
+    the sheet's focus containment does this.
+  */
+  const stateHeadingRef = useRef<Text>(null);
+  useStepHeadingFocus(pending ? `${pending.attemptId}:${pending.state}` : null, stateHeadingRef);
+  /*
     NATIVE-STATE-1. The pending record lives behind the device storage
     boundary now (AsyncStorage on a phone), so reading it back takes a moment.
     `restoreSettled` is false from every context change until this account's
@@ -640,6 +656,10 @@ export default function ContributeToGoal() {
    * reconcile, and cleared with every context change.
    */
   const [freshAttempt, setFreshAttempt] = useState<string | null>(null);
+  // W13-8 (INT-18): the attempt the receipt on screen confirms, so a phone is
+  // told about each receipt once (the kiosk receipt below; the Together
+  // receipt speaks for itself).
+  const receiptAttemptRef = useRef<string | null>(null);
 
   // Optional timer on the movement screen. It measures nothing the app
   // records; it is a stopwatch for the member's own reference.
@@ -1068,6 +1088,7 @@ export default function ContributeToGoal() {
       // stored record is cleared by `settleAttempt` once this returns, under
       // the same context check (src/pendingContribution.ts).
       setPending(null);
+      receiptAttemptRef.current = attemptId;
       setLastResult(data);
       // Applied in the same batch as the receipt, so the receipt mounts already
       // knowing whether it may move. A replay of an attempt that had landed
@@ -1734,11 +1755,13 @@ export default function ContributeToGoal() {
         {kioskCountdown != null ? (
         <View style={styles.kioskCountdownRow}>
           {/* D-2. The countdown changes without anybody acting, so it
-              announces itself politely rather than interrupting. */}
+              announces itself politely rather than interrupting. On a phone
+              (W13-4b) it is said once per clock start, never per tick. */}
+          <SpokenOnce message={kioskCountdown} announceKey={`kiosk-countdown:${kioskStartedAt}`} />
           <Text
             style={[styles.caption, tone === 'dark' ? styles.captionOnDark : null]}
             testID="wsf-kiosk-countdown"
-            aria-live="polite"
+            {...liveRegion}
           >
             {kioskCountdown}
           </Text>
@@ -1764,8 +1787,11 @@ export default function ContributeToGoal() {
           <Text
             style={[styles.kioskError, tone === 'dark' ? styles.kioskErrorDark : null]}
             testID="wsf-kiosk-finish-error"
-            aria-live="polite"
+            {...liveRegion}
           >
+            {/* W13-4b: said on a phone each time a Finish fails (the line is
+                cleared when Finish is pressed, so each failure mounts it anew). */}
+            <SpokenOnce message={kioskError} announceKey="kiosk-finish-error" />
             {kioskError}
           </Text>
         ) : null}
@@ -2188,7 +2214,7 @@ export default function ContributeToGoal() {
             <View
               style={styles.togetherBody}
               testID="wsf-contribute-receipt"
-              aria-live="polite"
+              {...liveRegion}
               {...({ dataSet: { variant } } as Record<string, unknown>)}
             >
               <TogetherCompletion
@@ -2267,10 +2293,15 @@ export default function ContributeToGoal() {
             style={[styles.sheetBody, windowHeight < 700 ? styles.sheetBodyShort : null]}
             testID="wsf-contribute-receipt"
             // D-2. The outcome replaces the form in place rather than by
-            // navigating, so the receipt has to announce itself.
-            aria-live="polite"
+            // navigating, so the receipt has to announce itself: a polite live
+            // region on web; on a phone, said once per attempt and outcome.
+            {...liveRegion}
             {...({ dataSet: { variant } } as Record<string, unknown>)}
           >
+            <SpokenOnce
+              message={`${copy.headline} ${copy.subline}`}
+              announceKey={`${receiptAttemptRef.current}:${r.alreadyRecorded ? 'already' : 'recorded'}`}
+            />
             <View style={styles.badge}>
               <View style={styles.badgeCheck} />
               <Text style={styles.badgeText}>{r.alreadyRecorded ? 'Already recorded' : 'Recorded'}</Text>
@@ -2484,11 +2515,13 @@ export default function ContributeToGoal() {
     return screen(
       <>
         {renderChrome(false)}
-        <View style={styles.sheet} testID="wsf-contribute-recording" aria-live="polite">
+        <View style={styles.sheet} testID="wsf-contribute-recording" {...liveRegion}>
+          {/* W13-4: said once per attempt on a phone; the live region speaks on web. */}
+          <SpokenOnce message={RECORDING_HEADING} announceKey={`${pending.attemptId}:sending`} />
           {renderSheetHead('Your attempt')}
           <View style={styles.sheetBody}>
             <ActivityIndicator color={NAVY} size="large" />
-            <Text style={styles.stepHeading} {...HEADING_1}>Recording your contribution…</Text>
+            <Text ref={stateHeadingRef} style={styles.stepHeading} {...HEADING_1}>{RECORDING_HEADING}</Text>
             <Text style={styles.stepBody}>{effortLabel(pending.count, unitKnown)}</Text>
           </View>
         </View>
@@ -2524,10 +2557,15 @@ export default function ContributeToGoal() {
           shared total is untouched, nothing offers to discard the attempt, and
           nothing says "nothing was counted" -- none of that is known.
         */}
-        <View style={styles.sheet} testID="wsf-contribute-pending" aria-live="polite">
+        <View style={styles.sheet} testID="wsf-contribute-pending" {...liveRegion}>
+          {/* W13-4: said once per attempt on a phone, with the one-line notice when there is one. */}
+          <SpokenOnce
+            message={attemptNotice ? `${UNKNOWN_OUTCOME_HEADING} ${attemptNotice}` : UNKNOWN_OUTCOME_HEADING}
+            announceKey={`${pending.attemptId}:unknown`}
+          />
           {renderSheetHead('Your attempt')}
           <View style={styles.sheetBody}>
-            <Text style={styles.stepHeading} {...HEADING_1}>We couldn’t confirm your contribution yet.</Text>
+            <Text ref={stateHeadingRef} style={styles.stepHeading} {...HEADING_1}>{UNKNOWN_OUTCOME_HEADING}</Text>
             <Text style={styles.stepBody} testID="wsf-contribute-pending-count">
               {'You entered '}
               <Text style={styles.pendingAmount}>{effortLabel(pending.count, unitKnown)}</Text>
@@ -2767,7 +2805,9 @@ export default function ContributeToGoal() {
     return screen(
       <>
         {renderChrome(false)}
-        <View style={styles.sheet} testID="wsf-contribute-restore-failed" aria-live="polite">
+        <View style={styles.sheet} testID="wsf-contribute-restore-failed" {...liveRegion}>
+          {/* W13-4: said once on a phone, while this screen stays up. */}
+          <SpokenOnce message={RESTORE_FAILED_HEADING} announceKey="restore-failed" />
           {renderSheetHead('Your attempt')}
           <View style={styles.sheetBody}>
             <Text style={styles.stepHeading} {...HEADING_1}>{RESTORE_FAILED_HEADING}</Text>

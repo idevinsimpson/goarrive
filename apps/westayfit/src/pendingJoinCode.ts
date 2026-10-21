@@ -34,17 +34,17 @@ import {
  * Whether a value looks like a plausible join code — matches the server's
  * normalizer so we do not stash garbage that the callables will reject.
  */
-function isValidShape(code: string): boolean {
+export function isJoinCodeShape(code: string): boolean {
   return /^[A-Za-z0-9_-]{16,128}$/.test(code);
 }
 
 const joinCode = definePostAuthDestination<string>({
   key: 'wsf.pendingJoinCode',
   decode(raw) {
-    if (isValidShape(raw)) return { value: raw, owner: null };
+    if (isJoinCodeShape(raw)) return { value: raw, owner: null };
     try {
       const v = JSON.parse(raw) as { code?: unknown; owner?: unknown } | null;
-      if (v && typeof v.code === 'string' && isValidShape(v.code) && typeof v.owner === 'string' && v.owner) {
+      if (v && typeof v.code === 'string' && isJoinCodeShape(v.code) && typeof v.owner === 'string' && v.owner) {
         return { value: v.code, owner: v.owner };
       }
     } catch {
@@ -64,7 +64,7 @@ const joinCode = definePostAuthDestination<string>({
  * the member just has to re-scan.
  */
 export function setPendingJoinCode(code: string, ownerUid: string | null = null): Promise<boolean> {
-  if (!isValidShape(code)) return Promise.resolve(false);
+  if (!isJoinCodeShape(code)) return Promise.resolve(false);
   return joinCode.write(code, ownerUid);
 }
 

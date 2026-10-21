@@ -21,6 +21,7 @@
  * exactly as when the screens called `set*` directly.
  */
 import { clearEventReturn } from './eventReturn';
+import { clearPendingEventActivity, clearPendingEventGoal } from './joinEventHandoff';
 import { clearKioskReturnGoal, markKioskSession, setKioskReturnGoal } from './kioskSession';
 import { clearMarkerReturn, setMarkerReturn } from './markerEntry';
 import { clearPendingJoinCode } from './pendingJoinCode';
@@ -53,7 +54,8 @@ export function armMarkerReturn(slug: string, uid: string | null, now: number = 
 
 /**
  * A shared screen has come to rest: nothing an earlier visitor armed may
- * route the next one. Resolves whether every clear was kept.
+ * route the next one — including the event context a join QR carried
+ * (src/joinEventHandoff.ts). Resolves whether every clear was kept.
  *
  * NOT the kiosk-session marker (src/kioskSession.ts): this runs as soon as
  * the start screen is in front, while the visitor may still be signed in.
@@ -67,5 +69,7 @@ export function resetSharedScreenHandoffs(): Promise<boolean> {
     clearEventReturn(),
     clearMarkerReturn(),
     clearKioskReturnGoal(),
+    clearPendingEventGoal(),
+    clearPendingEventActivity(),
   ]).then((results) => results.every(Boolean));
 }

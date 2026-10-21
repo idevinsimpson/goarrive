@@ -64,7 +64,30 @@ export type PostAuthDestination<V> = {
   /** Stash it. `owner` is the account signed in now, or null. Resolves whether the device kept it. */
   write(value: V, owner: string | null): Promise<boolean>;
   clear(): Promise<boolean>;
+  /**
+   * Clear it FOR GOOD: a removal the device refuses is retried once, and if
+   * it still refuses, the record is overwritten with `DISCARDED_RECORD`,
+   * which no destination decodes — so a record that must be consumed once
+   * cannot apply again after a relaunch. Resolves whether any of the three
+   * steps was kept.
+   *
+   * It stops — leaving the key to the newer write — once a write has been
+   * issued since `since` (default: now). If the device then refuses that
+   * newer write, the record being discarded stays on the device and can
+   * return after a relaunch; see the RESIDUAL note in the implementation.
+   */
+  discard(opts?: { since?: number }): Promise<boolean>;
+  /**
+   * Writes made to this record through the store in this process. Pass a
+   * value taken EARLIER as `discard({ since })` when the discard belongs to an
+   * operation that started then: a write that landed in between is newer than
+   * what that operation read, and is not discarded.
+   */
+  writeCount(): number;
 };
+
+/** What a record that could not be removed is overwritten with. Every codec decodes it as nothing. */
+export const DISCARDED_RECORD = '{"discarded":true}';
 
 const store = createKeyMirror(sessionKv, readSessionSync);
 const registry: PostAuthDestination<unknown>[] = [];
@@ -99,6 +122,46 @@ export function definePostAuthDestination<V>(codec: DestinationCodec<V>): PostAu
     },
     clear() {
       return store.remove(codec.key);
+    },
+    writeCount() {
+      return store.writeCount(codec.key);
+    },
+    async discard(opts) {
+      // A write that lands while a removal is outstanding is NEWER than the
+      // record being discarded (a fresh scan, say): once one has landed, the
+      // retry and the overwrite would destroy it, so they stop.
+      //
+      // "Newer" is decided by WRITE GENERATION, not by value: a re-stash of
+      // the identical record (a shared screen dropped the journey, then "use
+      // my own phone instead" stashed the same event again) is newer too, and
+      // a value comparison would destroy it. The count is of writes made
+      // through this store in this process, so it works on web as well, where
+      // `store.read` is sessionStorage itself and still holds the old value
+      // after a refused removal. A different value appearing without a write
+      // from here (another writer) counts as newer as well.
+      //
+      // RESIDUAL: a newer write that the device ALSO refuses still counts as
+      // newer — it is counted when it is issued, not when the device accepts
+      // it — so the discard leaves the key to it: after one refused removal,
+      // or before any removal when the caller's baseline is earlier (a
+      // timed-out take, or one that found nothing for its code), the record
+      // being discarded is still on the device and can apply once more after
+      // a relaunch (src/joinEventHandoff.ts, ACCEPTED LIMITS).
+      const since = opts?.since ?? store.writeCount(codec.key);
+      const discarding = store.read(codec.key);
+      const newerLanded = () => {
+        if (store.writeCount(codec.key) !== since) return true;
+        const now = store.read(codec.key);
+        return now !== null && now !== discarding;
+      };
+      // A write since the caller's baseline replaced the record it meant to
+      // discard (same key): that newer record is not this call's to remove.
+      if (newerLanded()) return true;
+      if (await store.remove(codec.key)) return true;
+      if (newerLanded()) return true;
+      if (await store.remove(codec.key)) return true;
+      if (newerLanded()) return true;
+      return store.write(codec.key, DISCARDED_RECORD);
     },
   };
   registry.push(destination as PostAuthDestination<unknown>);

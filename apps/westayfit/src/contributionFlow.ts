@@ -187,6 +187,15 @@ export function isDefiniteRefusal(e: unknown, attempt: 'new' | 'replay'): boolea
 
 // ---- the device's saved attempt (NATIVE-STATE-1) ---------------------------
 //
+// THE STATE SCREENS' HEADINGS (existing wording, unchanged). Kept here so the
+// sentence a phone's screen reader is told (W13-4, src/ui/SpokenOnce.tsx) is
+// the sentence on screen.
+
+/** The in-flight sheet (`wsf-contribute-recording`). */
+export const RECORDING_HEADING = 'Recording your contribution…';
+/** The unknown-outcome sheet (`wsf-contribute-pending`). */
+export const UNKNOWN_OUTCOME_HEADING = 'We couldn’t confirm your contribution yet.';
+
 // OWNER-VISIBLE WORDING, PENDING SIGN-OFF. Kept here, beside the rest of the
 // contribution copy, so the screen and its tests read the same sentences.
 
