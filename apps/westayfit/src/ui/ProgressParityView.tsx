@@ -14,7 +14,7 @@ import {
   type ProgressState,
   type ProgressStatus,
 } from '../progressParity';
-import { ACTION_GREEN, NAVY, PROGRESS_GREEN, SURFACE, elevation } from './kit';
+import { ACTION_GREEN, NAVY, PROGRESS_GREEN, SURFACE, elevation, numeralTextProps } from './kit';
 import { MEMBER_TAB_BAR_BODY, MEMBER_TAB_MOVE_OVERHANG } from './MemberTabBar';
 import { RefreshNote, type RefreshState } from './RefreshNote';
 import { useAnnounce } from './announce';
@@ -145,7 +145,10 @@ export function ProgressParityView({ state, actions, bottomInset = 0, refresh }:
                     accessible
                     accessibilityLabel={`${n(t.total)} ${t.unit} recorded`}
                   >
-                    <Text style={s.totalNumber}>{n(t.total)}</Text>
+                    {/* W12-8 (INT-16): capped and shrinking to fit on a phone; nothing on the web. */}
+                    <Text style={s.totalNumber} {...numeralTextProps}>
+                      {n(t.total)}
+                    </Text>
                     <Text style={s.totalUnit}>{`${t.unit} recorded`}</Text>
                   </View>
                 ))}
