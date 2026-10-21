@@ -47,7 +47,7 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 const APP_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -575,7 +575,21 @@ async function main() {
   return print(result) ? 0 : 1;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+/*
+  Run as a script, not imported. Compared by real path: node loads the main
+  module by its real path, so a script reached through a symlinked directory
+  (macOS's /var and /tmp, a linked checkout) would otherwise do nothing and
+  exit 0 (found with RV12-641-1's symlinked temporary directory).
+*/
+const realOrNull = (p) => {
+  try {
+    return realpathSync(p);
+  } catch {
+    return null;
+  }
+};
+const invokedAs = process.argv[1] ? realOrNull(process.argv[1]) : null;
+if (invokedAs !== null && invokedAs === realOrNull(fileURLToPath(import.meta.url))) {
   main().then(
     (code) => process.exit(code),
     (e) => {

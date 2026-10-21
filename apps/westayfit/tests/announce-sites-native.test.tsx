@@ -167,12 +167,24 @@ describe('W12-7: Progress speaks its partial note on a phone', () => {
 
   it('its visible sentence, once per appearance', () => {
     act(() => root.render(<ProgressParityView state={state} actions={actions} />));
-    expect(byId('wsf-activity-partial')!.textContent).toContain(PARTIAL_SENTENCE.slice(0, 40));
+    // RV12-641-A2: the whole visible sentence is the spoken one (the note's text is the sentence, then Retry).
+    expect(byId('wsf-activity-partial')!.textContent!.startsWith(PARTIAL_SENTENCE)).toBe(true);
     expect(spoken).toEqual([PARTIAL_SENTENCE]);
     act(() => root.render(<ProgressParityView state={{ ...state }} actions={actions} />));
     expect(spoken).toHaveLength(1);
     act(() => root.render(<ProgressParityView state={{ ...state, partial: false }} actions={actions} />));
     act(() => root.render(<ProgressParityView state={{ ...state, partial: true }} actions={actions} />));
     expect(spoken).toEqual([PARTIAL_SENTENCE, PARTIAL_SENTENCE]);
+  });
+
+  it('RV12-641-A3: not while Progress is out of sight; once when it is in front, and not again on later returns', () => {
+    act(() => root.render(<ProgressParityView state={state} actions={actions} inFront={false} />));
+    expect(byId('wsf-activity-partial')).not.toBeNull();
+    expect(spoken).toEqual([]);
+    act(() => root.render(<ProgressParityView state={state} actions={actions} inFront />));
+    expect(spoken).toEqual([PARTIAL_SENTENCE]);
+    act(() => root.render(<ProgressParityView state={state} actions={actions} inFront={false} />));
+    act(() => root.render(<ProgressParityView state={state} actions={actions} inFront />));
+    expect(spoken).toEqual([PARTIAL_SENTENCE]);
   });
 });
