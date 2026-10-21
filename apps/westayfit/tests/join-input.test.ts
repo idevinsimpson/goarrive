@@ -2,7 +2,15 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { inviteOrigins, inviteOriginsFor, isPublicHost, JOIN_INPUT_MAX, parseJoinInput } from '../src/joinInput';
+import {
+  configuredInviteHosts,
+  inviteOrigins,
+  inviteOriginsFor,
+  isDevTunnelHost,
+  isPublicHost,
+  JOIN_INPUT_MAX,
+  parseJoinInput,
+} from '../src/joinInput';
 import { readActivityLabel } from '../src/eventActivity';
 import { readEventParam } from '../src/ui/eventLinks';
 
@@ -348,6 +356,11 @@ describe('NB-1: isPublicHost', () => {
     ['under localhost', 'app.localhost'],
     ['.internal', 'wsf.internal'],
     ['home.arpa', 'nas.home.arpa'],
+    ['home.arpa itself (NB-C)', 'home.arpa'],
+    ['localhost.localdomain', 'localhost.localdomain'],
+    ['a router .lan name', 'nas.lan'],
+    ['a router .home name', 'router.home'],
+    ['fritz.box', 'fritz.box'],
     ['a leading hyphen', '-x.app'],
     ['empty', ''],
   ])('%s is not', (_l, h) => {
@@ -355,5 +368,58 @@ describe('NB-1: isPublicHost', () => {
   });
   it('a configured local name is ignored like any other non-public entry', () => {
     expect(inviteOriginsFor('ios', 'my-laptop.local, wsf.internal, ok.example', null)).toEqual(['https://ok.example']);
+  });
+});
+
+describe('NB-B: configured, configured-but-empty, or not configured', () => {
+  it('configuredInviteHosts: null when not configured, [] when every entry is ignored, else the hosts', () => {
+    for (const blank of [undefined, '', '   ', ' , ,\n']) expect(configuredInviteHosts(blank), String(blank)).toBeNull();
+    for (const ignored of [
+      'https://westayfit.app',
+      'westayfit.app:443',
+      'westayfit.app.',
+      '*.westayfit.app',
+      'westayfit.internal',
+      'abc-8081.exp.direct',
+      'laptop.tail1234.ts.net',
+      'https://westayfit.app, westayfit.app:443 *.westayfit.app',
+    ]) {
+      expect(configuredInviteHosts(ignored), ignored).toEqual([]);
+    }
+    expect(configuredInviteHosts('https://westayfit.app, Staging.WestayFit.app')).toEqual(['staging.westayfit.app']);
+  });
+
+  it("configured-but-empty reads no https link at all: not even the web's own origin", () => {
+    for (const os of ['web', 'ios', 'android']) {
+      expect(inviteOriginsFor(os, 'https://westayfit.app', 'https://goarrive.web.app'), os).toEqual([]);
+      expect(inviteOriginsFor(os, 'westayfit.app:443, *.x', 'http://localhost:8081'), os).toEqual([]);
+    }
+  });
+
+  it('not configured (blank) still reads the web page own origin, as before', () => {
+    expect(inviteOriginsFor('web', '  ,  ', 'https://goarrive.web.app')).toEqual(['https://goarrive.web.app']);
+  });
+
+  it('a development forwarder is never a configured invite host', () => {
+    expect(isDevTunnelHost('abc-8081.exp.direct')).toBe(true);
+    expect(isDevTunnelHost('fuzzy-space-8081.app.github.dev')).toBe(true);
+    expect(isDevTunnelHost('myexp.direct')).toBe(false);
+    expect(inviteOriginsFor('ios', 'abc-8081.exp.direct, westayfit.app', null)).toEqual(['https://westayfit.app']);
+  });
+
+  describe('the live default with a misconfigured value (vitest runs as the web)', () => {
+    const saved = process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS;
+    afterEach(() => {
+      if (saved === undefined) delete process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS;
+      else process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS = saved;
+    });
+    it('reads no https invite link, but westayfit: links and bare codes still work', () => {
+      process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS = 'https://westayfit.app';
+      expect(inviteOrigins()).toEqual([]);
+      expect(parseJoinInput(`${window.location.origin}/join/${CODE}`)).toBeNull();
+      expect(parseJoinInput(`https://westayfit.app/join/${CODE}`)).toBeNull();
+      expect(parseJoinInput(`westayfit://join/${CODE}`)?.href).toBe(`/join/${CODE}`);
+      expect(parseJoinInput(CODE)?.href).toBe(`/join/${CODE}`);
+    });
   });
 });

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
  * NATIVE-MEMBER-1 F-3, review F3-N1: a binary or development client built
@@ -29,11 +29,17 @@ vi.mock('react-native', () => ({
 const native = await import('../src/ui/shareLink.native');
 const URL = 'https://westayfit.app/join/Ab3_dE-fGh1JkLmN0pQrSt';
 
+const SAVED_HOSTS = process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS;
 beforeEach(() => {
   present = false;
   clipboardImports = 0;
   share.mockReset();
   share.mockResolvedValue({ action: 'sharedAction' });
+  process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS = 'westayfit.app';
+});
+afterEach(() => {
+  if (SAVED_HOSTS === undefined) delete process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS;
+  else process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS = SAVED_HOSTS;
 });
 
 describe('without the ExpoClipboard native module (F3-N1)', () => {

@@ -23,12 +23,16 @@
  * build's Metro address is not an invite this product handed out.
  *   · The canonical production and staging hosts come from
  *     `EXPO_PUBLIC_WSF_INVITE_HOSTS`: host names, comma- or space-separated,
- *     https only, no scheme, port or wildcard (an entry that is not a plain
- *     public host name is ignored). IT IS NOT SET TODAY: no canonical public
- *     origin is configured for the app yet (INT-08). Until it is, the app
- *     reads only `westayfit:` links and bare codes, and an https invite link
- *     pasted into the app is "not a valid code". Set it with the hosts INT-08
- *     settles on.
+ *     https only. An entry with a scheme, a port, a wildcard or a trailing
+ *     dot, a local name, or a development forwarder's host
+ *     (`configuredInviteHosts`) is ignored. A value whose EVERY entry is
+ *     ignored is a misconfiguration and is treated as configured-but-empty
+ *     (review NB-B): no https invite link is read at all, not even the web's
+ *     own origin, rather than falling back to the unconfigured rule. IT IS
+ *     NOT SET TODAY: no canonical public origin is configured for the app yet
+ *     (INT-08). Until it is, the app reads only `westayfit:` links and bare
+ *     codes, and an https invite link pasted into the app is "not a valid
+ *     code". Set it with the hosts INT-08 settles on.
  *   · On the WEB the page's own origin is ours as well, exactly as
  *     `currentOrigin()` reports it: the invite link a deployment hands out is
  *     built on that origin (community detail's `${origin}/join/<code>`), so a
@@ -67,8 +71,51 @@ const JOIN_PATH = /^\/join\/([A-Za-z0-9_-]{16,128})\/?$/;
  * letter. No port, IP literal, wildcard, single label or trailing dot.
  */
 const PUBLIC_HOST = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
-/** Special-use names that never resolve on the public internet (RFC 6761, 6762, 8375; ICANN's .internal). */
-const NON_PUBLIC_SUFFIXES = ['localhost', 'local', 'internal', 'home.arpa'] as const;
+/**
+ * Names that never resolve on the public internet: special-use names (RFC
+ * 6761, 6762, 8375; ICANN's .internal) and the undelegated names home and
+ * office routers hand out (.localdomain, .lan, .home, fritz.box).
+ */
+const NON_PUBLIC_SUFFIXES = ['localhost', 'local', 'internal', 'home.arpa', 'localdomain', 'lan', 'home', 'fritz.box'] as const;
+
+/**
+ * Domains that put a development machine on a public-looking https name:
+ * the ones `expo start --tunnel` uses (Expo's tunnel host and the ngrok
+ * domains it has used), other tunnel and port-forwarding services
+ * (Cloudflare quick tunnels, localtunnel, localhost.run, serveo, Microsoft
+ * dev tunnels, GitHub Codespaces, Tailscale, Pinggy) and the DNS names that
+ * point back at the caller or name an IP address (localtest.me, lvh.me,
+ * nip.io, sslip.io). Never a canonical We Stay Fit host.
+ */
+export const DEV_TUNNEL_DOMAINS = [
+  'exp.direct',
+  'exp.host',
+  'ngrok.io',
+  'ngrok.app',
+  'ngrok-free.app',
+  'ngrok.dev',
+  'ngrok-free.dev',
+  'trycloudflare.com',
+  'loca.lt',
+  'localtunnel.me',
+  'lhr.life',
+  'localhost.run',
+  'serveo.net',
+  'devtunnels.ms',
+  'app.github.dev',
+  'ts.net',
+  'pinggy.link',
+  'localtest.me',
+  'lvh.me',
+  'nip.io',
+  'sslip.io',
+] as const;
+
+/** Whether `host` is under a development forwarder's domain (whole labels). */
+export function isDevTunnelHost(host: string): boolean {
+  const h = host.toLowerCase();
+  return DEV_TUNNEL_DOMAINS.some((d) => h === d || h.endsWith(`.${d}`));
+}
 /** A page origin as `location.origin` gives it: http(s), a host, an optional port, nothing else. */
 const PAGE_ORIGIN = /^https?:\/\/[^/?#@\s]+$/;
 const KEPT_PARAMS = ['event', 'activity'] as const;
@@ -87,8 +134,12 @@ export type JoinInput = {
  * page's own origin. Lower-cased, de-duplicated; empty when nothing is ours.
  */
 export function inviteOriginsFor(os: string, configuredHosts: string | undefined, ownOrigin: string | null): string[] {
+  const hosts = configuredInviteHosts(configuredHosts);
+  // NB-B: set, but nothing in it is usable. A misconfiguration reads no
+  // https link at all -- never the unconfigured rule.
+  if (hosts !== null && hosts.length === 0) return [];
   const origins = new Set<string>();
-  for (const host of configuredInviteHosts(configuredHosts)) origins.add(`https://${host}`);
+  for (const host of hosts ?? []) origins.add(`https://${host}`);
   if (os === 'web' && typeof ownOrigin === 'string') {
     const origin = ownOrigin.toLowerCase();
     if (PAGE_ORIGIN.test(origin) && HOST.test(origin.slice(origin.indexOf('//') + 2))) origins.add(origin);
@@ -107,14 +158,20 @@ export function isPublicHost(host: string): boolean {
 }
 
 /**
- * The canonical hosts named in an `EXPO_PUBLIC_WSF_INVITE_HOSTS` value:
- * lower-cased, de-duplicated, plain public host names only. Empty today.
+ * The canonical hosts an `EXPO_PUBLIC_WSF_INVITE_HOSTS` value configures:
+ *   null    NOT CONFIGURED: unset, or nothing but spaces and commas (today);
+ *   []      CONFIGURED BUT EMPTY: entries were given and every one is
+ *           ignored (a scheme, port, wildcard or trailing dot, a local name,
+ *           a development forwarder). Callers refuse, never fall back;
+ *   hosts   lower-cased and de-duplicated, public host names only.
  */
-export function configuredInviteHosts(value: string | undefined): string[] {
+export function configuredInviteHosts(value: string | undefined): string[] | null {
+  const entries = (value ?? '').split(/[\s,]+/).filter((e) => e !== '');
+  if (entries.length === 0) return null;
   const hosts = new Set<string>();
-  for (const entry of (value ?? '').split(/[\s,]+/)) {
+  for (const entry of entries) {
     const host = entry.toLowerCase();
-    if (isPublicHost(host)) hosts.add(host);
+    if (isPublicHost(host) && !isDevTunnelHost(host)) hosts.add(host);
   }
   return [...hosts];
 }

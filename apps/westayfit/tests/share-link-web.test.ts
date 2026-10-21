@@ -22,9 +22,25 @@ import {
 
 const RN_NAVIGATOR = { product: 'ReactNative' };
 
+/** Runs `run` with EXPO_PUBLIC_WSF_INVITE_HOSTS set to `value` (undefined: unset), then restores it. */
+function withInviteHosts<T>(value: string | undefined, run: () => T): T {
+  const saved = process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS;
+  if (value === undefined) delete process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS;
+  else process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS = value;
+  try {
+    return run();
+  } finally {
+    if (saved === undefined) delete process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS;
+    else process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS = saved;
+  }
+}
+
 describe("shareRoute: React Native's navigator (MF-01 case 4)", () => {
-  it('is nativeShare once there is an absolute https origin', () => {
-    expect(shareRoute(RN_NAVIGATOR, 'https://westayfit.app')).toBe('nativeShare');
+  it('is nativeShare once the origin is a configured canonical host', () => {
+    withInviteHosts('westayfit.app', () => expect(shareRoute(RN_NAVIGATOR, 'https://westayfit.app')).toBe('nativeShare'));
+  });
+  it('NB-A: with no canonical host configured it is unavailable, fail closed', () => {
+    withInviteHosts(undefined, () => expect(shareRoute(RN_NAVIGATOR, 'https://westayfit.app')).toBe('unavailable'));
   });
   it('is unavailable with no origin (release, INT-08) or the Metro origin (dev, case 5)', () => {
     expect(shareRoute(RN_NAVIGATOR, null)).toBe('unavailable');
@@ -41,11 +57,13 @@ describe("shareRoute: React Native's navigator (MF-01 case 4)", () => {
     expect(shareControlLabel('nativeShare', 'failed')).toBe('Share');
   });
   it('isShareableHttpsUrl', () => {
-    expect(isShareableHttpsUrl('https://westayfit.app')).toBe(true);
-    expect(isShareableHttpsUrl('https://westayfit.app/display/goal%201')).toBe(true);
-    for (const bad of ['http://westayfit.app', 'https://host:443/x', 'https://a@b/x', 'https://', 'https://host./x', ' https://host', 'ftp://host', null, 7]) {
-      expect(isShareableHttpsUrl(bad)).toBe(false);
-    }
+    withInviteHosts('westayfit.app host', () => {
+      expect(isShareableHttpsUrl('https://westayfit.app')).toBe(true);
+      expect(isShareableHttpsUrl('https://westayfit.app/display/goal%201')).toBe(true);
+      for (const bad of ['http://westayfit.app', 'https://westayfit.app:443/x', 'https://a@westayfit.app/x', 'https://', 'https://westayfit.app./x', ' https://westayfit.app', 'ftp://westayfit.app', 'https://host/x', null, 7]) {
+        expect(isShareableHttpsUrl(bad)).toBe(false);
+      }
+    });
   });
 });
 
@@ -200,10 +218,13 @@ describe('F3-N2: a development tunnel is never a shareable origin', () => {
     expect(shareRoute({ product: 'ReactNative' }, url)).toBe('unavailable');
   });
 
-  it('every listed tunnel domain is refused, and only as a whole label', () => {
-    delete process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS;
-    for (const d of DEV_TUNNEL_DOMAINS) expect(isShareableHttpsUrl(`https://x.${d}`), d).toBe(false);
-    // A host that merely ends in the same letters is not a tunnel.
+  it('a development forwarder is never a canonical host, and only whole labels count', () => {
+    for (const d of DEV_TUNNEL_DOMAINS) {
+      process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS = `x.${d}`;
+      expect(isShareableHttpsUrl(`https://x.${d}`), d).toBe(false);
+    }
+    // A host that merely ends in the same letters is not a forwarder.
+    process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS = 'notexp.direct.example, myexp.direct';
     expect(isShareableHttpsUrl('https://notexp.direct.example')).toBe(true);
     expect(isShareableHttpsUrl('https://myexp.direct')).toBe(true);
   });
@@ -224,14 +245,29 @@ describe('F3-N2: a development tunnel is never a shareable origin', () => {
     expect(shareRoute({ product: 'ReactNative' }, 'https://goarrive.web.app')).toBe('unavailable');
   });
 
-  it('a configured value with no valid host leaves the tunnel rule in force', () => {
-    process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS = 'https://westayfit.app, *.x';
+  it.each([
+    ['a scheme', 'https://westayfit.app'],
+    ['a port', 'westayfit.app:443'],
+    ['a trailing dot', 'westayfit.app.'],
+    ['a wildcard', '*.westayfit.app'],
+    ['.internal', 'westayfit.internal'],
+    ['a development forwarder', 'abc-8081.exp.direct'],
+    ['several, every one ignored', 'https://westayfit.app, westayfit.app:443 *.westayfit.app'],
+  ])('NB-B: a value with only %s is configured-but-empty: nothing is shareable', (_l, value) => {
+    process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS = value;
+    expect(isShareableHttpsUrl('https://westayfit.app')).toBe(false);
     expect(isShareableHttpsUrl('https://abc-8081.exp.direct')).toBe(false);
-    expect(isShareableHttpsUrl('https://westayfit.app')).toBe(true);
+    expect(shareRoute(RN_NAVIGATOR, 'https://westayfit.app')).toBe('unavailable');
+  });
+
+  it('NB-B: a usable entry beside ignored ones is kept', () => {
+    process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS = 'https://westayfit.app, westayfit.app:443, staging.westayfit.app';
+    expect(isShareableHttpsUrl('https://staging.westayfit.app')).toBe(true);
+    expect(isShareableHttpsUrl('https://westayfit.app')).toBe(false);
   });
 });
 
-describe('NB-1: only a public host is shareable, configured or not', () => {
+describe('NB-1, NB-A: a non-public or forwarding host is never shareable, configured or not', () => {
   const saved = process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS;
   afterEach(() => {
     if (saved === undefined) delete process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS;
@@ -249,6 +285,18 @@ describe('NB-1: only a public host is shareable, configured or not', () => {
     ['under localhost', 'https://app.localhost'],
     ['.internal', 'https://wsf.internal'],
     ['home.arpa', 'https://nas.home.arpa'],
+    ['home.arpa itself (NB-C)', 'https://home.arpa'],
+    ['localtest.me (NB-A)', 'https://app.localtest.me'],
+    ['localtest.me itself (NB-A)', 'https://localtest.me'],
+    ['lvh.me (NB-A)', 'https://app.lvh.me'],
+    ['localhost.localdomain (NB-A)', 'https://localhost.localdomain'],
+    ['a router .lan name (NB-A)', 'https://nas.lan'],
+    ['a router .home name (NB-A)', 'https://router.home'],
+    ['fritz.box (NB-A)', 'https://fritz.box'],
+    ['Microsoft dev tunnels (NB-A)', 'https://abc-8081.euw.devtunnels.ms/join/x'],
+    ['GitHub Codespaces (NB-A)', 'https://fuzzy-space-8081.app.github.dev'],
+    ['Tailscale (NB-A)', 'https://laptop.tail1234.ts.net'],
+    ['Pinggy (NB-A)', 'https://abc.a.pinggy.link'],
     ['a Cloudflare quick tunnel', 'https://plain-words-here.trycloudflare.com'],
     ['localtunnel', 'https://tidy-cat-12.loca.lt'],
     ['localtunnel.me', 'https://x.localtunnel.me'],
@@ -257,16 +305,25 @@ describe('NB-1: only a public host is shareable, configured or not', () => {
     ['serveo', 'https://x.serveo.net'],
     ['nip.io naming the emulator host', 'https://10.0.2.2.nip.io/join/x'],
     ['sslip.io', 'https://192-168-1-20.sslip.io'],
-  ])('%s is refused with nothing configured', (_l, url) => {
+  ])('%s is refused with nothing configured, and even when configured as itself', (_l, url) => {
+    const host = url.slice('https://'.length).split('/')[0]!;
+    const origin = `https://${host}`;
     delete process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS;
     expect(isShareableHttpsUrl(url)).toBe(false);
-    expect(shareRoute({ product: 'ReactNative' }, url.replace(/\/join\/x$/, ''))).toBe('unavailable');
+    expect(shareRoute({ product: 'ReactNative' }, origin)).toBe('unavailable');
+    process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS = host;
+    expect(isShareableHttpsUrl(url)).toBe(false);
+    expect(shareRoute({ product: 'ReactNative' }, origin)).toBe('unavailable');
   });
 
-  it('a public host is still shareable with nothing configured', () => {
-    delete process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS;
-    expect(isShareableHttpsUrl('https://westayfit.app/join/x')).toBe(true);
-    expect(isShareableHttpsUrl('https://goarrive.web.app')).toBe(true);
+  it('NB-A: with nothing configured not even a public host is shareable (fail closed)', () => {
+    for (const value of [undefined, '', '  ', ' , ,']) {
+      if (value === undefined) delete process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS;
+      else process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS = value;
+      expect(isShareableHttpsUrl('https://westayfit.app/join/x'), String(value)).toBe(false);
+      expect(isShareableHttpsUrl('https://goarrive.web.app'), String(value)).toBe(false);
+      expect(shareRoute({ product: 'ReactNative' }, 'https://westayfit.app'), String(value)).toBe('unavailable');
+    }
   });
 
   it('a configured value cannot make a non-public host shareable', () => {
