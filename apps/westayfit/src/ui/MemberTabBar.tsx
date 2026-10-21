@@ -6,14 +6,17 @@ import { isKioskFlag } from '../kioskSession';
 import { registerFocusTarget } from './focusTarget';
 import {
   ACTION_GREEN,
+  ACTION_GREEN_DEEP,
   NAVY,
   ON_ACTION,
+  OPTION_SELECTED_TINT,
   PROGRESS_GREEN,
   TEXT_MUTED,
   chromeTextProps,
   effectiveWidth,
   elevation,
   lift,
+  pressableStyle,
 } from './kit';
 import { MEMBER_SHELL_GROUND, MEMBER_SHELL_RULE } from './memberShellMetrics';
 import { TabGlyph } from './TabGlyph';
@@ -203,7 +206,8 @@ export function MemberTabBar({ state, navigation, insets, onMove }: BottomTabBar
     <Pressable
       ref={moveRef}
       onPress={onMove}
-      style={styles.move}
+      // W12-17 (INT-33): pressed feedback on a phone; the web's style is unchanged.
+      {...pressableStyle(styles.move, ACTION_GREEN_DEEP)}
       testID="wsf-member-tab-move"
       accessibilityRole="button"
       accessibilityLabel="Move: record what you did"
@@ -262,7 +266,7 @@ export function MemberTabBar({ state, navigation, insets, onMove }: BottomTabBar
           <Pressable
             onPress={select}
             {...enterSelects(select)}
-            style={[styles.tab, narrow ? styles.tabHalf : null]}
+            {...pressableStyle([styles.tab, narrow ? styles.tabHalf : null], OPTION_SELECTED_TINT)}
             testID={`wsf-member-tab-${tab.key}`}
             // W12-10 (INT-32): a tab on a phone, whose selected state the
             // screen reader says itself; the web keeps its link and names the

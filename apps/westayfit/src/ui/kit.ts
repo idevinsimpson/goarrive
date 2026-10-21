@@ -1,4 +1,12 @@
-import { Platform, StyleSheet, type ViewStyle } from 'react-native';
+import {
+  Platform,
+  StyleSheet,
+  type ColorValue,
+  type PressableAndroidRippleConfig,
+  type PressableStateCallbackType,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
 
 import { wsfTheme } from '../theme';
 import { PROGRESS_GREEN } from './brandAssets';
@@ -158,7 +166,29 @@ export { lift, PANEL_BOX_SHADOW_IOS, TAB_BAR_BOX_SHADOW_ANDROID, type LiftTokens
  */
 export const BACK_GLYPH_HIT_SLOP = { top: 8, bottom: 8, left: 17, right: 17 } as const;
 
+/*
+  W12-17 (INT-33). PRESSED FEEDBACK ON A PHONE. No control showed it: a tap
+  on iOS or Android looked like nothing happened until the next screen came.
+  pressableStyle(base, tint) gives a Pressable its style and feedback: on a
+  phone the style dims while pressed and clears on release (kit.pressed),
+  and Android adds its ripple in `tint`. The web gets `base` itself, the same
+  object, so its DOM is unchanged. Spread it on a Pressable you own; never
+  on a <Link asChild> child or a ButtonLink, where Link merges the child's
+  style by object spread and a function style would blank the route.
+*/
+export type PressableFeedback = {
+  style: StyleProp<ViewStyle> | ((state: PressableStateCallbackType) => StyleProp<ViewStyle>);
+  android_ripple?: PressableAndroidRippleConfig;
+};
+export function pressableStyle(base: StyleProp<ViewStyle>, tint: ColorValue): PressableFeedback {
+  if (Platform.OS === 'web') return { style: base };
+  const style = ({ pressed }: PressableStateCallbackType): StyleProp<ViewStyle> => [base, pressed && kit.pressed];
+  return Platform.OS === 'android' ? { style, android_ripple: { color: tint } } : { style };
+}
+
 export const kit = StyleSheet.create({
+  // W12-17: a phone's pressed state (pressableStyle), cleared on release.
+  pressed: { opacity: 0.72 },
   // ---- page ----
   scroll: { flex: 1, backgroundColor: CREAM },
   page: {
