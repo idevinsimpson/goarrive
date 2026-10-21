@@ -12,6 +12,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * (verify-email clearing, profile-setup finishing) and on Progress → MOVE.
  * The screens are rendered with their backend stubbed; Platform.OS is
  * switchable.
+ *
+ * RV12-641-F1: never the Home reset for a kiosk destination. A visitor signing
+ * in at a kiosk returns to /contribute/<goal>?kiosk=1 by `replace`, with the
+ * kiosk's start screen kept beneath; proved below against React Navigation's
+ * own StackRouter, the one the root Stack runs.
  */
 
 const ctl = vi.hoisted(() => ({
@@ -111,7 +116,10 @@ vi.mock('../src/memberReads', () => ({
   readOwnCredit: async () => ({ ownCredit: 0, unit: 'squats' }),
 }));
 
-import { HOME_ONLY_RESET, landAfterAuth } from '../src/ui/authLanding';
+import { CommonActions, StackActions, StackRouter } from '@react-navigation/routers';
+
+import { kioskContributeRoute, kioskStartRoute } from '../src/kioskSession';
+import { HOME_ONLY_RESET, isKioskDestination, landAfterAuth } from '../src/ui/authLanding';
 import { SIGNED_OUT_HOME_RESET } from '../src/ui/signOutReset';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -184,6 +192,149 @@ describe('landAfterAuth', () => {
   });
 });
 
+describe('RV12-641-F1: a kiosk destination is never reset to Home', () => {
+  const deps = () => ({
+    dispatch: (a: unknown) => ctl.calls.push(['dispatch', a]),
+    push: (h: string) => ctl.calls.push(['push', h]),
+    replace: (h: string) => ctl.calls.push(['replace', h]),
+  });
+  const KIOSK = kioskContributeRoute('g1');
+
+  it('the kiosk routes, and the kiosk flag by the one rule (isKioskFlag), are kiosk destinations', () => {
+    for (const next of [
+      KIOSK,
+      kioskStartRoute('g1'),
+      '/kiosk/g1?x=1',
+      '/contribute/g1?mode=move&kiosk=1',
+      '/contribute/g1?kiosk=1&mode=move',
+      '/contribute/g1?kiosk=true',
+      '/contribute/g1?kiosk=0&kiosk=1',
+      '/contribute/g1?kiosk=1#top',
+      '/contribute/g1?%6Biosk=1',
+    ]) {
+      expect([next, isKioskDestination(next)]).toEqual([next, true]);
+    }
+    for (const next of [
+      '/',
+      '/join/AbCdEf',
+      '/contribute/g1',
+      '/contribute/g1?kiosk=0',
+      '/contribute/g1?kiosk=10',
+      '/contribute/g1?kiosk=',
+      '/contribute/g1?kiosk',
+      '/contribute/g1?notkiosk=1',
+      '/contribute/g1?mode=kiosk',
+      '/contribute/kiosk=1',
+      '/contribute/g1#kiosk=1',
+      '/kioskish',
+      '/community/kiosk',
+    ]) {
+      expect([next, isKioskDestination(next)]).toEqual([next, false]);
+    }
+  });
+
+  it('native: a kiosk destination is replaced, exactly as on the web; HOME_ONLY_RESET is never dispatched', () => {
+    for (const platform of ['ios', 'android', 'web']) {
+      for (const next of [KIOSK, '/contribute/g1?mode=move&kiosk=1', kioskStartRoute('g1')]) {
+        ctl.calls = [];
+        landAfterAuth(next, { ...deps(), platform });
+        expect([platform, ctl.calls]).toEqual([platform, [['replace', next]]]);
+      }
+    }
+  });
+
+  // The root Stack, run by React Navigation's own StackRouter. `replace` and
+  // `push` are what expo-router dispatches to it for these hrefs: REPLACE and
+  // PUSH addressed to the root Stack, with the route's name and params.
+  const ROOT_ROUTES = ['(tabs)', 'kiosk/[goalId]', 'contribute/[goalId]', 'join/[joinCode]', 'signin', 'signup', 'verify-email', 'profile-setup'];
+  const opts = { routeNames: ROOT_ROUTES, routeParamList: {}, routeGetIdList: {} };
+  type R = { name: string; params?: Record<string, string> };
+  const routeFor = (href: string): R => {
+    const [path, query = ''] = href.split('?');
+    const params = Object.fromEntries(new URLSearchParams(query));
+    const m = /^\/(kiosk|contribute|join)\/([^/]+)$/.exec(path!);
+    if (m) {
+      const [, base, id] = m;
+      const key = base === 'join' ? 'joinCode' : 'goalId';
+      return { name: `${base}/[${key}]`, params: { [key]: id!, ...params } };
+    }
+    throw new Error(`no root route for ${href}`);
+  };
+  const stackAfterLanding = (start: R[], next: string, platform: string) => {
+    const router = StackRouter({});
+    let state = router.getRehydratedState({ routes: start, index: start.length - 1 } as never, opts);
+    const apply = (action: unknown) => {
+      const after = router.getStateForAction(state, action as never, opts);
+      expect(after).not.toBeNull();
+      // RESET hands back a partial state; the stack rehydrates it, as useNavigationBuilder does.
+      state = router.getRehydratedState(after as never, opts);
+    };
+    landAfterAuth(next, {
+      dispatch: apply,
+      push: (href) => {
+        const r = routeFor(href);
+        apply(StackActions.push(r.name, r.params));
+      },
+      replace: (href) => {
+        const r = routeFor(href);
+        apply(StackActions.replace(r.name, r.params));
+      },
+      platform,
+    });
+    return { router, state };
+  };
+  const top = (state: { routes: Array<{ name: string; params?: object }>; index: number }) => state.routes[state.index]!;
+  /** Back, again and again, until the kiosk's start screen or nothing: every screen shown on the way. */
+  const backUntilKiosk = (router: ReturnType<typeof StackRouter>, from: ReturnType<typeof stackAfterLanding>['state']) => {
+    const shown: string[] = [];
+    let state = from;
+    for (;;) {
+      const after = router.getStateForAction(state, CommonActions.goBack() as never, opts);
+      if (!after) return shown;
+      state = router.getRehydratedState(after as never, opts);
+      shown.push(top(state).name);
+      if (top(state).name === 'kiosk/[goalId]') return shown;
+    }
+  };
+  const KIOSK_START: R = { name: 'kiosk/[goalId]', params: { goalId: 'g1' } };
+
+  for (const platform of ['ios', 'android']) {
+    it(`${platform}: the reviewer's probe, [(tabs), kiosk, signin, verify-email] → kiosk contribute; Back never reaches (tabs)`, () => {
+      const start: R[] = [{ name: '(tabs)' }, KIOSK_START, { name: 'signin' }, { name: 'verify-email' }];
+      const { router, state } = stackAfterLanding(start, KIOSK, platform);
+      expect(top(state)).toMatchObject({ name: 'contribute/[goalId]', params: { goalId: 'g1', kiosk: '1' } });
+      expect(state.routes.map((r) => r.name)).toEqual(['(tabs)', 'kiosk/[goalId]', 'signin', 'contribute/[goalId]']);
+      // One Back is the account the visitor just made (signin, under signup's
+      // replace), never member Home; walking on reaches the kiosk first.
+      const shown = backUntilKiosk(router, state);
+      expect(shown).toEqual(['signin', 'kiosk/[goalId]']);
+      expect(shown).not.toContain('(tabs)');
+    });
+
+    it(`${platform}: the kiosk gate's own path (gate replaced by signin, then verify-email or profile-setup): one Back is the kiosk`, () => {
+      for (const gate of ['verify-email', 'profile-setup', 'signin']) {
+        const start: R[] = [{ name: '(tabs)' }, KIOSK_START, { name: gate }];
+        const { router, state } = stackAfterLanding(start, KIOSK, platform);
+        expect(state.routes.map((r) => r.name)).toEqual(['(tabs)', 'kiosk/[goalId]', 'contribute/[goalId]']);
+        expect(backUntilKiosk(router, state)).toEqual(['kiosk/[goalId]']);
+      }
+    });
+
+    it(`${platform}: a kiosk launched cold (nothing beneath it) keeps its start screen too`, () => {
+      const { router, state } = stackAfterLanding([KIOSK_START, { name: 'verify-email' }], KIOSK, platform);
+      expect(state.routes.map((r) => r.name)).toEqual(['kiosk/[goalId]', 'contribute/[goalId]']);
+      expect(backUntilKiosk(router, state)).toEqual(['kiosk/[goalId]']);
+    });
+
+    it(`${platform}: control — a member destination still gets Home only beneath it (the probe sees the reset)`, () => {
+      const start: R[] = [{ name: '(tabs)' }, { name: 'signin' }, { name: 'verify-email' }];
+      const { router, state } = stackAfterLanding(start, '/join/AbCdEf', platform);
+      expect(state.routes.map((r) => r.name)).toEqual(['(tabs)', 'join/[joinCode]']);
+      expect(backUntilKiosk(router, state)).toEqual(['(tabs)']);
+    });
+  }
+});
+
 describe('verify-email’s terminal hop', () => {
   it('native: verified with a profile → Home only, the destination pushed', async () => {
     const { default: VerifyEmail } = await import('../app/verify-email');
@@ -216,6 +367,31 @@ describe('verify-email’s terminal hop', () => {
     await settle();
     expect(ctl.calls).toEqual([['replace', '/profile-setup']]);
   });
+});
+
+describe('RV12-641-F1: the kiosk return through the screens, on a phone', () => {
+  for (const os of ['ios', 'android'] as const) {
+    it(`${os}: verify-email replaces itself with the kiosk contribution; no Home reset`, async () => {
+      ctl.os = os;
+      ctl.next = kioskContributeRoute('g1');
+      const { default: VerifyEmail } = await import('../app/verify-email');
+      act(() => root.render(<VerifyEmail />));
+      await settle();
+      press('wsf-verify-check');
+      await settle();
+      expect(ctl.calls).toEqual([['replace', '/contribute/g1?kiosk=1']]);
+    });
+
+    it(`${os}: profile-setup (an existing profile) replaces itself with the kiosk contribution; no Home reset`, async () => {
+      ctl.os = os;
+      USER.emailVerified = true;
+      ctl.next = kioskContributeRoute('g1');
+      const { default: ProfileSetup } = await import('../app/profile-setup');
+      act(() => root.render(<ProfileSetup />));
+      await settle();
+      expect(ctl.calls).toEqual([['replace', '/contribute/g1?kiosk=1']]);
+    });
+  }
 });
 
 describe('profile-setup’s terminal hops', () => {
