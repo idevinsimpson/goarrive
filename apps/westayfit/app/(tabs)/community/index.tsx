@@ -6,7 +6,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useWsfAuth } from '../../../src/auth';
 import { mapWithLimit } from '../../../src/concurrency';
-import { currentFirst, rememberCurrentCommunity, resolveCurrentCommunity } from '../../../src/currentCommunity';
+import {
+  currentCommunityReady,
+  currentFirst,
+  isCurrentCommunityReady,
+  rememberCurrentCommunity,
+  resolveCurrentCommunity,
+  useCurrentCommunityReady,
+} from '../../../src/currentCommunity';
 import { getFirebaseFunctions } from '../../../src/firebase';
 import { memberCountLabel } from '../../../src/labels';
 import { formatPeriod, formatSinceShort } from '../../../src/ui/dates';
@@ -169,6 +176,10 @@ function warmState(uid: string | null): State | null {
   if (!mine || !uid) return null;
   const items = mine.items as unknown as Membership[];
   if (items.length === 0) return null;
+  // Not before the phone's remembered choice is read, where it can change the
+  // answer: with several communities "none chosen" would be a guess. With one,
+  // the answer is that one either way.
+  if (items.length > 1 && !isCurrentCommunityReady()) return null;
   const enriched: Enriched[] = items.map((m) => ({
     ...m,
     goals: (peekGoals<Goal>(uid, m.groupId)?.goals as Goal[] | undefined) ?? 'pending',
@@ -203,6 +214,9 @@ export default function CommunityIndexScreen() {
   */
   const [selection, setSelection] = useState(0);
   const retrying = useRef(false);
+  // Whether the current loading frame may still be replaced by a warm one (not after a retry).
+  const warmAllowed = useRef(true);
+  const communityReady = useCurrentCommunityReady();
   const [announcement, setAnnouncement] = useState('');
   const safeArea = useSafeAreaInsets();
 
@@ -235,6 +249,7 @@ export default function CommunityIndexScreen() {
     // A retry, or an account with nothing already read, starts from loading;
     // a warm first frame for THIS account stays up while the fresh reads run.
     const warm = retrying.current ? null : warmState(uid);
+    warmAllowed.current = !retrying.current;
     retrying.current = false;
     setState(warm ?? { kind: 'loading' });
 
@@ -269,7 +284,12 @@ export default function CommunityIndexScreen() {
       });
 
       // `memberOf` is the authority, and the resolver — not this screen —
-      // decides. Several memberships with nothing remembered is NULL.
+      // decides. Several memberships with nothing remembered is NULL. On a
+      // phone the remembered choice is read from storage at launch; this
+      // waits for that read (immediate on web) so it decides on what is
+      // remembered, not on "not read yet".
+      await currentCommunityReady();
+      if (liveRef.current !== token) return;
       const currentId = resolveCurrentCommunity(
         uid,
         items.map((m) => m.groupId),
@@ -330,6 +350,15 @@ export default function CommunityIndexScreen() {
     };
   }, [ready, user, attempt, selection]);
 
+  // A tab that came up before the phone's remembered community was read shows
+  // loading (warmState above); once the read lands, the warm frame it could
+  // not paint then is painted now. The fresh reads still replace it.
+  useEffect(() => {
+    if (!communityReady || !ready || !user || !warmAllowed.current) return;
+    const uid = user.uid;
+    setState((prev) => (prev.kind === 'loading' ? warmState(uid) ?? prev : prev));
+  }, [communityReady, ready, user]);
+
   // Back on this tab: if the member's current community moved while they
   // were elsewhere, the tab follows it.
   const currentIdNow = state.kind === 'ready' ? state.currentId : null;
@@ -380,7 +409,7 @@ export default function CommunityIndexScreen() {
   const select = useCallback(
     (groupId: string, name: string) => {
       if (!user || groupId === currentIdNow) return;
-      rememberCurrentCommunity(user.uid, groupId);
+      void rememberCurrentCommunity(user.uid, groupId);
       setAnnouncement(`Now showing ${name}.`);
       setSelection((n) => n + 1);
     },
@@ -390,7 +419,7 @@ export default function CommunityIndexScreen() {
   /** Choosing or switching: remember it, then open that community's Home. */
   const open = useCallback(
     (groupId: string) => {
-      rememberCurrentCommunity(user?.uid ?? null, groupId);
+      void rememberCurrentCommunity(user?.uid ?? null, groupId);
       router.replace(`/community/${groupId}`);
     },
     [user],

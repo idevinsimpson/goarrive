@@ -20,7 +20,7 @@ import {
 import { authErrorCode, authErrorMessage, isEmailAlreadyInUse } from '../src/authErrors';
 import { wsfAuthEnabled } from '../src/featureFlags';
 import { getFirebaseAuth, getFirebaseFirestore } from '../src/firebase';
-import { nextRouteAfterAuth } from '../src/pendingJoinCode';
+import { routeAfterAuth } from '../src/pendingJoinCode';
 import { requestVerificationEmail } from '../src/verificationEmail';
 import { beginVerificationSend, recordVerificationSend } from '../src/verificationSendState';
 
@@ -54,7 +54,11 @@ export default function SignUp() {
         router.replace('/profile-setup');
         return;
       }
-      router.replace(nextRouteAfterAuth('/') as never);
+      // Waits for the pending join code to have been read (a phone reads it
+      // from storage at launch) and honours it only for this account.
+      const next = await routeAfterAuth('/', user.uid);
+      if (cancelled) return;
+      router.replace(next as never);
     })();
     return () => {
       cancelled = true;

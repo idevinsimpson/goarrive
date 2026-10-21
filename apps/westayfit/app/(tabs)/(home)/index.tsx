@@ -5,7 +5,7 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-
 
 import { useWsfAuth } from '../../../src/auth';
 import { describeCallableError } from '../../../src/callableErrors';
-import { resolveCurrentCommunity } from '../../../src/currentCommunity';
+import { resolveCurrentCommunity, useCurrentCommunityReady } from '../../../src/currentCommunity';
 import { wsfAuthEnabled } from '../../../src/featureFlags';
 import { getFirebaseAuth } from '../../../src/firebase';
 import {
@@ -490,9 +490,18 @@ function SignedInHome({
   // mid-flight and came Home stays on Home when it lands (M5), and a member
   // who pressed Back from a community to see the list gets the list, not the
   // community again. A different account decides afresh.
+  //
+  // ON A PHONE the remembered community is read from storage at launch, and a
+  // decision taken once must not be taken on "not read yet": it waits for
+  // that read (`useCurrentCommunityReady`, always true on web).
   const uid = user?.uid ?? null;
+  const communityReady = useCurrentCommunityReady();
   const decided = useRef<{ uid: string | null; openable: string | null } | null>(null);
-  if (state.kind === 'ready' && (decided.current === null || decided.current.uid !== uid)) {
+  if (
+    state.kind === 'ready' &&
+    communityReady &&
+    (decided.current === null || decided.current.uid !== uid)
+  ) {
     decided.current = {
       uid,
       openable: resolveCurrentCommunity(uid, state.items.map((item) => item.groupId)),
@@ -524,6 +533,29 @@ function SignedInHome({
         {...({ 'data-state': 'opening' } as Record<string, unknown>)}
       >
         <Text style={kit.statusText}>Opening your community…</Text>
+      </View>
+    );
+  }
+  // ST-03 (heads-13 N3). The stack below IS the chooser ("Choose a community"
+  // over the list), so it waits for the same read the decision waits for:
+  // until the remembered community has been read, a member whose list is
+  // loading or has communities in it sees the list still loading, never a
+  // chooser the decision may replace a moment later. An error or an empty
+  // list is shown as before (nothing to decide). Not when the list itself was
+  // asked for: nothing is decided then. Never on web, where the read is
+  // always answered.
+  const awaitingRemembered =
+    !communityReady &&
+    !listRequested &&
+    (state.kind === 'idle' || state.kind === 'loading' || (state.kind === 'ready' && state.items.length > 0));
+  if (awaitingRemembered) {
+    return (
+      <View
+        style={styles.stack}
+        testID="wsf-home-awaiting-community"
+        {...({ 'data-state': 'loading' } as Record<string, unknown>)}
+      >
+        <MyCommunitiesList state={{ kind: 'loading' }} goalsByGroup={goalsByGroup} />
       </View>
     );
   }

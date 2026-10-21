@@ -4,7 +4,7 @@ import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-n
 
 import { useWsfAuth } from '../../src/auth';
 import { describeCallableError } from '../../src/callableErrors';
-import { resolveCurrentCommunity } from '../../src/currentCommunity';
+import { currentCommunityReady, resolveCurrentCommunity } from '../../src/currentCommunity';
 import { wsfAuthEnabled } from '../../src/featureFlags';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -184,6 +184,10 @@ export default function MoveResolver() {
         };
         if (cancelled || leaving()) return;
         const ids = mine.data.items.map((i) => i.groupId);
+        // On a phone the remembered choice is read from storage at launch;
+        // "not read yet" must not send the member to Home's chooser.
+        await currentCommunityReady();
+        if (cancelled || leaving()) return;
         const groupId = resolveCurrentCommunity(user.uid, ids);
         const community = mine.data.items.find((i) => i.groupId === groupId)?.displayName ?? null;
         // No community, or several with none chosen: Home already owns both of

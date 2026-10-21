@@ -156,6 +156,17 @@ export function kioskRemainingMs(startedAt: number, now: number, totalMs = KIOSK
   return left > 0 ? left : 0;
 }
 
+/**
+ * The countdown line, or null when the session clock is not running —
+ * nothing is going to end the session (a request in flight, a restore being
+ * retried), so nothing may say it is about to. `kioskRemainingSeconds` turns
+ * an unstarted clock (+Infinity) into 0, which would read "Finishing now…".
+ */
+export function kioskCountdownText(startedAt: number | null, now: number, totalMs: number = KIOSK_IDLE_MS): string | null {
+  if (startedAt == null) return null;
+  return kioskCountdownLabel(kioskRemainingSeconds(kioskRemainingMs(startedAt, now, totalMs)));
+}
+
 /** Whole seconds to show. Rounds UP, so "1 second" is on screen for the last
  * whole second rather than flicking to 0 while time is still left. */
 export function kioskRemainingSeconds(remainingMs: number): number {
@@ -223,6 +234,26 @@ export type KioskRestInput = {
   loadSettled: boolean;
 };
 
+/**
+ * Whether the contribute screen a kiosk is on is a SETTLED screen with no
+ * attempt of its own — the `loadSettled` input above. The goal could not be
+ * shown (closed, not found, an error), or the device's saved attempt could
+ * not be read and nothing has been written since (the screen's fail-closed
+ * state). Without the second, a kiosk on that state had no deadline: nobody
+ * could record there, and nothing ended the session for whoever walked up
+ * next. Finishing from it clears nothing — no attempt was made, so there is
+ * no attempt id to clear, and the unread record stays for its owner — and
+ * signs out.
+ */
+export function kioskScreenSettled(s: { stateKind: string; restoreFailed: boolean; beforeWrite: boolean }): boolean {
+  if (s.stateKind === 'closed' || s.stateKind === 'notFound' || s.stateKind === 'error') return true;
+  // The paused screen is only drawn over a READY goal (the loading,
+  // signed-out and other load states return before it), so the restore
+  // clause counts only there: the clock must not start under a screen that
+  // shows no Finish bar.
+  return s.stateKind === 'ready' && s.restoreFailed && s.beforeWrite;
+}
+
 export function kioskMayFinishUnattended(input: KioskRestInput): boolean {
   if (input.attemptInFlight) return false;
   switch (input.outcome) {
@@ -254,8 +285,9 @@ export type KioskFinishPlan = {
  * IT USED TO PROMISE PORTABILITY IT CANNOT KEEP. The old wording — "Your
  * attempt is saved to your account; check it from your own device." — reads as
  * though the attempt travels with the account. It does not. The record that
- * makes the SAME attempt replayable lives in `localStorage` on the browser that
- * made it (src/pendingContribution.ts), keyed to that uid; a different device
+ * makes the SAME attempt replayable lives in the device store of the browser or
+ * phone that made it (src/pendingContribution.ts: localStorage on web,
+ * AsyncStorage on iOS and Android), keyed to that uid; a different device
  * signing into the same account finds no such record. W3's storage-level probe
  * confirmed it. A member's own credit total is durable and readable elsewhere,
  * but a total is not this attempt's outcome: somebody who does not already know
@@ -322,8 +354,10 @@ export type KioskFinishDeps = {
   /** firebase signOut, injected so the rule can be tested without auth. */
   signOut: () => Promise<void>;
   /** src/pendingContribution.ts `clearPendingIfAttempt` — the guarded clear
-   * that refuses when the stored record is a DIFFERENT attempt. */
-  clearPendingIfAttempt: (goalId: string, uid: string, attemptId: string) => boolean;
+   * that refuses when the stored record is a DIFFERENT attempt. Asynchronous
+   * since the record moved behind the device storage boundary; it is awaited,
+   * so the clear completes while the uid it needs is still signed in. */
+  clearPendingIfAttempt: (goalId: string, uid: string, attemptId: string) => boolean | Promise<boolean>;
   /** Removes this feature's own storage keys. */
   clearKioskKeys: () => void;
 };
@@ -362,7 +396,7 @@ export async function runKioskFinish(
   let clearedPendingDraft = false;
   if (plan.clearPendingDraft && input.uid && input.attemptId) {
     try {
-      clearedPendingDraft = deps.clearPendingIfAttempt(input.goalId, input.uid, input.attemptId);
+      clearedPendingDraft = await deps.clearPendingIfAttempt(input.goalId, input.uid, input.attemptId);
     } catch {
       clearedPendingDraft = false;
     }

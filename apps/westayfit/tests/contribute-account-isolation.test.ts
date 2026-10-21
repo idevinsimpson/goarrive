@@ -79,31 +79,31 @@ describe('the pending record belongs to one account', () => {
     expect(pendingKey(GOAL, A)).toContain(A);
   });
 
-  it("does not let B read A's unsent attempt", () => {
+  it("does not let B read A's unsent attempt", async () => {
     window.localStorage.setItem(
       pendingKey(GOAL, A),
       JSON.stringify({ goalId: GOAL, attemptId: 'attempt-a', count: 20, ts: 1, state: 'unknown' })
     );
-    expect(loadPending(GOAL, A)?.attemptId).toBe('attempt-a');
+    expect((await loadPending(GOAL, A))?.attemptId).toBe('attempt-a');
     // The requirement in one line: A's uncertain attempt must never appear as
     // B's effort.
-    expect(loadPending(GOAL, B)).toBeNull();
+    expect(await loadPending(GOAL, B)).toBeNull();
   });
 
-  it("preserves A's attempt id so A's own retry still counts once", () => {
+  it("preserves A's attempt id so A's own retry still counts once", async () => {
     const row = { goalId: GOAL, attemptId: 'attempt-a', count: 20, ts: 1, state: 'unknown' };
     window.localStorage.setItem(pendingKey(GOAL, A), JSON.stringify(row));
     // Reloading yields the SAME attemptId, which is what makes the server's
     // idempotency check count the retry once rather than twice.
-    expect(loadPending(GOAL, A)?.attemptId).toBe('attempt-a');
+    expect((await loadPending(GOAL, A))?.attemptId).toBe('attempt-a');
   });
 
-  it('does not read one goal record for another goal', () => {
+  it('does not read one goal record for another goal', async () => {
     window.localStorage.setItem(
       pendingKey(GOAL, A),
       JSON.stringify({ goalId: GOAL, attemptId: 'attempt-a', count: 20, ts: 1, state: 'unknown' })
     );
-    expect(loadPending(OTHER_GOAL, A)).toBeNull();
+    expect(await loadPending(OTHER_GOAL, A)).toBeNull();
   });
 });
 
@@ -116,17 +116,17 @@ describe('a legacy unscoped record is retired, never adopted', () => {
     state: 'unknown' as const,
   };
 
-  it('quarantines it and leaves no account able to load it', () => {
+  it('quarantines it and leaves no account able to load it', async () => {
     window.localStorage.setItem(legacyPendingKey(GOAL), JSON.stringify(legacyRow));
 
-    const retired = retireLegacyPending(GOAL);
+    const retired = await retireLegacyPending(GOAL);
     expect(retired?.attemptId).toBe('legacy-attempt');
 
     // Gone from the key anyone could inherit it from…
     expect(window.localStorage.getItem(legacyPendingKey(GOAL))).toBeNull();
     // …and not adopted by either account.
-    expect(loadPending(GOAL, A)).toBeNull();
-    expect(loadPending(GOAL, B)).toBeNull();
+    expect(await loadPending(GOAL, A)).toBeNull();
+    expect(await loadPending(GOAL, B)).toBeNull();
 
     // The attempt identity survives, so the original effort can still be
     // reconciled rather than silently lost.
@@ -137,7 +137,7 @@ describe('a legacy unscoped record is retired, never adopted', () => {
     );
   });
 
-  it('keeps the original when the quarantine write fails, rather than losing it', () => {
+  it('keeps the original when the quarantine write fails, rather than losing it', async () => {
     window.localStorage.setItem(legacyPendingKey(GOAL), JSON.stringify(legacyRow));
     const setItem = vi
       .spyOn(Storage.prototype, 'setItem')
@@ -145,7 +145,7 @@ describe('a legacy unscoped record is retired, never adopted', () => {
         throw new Error('QuotaExceededError');
       });
 
-    const retired = retireLegacyPending(GOAL);
+    const retired = await retireLegacyPending(GOAL);
     setItem.mockRestore();
 
     expect(retired?.attemptId).toBe('legacy-attempt');
@@ -154,12 +154,12 @@ describe('a legacy unscoped record is retired, never adopted', () => {
     expect(window.localStorage.getItem(legacyPendingKey(GOAL))).not.toBeNull();
     // It is still inert: loadPending only ever reads account-scoped keys, so
     // no account can adopt or resubmit it.
-    expect(loadPending(GOAL, A)).toBeNull();
-    expect(loadPending(GOAL, B)).toBeNull();
+    expect(await loadPending(GOAL, A)).toBeNull();
+    expect(await loadPending(GOAL, B)).toBeNull();
   });
 
-  it('is a no-op when there is no legacy record', () => {
-    expect(retireLegacyPending(GOAL)).toBeNull();
+  it('is a no-op when there is no legacy record', async () => {
+    expect(await retireLegacyPending(GOAL)).toBeNull();
   });
 });
 
@@ -184,60 +184,60 @@ describe('persisted state is guarded per attempt, not only per context', () => {
     state: 'sending',
   });
 
-  it('an old failure does not overwrite a newer attempt', () => {
+  it('an old failure does not overwrite a newer attempt', async () => {
     // Attempt 2 owns the slot.
-    savePendingNew(row('attempt-2', 7), A);
-    expect(loadPending(GOAL, A)?.attemptId).toBe('attempt-2');
+    await savePendingNew(row('attempt-2', 7), A);
+    expect((await loadPending(GOAL, A))?.attemptId).toBe('attempt-2');
 
     // Attempt 1 fails late and tries to escalate its own row.
-    const wrote = updatePendingIfAttempt(
+    const wrote = await updatePendingIfAttempt(
       { ...row('attempt-1', 11), state: 'unknown' },
       A,
       'attempt-1'
     );
 
     expect(wrote, 'the superseded attempt must not write').toBe(false);
-    expect(loadPending(GOAL, A)?.attemptId).toBe('attempt-2');
-    expect(loadPending(GOAL, A)?.count).toBe(7);
+    expect((await loadPending(GOAL, A))?.attemptId).toBe('attempt-2');
+    expect((await loadPending(GOAL, A))?.count).toBe(7);
   });
 
-  it('an old success does not clear a newer attempt', () => {
-    savePendingNew(row('attempt-2', 7), A);
-    const cleared = clearPendingIfAttempt(GOAL, A, 'attempt-1');
+  it('an old success does not clear a newer attempt', async () => {
+    await savePendingNew(row('attempt-2', 7), A);
+    const cleared = await clearPendingIfAttempt(GOAL, A, 'attempt-1');
     expect(cleared, 'the superseded attempt must not clear').toBe(false);
-    expect(loadPending(GOAL, A)?.attemptId).toBe('attempt-2');
+    expect((await loadPending(GOAL, A))?.attemptId).toBe('attempt-2');
   });
 
-  it('the attempt that owns the slot may still update and clear it', () => {
-    savePendingNew(row('attempt-2', 7), A);
+  it('the attempt that owns the slot may still update and clear it', async () => {
+    await savePendingNew(row('attempt-2', 7), A);
     expect(
-      updatePendingIfAttempt({ ...row('attempt-2', 7), state: 'unknown' }, A, 'attempt-2')
+      await updatePendingIfAttempt({ ...row('attempt-2', 7), state: 'unknown' }, A, 'attempt-2')
     ).toBe(true);
-    expect(loadPending(GOAL, A)?.state).toBe('unknown');
-    expect(clearPendingIfAttempt(GOAL, A, 'attempt-2')).toBe(true);
-    expect(loadPending(GOAL, A)).toBeNull();
+    expect((await loadPending(GOAL, A))?.state).toBe('unknown');
+    expect(await clearPendingIfAttempt(GOAL, A, 'attempt-2')).toBe(true);
+    expect(await loadPending(GOAL, A)).toBeNull();
   });
 
-  it('the full sequence: attempt 1 reconciled, attempt 2 started, attempt 1 fails late', () => {
+  it('the full sequence: attempt 1 reconciled, attempt 2 started, attempt 1 fails late', async () => {
     // A starts attempt 1.
-    savePendingNew(row('attempt-1', 11), A);
+    await savePendingNew(row('attempt-1', 11), A);
     // A reconciles it successfully — the slot is released.
-    expect(clearPendingIfAttempt(GOAL, A, 'attempt-1')).toBe(true);
+    expect(await clearPendingIfAttempt(GOAL, A, 'attempt-1')).toBe(true);
     // A starts attempt 2.
-    savePendingNew(row('attempt-2', 7), A);
+    await savePendingNew(row('attempt-2', 7), A);
     // Attempt 1's original request finally fails.
-    updatePendingIfAttempt({ ...row('attempt-1', 11), state: 'unknown' }, A, 'attempt-1');
+    await updatePendingIfAttempt({ ...row('attempt-1', 11), state: 'unknown' }, A, 'attempt-1');
 
     // Attempt 2 stands; attempt 1 is not resurrected over it.
-    expect(loadPending(GOAL, A)?.attemptId).toBe('attempt-2');
-    expect(loadPending(GOAL, A)?.count).toBe(7);
+    expect((await loadPending(GOAL, A))?.attemptId).toBe('attempt-2');
+    expect((await loadPending(GOAL, A))?.count).toBe(7);
   });
 
-  it("does not touch another account's slot", () => {
-    savePendingNew(row('attempt-b', 5), B);
-    savePendingNew(row('attempt-a', 9), A);
-    expect(loadPending(GOAL, B)?.attemptId).toBe('attempt-b');
-    expect(loadPending(GOAL, A)?.attemptId).toBe('attempt-a');
+  it("does not touch another account's slot", async () => {
+    await savePendingNew(row('attempt-b', 5), B);
+    await savePendingNew(row('attempt-a', 9), A);
+    expect((await loadPending(GOAL, B))?.attemptId).toBe('attempt-b');
+    expect((await loadPending(GOAL, A))?.attemptId).toBe('attempt-a');
   });
 });
 
@@ -262,68 +262,68 @@ describe('a late callback cannot recreate a record the slot no longer holds', ()
     state: 'sending',
   });
 
-  it('attempt 1 confirmed and cleared, then its old failure — storage stays empty', () => {
-    savePendingNew(row('attempt-1', 11), A);
-    expect(clearPendingIfAttempt(GOAL, A, 'attempt-1')).toBe(true);
+  it('attempt 1 confirmed and cleared, then its old failure — storage stays empty', async () => {
+    await savePendingNew(row('attempt-1', 11), A);
+    expect(await clearPendingIfAttempt(GOAL, A, 'attempt-1')).toBe(true);
 
-    const wrote = updatePendingIfAttempt(
+    const wrote = await updatePendingIfAttempt(
       { ...row('attempt-1', 11), state: 'unknown' },
       A,
       'attempt-1'
     );
 
     expect(wrote, 'an empty slot is not permission to recreate').toBe(false);
-    expect(loadPending(GOAL, A)).toBeNull();
+    expect(await loadPending(GOAL, A)).toBeNull();
     expect(window.localStorage.getItem(pendingKey(GOAL, A))).toBeNull();
   });
 
-  it('attempt 1 confirmed, attempt 2 confirmed and cleared, then attempt 1 fails — storage stays empty', () => {
-    savePendingNew(row('attempt-1', 11), A);
-    clearPendingIfAttempt(GOAL, A, 'attempt-1');
-    savePendingNew(row('attempt-2', 7), A);
-    clearPendingIfAttempt(GOAL, A, 'attempt-2');
+  it('attempt 1 confirmed, attempt 2 confirmed and cleared, then attempt 1 fails — storage stays empty', async () => {
+    await savePendingNew(row('attempt-1', 11), A);
+    await clearPendingIfAttempt(GOAL, A, 'attempt-1');
+    await savePendingNew(row('attempt-2', 7), A);
+    await clearPendingIfAttempt(GOAL, A, 'attempt-2');
 
-    updatePendingIfAttempt({ ...row('attempt-1', 11), state: 'unknown' }, A, 'attempt-1');
+    await updatePendingIfAttempt({ ...row('attempt-1', 11), state: 'unknown' }, A, 'attempt-1');
 
-    expect(loadPending(GOAL, A)).toBeNull();
+    expect(await loadPending(GOAL, A)).toBeNull();
     expect(window.localStorage.getItem(pendingKey(GOAL, A))).toBeNull();
   });
 
-  it('attempt 2 still pending when attempt 1 fails — attempt 2 is preserved', () => {
-    savePendingNew(row('attempt-2', 7), A);
-    const wrote = updatePendingIfAttempt(
+  it('attempt 2 still pending when attempt 1 fails — attempt 2 is preserved', async () => {
+    await savePendingNew(row('attempt-2', 7), A);
+    const wrote = await updatePendingIfAttempt(
       { ...row('attempt-1', 11), state: 'unknown' },
       A,
       'attempt-1'
     );
     expect(wrote).toBe(false);
-    expect(loadPending(GOAL, A)?.attemptId).toBe('attempt-2');
-    expect(loadPending(GOAL, A)?.count).toBe(7);
-    expect(loadPending(GOAL, A)?.state).toBe('sending');
+    expect((await loadPending(GOAL, A))?.attemptId).toBe('attempt-2');
+    expect((await loadPending(GOAL, A))?.count).toBe(7);
+    expect((await loadPending(GOAL, A))?.state).toBe('sending');
   });
 
-  it('a matching existing attempt legitimately moves from sending to unknown', () => {
-    savePendingNew(row('attempt-1', 11), A);
-    const wrote = updatePendingIfAttempt(
+  it('a matching existing attempt legitimately moves from sending to unknown', async () => {
+    await savePendingNew(row('attempt-1', 11), A);
+    const wrote = await updatePendingIfAttempt(
       { ...row('attempt-1', 11), state: 'unknown' },
       A,
       'attempt-1'
     );
     expect(wrote, 'the attempt that owns the slot may update it').toBe(true);
-    expect(loadPending(GOAL, A)?.state).toBe('unknown');
-    expect(loadPending(GOAL, A)?.attemptId).toBe('attempt-1');
+    expect((await loadPending(GOAL, A))?.state).toBe('unknown');
+    expect((await loadPending(GOAL, A))?.attemptId).toBe('attempt-1');
   });
 
-  it('an old success arriving while a newer attempt is pending preserves attempt 2', () => {
-    savePendingNew(row('attempt-2', 7), A);
-    const cleared = clearPendingIfAttempt(GOAL, A, 'attempt-1');
+  it('an old success arriving while a newer attempt is pending preserves attempt 2', async () => {
+    await savePendingNew(row('attempt-2', 7), A);
+    const cleared = await clearPendingIfAttempt(GOAL, A, 'attempt-1');
     expect(cleared, "an old success must not clear a newer attempt").toBe(false);
-    expect(loadPending(GOAL, A)?.attemptId).toBe('attempt-2');
+    expect((await loadPending(GOAL, A))?.attemptId).toBe('attempt-2');
   });
 
-  it('refuses to update when the stored record is unreadable', () => {
+  it('refuses to update when the stored record is unreadable', async () => {
     window.localStorage.setItem(pendingKey(GOAL, A), 'not json');
-    const wrote = updatePendingIfAttempt(
+    const wrote = await updatePendingIfAttempt(
       { ...row('attempt-1', 11), state: 'unknown' },
       A,
       'attempt-1'

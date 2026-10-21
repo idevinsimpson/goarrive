@@ -230,7 +230,7 @@ describe('runKioskFinish', () => {
       ts: Date.now(),
       state: 'unknown',
     };
-    savePendingNew(row, UID);
+    await savePendingNew(row, UID);
     // The real helper, not a stub: this is the end-to-end storage claim.
     const { clearPendingIfAttempt } = await import('../src/pendingContribution');
     await runKioskFinish(
@@ -252,7 +252,7 @@ describe('runKioskFinish', () => {
       ts: Date.now(),
       state: 'unknown',
     };
-    savePendingNew(row, OTHER_UID);
+    await savePendingNew(row, OTHER_UID);
     const { clearPendingIfAttempt } = await import('../src/pendingContribution');
     const result = await runKioskFinish(
       // A confirmed session for UID, finishing on a device where OTHER_UID
@@ -328,5 +328,77 @@ describe('post-auth routing', () => {
   it('is unchanged when no kiosk is in play', async () => {
     const { nextRouteAfterAuth } = await import('../src/pendingJoinCode');
     expect(nextRouteAfterAuth('/')).toBe('/');
+  });
+});
+
+describe('#635 follow-up: a kiosk on the "couldn’t read this device’s saved attempt" screen', () => {
+  it('counts as settled, so the deadline runs; Finish clears nothing, signs out, and leaves the stored record', async () => {
+    const { kioskScreenSettled, kioskMayFinishUnattended } = await import('../src/kioskSession');
+    const settled = kioskScreenSettled({ stateKind: 'ready', restoreFailed: true, beforeWrite: true });
+    expect(settled).toBe(true);
+    expect(kioskMayFinishUnattended({ outcome: 'none', attemptInFlight: false, loadSettled: settled })).toBe(true);
+    // Not while anything was written, and not on an ordinary ready screen.
+    expect(kioskScreenSettled({ stateKind: 'ready', restoreFailed: true, beforeWrite: false })).toBe(false);
+    expect(kioskScreenSettled({ stateKind: 'ready', restoreFailed: false, beforeWrite: true })).toBe(false);
+    expect(kioskScreenSettled({ stateKind: 'error', restoreFailed: false, beforeWrite: true })).toBe(true);
+
+    // What the deadline does there: the unread record is somebody's, and stays.
+    const row: PendingContribution = { goalId: GOAL, attemptId: ATTEMPT, count: 30, ts: Date.now(), state: 'unknown' };
+    await savePendingNew(row, UID);
+    const { clearPendingIfAttempt } = await import('../src/pendingContribution');
+    const guarded = vi.fn(clearPendingIfAttempt);
+    const signOut = vi.fn(async () => {});
+    const result = await runKioskFinish(
+      { goalId: GOAL, outcome: 'none', uid: UID, attemptId: null },
+      { signOut, clearPendingIfAttempt: guarded, clearKioskKeys: clearKioskReturnGoal }
+    );
+    expect(result.signedOut).toBe(true);
+    expect(signOut).toHaveBeenCalledTimes(1);
+    expect(guarded).not.toHaveBeenCalled();
+    expect(JSON.parse(window.localStorage.getItem(pendingKey(GOAL, UID)) as string).attemptId).toBe(ATTEMPT);
+  });
+
+  it('the route uses that rule, and the deadline still waits for an unsettled restore (so Try again resets it)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const route = readFileSync('app/contribute/[goalId].tsx', 'utf8');
+    expect(route).toContain('const kioskLoadSettled = kioskScreenSettled({ stateKind: state.kind, restoreFailed, beforeWrite });');
+    const terminal = route.slice(route.indexOf('const kioskTerminal ='), route.indexOf('kioskMayFinishUnattended({', route.indexOf('const kioskTerminal =')));
+    expect(terminal).toContain('restoreSettled &&');
+  });
+});
+
+describe('#635 delta-3: the kiosk clock on the paused screen', () => {
+  it('NB-1: no countdown line while the clock is not running (it used to read "Finishing now…")', async () => {
+    const { kioskCountdownText, kioskCountdownLabel, kioskRemainingSeconds } = await import('../src/kioskSession');
+    // Why: an unstarted clock is +Infinity, which the seconds helper turns into 0.
+    expect(kioskCountdownLabel(kioskRemainingSeconds(Number.POSITIVE_INFINITY))).toBe('Finishing now…');
+    expect(kioskCountdownText(null, 1_000)).toBeNull();
+    expect(kioskCountdownText(1_000, 1_000)).toBe('Finishing in 90 seconds');
+    expect(kioskCountdownText(1_000, 1_000 + KIOSK_IDLE_MS)).toBe('Finishing now…');
+    const { readFileSync } = await import('node:fs');
+    const route = readFileSync('app/contribute/[goalId].tsx', 'utf8');
+    expect(route).toContain('const kioskCountdown = kioskCountdownText(kioskStartedAt, kioskNow);');
+    const bar = route.slice(route.indexOf('{kioskCountdown != null ? ('), route.indexOf(') : null}', route.indexOf('{kioskCountdown != null ? (')));
+    expect(bar).toContain('testID="wsf-kiosk-countdown"');
+    expect(bar).toContain('testID="wsf-kiosk-stay"');
+    expect(bar).toContain('{kioskCountdown}');
+  });
+
+  it('NB-3: the restore clause counts only over a ready goal; in flight still beats settled', async () => {
+    const { kioskScreenSettled, kioskMayFinishUnattended } = await import('../src/kioskSession');
+    for (const stateKind of ['loading', 'notSignedIn']) {
+      expect(kioskScreenSettled({ stateKind, restoreFailed: true, beforeWrite: true }), stateKind).toBe(false);
+    }
+    expect(kioskScreenSettled({ stateKind: 'ready', restoreFailed: true, beforeWrite: true })).toBe(true);
+    for (const stateKind of ['closed', 'notFound', 'error']) {
+      expect(kioskScreenSettled({ stateKind, restoreFailed: false, beforeWrite: false }), stateKind).toBe(true);
+    }
+    expect(
+      kioskMayFinishUnattended({
+        outcome: 'none',
+        attemptInFlight: true,
+        loadSettled: kioskScreenSettled({ stateKind: 'ready', restoreFailed: true, beforeWrite: true }),
+      })
+    ).toBe(false);
   });
 });
