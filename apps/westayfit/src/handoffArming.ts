@@ -21,7 +21,7 @@
  * exactly as when the screens called `set*` directly.
  */
 import { clearEventReturn } from './eventReturn';
-import { clearKioskReturnGoal, clearKioskSession, markKioskSession, setKioskReturnGoal } from './kioskSession';
+import { clearKioskReturnGoal, markKioskSession, setKioskReturnGoal } from './kioskSession';
 import { clearMarkerReturn, setMarkerReturn } from './markerEntry';
 import { clearPendingJoinCode } from './pendingJoinCode';
 
@@ -54,6 +54,12 @@ export function armMarkerReturn(slug: string, uid: string | null, now: number = 
 /**
  * A shared screen has come to rest: nothing an earlier visitor armed may
  * route the next one. Resolves whether every clear was kept.
+ *
+ * NOT the kiosk-session marker (src/kioskSession.ts): this runs as soon as
+ * the start screen is in front, while the visitor may still be signed in.
+ * The marker goes only once nobody is signed in (the start screen's focus
+ * effect, and `runKioskFinish` after its sign-out), so a sign-out that fails
+ * or a kill before it lands still brings the next launch back to the kiosk.
  */
 export function resetSharedScreenHandoffs(): Promise<boolean> {
   return Promise.all([
@@ -61,7 +67,5 @@ export function resetSharedScreenHandoffs(): Promise<boolean> {
     clearEventReturn(),
     clearMarkerReturn(),
     clearKioskReturnGoal(),
-    // At rest the start screen has signed out: the kiosk session is over.
-    clearKioskSession(),
   ]).then((results) => results.every(Boolean));
 }
