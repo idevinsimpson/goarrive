@@ -5,7 +5,12 @@ import { Platform } from 'react-native';
 
 import { useWsfAuth } from '../../src/auth';
 import { mapWithLimit } from '../../src/concurrency';
-import { currentCommunityReady, isCurrentCommunityReady, resolveCurrentCommunity } from '../../src/currentCommunity';
+import {
+  currentCommunityReady,
+  isCurrentCommunityReady,
+  resolveCurrentCommunity,
+  useCurrentCommunityReady,
+} from '../../src/currentCommunity';
 import { getFirebaseAuth } from '../../src/firebase';
 import { UNKNOWN_SHARED, knownShared } from '../../src/goalTruth';
 import {
@@ -322,8 +327,10 @@ function recordedYou(uid: string): { screen: Screen; args: ComposeArgs | null } 
   const profile: Profile = known ? toProfile(known) : { displayName: null, memberSince: null, pending: true };
   const communities = mine.items as unknown as Community[];
   if (communities.length === 0) return { screen: { kind: 'noCommunity', profile }, args: null };
-  // Not before the phone's remembered choice is read: "none chosen" would be a guess.
-  if (!isCurrentCommunityReady()) return null;
+  // Not before the phone's remembered choice is read, where it can change the
+  // answer: with several communities "none chosen" would be a guess. With one,
+  // the answer is that one either way.
+  if (communities.length > 1 && !isCurrentCommunityReady()) return null;
   const currentId = resolveCurrentCommunity(
     uid,
     communities.map((c) => c.groupId),
@@ -425,6 +432,22 @@ export default function You() {
   }, []);
   const [signingOut, setSigningOut] = useState(false);
   const [reloads, setReloads] = useState(0);
+  // A page that came up before the phone's remembered community was read
+  // shows loading (recordedYou above); once the read lands, the frame the
+  // record could not give then is given now. Not after a Retry, which reads
+  // everything fresh. The load below still replaces it.
+  const communityReady = useCurrentCommunityReady();
+  // heads-11 F2: what that repaint drew. It lets the load in flight keep the
+  // page on screen if it fails, under the same gate as a page drawn at mount
+  // (`fail` below).
+  const repainted = useRef<{ uid: string; screen: Screen } | null>(null);
+  useEffect(() => {
+    if (!communityReady || !ready || !user || reloads > 0) return;
+    const warmNow = recordedYou(user.uid)?.screen ?? null;
+    repainted.current = warmNow ? { uid: user.uid, screen: warmNow } : null;
+    const uid = user.uid;
+    setScreen(uid, (prev) => (prev.kind === 'loading' ? recordedYou(uid)?.screen ?? prev : prev));
+  }, [communityReady, ready, user, reloads, setScreen]);
   /** Guards a landed read against a newer one, and against an unmounted tree. */
   const live = useRef(0);
 
@@ -514,6 +537,7 @@ export default function You() {
       return;
     }
     const token = ++live.current;
+    repainted.current = null;
     const uid = user.uid;
     const fresh = reloads > 0 || freshNext.current;
     freshNext.current = false;
@@ -554,6 +578,32 @@ export default function You() {
         const profile = await profileRead;
         if (live.current !== token) return;
         settle();
+        /*
+          WHICH PAGE A FAILED LOAD KEEPS (RV16-C15-1, RV16-C15-2, RV16-639-1).
+          A load may keep what is on screen, marked stale, when it began on a
+          member page from the record (`recorded`), when the readiness repaint
+          drew a member page while it was in flight (`painted`, heads-11 F2),
+          or when it is a return's revalidation (`keep`). ONE GATE decides,
+          on the page ON SCREEN now (`shownRef`), not on the page the load
+          began on, which a focus may have replaced since:
+            · a member page is kept only while the fresh read still shows it
+              (`keptPageStillShown`, RV15-639-N2);
+            · pick, none and failed pages are kept only when NO community was
+              resolved, i.e. the membership read itself failed (W13-15,
+              heads-15 RV17-642-N1): once the fresh list resolved one whose
+              goals then failed, that community's failed page is the true
+              one. 'loading' is never kept: a skeleton is never left up as a
+              stale page (a refused community's page dropped to loading,
+              then a failed revalidation).
+          Otherwise the failed page for the resolved community, with Retry,
+          and nothing is marked stale. The condition is member's (W16-17),
+          with the repainted page added: only this tree keeps it apart.
+        */
+        const painted = !recorded && !keep && repainted.current?.uid === uid ? repainted.current.screen : null;
+        // Candidate-17 composition: the repainted page joins the one gate below
+        // (W13-12), so it is judged on the page on screen like the others and
+        // kept through member's keep body, whose head never falls back to the
+        // read's failure fallback (RV16-C15-3).
         // heads-13 RV15-642-B2: a load that drew the record's member page
         // fails the same way as a kept one. It used to put back the page it
         // drew when it STARTED, so a focus that had since drawn a newer page
@@ -578,10 +628,8 @@ export default function You() {
         // failed page for the community resolved is drawn instead.
         const shown = shownRef.current.uid === uid ? shownRef.current.screen : LOADING;
         if (
-          (keep || (recorded && recorded.kind === 'member')) &&
-          (shown.kind === 'member'
-            ? keptPageStillShown(shown, community, communities)
-            : shown.kind !== 'loading' && community === undefined)
+          (keep || (recorded && recorded.kind === 'member') || (painted && painted.kind === 'member')) &&
+          (shown.kind === 'member' ? keptPageStillShown(shown, community, communities) : shown.kind !== 'loading' && community === undefined)
         ) {
           // Kept, but recomposed against now (N3). heads-10 F-1: from the
           // account's record first, which is never older than the page (a
