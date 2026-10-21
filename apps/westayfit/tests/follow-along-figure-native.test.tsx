@@ -1,6 +1,6 @@
 import { act, useCallback, useState, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { Image } from 'react-native';
+import { Image, StyleSheet } from 'react-native';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
@@ -48,6 +48,9 @@ import { FollowAlongCard } from '../src/ui/FollowAlongCard';
 import { moveFigureLabel, moveFigureSvg, moveFigureSvgDataUriRaw, type MovePose } from '../src/ui/moveFigure';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+/** The figure's sizes as they stand in FollowAlongCard.tsx, as literals (the web references below). */
+const FIGURE = StyleSheet.create({ light: { width: 200, height: 240 }, venue: { width: 160, height: 192 } });
 
 let container: HTMLDivElement;
 let root: Root;
@@ -131,15 +134,21 @@ describe('the web keeps today’s <Image>', () => {
       ];
       expect(ctl.calls).toHaveLength(2);
       for (const [i, f] of before.entries()) {
-        const call = ctl.calls[i]!;
-        // Today's element, given the style the card passes.
+        // The card handed SvgMarkup this figure's RAW markup and label.
+        expect(ctl.calls[i]).toMatchObject({
+          markup: moveFigureSvg({ kind: 'squat', pose: f.pose, accent: f.accent }),
+          accessibilityLabel: moveFigureLabel('squat', f.pose),
+          testID: f.testID,
+        });
+        // Today's element, from literal values (FollowAlongCard.tsx styles.figure
+        // and styles.figureVenue), not from the style the card passes (RV11-634-N1).
         const reference = document.createElement('div');
         const refRoot = createRoot(reference);
         act(() =>
           refRoot.render(
             <Image
               source={{ uri: moveFigureSvgDataUriRaw({ kind: 'squat', pose: f.pose, accent: f.accent }) }}
-              style={call.style as ComponentProps<typeof Image>['style']}
+              style={venue ? FIGURE.venue : FIGURE.light}
               resizeMode="contain"
               accessibilityLabel={moveFigureLabel('squat', f.pose)}
               testID={f.testID}

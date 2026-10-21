@@ -125,7 +125,7 @@ vi.mock('../src/ui/useReducedMotion', () => ({
   useReducedMotionPreference: () => ({ ...ctl.pref }),
 }));
 
-import { Pressable, Text } from 'react-native';
+import { Pressable, StyleSheet, Text } from 'react-native';
 
 import { togetherPresentation, type ContributeReceipt } from '../src/contributionFlow';
 import { percentLabel, totalOfTargetLabel } from '../src/ui/progressFormat';
@@ -543,12 +543,17 @@ describe('W14-2 (INT-16): the receipt numeral is capped on a phone, untouched on
     for (const key of ['maxFontSizeMultiplier', 'numberOfLines', 'adjustsFontSizeToFit', 'minimumFontScale']) {
       expect(given, key).not.toHaveProperty(key);
     }
-    // Today's element, with the style the receipt passes: the same DOM.
+    // Today's element, built from literal values (styles.amount as it stands
+    // in TogetherCompletion.tsx; a 844 pt window is not "short"), not from the
+    // style the receipt passes (RV11-634-N1): the same DOM.
+    const literal = StyleSheet.create({
+      amount: { color: '#F6F9FD', fontSize: 82, fontWeight: '600', lineHeight: 86, letterSpacing: -6, fontVariant: ['tabular-nums'] },
+    });
     const reference = document.createElement('div');
     const refRoot = createRoot(reference);
     act(() =>
       refRoot.render(
-        <Text style={given.style as never} testID={AMOUNT}>
+        <Text style={[literal.amount, null]} testID={AMOUNT}>
           +5015
         </Text>,
       ),

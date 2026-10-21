@@ -3,7 +3,7 @@ import * as nodePath from 'node:path';
 
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { Easing, View as RNView } from 'react-native';
+import { Easing, StyleSheet, View as RNView } from 'react-native';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
@@ -352,14 +352,29 @@ describe('lift and containment', () => {
   it('the web panel element is the View it was: same attributes, same CSS phase, the empty token adding nothing', () => {
     fx.os = 'web';
     show();
-    const given = fx.plain['wsf-settings-panel']!;
     const actual = container.querySelector('[data-testid="wsf-settings-panel"]')!.cloneNode(false) as HTMLElement;
+    // The panel as it stands in app/settings.tsx (st.panel), as literal values,
+    // not read back from the screen (RV11-634-N1).
+    const literal = StyleSheet.create({
+      panel: {
+        width: '100%',
+        maxWidth: 380,
+        height: '100%',
+        backgroundColor: '#FFFFFF',
+        borderRadius: 8,
+        overflow: 'hidden',
+        shadowColor: '#081D36',
+        shadowOpacity: 0.3,
+        shadowRadius: 30,
+        shadowOffset: { width: 0, height: 20 },
+      },
+    });
     const reference = document.createElement('div');
     const refRoot = createRoot(reference);
     act(() =>
       refRoot.render(
         <RNView
-          style={(given.style as unknown[])[0] as never}
+          style={literal.panel}
           testID="wsf-settings-panel"
           {...({ role: 'dialog', 'aria-modal': true, 'aria-label': 'Settings' } as Record<string, unknown>)}
           {...({ dataSet: { wsfSidePanel: 'in' } } as Record<string, unknown>)}
