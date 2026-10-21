@@ -443,3 +443,98 @@ describe('#639 follow-up: newer writes are decided by write generation, not valu
     expect(await m.je.takeJoinEventContext(A, CODE)).toEqual({ goalId: null, activity: null });
   });
 });
+
+describe('#639 delta-3 N1: the discard ends the take that started it, not a later stash', () => {
+  it('a scan that lands while a bounded take is still reading survives the take’s discard', async () => {
+    let m = await launch();
+    await scan(m, G1, 'Squats');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const realGet = disk.api.getItem;
+    disk.api.getItem = async (key: string) => {
+      await new Promise((r) => setTimeout(r, 3_000));
+      return realGet(key);
+    };
+    try {
+      m = await launch();
+      let answer: unknown = 'waiting';
+      void m.je.takeJoinEventContextWithin(A, CODE).then((c) => (answer = c));
+      await vi.advanceTimersByTimeAsync(m.je.JOIN_CONTEXT_WAIT_MS + 10);
+      expect(answer).toEqual({ goalId: null, activity: null });
+      // A fresh scan of a second event (no activity) arrives before the slow read answers.
+      await vi.advanceTimersByTimeAsync(500);
+      void m.je.setPendingEventGoal(G2, CODE, null);
+      await vi.advanceTimersByTimeAsync(12_000);
+    } finally {
+      disk.api.getItem = realGet;
+    }
+    vi.useRealTimers();
+    // The take discarded what it read (G1's activity), not the newer scan.
+    expect(disk.map.has(ACTIVITY_KEY)).toBe(false);
+    m = await launch();
+    expect(await m.je.takeJoinEventContext(A, CODE)).toEqual({ goalId: G2, activity: null });
+  });
+
+  it('with no write in between, the take still consumes what it read', async () => {
+    let m = await launch();
+    await scan(m, G1, 'Squats');
+    m = await launch();
+    expect(await m.je.takeJoinEventContext(A, CODE)).toEqual({ goalId: G1, activity: 'Squats' });
+    m = await launch();
+    expect(await m.je.takeJoinEventContext(A, CODE)).toEqual({ goalId: null, activity: null });
+  });
+});
+
+describe('#639 delta-3 N1: a context that is USED is consumed, even one written while it was being read', () => {
+  async function slowReads(ms: number) {
+    const realGet = disk.api.getItem;
+    disk.api.getItem = async (key: string) => {
+      await new Promise((r) => setTimeout(r, ms));
+      return realGet(key);
+    };
+    return () => {
+      disk.api.getItem = realGet;
+    };
+  }
+
+  it('unbounded take: a scan landing during the read is what it returns, and it is consumed', async () => {
+    let m = await launch();
+    await scan(m, G1, 'Squats');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const restore = await slowReads(3_000);
+    let answer: unknown = 'waiting';
+    try {
+      m = await launch();
+      void m.je.takeJoinEventContext(A, CODE).then((c) => (answer = c));
+      await vi.advanceTimersByTimeAsync(1_000);
+      void m.je.setPendingEventGoal(G2, CODE, null);
+      await vi.advanceTimersByTimeAsync(12_000);
+    } finally {
+      restore();
+    }
+    vi.useRealTimers();
+    expect(answer).toEqual({ goalId: G2, activity: null });
+    m = await launch();
+    expect(await m.je.takeJoinEventContext(A, CODE)).toEqual({ goalId: null, activity: null });
+  });
+
+  it('bounded take answering in time: what it returns is consumed, including a scan that landed mid-read', async () => {
+    let m = await launch();
+    await scan(m, G1, 'Squats');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const restore = await slowReads(1_000);
+    let answer: unknown = 'waiting';
+    try {
+      m = await launch();
+      void m.je.takeJoinEventContextWithin(A, CODE).then((c) => (answer = c));
+      await vi.advanceTimersByTimeAsync(400);
+      void m.je.setPendingEventGoal(G2, CODE, null);
+      await vi.advanceTimersByTimeAsync(12_000);
+    } finally {
+      restore();
+    }
+    vi.useRealTimers();
+    expect(answer).toEqual({ goalId: G2, activity: null });
+    m = await launch();
+    expect(await m.je.takeJoinEventContext(A, CODE)).toEqual({ goalId: null, activity: null });
+  });
+});
