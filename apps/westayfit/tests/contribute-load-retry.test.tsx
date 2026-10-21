@@ -68,6 +68,7 @@ vi.mock('firebase/functions', () => ({
 }));
 
 const { clearMemberReads } = await import('../src/memberReads');
+const { signOut } = await import('firebase/auth');
 const { default: ContributeToGoal } = await import('../app/contribute/[goalId]');
 
 const PULSE = { sharedTotal: 40, target: 100, unit: 'squats', status: 'active' };
@@ -258,13 +259,24 @@ describe('#641 NB-1 and NB-2: what Try again re-reads, and the kiosk', () => {
     expect(count('wsfListGoals')).toBe(2);
   });
 
-  it('NB-2: on a kiosk the load error offers Finish alone; no Try again can clear its deadline', async () => {
+  it('NB-2: on a kiosk the load error offers Finish alone, and its 90-second deadline runs and ends the session', async () => {
     params.value = { goalId: 'g1', kiosk: '1' };
     answers.wsfGoalPulse = OFFLINE;
+    (signOut as unknown as { mockClear: () => void }).mockClear();
+    router.dismissTo.mockClear();
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
     act(() => root.render(<ContributeToGoal />));
     await settle();
     expect(byId('wsf-contribute-load-error')).not.toBeNull();
     expect(byId('wsf-contribute-load-retry')).toBeNull();
     expect(byId('wsf-kiosk-finish')).not.toBeNull();
+    // The load error is a rest state: the deadline is on screen from 90 s ...
+    expect(byId('wsf-kiosk-countdown')!.textContent).toBe('Finishing in 90 seconds');
+    expect(signOut).not.toHaveBeenCalled();
+    // ... and when nobody acts it finishes the session, once, back to the kiosk's start.
+    for (let i = 0; i < 91; i += 1) await act(async () => vi.advanceTimersByTime(1_000));
+    await settle();
+    expect(signOut).toHaveBeenCalledTimes(1);
+    expect(router.dismissTo).toHaveBeenCalledWith('/kiosk/g1');
   });
 });
