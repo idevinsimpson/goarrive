@@ -7,6 +7,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   BaseNavigationContainer,
+  NavigationIndependentTree,
   StackRouter,
   TabRouter,
   createNavigationContainerRef,
@@ -38,6 +39,7 @@ import {
 
 const ctl = vi.hoisted(() => ({
   log: [] as string[],
+  unhandled: [] as unknown[],
   ref: null as unknown as { dispatch: (a: unknown) => void; getRootState: () => unknown },
 }));
 vi.mock('../src/kioskSession', async (importOriginal) => ({
@@ -97,8 +99,8 @@ function actionStateFor(href: string): object {
 
 vi.mock('expo-router', () => {
   const go = (href: string, type: string) => {
-    const action = getNavigateAction(actionStateFor(href), ctl.ref.getRootState(), type);
     ctl.log.push(`${type} ${href}`);
+    const action = getNavigateAction(actionStateFor(href), ctl.ref.getRootState(), type);
     ctl.ref.dispatch(action);
   };
   return {
@@ -177,6 +179,7 @@ beforeEach(() => {
   ref = createNavigationContainerRef();
   ctl.ref = ref as never;
   ctl.log = [];
+  ctl.unhandled = [];
   indexMounts = 0;
 });
 afterEach(() => {
@@ -234,5 +237,85 @@ describe('RV16-641-N1: Go to Home from a root-stack screen fallback over a mount
     await flush();
     expect(rootNames()).toEqual(['(tabs)']);
     expect(homeStackNames()).toEqual(['community/[groupId]/index', 'community/[groupId]/index']);
+  });
+});
+
+// ---- RV17-641-N4: a dispatch that no navigator takes is not taken for a way Home ----
+const Plain = () => <div data-testid="plain">a</div>;
+const OtherStack = createNavigatorFactory(ProbeStack)();
+
+describe('RV17-641-N4: Go to Home whose POP_TO no navigator takes falls back to dismissTo("/")', () => {
+  it("the reviewer's probe tree, where no navigator knows (tabs): the dropped POP_TO is noticed and dismissTo('/') is asked", async () => {
+    act(() =>
+      root.render(
+        <BaseNavigationContainer ref={ref as never} onUnhandledAction={(a) => ctl.unhandled.push(a)}>
+          <RootStack.Navigator>
+            <RootStack.Screen name="a" component={Plain} />
+            <RootStack.Screen name="b" component={SettingsFallback} />
+          </RootStack.Navigator>
+        </BaseNavigationContainer>,
+      ),
+    );
+    await flush();
+    act(() => (ref as unknown as { navigate: (n: string) => void }).navigate('b'));
+    await flush();
+    expect(rootNames()).toEqual(['a', 'b']);
+    ctl.log = [];
+    ctl.unhandled = [];
+    const home = container.querySelector('[data-focused="true"] [data-testid="wsf-route-error-home"]') as HTMLElement;
+    expect(home.textContent).toBe('Go to Home');
+    await act(async () => home.click());
+    await flush();
+    // The screen's POP_TO (tabs) was dropped: the router is asked next.
+    expect(ctl.unhandled.length).toBeGreaterThanOrEqual(1);
+    expect(ctl.log[0]).toBe('POP_TO /');
+    // Nothing in this tree is Home: the stack stands.
+    expect(rootNames()).toEqual(['a', 'b']);
+  });
+
+  it('a fallback inside an independent navigation tree (its navigator cannot see the app\'s tabs): the app pops back to the tabs through the router', async () => {
+    const IndependentSettings = () => (
+      <NavigationIndependentTree>
+        <BaseNavigationContainer onUnhandledAction={(a) => ctl.unhandled.push(a)}>
+          <OtherStack.Navigator>
+            <OtherStack.Screen name="inner" component={SettingsFallback} />
+          </OtherStack.Navigator>
+        </BaseNavigationContainer>
+      </NavigationIndependentTree>
+    );
+    act(() =>
+      root.render(
+        <BaseNavigationContainer ref={ref as never}>
+          <RootStack.Navigator>
+            <RootStack.Screen name="(tabs)" component={TabsShell} />
+            <RootStack.Screen name="settings" component={IndependentSettings} />
+          </RootStack.Navigator>
+        </BaseNavigationContainer>,
+      ),
+    );
+    await flush();
+    act(() => router.push('/settings' as never));
+    await flush();
+    expect(rootNames()).toEqual(['(tabs)', 'settings']);
+    ctl.log = [];
+    ctl.unhandled = [];
+    const home = container.querySelector('[data-route="settings"] [data-testid="wsf-route-error-home"]') as HTMLElement;
+    await act(async () => home.click());
+    await flush();
+    // The app popped back to its tabs: the stack first.
+    expect(rootNames()).toEqual(['(tabs)']);
+    expect(ctl.unhandled).toHaveLength(1);
+    // The router's POP_TO / (then Home's own redirect to the community, as the app does).
+    expect(ctl.log[0]).toBe('POP_TO /');
+  });
+
+  it('control: a POP_TO that IS taken is never followed by the router (one community, as above)', async () => {
+    await settingsOverCommunity();
+    const home = container.querySelector('[data-focused="true"] [data-testid="wsf-route-error-home"]') as HTMLElement;
+    await act(async () => home.click());
+    await flush();
+    expect(ctl.log).toEqual([]);
+    expect(rootNames()).toEqual(['(tabs)']);
+    expect(homeStackNames()).toEqual(['community/[groupId]/index']);
   });
 });

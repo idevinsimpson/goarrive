@@ -1,4 +1,4 @@
-import { act, useSyncExternalStore, type ComponentType, type ReactNode } from 'react';
+import { act, useSyncExternalStore, type ComponentType, type ReactElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -16,9 +16,10 @@ import {
  * AWAY. Self-contained: it runs on integrator-2 alone and copies unchanged onto
  * a composed candidate.
  *
- * The gap: landAfterAuth's kiosk-beneath guard needs the caller's `routes`, and
- * member's Sign in and Create account (app/signin.tsx, app/signup.tsx on the
- * member lane) pass only dispatch, push and replace. A pending join code, an
+ * The gap: landAfterAuth's kiosk-beneath guard needed the caller's `routes`,
+ * and member's Sign in and Create account (app/signin.tsx, app/signup.tsx on
+ * the member lane) passed only dispatch, push and replace before W16-19
+ * (41090634), which now passes routes and dismissTo. A pending join code, an
  * event return or a /go marker return outranks the kiosk return
  * (src/pendingJoinCode.ts nextRouteAfterAuth), so Sign in landed a member
  * destination by the Home reset: [(tabs), join] over a wiped kiosk, the visitor
@@ -45,14 +46,31 @@ import {
  *     app/contribute/[goalId].tsx:1647, and performs Finish when it runs out
  *     (:1659).
  *
- * Sign in is MEMBER'S terminal hop, modelled: landAfterAuth(routeAfterAuth('/'),
- * { dispatch, push, replace, platform }), no routes and no dismissTo.
+ * Sign in is a Sign in that passes NO routes, modelled:
+ * landAfterAuth(routeAfterAuth('/'), { dispatch, push, replace, platform }), no
+ * routes and no dismissTo, as member's Sign in did before W16-19 (41090634).
+ * So these cases test landAfterAuth's no-routes fallback; the composed Sign in
+ * (routes and dismissTo) is covered on the member lane by
+ * tests/kiosk-signin-landing-stack.test.tsx (RV17-C16-5).
  * Everything else is real: the kiosk start screen, the hand-off arming, the
- * join screen, the contribution screen (once signed in), the kiosk session and
- * the destinations over the NATIVE storage modules and an in-memory
- * AsyncStorage, as on a phone. expo-router's hooks are forwarded to the core
+ * join screen, the event screen (app/event/[goalId]), the /go marker screen
+ * (app/go/[markerSlug], MarkerEntryScreen), the contribution screen (once
+ * signed in), the kiosk session and the destinations over the NATIVE storage
+ * modules and an in-memory AsyncStorage, as on a phone (RV17-641-N1: the event
+ * and /go stand-ins are gone). expo-router's hooks are forwarded to the core
  * hooks it wraps; router.push, replace, dismissTo and navigate dispatch PUSH,
- * REPLACE, POP_TO and NAVIGATE on the root stack. Firebase is a fake.
+ * REPLACE, POP_TO and NAVIGATE on the root stack, and its Link runs the
+ * child's onPress, then navigates (replaces, with `replace`), as expo-router's
+ * Link does. Firebase is a fake.
+ *
+ * WHAT IS MEASURED WHERE (RV17-641-N1). FINISH and IDLE are measured on the
+ * kiosk contribution flow: those cases push the kiosk contribution from the
+ * landed state, a step the real landing does not take. The landed screens
+ * themselves (join, event, /go) have no Finish and no idle deadline: that is
+ * pinned, as it is today, under "owner decision RV16-641-N3 pending", together
+ * with their "back to home" links, which open member (tabs) over the kiosk
+ * while the marker stays open. Product behaviour there is the owner's call;
+ * these cases only pin it.
  */
 
 const disk = vi.hoisted(() => {
@@ -155,6 +173,18 @@ const PULSE = {
   endsAt: '2026-12-01T00:00:00Z',
   timezone: 'UTC',
 };
+/** What /go/oak-hall-01 resolves to: a signed-in visitor who is not a member, so the join step. */
+const MARKER = {
+  markerSlug: 'oak-hall-01',
+  label: 'Oak Hall',
+  communityName: 'Oak Grove',
+  goalId: 'goal-1',
+  goalTitle: '500 squats together',
+  goalState: 'open',
+  kioskMode: 'available',
+  viewer: 'nonMember',
+  communityGroupId: null,
+};
 /** The callables, by name; a test may make one fail. */
 const api = vi.hoisted(() => ({ failPulse: false }));
 vi.mock('firebase/functions', () => ({
@@ -173,6 +203,10 @@ vi.mock('firebase/functions', () => ({
         return { data: { goals: [] } };
       case 'wsfMyCommunities':
         return { data: { items: [] } };
+      case 'wsfEventContext':
+        return { data: { activities: [] } };
+      case 'wsfResolveMarker':
+        return { data: MARKER };
       default:
         return { data: {} };
     }
@@ -198,6 +232,7 @@ vi.mock('../src/featureFlags', async (importOriginal) => ({
 const nav = vi.hoisted(() => ({ ref: null as unknown as { dispatch: (a: unknown) => void }, log: [] as string[] }));
 vi.mock('expo-router', async () => {
   const core = await import('@react-navigation/core');
+  const { cloneElement, isValidElement } = await import('react');
   function routeOf(href: string): [string, Record<string, string> | undefined] {
     const [path, q] = href.split('?');
     const params = Object.fromEntries(new URLSearchParams(q ?? ''));
@@ -241,7 +276,17 @@ vi.mock('expo-router', async () => {
     useFocusEffect: core.useFocusEffect,
     useLocalSearchParams: () => core.useRoute().params ?? {},
     usePathname: () => '/',
-    Link: ({ children }: { children: ReactNode }) => children,
+    // expo-router's Link (asChild): the child's onPress first, then the navigation (NAVIGATE; REPLACE with `replace`).
+    Link: ({ href, replace, children }: { href: string; replace?: boolean; children: ReactNode }) =>
+      isValidElement(children)
+        ? cloneElement(children as ReactElement<{ onPress?: (e: unknown) => void }>, {
+            onPress: (e: unknown) => {
+              (children as ReactElement<{ onPress?: (e: unknown) => void }>).props.onPress?.(e);
+              if (replace) router.replace(href);
+              else router.navigate(href);
+            },
+          })
+        : children,
   };
 });
 
@@ -258,6 +303,9 @@ const { landAfterAuth } = await import('../src/ui/authLanding');
 const { default: KioskGoal } = await import('../app/kiosk/[goalId]');
 const { default: JoinPage } = await import('../app/join/[joinCode]');
 const { default: ContributeToGoal } = await import('../app/contribute/[goalId]');
+const { default: EventPage } = await import('../app/event/[goalId]');
+const { default: MarkerEntryRoute } = await import('../app/go/[markerSlug]');
+const { clearDeviceMode } = await import('../src/deviceMode');
 const { useWsfAuth } = await import('../src/auth');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -318,8 +366,6 @@ function MemberSignIn() {
     </button>
   );
 }
-const EventScreen = () => <div data-testid="probe-event">event</div>;
-const MarkerScreen = () => <div data-testid="probe-marker">marker</div>;
 
 let container: HTMLDivElement;
 let root: Root;
@@ -330,6 +376,8 @@ beforeEach(async () => {
   await act(async () => {
     await session.clearKioskSession();
     await session.clearKioskReturnGoal();
+    // A device that has not said whose it is (the event screen asks).
+    await clearDeviceMode();
   });
   disk.map.clear();
   nav.log = [];
@@ -400,8 +448,8 @@ function App({ initial }: { initial: { name: string; params?: object }[] }) {
         <Stack.Screen name="contribute/[goalId]" component={KioskContribution} />
         <Stack.Screen name="signin" component={MemberSignIn} />
         <Stack.Screen name="join/[joinCode]" component={JoinPage as ComponentType} />
-        <Stack.Screen name="event/[goalId]" component={EventScreen} />
-        <Stack.Screen name="go/[markerSlug]" component={MarkerScreen} />
+        <Stack.Screen name="event/[goalId]" component={EventPage as ComponentType} />
+        <Stack.Screen name="go/[markerSlug]" component={MarkerEntryRoute as ComponentType} />
       </Stack.Navigator>
     </BaseNavigationContainer>
   );
@@ -458,7 +506,9 @@ const LANDED: Record<Case, { stack: string[]; user: string | null; marker: strin
   event: { stack: [KIOSK, 'event/[goalId]'], user: 'visitor-1', marker: 'goal-1', kioskReturn: 'goal-1' },
   go: { stack: [KIOSK, 'go/[markerSlug]'], user: 'visitor-1', marker: 'goal-1', kioskReturn: null },
   // '/' with the marker: that kiosk's start screen replaces Sign in; focused, it ends the session there
-  // (app/kiosk/[goalId].tsx:95-104).
+  // (app/kiosk/[goalId].tsx:95-104). [kiosk, kiosk] is the NO-ROUTES FALLBACK shape: with no stack to
+  // see, Sign in cannot dismiss to the kiosk beneath. The composed Sign in (W16-19, routes and
+  // dismissTo) lands on ONE kiosk (tests/kiosk-signin-landing-stack.test.tsx on the member lane).
   'marker-alone': { stack: [KIOSK, KIOSK], user: null, marker: null, kioskReturn: null },
 };
 
@@ -499,7 +549,7 @@ describe.each(['ios', 'android'] as const)('RV16-641-B1 on %s: a return opened a
   }
 
   for (const kind of ['join', 'event', 'go'] as const) {
-    it(`${kind}: FINISH from the landed state (the kiosk contribution's Finish) → the kiosk start screen, signed out, the marker cleared`, async () => {
+    it(`${kind}: FINISH, measured on the kiosk contribution flow (pushed from the landed state, a step the real landing does not take): the kiosk contribution's Finish → the kiosk start screen, signed out, the marker cleared`, async () => {
       await landed(kind);
       expectState(`${kind} landing`, LANDED[kind]);
       // Back to the kiosk flow: the kiosk contribution, the visitor still signed in.
@@ -516,7 +566,7 @@ describe.each(['ios', 'android'] as const)('RV16-641-B1 on %s: a return opened a
       expectState(`${kind} after Finish`, { stack: [KIOSK], user: null, marker: null, kioskReturn: null });
     });
 
-    it(`${kind}: IDLE — on a settled kiosk screen nobody touches, the ${90}-second deadline finishes the session`, async () => {
+    it(`${kind}: IDLE, measured on the kiosk contribution flow (pushed from the landed state, a step the real landing does not take): on a settled kiosk contribution nobody touches, the ${90}-second deadline finishes the session`, async () => {
       await landed(kind);
       expectState(`${kind} landing`, LANDED[kind]);
       // The kiosk contribution that cannot load is a settled screen (src/kioskSession.ts kioskScreenSettled):
@@ -538,6 +588,50 @@ describe.each(['ios', 'android'] as const)('RV16-641-B1 on %s: a return opened a
       await flush();
       expect(focusedRoute()).toBe(KIOSK);
       expectState(`${kind} after the deadline`, { stack: [KIOSK], user: null, marker: null, kioskReturn: null });
+    });
+  }
+
+  // ---- owner decision RV16-641-N3 pending: today's landed state, PINNED (not changed here) ----
+  for (const kind of ['join', 'event', 'go'] as const) {
+    it(`owner decision RV16-641-N3 pending — ${kind}: a visitor who lands on it after a kiosk Sign in and walks away stays signed in; no idle deadline runs on that screen`, async () => {
+      await landed(kind);
+      expectState(`${kind} landing`, LANDED[kind]);
+      const signOutsBefore = fb.signOutCalls;
+      // Every timer the app could run a deadline on, and the clock, well past KIOSK_IDLE_MS (src/kioskSession.ts:38).
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(session.KIOSK_IDLE_MS + 10 * session.KIOSK_TICK_MS);
+      });
+      vi.useRealTimers();
+      await flush();
+      // Nothing ended the session: the same screen, still signed in, the marker still open.
+      expectState(`${kind} walked away`, { stack: LANDED[kind].stack, user: 'visitor-1', marker: 'goal-1' });
+      expect(fb.signOutCalls).toBe(signOutsBefore);
+    });
+
+    it(`owner decision RV16-641-N3 pending — ${kind}: its "back to home" link opens member (tabs) over the kiosk, signed in, the marker still open`, async () => {
+      await landed(kind);
+      expectState(`${kind} landing`, LANDED[kind]);
+      if (kind === 'event') {
+        // The event screen first asks whose screen this is (no device answer stored); "My own phone".
+        await press('wsf-device-choice-personal');
+        await flush();
+        expectState('event, own phone chosen', { stack: LANDED.event.stack, user: 'visitor-1', marker: 'goal-1' });
+      }
+      // join: wsf-join-decline (app/join/[joinCode].tsx:648); event: "Back to home" (app/event/[goalId].tsx:922,
+      // the member branch); /go: "Not now — back to home" (src/ui/MarkerEntryScreen.tsx:319, the join step).
+      const label = { join: 'Not now — back to home', event: 'Back to home', go: 'Not now — back to home' }[kind];
+      const link = Array.from(focusedEl().querySelectorAll('[role="link"], a')).find((el) => el.textContent === label) as HTMLElement | undefined;
+      expect(link, `${label} on the ${kind} screen`).toBeDefined();
+      nav.log = [];
+      await act(async () => {
+        link!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      await flush();
+      expectState(`${kind} back to home`, { stack: [...LANDED[kind].stack, '(tabs)'], user: 'visitor-1', marker: 'goal-1' });
+      expect(nav.log).toEqual(['navigate /']);
+      expect(memberHomeRenders).toBeGreaterThan(0);
+      expect(focusedEl().querySelector('[data-testid="member-home"]')!.textContent).toBe('member-home:visitor-1');
     });
   }
 

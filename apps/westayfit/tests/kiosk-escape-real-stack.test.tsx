@@ -702,9 +702,12 @@ const { useNavigation: useRouteNavigation } = await import('expo-router');
 const { Platform: RNPlatform } = await import('react-native');
 
 /**
- * Member's Sign in as composed (app/signin.tsx on the member lane): its terminal
- * hop lands through landAfterAuth with dispatch, push and replace ONLY, no
- * routes and no dismissTo. Modelled here, so the case runs on this branch too.
+ * A Sign in that passes no routes: landAfterAuth with dispatch, push and
+ * replace ONLY, no routes and no dismissTo, as member's Sign in did before
+ * W16-19 (41090634). Modelled here, so the case runs on this branch too: it
+ * tests landAfterAuth's no-routes fallback. The composed Sign in (W16-19,
+ * memberLandingDeps: routes and dismissTo) is covered on the member lane by
+ * tests/kiosk-signin-landing-stack.test.tsx (RV17-C16-5).
  */
 function MemberDepsSignIn() {
   const navigation = useRouteNavigation();
@@ -748,7 +751,7 @@ function MemberDepsApp({ initial }: { initial: { name: string; params?: object }
     </BaseNavigationContainer>
   );
 }
-/** The kiosk's Contribute, then its Sign in gate, with member's Sign in. */
+/** The kiosk's Contribute, then its Sign in gate, with a Sign in that passes no routes. */
 async function kioskVisitorAtMemberSignIn(): Promise<void> {
   act(() => root.render(<MemberDepsApp initial={[KIOSK_START]} />));
   await flush();

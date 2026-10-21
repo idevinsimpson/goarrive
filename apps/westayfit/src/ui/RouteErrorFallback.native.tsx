@@ -8,7 +8,7 @@ import { SafeAreaInsetsContext, initialWindowMetrics } from 'react-native-safe-a
 import { crashHarnessEnabled, disarmAllCrashSites } from '../crashHarness.native';
 import { noteCaughtError } from '../crashRecords';
 import { getFirebaseAuth } from '../firebase';
-import { kioskStartRoute, readKioskReturnGoal, readKioskSession } from '../kioskSession';
+import { kioskSessionUnknown, kioskStartRoute, readKioskReturnGoal, readKioskSession } from '../kioskSession';
 import { CREAM, kit } from './kit';
 import type { BoundaryProps, FallbackVariant } from './routeErrorTypes';
 
@@ -68,6 +68,16 @@ import type { BoundaryProps, FallbackVariant } from './routeErrorTypes';
  * fallback stands in for is remounted as for Home, and the kiosk asked for
  * again once it has (at the root, the first request has no navigator to take
  * it).
+ *
+ * NO WAY HOME WHILE THE MARKER IS UNKNOWN (RV17-641-N3). When the device's
+ * marker cannot be read (a read that throws, or the storage layer's unknown
+ * state, `kioskSessionUnknown()`) and no kiosk return names a kiosk, this
+ * device may be a kiosk with a visitor signed in, and there is no kiosk to go
+ * back to. Of the two conservative answers (Try again only, or sign out and
+ * then Home), this takes TRY AGAIN ONLY: it opens nothing and changes no
+ * account, so a member whose storage merely failed is not signed out, and a
+ * visitor is never shown member Home. Back, where the platform has one, still
+ * leads down the stack, at a kiosk to its start screen, which signs out.
  */
 
 export type { FallbackVariant };
@@ -110,15 +120,19 @@ const REMOUNTS_ON_HOME: Record<FallbackVariant, boolean> = {
 export const FALLBACK_WAY_OUT_KIOSK = 'Back to the kiosk';
 /** New copy (RV15-642-F1): the body while a kiosk session is open, pending owner wording sign-off. */
 export const FALLBACK_KIOSK_COPY = 'This screen hit a problem and stopped. Try again, or go back to the kiosk.';
+/** New copy (RV17-641-N3): the body while the marker is unknown and no kiosk is named, pending owner wording sign-off. */
+export const FALLBACK_UNKNOWN_COPY = 'This screen hit a problem and stopped. Try again.';
 
 /**
- * The goal of the kiosk session open on this device, or null. Never throws: an
- * account that cannot be read counts as nobody in particular (the kiosk
- * return armed at a kiosk has no owner), and each record is read on its own
- * (RV16-641-N2): a marker read that throws still lets the kiosk return name
- * the kiosk, rather than failing open to Go to Home.
+ * What the fallback knows of a kiosk session on this device: the kiosk's goal
+ * (`goalId`), and whether the marker is unknown. Never throws: an account that
+ * cannot be read counts as nobody in particular (the kiosk return armed at a
+ * kiosk has no owner), and each record is read on its own (RV16-641-N2): a
+ * marker that cannot be read still lets the kiosk return name the kiosk. A
+ * marker that cannot be read and no return to name a kiosk leaves
+ * `markerUnknown` (RV17-641-N3), and then no way Home is offered.
  */
-export function openKioskGoalForFallback(): string | null {
+export function kioskStateForFallback(): { goalId: string | null; markerUnknown: boolean } {
   let uid: string | null = null;
   try {
     uid = getFirebaseAuth().currentUser?.uid ?? null;
@@ -126,17 +140,27 @@ export function openKioskGoalForFallback(): string | null {
     uid = null;
   }
   let marker: string | null = null;
+  let markerUnknown = false;
   try {
     marker = readKioskSession();
+    if (marker === null) markerUnknown = kioskSessionUnknown();
   } catch {
     marker = null;
+    markerUnknown = true;
   }
-  if (marker) return marker;
+  if (marker) return { goalId: marker, markerUnknown: false };
+  let goalId: string | null = null;
   try {
-    return readKioskReturnGoal(uid);
+    goalId = readKioskReturnGoal(uid);
   } catch {
-    return null;
+    goalId = null;
   }
+  return { goalId, markerUnknown: goalId === null && markerUnknown };
+}
+
+/** The goal of the kiosk session open on this device, or null (see kioskStateForFallback). */
+export function openKioskGoalForFallback(): string | null {
+  return kioskStateForFallback().goalId;
 }
 
 /** Root-stack variants: Home is the tabs beneath, popped back to. */
@@ -152,7 +176,37 @@ const POPS_TO_HOME: Record<FallbackVariant, boolean> = {
 /** The tabs as they stand, Home selected: contribute's own "Back to Home" (leaveFor). */
 const POP_TO_HOME_TAB = { type: 'POP_TO', payload: { name: '(tabs)', params: { screen: '(home)' } } } as const;
 
-type Dispatches = { dispatch: (action: never) => void } | undefined;
+type Navigation = {
+  dispatch: (action: never) => void;
+  getState?: () => unknown;
+  getParent?: () => Navigation;
+};
+type Dispatches = Navigation | undefined;
+
+/** The ROOT navigator's state, reached through the screen's navigation object; undefined when it cannot be read. */
+function rootStateOf(navigation: Navigation): unknown {
+  try {
+    let top = navigation;
+    for (let parent = top.getParent?.(); parent; parent = parent.getParent?.()) top = parent;
+    return top.getState?.();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Dispatches on the screen's navigator; true when some navigator took it.
+ * React Navigation drops an action that no navigator handles without a word
+ * (core 7.21.13 useOnAction: onUnhandledAction only logs, in development), so
+ * a dispatch that did not throw proves nothing (RV17-641-N4): the root state
+ * must have changed. A state that cannot be read is taken at its word.
+ */
+function dispatchHandled(navigation: Navigation, action: object): boolean {
+  const before = rootStateOf(navigation);
+  navigation.dispatch(action as never);
+  if (before === undefined) return true;
+  return rootStateOf(navigation) !== before;
+}
 
 /** Asks for Home; never throws (a throw in a press handler is fatal on a phone). */
 function requestHome(variant: FallbackVariant, navigation: Dispatches): void {
@@ -161,13 +215,13 @@ function requestHome(variant: FallbackVariant, navigation: Dispatches): void {
     // contribute's "Back to Home" does: dismissTo('/') named Home's index,
     // which the Home stack pushed over a mounted community, whose own redirect
     // then built a second copy of it. With nothing beneath (a cold link) the
-    // tabs replace this route. dismissTo('/') and then navigate('/') stay the
-    // fallbacks, should this screen have no navigator to dispatch to.
+    // tabs replace this route. dismissTo('/'), and navigate('/') should that
+    // throw, stay the fallbacks: for a screen with no navigator to dispatch
+    // to, and for a dispatch that no navigator took (RV17-641-N4). expo-router
+    // 6 queues its own actions for the container to run (routing.js
+    // routingQueue), so whether dismissTo was taken cannot be read here.
     try {
-      if (navigation) {
-        navigation.dispatch(POP_TO_HOME_TAB as never);
-        return;
-      }
+      if (navigation && dispatchHandled(navigation, POP_TO_HOME_TAB)) return;
     } catch {
       // fall through to dismissTo
     }
@@ -196,9 +250,13 @@ function requestKiosk(goalId: string): void {
 
 export function RouteErrorFallback({ error, retry, variant }: Props) {
   const [retrying, setRetrying] = useState(false);
+  const [, redraw] = useState(0);
   const harness = crashHarnessEnabled();
-  // Read on every render (two memory reads): the way out this screen shows.
-  const shownKioskGoal = openKioskGoalForFallback();
+  // Read on every render (memory reads only): the way out this screen shows.
+  const shown = kioskStateForFallback();
+  const shownKioskGoal = shown.goalId;
+  // RV17-641-N3: the marker unknown and no kiosk named: Try again only.
+  const noWayOut = shownKioskGoal === null && shown.markerUnknown;
   // The navigator this fallback's route sits in (none at the root, or in a test without one).
   const navigation = useContext(NavigationContext) as Dispatches;
   useEffect(() => {
@@ -229,7 +287,13 @@ export function RouteErrorFallback({ error, retry, variant }: Props) {
           Something went wrong
         </Text>
         <Text style={kit.body} testID="wsf-route-error-body">
-          {shownKioskGoal && variant !== 'contribute' ? FALLBACK_KIOSK_COPY : COPY[variant]}
+          {variant === 'contribute'
+            ? COPY[variant]
+            : shownKioskGoal
+              ? FALLBACK_KIOSK_COPY
+              : noWayOut
+                ? FALLBACK_UNKNOWN_COPY
+                : COPY[variant]}
         </Text>
         <Pressable
           onPress={() => {
@@ -243,30 +307,39 @@ export function RouteErrorFallback({ error, retry, variant }: Props) {
         >
           <Text style={kit.primaryButtonText}>{retrying ? 'Trying again…' : 'Try again'}</Text>
         </Pressable>
-        <Pressable
-          onPress={() => {
-            // Read again at the press; fails closed to the kiosk this screen showed.
-            const kioskGoal = openKioskGoalForFallback() ?? shownKioskGoal;
-            if (kioskGoal) requestKiosk(kioskGoal);
-            else requestHome(variant, navigation);
-            // After the queued navigation is dispatched (a discrete press
-            // flushes its effects first), so the remount reads the new route.
-            if (REMOUNTS_ON_HOME[variant]) {
-              setTimeout(() => {
-                void Promise.resolve()
-                  .then(retry)
-                  // At the root the first request had no navigator: ask again.
-                  .then(() => (kioskGoal ? setTimeout(() => requestKiosk(kioskGoal), 0) : undefined))
-                  .catch(() => undefined);
-              }, 0);
-            }
-          }}
-          style={kit.secondaryButton}
-          accessibilityRole="button"
-          testID="wsf-route-error-home"
-        >
-          <Text style={kit.secondaryButtonText}>{shownKioskGoal ? FALLBACK_WAY_OUT_KIOSK : 'Go to Home'}</Text>
-        </Pressable>
+        {noWayOut ? null : (
+          <Pressable
+            onPress={() => {
+              // Read again at the press; fails closed to the kiosk this screen showed.
+              const now = kioskStateForFallback();
+              const kioskGoal = now.goalId ?? shownKioskGoal;
+              if (!kioskGoal && now.markerUnknown) {
+                // The marker became unknown since this rendered: never Home.
+                // Drawn again, now without a way out (RV17-641-N3).
+                redraw((n) => n + 1);
+                return;
+              }
+              if (kioskGoal) requestKiosk(kioskGoal);
+              else requestHome(variant, navigation);
+              // After the queued navigation is dispatched (a discrete press
+              // flushes its effects first), so the remount reads the new route.
+              if (REMOUNTS_ON_HOME[variant]) {
+                setTimeout(() => {
+                  void Promise.resolve()
+                    .then(retry)
+                    // At the root the first request had no navigator: ask again.
+                    .then(() => (kioskGoal ? setTimeout(() => requestKiosk(kioskGoal), 0) : undefined))
+                    .catch(() => undefined);
+                }, 0);
+              }
+            }}
+            style={kit.secondaryButton}
+            accessibilityRole="button"
+            testID="wsf-route-error-home"
+          >
+            <Text style={kit.secondaryButtonText}>{shownKioskGoal ? FALLBACK_WAY_OUT_KIOSK : 'Go to Home'}</Text>
+          </Pressable>
+        )}
         {harness ? (
           <Pressable
             onPress={disarmAllCrashSites}
