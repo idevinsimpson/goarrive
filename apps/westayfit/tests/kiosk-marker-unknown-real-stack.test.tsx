@@ -22,11 +22,16 @@ import {
  * says so, and landAfterAuth and the fallback treat the marker as unreadable.
  *
  * Every case asserts the root stack's route names (the real
- * @react-navigation/core container and StackRouter), the signed-in uid and the
- * marker read, on iOS and Android. Real: the kiosk start screen, the kiosk
- * session over the NATIVE storage modules (AsyncStorage failing every read of
- * the marker key), landAfterAuth, and the crash fallback
- * (RouteErrorFallback.native) as a route. Firebase is a fake. Self-contained.
+ * @react-navigation/core container and StackRouter), the signed-in uid, and
+ * the marker as it really is (heads-16 K1): the DISK key and the unknown
+ * state, never readKioskSession() alone, which is null by construction. On
+ * iOS and Android. Real: the kiosk start screen, the kiosk session over the
+ * NATIVE storage modules (AsyncStorage failing every read of the marker
+ * key), landAfterAuth, and the crash fallback (RouteErrorFallback.native) as
+ * a route. Firebase is a fake. Self-contained, and no case depends on
+ * another's order: each starts from the open session on disk and the marker
+ * unknown, and the one case that writes the marker does so on a module
+ * instance of its own.
  */
 
 const MARKER_KEY = 'wsf.kioskSessionGoalId';
@@ -152,6 +157,8 @@ vi.mock('expo-router', async () => {
       nav.log.push(`navigate ${href}`);
       nav.ref.dispatch(core.CommonActions.navigate(...routeOf(href)));
     },
+    back: () => (nav.ref as unknown as { goBack: () => void }).goBack(),
+    canGoBack: () => (nav.ref as unknown as { canGoBack: () => boolean }).canGoBack(),
   };
   return {
     router,
@@ -233,6 +240,11 @@ let root: Root;
 let ref: ReturnType<typeof createNavigationContainerRef>;
 let stacks: string[][] = [];
 beforeEach(() => {
+  // Each case starts from the same device: the open session on disk, the marker unknown, nothing read.
+  disk.map.set(MARKER_KEY, 'goal-1');
+  expect(session.kioskSessionUnknown()).toBe(true);
+  expect(() => session.readKioskSession()).not.toThrow();
+  expect(session.readKioskSession()).toBeNull();
   nav.log = [];
   stacks = [];
   memberHomeRenders = 0;
@@ -265,11 +277,19 @@ async function press(id: string): Promise<void> {
   await flush();
 }
 const signedIn = () => (authStore.state.user as { uid: string } | null)?.uid ?? null;
-function expectState(at: string, want: { stack: string[]; user: string | null }): void {
+/**
+ * Stack, signed-in state, and the marker as it really is (K1): its DISK key
+ * ('goal-1' while the session is open on the device; null once the kiosk
+ * start screen at rest has cleared it) and the unknown state, which stays
+ * true for the process (K2: a removal does not clear it; only a write
+ * does). readKioskSession() is null throughout, by construction.
+ */
+function expectState(at: string, want: { stack: string[]; user: string | null; disk: string | null }): void {
   expect([at, 'stack', names()]).toEqual([at, 'stack', want.stack]);
   expect([at, 'signed in', signedIn()]).toEqual([at, 'signed in', want.user]);
-  // The marker as every reader sees it: null, because it cannot be read (its disk copy stays).
-  expect([at, 'marker', session.readKioskSession()]).toEqual([at, 'marker', null]);
+  expect([at, 'marker on disk', disk.map.get(MARKER_KEY) ?? null]).toEqual([at, 'marker on disk', want.disk]);
+  expect([at, 'marker unknown', session.kioskSessionUnknown()]).toEqual([at, 'marker unknown', true]);
+  expect([at, 'marker read', session.readKioskSession()]).toEqual([at, 'marker read', null]);
 }
 
 function App({ initial }: { initial: object[] }) {
@@ -293,24 +313,26 @@ const KIOSK = 'kiosk/[goalId]';
 const KIOSK_G1 = { name: KIOSK, params: { goalId: 'goal-1' } };
 
 /**
- * Who is signed in once the kiosk start screen is focused: THAT SCREEN'S OWN
- * DECISION. On integrator-2 it signs whoever it finds out
- * (app/kiosk/[goalId].tsx:95-104). On member-1 (MF-08) it signs out on kiosk
- * evidence and otherwise asks (src/kioskSignOutGuard.ts decideKioskStart);
- * since member W16-23 an UNKNOWN marker is kiosk evidence there, so it signs
- * out too. On both lanes, then: signed out, never "Stay signed in", at the
- * kiosk start screen, never on member Home.
+ * The kiosk start screen, focused, at rest: THAT SCREEN'S OWN DECISION. On
+ * integrator-2 it signs whoever it finds out (app/kiosk/[goalId].tsx). On
+ * member-1 (MF-08) it signs out on kiosk evidence and otherwise asks
+ * (src/kioskSignOutGuard.ts decideKioskStart); since member W16-23 an
+ * UNKNOWN marker is kiosk evidence there, so it signs out too. On both
+ * lanes, then: signed out, never "Stay signed in", at the kiosk start
+ * screen, never on member Home; and the disk record of the session cleared
+ * by the start screen once nobody is signed in.
  */
-function kioskStartUser(): string | null {
+function expectAtKioskStart(at: string, stack: string[] = [KIOSK]): void {
   expect(focusedEl().getAttribute('data-route')).toBe(KIOSK);
-  expect(memberHomeRenders).toBe(0);
   expect(focusedEl().textContent ?? '', 'never offers to stay signed in').not.toContain('Stay signed in');
-  return null;
+  expectState(at, { stack, user: null, disk: null });
+  expect(memberHomeRenders).toBe(0);
 }
 
-describe('the launch read of the marker failed', () => {
-  it('the precondition: the disk holds an open kiosk session, and readKioskSession() answers null without throwing', () => {
+describe('the precondition, on every case', () => {
+  it('the disk holds an open kiosk session, the marker is unknown, and readKioskSession() answers null without throwing', () => {
     expect(disk.map.get(MARKER_KEY)).toBe('goal-1');
+    expect(session.kioskSessionUnknown()).toBe(true);
     expect(() => session.readKioskSession()).not.toThrow();
     expect(session.readKioskSession()).toBeNull();
   });
@@ -321,34 +343,32 @@ describe.each(['ios', 'android'] as const)('RV17-641-N3 on %s: the marker unknow
     platform.OS = os;
   });
 
-  it('a Sign in that passes no routes, with the kiosk beneath: the join is replaced, never the Home reset; Back reaches the kiosk, which signs out', async () => {
+  it('a Sign in that passes no routes, with the kiosk beneath: the join is replaced, never the Home reset, the visitor signed in with the session still on disk; Back reaches the kiosk start screen, which signs out and clears the disk record', async () => {
     act(() => root.render(<App initial={[KIOSK_G1, { name: 'signin' }]} />));
     await flush();
     await press('probe-signin-submit');
     await flush();
-    expectState('after Sign in', { stack: [KIOSK, 'join/[joinCode]'], user: 'visitor-1' });
+    expectState('after Sign in', { stack: [KIOSK, 'join/[joinCode]'], user: 'visitor-1', disk: 'goal-1' });
     expect(nav.log).toEqual(['replace /join/OakGroveTogether01']);
     expect(stacks.every((s) => s.includes(KIOSK))).toBe(true);
     act(() => (ref as unknown as { goBack: () => void }).goBack());
     await flush();
-    expectState('after Back', { stack: [KIOSK], user: kioskStartUser() });
-    expect(memberHomeRenders).toBe(0);
+    expectAtKioskStart('after Back');
   });
 
-  it('Home, with routes and dismissTo and the kiosk in the stack (RV17-C16-3): popped back to that kiosk, which signs out', async () => {
+  it('Home, with routes and dismissTo and the kiosk in the stack (RV17-C16-3): popped back to that kiosk start screen, signed out, the disk record cleared', async () => {
     landing.target = '/';
     landing.withRoutes = true;
     act(() => root.render(<App initial={[KIOSK_G1, { name: 'signin' }]} />));
     await flush();
     await press('probe-signin-submit');
     await flush();
-    expectState('after Sign in', { stack: [KIOSK], user: kioskStartUser() });
     expect(nav.log).toEqual(['dismissTo /kiosk/goal-1']);
     expect(stacks.some((s) => s.includes('(tabs)'))).toBe(false);
-    expect(memberHomeRenders).toBe(0);
+    expectAtKioskStart('after Sign in');
   });
 
-  it('a screen that throws, with no kiosk return: no way Home is offered (Try again only); the visitor stays where they are, never on member Home', async () => {
+  it('a screen that throws, with no kiosk return: no way Home is offered (Try again only); the visitor stays where they are, signed in, never on member Home; Back, Back reaches the kiosk start screen, which signs out', async () => {
     setUser(VISITOR);
     act(() => root.render(<App initial={[KIOSK_G1, { name: 'signin' }, { name: 'broken' }]} />));
     await flush();
@@ -361,18 +381,18 @@ describe.each(['ios', 'android'] as const)('RV17-641-N3 on %s: the marker unknow
       });
       await flush();
     }
-    expectState('after reaching for a way out', { stack: [KIOSK, 'signin', 'broken'], user: 'visitor-1' });
+    expectState('after reaching for a way out', { stack: [KIOSK, 'signin', 'broken'], user: 'visitor-1', disk: 'goal-1' });
     expect(memberHomeRenders).toBe(0);
     // Try again is still there, and retries.
     await press('wsf-route-error-retry');
     expect(retries).toBe(1);
-    expectState('after Try again', { stack: [KIOSK, 'signin', 'broken'], user: 'visitor-1' });
+    expectState('after Try again', { stack: [KIOSK, 'signin', 'broken'], user: 'visitor-1', disk: 'goal-1' });
     // Back, the platform's own way down the stack, still reaches the kiosk, which signs out.
     act(() => (ref as unknown as { goBack: () => void }).goBack());
     await flush();
     act(() => (ref as unknown as { goBack: () => void }).goBack());
     await flush();
-    expectState('after Back, Back', { stack: [KIOSK], user: kioskStartUser() });
+    expectAtKioskStart('after Back, Back');
   });
 });
 
@@ -382,11 +402,20 @@ describe('kioskSessionUnknown() (RV17-641-N3)', () => {
     expect(session.readKioskSession()).toBeNull();
   });
 
-  it('an explicit write (a new kiosk session) makes the marker known again', async () => {
+  it('an explicit write (a new kiosk session) makes the marker known again: on a module instance of its own, so the shared one stays unknown for the other cases', async () => {
+    vi.resetModules();
+    const fresh = await import('../src/kioskSession');
+    await fresh.kioskSessionReady();
+    expect(fresh.kioskSessionUnknown()).toBe(true);
+    expect(fresh.readKioskSession()).toBeNull();
     await act(async () => {
-      await session.markKioskSession('goal-2');
+      await fresh.markKioskSession('goal-2');
     });
-    expect(session.kioskSessionUnknown()).toBe(false);
-    expect(session.readKioskSession()).toBe('goal-2');
+    expect(fresh.kioskSessionUnknown()).toBe(false);
+    expect(fresh.readKioskSession()).toBe('goal-2');
+    expect(disk.map.get(MARKER_KEY)).toBe('goal-2');
+    // The shared instance never saw a write: still unknown.
+    expect(session.kioskSessionUnknown()).toBe(true);
+    expect(session.readKioskSession()).toBeNull();
   });
 });
