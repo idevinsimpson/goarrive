@@ -11,7 +11,7 @@
  * that needs the record to exist before acting (a pending attempt before its
  * request) must check the result rather than assume it.
  */
-import type { DeviceKv } from './kvTypes';
+import { isAppKeyPrefix, type DeviceKv } from './kvTypes';
 
 // The contract lives in a module with NO platform sibling (src/storage/kvTypes.ts):
 // re-exported here so every `from './kv'` importer is unchanged.
@@ -71,6 +71,8 @@ export const deviceKv: DeviceKv = {
     }
   },
   async keysWithPrefix(prefix) {
+    // Never outside the app's namespace (src/storage/kvTypes.ts).
+    if (!isAppKeyPrefix(prefix)) return [];
     const s = webStorage();
     if (!s) return [];
     try {

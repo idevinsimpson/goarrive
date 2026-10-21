@@ -9,6 +9,7 @@ import { mapWithLimit } from '../../../src/concurrency';
 import {
   currentCommunityReady,
   currentFirst,
+  isCurrentCommunityReady,
   rememberCurrentCommunity,
   resolveCurrentCommunity,
 } from '../../../src/currentCommunity';
@@ -174,6 +175,8 @@ function warmState(uid: string | null): State | null {
   if (!mine || !uid) return null;
   const items = mine.items as unknown as Membership[];
   if (items.length === 0) return null;
+  // Not before the phone's remembered choice is read: "none chosen" would be a guess.
+  if (!isCurrentCommunityReady()) return null;
   const enriched: Enriched[] = items.map((m) => ({
     ...m,
     goals: (peekGoals<Goal>(uid, m.groupId)?.goals as Goal[] | undefined) ?? 'pending',
