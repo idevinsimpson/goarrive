@@ -15,6 +15,8 @@
  * being asked to resemble.
  */
 
+import { SVG_DATA_URI_PREFIX } from './qr';
+
 export type MovePose = 'start' | 'end';
 
 /** The movements this module can draw. Anything else falls back to `generic`. */
@@ -77,8 +79,8 @@ function body(kind: MoveFigureKind, pose: MovePose): string {
   }
 }
 
-/** What every figure URI below is built on. Shared with `qr.ts` on purpose. */
-const SVG_DATA_URI_PREFIX = 'data:image/svg+xml;utf8,';
+// What every figure URI below is built on: `qr.ts`'s prefix, defined once
+// there and shared by SvgMarkup (MF-05).
 
 /** The figure as plain SVG markup, drawn in the brand colours and nothing else. */
 export function moveFigureSvg(input: {

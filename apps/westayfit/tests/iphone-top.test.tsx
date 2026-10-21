@@ -15,7 +15,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * where a pixel lands on an iPhone is Appendix C.
  */
 
+const WINDOW = { insets: { top: 59, bottom: 34, left: 0, right: 0 }, frame: { x: 0, y: 0, width: 393, height: 852 } };
 const state = {
+  window: WINDOW as typeof WINDOW | null,
   top: 59,
   strip: false,
   focused: true,
@@ -24,7 +26,9 @@ const state = {
 };
 vi.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: state.top, bottom: 34, left: 0, right: 0 }),
-  initialWindowMetrics: { insets: { top: 59, bottom: 34, left: 0, right: 0 }, frame: { x: 0, y: 0, width: 393, height: 852 } },
+  get initialWindowMetrics() {
+    return state.window;
+  },
   SafeAreaProvider: ({
     children,
     testID,
@@ -107,6 +111,7 @@ const setFocused = (v: boolean) => {
 
 beforeEach(() => {
   os = Platform.OS;
+  state.window = WINDOW;
   state.top = 59;
   state.strip = false;
   state.focused = true;
@@ -334,6 +339,21 @@ describe('INT-10: the staging strip', () => {
     expect(frame.dataset.initialTop).toBe('59');
     expect(below!.dataset.initialTop).toBe('0');
     expect(below!.dataset.initialBottom).toBe('34');
+  });
+
+  it('RV8-641-I10-3: with no window metrics, the providers below the strip start from their parent (no zero frame)', () => {
+    setOs('ios');
+    state.window = null;
+    const Staged = frameFor(true);
+    act(() => root.render(<Staged><Text testID="child">x</Text></Staged>));
+    expect(byId('wsf-staging-stack-frame')!.dataset.initialTop).toBe('none');
+    const layout = screenLayoutFor(true, 'ios')!;
+    act(() => root.render(layout({ options: { presentation: 'transparentModal' }, children: <Text testID="screen">s</Text> })));
+    const frame = byId('wsf-staging-modal-frame')!;
+    expect(frame.dataset.initialTop).toBe('none');
+    const below = Array.from(frame.children)[1] as HTMLElement;
+    expect(below.dataset.provider).toBe('1');
+    expect(below.dataset.initialTop).toBe('none');
   });
 
   it('AppShell wires the frame and the layout around the stack', () => {
