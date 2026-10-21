@@ -4,7 +4,17 @@ import { Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from
 
 import { isKioskFlag } from '../kioskSession';
 import { registerFocusTarget } from './focusTarget';
-import { ACTION_GREEN, NAVY, ON_ACTION, PROGRESS_GREEN, TEXT_MUTED, chromeTextProps, effectiveWidth, elevation } from './kit';
+import {
+  ACTION_GREEN,
+  NAVY,
+  ON_ACTION,
+  PROGRESS_GREEN,
+  TEXT_MUTED,
+  chromeTextProps,
+  effectiveWidth,
+  elevation,
+  lift,
+} from './kit';
 import { MEMBER_SHELL_GROUND, MEMBER_SHELL_RULE } from './memberShellMetrics';
 import { TabGlyph } from './TabGlyph';
 
@@ -343,6 +353,10 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.06,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: -4 },
+    // W12-15 (INT-31): the same lift on Android, where the shadow props draw
+    // nothing and elevation cannot cast upward (an upward boxShadow); `{}` on
+    // iOS, which draws the props above, and on the web.
+    ...lift.tabBar,
   },
   barWrapped: { flexWrap: 'wrap' },
   // W12-8 (native): the wrapped bar's MOVE, a full-width row above the two rows of two.

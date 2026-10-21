@@ -1,4 +1,4 @@
-import { StyleSheet } from 'react-native';
+import { Platform, StyleSheet, type ViewStyle } from 'react-native';
 
 import { wsfTheme } from '../theme';
 import { PROGRESS_GREEN } from './brandAssets';
@@ -93,30 +93,63 @@ export const display = {
  * DEPTH. There was none: no shadow, elevation or gradient token anywhere, which
  * is why every surface in this product is a bordered rectangle.
  * react-native-web maps these to box-shadow.
+ *
+ * W12-15 (INT-21). EACH PLATFORM GETS THE SHADOW IT CAN DRAW.
+ *   · iOS clips `shadow*` on a view with `overflow: hidden` (the hero, the
+ *     contribute and MOVE panels, the sign-in field), so there each token is
+ *     one `boxShadow` with the same colour, offset and opacity, blur = the
+ *     shadowRadius. A boxShadow is drawn outside the clip (new architecture).
+ *   · Android and the web keep today's objects exactly: Android draws the
+ *     lift from `elevation` (tinted by shadowColor on API 28+), and
+ *     react-native-web maps the shadow props to the same box-shadow as before.
  */
+type ShadowSpec = Readonly<{
+  shadowColor: string;
+  shadowOpacity: number;
+  shadowRadius: number;
+  shadowOffset: Readonly<{ width: number; height: number }>;
+  elevation: number;
+}>;
+/** One CSS shadow from a `#RRGGBB` shadow set: `x y blur rgba(r,g,b,opacity)`. */
+function boxShadowOf(s: ShadowSpec): string {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(s.shadowColor.slice(i, i + 2), 16));
+  return `${s.shadowOffset.width}px ${s.shadowOffset.height}px ${s.shadowRadius}px rgba(${r},${g},${b},${s.shadowOpacity})`;
+}
+/** Only the depth keys (the shadow as a CSS string), so a token still spreads into a Text or Link style. */
+type ElevationStyle = Pick<ViewStyle, 'shadowColor' | 'shadowOpacity' | 'shadowRadius' | 'shadowOffset' | 'elevation'> & {
+  boxShadow?: string;
+};
+const perPlatform = (s: ShadowSpec): ElevationStyle =>
+  Platform.select<ElevationStyle>({ ios: { boxShadow: boxShadowOf(s) }, default: s });
 export const elevation = {
-  card: {
+  card: perPlatform({
     shadowColor: '#0B1F3A',
     shadowOpacity: 0.08,
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 6 },
     elevation: 3,
-  },
-  hero: {
+  }),
+  hero: perPlatform({
     shadowColor: '#0B1F3A',
     shadowOpacity: 0.22,
     shadowRadius: 28,
     shadowOffset: { width: 0, height: 14 },
     elevation: 8,
-  },
-  action: {
+  }),
+  action: perPlatform({
     shadowColor: ACTION_GREEN_DEEP,
     shadowOpacity: 0.32,
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 8 },
     elevation: 6,
-  },
+  }),
 };
+/*
+  W12-15 (INT-21, INT-31). The lift tokens for surfaces that need more than
+  elevation.* (kit-base's src/ui/lift.ts): lift.panel for a side or bottom
+  panel, lift.tabBar (Android's upward shadow) and lift.knob. `{}` on the web.
+*/
+export { lift, PANEL_BOX_SHADOW_IOS, TAB_BAR_BOX_SHADOW_ANDROID, type LiftTokens } from './lift';
 
 /**
  * NATIVE-INTEGRATOR-1 (INT-09). A text-glyph Back ("‹", about 10 pt wide)
