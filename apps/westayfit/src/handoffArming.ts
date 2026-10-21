@@ -22,7 +22,7 @@
  */
 import { clearEventReturn } from './eventReturn';
 import { clearPendingEventActivity, clearPendingEventGoal } from './joinEventHandoff';
-import { clearKioskReturnGoal, setKioskReturnGoal } from './kioskSession';
+import { clearKioskReturnGoal, clearKioskSession, markKioskSession, setKioskReturnGoal } from './kioskSession';
 import { clearMarkerReturn, setMarkerReturn } from './markerEntry';
 import { clearPendingJoinCode } from './pendingJoinCode';
 
@@ -35,7 +35,10 @@ import { clearPendingJoinCode } from './pendingJoinCode';
 export function armKioskReturn(goalId: string): Promise<boolean> {
   const cleared = [clearPendingJoinCode(), clearEventReturn(), clearMarkerReturn()];
   const armed = setKioskReturnGoal(goalId, null);
-  return Promise.all([armed, ...cleared]).then(([kept]) => kept);
+  // The durable kiosk-session marker (native only): a relaunch mid-session
+  // returns to the kiosk start screen (src/kioskLaunchGuard.ts).
+  const marked = markKioskSession(goalId);
+  return Promise.all([armed, marked, ...cleared]).then(([kept]) => kept);
 }
 
 /**
@@ -62,5 +65,7 @@ export function resetSharedScreenHandoffs(): Promise<boolean> {
     clearKioskReturnGoal(),
     clearPendingEventGoal(),
     clearPendingEventActivity(),
+    // At rest the start screen has signed out: the kiosk session is over.
+    clearKioskSession(),
   ]).then((results) => results.every(Boolean));
 }
