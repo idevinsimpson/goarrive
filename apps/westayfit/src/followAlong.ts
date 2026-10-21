@@ -346,6 +346,44 @@ export function pausesForInterruption(reason: unknown): boolean {
   );
 }
 
+/**
+ * MO-05 — the native app lifecycle, read the same way. Pure.
+ *
+ * Going to the BACKGROUND is the native "this screen went away" (the web's
+ * `hidden`): the round pauses. Being only INACTIVE is not — Control Center,
+ * a notification pulled down, the app switcher glimpsed and abandoned — that
+ * is the blur rule above, and a round does not pause for it.
+ *
+ * NOTHING ACCRUES FOR THE INTERRUPTION ITSELF. iOS passes through `inactive`
+ * on its way to `background` (an incoming call is inactive while it rings,
+ * background once answered), so the pause is dated to the moment the app first
+ * went inactive, not to when the background event arrived. Android goes
+ * straight to background, dated to the event. `lastTickAt` caps a background
+ * event delivered late (JavaScript can be suspended right after the app
+ * leaves): the round cannot have run more than one tick past its last tick.
+ */
+export type AppLifecycle = { inactiveSince: number | null };
+export const ACTIVE_LIFECYCLE: AppLifecycle = { inactiveSince: null };
+
+export function appLifecycleStep(
+  prev: AppLifecycle,
+  next: string,
+  now: number,
+  lastTickAt: number | null = null,
+  tickMs = 250
+): { lifecycle: AppLifecycle; pauseAt: number | null } {
+  if (next === 'inactive') {
+    return { lifecycle: { inactiveSince: prev.inactiveSince ?? now }, pauseAt: null };
+  }
+  if (next === 'background') {
+    let pauseAt = Math.min(now, prev.inactiveSince ?? now);
+    if (lastTickAt !== null && Number.isFinite(lastTickAt)) pauseAt = Math.min(pauseAt, lastTickAt + tickMs);
+    return { lifecycle: ACTIVE_LIFECYCLE, pauseAt };
+  }
+  // 'active' (or anything else): back in front, nothing to pause.
+  return { lifecycle: ACTIVE_LIFECYCLE, pauseAt: null };
+}
+
 /** What the screen says once an interruption has paused a round. */
 export const INTERRUPTED_NOTICE =
   'Paused when this screen went away. Nothing was counted while it was paused — pick up where you left off.';
