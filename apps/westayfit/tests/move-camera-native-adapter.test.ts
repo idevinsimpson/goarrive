@@ -1103,16 +1103,65 @@ describe('support.native — fail closed: the telemetry gate, then the linked mo
   }
 
   it('the contribute screen takes `supported` only from cameraCounterSupported(), and mounts the camera only inside `if (cameraOpen)`', () => {
+    // By property, not by count: the state lane's restore gating (#635) adds a second entry-gate
+    // call (`cameraWaiting`, the loading frame), and any number of gate calls is fine as long as
+    // each takes `supported` from the one probe and nothing reads it outside them.
     const screen = read('app/contribute/[goalId].tsx');
+    /** [start, end) of the bracketed span that opens at `at`. Brackets only: the gate calls hold no bracket inside a string. */
+    const spanFrom = (code: string, at: number): [number, number] => {
+      let depth = 0;
+      for (let i = at; i < code.length; i += 1) {
+        if ('({['.includes(code[i])) depth += 1;
+        else if (')}]'.includes(code[i]) && --depth === 0) return [at, i + 1];
+      }
+      return [at, code.length];
+    };
+    // 1. One source: the static probe, called once, into a state with no setter, declared exactly once.
     expect(screen).toContain("import { cameraCounterSupported } from '../../src/movement-camera/support';");
     expect(screen.match(/cameraCounterSupported/g)).toHaveLength(2); // the import and the one call
-    expect(screen).toContain('  const [cameraSupported] = useState(() => cameraCounterSupported());\n');
-    expect(screen.match(/\bcameraSupported\b/g)).toHaveLength(2); // declared once, read once
-    expect(screen).toContain('      supported: cameraSupported,\n');
-    expect(screen.match(/<CameraRepCounter\b/g)).toHaveLength(1);
+    const DECL = '  const [cameraSupported] = useState(() => cameraCounterSupported());\n';
+    expect(screen.split(DECL)).toHaveLength(2);
+    const declAt = screen.indexOf(DECL) + '  const ['.length;
+    // 2. The entry gate, cameraEntryAllowed({...}): every call takes `supported: cameraSupported`, and nothing else.
+    const gates = [...screen.matchAll(/\bcameraEntryAllowed\(/g)].map((m) => spanFrom(screen, m.index! + m[0].length - 1));
+    expect(gates.length).toBeGreaterThan(0);
+    for (const [a, b] of gates) {
+      const args = (screen.slice(a, b).match(/\bsupported:[^,\n}]*/g) ?? []).map((x) => x.replace(/\s+/g, ' ').trim());
+      expect(args, screen.slice(a, b)).toEqual(['supported: cameraSupported']);
+    }
+    // 3. Every other occurrence of cameraSupported is exactly that argument, inside a gate call.
+    const reads = [...screen.matchAll(/\bcameraSupported\b/g)].map((m) => m.index!).filter((i) => i !== declAt);
+    expect(reads.length).toBeGreaterThan(0);
+    for (const i of reads) {
+      const line = screen.slice(screen.lastIndexOf('\n', i) + 1, screen.indexOf('\n', i));
+      expect(line, 'cameraSupported is read only as the gate argument').toMatch(/^\s*supported: cameraSupported,?$/);
+      expect(gates.some(([a, b]) => i > a && i < b), `outside every cameraEntryAllowed call: ${line.trim()}`).toBe(true);
+    }
+    // 4. cameraOpen holds only when a gate call says yes: an && chain (no ||, ?? or ?: at its top
+    //    level) with one gate call as a plain term. Comments are removed first (they may hold brackets).
+    const from = screen.search(/^ {2}const cameraOpen =/m);
     const open = screen.indexOf('  if (cameraOpen) {\n');
+    expect(screen.match(/^ {2}const cameraOpen =/gm)).toHaveLength(1);
+    expect(from).toBeGreaterThan(0);
+    expect(open).toBeGreaterThan(from);
+    const tail = strip(screen.slice(from, open), 'ts');
+    let depth = 0;
+    let top = '';
+    let end = tail.length;
+    for (let i = 0; i < tail.length; i += 1) {
+      const ch = tail[i];
+      if ('({['.includes(ch)) depth += 1;
+      else if (')}]'.includes(ch)) depth -= 1;
+      else if (ch === ';' && depth === 0) { end = i; break; }
+      top += depth === 0 ? ch : ' ';
+    }
+    const cameraOpen = tail.slice(0, end);
+    expect(cameraOpen.match(/\bcameraEntryAllowed\(/g), cameraOpen).toHaveLength(1);
+    expect(cameraOpen).toMatch(/&&\s*cameraEntryAllowed\(\{/);
+    expect(top, cameraOpen).not.toMatch(/\|\||\?\?|\?(?!\.)/);
+    // 5. The camera mounts once, right inside `if (cameraOpen)`.
+    expect(screen.match(/<CameraRepCounter\b/g)).toHaveLength(1);
     const mount = screen.indexOf('<CameraRepCounter');
-    expect(open).toBeGreaterThan(0);
     expect(mount).toBeGreaterThan(open);
     expect(mount - open).toBeLessThan(200);
   });
