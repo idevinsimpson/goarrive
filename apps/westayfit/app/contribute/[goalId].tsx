@@ -566,6 +566,12 @@ export default function ContributeToGoal() {
   // Only the LATEST restore's answer applies: a double tap on Retry, or a
   // retry racing the first read, cannot apply an older answer over a newer.
   const restoreTokenRef = useRef(0);
+  // A Try again in flight. The ref refuses a second tap delivered in the same
+  // task (before a re-render can disable the button); the state disables the
+  // button while the paused screen stays up. `restoreFailed` is left set until
+  // the read answers.
+  const retryingRef = useRef(false);
+  const [retrying, setRetrying] = useState(false);
   // One line under Record or Confirm when it ended without sending, or a
   // replay came back "not signed in". Cleared by the next action.
   const [attemptNotice, setAttemptNotice] = useState<string | null>(null);
@@ -711,6 +717,8 @@ export default function ContributeToGoal() {
         }
         setRestoreFailed(!!readFailed);
         setRestoreSettled(true);
+        retryingRef.current = false;
+        setRetrying(false);
       });
   }, []);
 
@@ -735,6 +743,8 @@ export default function ContributeToGoal() {
     setPendingDurable(true);
     setRestoreSettled(false);
     setRestoreFailed(false);
+    retryingRef.current = false;
+    setRetrying(false);
     setAttemptNotice(null);
     setLastResult(null);
     setRepeatPolicy(recorded?.policy ?? 'once');
@@ -1361,7 +1371,10 @@ export default function ContributeToGoal() {
   // Retry on the "couldn't read this device's saved attempt" state: the same
   // restore, again, for the same context.
   const onRetryRestore = useCallback(() => {
-    if (goalId) startRestore(goalId, uid);
+    if (!goalId || retryingRef.current) return;
+    retryingRef.current = true;
+    setRetrying(true);
+    startRestore(goalId, uid);
   }, [goalId, uid, startRestore]);
 
   // There is deliberately no control that discards an unresolved attempt's
@@ -2736,7 +2749,7 @@ export default function ContributeToGoal() {
             <View style={styles.sheetActionsInline}>
               <Pressable
                 onPress={onRetryRestore}
-                disabled={!restoreSettled}
+                disabled={retrying || !restoreSettled}
                 accessibilityRole="button"
                 style={styles.primaryButton}
                 testID="wsf-contribute-restore-retry"
