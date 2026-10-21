@@ -28,6 +28,20 @@ const ctl = vi.hoisted(() => ({
   verifiedAfterReload: true,
   /** The root stack's state as the screen's navigation object reports it. */
   rootState: undefined as undefined | { routes: Array<{ name: string; params?: object }> },
+  /** The device's kiosk-session marker (RV16-641-B1), or a read that throws (RV16-641-N2). */
+  marker: null as string | null,
+  markerThrows: false,
+  /** The storage layer's unknown marker (RV17-641-N3): readKioskSession() answers null, kioskSessionUnknown() true. */
+  unknown: false,
+}));
+
+vi.mock('../src/kioskSession', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  readKioskSession: () => {
+    if (ctl.markerThrows) throw new Error('marker unreadable');
+    return ctl.marker;
+  },
+  kioskSessionUnknown: () => ctl.unknown,
 }));
 
 vi.mock('react-native', async () => {
@@ -138,6 +152,9 @@ beforeEach(() => {
   ctl.profileExists = true;
   ctl.verifiedAfterReload = true;
   ctl.rootState = undefined;
+  ctl.marker = null;
+  ctl.markerThrows = false;
+  ctl.unknown = false;
   USER.emailVerified = false;
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -305,6 +322,137 @@ describe('RV12-641-F1: a kiosk destination is never reset to Home', () => {
         ['dispatch', HOME_ONLY_RESET],
         ['push', '/community/oak'],
       ]);
+    }
+  });
+
+  it('RV16-641-B1, native: a caller that passes NO routes (Sign in, Create account) with a kiosk marker open: a member destination is replaced, never reset', () => {
+    ctl.marker = 'g1';
+    for (const platform of ['ios', 'android']) {
+      for (const next of ['/join/AbCdEf', '/event/g9', '/go/oak-hall-01', '/community/oak']) {
+        ctl.calls = [];
+        landAfterAuth(next, { ...deps(), platform });
+        expect([platform, ctl.calls]).toEqual([platform, [['replace', next]]]);
+      }
+      // '/' with the marker: that kiosk's start screen (replaced, with no stack to pop back to).
+      ctl.calls = [];
+      landAfterAuth('/', { ...deps(), platform });
+      expect(ctl.calls).toEqual([['replace', '/kiosk/g1']]);
+    }
+    // Control: no marker, no routes: the Home reset and the push, as before.
+    ctl.marker = null;
+    ctl.calls = [];
+    landAfterAuth('/join/AbCdEf', { ...deps(), platform: 'ios' });
+    expect(ctl.calls).toEqual([
+      ['dispatch', HOME_ONLY_RESET],
+      ['push', '/join/AbCdEf'],
+    ]);
+    // The web: replace, whatever the marker says.
+    ctl.marker = 'g1';
+    ctl.calls = [];
+    landAfterAuth('/join/AbCdEf', { ...deps(), platform: 'web' });
+    expect(ctl.calls).toEqual([['replace', '/join/AbCdEf']]);
+  });
+
+  it('RV16-641-N2, native: a marker read that throws counts as open: replaced, never the Home reset, with or without a stack', () => {
+    ctl.markerThrows = true;
+    for (const platform of ['ios', 'android']) {
+      for (const next of ['/join/AbCdEf', '/']) {
+        ctl.calls = [];
+        landAfterAuth(next, { ...deps(), platform });
+        expect([platform, next, ctl.calls]).toEqual([platform, next, [['replace', next]]]);
+        ctl.calls = [];
+        landAfterAuth(next, { ...deps(), routes: () => [{ name: '(tabs)' }, { name: 'signin' }], platform });
+        expect([platform, next, ctl.calls]).toEqual([platform, next, [['replace', next]]]);
+      }
+    }
+  });
+
+  const withDismiss = () => ({ ...deps(), dismissTo: (h: string) => ctl.calls.push(['dismissTo', h]) });
+  const KIOSK_G1 = { name: 'kiosk/[goalId]', params: { goalId: 'g1' } };
+  /** Readable stacks that show no kiosk start screen at the top level of the root stack. */
+  const NO_KIOSK_SHOWN: Array<[string, () => Array<{ name: string; params?: object; state?: object }>]> = [
+    ['[(tabs), signin]', () => [{ name: '(tabs)' }, { name: 'signin' }]],
+    ['[]', () => []],
+    ['a kiosk only inside (tabs)', () => [{ name: '(tabs)', state: { routes: [KIOSK_G1] } }, { name: 'signin' }]],
+  ];
+
+  it("RV17-641-N2, native: the marker open and a readable stack with no kiosk start screen: that kiosk's start screen, never the Home reset", () => {
+    ctl.marker = 'g1';
+    for (const platform of ['ios', 'android']) {
+      for (const [label, routes] of NO_KIOSK_SHOWN) {
+        for (const next of ['/join/AbCdEf', '/event/g9', '/community/oak']) {
+          ctl.calls = [];
+          landAfterAuth(next, { ...withDismiss(), routes, platform });
+          expect([platform, label, next, ctl.calls]).toEqual([platform, label, next, [['replace', '/kiosk/g1']]]);
+        }
+        // Home: the kiosk start too (not beneath, so replaced).
+        ctl.calls = [];
+        landAfterAuth('/', { ...withDismiss(), routes, platform });
+        expect([platform, label, '/', ctl.calls]).toEqual([platform, label, '/', [['replace', '/kiosk/g1']]]);
+      }
+      // A kiosk start screen beneath: the destination replaced, as before; Back reaches the kiosk.
+      ctl.calls = [];
+      landAfterAuth('/join/AbCdEf', { ...withDismiss(), routes: () => [KIOSK_G1, { name: 'signin' }], platform });
+      expect(ctl.calls).toEqual([['replace', '/join/AbCdEf']]);
+    }
+    // Control: no marker, the same readable stacks: the Home reset and the push, as before.
+    ctl.marker = null;
+    ctl.calls = [];
+    landAfterAuth('/join/AbCdEf', { ...withDismiss(), routes: NO_KIOSK_SHOWN[0]![1], platform: 'ios' });
+    expect(ctl.calls).toEqual([
+      ['dispatch', HOME_ONLY_RESET],
+      ['push', '/join/AbCdEf'],
+    ]);
+  });
+
+  it("RV17-C16-3, native: an unreadable marker and Home, with the kiosk start in the stack: that kiosk (dismissed to when the caller can), never member Home over it", () => {
+    for (const unreadable of ['throws', 'unknown'] as const) {
+      ctl.markerThrows = unreadable === 'throws';
+      ctl.unknown = unreadable === 'unknown';
+      for (const platform of ['ios', 'android']) {
+        ctl.calls = [];
+        landAfterAuth('/', { ...withDismiss(), routes: () => [{ name: '(tabs)' }, KIOSK_G1, { name: 'signin' }], platform });
+        expect([unreadable, platform, ctl.calls]).toEqual([unreadable, platform, [['dismissTo', '/kiosk/g1']]]);
+        // Without dismissTo: that kiosk's start screen replaces the current route.
+        ctl.calls = [];
+        landAfterAuth('/', { ...deps(), routes: () => [KIOSK_G1, { name: 'signin' }], platform });
+        expect([unreadable, platform, ctl.calls]).toEqual([unreadable, platform, [['replace', '/kiosk/g1']]]);
+        // The nearest kiosk, when there are two.
+        ctl.calls = [];
+        landAfterAuth('/', { ...withDismiss(), routes: () => [KIOSK_G1, { name: 'kiosk/[goalId]', params: { goalId: 'g2' } }, { name: 'signin' }], platform });
+        expect([unreadable, platform, ctl.calls]).toEqual([unreadable, platform, [['dismissTo', '/kiosk/g2']]]);
+        // No kiosk in the stack, or no stack at all: replaced (never the reset). RESIDUAL, recorded: with no
+        // kiosk to find, Home is replaced in (no caller on this branch lands '/' without routes).
+        for (const extra of [{ routes: () => [{ name: '(tabs)' }, { name: 'signin' }] }, {}]) {
+          ctl.calls = [];
+          landAfterAuth('/', { ...withDismiss(), ...extra, platform });
+          expect([unreadable, platform, ctl.calls]).toEqual([unreadable, platform, [['replace', '/']]]);
+        }
+      }
+    }
+  });
+
+  it("RV17-641-N3, native: the storage layer's unknown marker (readKioskSession() null) counts as open: never the Home reset", () => {
+    ctl.unknown = true;
+    for (const platform of ['ios', 'android']) {
+      for (const extra of [{}, { routes: () => [{ name: '(tabs)' }, { name: 'signin' }] }, { routes: () => [] }]) {
+        ctl.calls = [];
+        landAfterAuth('/join/AbCdEf', { ...withDismiss(), ...extra, platform });
+        expect([platform, ctl.calls]).toEqual([platform, [['replace', '/join/AbCdEf']]]);
+      }
+    }
+    // Web: no marker exists there; replace, as always.
+    ctl.calls = [];
+    landAfterAuth('/join/AbCdEf', { ...withDismiss(), platform: 'web' });
+    expect(ctl.calls).toEqual([['replace', '/join/AbCdEf']]);
+  });
+
+  it("RV17-641-N3, native: the unreadable value is not a string: a marker naming the goal 'unreadable' is an open kiosk session like any other", () => {
+    ctl.marker = 'unreadable';
+    for (const platform of ['ios', 'android']) {
+      ctl.calls = [];
+      landAfterAuth('/', { ...withDismiss(), routes: () => [{ name: 'kiosk/[goalId]', params: { goalId: 'unreadable' } }, { name: 'signin' }], platform });
+      expect([platform, ctl.calls]).toEqual([platform, [['dismissTo', '/kiosk/unreadable']]]);
     }
   });
 
