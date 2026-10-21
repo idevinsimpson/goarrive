@@ -1,6 +1,6 @@
 import { act, forwardRef, useEffect, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { AppState, Dimensions, Platform } from 'react-native';
+import { AccessibilityInfo, AppState, Dimensions, Platform } from 'react-native';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
@@ -34,6 +34,19 @@ vi.mock('react-native', async (importOriginal) => {
   return { ...rn, Text };
 });
 vi.mock('../src/ui/LivingWeProgress', () => ({ LivingWeProgress: () => null }));
+// The announce helper of the platform rendering (fixed for each test): the
+// web's polite region, or the native announcement.
+vi.mock('../src/ui/announce', async (importOriginal) => {
+  const web = await importOriginal<typeof import('../src/ui/announce')>();
+  const native = await import('../src/ui/announce.native');
+  const { Platform: P } = await import('react-native');
+  return {
+    get liveRegion() {
+      return P.OS === 'web' ? web.liveRegion : native.liveRegion;
+    },
+    useAnnounce: (...a: Parameters<typeof web.useAnnounce>) => (P.OS === 'web' ? web.useAnnounce(...a) : native.useAnnounce(...a)),
+  };
+});
 vi.mock('../src/ui/useReducedMotion', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useReducedMotion: () => true,
@@ -71,17 +84,22 @@ const PULSE = {
   endsAt: new Date(NOW + 5 * 86_400_000).toISOString(),
   timezone: 'UTC',
 };
-const net = { down: false };
+const net: { down: boolean; pulseDownFor: string | null } = { down: false, pulseDownFor: null };
 const offline = () => Promise.reject(Object.assign(new Error('offline'), { code: 'functions/unavailable' }));
 vi.mock('firebase/functions', () => ({
-  httpsCallable: (_f: unknown, name: string) => () =>
-    net.down ? offline() : name === 'wsfGoalPulse' ? Promise.resolve({ data: PULSE }) : offline(),
+  httpsCallable: (_f: unknown, name: string) => (req?: { goalId?: string }) =>
+    net.down || (name === 'wsfGoalPulse' && req?.goalId === net.pulseDownFor)
+      ? offline()
+      : name === 'wsfGoalPulse'
+        ? Promise.resolve({ data: PULSE })
+        : offline(),
 }));
 vi.mock('../src/firebase', () => ({ getFirebaseFirestore: () => ({}), getFirebaseFunctions: () => ({}) }));
 vi.mock('../src/featureFlags', () => ({ wsfAuthEnabled: true }));
 const AUTH = { ready: true, user: { uid: 'u1', email: 'm@example.com', displayName: 'M' } };
 vi.mock('../src/auth', () => ({ useWsfAuth: () => AUTH }));
 vi.mock('../src/currentCommunity', () => ({ rememberCurrentCommunity: vi.fn(), resolveCurrentCommunity: () => null }));
+const goals = { two: false };
 const GOAL = {
   goalId: 'g1',
   title: 'Autumn squats',
@@ -97,7 +115,8 @@ vi.mock('../src/memberReads', () => ({
   SAME_LOAD_MS: 10_000,
   forgetCommunity: vi.fn(),
   peekMyCommunities: () => undefined,
-  readGoals: () => (net.down ? offline() : Promise.resolve({ goals: [GOAL] })),
+  readGoals: () =>
+    net.down ? offline() : Promise.resolve({ goals: goals.two ? [GOAL, { ...GOAL, goalId: 'g2', title: 'Winter squats' }] : [GOAL] }),
   readMyCommunities: () =>
     Promise.resolve({ items: [{ groupId: 'oak', displayName: 'Oak Grove Together', memberCount: 4, isSample: false, activeChallenge: null }] }),
   readOwnCredit: () => (net.down ? offline() : Promise.resolve({ ownCredit: 20, unit: 'squats' })),
@@ -114,9 +133,20 @@ const OS = Platform.OS;
 let container: HTMLDivElement;
 let root: Root;
 let appState: Array<(s: string) => void>;
+let spoken: string[];
 beforeEach(() => {
   vi.useFakeTimers({ now: NOW });
   net.down = false;
+  net.pulseDownFor = null;
+  goals.two = false;
+  spoken = [];
+  const say = (m: string) => {
+    spoken.push(m);
+  };
+  vi.spyOn(AccessibilityInfo, 'announceForAccessibility').mockImplementation(say);
+  if ((AccessibilityInfo as { announceForAccessibilityWithOptions?: unknown }).announceForAccessibilityWithOptions) {
+    vi.spyOn(AccessibilityInfo, 'announceForAccessibilityWithOptions').mockImplementation(say);
+  }
   delete copies.region;
   delete copies.visible;
   getDoc.mockReset();
@@ -147,6 +177,16 @@ const flush = () =>
   });
 const emit = (s: string) => act(() => appState.forEach((h) => h(s)));
 
+/** A return to the app after 30 s. */
+async function returnToApp(): Promise<void> {
+  emit('background');
+  act(() => vi.advanceTimersByTime(RESUME_MIN_AWAY_MS + 1_000));
+  emit('active');
+  act(() => vi.advanceTimersByTime(RESUME_SETTLE_MS));
+  await flush();
+  await flush();
+}
+
 /** Loads the figure, then returns to the app after 30 s with the network down. */
 async function failARefresh(platform: 'ios' | 'web'): Promise<void> {
   (Platform as { OS: string }).OS = platform;
@@ -165,6 +205,48 @@ async function failARefresh(platform: 'ios' | 'web'): Promise<void> {
   expect(byId('wsf-community-goal-stale-g1')).not.toBeNull();
   expect(byId('wsf-community-goal-total-g1')!.textContent).toBe('1,847 of 5,000 squats');
 }
+
+describe('heads-9 N-3: one announcement per failure wave, for the whole page', () => {
+  it('iOS: an outage that fails both open goals speaks the sentence once; after all recover, a new failure speaks again', async () => {
+    goals.two = true;
+    await failARefresh('ios');
+    expect(byId('wsf-community-goal-stale-g2')).not.toBeNull();
+    expect(spoken).toEqual([SENTENCE]);
+    // Another failed return while both are still stale: nothing new.
+    await returnToApp();
+    expect(spoken).toEqual([SENTENCE]);
+    // Recovered: both figures fresh, no sentence.
+    net.down = false;
+    await returnToApp();
+    expect(byId('wsf-community-goal-stale-g1')).toBeNull();
+    expect(byId('wsf-community-goal-stale-g2')).toBeNull();
+    // A later outage is a new wave.
+    net.down = true;
+    await returnToApp();
+    expect(byId('wsf-community-goal-stale-g1')).not.toBeNull();
+    expect(spoken).toEqual([SENTENCE, SENTENCE]);
+  });
+
+  it('iOS: a failure of the second goal alone is announced too (any figure, not the hero only)', async () => {
+    goals.two = true;
+    (Platform as { OS: string }).OS = 'ios';
+    act(() => root.render(<CommunityPage />));
+    await flush();
+    expect(byId('wsf-community-goal-total-g2')).not.toBeNull();
+    net.pulseDownFor = 'g2';
+    await returnToApp();
+    expect(byId('wsf-community-goal-stale-g1')).toBeNull();
+    expect(byId('wsf-community-goal-stale-g2')).not.toBeNull();
+    expect(spoken).toEqual([SENTENCE]);
+  });
+
+  it('web: nothing is announced (the polite regions speak, one per figure, as before)', async () => {
+    goals.two = true;
+    await failARefresh('web');
+    expect(spoken).toEqual([]);
+    expect(byId('wsf-community-goal-stale-status-g2')!.getAttribute('aria-live')).toBe('polite');
+  });
+});
 
 describe('heads-9 B-1: the stale-figure sentence stays browsable on a phone', () => {
   it('iOS: the visible sentence has no accessible:false; the hidden region’s copy is the one hidden', async () => {

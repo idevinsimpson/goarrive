@@ -2135,6 +2135,19 @@ export default function CommunityPage() {
   const featured = activeGoals[0] ?? null;
 
   const otherActive = activeGoals.slice(1);
+  /*
+    heads-9 N-3. ONE STALE ANNOUNCEMENT PER FAILURE WAVE, FOR THE WHOLE PAGE.
+    A refresh round that fails fails every open goal at once (it is the
+    network), and one announcer per goal queued the same sentence N times,
+    naming none of them. The page has one StaleAnnouncer, fed whether ANY
+    figure on it is a kept, last-confirmed one: it speaks when the first goes
+    stale, not again while any stays stale, and again after all recover and a
+    later read fails. Each card still says so in words where it is seen.
+  */
+  const anyStaleFigure = activeGoals.some((g) => {
+    const gp = progress[g.goalId];
+    return gp?.kind === 'ok' && gp.refreshFailed === true;
+  });
   // D-7. Which goals actually get a permission card this pass — ONE source,
   // consulted by the card renderer and by the orphan block in the Manage
   // sheet, so every outcome is reported exactly once: never twice, and never
@@ -2953,7 +2966,8 @@ export default function CommunityPage() {
           THE REGION SPEAKS ON THE WEB ONLY. There the visible copy of the
           sentence is hidden from assistive technology, because the region
           reads it in the same place. On a phone the region is not live (W16-3:
-          StaleAnnouncer speaks the sentence once per failure instead), and an
+          the page's one StaleAnnouncer speaks the sentence once per failure
+          wave instead, heads-9 N-3), and an
           opacity-0, one-pixel box is skipped by VoiceOver and TalkBack, so it
           is the region's copy that is hidden there, and the visible sentence
           stays where a screen reader can browse to it (heads-9 B-1). A member
@@ -2964,13 +2978,12 @@ export default function CommunityPage() {
           style={styles.visuallyHidden}
           testID={`wsf-community-goal-stale-status-${goal.goalId}`}
           // W16-3 (INT-18): aria-live="polite" on the web, as before; nothing
-          // on a phone, where StaleAnnouncer speaks the sentence instead.
+          // on a phone, where the page's one StaleAnnouncer speaks instead.
           {...liveRegion}
         >
           {/* B-1: natively a hidden duplicate of the visible sentence. */}
           {p.refreshFailed ? <Text {...nativeA11yHidden()}>{STALE_FIGURE_SENTENCE}</Text> : null}
         </View>
-        <StaleAnnouncer failed={p.refreshFailed === true} />
         {p.refreshFailed ? (
           <View
             style={onDark ? styles.heroLastKnown : styles.cardLastKnown}
@@ -3115,11 +3128,21 @@ export default function CommunityPage() {
   /*
     NATIVE-MEMBER-1 W16-9 (MF-09). ON A PHONE THE SHEET RESPECTS THE SAFE AREA
     AND THE KEYBOARD, AND THE SCRIM CLOSES IT. Native only: the panel pads
-    its bottom by the home indicator, or by the keyboard while it is up
-    (sheetBottomPadding, INT-07), so the pairing code and the combined-goal
-    fields rise above it. With the keyboard up the panel may grow to just below
-    the top inset, so what it shows is the window minus the top, the keyboard
-    and the margins. (The keyboard is already in the padding; subtracting it
+    its bottom by the home indicator, and the pairing code and the
+    combined-goal fields are kept above the keyboard by ONE mechanism per
+    platform (heads-9 N-1):
+      iOS      the scroll view's automaticallyAdjustKeyboardInsets
+               (KEYBOARD_SCROLL_PROPS) insets the content by exactly the
+               keyboard's overlap and scrolls the focused field into view. It
+               measures the frame as the keyboard starts to move, before any
+               JS lands, so the panel does NOT also pad by the keyboard (that
+               left ~278 pt of blank scroll space under Leave): its bottom
+               edge stays where it is, and the native inset stays exact.
+      Android  no automatic insets: the panel pads by the IME instead
+               (sheetBottomPadding, INT-07), so the fields rise above it.
+    With the keyboard up the panel may grow to just below the top inset (its
+    top edge only), so what it shows is the window minus the top, the keyboard
+    and the margins. (The keyboard is already taken out below; subtracting it
     from the cap as well would leave ~90 pt.) A drag puts the keyboard away.
     The web is untouched: sheetBottomPadding is never called there, so its
     padding stays 24 and its scrim stays the onClick view (D-3).
@@ -3134,7 +3157,8 @@ export default function CommunityPage() {
         styles.sheet,
         {
           maxHeight: sheetMaxHeight,
-          paddingBottom: sheetBottomPadding(sheetInsets.bottom, sheetKeyboard, Platform.OS, 24),
+          // N-1: on iOS the scroll view's own inset takes the keyboard.
+          paddingBottom: sheetBottomPadding(sheetInsets.bottom, Platform.OS === 'ios' ? 0 : sheetKeyboard, Platform.OS, 24),
         },
       ]
     : [styles.sheet, { maxHeight: sheetMaxHeight }];
@@ -4600,6 +4624,9 @@ export default function CommunityPage() {
           </Pressable>
 
           {/* Your part moved up, under the action (HOME-POLISH-1). */}
+
+          {/* N-3: the page's one stale announcement (renders nothing). */}
+          <StaleAnnouncer failed={anyStaleFigure} />
 
           {/* Other open goals keep their own separately labelled mark. */}
           {otherActive.map((goal) => {
