@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * member-read layer in between). No device.
  */
 
+const params = { value: { goalId: 'g1' } as Record<string, string> };
 const router = { replace: vi.fn(), push: vi.fn(), back: vi.fn(), canGoBack: () => true, dismissTo: vi.fn(), navigate: vi.fn() };
 const navigation = {
   dispatch: vi.fn(),
@@ -29,7 +30,7 @@ vi.mock('expo-router', () => ({
   useRouter: () => router,
   useNavigation: () => navigation,
   usePathname: () => '/contribute/g1',
-  useLocalSearchParams: () => ({ goalId: 'g1' }),
+  useLocalSearchParams: () => params.value,
   useFocusEffect: () => undefined,
 }));
 vi.mock('react-native-safe-area-context', () => ({
@@ -91,6 +92,7 @@ const pollFor = async (ms: number) => {
 
 beforeEach(() => {
   inset.top = 0;
+  params.value = { goalId: 'g1' };
   clearMemberReads();
   calls.length = 0;
   answers.wsfGoalPulse = async () => PULSE;
@@ -209,5 +211,60 @@ describe('the page mode and the top of the screen (INT-09)', () => {
   it('the navy receipt (dark tone) asks for light icons', () => {
     const src = readFileSync(join(__dirname, '..', 'app/contribute/[goalId].tsx'), 'utf8');
     expect(src).toContain("<ScreenStatusBar tone={tone === 'dark' ? 'navy' : 'cream'} />");
+  });
+});
+
+describe('#641 NB-1 and NB-2: what Try again re-reads, and the kiosk', () => {
+  const LISTED = { goals: [{ goalId: 'g1', title: '500 squats together', status: 'active', target: 100, unit: 'squats', sharedTotal: 40 }] };
+  const COMMUNITIES = { items: [{ groupId: 'oak', displayName: 'Oak Grove Together', memberCount: 3 }] };
+
+  it('NB-1: with the community in the route, Try again re-reads the labels too (fresh) and shows the goal title and community name', async () => {
+    params.value = { goalId: 'g1', groupId: 'oak' };
+    answers.wsfGoalPulse = OFFLINE;
+    answers.wsfListGoals = OFFLINE;
+    answers.wsfMyCommunities = OFFLINE;
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    expect(byId('wsf-contribute-load-error')).not.toBeNull();
+    expect(count('wsfListGoals')).toBe(1);
+    expect(count('wsfMyCommunities')).toBe(1);
+
+    answers.wsfGoalPulse = async () => PULSE;
+    answers.wsfListGoals = async () => LISTED;
+    answers.wsfMyCommunities = async () => COMMUNITIES;
+    await act(async () => byId('wsf-contribute-load-retry')!.click());
+    await settle();
+    expect(byId('wsf-contribute-load-error')).toBeNull();
+    expect(byId('wsf-contribute-goal-title')!.textContent).toBe('500 squats together');
+    expect(byId('wsf-contribute-community')!.textContent).toContain('Oak Grove Together');
+    expect(count('wsfListGoals')).toBe(2);
+    expect(count('wsfMyCommunities')).toBe(2);
+  });
+
+  it('NB-1: the retried label reads are fresh: a list settled during the failed load is not reused', async () => {
+    params.value = { goalId: 'g1', groupId: 'oak' };
+    answers.wsfGoalPulse = OFFLINE;
+    answers.wsfListGoals = async () => ({ goals: [{ ...LISTED.goals[0]!, title: 'An older title' }] });
+    answers.wsfMyCommunities = OFFLINE;
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    expect(byId('wsf-contribute-load-error')).not.toBeNull();
+    answers.wsfGoalPulse = async () => PULSE;
+    answers.wsfListGoals = async () => LISTED;
+    answers.wsfMyCommunities = async () => COMMUNITIES;
+    await act(async () => byId('wsf-contribute-load-retry')!.click());
+    await settle();
+    expect(byId('wsf-contribute-goal-title')!.textContent).toBe('500 squats together');
+    expect(count('wsfListGoals')).toBe(2);
+  });
+
+  it('NB-2: on a kiosk the load error offers Finish alone; no Try again can clear its deadline', async () => {
+    params.value = { goalId: 'g1', kiosk: '1' };
+    answers.wsfGoalPulse = OFFLINE;
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    expect(byId('wsf-contribute-load-error')).not.toBeNull();
+    expect(byId('wsf-contribute-load-retry')).toBeNull();
+    expect(byId('wsf-kiosk-finish')).not.toBeNull();
   });
 });

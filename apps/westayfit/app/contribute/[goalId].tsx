@@ -804,11 +804,14 @@ export default function ContributeToGoal() {
           `wsfListGoals` (which refuses a non-member, exactly as before) and
           its communities from `wsfMyCommunities` (which lists only this
           account's active memberships). A read from this load is reused; a
-          cold link reads them.
+          cold link reads them. The load error's Try again re-runs this too,
+          and fresh (#641 NB-1, INT-26): whatever failed the goal load usually
+          failed these as well.
         */
+        const reuse = loadToken > 0 ? 0 : SAME_LOAD_MS;
         const [listed, mine] = await Promise.all([
-          readGoals<ListedGoal>(user.uid, groupIdHint, SAME_LOAD_MS),
-          readMyCommunities(user.uid, SAME_LOAD_MS),
+          readGoals<ListedGoal>(user.uid, groupIdHint, reuse),
+          readMyCommunities(user.uid, reuse),
         ]);
         if (cancelled) return;
         const goal = listed.goals.find((g) => g.goalId === goalId);
@@ -823,7 +826,7 @@ export default function ContributeToGoal() {
     return () => {
       cancelled = true;
     };
-  }, [ready, user, goalId, groupIdHint]);
+  }, [ready, user, goalId, groupIdHint, loadToken]);
 
   // Poll wsfGoalPulse only while the member is still before the write. Once
   // an attempt is in flight, unknown, refused or confirmed, the screen shows
@@ -1809,15 +1812,21 @@ export default function ContributeToGoal() {
         <View style={styles.card} testID="wsf-contribute-load-error">
           <Text style={styles.heading} {...HEADING_1}>Something went wrong</Text>
           <Text style={styles.body}>{state.message}</Text>
-          {/* INT-04 case 4: try again here, in place. */}
-          <Pressable
-            onPress={retryLoad}
-            accessibilityRole="button"
-            style={styles.primaryButton}
-            testID="wsf-contribute-load-retry"
-          >
-            <Text style={styles.primaryButtonText}>Try again</Text>
-          </Pressable>
+          {/* INT-04 case 4: try again here, in place. Not on a kiosk (#641
+              NB-2): there this error is a rest state with a 90-second Finish,
+              and a retry would pass through loading and clear that deadline
+              while it waited, leaving the shared device as the last visitor
+              left it. A kiosk gets Finish alone, as before. */}
+          {kiosk ? null : (
+            <Pressable
+              onPress={retryLoad}
+              accessibilityRole="button"
+              style={styles.primaryButton}
+              testID="wsf-contribute-load-retry"
+            >
+              <Text style={styles.primaryButtonText}>Try again</Text>
+            </Pressable>
+          )}
           {/* NOT ON A SHARED DEVICE. "Back to home" is the member home of the
               account signed in right now, so on a kiosk it is a door out of the
               session and into somebody's account for whoever walks up next.
