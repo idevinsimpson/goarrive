@@ -481,6 +481,18 @@ describe('the kiosk start screen ends the kiosk session only once nobody is sign
     screen.unmount();
   });
 
+  it('auth answering late with nobody signed in: the marker goes then', async () => {
+    await withOpenSession();
+    auth = { ready: false, user: null };
+    const screen = await openStartScreen();
+    expect(disk.map.get(MARKER)).toBe(GOAL);
+    auth = { ready: true, user: null };
+    await screen.render();
+    expect(signOutCalls).toBe(0);
+    expect(disk.map.has(MARKER)).toBe(false);
+    screen.unmount();
+  });
+
   it('nobody signed in at rest: the marker goes', async () => {
     await withOpenSession();
     auth = { ready: true, user: null };
@@ -512,6 +524,53 @@ describe('web: none of this', () => {
     expect(await guard.kioskLaunchRoute()).toBeNull();
     expect(await ks.clearKioskSession()).toBe(true);
     window.sessionStorage.clear();
+  });
+
+  it('the start screen’s reset runs exactly when it always has: once per focus and user, not again when auth answers', async () => {
+    vi.resetModules();
+    const resets: number[] = [];
+    vi.doMock('expo-router', async () => {
+      const React = await import('react');
+      return {
+        router,
+        usePathname: () => `/kiosk/${GOAL}`,
+        useLocalSearchParams: () => ({ goalId: GOAL }),
+        useFocusEffect: (effect: () => void | (() => void)) => React.useEffect(effect, [effect]),
+      };
+    });
+    vi.doMock('../src/auth', () => ({ useWsfAuth: () => auth }));
+    vi.doMock('../src/firebase', () => ({ getFirebaseAuth: () => ({}), getFirebaseFunctions: () => ({}), wsfUsingEmulators: false }));
+    vi.doMock('firebase/auth', () => ({ onAuthStateChanged: () => () => undefined, signOut: () => Promise.resolve() }));
+    vi.doMock('firebase/functions', () => ({ httpsCallable: () => () => new Promise(() => undefined) }));
+    vi.doMock('../src/handoffArming', () => ({
+      armKioskReturn: () => Promise.resolve(true),
+      resetSharedScreenHandoffs: () => {
+        resets.push(1);
+        return Promise.resolve(true);
+      },
+    }));
+    try {
+      auth = { ready: false, user: null };
+      const { createElement, act } = await import('react');
+      const { createRoot } = await import('react-dom/client');
+      const { default: KioskStart } = await import('../app/kiosk/[goalId]');
+      const container = document.createElement('div');
+      const root = createRoot(container);
+      const render = () =>
+        act(async () => {
+          root.render(createElement(KioskStart));
+          await flush();
+        });
+      await render();
+      expect(resets).toHaveLength(1);
+      // Auth answers with nobody: the user is still null, so the reset does not run again.
+      auth = { ready: true, user: null };
+      await render();
+      expect(resets).toHaveLength(1);
+      act(() => root.unmount());
+    } finally {
+      vi.doUnmock('../src/handoffArming');
+    }
   });
 
   it('never holds: the first frame is already free (ESC-2)', async () => {
