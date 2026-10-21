@@ -18,7 +18,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * open goal. The figure loads, then a return to the app after 30 s finds the
  * network down, which is the RETURN-CONTINUITY-1 path. Text is wrapped to read
  * the props a phone acts on. No device.
+ *
+ * NATIVE-MEMBER-1 W16-14 (INT-12, member half): the freshness line under the
+ * figure ("Confirmed …") names the day when it is not today and says "Last
+ * confirmed" while the figure is the kept one, against a fixed now (fake
+ * timers) in a pinned zone (UTC) and the en-US clock.
  */
+
+// The freshness line is in the reader's zone: pinned so the strings are exact.
+process.env.TZ = 'UTC';
 
 const SENTENCE = 'Couldn’t refresh. This is the last confirmed figure.';
 // The props each copy of the sentence was last rendered with: the region's
@@ -331,5 +339,49 @@ describe('heads-9 B-1: the stale-figure sentence stays browsable on a phone', ()
     // For the before/after web DOM comparison (heads-9 B-1): the whole page.
     const dump = process.env.WSF_DUMP_STALE_DOM;
     if (dump) (await import('node:fs')).writeFileSync(dump, container.innerHTML);
+  });
+});
+
+describe('W16-14 / INT-12: the freshness line names the day, and says when the figure is the kept one', () => {
+  const line = () => byId('wsf-community-progress-updated')!.textContent;
+  const DAY = 86_400_000;
+
+  it.each(['ios', 'web'] as const)('%s: the same day reads as before ("Confirmed 3:00 PM")', async (os) => {
+    (Platform as { OS: string }).OS = os;
+    act(() => root.render(<CommunityPage />));
+    await flush();
+    expect(line()).toBe('Confirmed 3:00 PM');
+  });
+
+  it.each(['ios', 'web'] as const)('%s: a figure confirmed on another day names the day ("Confirmed Oct 21, 3:00 PM")', async (os) => {
+    (Platform as { OS: string }).OS = os;
+    act(() => root.render(<CommunityPage />));
+    await flush();
+    expect(line()).toBe('Confirmed 3:00 PM');
+    // The next day, before any read lands: the page draws again and the same figure names its day.
+    vi.setSystemTime(NOW + DAY + 41 * 60_000);
+    act(() => root.render(<CommunityPage />));
+    expect(line()).toBe('Confirmed Oct 21, 3:00 PM');
+  });
+
+  it.each(['ios', 'web'] as const)('%s: a refresh that failed reads "Last confirmed" with the kept time', async (os) => {
+    await failARefresh(os);
+    expect(line()).toBe('Last confirmed 3:00 PM');
+  });
+
+  it('iOS: failed and from another day: "Last confirmed Oct 21, 3:00 PM"', async () => {
+    await failARefresh('ios');
+    vi.setSystemTime(NOW + DAY);
+    act(() => root.render(<CommunityPage />));
+    expect(line()).toBe('Last confirmed Oct 21, 3:00 PM');
+  });
+
+  it('iOS: once a read lands again, the line is "Confirmed" with the new time', async () => {
+    await failARefresh('ios');
+    expect(line()).toBe('Last confirmed 3:00 PM');
+    net.down = false;
+    await returnToApp();
+    expect(byId('wsf-community-goal-stale-g1')).toBeNull();
+    expect(line()).toMatch(/^Confirmed 3:01 PM$/);
   });
 });
