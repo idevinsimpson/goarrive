@@ -108,23 +108,38 @@ const PULSE = {
   endsAt: new Date(NOW + 5 * 86_400_000).toISOString(),
   timezone: 'UTC',
 };
-// `holdFor`: that goal's pulse answers only when `release()` runs (it answers last).
-const net: { down: boolean; pulseDownFor: string | null; holdFor: string | null; held: Array<() => void> } = {
+// `holdFor`: that goal's pulse answers only when `release()` runs (it answers
+// last); `release(true)` fails it instead (W16-20: a late failing read).
+// `pulses`: how many pulse reads were issued.
+const net: {
+  down: boolean;
+  pulseDownFor: string | null;
+  holdFor: string | null;
+  held: Array<(fail?: boolean) => void>;
+  pulses: number;
+} = {
   down: false,
   pulseDownFor: null,
   holdFor: null,
   held: [],
+  pulses: 0,
 };
 const offline = () => Promise.reject(Object.assign(new Error('offline'), { code: 'functions/unavailable' }));
 vi.mock('firebase/functions', () => ({
-  httpsCallable: (_f: unknown, name: string) => (req?: { goalId?: string }) =>
-    net.down || (name === 'wsfGoalPulse' && req?.goalId === net.pulseDownFor)
+  httpsCallable: (_f: unknown, name: string) => (req?: { goalId?: string }) => {
+    if (name === 'wsfGoalPulse') net.pulses += 1;
+    return net.down || (name === 'wsfGoalPulse' && req?.goalId === net.pulseDownFor)
       ? offline()
       : name === 'wsfGoalPulse'
         ? req?.goalId === net.holdFor
-          ? new Promise((resolve) => net.held.push(() => resolve({ data: PULSE })))
+          ? new Promise((resolve, reject) =>
+              net.held.push((fail) =>
+                fail ? reject(Object.assign(new Error('offline'), { code: 'functions/unavailable' })) : resolve({ data: PULSE }),
+              ),
+            )
           : Promise.resolve({ data: PULSE })
-        : offline(),
+        : offline();
+  },
 }));
 vi.mock('../src/firebase', () => ({ getFirebaseFirestore: () => ({}), getFirebaseFunctions: () => ({}) }));
 vi.mock('../src/featureFlags', () => ({ wsfAuthEnabled: true }));
@@ -172,6 +187,7 @@ beforeEach(() => {
   net.pulseDownFor = null;
   net.holdFor = null;
   net.held = [];
+  net.pulses = 0;
   goals.two = false;
   spoken = [];
   const say = (m: string) => {
@@ -381,6 +397,92 @@ describe('heads-13 RV15-642-B1: a recovery is never spoken as a failure', () => 
   });
 });
 
+/*
+  W16-20 (heads-14 RV16-642-N2). A wave's value is its round's issue time
+  (Date.now()), so a genuinely new failure can carry an OLDER value than a
+  wave already spoken, and RV15-642-B1's grow-only key left it silent. Two
+  ways, rendered: a settle read issued before a newer failed round fails
+  late, after a full recovery (the settle is not cancelled by later rounds);
+  and the device clock is corrected backwards. The announcer now speaks any
+  wave it has not seen.
+*/
+describe('heads-14 RV16-642-N2: a new failure is spoken whatever its round’s issue time', () => {
+  /** Two goals on screen, read at the mount (NOW), on iOS. */
+  async function mountTwo(): Promise<void> {
+    goals.two = true;
+    (Platform as { OS: string }).OS = 'ios';
+    act(() => root.render(<CommunityPage />));
+    await flush();
+    expect(byId('wsf-community-goal-total-g2')).not.toBeNull();
+  }
+
+  it('iOS: g2’s settle read hangs; g1 fails in a newer round (spoken) and recovers; the old settle read then fails late: spoken', async () => {
+    await mountTwo();
+    // The mount's settle read (NOW + 2.6 s): g1 answers, g2's hangs.
+    net.holdFor = 'g2';
+    act(() => vi.advanceTimersByTime(2_600));
+    await flush();
+    expect(net.held).toHaveLength(1);
+    // A newer round (a return) fails g1 alone; g2's read in it hangs too.
+    net.pulseDownFor = 'g1';
+    await returnToApp();
+    expect(byId('wsf-community-goal-stale-g1')).not.toBeNull();
+    expect(byId('wsf-community-goal-stale-g2')).toBeNull();
+    expect(spoken).toEqual([SENTENCE]);
+    // Full recovery: g1 reads again; nothing on the page is stale.
+    net.pulseDownFor = null;
+    await returnToApp();
+    expect(byId('wsf-community-goal-stale-g1')).toBeNull();
+    expect(byId('wsf-community-goal-stale-g2')).toBeNull();
+    expect(spoken).toEqual([SENTENCE]);
+    // The settle read, issued before both rounds, fails now: g2 is newly stale.
+    await act(async () => net.held[0]!(true));
+    await flush();
+    expect(byId('wsf-community-goal-stale-g2')).not.toBeNull();
+    expect(spoken).toEqual([SENTENCE, SENTENCE]);
+  });
+
+  it('iOS: the same late settle failure while g1 is still stale from the newer round: spoken (every stale wave counts, not the latest alone)', async () => {
+    await mountTwo();
+    net.holdFor = 'g2';
+    act(() => vi.advanceTimersByTime(2_600));
+    await flush();
+    net.pulseDownFor = 'g1';
+    await returnToApp();
+    expect(byId('wsf-community-goal-stale-g1')).not.toBeNull();
+    expect(spoken).toEqual([SENTENCE]);
+    await act(async () => net.held[0]!(true));
+    await flush();
+    expect(byId('wsf-community-goal-stale-g1')).not.toBeNull();
+    expect(byId('wsf-community-goal-stale-g2')).not.toBeNull();
+    expect(spoken).toEqual([SENTENCE, SENTENCE]);
+  });
+
+  it('iOS: the clock jumps forward, g1 fails (spoken) and recovers; the clock is corrected back and g2 fails: spoken', async () => {
+    await mountTwo();
+    act(() => vi.advanceTimersByTime(2_600));
+    await flush();
+    // The clock jumps an hour ahead. g1 fails; g2's read hangs.
+    vi.setSystemTime(Date.now() + 3_600_000);
+    net.pulseDownFor = 'g1';
+    net.holdFor = 'g2';
+    await returnToApp();
+    expect(byId('wsf-community-goal-stale-g1')).not.toBeNull();
+    expect(spoken).toEqual([SENTENCE]);
+    net.pulseDownFor = null;
+    await returnToApp();
+    expect(byId('wsf-community-goal-stale-g1')).toBeNull();
+    expect(byId('wsf-community-goal-stale-g2')).toBeNull();
+    // The clock is corrected back; then an outage. g2 (last read before the jump) is newly stale.
+    vi.setSystemTime(NOW + 5 * 60_000);
+    net.holdFor = null;
+    net.down = true;
+    await returnToApp();
+    expect(byId('wsf-community-goal-stale-g2')).not.toBeNull();
+    expect(spoken).toEqual([SENTENCE, SENTENCE]);
+  });
+});
+
 describe('heads-9 B-1: the stale-figure sentence stays browsable on a phone', () => {
   it('iOS: the visible sentence has no accessible:false; the hidden region’s copy is the one hidden', async () => {
     await failARefresh('ios');
@@ -458,5 +560,38 @@ describe('W16-14 / INT-12: the freshness line names the day, and says when the f
     await returnToApp();
     expect(byId('wsf-community-goal-stale-g1')).toBeNull();
     expect(line()).toMatch(/^Confirmed 3:01 PM$/);
+  });
+});
+
+/*
+  W16-20 (heads-14 RV16-642-N3). The line was read against now only when the
+  page drew, and Community Home has no clock of its own: left in front across
+  local midnight (or locked for less than the 30 s resume minimum), it kept
+  "Confirmed 11:58 PM" the next day. It is now drawn again by the shared
+  coarse clock (useNowTick), with no read and no return.
+*/
+describe('heads-14 RV16-642-N3: the freshness line follows the clock while the screen stays open', () => {
+  const line = () => byId('wsf-community-progress-updated')!.textContent;
+
+  it.each(['ios', 'web'] as const)('%s: confirmed at 11:58 PM, still in front past midnight: "Confirmed Oct 21, 11:58 PM"', async (os) => {
+    vi.setSystemTime(Date.UTC(2026, 9, 21, 23, 58, 0, 400));
+    (Platform as { OS: string }).OS = os;
+    act(() => root.render(<CommunityPage />));
+    await flush();
+    expect(line()).toBe('Confirmed 11:58 PM');
+    const reads = net.pulses;
+    // The mount's settle read lands at 23:58:03.
+    act(() => vi.advanceTimersByTime(2_600));
+    await flush();
+    expect(new Date().toISOString()).toBe('2026-10-21T23:58:03.000Z');
+    expect(net.pulses).toBe(reads + 1);
+    expect(line()).toBe('Confirmed 11:58 PM');
+    // The app stays in front; past midnight. No read, no return, no new render from the page.
+    expect(AppState.currentState).toBe('active');
+    act(() => vi.advanceTimersByTime(3 * 60_000));
+    await flush();
+    expect(new Date().toISOString()).toBe('2026-10-22T00:01:03.000Z');
+    expect(net.pulses).toBe(reads + 1);
+    expect(line()).toBe('Confirmed Oct 21, 11:58 PM');
   });
 });

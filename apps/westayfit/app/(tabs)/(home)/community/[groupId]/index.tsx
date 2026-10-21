@@ -30,7 +30,7 @@ import {
 } from '../../../../../src/ui/keyboardAvoidance';
 import { useSheetInsets } from '../../../../../src/ui/sheetInsets';
 import { liveRegion } from '../../../../../src/ui/announce';
-import { STALE_FIGURE_SENTENCE, StaleAnnouncer, nativeA11yHidden } from '../../../../../src/ui/staleFigure';
+import { FreshnessLine, STALE_FIGURE_SENTENCE, StaleAnnouncer, nativeA11yHidden } from '../../../../../src/ui/staleFigure';
 // W16-4 (MF-11): the one text-scale policy (W12-8): layout widths and the initials discs.
 import { chromeTextProps, effectiveWidth } from '../../../../../src/ui/textScale';
 import { resolveRepeatPolicy, type RepeatPolicy } from '../../../../../src/contributionFlow';
@@ -109,7 +109,6 @@ import {
 } from '../../../../../src/stationSession';
 import {
   formatActiveWindowLabel,
-  formatConfirmedAt,
   formatMonthYear,
   formatPeriod,
   formatReachedOn,
@@ -2162,22 +2161,23 @@ export default function CommunityPage() {
     heads-9 N-3. ONE STALE ANNOUNCEMENT PER FAILURE WAVE, FOR THE WHOLE PAGE.
     A refresh round that fails fails every open goal at once (it is the
     network), and one announcer per goal queued the same sentence N times,
-    naming none of them. The page has one StaleAnnouncer, keyed by the WAVE:
-    the latest round whose failure made a figure stale (`staleSince`). So a
-    round that fails several goals speaks once, a figure that fails again
-    while already stale says nothing new, and (heads-11 NB-2) a later round
-    that fails a goal which had recovered speaks again, even while another
-    goal stays stale. When the newest wave's goal recovers first this value
-    falls back to an older wave; the announcer keys on the newest wave it has
-    seen, so a recovery is never spoken as a failure (heads-13 RV15-642-B1).
-    Each card still says so in words where it is seen.
+    naming none of them. The page has one StaleAnnouncer, keyed by the WAVES:
+    the rounds whose failures made the figures on screen stale (each stale
+    goal's `staleSince`). So a round that fails several goals speaks once, a
+    figure that fails again while already stale says nothing new, and
+    (heads-11 NB-2) a later round that fails a goal which had recovered
+    speaks again, even while another goal stays stale. The announcer speaks a
+    wave it has not seen before, whatever its value (W16-20, heads-14
+    RV16-642-N2), so a recovery is never spoken as a failure (heads-13
+    RV15-642-B1), and a new failure is spoken even when its round was issued
+    earlier (a late settle read, a clock set back). Each card still says so
+    in words where it is seen.
   */
-  let staleWave: number | null = null;
+  const staleWaves: number[] = [];
   for (const g of activeGoals) {
     const gp = progress[g.goalId];
     if (gp?.kind !== 'ok' || gp.refreshFailed !== true) continue;
-    const since = gp.staleSince ?? 0;
-    if (staleWave === null || since > staleWave) staleWave = since;
+    staleWaves.push(gp.staleSince ?? 0);
   }
   // D-7. Which goals actually get a permission card this pass — ONE source,
   // consulted by the card renderer and by the orphan block in the Manage
@@ -2836,13 +2836,18 @@ export default function CommunityPage() {
   // the figure was confirmed on another day ("Confirmed Oct 20, 3:41 PM"; a
   // bare clock reads as today), and says "Last confirmed" while a later read
   // has failed and the figure is the kept one (W12-6 formatConfirmedAt, read
-  // against now at each render). The same day reads as before.
+  // against now at each render). The same day reads as before. W16-20
+  // (heads-14 RV16-642-N3): drawn by FreshnessLine, which the shared coarse
+  // clock draws again while the screen stays open, so midnight names the day.
   const renderFreshness = (p: GoalProgress) =>
     p.kind === 'ok' ? (
       <View style={styles.freshnessUtilityRow}>
-        <Text style={styles.freshnessUtilityText} testID="wsf-community-progress-updated">
-          {formatConfirmedAt(p.at, new Date(), { failed: p.refreshFailed === true })}
-        </Text>
+        <FreshnessLine
+          at={p.at}
+          failed={p.refreshFailed === true}
+          style={styles.freshnessUtilityText}
+          testID="wsf-community-progress-updated"
+        />
         <Pressable
           onPress={refreshProgress}
           accessibilityRole="button"
@@ -4665,7 +4670,7 @@ export default function CommunityPage() {
           {/* Your part moved up, under the action (HOME-POLISH-1). */}
 
           {/* N-3, NB-2: the page's one stale announcement, per wave (renders nothing). */}
-          <StaleAnnouncer wave={staleWave} />
+          <StaleAnnouncer waves={staleWaves} />
 
           {/* Other open goals keep their own separately labelled mark. */}
           {otherActive.map((goal) => {

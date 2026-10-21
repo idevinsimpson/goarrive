@@ -598,14 +598,21 @@ export default function You() {
               // even when the page was recomposed from `composedFrom` (the
               // record could not), which may hold an older name; and those
               // inputs take the head shown, so they stay the page's own.
+              // W16-20 (heads-14 RV16-642-N1): the chain never ends on a
+              // pending profile. A record with no profile composes a pending
+              // head, and so may the page on screen; with both pending, the
+              // head is this load's failure fallback (`profile`), the "You"
+              // header, not the pending bar.
               const known = peekMemberProfile(uid);
               const head = profileAnswered
                 ? profile
                 : known
                   ? toProfile(known)
-                  : again.profile.pending
-                    ? prev.profile
-                    : again.profile;
+                  : !again.profile.pending
+                    ? again.profile
+                    : !prev.profile.pending
+                      ? prev.profile
+                      : profile;
               if (!rec && from) composedFrom.current = { uid, args: [head, ...from.slice(1)] as ComposeArgs };
               return { ...again, profile: head };
             });
