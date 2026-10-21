@@ -257,6 +257,38 @@ describe('iOS', () => {
     expect(notice()).toBe(INTERRUPTED_NOTICE);
   });
 
+  it('inactive before Start, then Home within the window: nothing ran in front of the person — Ready, “Not started”, no paused notice (N1)', () => {
+    act(() => root.render(<Host />));
+    app('inactive');
+    advance(2_000);
+    press('fa-start'); // pressed while the app was already inactive
+    advance(5_000);
+    app('background'); // the backdate reaches to before Start
+    advance(30_000);
+    app('active');
+    expect(status()).toMatch(/^Not started · /);
+    expect(notice()).toBeNull();
+    expect(el('fa-start')?.textContent).toBe('Start');
+    expect(vi.getTimerCount()).toBe(0); // the clock stopped
+    press('fa-start'); // and Start begins the round from the top
+    expect(status()).toBe('Starting in 3');
+  });
+
+  it('Resume pressed while inactive, then Home within the window: the round keeps what it had and is interrupted (N1)', () => {
+    startAndRunTo50();
+    app('background');
+    app('active');
+    expect(status()).toBe('Paused · 50 left in this round');
+    app('inactive');
+    advance(2_000);
+    press('fa-start'); // Resume, pressed while the app was already inactive
+    advance(5_000);
+    app('background');
+    app('active');
+    expect(status()).toBe('Paused · 50 left in this round');
+    expect(notice()).toBe(INTERRUPTED_NOTICE);
+  });
+
   it('a phone call during the countdown pauses it there, with nothing accrued', () => {
     act(() => root.render(<Host />));
     press('fa-start');

@@ -303,8 +303,19 @@ export function useFollowAlongSession(input: {
       // (the blur rule), so it simply finishes — the end-of-round effect stops
       // the clock once `inactiveSince` clears — with no "paused" notice beside
       // "That's the round" and no Resume that could go nowhere.
-      if (step.pauseAt !== null && !stepAt(planRef.current, clockElapsed(clockRef.current, step.pauseAt)).finished) {
-        interrupt('hidden', step.pauseAt);
+      //
+      // Nor is one that leaves nothing banked (N1): the app was already
+      // inactive when Start was pressed and went to the background within the
+      // window, so the backdate reaches to before the run began and nothing of
+      // the round ran in front of the person (a pause before the run's start
+      // banks nothing: clockElapsed never counts a negative run). The clock
+      // stops where it began and the card is Ready again — "Not started" with
+      // no "paused" notice beside it. A resumed round keeps what it had banked
+      // and is interrupted as usual.
+      if (step.pauseAt !== null) {
+        const banked = clockElapsed(clockRef.current, step.pauseAt);
+        if (banked === 0) setClock((c) => pauseClock(c, step.pauseAt!));
+        else if (!stepAt(planRef.current, banked).finished) interrupt('hidden', step.pauseAt);
       }
       setInactiveSince(step.lifecycle.inactiveSince);
     });
