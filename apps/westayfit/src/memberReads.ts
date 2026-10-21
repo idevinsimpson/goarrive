@@ -115,9 +115,22 @@ const version = (key: string): number => versions.get(key) ?? 0;
 const advance = (key: string): void => {
   versions.set(key, version(key) + 1);
 };
+/*
+  Changes from OUTSIDE a read (a receipt, a refusal, a forget), counted apart
+  from the generation, which a fresher read also advances when it supersedes
+  an older one (INT-26). A superseded answer may only be kept when nothing
+  but fresher reads, all of which failed, came after it (#641 SH-3).
+*/
+const changes = new Map<string, number>();
+const changeCount = (key: string): number => changes.get(key) ?? 0;
+const touch = (key: string): void => {
+  advance(key);
+  changes.set(key, changeCount(key) + 1);
+};
 function resetRecord(): void {
   store.clear();
   versions.clear();
+  changes.clear();
   groupGoals.clear();
   refused.clear();
   epoch += 1;
@@ -171,7 +184,7 @@ function peek<T>(uid: string | null, key: string): T | undefined {
 /** Removes a key; its generation advances first, so no older read can put it back. */
 function forget(uid: string | null, key: string): void {
   if (!scope(uid)) return;
-  advance(key);
+  touch(key);
   store.delete(key);
 }
 
@@ -205,6 +218,8 @@ function read<T>(
   }
   const issuedEpoch = epoch;
   const issuedVersion = version(key);
+  const issuedChanges = changeCount(key);
+  const issuedAt = Date.now();
   const sameAccount = () => owner === uid && epoch === issuedEpoch;
   const stillCurrent = () => sameAccount() && version(key) === issuedVersion;
   const p: Promise<T> = fetch()
@@ -215,16 +230,28 @@ function read<T>(
         return value;
       }
       if (sameAccount()) {
-        // SUPERSEDED while in flight, for this same account. A receipt that
-        // replaced the key is newer than this answer: that is the answer. A
-        // key that was removed (a refusal, a receipt that could not patch a
-        // list) is asked again, fresh, rather than answered from before.
+        // SUPERSEDED while in flight, for this same account.
         const now = store.get(key);
-        if (now && now.at !== undefined) return now.value as T;
-        // A fresher read already in flight (INT-26) is the answer: share it
-        // rather than asking again, so superseded reads never chain requests.
+        // A fresher read still in flight (INT-26) is the answer: share it. It
+        // comes first, because its entry still carries the value settled
+        // before it, which is older than this answer (#641 SH-3a).
         if (now?.inflight && now.inflight !== p) return now.inflight as Promise<T>;
-        return read(uid, key, fetch, 0, onRecorded);
+        if (changeCount(key) !== issuedChanges) {
+          // Changed from outside since this read was issued. A receipt that
+          // replaced the key is newer than this answer: that is the answer.
+          // A key that was removed (a refusal, a receipt that could not patch
+          // a list) is asked again, fresh, rather than answered from before.
+          if (now && now.at !== undefined) return now.value as T;
+          return read(uid, key, fetch, 0, onRecorded);
+        }
+        // Only fresher reads came after this one. One that landed is the answer.
+        if (now && now.at !== undefined && now.at >= issuedAt) return now.value as T;
+        // They all failed: this answer is the freshest there is, newer than
+        // anything settled. Keep it, rather than handing back an older value
+        // or asking a third time (#641 SH-3b).
+        store.set(key, { value, at: Date.now() });
+        onRecorded?.(value);
+        return value;
       }
       // Another account owns the record now: nothing is recorded, and the
       // screen that asked drops the answer by its own account guard.
@@ -421,7 +448,7 @@ export function noteConfirmedContribution(uid: string | null, receipt: Confirmed
   const now = Date.now();
   const ownKeyOf = ownKey(receipt.goalId);
   const previous = (store.get(ownKeyOf)?.value ?? {}) as OwnCreditAnswer;
-  advance(ownKeyOf);
+  touch(ownKeyOf);
   store.set(ownKeyOf, { value: { ...previous, ownCredit: receipt.ownCredit, unit: receipt.unit }, at: now });
   if (!receipt.groupId) return;
   registerGoal(receipt.groupId, receipt.goalId);
@@ -431,7 +458,7 @@ export function noteConfirmedContribution(uid: string | null, receipt: Confirmed
   const key = goalsKey(receipt.groupId);
   const listed = store.get(key);
   const goals = (listed?.value as ListedGoalsAnswer<Record<string, unknown>> | undefined)?.goals;
-  advance(key);
+  touch(key);
   if (listed && !listed.inflight && listed.at !== undefined && Array.isArray(goals)) {
     const index = goals.findIndex((g) => g.goalId === receipt.goalId);
     if (index >= 0 && receipt.status === 'active' && goals[index]!.status === 'active') {
