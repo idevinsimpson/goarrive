@@ -33,6 +33,8 @@ const h = vi.hoisted(() => ({
   goalsAsked: [] as string[],
   /** The member's communities, as the membership read answers. */
   items: [] as unknown[],
+  /** The route's search params, as the screen reads them. */
+  params: {} as Record<string, string>,
 }));
 
 const A = 'member-a';
@@ -112,7 +114,7 @@ vi.mock('expo-router', () => {
     useNavigation: () => navigation,
     useFocusEffect: () => undefined,
     usePathname: () => '/',
-    useLocalSearchParams: () => ({}),
+    useLocalSearchParams: () => h.params,
     useSegments: () => [],
     Link: ({ children }: { children?: unknown }) => children ?? null,
     // A <Redirect> navigates when it is drawn: drawing one is recorded.
@@ -130,6 +132,29 @@ let cleanup: Array<() => void> = [];
 useUnhandledRejectionGuard();
 
 /** A fresh process over `disk`; Firebase is mocked after the harness's own mocks have landed. */
+/**
+ * A fresh WEB process: the web storage implementations (localStorage, read
+ * synchronously, so the remembered community is answered at load), with the
+ * same Firebase mocks. Returns its currentCommunity module.
+ */
+async function bootWeb() {
+  vi.resetModules();
+  vi.doUnmock('@react-native-async-storage/async-storage');
+  vi.doUnmock('../src/storage/kv');
+  vi.doUnmock('../src/storage/sessionKv');
+  vi.doUnmock('../src/storage/syncRead');
+  vi.doMock('../src/firebase', () => ({
+    getFirebaseApp: () => ({}),
+    getFirebaseAuth: () => ({ currentUser: null }),
+    getFirebaseFirestore: () => ({}),
+    getFirebaseFunctions: () => ({}),
+    wsfUsingEmulators: false,
+    wsfIsStaging: false,
+  }));
+  vi.doMock('firebase/auth', () => ({ signOut: async () => undefined, onAuthStateChanged: () => () => undefined }));
+  return import('../src/currentCommunity');
+}
+
 async function boot() {
   bootNative(disk);
   await import('../src/storage/syncRead');
@@ -228,6 +253,7 @@ beforeEach(() => {
   h.navigated.length = 0;
   h.goalsAsked.length = 0;
   h.items = TWO;
+  h.params = {};
 });
 
 afterEach(async () => {
@@ -281,6 +307,7 @@ describe('Home, with B remembered and the launch read held', () => {
     expect(h.navigated).toEqual([]);
     // heads-13 N3: while the read is held, the list is still loading; the
     // chooser (its list, its heading, the stack it sits in) is never drawn.
+    expect(home.testIds().has('wsf-home-awaiting-community')).toBe(true);
     expect(home.testIds().has('wsf-home-my-loading')).toBe(true);
     expect(home.testIds().has(CHOOSER_LIST)).toBe(false);
     expect(home.testIds().has('wsf-home-signed-in')).toBe(false);
@@ -307,6 +334,7 @@ describe('Home, with B remembered and the launch read held', () => {
     expect(cc.isCurrentCommunityReady()).toBe(false);
     expect(h.goalsAsked).toEqual(['g1']);
     expect(h.navigated).toEqual([]);
+    expect(home.testIds().has('wsf-home-awaiting-community')).toBe(true);
     expect(home.testIds().has('wsf-home-my-loading')).toBe(true);
     expect(home.testIds().has(CHOOSER_LIST)).toBe(false);
     expect(home.everSaid(CHOOSER_HEADING)).toBe(false);
@@ -334,5 +362,41 @@ describe('Home controls: the chooser is still drawn when it is the answer', () =
     expect(home.testIds().has(CHOOSER_LIST)).toBe(true);
     expect(home.everSaid(CHOOSER_HEADING)).toBe(true);
     expect(h.navigated).toEqual([]);
+  }, 20_000);
+
+  it('RV16-639-2: the list was asked for (?view=communities): drawn while the read is held, never held, nothing navigates', async () => {
+    h.params = { view: 'communities' };
+    const release = holdLaunchRead();
+    const cc = await boot();
+    const home = await render('home');
+    await home.settle();
+    expect(cc.isCurrentCommunityReady()).toBe(false);
+    expect([...h.goalsAsked].sort()).toEqual(['g1', 'g2']);
+    expect(home.testIds().has(CHOOSER_LIST)).toBe(true);
+    expect(home.testIds().has('wsf-home-awaiting-community')).toBe(false);
+    expect(h.navigated).toEqual([]);
+
+    release();
+    await cc.currentCommunityReady();
+    await home.settle();
+    // Asked for the list: it stays; nothing is decided or opened.
+    expect(h.navigated).toEqual([]);
+    expect(home.testIds().has('wsf-home-awaiting-community')).toBe(false);
+  }, 20_000);
+
+  it('RV16-639-2 web control: the hold is never drawn on web (the remembered community is read synchronously)', async () => {
+    localStorage.setItem(REMEMBERED_KEY, 'g2');
+    try {
+      const cc = await bootWeb();
+      expect(cc.isCurrentCommunityReady()).toBe(true);
+      const home = await render('home');
+      await home.settle();
+      expect(home.testIds().has('wsf-home-awaiting-community')).toBe(false);
+      // The web's own frames, as before: the signed-in stack while the list loads, then B opens.
+      expect(home.testIds().has('wsf-home-signed-in')).toBe(true);
+      expect(h.navigated).toEqual(['replace:/community/g2']);
+    } finally {
+      localStorage.removeItem(REMEMBERED_KEY);
+    }
   }, 20_000);
 });
