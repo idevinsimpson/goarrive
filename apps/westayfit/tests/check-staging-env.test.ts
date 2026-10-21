@@ -84,11 +84,21 @@ for (const name of [...EXPO_FILES, '.env.development.local']) writeFileSync(join
 const REPOS = realpathSync(mkdtempSync(join(tmpdir(), 'wsf-check-staging-env-repos-')));
 const REPO = join(REPOS, 'repo');
 const SIBLING = join(REPOS, 'sibling');
+/*
+  RV14-641-3. git hands a hook run in a linked worktree GIT_DIR and
+  GIT_INDEX_FILE as absolute paths. Inherited, they would send the fixture's
+  init, add, commit and worktree add into the owner's repository. So the
+  fixture's git gets the script's own scrubbed environment (gitEnv: no GIT_*,
+  absolute PATH entries only, the C locale) and no system or global config.
+*/
+type Env = Record<string, string | undefined>;
+const fixtureGitEnv = (env: Env): Env => ({ ...gitEnv(env), GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' });
 const fixtureGit = (cwd: string, ...args: string[]) => {
   const r = spawnSync(
     'git',
     ['-c', 'user.name=wsf-test', '-c', 'user.email=wsf-test@example.invalid', '-c', 'commit.gpgsign=false', '-c', 'init.defaultBranch=main', '-c', 'core.hooksPath=/dev/null', ...args],
-    { cwd, encoding: 'utf8', env: { ...process.env, LC_ALL: 'C', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' } },
+    // (The cast only satisfies this project's NODE_ENV typing; gitEnv keeps NODE_ENV when it is set.)
+    { cwd, encoding: 'utf8', env: fixtureGitEnv(process.env) as NodeJS.ProcessEnv },
   );
   if (r.status !== 0) throw new Error(`git ${args.join(' ')} failed`);
 };
@@ -1113,6 +1123,31 @@ describe('RV11-641-SEC: other checkouts, mount points, bind mounts, and the git 
     it('gitEnv: no GIT_* but GIT_DISCOVERY_ACROSS_FILESYSTEM=1, the C locale, and only absolute PATH entries', () => {
       const env = gitEnv({ PATH: `.:/usr/bin::rel/bin:/bin`, GIT_DIR: '/x', GIT_INDEX_FILE: '/y', GIT_DISCOVERY_ACROSS_FILESYSTEM: '0', HOME: '/home/u', LC_ALL: 'de_DE.UTF-8' });
       expect(env).toEqual({ PATH: '/usr/bin:/bin', HOME: '/home/u', LC_ALL: 'C', LANGUAGE: '', GIT_DISCOVERY_ACROSS_FILESYSTEM: '1' });
+    });
+
+    it('RV14-641-3: the fixture\'s git keeps no GIT_* from the environment and reads no system or global config', () => {
+      const owner = { GIT_DIR: '/owner/.git', GIT_INDEX_FILE: '/owner/.git/index', GIT_WORK_TREE: '/owner', GIT_COMMON_DIR: '/owner/.git', GIT_OBJECT_DIRECTORY: '/owner/.git/objects' };
+      const env = fixtureGitEnv({ PATH: '/usr/bin:rel/bin', HOME: '/home/u', ...owner });
+      for (const name of Object.keys(owner)) expect(env, name).not.toHaveProperty(name);
+      expect(env).toMatchObject({ PATH: '/usr/bin', HOME: '/home/u', LC_ALL: 'C', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' });
+    });
+
+    it('RV14-641-3: with GIT_DIR and GIT_INDEX_FILE exported, as git does for a hook in a linked worktree, the fixture\'s git still works in its own directory', () => {
+      const fresh = join(REPOS, `gitdir-probe-${(n += 1)}`);
+      mkdirSync(fresh);
+      const saved = { GIT_DIR: process.env.GIT_DIR, GIT_INDEX_FILE: process.env.GIT_INDEX_FILE };
+      // The fixture repository stands in for the owner's: an inherited GIT_DIR would re-initialise it and leave `fresh` empty.
+      process.env.GIT_DIR = join(REPO, '.git');
+      process.env.GIT_INDEX_FILE = join(REPO, '.git', 'index');
+      try {
+        fixtureGit(fresh, 'init', '-q');
+      } finally {
+        for (const [name, value] of Object.entries(saved)) {
+          if (value === undefined) delete process.env[name];
+          else process.env[name] = value;
+        }
+      }
+      expect(readdirSync(fresh)).toEqual(['.git']);
     });
 
     it('every git command starts with no fsmonitor hook and no untracked cache', () => {
