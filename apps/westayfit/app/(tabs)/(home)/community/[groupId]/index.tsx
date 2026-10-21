@@ -1,7 +1,7 @@
 import { Link, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { doc, getDoc, type Timestamp } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
-import { Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Modal,
   Platform,
@@ -17,8 +17,6 @@ import {
   type ViewStyle,
 } from 'react-native';
 
-import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
-
 import { useWsfAuth } from '../../../../../src/auth';
 import { rememberCurrentCommunity, resolveCurrentCommunity } from '../../../../../src/currentCommunity';
 import { AuthFlagOffPanel } from '../../../../../src/AuthFlagOffPanel';
@@ -30,6 +28,7 @@ import {
   sheetBottomPadding,
   useKeyboardHeight,
 } from '../../../../../src/ui/keyboardAvoidance';
+import { useSheetInsets } from '../../../../../src/ui/sheetInsets';
 import { resolveRepeatPolicy, type RepeatPolicy } from '../../../../../src/contributionFlow';
 import { wsfAuthEnabled } from '../../../../../src/featureFlags';
 import { getFirebaseFirestore, getFirebaseFunctions } from '../../../../../src/firebase';
@@ -556,8 +555,8 @@ export default function CommunityPage() {
   );
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   // W16-9 (MF-09): the Manage sheet's safe area and keyboard, used on native
-  // only. The context (not the throwing hook) reads null with no provider.
-  const sheetInsets = useContext(SafeAreaInsetsContext);
+  // only (src/ui/sheetInsets: 0 on web, the provider's insets on a phone).
+  const sheetInsets = useSheetInsets();
   const sheetKeyboard = useKeyboardHeight();
   const [resetting, setResetting] = useState(false);
   const [resetJoinCode, setResetJoinCode] = useState<string | null>(null);
@@ -3073,14 +3072,14 @@ export default function CommunityPage() {
   const nativeSheet = Platform.OS !== 'web';
   const sheetMaxHeight =
     nativeSheet && sheetKeyboard > 0
-      ? windowHeight - (sheetInsets?.top ?? 0) - SHEET_TOP_MARGIN
+      ? windowHeight - sheetInsets.top - SHEET_TOP_MARGIN
       : Math.min(windowHeight * 0.88, 760);
   const sheetPanelStyle = nativeSheet
     ? [
         styles.sheet,
         {
           maxHeight: sheetMaxHeight,
-          paddingBottom: sheetBottomPadding(sheetInsets?.bottom ?? 0, sheetKeyboard, Platform.OS, 24),
+          paddingBottom: sheetBottomPadding(sheetInsets.bottom, sheetKeyboard, Platform.OS, 24),
         },
       ]
     : [styles.sheet, { maxHeight: sheetMaxHeight }];

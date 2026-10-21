@@ -47,6 +47,7 @@ vi.mock('react-native-safe-area-context', async () => {
     useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
   };
 });
+vi.mock('../src/ui/sheetInsets', async () => import('../src/ui/sheetInsets.native'));
 vi.mock('../src/ui/keyboardAvoidance', async () => {
   const native = await import('../src/ui/keyboardAvoidance.native');
   return { ...native, sheetBottomPadding: vi.fn(native.sheetBottomPadding) };
