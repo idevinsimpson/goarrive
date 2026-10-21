@@ -67,7 +67,13 @@ vi.mock('react-native-safe-area-context', () => ({
   initialWindowMetrics: { insets: { top: 0, bottom: 0, left: 0, right: 0 }, frame: { x: 0, y: 0, width: 390, height: 844 } },
 }));
 vi.mock('../src/featureFlags', () => ({ wsfAuthEnabled: true }));
-vi.mock('../src/ui/useReducedMotion', () => ({ useReducedMotion: () => true }));
+// Forward-compatible: every real export, with reduced motion on (the integrated
+// screen also reads the preference with its known/failed state).
+vi.mock('../src/ui/useReducedMotion', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/ui/useReducedMotion')>()),
+  useReducedMotion: () => true,
+  useReducedMotionPreference: () => ({ known: true, reduced: true, failed: false }),
+}));
 const USER = { uid: 'u1', email: 'member@example.com', displayName: 'Member', emailVerified: true };
 vi.mock('../src/firebase', () => ({
   getFirebaseAuth: () => ({ currentUser: { uid: USER.uid } }),
