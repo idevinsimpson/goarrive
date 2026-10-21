@@ -28,9 +28,11 @@ import { describe, expect, it } from 'vitest';
  *     property of an object spread straight into JSX (`{...({ role: 'dialog' })}`).
  *     A `role={m.role}` on a custom component is data (a community role), not
  *     an accessibility prop, and is not read.
- * A branch guarded by `Platform.OS === 'web'` (or the web key of
- * `Platform.select`) is web-only and is not checked. `*.web.ts(x)` files never
- * ship to a phone and are skipped. An `accessibilityRole` value the scan cannot
+ * Only what ANDROID can reach is checked (W12-10): a branch guarded by
+ * `Platform.OS === 'web'` or `=== 'ios'` (any platform but Android), and a
+ * `Platform.select` key Android does not take (it takes `android`, else
+ * `native`, else `default`), are not. `*.web.ts(x)` files never ship to a
+ * phone and are skipped. An `accessibilityRole` value the scan cannot
  * resolve to literals fails: it has to be made checkable.
  */
 
@@ -69,11 +71,11 @@ function isPlatformOs(e: ts.Expression): boolean {
     e.expression.text === 'Platform'
   );
 }
-function isWebLiteral(e: ts.Expression): boolean {
-  return ts.isStringLiteral(e) && e.text === 'web';
-}
-/** 'web-true' when the condition holds only on web, 'web-false' when only off web. */
-function webGuard(cond: ts.Expression): 'web-true' | 'web-false' | null {
+/**
+ * For `Platform.OS === '<p>'` (or `!==`, either side): whether the condition
+ * is true on Android. null when the condition is not such a comparison.
+ */
+function onAndroid(cond: ts.Expression): boolean | null {
   let c = cond;
   while (ts.isParenthesizedExpression(c)) c = c.expression;
   if (!ts.isBinaryExpression(c)) return null;
@@ -81,13 +83,13 @@ function webGuard(cond: ts.Expression): 'web-true' | 'web-false' | null {
   const eq = op === ts.SyntaxKind.EqualsEqualsEqualsToken || op === ts.SyntaxKind.EqualsEqualsToken;
   const ne = op === ts.SyntaxKind.ExclamationEqualsEqualsToken || op === ts.SyntaxKind.ExclamationEqualsToken;
   if (!eq && !ne) return null;
-  const pair =
-    (isPlatformOs(c.left) && isWebLiteral(c.right)) || (isPlatformOs(c.right) && isWebLiteral(c.left));
-  if (!pair) return null;
-  return eq ? 'web-true' : 'web-false';
+  const literal = isPlatformOs(c.left) ? c.right : isPlatformOs(c.right) ? c.left : null;
+  if (!literal || !ts.isStringLiteral(literal)) return null;
+  const isAndroid = literal.text === 'android';
+  return eq ? isAndroid : !isAndroid;
 }
 
-/** Every string a role expression can evaluate to off web, or UNRESOLVED. */
+/** Every string a role expression can evaluate to on Android, or UNRESOLVED. */
 function resolve(e: ts.Expression | undefined): Resolved {
   if (!e) return UNRESOLVED;
   if (
@@ -103,9 +105,9 @@ function resolve(e: ts.Expression | undefined): Resolved {
   if (e.kind === ts.SyntaxKind.NullKeyword) return [];
   if (ts.isIdentifier(e) && e.text === 'undefined') return [];
   if (ts.isConditionalExpression(e)) {
-    const guard = webGuard(e.condition);
-    if (guard === 'web-true') return resolve(e.whenFalse);
-    if (guard === 'web-false') return resolve(e.whenTrue);
+    const android = onAndroid(e.condition);
+    if (android === true) return resolve(e.whenTrue);
+    if (android === false) return resolve(e.whenFalse);
     const a = resolve(e.whenTrue);
     const b = resolve(e.whenFalse);
     if (a === UNRESOLVED || b === UNRESOLVED) return UNRESOLVED;
@@ -120,16 +122,16 @@ function resolve(e: ts.Expression | undefined): Resolved {
     e.arguments[0] &&
     ts.isObjectLiteralExpression(e.arguments[0])
   ) {
-    const out: string[] = [];
+    // Android takes its own key, else `native`, else `default`; with none, undefined.
+    const byKey = new Map<string, ts.Expression>();
     for (const p of e.arguments[0].properties) {
       if (!ts.isPropertyAssignment(p)) return UNRESOLVED;
       const key = ts.isIdentifier(p.name) || ts.isStringLiteral(p.name) ? p.name.text : null;
-      if (key === 'web') continue;
-      const v = resolve(p.initializer);
-      if (v === UNRESOLVED) return UNRESOLVED;
-      out.push(...v);
+      if (key === null) return UNRESOLVED;
+      byKey.set(key, p.initializer);
     }
-    return out;
+    const taken = byKey.get('android') ?? byKey.get('native') ?? byKey.get('default');
+    return taken ? resolve(taken) : [];
   }
   return UNRESOLVED;
 }
@@ -279,7 +281,7 @@ describe('INT-02: accessibility roles Android accepts', () => {
     for (const v of ['status', 'group', 'dialog', 'heading', 'region', 'img']) expect(ANDROID_ROLES.has(v)).toBe(true);
   });
 
-  it('app/ and src/ carry no role value outside those enums (web-guarded branches excepted)', () => {
+  it('app/ and src/ carry no role value outside those enums (branches Android cannot reach excepted)', () => {
     const { sites, findings } = scanAll();
     // Not vacuous: the scan really saw the codebase's roles.
     expect(sites.filter((s) => s.prop === 'accessibilityRole').length).toBeGreaterThan(150);
@@ -323,14 +325,25 @@ describe('INT-02: accessibility roles Android accepts', () => {
       expect(findings).toEqual([expect.objectContaining({ file, problem: expect.stringContaining('"group"') })]);
     });
 
-    it('honours only a web guard, Platform.select web keys, and nothing else', () => {
+    it('checks what Android can reach: a web or iOS guard, and Platform.select\'s other keys, are not checked (W12-10)', () => {
       const scan = (src: string) => scanSource('x.tsx', src).findings.map((f) => f.problem);
       expect(scan(`<View accessibilityRole={Platform.OS === 'web' ? ('navigation' as 'none') : undefined} />`)).toEqual([]);
       expect(scan(`<View accessibilityRole={Platform.OS !== 'web' ? undefined : 'navigation'} />`)).toEqual([]);
       expect(scan(`<View accessibilityRole={Platform.select({ web: 'navigation', default: 'none' })} />`)).toEqual([]);
-      // A guard on any other platform does not make a value web-only.
-      expect(scan(`<View accessibilityRole={Platform.OS === 'ios' ? 'navigation' : undefined} />`)).toHaveLength(1);
-      expect(scan(`<View accessibilityRole={Platform.select({ ios: 'tabbar', web: 'tablist' })} />`)).toHaveLength(1);
+      // An iOS-only value never reaches Android.
+      expect(scan(`<View accessibilityRole={Platform.OS === 'ios' ? 'navigation' : undefined} />`)).toEqual([]);
+      expect(scan(`<View accessibilityRole={Platform.OS !== 'android' ? 'tabbar' : 'tablist'} />`)).toEqual([]);
+      // The tab bar's own shape: iOS's tabbar, Android's tablist.
+      expect(scan(`<View accessibilityRole={Platform.select({ ios: 'tabbar', android: 'tablist' })} />`)).toEqual([]);
+      expect(scan(`<View accessibilityRole={Platform.select({ ios: 'tabbar', web: 'tablist' })} />`)).toEqual([]);
+      expect(scan(`<View accessibilityRole={Platform.select({ android: 'tablist', native: 'tabbar' })} />`)).toEqual([]);
+      // An Android-reachable 'tabbar' still fails, however it is reached.
+      expect(scan(`<View accessibilityRole={Platform.select({ ios: 'tablist', android: 'tabbar' })} />`)).toHaveLength(1);
+      expect(scan(`<View accessibilityRole={Platform.select({ ios: 'tablist', default: 'tabbar' })} />`)).toHaveLength(1);
+      expect(scan(`<View accessibilityRole={Platform.select({ native: 'tabbar', web: 'tablist' })} />`)).toHaveLength(1);
+      expect(scan(`<View accessibilityRole={Platform.OS === 'ios' ? 'tablist' : 'tabbar'} />`)).toHaveLength(1);
+      expect(scan(`<View accessibilityRole={Platform.OS === 'android' ? 'tabbar' : 'tablist'} />`)).toHaveLength(1);
+      expect(scan(`<View accessibilityRole={Platform.OS === 'web' ? 'navigation' : Platform.select({ ios: 'tablist', android: 'tabbar' })} />`)).toHaveLength(1);
       expect(scan(`<View accessibilityRole="tabbar" />`)).toHaveLength(1);
       expect(scan(`const H = { accessibilityRole: 'status' } as Record<string, unknown>;`)).toHaveLength(1);
       expect(scan(`<View {...({ role: 'stauts' } as Record<string, unknown>)} />`)).toHaveLength(1);

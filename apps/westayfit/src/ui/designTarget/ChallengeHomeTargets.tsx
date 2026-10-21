@@ -18,6 +18,7 @@ import {
   SURFACE,
   display,
   elevation,
+  ELEVATION_OFF,
 } from '../kit';
 
 /**
@@ -1142,12 +1143,12 @@ const s = StyleSheet.create({
     marginTop: 4,
     ...elevation.action,
   },
-  primaryOff: { backgroundColor: '#CDE8D5', shadowOpacity: 0 },
+  primaryOff: { backgroundColor: '#CDE8D5', ...ELEVATION_OFF },
   primaryDone: {
     backgroundColor: SURFACE,
     borderWidth: 1.5,
     borderColor: CARD_BORDER,
-    shadowOpacity: 0,
+    ...ELEVATION_OFF,
   },
   primaryText: { color: ON_ACTION, fontSize: 16.5, fontWeight: '900' },
   primaryTextOff: { color: '#6B8A76' },
@@ -1191,7 +1192,7 @@ const s = StyleSheet.create({
     gap: 6,
     ...elevation.card,
   },
-  moveDone: { backgroundColor: '#F4F7F4', shadowOpacity: 0 },
+  moveDone: { backgroundColor: '#F4F7F4', ...ELEVATION_OFF },
   moveTitle: { color: NAVY, fontSize: 16, fontWeight: '900' },
   moveBody: { color: NAVY, fontSize: 13.5, lineHeight: 19 },
   moveMeta: { color: INK_QUIET, fontSize: 12, fontWeight: '700' },

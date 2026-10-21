@@ -61,6 +61,7 @@ import { readEventParam } from '../../src/ui/eventLinks';
 import { FollowAlongCard } from '../../src/ui/FollowAlongCard';
 import { kit } from '../../src/ui/kit';
 import { encodeQr, qrSvgDataUriRaw } from '../../src/ui/qr';
+import { ScreenTopSpacer } from '../../src/ui/useScreenTopInset';
 import { WsfWordmark } from '../../src/ui/WsfWordmark';
 
 /** The same breakpoint, and the same hydration gate, the kiosk and station use. */
@@ -304,6 +305,8 @@ function Page({
 }) {
   return (
     <ScrollView style={kit.scroll} contentContainerStyle={kit.page}>
+      {/* W12-16 (INT-09): below the status bar on a phone; nothing on the web. */}
+      <ScreenTopSpacer />
       <View
         style={station ? styles.columnStation : kit.column}
         testID="wsf-move-screen"

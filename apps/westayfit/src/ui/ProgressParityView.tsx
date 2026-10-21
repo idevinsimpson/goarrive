@@ -15,7 +15,7 @@ import {
   type ProgressStatus,
 } from '../progressParity';
 import { ACTION_GREEN, NAVY, PROGRESS_GREEN, SURFACE, elevation, numeralTextProps } from './kit';
-import { MEMBER_TAB_BAR_BODY, MEMBER_TAB_MOVE_OVERHANG } from './MemberTabBar';
+import { tabContentBottomReserve } from './MemberTabBar';
 import { RefreshNote, type RefreshState } from './RefreshNote';
 import { useAnnounce } from './announce';
 
@@ -54,7 +54,10 @@ export type ProgressParityActions = {
 export type ProgressParityViewProps = {
   state: ProgressState;
   actions: ProgressParityActions;
-  /** The device's bottom safe area; the view already clears the tab bar. */
+  /**
+   * The device's bottom safe area; the view already clears the tab bar. Read
+   * on the web only: on a phone the tab bar below the scene pads it itself.
+   */
   bottomInset?: number;
   /**
    * The route's revalidation state (PERF-MOBILE-1): checking after a moment,
@@ -111,7 +114,8 @@ export function ProgressParityView({ state, actions, bottomInset = 0, refresh, i
         contentContainerStyle={[
           s.body,
           compact && s.bodyCompact,
-          { paddingBottom: MEMBER_TAB_BAR_BODY + MEMBER_TAB_MOVE_OVERHANG + bottomInset },
+          // W12-16 (INT-30): the web clears the bar and the inset as before; a phone, only MOVE's overhang.
+          { paddingBottom: tabContentBottomReserve(bottomInset) },
         ]}
       >
         {/* THE HERO. Private to you, then what the page is, then — when there

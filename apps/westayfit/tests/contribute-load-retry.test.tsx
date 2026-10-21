@@ -551,8 +551,9 @@ describe('W12-2: a failed refresh keeps a warm screen (INT-25); a stale sign-in 
     expect(peekGoals('u1', 'oak')).toBeUndefined();
   });
 
-  it('RV11-641-5: a confirmed receipt clears the kept-figures note (Record more shows the confirmed anchor)', async () => {
+  it('RV11-641-5: a confirmed receipt clears the kept-figures note (Record more shows the confirmed anchor), and the poll runs on (N1)', async () => {
     await warm('ios');
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     // The live account the send is checked against (mayFireAs).
     fakeAuth.currentUser = { uid: 'u1', getIdToken: async () => 't' };
     answers.wsfGoalPulse = INTERNAL;
@@ -571,6 +572,34 @@ describe('W12-2: a failed refresh keeps a warm screen (INT-25); a stale sign-in 
     expect(byId('wsf-contribute-entry-screen')).not.toBeNull();
     expect(byId('wsf-contribute-stale-note')).toBeNull();
     expect(byId('wsf-contribute-shared-total')!.textContent).toContain('75');
+    // Heads-11 N1: the receipt is a confirmed read, so the poll runs again and shows a peer's later total.
+    answers.wsfGoalPulse = async () => ({ ...PULSE, sharedTotal: 90 });
+    const before = count('wsfGoalPulse');
+    await pollFor(4_000);
+    expect(count('wsfGoalPulse')).toBeGreaterThan(before);
+    expect(byId('wsf-contribute-shared-total')!.textContent).toContain('90');
+  });
+
+  it('N1: a receipt keeps a confirmed time the screen already has (only a missing one is filled; the web\'s line is unchanged)', async () => {
+    windowOf(844);
+    vi.useFakeTimers({ now: Date.UTC(2026, 9, 21, 9, 0), toFake: ['Date', 'setInterval', 'clearInterval'] });
+    fakeAuth.currentUser = { uid: 'u1', getIdToken: async () => 't' };
+    answers.wsfContribute = async () => ({ addedCount: 35, ownCredit: 40, sharedTotal: 75, target: 100, unit: 'squats', status: 'active', alreadyRecorded: false });
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    const confirmed = byId('wsf-contribute-context-updated')!.textContent;
+    expect(confirmed).toMatch(/^Confirmed /);
+    // Ten minutes later, before any tick: the receipt confirms the figures, not a new read time.
+    vi.setSystemTime(Date.UTC(2026, 9, 21, 9, 10));
+    act(() => typeInto(entry(), '35'));
+    await act(async () => byId('wsf-contribute-review')!.click());
+    await settle();
+    await act(async () => byId('wsf-contribute-submit')!.click());
+    await settle();
+    await act(async () => byId('wsf-contribute-record-more')!.click());
+    await settle();
+    expect(byId('wsf-contribute-shared-total')!.textContent).toContain('75');
+    expect(byId('wsf-contribute-context-updated')!.textContent).toBe(confirmed);
   });
 
   it('web: a poll not-found still ends the screen, as before', async () => {

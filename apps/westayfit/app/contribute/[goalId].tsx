@@ -1322,6 +1322,14 @@ export default function ContributeToGoal() {
       // RV11-641-5: these figures are confirmed now; the kept-figures note is no longer true.
       setRefreshFailed(false);
       signInOfflineRef.current = false;
+      /*
+        Heads-11 N1: and they are a confirmed read, so the poll's gate holds
+        again. After a warm load failed and no tick has landed, pulseAt is
+        still null; without this, clearing the note above would stop the
+        pulse poll (and its foreground return) for the rest of the screen's
+        life. Only a missing time is filled.
+      */
+      setPulseAt((prev) => prev ?? new Date());
       // Ready for the next fresh attempt.
       attemptRef.current = null;
       setEntry('');
