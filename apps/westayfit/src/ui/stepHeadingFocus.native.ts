@@ -12,16 +12,17 @@ import { focusAccessibilitySoon } from './accessibilityFocus';
  * changes, the new step's heading (`heading`, the ref on its level-1 Text)
  * takes the screen reader's focus, once the change has settled
  * (src/ui/accessibilityFocus.ts). Never on the first mount: the screen's own
- * arrival is the platform's to announce. A null key is no step. A change
- * before the focus lands, or unmounting, cancels it. The web twin is a no-op.
+ * arrival is the platform's to announce. "A change" is judged against the
+ * previous key (Object.is), not by counting effect runs, so React
+ * StrictMode's development re-run of the mount effect is not a change. A
+ * null key is no step. A change before the focus lands, or unmounting,
+ * cancels it. The web twin is a no-op.
  */
 export function useStepHeadingFocus(stepKey: string | number | null | undefined, heading: RefObject<unknown>): void {
-  const first = useRef(true);
+  const previous = useRef(stepKey);
   useEffect(() => {
-    if (first.current) {
-      first.current = false;
-      return undefined;
-    }
+    if (Object.is(previous.current, stepKey)) return undefined;
+    previous.current = stepKey;
     if (stepKey === null || stepKey === undefined) return undefined;
     return focusAccessibilitySoon(heading);
   }, [stepKey, heading]);
