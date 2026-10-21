@@ -1,14 +1,13 @@
 /**
- * NATIVE-INTEGRATOR-1 (INT-09, INT-10). WHICH STATUS-BAR ICONS A SCREEN GETS.
+ * NATIVE-INTEGRATOR-1 (INT-09). WHICH STATUS-BAR ICONS A SCREEN GETS.
  *
- * Light icons over navy, dark over cream. On a native staging build the red
- * staging strip sits behind the status bar on every screen, so the icons are
- * light everywhere there. On web the browser owns the status area and none of
- * this is applied (expo-status-bar renders nothing on web).
+ * Light icons over navy, dark over cream. On web the browser owns the status
+ * area and none of this is applied (expo-status-bar renders nothing on web).
+ * W12-26 (the owner's UI-copy order): the red strip a test build used to draw
+ * behind the status bar is gone, so the screen's tone alone decides.
  */
 export type ScreenTone = 'navy' | 'cream';
 
-export function statusBarStyleFor(tone: ScreenTone, stagingStripUnderStatusBar: boolean): 'light' | 'dark' {
-  if (stagingStripUnderStatusBar) return 'light';
+export function statusBarStyleFor(tone: ScreenTone): 'light' | 'dark' {
   return tone === 'navy' ? 'light' : 'dark';
 }

@@ -17,7 +17,7 @@ import { Keyboard, Platform, View, type KeyboardEvent, type LayoutChangeEvent, t
  *           `_keyboardWillChangeFrame`). Spread onto a form's ScrollView.
  *   Android `KeyboardInsetView` replaces the View that frames a form's
  *           ScrollView and pads its bottom by how far the IME overlaps it
- *           (measured in the window, so a staging strip above or a tab bar
+ *           (measured in the window, so a banner above or a tab bar
  *           below is accounted for). The ScrollView shrinks, and Android's
  *           ScrollView scrolls its focused child into view on the resize.
  *   web     src/ui/keyboardAvoidance.tsx: every export is inert (empty props,

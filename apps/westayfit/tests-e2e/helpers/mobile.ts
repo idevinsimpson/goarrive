@@ -614,16 +614,13 @@ export async function typeInto(
 // ---------------------------------------------------------------------------
 
 /**
- * The top of the product area: the bottom of the staging strip when a build
- * carries one, otherwise the top of the viewport.
+ * The top of the product area: the top of the viewport. W12-26 (the owner's
+ * UI-copy order): the strip a test build used to draw above the product is
+ * gone on every platform, so nothing sits above the product any more. Kept so
+ * every caller measures from the same place.
  */
-export async function productAreaTop(page: Page): Promise<number> {
-  return page.evaluate(() => {
-    const strip = document.querySelector('[data-testid="wsf-staging-banner"]');
-    if (!strip) return 0;
-    const r = strip.getBoundingClientRect();
-    return r.height > 0 ? r.bottom : 0;
-  });
+export async function productAreaTop(_page: Page): Promise<number> {
+  return 0;
 }
 
 export type ScrollTrapReport = {
