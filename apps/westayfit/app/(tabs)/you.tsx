@@ -338,9 +338,25 @@ function youFromRecord(uid: string): Screen | null {
   return composeMember(profile, community, goals, owned, elsewhereFromRecord(uid, communities, community.groupId));
 }
 
-/** W13-12: the loading page, as a failed load sees another account's page (`shownRef` below). */
+/*
+  W13-16 (RV18-639-S1; member's form, so the two trees compose as one). THE
+  SCREEN IS OWNED: it is held with the account it was set for, and the page
+  draws it only while that uid is the signed-in one. Signed out it draws the
+  signed-out card, from auth state alone, from the very first frame. A screen
+  updater for one account sees another account's screen as loading, so a
+  focus or a load for the account now signed in never keeps the previous
+  one's page.
+*/
+type Owned = { uid: string | null; screen: Screen };
 const LOADING: Screen = { kind: 'loading' };
 const SIGNED_OUT: Screen = { kind: 'signedOut' };
+
+/** What the page may draw now: never a screen read for another account, or for none. */
+function screenForAccount(ready: boolean, uid: string | null, held: Owned): Screen {
+  if (ready && !uid) return SIGNED_OUT;
+  if (uid && held.uid !== uid) return LOADING;
+  return held.screen;
+}
 
 /**
  * RV15-639-N2. WHETHER A PAGE A FAILED LOAD WOULD KEEP IS ONE ITS FRESH READ
@@ -373,31 +389,29 @@ export default function You() {
   const { ready, user } = useWsfAuth();
   // The first frame already stands on the account's record when it can: a
   // loading state painted for one frame and then replaced is still a flash.
-  const [screen, setScreen] = useState<Screen>(
-    () => (ready && user ? youFromRecord(user.uid) : null) ?? { kind: 'loading' },
-  );
-  /*
-    W13-12 (privacy). THE ACCOUNT THE SCREEN WAS SET FOR: each load sets it
-    with the screen it starts on. A screen set for one account is never
-    drawn for another, or for nobody. Right after a switch, before the new
-    account's own load has set its screen, the page draws loading; signed
-    out, the signed-out card, from auth state alone. The previous account's
-    community or name is never drawn, and a load of the account that left,
-    landing late, draws nothing.
-  */
-  const [screenFor, setScreenFor] = useState<string | null>(() => (ready && user ? user.uid : null));
-  const uidNow = ready && user ? user.uid : null;
-  const drawn: Screen = ready && !user ? SIGNED_OUT : uidNow !== null && screenFor !== uidNow ? LOADING : screen;
-  /*
-    W13-12 (RV16-C15-1). THE PAGE ON SCREEN and the account it is drawn for:
-    what a failed load judges (`fail` below), not the page the load began on,
-    which a focus may have redrawn since. Mirrored on every render (this tree
-    has no single setScreen to set it from), so it is the page last drawn;
-    a load reads it only after its own reads have answered, when its own
-    first setScreen has long been rendered.
-  */
-  const shownRef = useRef<{ uid: string | null; screen: Screen }>({ uid: null, screen: LOADING });
-  shownRef.current = { uid: uidNow, screen: drawn };
+  const [held, setHeld] = useState<Owned>(() => ({
+    uid: ready && user ? user.uid : null,
+    screen: (ready && user ? youFromRecord(user.uid) : null) ?? LOADING,
+  }));
+  /**
+   * W13-12 (RV16-C15-1), in member's W16-17 form: the page on screen and the
+   * account it is for, mirrored wherever `held` changes (only setScreen sets
+   * it), so a failed load can test the page ON SCREEN against its fresh read:
+   * a focus may have redrawn it since the load began, and fail() runs outside
+   * any updater.
+   */
+  const shownRef = useRef<Owned>(held);
+  /**
+   * Sets the screen for `uid`; an updater sees another account's screen as
+   * loading. The next screen is worked out here, against the mirror, and the
+   * mirror is set at once; `held` follows it.
+   */
+  const setScreen = useCallback((uid: string | null, next: Screen | ((prev: Screen) => Screen)) => {
+    const base = shownRef.current.uid === uid ? shownRef.current.screen : LOADING;
+    const out: Owned = { uid, screen: typeof next === 'function' ? next(base) : next };
+    shownRef.current = out;
+    setHeld(out);
+  }, []);
   const [signingOut, setSigningOut] = useState(false);
   const [reloads, setReloads] = useState(0);
   // A page that came up before the phone's remembered community was read
@@ -414,7 +428,7 @@ export default function You() {
     const warmNow = youFromRecord(user.uid);
     repainted.current = warmNow ? { uid: user.uid, screen: warmNow } : null;
     const uid = user.uid;
-    setScreen((prev) => (prev.kind === 'loading' ? youFromRecord(uid) ?? prev : prev));
+    setScreen(uid, (prev) => (prev.kind === 'loading' ? youFromRecord(uid) ?? prev : prev));
   }, [communityReady, ready, user, reloads]);
   /** Guards a landed read against a newer one, and against an unmounted tree. */
   const live = useRef(0);
@@ -464,21 +478,21 @@ export default function You() {
       const uid = user.uid;
       const recorded = youFromRecord(uid);
       if (recorded) {
-        setScreen(recorded);
+        setScreen(uid, recorded);
         return;
       }
-      setScreen((prev) =>
+      setScreen(uid, (prev) =>
         prev.kind === 'member' && wasRefused(uid, prev.community.groupId) ? { kind: 'loading' } : prev,
       );
       keepOnScreen.current = true;
       setRevalidate((n) => n + 1);
-    }, [ready, user]),
+    }, [ready, user, setScreen]),
   );
 
   useEffect(() => {
     if (!ready) return;
     if (!user) {
-      setScreen({ kind: 'signedOut' });
+      setScreen(null, SIGNED_OUT);
       return;
     }
     const token = ++live.current;
@@ -488,8 +502,7 @@ export default function You() {
     const recorded = reloads > 0 ? null : youFromRecord(uid);
     const keep = keepOnScreen.current;
     keepOnScreen.current = false;
-    setScreenFor(uid);
-    setScreen((prev) => recorded ?? (keep && prev.kind !== 'loading' ? prev : { kind: 'loading' }));
+    setScreen(uid, (prev) => recorded ?? (keep && prev.kind !== 'loading' ? prev : { kind: 'loading' }));
     setStale(false);
     setChecking(false);
     const slow = recorded || keep
@@ -553,7 +566,7 @@ export default function You() {
             // the read's failure fallback, which would say "You").
             const known = peekMemberProfile(uid);
             const head = profileAnswered ? profile : known ? toProfile(known) : shown.profile;
-            setScreen((prev) =>
+            setScreen(uid, (prev) =>
               prev.kind === 'member' && prev.community.groupId === shown.community.groupId
                 ? { ...prev, profile: head }
                 : prev,
@@ -562,7 +575,7 @@ export default function You() {
           setStale(true);
           return;
         }
-        setScreen(community ? { kind: 'failed', profile, community } : { kind: 'failed', profile });
+        setScreen(uid, community ? { kind: 'failed', profile, community } : { kind: 'failed', profile });
       };
 
       let communities: Community[] = [];
@@ -578,7 +591,7 @@ export default function You() {
         const profile = await profileRead;
         if (live.current !== token) return;
         settle();
-        setScreen({ kind: 'noCommunity', profile });
+        setScreen(uid, { kind: 'noCommunity', profile });
         return;
       }
 
@@ -599,7 +612,7 @@ export default function You() {
         const profile = await profileRead;
         if (live.current !== token) return;
         settle();
-        setScreen({ kind: 'pickCommunity', profile, count: communities.length });
+        setScreen(uid, { kind: 'pickCommunity', profile, count: communities.length });
         return;
       }
 
@@ -623,6 +636,7 @@ export default function You() {
       if (live.current !== token) return;
       settle();
       setScreen(
+        uid,
         composeMember(
           profile,
           community,
@@ -633,9 +647,13 @@ export default function You() {
       );
     })();
     return () => {
+      // W13-16 (RV18-639-S1): whatever this run still has in flight belongs
+      // to a session or a load that is over (a sign-out, a switch, a Retry):
+      // it writes nothing. The signed-out branch above takes no token.
+      live.current += 1;
       if (slow) clearTimeout(slow);
     };
-  }, [ready, user, reloads, revalidate]);
+  }, [ready, user, reloads, revalidate, setScreen]);
 
   const onSignOut = useCallback(() => {
     setSigningOut(true);
@@ -645,10 +663,11 @@ export default function You() {
   }, []);
 
   const reload = useCallback(() => setReloads((v) => v + 1), []);
+  const screen = screenForAccount(ready, user?.uid ?? null, held);
 
   return (
     <YouParityView
-      state={drawn}
+      state={screen}
       email={user?.email ?? null}
       signingOut={signingOut}
       refresh={{ checking, stale, onRetry: reload }}
