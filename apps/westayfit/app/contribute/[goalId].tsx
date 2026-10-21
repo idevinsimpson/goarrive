@@ -135,6 +135,7 @@ import {
 import { SheetPanel, SheetScrim } from '../../src/ui/sheetMotionNative';
 import { liveRegion, useAnnounce } from '../../src/ui/announce';
 import { modalPanelA11y } from '../../src/ui/modalA11y';
+import { focusSoon, registerFocusTarget } from '../../src/ui/focusTarget';
 import { useStepHeadingFocus } from '../../src/ui/stepHeadingFocus';
 import { useReducedMotion, useReducedMotionPreference } from '../../src/ui/useReducedMotion';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -578,6 +579,33 @@ export default function ContributeToGoal() {
   const sheetPanelRef = useRef<View>(null);
   const closeSheetRef = useRef<() => void>(() => undefined);
   /*
+    W12-20 (INT-17, native). IN THE SHEET, THE SCREEN READER STARTS ON CLOSE.
+    The web's containment puts keyboard focus on the panel's first control,
+    Close (useSheetFocusContainment, below); off the web it does nothing. MOVE
+    with one open goal hands straight to this sheet, so on iOS and Android its
+    Close is a registered focus target (src/ui/focusTarget.ts) and takes the
+    screen reader's focus once, when the sheet first appears (after the
+    presentation settles; about 400 ms later on iOS). Something opening over
+    it first, or the sheet going, cancels that. The page mode has no Close and
+    keeps the platform's own arrival. Nothing on the web.
+  */
+  const sheetCloseRef = useRef<View>(null);
+  useEffect(() => {
+    if (Platform.OS === 'web' || !asSheet) return undefined;
+    return registerFocusTarget('wsf-contribute-close', sheetCloseRef);
+  }, [asSheet]);
+  useEffect(() => {
+    if (Platform.OS === 'web' || !asSheet) return undefined;
+    const cancel = focusSoon(sheetCloseRef);
+    const offBlur = rootNavigation.addListener('blur', cancel);
+    return () => {
+      cancel();
+      offBlur();
+    };
+    // The first mount only (`asSheet` is fixed for the screen's life).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  /*
     ESCAPE IS CLOSE, while this sheet is the screen in front: the same path as
     the Close control and the scrim.
   */
@@ -641,6 +669,9 @@ export default function ContributeToGoal() {
   const [guideOpen, setGuideOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [lastResult, setLastResult] = useState<ContributeResult | null>(null);
+  // W12-20: the attempt the receipt on screen confirms (set with it; the
+  // attempt ref is cleared before the receipt goes). Keys the heading focus.
+  const [receiptAttemptId, setReceiptAttemptId] = useState<string | null>(null);
   const announcedReceiptRef = useRef<ContributeResult | null>(null); // NATIVE-MOTION-1: receipt already announced
   // The goal's repeat policy, from the member-authorized read. 'once' until
   // the server answers — not the resolved default, because before the answer
@@ -1289,6 +1320,7 @@ export default function ContributeToGoal() {
       // the same context check (src/pendingContribution.ts).
       setPending(null);
       setLastResult(data);
+      setReceiptAttemptId(attemptId);
       // Applied in the same batch as the receipt, so the receipt mounts already
       // knowing whether it may move. A replay of an attempt that had landed
       // (`alreadyRecorded`) is never fresh.
@@ -1814,6 +1846,17 @@ export default function ContributeToGoal() {
   useStepHeadingFocus(step === 'enter' ? 'enter' : null, enterHeadingRef);
   useStepHeadingFocus(step === 'review' ? 'review' : null, reviewHeadingRef);
   /*
+    W12-20 (INT-17, native). The member's receipt replaces the step they were
+    on too, so its headline (TogetherCompletion's level-1 heading) takes the
+    screen reader's focus, once per receipt (keyed on the attempt it
+    confirms). The receipt's own announcement is unchanged: once, with the
+    confirmed figures (TogetherCompletion's useAnnounce, INT-18). The kiosk's
+    plain receipt is not moved to. Nothing on the web, where the sheet
+    containment re-orients focus.
+  */
+  const togetherHeadingRef = useRef<Text>(null);
+  useStepHeadingFocus(lastResult && !kiosk ? `receipt:${receiptAttemptId}` : null, togetherHeadingRef);
+  /*
     W12-7 (INT-18, native). AN OUTCOME THAT REPLACES WHAT WAS ON SCREEN IS
     SPOKEN. iOS ignores aria-live and the entry error's alert role, so on a
     phone the refusal and the entry error announce their visible sentence,
@@ -2181,7 +2224,9 @@ export default function ContributeToGoal() {
           preference={motionPreference}
         >
           <View style={[styles.sheetBar, tone === 'dark' ? styles.sheetBarDark : null]}>
-            <View pointerEvents="none" style={styles.sheetGrabber} />
+            {/* MO-02 case 5: drawn on the web only, as MOVE's is (app/move/index.tsx):
+                on a phone it looked draggable and was not. */}
+            {Platform.OS === 'web' ? <View pointerEvents="none" style={styles.sheetGrabber} /> : null}
             <Text
               style={[styles.sheetBarTitle, tone === 'dark' ? styles.sheetBarTitleDark : null]}
               testID="wsf-contribute-sheet-title"
@@ -2199,6 +2244,7 @@ export default function ContributeToGoal() {
               reading the first `wsf-contribute-back` got "Close").
             */}
             <Pressable
+              ref={sheetCloseRef}
               onPress={closeSheet}
               accessibilityRole="button"
               accessibilityLabel="Close"
@@ -2574,6 +2620,7 @@ export default function ContributeToGoal() {
               {...({ dataSet: { variant } } as Record<string, unknown>)}
             >
               <TogetherCompletion
+                headingRef={togetherHeadingRef}
                 presentation={together}
                 eyebrow={r.alreadyRecorded ? 'Already recorded' : 'Recorded'}
                 amountText={r.alreadyRecorded ? formatCount(r.addedCount) : `+${formatCount(r.addedCount)}`}

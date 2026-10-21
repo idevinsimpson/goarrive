@@ -1,4 +1,5 @@
-import { act } from 'react';
+import { act, createRef, type Ref } from 'react';
+import type { Text } from 'react-native';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -80,7 +81,7 @@ const receipt: ContributeReceipt = {
   status: 'active',
 };
 
-function render(fresh: boolean) {
+function render(fresh: boolean, headingRef?: Ref<Text>) {
   const p = togetherPresentation(receipt, { communityName: 'Fixture Community', fresh, sharedBefore: 3700, beforeTarget: 5000 });
   act(() => {
     root.render(
@@ -100,6 +101,7 @@ function render(fresh: boolean) {
         onAnnounced={() => undefined}
         windowWidth={390}
         windowHeight={844}
+        headingRef={headingRef}
       />
     );
   });
@@ -175,5 +177,36 @@ describe('web Together: the path the native work did not change', () => {
     advance(TOGETHER_TIMING.settleMs);
     expect(el('wsf-together-native-layer')).toBeNull();
     expect(announced).toEqual([]);
+  });
+});
+
+describe('W12-20 (INT-17): the headline ref adds nothing to the web', () => {
+  // react-native-web numbers its tint filters per render; the count is not the DOM's shape.
+  const shape = (html: string) => html.replace(/tint-\d+/g, 'tint-N');
+
+  it('with and without headingRef the receipt is the same DOM; the ref is the headline; nothing is announced', () => {
+    media.reduced = true; // settled from the first frame: one deterministic DOM
+    render(true);
+    const without = el('wsf-together')!.outerHTML;
+    act(() => root.unmount());
+    root = createRoot(container);
+    const ref = createRef<Text>();
+    render(true, ref);
+    expect(shape(el('wsf-together')!.outerHTML)).toBe(shape(without));
+    expect(ref.current as unknown).toBe(el('wsf-contribute-result-headline'));
+    expect(announced).toEqual([]);
+  });
+
+  it('playing, too: the same DOM at mount and at the settle', () => {
+    render(true);
+    const without = el('wsf-together')!.outerHTML;
+    advance(TOGETHER_TIMING.settleMs);
+    const withoutSettled = el('wsf-together')!.outerHTML;
+    act(() => root.unmount());
+    root = createRoot(container);
+    render(true, createRef<Text>());
+    expect(shape(el('wsf-together')!.outerHTML)).toBe(shape(without));
+    advance(TOGETHER_TIMING.settleMs);
+    expect(shape(el('wsf-together')!.outerHTML)).toBe(shape(withoutSettled));
   });
 });

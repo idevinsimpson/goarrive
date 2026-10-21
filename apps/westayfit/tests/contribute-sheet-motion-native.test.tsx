@@ -347,3 +347,25 @@ describe('W12-9 (INT-17) on the contribution sheet', () => {
     expect(fx.focused).toHaveLength(3);
   });
 });
+
+describe('MO-02 case 5: the sheet bar draws its grabber on the web only (as MOVE\'s does)', () => {
+  const barChildren = () =>
+    Array.from(byId('wsf-contribute-sheet-title')!.parentElement!.children).map((c) => c.getAttribute('data-testid'));
+
+  it.each(['ios', 'android'] as const)('%s: no grabber (on a phone it looked draggable and was not): the bar is the title and Close', async (os) => {
+    fx.os = os;
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    expect(barChildren()).toEqual(['wsf-contribute-sheet-title', 'wsf-contribute-close']);
+  });
+
+  it('web: the grabber is still drawn, first in the bar, an empty decoration', async () => {
+    fx.os = 'web';
+    act(() => root.render(<ContributeToGoal />));
+    await settle();
+    expect(barChildren()).toEqual([null, 'wsf-contribute-sheet-title', 'wsf-contribute-close']);
+    const grabber = byId('wsf-contribute-sheet-title')!.parentElement!.firstElementChild!;
+    expect(grabber.children).toHaveLength(0);
+    expect(grabber.textContent).toBe('');
+  });
+});

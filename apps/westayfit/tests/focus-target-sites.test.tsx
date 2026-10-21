@@ -1,4 +1,4 @@
-import { act, useRef, useState, type ReactNode } from 'react';
+import { act, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Dimensions } from 'react-native';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -11,8 +11,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * registry. Rendered here with the native twins (Metro's resolution), the
  * screen reader's focus recorded at react-native's boundary, the shell's
  * navigation events driven by hand. No device.
+ *
+ * W12-20 (INT-17): and MOVE's own Close (app/move/index.tsx), the sheet's
+ * first stop and the target its focus return falls back to. focusTarget and
+ * focusReturn are the twin Metro would pick for Platform.OS here, with every
+ * focusTarget call counted, so the web's twin is the one the web case runs.
  */
-const fx = vi.hoisted(() => ({ os: 'android' as 'android' | 'ios' | 'web', focused: [] as unknown[] }));
+const fx = vi.hoisted(() => ({
+  os: 'android' as 'android' | 'ios' | 'web',
+  focused: [] as unknown[],
+  registered: [] as string[],
+  focusSoonCalls: 0,
+}));
 vi.mock('react-native', async () => {
   const actual = (await vi.importActual('react-native-web')) as Record<string, any>;
   return {
@@ -29,7 +39,31 @@ vi.mock('react-native', async () => {
     findNodeHandle: (x: unknown) => x,
   };
 });
-vi.mock('../src/ui/focusTarget', async () => import('../src/ui/focusTarget.native'));
+vi.mock('../src/ui/focusTarget', async () => {
+  const native = await import('../src/ui/focusTarget.native');
+  const web = await vi.importActual<typeof import('../src/ui/focusTarget')>('../src/ui/focusTarget');
+  const pick = () => (fx.os === 'web' ? web : native);
+  return {
+    registerFocusTarget: (testId: string, ref: { readonly current: unknown }) => {
+      fx.registered.push(testId);
+      return pick().registerFocusTarget(testId, ref);
+    },
+    focusSoon: (ref: { readonly current: unknown }) => {
+      fx.focusSoonCalls += 1;
+      return pick().focusSoon(ref);
+    },
+  };
+});
+// MOVE's import of the focus return, by platform (the shell below calls the native twin directly).
+vi.mock('../src/ui/focusReturn', async () => {
+  const native = await import('../src/ui/focusReturn.native');
+  const web = await vi.importActual<typeof import('../src/ui/focusReturn')>('../src/ui/focusReturn');
+  return {
+    ...web,
+    armTabsFocusReturn: () => (fx.os === 'web' ? web : native).armTabsFocusReturn(),
+    useSheetFocusReturn: (c: RefObject<unknown>) => (fx.os === 'web' ? web : native).useSheetFocusReturn(c),
+  };
+});
 type Route = { key: string; name: string };
 const nav = { routes: [] as Route[], listeners: {} as Record<string, Array<() => void>> };
 // One navigation object, as react-navigation gives a screen: the shell's focus-return effect depends on it.
@@ -41,10 +75,53 @@ const navigation = vi.hoisted(() => ({
       nav.listeners[event] = (nav.listeners[event] ?? []).filter((x) => x !== cb);
     };
   },
+  isFocused: () => true,
+  dispatch: () => undefined,
+}));
+const router = vi.hoisted(() => ({
+  replace: vi.fn(),
+  back: vi.fn(),
+  canGoBack: () => true,
+  dismissTo: vi.fn(),
+  push: vi.fn(),
 }));
 vi.mock('expo-router', () => ({
+  router,
+  useRouter: () => router,
   useNavigation: () => navigation,
+  useFocusEffect: () => undefined,
   Link: ({ children }: { children?: ReactNode }) => <>{children}</>,
+}));
+// MOVE's reads, at the module boundary (as tests/move-retry.test.tsx has them).
+const reads = vi.hoisted(() => ({
+  mine: null as unknown,
+  goals: null as unknown,
+  peekMine: undefined as unknown,
+  peekGoals: undefined as unknown,
+}));
+vi.mock('../src/featureFlags', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/featureFlags')>()),
+  wsfAuthEnabled: true,
+}));
+// One signed-in account object, as the provider gives (MOVE's resolver re-reads when it changes).
+const auth = vi.hoisted(() => ({ ready: true, user: { uid: 'u1', email: 'm@example.com' } }));
+vi.mock('../src/auth', () => ({ useWsfAuth: () => auth }));
+vi.mock('../src/currentCommunity', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/currentCommunity')>()),
+  resolveCurrentCommunity: () => 'oak',
+  currentCommunityReady: () => Promise.resolve(),
+}));
+vi.mock('../src/memberReads', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/memberReads')>()),
+  peekMyCommunities: () => reads.peekMine,
+  peekGoals: () => reads.peekGoals,
+  readMyCommunities: async () => reads.mine,
+  readGoals: async () => reads.goals,
+}));
+vi.mock('../src/ui/useReducedMotion', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/ui/useReducedMotion')>()),
+  useReducedMotion: () => true,
+  useReducedMotionPreference: () => ({ known: true, reduced: true, failed: false }),
 }));
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 vi.mock('../src/firebase', () => ({
@@ -58,6 +135,7 @@ vi.mock('../src/firebase', () => ({
 const { MemberTabBar } = await import('../src/ui/MemberTabBar');
 const { MemberTopBar } = await import('../src/ui/MemberTopBar');
 const native = await import('../src/ui/focusReturn.native');
+const { default: MoveResolver } = await import('../app/move/index');
 
 const TAB_STATE = {
   index: 0,
@@ -107,6 +185,13 @@ const lastFocused = () => fx.focused[fx.focused.length - 1];
 beforeEach(() => {
   fx.os = 'android';
   fx.focused.length = 0;
+  fx.registered.length = 0;
+  fx.focusSoonCalls = 0;
+  reads.mine = null;
+  reads.goals = null;
+  reads.peekMine = undefined;
+  reads.peekGoals = undefined;
+  router.replace.mockReset();
   menuItems.value = [];
   nav.routes = [{ key: 't', name: '(tabs)' }];
   nav.listeners = {};
@@ -228,6 +313,101 @@ describe('RV12-641-A1: a menu row that opens another surface does not pull the s
     open();
     act(() => byId('wsf-member-topbar-menu-manage')!.click());
     expect(document.activeElement).toBe(byId('wsf-member-topbar-menu-button'));
+    expect(fx.focused).toHaveLength(0);
+  });
+});
+
+describe('W12-20 (INT-17): MOVE\'s Close is where the screen reader starts, and where it comes back to', () => {
+  const MINE = { items: [{ groupId: 'oak', displayName: 'Oak Grove Together' }] };
+  const goal = (goalId: string, endsAt: string) => ({
+    goalId,
+    title: goalId,
+    target: 100,
+    unit: 'squats',
+    status: 'active',
+    endsAt,
+    sharedTotal: 10,
+  });
+  const TWO_GOALS = { goals: [goal('g1', '2030-01-01'), goal('g2', '2030-02-01')] };
+  const settle = async () => {
+    for (let i = 0; i < 6; i += 1) await act(async () => undefined);
+  };
+  /** MOVE opened from the tabs: "working" on its first frame, then the chooser (two open goals). */
+  const openMove = async () => {
+    reads.mine = MINE;
+    reads.goals = TWO_GOALS;
+    act(() => root.render(<MoveResolver />));
+    await settle();
+    expect(byId('wsf-move-choose')).not.toBeNull();
+  };
+  const close = () => byId('wsf-move-close');
+
+  it('Android: MOVE opens and its Close takes the focus once, on settle; the chooser arriving does not take it again', async () => {
+    await openMove();
+    expect(close()).not.toBeNull();
+    expect(fx.focused).toEqual([close()]);
+    expect(fx.registered).toEqual(['wsf-move-close']);
+  });
+
+  it('iOS: Close takes the focus once, 400 ms after the presentation settles', async () => {
+    fx.os = 'ios';
+    vi.useFakeTimers();
+    await openMove();
+    expect(fx.focused).toHaveLength(0);
+    act(() => vi.advanceTimersByTime(399));
+    expect(fx.focused).toHaveLength(0);
+    act(() => vi.advanceTimersByTime(1));
+    expect(fx.focused).toEqual([close()]);
+    act(() => vi.advanceTimersByTime(5_000));
+    expect(fx.focused).toEqual([close()]);
+  });
+
+  it('back from a goal\'s flow lands on Close (the sheet\'s fallback, now registered)', async () => {
+    await openMove();
+    // A goal's "Move" opens its flow over the sheet; its Back uncovers the sheet.
+    emit('blur');
+    emit('focus');
+    expect(fx.focused).toEqual([close(), close()]);
+  });
+
+  it('iOS: a goal\'s flow opening inside the 400 ms wait cancels the first focus; Back still lands on Close, once', async () => {
+    fx.os = 'ios';
+    vi.useFakeTimers();
+    await openMove();
+    emit('blur');
+    act(() => vi.advanceTimersByTime(1_000));
+    expect(fx.focused).toHaveLength(0);
+    emit('focus');
+    act(() => vi.advanceTimersByTime(400));
+    expect(fx.focused).toEqual([close()]);
+  });
+
+  it('iOS: the sheet going inside the wait cancels the focus', async () => {
+    fx.os = 'ios';
+    vi.useFakeTimers();
+    await openMove();
+    act(() => root.render(<div />));
+    act(() => vi.advanceTimersByTime(1_000));
+    expect(fx.focused).toHaveLength(0);
+  });
+
+  it('a sheet decided as a hand-off on its first frame is replaced at once and focuses nothing (the flow\'s Close does)', async () => {
+    reads.peekMine = MINE;
+    reads.peekGoals = { goals: [goal('g1', '2030-01-01')] };
+    act(() => root.render(<MoveResolver />));
+    await settle();
+    expect(router.replace).toHaveBeenCalledWith('/contribute/g1?groupId=oak&mode=move');
+    expect(fx.focusSoonCalls).toBe(0);
+    expect(fx.focused).toHaveLength(0);
+  });
+
+  it('web: MOVE makes no registry or focus call, and the screen reader is never touched', async () => {
+    fx.os = 'web';
+    await openMove();
+    emit('blur');
+    emit('focus');
+    expect(fx.registered).toEqual([]);
+    expect(fx.focusSoonCalls).toBe(0);
     expect(fx.focused).toHaveLength(0);
   });
 });

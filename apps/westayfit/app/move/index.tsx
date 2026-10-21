@@ -10,6 +10,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ButtonLink } from '../../src/ui/ButtonLink';
 import { armTabsFocusReturn, useSheetFocusReturn } from '../../src/ui/focusReturn';
+import { focusSoon, registerFocusTarget } from '../../src/ui/focusTarget';
 import {
   SCRIM_PROPS,
   markSheetHandoff,
@@ -343,6 +344,37 @@ export default function MoveResolver() {
   // in front (F2: the outer root also holds the scrim).
   const panelRef = useRef<View>(null);
   useSheetFocusContainment(panelRef);
+  /*
+    W12-20 (INT-17, native). THE SCREEN READER STARTS ON CLOSE, AND COMES
+    BACK TO IT. On the web focus enters the panel on Close (the containment
+    above); off the web that hook does nothing, and VoiceOver or TalkBack
+    stayed on whatever the tab behind had. On iOS and Android, Close is a
+    registered focus target (src/ui/focusTarget.ts) -- the one
+    useSheetFocusReturn falls back to when a goal's flow closes over this
+    sheet -- and it takes the screen reader's focus once, when the sheet first
+    appears: after the presentation settles, and about 400 ms later on iOS
+    (src/ui/accessibilityFocus.ts). A goal's flow covering the sheet first, or
+    the sheet going, cancels it. A sheet decided as a hand-off on its first
+    frame is replaced by its one goal's flow at once and focuses nothing here;
+    that flow's own Close does. Nothing on the web.
+  */
+  const closeRef = useRef<View>(null);
+  const handoffAtMount = useRef(state.kind === 'handoff').current;
+  useEffect(() => {
+    if (Platform.OS === 'web') return undefined;
+    return registerFocusTarget('wsf-move-close', closeRef);
+  }, []);
+  useEffect(() => {
+    if (Platform.OS === 'web' || handoffAtMount) return undefined;
+    const cancel = focusSoon(closeRef);
+    const offBlur = navigation.addListener('blur', cancel);
+    return () => {
+      cancel();
+      offBlur();
+    };
+    // The first mount only: the return to Close is useSheetFocusReturn's.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /*
     THE SHEET. The scrim covers the whole viewport, which is what keeps the tab
@@ -384,6 +416,7 @@ export default function MoveResolver() {
         <View style={s.sheetHead}>
           {Platform.OS === 'web' ? <View pointerEvents="none" style={s.grabber} /> : null}
           <Pressable
+            ref={closeRef}
             onPress={close}
             style={s.close}
             accessibilityRole="button"
