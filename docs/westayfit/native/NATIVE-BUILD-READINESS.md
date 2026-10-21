@@ -44,6 +44,17 @@ This document is preparation only. No build ran from the sprint sandbox and no s
   - Before a store build, add `uses-feature android.hardware.camera required=false`.
 - **Native dependencies included ahead of use** (`expo-dev-client`, `react-native-svg`, `expo-video`, `expo-system-ui`): these are ordinary dependencies, autolinked into every native build, including the `preview` builds testers get. On Android, `expo-dev-client` is linked into release builds too (its launcher and menu ship inert release stubs); on iOS it is debug-only. Later JavaScript work that uses them needs no new development client.
 
+## Native type-check (NATIVE-TSC-1)
+- **Run it from `apps/westayfit`:** `[LOCAL] npm run typecheck:native` (both platforms), or `npm run typecheck:native -- ios` for one. It runs `scripts/typecheck-native.mjs`.
+- **Why the default check misses this.** `npm run ts:check` (`tsc --noEmit`) resolves every import the way the web build does, so `./kv` is always `kv.ts`. A file that only the phones run is checked against the web module's types, and an error that exists only on a phone type-checks clean: the first native check found 16 errors where the default found 0.
+- **What it does:** it runs tsc once per platform with Metro's suffix order, `moduleSuffixes: [".<platform>", ".native", ""]`, over the files that platform can reach:
+  - the git-tracked `app/`, `src/` and `modules/` sources, plus `expo-env.d.ts` and `.expo/types` when present;
+  - minus tests, `*.web.*`, the other platform's files, `src/movement-camera/frozen`, and any file shadowed by a higher-priority sibling (a base `X.ts` beside `X.native.ts`).
+- **Output:** the errors with app-relative paths. It exits non-zero on any error.
+- **What it catches:** type errors as a phone resolves the code. That includes a `.native` file that imports its own base specifier: on a phone that resolves to the file itself, so its types become `any`. `tests/native-self-import.test.ts` guards that case statically on every vitest run.
+- **What it is not:** a Swift, Kotlin, Xcode or Gradle compile. Native module code (for example `modules/wsf-pose-camera`'s Swift and Kotlin) is not compiled here, and a clean result says nothing about the binary building.
+- **Known state:** until two lanes split their shared types into suffix-free modules, it reports the storage errors in `src/storage/kv.native.ts`, which imports `DeviceKv`/`KvRead` from `./kv` (ST-TSC-1, W13: `src/storage/kvTypes.ts`). With the camera lane merged it also reports `src/movement-camera/support.native.ts`, which takes `TestPoseHook` from `./support` (CAM-TSC-1, W15: `src/movement-camera/testPoseHookType.ts`). With both splits applied, iOS and Android report 0 errors.
+
 ## What the sprint sandbox can and cannot do
 - **Can:** `expo prebuild --no-install`, whose template comes from npm. Prebuild output was used for the permission check above.
 - **Cannot:** run Gradle, because the network policy denies `dl.google.com` and so blocks the Android SDK. iOS builds need macOS and Xcode.
