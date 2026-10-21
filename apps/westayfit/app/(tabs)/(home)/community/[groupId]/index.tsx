@@ -369,6 +369,14 @@ type GoalProgress =
        * read that lands clears it.
        */
       refreshFailed?: boolean;
+      /**
+       * heads-11 NB-2: the refresh round (its read's issue time) whose failure
+       * FIRST made this figure stale, kept while it stays stale. The page's one
+       * stale announcement is keyed by the latest of these, so a round that
+       * fails several goals speaks once, and a later round that fails a goal
+       * which had recovered speaks again even while another stays stale.
+       */
+      staleSince?: number;
     }
   | { kind: 'failed' };
 
@@ -1336,7 +1344,8 @@ export default function CommunityPage() {
             // `>=`: a read issued in the same millisecond as this failure and
             // already landed is not made stale by it.
             if (shown.issuedAt >= issuedAt) return prev;
-            return { ...prev, [goal.goalId]: { ...shown, refreshFailed: true } };
+            const staleSince = shown.refreshFailed && shown.staleSince !== undefined ? shown.staleSince : issuedAt;
+            return { ...prev, [goal.goalId]: { ...shown, refreshFailed: true, staleSince } };
           });
         }
       })();
@@ -1432,7 +1441,8 @@ export default function CommunityPage() {
             setProgress((prev) => {
               const shown = prev[goal.goalId];
               if (shown?.kind !== 'ok' || shown.issuedAt >= issuedAt) return prev;
-              return { ...prev, [goal.goalId]: { ...shown, refreshFailed: true } };
+              const staleSince = shown.refreshFailed && shown.staleSince !== undefined ? shown.staleSince : issuedAt;
+              return { ...prev, [goal.goalId]: { ...shown, refreshFailed: true, staleSince } };
             });
           }
         })();
@@ -2139,15 +2149,20 @@ export default function CommunityPage() {
     heads-9 N-3. ONE STALE ANNOUNCEMENT PER FAILURE WAVE, FOR THE WHOLE PAGE.
     A refresh round that fails fails every open goal at once (it is the
     network), and one announcer per goal queued the same sentence N times,
-    naming none of them. The page has one StaleAnnouncer, fed whether ANY
-    figure on it is a kept, last-confirmed one: it speaks when the first goes
-    stale, not again while any stays stale, and again after all recover and a
-    later read fails. Each card still says so in words where it is seen.
+    naming none of them. The page has one StaleAnnouncer, keyed by the WAVE:
+    the latest round whose failure made a figure stale (`staleSince`). So a
+    round that fails several goals speaks once, a figure that fails again
+    while already stale says nothing new, and (heads-11 NB-2) a later round
+    that fails a goal which had recovered speaks again, even while another
+    goal stays stale. Each card still says so in words where it is seen.
   */
-  const anyStaleFigure = activeGoals.some((g) => {
+  let staleWave: number | null = null;
+  for (const g of activeGoals) {
     const gp = progress[g.goalId];
-    return gp?.kind === 'ok' && gp.refreshFailed === true;
-  });
+    if (gp?.kind !== 'ok' || gp.refreshFailed !== true) continue;
+    const since = gp.staleSince ?? 0;
+    if (staleWave === null || since > staleWave) staleWave = since;
+  }
   // D-7. Which goals actually get a permission card this pass — ONE source,
   // consulted by the card renderer and by the orphan block in the Manage
   // sheet, so every outcome is reported exactly once: never twice, and never
@@ -4625,8 +4640,8 @@ export default function CommunityPage() {
 
           {/* Your part moved up, under the action (HOME-POLISH-1). */}
 
-          {/* N-3: the page's one stale announcement (renders nothing). */}
-          <StaleAnnouncer failed={anyStaleFigure} />
+          {/* N-3, NB-2: the page's one stale announcement, per wave (renders nothing). */}
+          <StaleAnnouncer wave={staleWave} />
 
           {/* Other open goals keep their own separately labelled mark. */}
           {otherActive.map((goal) => {

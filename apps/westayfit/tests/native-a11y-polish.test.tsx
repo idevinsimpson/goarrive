@@ -200,26 +200,29 @@ describe('W16-3 (f): DeviceChoice reads as its buttons say, natively', () => {
   });
 });
 
-describe('W16-3 (INT-18): the stale-figure sentence is spoken once per failure, natively', () => {
-  it('a failure speaks once; a re-render does not repeat it; recovering and failing again speaks again', async () => {
-    await render(<StaleAnnouncer failed={false} />);
+describe('W16-3 (INT-18): the stale-figure sentence is spoken once per failure wave, natively', () => {
+  it('a wave speaks once; a re-render does not repeat it; a new wave speaks again, after a recovery or not', async () => {
+    await render(<StaleAnnouncer wave={null} />);
     expect(spoken).toEqual([]);
-    await render(<StaleAnnouncer failed />);
+    await render(<StaleAnnouncer wave={100} />);
     expect(spoken).toEqual([STALE_FIGURE_SENTENCE]);
-    await render(<StaleAnnouncer failed />);
+    await render(<StaleAnnouncer wave={100} />);
     expect(spoken).toEqual([STALE_FIGURE_SENTENCE]);
-    await render(<StaleAnnouncer failed={false} />);
-    await render(<StaleAnnouncer failed />);
+    await render(<StaleAnnouncer wave={null} />);
+    await render(<StaleAnnouncer wave={200} />);
     expect(spoken).toEqual([STALE_FIGURE_SENTENCE, STALE_FIGURE_SENTENCE]);
+    // heads-11 NB-2: a newer failure while something is still stale.
+    await render(<StaleAnnouncer wave={300} />);
+    expect(spoken).toEqual([STALE_FIGURE_SENTENCE, STALE_FIGURE_SENTENCE, STALE_FIGURE_SENTENCE]);
   });
 
   // heads-9 N-3: a failure that predates the mount is not a new one.
-  it('mounting already failed says nothing; recovering and failing again then speaks', async () => {
-    await render(<StaleAnnouncer failed />);
-    await render(<StaleAnnouncer failed />);
+  it('mounting on a wave says nothing; a later wave then speaks', async () => {
+    await render(<StaleAnnouncer wave={100} />);
+    await render(<StaleAnnouncer wave={100} />);
     expect(spoken).toEqual([]);
-    await render(<StaleAnnouncer failed={false} />);
-    await render(<StaleAnnouncer failed />);
+    await render(<StaleAnnouncer wave={null} />);
+    await render(<StaleAnnouncer wave={200} />);
     expect(spoken).toEqual([STALE_FIGURE_SENTENCE]);
   });
 });
@@ -245,13 +248,13 @@ describe('W16-3 (b), (c), INT-18 in Community Home (wiring)', () => {
     const nbsp = src.indexOf("{'\\u00A0'}");
     expect(src.slice(nbsp - 400, nbsp)).toContain('{...nativeA11yHidden()}');
   });
-  it('INT-18: the stale status region spreads liveRegion; the page has ONE StaleAnnouncer, fed any stale figure (heads-9 N-3)', () => {
+  it('INT-18: the stale status region spreads liveRegion; the page has ONE StaleAnnouncer, keyed by the failure wave (heads-9 N-3, heads-11 NB-2)', () => {
     const at = src.indexOf('testID={`wsf-community-goal-stale-status-${goal.goalId}`}');
     const block = src.slice(at, at + 500);
     expect(block).toContain('{...liveRegion}');
     expect(block).not.toContain('<StaleAnnouncer');
     expect(src.match(/<StaleAnnouncer /g)).toHaveLength(1);
-    expect(src).toContain('<StaleAnnouncer failed={anyStaleFigure} />');
+    expect(src).toContain('<StaleAnnouncer wave={staleWave} />');
     expect(src).not.toMatch(/'aria-live': 'polite' \} as Record<string, unknown>\)\}\s*>\s*\{p\.refreshFailed/);
   });
   it('nativeA11yHidden is empty on the web and hides on a phone', () => {

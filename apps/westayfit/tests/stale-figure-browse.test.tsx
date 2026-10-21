@@ -53,13 +53,29 @@ vi.mock('../src/ui/useReducedMotion', async (importOriginal) => ({
   useReducedMotionPreference: () => ({ reduced: true, known: true, failed: false }),
 }));
 const router = { push: vi.fn(), replace: vi.fn(), back: vi.fn(), navigate: vi.fn() };
+// Every live focus effect, so a test can leave and come back to the screen
+// (refocus(): each one's blur cleanup, then the callback again).
+const focusEntries = new Set<{ refire: () => void }>();
 vi.mock('expo-router', () => ({
   Link: ({ href, children }: { href: string; children: ReactNode }) => <a href={href}>{children}</a>,
   useLocalSearchParams: () => ({ groupId: 'oak' }),
   useRouter: () => router,
   router,
   useFocusEffect: (cb: () => void | (() => void)) => {
-    useEffect(() => cb(), [cb]);
+    useEffect(() => {
+      let cleanup = cb();
+      const entry = {
+        refire: () => {
+          if (typeof cleanup === 'function') cleanup();
+          cleanup = cb();
+        },
+      };
+      focusEntries.add(entry);
+      return () => {
+        focusEntries.delete(entry);
+        if (typeof cleanup === 'function') cleanup();
+      };
+    }, [cb]);
   },
 }));
 vi.mock('react-native-safe-area-context', async () => {
@@ -221,6 +237,40 @@ describe('heads-9 N-3: one announcement per failure wave, for the whole page', (
     expect(byId('wsf-community-goal-stale-g1')).toBeNull();
     expect(byId('wsf-community-goal-stale-g2')).toBeNull();
     // A later outage is a new wave.
+    net.down = true;
+    await returnToApp();
+    expect(byId('wsf-community-goal-stale-g1')).not.toBeNull();
+    expect(spoken).toEqual([SENTENCE, SENTENCE]);
+  });
+
+  // The focus settle read (2.6 s after each focus) failing on figures that are
+  // already stale is the same wave, not a new one.
+  it('iOS: coming back to the page during the outage (its settle read fails again) says nothing new', async () => {
+    goals.two = true;
+    await failARefresh('ios');
+    expect(spoken).toEqual([SENTENCE]);
+    act(() => focusEntries.forEach((e) => e.refire()));
+    act(() => vi.advanceTimersByTime(3_000));
+    await flush();
+    await flush();
+    expect(byId('wsf-community-goal-stale-g1')).not.toBeNull();
+    expect(spoken).toEqual([SENTENCE]);
+  });
+
+  // heads-11 NB-2: the page-wide latch missed this; the wave key does not.
+  it('iOS: after a partial recovery (one goal still stale), a second outage that fails the recovered goal speaks again', async () => {
+    goals.two = true;
+    await failARefresh('ios');
+    expect(byId('wsf-community-goal-stale-g2')).not.toBeNull();
+    expect(spoken).toEqual([SENTENCE]);
+    // Partial recovery: g1 reads fresh, g2's pulse still fails.
+    net.down = false;
+    net.pulseDownFor = 'g2';
+    await returnToApp();
+    expect(byId('wsf-community-goal-stale-g1')).toBeNull();
+    expect(byId('wsf-community-goal-stale-g2')).not.toBeNull();
+    expect(spoken).toEqual([SENTENCE]);
+    // A second outage fails g1 again while g2 never recovered.
     net.down = true;
     await returnToApp();
     expect(byId('wsf-community-goal-stale-g1')).not.toBeNull();
