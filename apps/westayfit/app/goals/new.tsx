@@ -51,6 +51,8 @@ import { MovementPicker } from '../../src/ui/MovementPicker';
 import { OptionGroup, OptionRow } from '../../src/ui/OptionRow';
 import { formatCount } from '../../src/ui/progressFormat';
 import { revealInScroll } from '../../src/ui/revealInScroll';
+// W16-11 (MF-20): a time zone in words, iOS-safe; shared with the combined setup.
+import { zoneInWords } from '../../src/zoneName';
 import { ScreenTopSpacer, useScreenTopInset } from '../../src/ui/useScreenTopInset';
 import { WsfWordmark } from '../../src/ui/WsfWordmark';
 
@@ -112,11 +114,6 @@ const SYNTHETIC_LABEL = wsfIsStaging ? 'STAGING SYNTHETIC TEST' : 'LOCAL SYNTHET
 
 const FALLBACK_COMMUNITY_NAME = 'Your community';
 const FALLBACK_TIME_ZONE = 'America/New_York';
-
-// A zone Intl names awkwardly reads better as its place. Arizona keeps
-// standard time all year, which Intl calls "Mountain Standard Time"; beside
-// "Mountain Time" that reads as a duplicate, so it is named for the place.
-const ZONE_LABELS: Readonly<Record<string, string>> = { 'America/Phoenix': 'Arizona Time' };
 
 // ---- dates: the datetime-local shape "2026-09-25T14:00", read in local time ----
 
@@ -240,38 +237,6 @@ function deviceTimeZone(): string {
   } catch {
     return FALLBACK_TIME_ZONE;
   }
-}
-
-/**
- * A time zone in words: "Eastern Time", "United Kingdom Time", "Coordinated
- * Universal Time". The generic name is preferred (it does not flip between
- * standard and daylight); zones the platform can only name as an offset fall
- * back to the specific name, and a zone it cannot name at all reads as its
- * identifier with the underscores taken out.
- */
-function zoneInWords(tz: string): string {
-  const named = ZONE_LABELS[tz];
-  if (named) return named;
-  const plain = tz.replace(/_/g, ' ');
-  const nameOf = (timeZoneName: 'long' | 'longGeneric'): string | null => {
-    try {
-      const part = new Intl.DateTimeFormat(undefined, {
-        timeZone: tz,
-        // 'longGeneric' is newer than the lib typings; older engines ignore it.
-        timeZoneName: timeZoneName as 'long',
-      })
-        .formatToParts(new Date())
-        .find((p) => p.type === 'timeZoneName');
-      return part && part.value.trim() ? part.value : null;
-    } catch {
-      return null;
-    }
-  };
-  const generic = nameOf('longGeneric');
-  // A bare offset ("GMT", "GMT+00:00") is not a name; the specific name
-  // ("Coordinated Universal Time") reads better when there is one.
-  if (generic && !/^(GMT|UTC)([+-].*)?$/.test(generic)) return generic;
-  return nameOf('long') ?? generic ?? plain;
 }
 
 /** "5,000 squats" — the goal as one phrase, numbers grouped for reading. */
