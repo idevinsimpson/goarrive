@@ -126,6 +126,12 @@ export function useFollowAlongSession(input: {
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   /** When the clock was last read while running (native lifecycle uses it to cap a late background event). */
   const lastTickRef = useRef<number | null>(null);
+  /**
+   * Native only: when the app went inactive, while it still is (null otherwise).
+   * State, not just a ref, because the end-of-round effect below must re-run
+   * when the app comes back.
+   */
+  const [inactiveSince, setInactiveSince] = useState<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -186,9 +192,16 @@ export function useFollowAlongSession(input: {
         : 'round';
 
   // A round that ran to its end stops the clock rather than accruing forever.
+  //
+  // NOT WHILE THE APP IS ONLY INACTIVE (native, MO-05 NB-1): a call that rings
+  // past the end of the round must still be able to pause it — when it is
+  // answered, `background` dates the pause to when the ringing began, before
+  // the end. So the clock is left running while inactive; if the app comes
+  // straight back (call declined, Control Center closed), this runs then and
+  // the round finishes as the blur rule says it did.
   useEffect(() => {
-    if (finished && clockRunning(clock)) setClock((c) => pauseClock(c, Date.now()));
-  }, [finished, clock]);
+    if (finished && clockRunning(clock) && inactiveSince === null) setClock((c) => pauseClock(c, Date.now()));
+  }, [finished, clock, inactiveSince]);
 
   const onStart = useCallback(() => {
     // A NEW round is a new attempt. Starting again after a stop asks the host
@@ -284,7 +297,10 @@ export function useFollowAlongSession(input: {
     const sub = AppState.addEventListener('change', (next) => {
       const step = appLifecycleStep(lifecycle, next, Date.now(), lastTickRef.current, TICK_MS);
       lifecycle = step.lifecycle;
+      // The pause (if any) lands in the same batch as clearing `inactiveSince`,
+      // so the end-of-round effect never sees a running clock with it cleared.
       if (step.pauseAt !== null) interrupt('hidden', step.pauseAt);
+      setInactiveSince(step.lifecycle.inactiveSince);
     });
     return () => sub?.remove?.();
   }, [interrupt]);

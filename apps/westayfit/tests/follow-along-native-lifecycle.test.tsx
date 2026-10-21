@@ -47,7 +47,7 @@ vi.mock('react-native', async () => {
 // so the card never renders the slot in these tests anyway.
 vi.mock('../src/ui/MovementDemoMedia', () => ({ MovementDemoMedia: () => null }));
 
-import { ACTIVE_LIFECYCLE, appLifecycleStep, INTERRUPTED_NOTICE } from '../src/followAlong';
+import { ACTIVE_LIFECYCLE, appLifecycleStep, INTERRUPTED_NOTICE, RING_BACKDATE_MS } from '../src/followAlong';
 import { TICK_MS, useFollowAlongSession } from '../src/followAlongSession';
 import { FollowAlongCard } from '../src/ui/FollowAlongCard';
 
@@ -107,6 +107,14 @@ describe('appLifecycleStep (pure)', () => {
     expect(appLifecycleStep(ACTIVE_LIFECYCLE, 'background', 5_000).pauseAt).toBe(5_000);
     const ringing = appLifecycleStep(ACTIVE_LIFECYCLE, 'inactive', 1_000).lifecycle;
     expect(appLifecycleStep(ringing, 'background', 6_000)).toEqual({ lifecycle: ACTIVE_LIFECYCLE, pauseAt: 1_000 });
+  });
+
+  it('the backdate reaches back at most a ring-sized window (NB-2)', () => {
+    expect(RING_BACKDATE_MS).toBe(30_000);
+    const longInactive = appLifecycleStep(ACTIVE_LIFECYCLE, 'inactive', 0).lifecycle;
+    expect(appLifecycleStep(longInactive, 'background', 120_000).pauseAt).toBe(120_000 - RING_BACKDATE_MS);
+    const shortInactive = appLifecycleStep(ACTIVE_LIFECYCLE, 'inactive', 100_000).lifecycle;
+    expect(appLifecycleStep(shortInactive, 'background', 120_000).pauseAt).toBe(100_000);
   });
 
   it('a late background event is capped one tick after the last tick', () => {
@@ -179,6 +187,47 @@ describe('iOS', () => {
     advance(60_000);
     app('active'); // hung up
     expect(status()).toBe('Paused · 50 left in this round');
+    expect(notice()).toBe(INTERRUPTED_NOTICE);
+  });
+
+  it('a call that rings past the end of the round still pauses it when answered (NB-1)', () => {
+    act(() => root.render(<Host />));
+    press('fa-start');
+    advance(3_000 + 50_000);
+    expect(status()).toBe('10 left in this round');
+    app('inactive'); // it rings…
+    advance(20_000); // …for longer than the 10 s the round had left
+    app('background'); // answered
+    advance(60_000);
+    app('active');
+    expect(el('fa-finished')).toBeNull();
+    expect(status()).toBe('Paused · 10 left in this round');
+    expect(notice()).toBe(INTERRUPTED_NOTICE);
+  });
+
+  it('inactive past the end, then straight back (declined, Control Center): the round finishes, as the blur rule says', () => {
+    act(() => root.render(<Host />));
+    press('fa-start');
+    advance(3_000 + 50_000);
+    app('inactive');
+    advance(20_000);
+    app('active');
+    expect(el('fa-finished')).not.toBeNull();
+    expect(notice()).toBeNull();
+    // And the clock was stopped on return: no tick is left running.
+    expect(vi.getTimerCount()).toBe(0);
+    advance(60_000);
+    expect(el('fa-finished')).not.toBeNull();
+  });
+
+  it('Control Center left open, then Home: at most a ring-sized window is given back (NB-2)', () => {
+    startAndRunTo50();
+    app('inactive'); // Control Center open; the round keeps running (blur rule)
+    advance(40_000);
+    app('background'); // then Home
+    app('active');
+    // 40 s showed as gone; only the last 30 s count as the interruption.
+    expect(status()).toBe('Paused · 40 left in this round');
     expect(notice()).toBe(INTERRUPTED_NOTICE);
   });
 
