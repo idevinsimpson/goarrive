@@ -27,6 +27,7 @@ import { ACQUIRING, cameraCue, stepCountdown, type CountdownState } from '../mov
 import type { CameraFailure } from '../movement-camera/orchestrator';
 import { CameraSkeletonOverlay } from './CameraSkeletonOverlay';
 import { NAVY, PROGRESS_GREEN } from './kit';
+import { NativeCameraPreview } from './NativeCameraPreview';
 
 export interface CameraRepCounterProps {
   showFigure: boolean;
@@ -166,7 +167,7 @@ export function CameraRepCounter(props: CameraRepCounterProps) {
             'data-testid': 'wsf-camera-video',
             style: videoStyle,
           })
-        : null}
+        : <NativeCameraPreview controller={ctl} />}
       {figure}
       <View style={st.shade} pointerEvents="none" />
 
