@@ -9,7 +9,9 @@ import { afterAll, beforeAll, expect } from 'vitest';
  * name of the test that was running WHEN NODE REPORTED IT (vitest's
  * `currentTestName`), which is usually, but not always, the test that raised
  * it: a rejection that surfaces after a test's drain is reported during the
- * next test, and one between tests is reported with no test name.
+ * next test. One reported between tests carries the PREVIOUS test's name
+ * (vitest 4 sets `currentTestName` as each test starts and never clears it);
+ * only one reported before the first test has none.
  *
  *   - `assertNoUnhandledRejections()` fails the calling hook with every
  *     rejection reported since the last check, each with the test it was
