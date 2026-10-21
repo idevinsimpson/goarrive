@@ -13,6 +13,7 @@
  * bounded expiry instead.
  */
 import type { DeviceKv } from './kv';
+import { isAppKeyPrefix } from './kvTypes';
 
 function webSession(): Storage | null {
   try {
@@ -62,6 +63,8 @@ export const sessionKv: DeviceKv = {
     }
   },
   async keysWithPrefix(prefix) {
+    // Never outside the app's namespace (src/storage/kvTypes.ts).
+    if (!isAppKeyPrefix(prefix)) return [];
     const s = webSession();
     if (!s) return [];
     try {
