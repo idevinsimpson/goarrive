@@ -100,7 +100,7 @@ import {
 } from '../../src/pendingContribution';
 import { wsfTheme } from '../../src/theme';
 import { PROGRESS_GREEN } from '../../src/ui/brandAssets';
-import { ButtonLink } from '../../src/ui/ButtonLink';
+import { SignInLink } from '../../src/ui/SignInLink';
 import { formatClock } from '../../src/ui/dates';
 import { LivingWeProgress } from '../../src/ui/LivingWeProgress';
 import { TogetherCompletion } from '../../src/ui/TogetherCompletion';
@@ -2140,8 +2140,9 @@ export default function ContributeToGoal() {
           <Text style={styles.body}>
             Contributions are recorded to your account, so sign in before you record one.
           </Text>
-          <ButtonLink
-            href="/signin"
+          {/* INT-29: from the sheet on a phone, close it and push /signin (SignInLink). */}
+          <SignInLink
+            fromSheet={asSheet}
             style={styles.primaryButton}
             textStyle={styles.primaryButtonText}
             testID="wsf-contribute-signin-link"
@@ -2688,8 +2689,8 @@ export default function ContributeToGoal() {
               renderKioskFinish('refused')
             ) : (
               refusal.reason === 'signedOut' ? (
-                <ButtonLink
-                  href="/signin"
+                <SignInLink
+                  fromSheet={asSheet}
                   style={styles.primaryButton}
                   textStyle={styles.primaryButtonText}
                   testID="wsf-contribute-back"
