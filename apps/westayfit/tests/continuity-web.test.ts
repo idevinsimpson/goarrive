@@ -257,3 +257,91 @@ describe('web (NATIVE-STATE-2 review): an owned record found after a same-tab re
     window.sessionStorage.clear();
   });
 });
+
+describe('web (#635 follow-up): a browser with no usable storage still records, honestly', () => {
+  const GOAL_ID = 'goal-web-1';
+  const UID = 'uid-web';
+  const row = { goalId: GOAL_ID, attemptId: 'att-1', count: 4, ts: 1, state: 'sending' as const };
+
+  async function withoutStorage(getter: () => Storage | null, run: () => Promise<void>) {
+    const spy = vi.spyOn(window, 'localStorage', 'get').mockImplementation(getter as () => Storage);
+    try {
+      await run();
+    } finally {
+      spy.mockRestore();
+    }
+  }
+
+  for (const [label, getter] of [
+    ['localStorage is null (storage disabled)', () => null],
+    [
+      'the localStorage getter throws (site data blocked)',
+      () => {
+        throw new DOMException('denied', 'SecurityError');
+      },
+    ],
+  ] as const) {
+    it(`${label}: nothing stored, nothing storable — Record proceeds, not durable`, async () => {
+      const { deviceKv } = await import('../src/storage/kv');
+      const pc = await import('../src/pendingContribution');
+      await withoutStorage(getter, async () => {
+        expect(await deviceKv.readItem('k')).toEqual({ ok: true, value: null });
+        expect(await deviceKv.setItem('k', 'v')).toBe(false);
+        // The restore says "nothing stored", so the screen does not fail closed…
+        expect(await pc.restorePendingAttempt(GOAL_ID, UID)).toEqual({ pending: null, orphan: null });
+        // …and Record goes, reported not durable ("This device couldn't save this attempt").
+        expect(await pc.openAttempt(row, UID, () => true)).toEqual({ fire: true, durable: false });
+      });
+    });
+  }
+
+  it('a Storage that is there but refuses this read is unreadable, not empty — the screen still fails closed', async () => {
+    const { deviceKv } = await import('../src/storage/kv');
+    const pc = await import('../src/pendingContribution');
+    window.localStorage.setItem(`wsf.pendingContribution.${GOAL_ID}.${UID}`, JSON.stringify({ ...row, attemptId: 'att-old', state: 'unknown' }));
+    const realGet = Storage.prototype.getItem;
+    const spy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key: string) {
+      if (key.startsWith('wsf.pendingContribution.')) throw new DOMException('refused', 'SecurityError');
+      return realGet.call(this, key);
+    });
+    try {
+      expect(await deviceKv.readItem(`wsf.pendingContribution.${GOAL_ID}.${UID}`)).toEqual({ ok: false });
+      expect(await pc.restorePendingAttempt(GOAL_ID, UID)).toMatchObject({ pending: null, readFailed: true });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(JSON.parse(window.localStorage.getItem(`wsf.pendingContribution.${GOAL_ID}.${UID}`) as string).attemptId).toBe('att-old');
+  });
+
+  it('the session store answers the same way when sessionStorage is missing', async () => {
+    const spy = vi.spyOn(window, 'sessionStorage', 'get').mockImplementation((() => null) as unknown as () => Storage);
+    try {
+      expect(await sessionKv.readItem('k')).toEqual({ ok: true, value: null });
+      expect(await sessionKv.setItem('k', 'v')).toBe(false);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
+describe('the mirror counts writes, not removals', () => {
+  it('writeCount moves on a write and stays on a removal', async () => {
+    const map = new Map<string, string>();
+    const kv: DeviceKv = {
+      getItem: async (k) => map.get(k) ?? null,
+      readItem: async (k) => ({ ok: true, value: map.get(k) ?? null }),
+      setItem: async (k, v) => (map.set(k, v), true),
+      removeItem: async (k) => (map.delete(k), true),
+      keysWithPrefix: async () => [],
+    };
+    const mirror = createKeyMirror(kv, () => undefined);
+    expect(mirror.writeCount('k')).toBe(0);
+    await mirror.write('k', 'a');
+    await mirror.remove('k');
+    expect(mirror.writeCount('k')).toBe(1);
+    // The same value again is still a newer write.
+    await mirror.write('k', 'a');
+    expect(mirror.writeCount('k')).toBe(2);
+    expect(mirror.writeCount('other')).toBe(0);
+  });
+});

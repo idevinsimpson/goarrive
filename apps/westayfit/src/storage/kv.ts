@@ -53,10 +53,17 @@ export const deviceKv: DeviceKv = {
   },
   async readItem(key) {
     const s = webStorage();
-    if (!s) return { ok: false };
+    // NO STORAGE OBJECT AT ALL (storage disabled, or a getter that throws):
+    // nothing is stored and nothing can be — `setItem` reports false — so
+    // there is no record here to protect. "Nothing stored" is the true
+    // answer, and the screen records honestly as not durable rather than
+    // failing closed for good on a read that can never succeed.
+    if (!s) return { ok: true, value: null };
     try {
       return { ok: true, value: s.getItem(key) };
     } catch {
+      // A Storage that is THERE but refuses this read may hold the record:
+      // unreadable, not empty.
       return { ok: false };
     }
   },

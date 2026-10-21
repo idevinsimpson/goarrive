@@ -834,7 +834,7 @@ describe('#635 delta: a restore that could not read the slot fails closed, and a
     expect(camera).toContain('mayBeginNewAttempt({ restoreSettled, restoreFailed, pending,');
     // The restore marks a failed read, and the screen replaces entry, review
     // and the camera with the visible state and its Retry.
-    expect(ROUTE.slice(ROUTE.indexOf('const startRestore = useCallback('))).toMatch(/if \(readFailed\) setRestoreFailed\(true\);\s*setRestoreSettled\(true\);/);
+    expect(ROUTE.slice(ROUTE.indexOf('const startRestore = useCallback('))).toMatch(/setRestoreFailed\(!!readFailed\);\s*setRestoreSettled\(true\);/);
     const failed = ROUTE.slice(ROUTE.indexOf('if (restoreFailed && beforeWrite) {'), ROUTE.indexOf("// ---- review ----"));
     expect(failed).toContain('{RESTORE_FAILED_HEADING}');
     expect(failed).toContain('onPress={onRetryRestore}');
@@ -919,5 +919,37 @@ describe('#635 delta: the cheaper should-fix guards', () => {
     expect(st.moveCameraSettingsLoaded()).toBe(true);
     expect(communityReady).toBe(true);
     expect(cc.isCurrentCommunityReady()).toBe(true);
+  });
+});
+
+describe('#635 follow-up: route wiring pinned exactly where meaning-changing edits used to survive', () => {
+  // The route cannot be imported by this harness, so these pin whole
+  // statements: an edit that keeps the words but changes the meaning (an
+  // inverted check, an extra `&& …`) no longer matches.
+  it('the Record gate returns on the gate alone (M26)', () => {
+    expect(ROUTE).toContain(
+      '    if (!mayBeginNewAttempt({ restoreSettled, restoreFailed, pending, settled: refusal != null || lastResult != null })) return;\n'
+    );
+    expect(ROUTE).toContain(
+      '    mayBeginNewAttempt({ restoreSettled, restoreFailed, pending, settled: refusal != null || lastResult != null }) &&\n    moveCameraLoaded &&'
+    );
+  });
+
+  it('the conflict is shown only for the context that asked (M19), and a round’s id is put back (F5)', () => {
+    const conflict = ROUTE.slice(ROUTE.indexOf('if (opened.conflict) {'), ROUTE.indexOf('if (!opened.fire) {'));
+    expect(conflict).toMatch(/\n {8}if \(stillCurrent\(\)\) \{\n {10}setPending\(\{ \.\.\.opened\.conflict, state: 'unknown' \}\);/);
+    expect(conflict).toContain('if (roundAttemptId != null && attemptId === roundAttemptId) roundAttemptRef.current = attemptId;');
+    expect(ROUTE).toContain('const roundAttemptId = moveAttemptIdFor(params.attempt, uid);');
+  });
+
+  it('a restore applies only to its own generation and only if it is the latest (M27, F4)', () => {
+    const restore = ROUTE.slice(ROUTE.indexOf('const startRestore = useCallback('), ROUTE.indexOf('}, []);', ROUTE.indexOf('const startRestore = useCallback(')));
+    expect(restore).toContain('const token = ++restoreTokenRef.current;');
+    expect(restore).toContain('        if (generationRef.current !== restoringFor || restoreTokenRef.current !== token) return;\n');
+    // A retry keeps the failed screen up until it answers, and a success clears it.
+    expect(restore).not.toContain('setRestoreFailed(false)');
+    expect(restore).toContain('setRestoreFailed(!!readFailed);');
+    const failed = ROUTE.slice(ROUTE.indexOf('if (restoreFailed && beforeWrite) {'), ROUTE.indexOf("// ---- review ----"));
+    expect(failed).toContain('onPress={onRetryRestore}\n                disabled={!restoreSettled}');
   });
 });

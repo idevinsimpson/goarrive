@@ -56,6 +56,7 @@ import {
   clearKioskReturnGoal,
   isKioskFlag,
   kioskMayFinishUnattended,
+  kioskScreenSettled,
   kioskCountdownExpired,
   kioskCountdownLabel,
   kioskRemainingMs,
@@ -557,9 +558,14 @@ export default function ContributeToGoal() {
   // The restore could not read the slot (an error, or no answer within the
   // storage bound). FAIL CLOSED: Record and the camera stay disabled and the
   // screen says so, with Retry, because the slot may hold an unresolved
-  // attempt nobody has seen. `restoreSettled` is still set, so a kiosk's
-  // deadline runs.
+  // attempt nobody has seen. `restoreSettled` is still set, and that screen
+  // counts as a settled kiosk screen (`kioskScreenSettled`), so a kiosk's
+  // deadline runs there and Finish clears nothing; Retry pauses it (the
+  // restore is unsettled again) and a repeat failure starts it afresh.
   const [restoreFailed, setRestoreFailed] = useState(false);
+  // Only the LATEST restore's answer applies: a double tap on Retry, or a
+  // retry racing the first read, cannot apply an older answer over a newer.
+  const restoreTokenRef = useRef(0);
   // One line under Record or Confirm when it ended without sending, or a
   // replay came back "not signed in". Cleared by the next action.
   const [attemptNotice, setAttemptNotice] = useState<string | null>(null);
@@ -686,20 +692,24 @@ export default function ContributeToGoal() {
   // A FAILED READ FAILS CLOSED. "Nothing stored" and "could not read" are
   // different answers: on the second, new attempts stay disabled
   // (`restoreFailed`) until Retry reads the slot.
+  //
+  // A RETRY leaves the failed state on screen while it reads (Try again is
+  // disabled, because the restore is unsettled), rather than flashing back to
+  // entry with Record inert; the answer then sets it either way.
   const startRestore = useCallback((forGoal: string, forUid: string | null) => {
     const restoringFor = generationRef.current;
-    setRestoreFailed(false);
+    const token = ++restoreTokenRef.current;
     setRestoreSettled(false);
     void restorePendingAttempt(forGoal, forUid)
       .catch((): RestoredAttempt => ({ pending: null, orphan: null, readFailed: true }))
       .then(({ pending: restored, orphan, readFailed }) => {
-        if (generationRef.current !== restoringFor) return;
+        if (generationRef.current !== restoringFor || restoreTokenRef.current !== token) return;
         if (orphan) setLegacyOrphan(orphan);
         if (restored) {
           setPending(restored);
           setPendingDurable(true);
         }
-        if (readFailed) setRestoreFailed(true);
+        setRestoreFailed(!!readFailed);
         setRestoreSettled(true);
       });
   }, []);
@@ -1164,6 +1174,8 @@ export default function ContributeToGoal() {
 
     if (!attemptRef.current) attemptRef.current = takeRoundAttemptId() ?? mintAttemptId();
     const attemptId = attemptRef.current;
+    // The follow-along round's id, if this attempt is it (src/moveSession.ts).
+    const roundAttemptId = moveAttemptIdFor(params.attempt, uid);
 
     const pendingRow: PendingContribution = {
       goalId: goalId as string,
@@ -1202,6 +1214,11 @@ export default function ContributeToGoal() {
           setPending({ ...opened.conflict, state: 'unknown' });
           setPendingDurable(true);
           attemptRef.current = null;
+          // A round's attempt id is put back, not spent: once the earlier
+          // attempt is resolved, the round's count is still the round's, and
+          // must keep its id so finishing the same round on a second device
+          // still counts once.
+          if (roundAttemptId != null && attemptId === roundAttemptId) roundAttemptRef.current = attemptId;
           setAttemptNotice(ATTEMPT_CONFLICT_NOTICE);
         }
         return;
@@ -1388,8 +1405,10 @@ export default function ContributeToGoal() {
     not answered.
   */
   const kioskAttemptInFlight = submitting || (pending != null && pending.state === 'sending');
-  const kioskLoadSettled =
-    state.kind === 'closed' || state.kind === 'notFound' || state.kind === 'error';
+  // Settled: the goal could not be shown, or the saved attempt could not be
+  // read and nothing has been written (src/kioskSession.ts
+  // `kioskScreenSettled`) — so the fail-closed screen has a deadline too.
+  const kioskLoadSettled = kioskScreenSettled({ stateKind: state.kind, restoreFailed, beforeWrite });
   const kioskTerminal =
     kiosk &&
     // Not before the stored attempt has been read back: the deadline must
@@ -2702,7 +2721,9 @@ export default function ContributeToGoal() {
   // FAIL CLOSED (NATIVE-STATE-1). The restore could not read this account's
   // slot, so it may hold an unresolved attempt nobody has seen. Entry, review
   // and the camera are not offered — a new attempt could replace that one —
-  // until Retry reads it. A kiosk keeps its Finish and its deadline.
+  // until Retry reads it. A kiosk keeps its Finish and its 90-second deadline
+  // (`kioskLoadSettled` counts this screen as settled); Finish clears nothing
+  // and signs out.
   if (restoreFailed && beforeWrite) {
     return screen(
       <>

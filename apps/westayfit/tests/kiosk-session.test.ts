@@ -361,3 +361,39 @@ describe('NATIVE-STATE-2 review: the kiosk guards that had no test', () => {
     window.sessionStorage.clear();
   });
 });
+
+describe('#635 follow-up: a kiosk on the "couldn’t read this device’s saved attempt" screen', () => {
+  it('counts as settled, so the deadline runs; Finish clears nothing, signs out, and leaves the stored record', async () => {
+    const { kioskScreenSettled, kioskMayFinishUnattended } = await import('../src/kioskSession');
+    const settled = kioskScreenSettled({ stateKind: 'ready', restoreFailed: true, beforeWrite: true });
+    expect(settled).toBe(true);
+    expect(kioskMayFinishUnattended({ outcome: 'none', attemptInFlight: false, loadSettled: settled })).toBe(true);
+    // Not while anything was written, and not on an ordinary ready screen.
+    expect(kioskScreenSettled({ stateKind: 'ready', restoreFailed: true, beforeWrite: false })).toBe(false);
+    expect(kioskScreenSettled({ stateKind: 'ready', restoreFailed: false, beforeWrite: true })).toBe(false);
+    expect(kioskScreenSettled({ stateKind: 'error', restoreFailed: false, beforeWrite: true })).toBe(true);
+
+    // What the deadline does there: the unread record is somebody's, and stays.
+    const row: PendingContribution = { goalId: GOAL, attemptId: ATTEMPT, count: 30, ts: Date.now(), state: 'unknown' };
+    await savePendingNew(row, UID);
+    const { clearPendingIfAttempt } = await import('../src/pendingContribution');
+    const guarded = vi.fn(clearPendingIfAttempt);
+    const signOut = vi.fn(async () => {});
+    const result = await runKioskFinish(
+      { goalId: GOAL, outcome: 'none', uid: UID, attemptId: null },
+      { signOut, clearPendingIfAttempt: guarded, clearKioskKeys: clearKioskReturnGoal }
+    );
+    expect(result.signedOut).toBe(true);
+    expect(signOut).toHaveBeenCalledTimes(1);
+    expect(guarded).not.toHaveBeenCalled();
+    expect(JSON.parse(window.localStorage.getItem(pendingKey(GOAL, UID)) as string).attemptId).toBe(ATTEMPT);
+  });
+
+  it('the route uses that rule, and the deadline still waits for an unsettled restore (so Try again resets it)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const route = readFileSync('app/contribute/[goalId].tsx', 'utf8');
+    expect(route).toContain('const kioskLoadSettled = kioskScreenSettled({ stateKind: state.kind, restoreFailed, beforeWrite });');
+    const terminal = route.slice(route.indexOf('const kioskTerminal ='), route.indexOf('kioskMayFinishUnattended({', route.indexOf('const kioskTerminal =')));
+    expect(terminal).toContain('restoreSettled &&');
+  });
+});

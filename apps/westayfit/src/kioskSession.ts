@@ -239,6 +239,21 @@ export type KioskRestInput = {
   loadSettled: boolean;
 };
 
+/**
+ * Whether the contribute screen a kiosk is on is a SETTLED screen with no
+ * attempt of its own — the `loadSettled` input above. The goal could not be
+ * shown (closed, not found, an error), or the device's saved attempt could
+ * not be read and nothing has been written since (the screen's fail-closed
+ * state). Without the second, a kiosk on that state had no deadline: nobody
+ * could record there, and nothing ended the session for whoever walked up
+ * next. Finishing from it clears nothing — no attempt was made, so there is
+ * no attempt id to clear, and the unread record stays for its owner — and
+ * signs out.
+ */
+export function kioskScreenSettled(s: { stateKind: string; restoreFailed: boolean; beforeWrite: boolean }): boolean {
+  return s.stateKind === 'closed' || s.stateKind === 'notFound' || s.stateKind === 'error' || (s.restoreFailed && s.beforeWrite);
+}
+
 export function kioskMayFinishUnattended(input: KioskRestInput): boolean {
   if (input.attemptInFlight) return false;
   switch (input.outcome) {
