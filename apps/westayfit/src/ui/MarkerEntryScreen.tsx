@@ -1,6 +1,6 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { useWsfAuth } from '../auth';
 import { AuthFlagOffPanel } from '../AuthFlagOffPanel';
@@ -21,6 +21,7 @@ import {
 import { clearPendingJoinCode } from '../pendingJoinCode';
 import { ButtonLink } from './ButtonLink';
 import { kit } from './kit';
+import { ScreenTopSpacer } from './useScreenTopInset';
 import { WsfWordmark } from './WsfWordmark';
 
 /**
@@ -164,6 +165,8 @@ export function MarkerEntryScreen({
 
   const page = (testID: string, children: React.ReactNode) => (
     <ScrollView style={kit.scroll} contentContainerStyle={kit.page} keyboardShouldPersistTaps="handled">
+      {/* // NATIVE-MEMBER-1 W16-8 (INT-09): a root-stack screen clears the status bar itself; nothing on web. */}
+      <ScreenTopSpacer />
       <View style={kit.column} testID={testID}>
         <View style={kit.chrome}>
           <WsfWordmark variant="navy" height={22} testID="wsf-marker-wordmark" />
@@ -189,10 +192,18 @@ export function MarkerEntryScreen({
         <Text style={kit.cardTitle} accessibilityRole="header" {...({ 'aria-level': 1 } as Record<string, unknown>)}>
           {INVALID_TITLE}
         </Text>
-        <Text style={kit.body}>
-          It isn’t pointing at a challenge right now. Ask someone at the event, or open the app to
-          find your communities.
-        </Text>
+        {/* MF-19: in the app the member is already in it, so the app names Home instead. */}
+        {Platform.OS === 'web' ? (
+          <Text style={kit.body}>
+            It isn’t pointing at a challenge right now. Ask someone at the event, or open the app to
+            find your communities.
+          </Text>
+        ) : (
+          <Text style={kit.body}>
+            It isn’t pointing at a challenge right now. Ask someone at the event, or go to Home to find
+            your communities.
+          </Text>
+        )}
         <SecondaryLink href="/" label="Back to home" testID="wsf-marker-home" />
       </View>
     );
