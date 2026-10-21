@@ -133,23 +133,47 @@ function trackedSources(appRoot) {
   return { listed, extra };
 }
 
-function checkPlatform(appRoot, platform) {
-  const { listed, extra } = trackedSources(appRoot);
-  const files = [...nativeFileList(listed, platform), ...extra];
-  const dir = mkdtempSync(join(tmpdir(), `wsf-typecheck-${platform}-`));
-  const config = join(dir, 'tsconfig.json');
-  writeFileSync(config, JSON.stringify(tsconfigFor(appRoot, platform, files), null, 2));
-  const tsc = join(appRoot, 'node_modules', 'typescript', 'bin', 'tsc');
-  const run = spawnSync(process.execPath, [tsc, '-p', config, '--pretty', 'false'], { cwd: appRoot, encoding: 'utf8' });
-  // Only what this run wrote: its one tsconfig and the empty directory around it.
-  unlinkSync(config);
-  rmdirSync(dir);
+/** tsc's output for the whole app can be large; spawnSync's 1 MiB default would cut it off. */
+export const TSC_MAX_BUFFER = 64 * 1024 * 1024;
+
+/**
+ * One tsc run's verdict from spawnSync's answer. A tsc that did not run (not
+ * found, killed for its output size, any spawn error) fails: it is never read
+ * as "0 errors".
+ */
+export function outcomeOf(run, appRoot) {
+  if (run.error) {
+    const code = run.error.code ?? run.error.name ?? 'error';
+    return { errors: [], output: `tsc did not run (${code})`, failed: true };
+  }
   const output = `${run.stdout ?? ''}${run.stderr ?? ''}`
     .split(appRoot + sep)
     .join('')
     .trim();
   const errors = output.split('\n').filter((l) => /error TS\d+:/.test(l));
-  return { files: files.length, errors, output, status: run.status };
+  return { errors, output, failed: errors.length > 0 || run.status !== 0 };
+}
+
+export function checkPlatform(appRoot, platform, spawn = spawnSync) {
+  const { listed, extra } = trackedSources(appRoot);
+  const files = [...nativeFileList(listed, platform), ...extra];
+  const dir = mkdtempSync(join(tmpdir(), `wsf-typecheck-${platform}-`));
+  const config = join(dir, 'tsconfig.json');
+  let run;
+  try {
+    writeFileSync(config, JSON.stringify(tsconfigFor(appRoot, platform, files), null, 2));
+    const tsc = join(appRoot, 'node_modules', 'typescript', 'bin', 'tsc');
+    run = spawn(process.execPath, [tsc, '-p', config, '--pretty', 'false'], {
+      cwd: appRoot,
+      encoding: 'utf8',
+      maxBuffer: TSC_MAX_BUFFER,
+    });
+  } finally {
+    // Only what this run wrote: its one tsconfig and the empty directory around it.
+    if (existsSync(config)) unlinkSync(config);
+    rmdirSync(dir);
+  }
+  return { files: files.length, ...outcomeOf(run, appRoot) };
 }
 
 function main() {
@@ -161,7 +185,7 @@ function main() {
     const r = checkPlatform(appRoot, platform);
     console.log(`typecheck:native ${platform}: ${r.files} files, ${r.errors.length} error(s)`);
     if (r.output) console.log(r.output);
-    if (r.errors.length > 0 || r.status !== 0) failed = true;
+    if (r.failed) failed = true;
   }
   process.exit(failed ? 1 : 0);
 }
