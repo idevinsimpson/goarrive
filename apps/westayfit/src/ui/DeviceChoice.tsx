@@ -16,6 +16,7 @@ import {
   DEVICE_SHARED_RESET,
   DEVICE_SHARED_TITLE,
   deviceModeMayBeRemembered,
+  isDeviceModeReady,
   subscribeDeviceModeMayBeRemembered,
 } from '../deviceMode';
 import {
@@ -67,6 +68,11 @@ export type DeviceChoiceProps = {
   testID: string;
 };
 
+/** The device note may show: the launch read has answered (always, on the web) and the answer can be remembered. */
+function deviceNoteMayShow(): boolean {
+  return isDeviceModeReady() && deviceModeMayBeRemembered();
+}
+
 export function DeviceChoice({
   onChoosePersonal,
   onChooseShared,
@@ -83,11 +89,17 @@ export function DeviceChoice({
     unreadable; then "remembered on this device only" would be untrue, so the
     note is not shown (src/deviceMode.ts `deviceModeMayBeRemembered`, W13-3,
     followed as it changes). On the web it is always true: the note stays.
+
+    RV14-642-N2: and not before the device's launch read has answered. Until
+    then nothing is known, and an unreadable store would flash the note on the
+    first render. The shipped routes render this only once the device mode is
+    read; this keeps the component honest for any caller. On the web the
+    store is always ready, so nothing changes there.
   */
   const remembered = useSyncExternalStore(
     subscribeDeviceModeMayBeRemembered,
-    deviceModeMayBeRemembered,
-    deviceModeMayBeRemembered,
+    deviceNoteMayShow,
+    deviceNoteMayShow,
   );
   const note = remembered ? (
     <Text style={kit.caption} testID={`${testID}-note`}>
