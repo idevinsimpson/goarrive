@@ -616,12 +616,18 @@ export default function You() {
         // community resolved, with Retry and no stale mark. A 'loading' page
         // (the focus dropped a refused community's figures) is never kept: it
         // falls through to the failed page with Retry, not a skeleton marked
-        // stale. Pick, none and failed pages are kept and marked stale, as
-        // before.
+        // stale. Pick, none and failed pages are kept and marked stale only
+        // when no fresh list resolved a community (the membership read itself
+        // failed): W16-22 (heads-15 RV17-642-N1), a fresh list that RESOLVED
+        // one (whose goals then failed) contradicts them as surely as it does
+        // a member page, and they draw no stale mark and no Retry, so the
+        // failed page for the community resolved is drawn instead.
         const shown = shownRef.current.uid === uid ? shownRef.current.screen : LOADING;
         if (
           (keep || (recorded && recorded.kind === 'member') || (painted && painted.kind === 'member')) &&
-          (shown.kind === 'member' ? keptPageStillShown(shown, community, communities) : shown.kind !== 'loading')
+          (shown.kind === 'member'
+            ? keptPageStillShown(shown, community, communities)
+            : shown.kind !== 'loading' && community === undefined)
         ) {
           // Kept, but recomposed against now (N3). heads-10 F-1: from the
           // account's record first, which is never older than the page (a

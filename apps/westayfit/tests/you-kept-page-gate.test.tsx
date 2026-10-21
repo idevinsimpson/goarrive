@@ -13,7 +13,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * member page the fresh read contradicts gives way to the failed page for the
  * community resolved, with Retry and no stale mark; a 'loading' page is never
  * kept (it gives way to the failed page with Retry); pick, none and failed
- * pages are kept as before.
+ * pages are kept as before when no fresh list was read, and (W16-22, heads-15
+ * RV17-642-N1) give way to the failed page for the community a fresh list
+ * resolved, whose goals then failed.
  *
  * Built on the RV16-C15 reviewer's probe (its harness is tests/you-resume's,
  * with one realism change: the membership read writes its answer into the
@@ -288,5 +290,58 @@ describe('W16-17: a failed You load keeps the page on screen only while its fres
     expect(readMyCommunities.mock.calls.at(-1)).toEqual(['u1', 0]);
     expect(byId('wsf-you-pick-community')).not.toBeNull();
     expect(byId('wsf-you-failed')).toBeNull();
+  });
+
+  it('(e2) control: "no community" on screen, the membership read fails (no list read): kept as today', async () => {
+    readMyCommunities.mockResolvedValueOnce({ items: [] });
+    await render();
+    expect(byId('wsf-you-no-community')).not.toBeNull();
+    readMyCommunities.mockRejectedValueOnce(OFFLINE());
+    await returnAfter(RESUME_MIN_AWAY_MS + 1_000);
+    await flush();
+    await flush();
+    expect(byId('wsf-you-no-community')).not.toBeNull();
+    expect(byId('wsf-you-failed')).toBeNull();
+  });
+});
+
+/*
+  W16-22 (heads-15 RV17-642-N1). The gate's non-member half kept a pick or
+  "no community" page even when this load's FRESH list resolved a community
+  whose goals then failed. The fresh read contradicts that page, and those
+  pages draw no stale mark and no Retry (YouParityView draws both inside a
+  member page only), so the contradicted card stood with nothing to say so.
+  A non-member page is now kept only when no fresh list resolved a community
+  (`community === undefined`: the membership read itself failed); otherwise
+  the failed page for the community resolved, with Retry. The reviewer's P1
+  and P2, which asserted the old behaviour, now assert this.
+*/
+describe('W16-22 / RV17-642-N1: a non-member page gives way when a fresh list resolved a community', () => {
+  it('P1: "no community" on screen; a resume reads [Oak], Oak resolves and its goals fail: the failed page for Oak, with Retry', async () => {
+    readMyCommunities.mockResolvedValueOnce({ items: [] });
+    await render();
+    expect(byId('wsf-you-no-community')).not.toBeNull();
+    readMyCommunities.mockResolvedValueOnce({ items: [OAK] });
+    oakGoalsFail();
+    await returnAfter(RESUME_MIN_AWAY_MS + 1_000);
+    await flush();
+    await flush();
+    expect(readGoals.mock.calls.at(-1)?.[1]).toBe('oak');
+    expect(byId('wsf-you-no-community')).toBeNull();
+    expectFailedForOak();
+  });
+
+  it('P2: pick on screen; Oak remembered meanwhile; a resume reads [Oak, Elm], Oak resolves and its goals fail: the failed page for Oak, with Retry', async () => {
+    await render();
+    expect(byId('wsf-you-pick-community')).not.toBeNull();
+    rememberCurrentCommunity('u1', 'oak');
+    readMyCommunities.mockResolvedValueOnce({ items: [OAK, ELM] });
+    oakGoalsFail();
+    await returnAfter(RESUME_MIN_AWAY_MS + 1_000);
+    await flush();
+    await flush();
+    expect(readGoals.mock.calls.at(-1)?.[1]).toBe('oak');
+    expect(byId('wsf-you-pick-community')).toBeNull();
+    expectFailedForOak();
   });
 });

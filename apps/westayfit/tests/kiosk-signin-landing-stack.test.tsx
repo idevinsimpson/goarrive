@@ -29,11 +29,16 @@ import {
  * currentUser) and the kiosk records (`readKioskSession()`, and the kiosk
  * return where it matters) at each point: (1) the LANDING right after Sign in
  * or Create account, for a join link opened at the kiosk, an event return, a
- * /go marker return and the kiosk marker alone ('/', exactly ONE kiosk start
- * screen); (2) after EACH Back until the kiosk start screen is focused; (3)
- * FINISH on the kiosk flow from the landed state; (4) IDLE EXPIRY on the kiosk
- * flow, past KIOSK_IDLE_MS; and (5) for the join, after Join and then Back,
- * Back. On iOS and Android.
+ * /go marker return, the kiosk marker alone ('/', exactly ONE kiosk start
+ * screen) and (W16-22, heads-15 RV17-642-N2) the plain kiosk RETURN, the
+ * default after a kiosk Sign in (/contribute/<goal>?kiosk=1: dismissTo the
+ * kiosk, then push the contribution, never signed out in between); (2) after
+ * EACH Back until the kiosk start screen is focused; (3) FINISH on the kiosk
+ * CONTRIBUTION flow, opened from the landing (it is the landing itself for
+ * the return); (4) IDLE EXPIRY on that flow, past KIOSK_IDLE_MS; and (5) for
+ * the join, after Join and then Back, Back. On iOS and Android. Finish and
+ * idle exist only on the kiosk contribution flow: at a landed join, event or
+ * /go screen there is neither (owner decision RV16-641-N3, pinned by W14).
  *
  * THE KIOSK START SCREEN'S DESIGN, asserted wherever it is reached:
  * app/kiosk/[goalId].tsx:118-137 (useFocusEffect): with the session's marker
@@ -423,7 +428,7 @@ async function submitSignIn(): Promise<void> {
 }
 
 type Screen = 'signin' | 'signup';
-type Destination = 'join' | 'event' | 'go' | 'marker';
+type Destination = 'join' | 'event' | 'go' | 'marker' | 'return';
 
 /**
  * From the kiosk start screen to the landing: the destination is armed at the
@@ -475,6 +480,10 @@ async function landVia(screen: Screen, dest: Destination): Promise<Checkpoint> {
     case 'marker':
       // '/' with the marker open: that kiosk's start screen, dismissed to (ONE kiosk), which signs the visitor out.
       return { ...AT_REST_ON_THE_KIOSK, kioskReturn: null };
+    case 'return':
+      // W16-22 (RV17-642-N2): the kiosk return Contribute armed, nothing else. dismissTo the kiosk start
+      // screen (whatever lay above it goes), then push its contribution, signed in, the marker open.
+      return { stack: [KIOSK, 'contribute/[goalId]'], user: VISITOR.uid, marker: GOAL, kioskReturn: GOAL };
   }
 }
 
@@ -494,7 +503,7 @@ async function backToTheKiosk(landed: Checkpoint, label: string): Promise<void> 
 /** The kiosk flow from where the visitor is: the kiosk's own contribution screen (from the start screen, its Contribute). */
 async function openTheKioskFlow(): Promise<void> {
   if (focusedRoute() === KIOSK) await clickFocused('wsf-kiosk-start');
-  else {
+  else if (focusedRoute() !== 'contribute/[goalId]') {
     act(() => router.push(`/contribute/${GOAL}?kiosk=1` as never));
     await flush();
   }
@@ -508,7 +517,10 @@ describe.each(['ios', 'android'] as const)('W16-19 / RV16-641-B1 on %s: Sign in 
   });
 
   describe.each(['signin', 'signup'] as const)('%s', (screen) => {
-    describe.each(['join', 'event', 'go', 'marker'] as const)('%s', (dest) => {
+    describe.each(['join', 'event', 'go', 'marker', 'return'] as const)('%s', (dest) => {
+      /** Where Finish and idle run: the kiosk contribution flow (W14-N; no landed-state Finish or idle, RV16-641-N3). */
+      const flow =
+        dest === 'return' ? 'on the kiosk contribution flow (the landing itself)' : 'on the kiosk contribution flow, opened from the landing';
       it(`landing, then Back until the kiosk start screen`, async () => {
         const landed = await landVia(screen, dest);
         expectCheckpoint(`landed (${screen}, ${dest})`, landed);
@@ -517,6 +529,16 @@ describe.each(['ios', 'android'] as const)('W16-19 / RV16-641-B1 on %s: Sign in 
           expect(names().filter((n) => n === KIOSK)).toHaveLength(1);
           expect(nav.log).toContain(`dismissTo /kiosk/${GOAL}`);
           expect(nav.log.some((l) => l.startsWith('replace /kiosk'))).toBe(false);
+        } else if (dest === 'return') {
+          // W16-22 (RV17-642-N2): dismissTo the ONE kiosk start screen, then push its contribution; the
+          // dismiss in between never signs the visitor out, and the contribution is not the signed-out gate.
+          const dismissed = nav.log.indexOf(`dismissTo /kiosk/${GOAL}`);
+          expect(dismissed, nav.log.join(' | ')).toBeGreaterThanOrEqual(0);
+          expect(nav.log.indexOf(`push /contribute/${GOAL}?kiosk=1`)).toBeGreaterThan(dismissed);
+          expect(nav.log.some((l) => l.startsWith('replace'))).toBe(false);
+          expect(fb.signOutCalls, 'no sign-out at the landing').toBe(0);
+          expect(inFocused('wsf-contribute-signin-link'), 'the contribution is not the signed-out gate').toBeNull();
+          expect(names().filter((n) => n === KIOSK)).toHaveLength(1);
         } else {
           expect(nav.log.some((l) => l.startsWith('push'))).toBe(false);
         }
@@ -525,7 +547,7 @@ describe.each(['ios', 'android'] as const)('W16-19 / RV16-641-B1 on %s: Sign in 
         expect(fb.signOutCalls).toBeGreaterThanOrEqual(1);
       });
 
-      it(`landing, then Finish on the kiosk flow`, async () => {
+      it(`landing, then Finish ${flow}`, async () => {
         const landed = await landVia(screen, dest);
         expectCheckpoint(`landed (${screen}, ${dest})`, landed);
         await openTheKioskFlow();
@@ -536,7 +558,7 @@ describe.each(['ios', 'android'] as const)('W16-19 / RV16-641-B1 on %s: Sign in 
         expect(memberHomeRenders).toBe(0);
       });
 
-      it(`landing, then idle expiry on the kiosk flow`, async () => {
+      it(dest === 'marker' ? 'landing at rest on the kiosk start screen, then past the idle timeout: unchanged' : `landing, then idle expiry ${flow}`, async () => {
         const landed = await landVia(screen, dest);
         expectCheckpoint(`landed (${screen}, ${dest})`, landed);
         if (dest === 'marker') {

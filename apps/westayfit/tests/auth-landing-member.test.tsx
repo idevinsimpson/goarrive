@@ -50,9 +50,11 @@ vi.mock('../src/ui/useReducedMotion', async (importOriginal) => ({
 
 const router = { replace: vi.fn(), push: vi.fn(), dismissTo: vi.fn(), back: vi.fn(), canGoBack: () => true };
 // W16-19: the screens read the root stack at the landing (landAfterAuth's
-// kiosk-beneath guard). Here they were opened over Home, with no kiosk.
+// kiosk-beneath guard). Here they were opened over Home, with no kiosk, unless
+// a case opens them at a kiosk (`rootStack`, W16-22).
 const ROOT_STACK = { index: 1, routes: [{ name: '(tabs)' }, { name: 'signin' }] };
-const navigation = { dispatch: vi.fn(), isFocused: () => true, getParent: () => undefined, addListener: () => () => {}, setParams: vi.fn(), getState: () => ROOT_STACK };
+let rootStack: { index: number; routes: Array<{ name: string; params?: object }> } = ROOT_STACK;
+const navigation = { dispatch: vi.fn(), isFocused: () => true, getParent: () => undefined, addListener: () => () => {}, setParams: vi.fn(), getState: () => rootStack };
 vi.mock('expo-router', () => ({
   router,
   Link: ({ href, children }: { href: string; children: ReactNode }) => <a href={href}>{children}</a>,
@@ -266,22 +268,42 @@ describe('W16-7 / INT-20: the sign-in and sign-up terminal hops land on a phone'
 // RV12-641-F1 (integrator 793821c9, merged at cab2e9ae): a visitor signing in
 // at a kiosk returns to /contribute/<goal>?kiosk=1 over the kiosk's start
 // screen. Resetting to Home there would put the visitor's member Home under
-// the contribution on a shared device, so the hop replaces.
-describe('W16-7 x RV12-641-F1: a kiosk destination is replaced on a phone, never reset to Home', () => {
+// the contribution on a shared device. W16-22 (heads-15 RV17-642-N2): since
+// W16-19 the screens read the root stack, so "at a kiosk" is a stack with the
+// kiosk's start screen beneath: they dismiss to it, then push the
+// contribution (proven on a real stack in
+// tests/kiosk-signin-landing-stack.test.tsx, 'return'). With no kiosk on the
+// stack, the kiosk destination is replaced, as before.
+describe('W16-7 x RV12-641-F1: a kiosk destination on a phone, never reset to Home', () => {
   const KIOSK_NEXT = '/contribute/g1?kiosk=1';
+  const AT_THE_KIOSK = { index: 1, routes: [{ name: 'kiosk/[goalId]', params: { goalId: 'g1' } }, { name: 'signin' }] };
+  afterEach(() => {
+    rootStack = ROOT_STACK;
+  });
+  /** dismissTo the kiosk start screen, THEN push the contribution; no replace, no reset. */
+  const expectDismissThenPush = () => {
+    expect(router.dismissTo).toHaveBeenCalledTimes(1);
+    expect(router.dismissTo).toHaveBeenCalledWith('/kiosk/g1');
+    expect(router.push).toHaveBeenCalledTimes(1);
+    expect(router.push).toHaveBeenCalledWith(KIOSK_NEXT);
+    expect(router.dismissTo.mock.invocationCallOrder[0]).toBeLessThan(router.push.mock.invocationCallOrder[0]!);
+    expect(router.replace).not.toHaveBeenCalled();
+    expect(navigation.dispatch).not.toHaveBeenCalled();
+  };
+
   it.each([
     ['Sign in', () => <SignIn />],
     ['Create account', () => <SignUp />],
-  ])('%s, already signed in (iOS): the kiosk contribution is replaced, never HOME_ONLY_RESET', async (_n, el) => {
+  ])('%s at a kiosk, already signed in (iOS): dismissed to the kiosk, the contribution pushed, never HOME_ONLY_RESET', async (_n, el) => {
+    rootStack = AT_THE_KIOSK;
     next.value = KIOSK_NEXT;
     auth = { ready: true, user: MEMBER };
     await render(el(), 'ios');
-    expect(router.replace).toHaveBeenCalledWith(KIOSK_NEXT);
-    expect(navigation.dispatch).not.toHaveBeenCalled();
-    expect(router.push).not.toHaveBeenCalled();
+    expectDismissThenPush();
   });
 
-  it('Sign in submitted at a kiosk (Android): one replace to the kiosk contribution, no reset, no push', async () => {
+  it('Sign in submitted at a kiosk (Android): dismissed to the kiosk, the contribution pushed once, no reset', async () => {
+    rootStack = AT_THE_KIOSK;
     next.value = KIOSK_NEXT;
     signIn.mockImplementation(async () => {
       setUser(MEMBER);
@@ -292,10 +314,20 @@ describe('W16-7 x RV12-641-F1: a kiosk destination is replaced on a phone, never
     type('wsf-signin-password', 'correct horse');
     await click('wsf-signin-submit');
     await flush();
-    expect(router.replace).toHaveBeenCalledTimes(1);
-    expect(router.replace).toHaveBeenCalledWith(KIOSK_NEXT);
-    expect(navigation.dispatch).not.toHaveBeenCalled();
+    expectDismissThenPush();
     expect(navigation.dispatch).not.toHaveBeenCalledWith(HOME_ONLY_RESET);
+  });
+
+  it.each([
+    ['Sign in', () => <SignIn />],
+    ['Create account', () => <SignUp />],
+  ])('%s with a kiosk destination but no kiosk on the stack (iOS): the contribution is replaced, never HOME_ONLY_RESET', async (_n, el) => {
+    next.value = KIOSK_NEXT;
+    auth = { ready: true, user: MEMBER };
+    await render(el(), 'ios');
+    expect(router.replace).toHaveBeenCalledWith(KIOSK_NEXT);
+    expect(router.dismissTo).not.toHaveBeenCalled();
+    expect(navigation.dispatch).not.toHaveBeenCalled();
     expect(router.push).not.toHaveBeenCalled();
   });
 });
