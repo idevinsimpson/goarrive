@@ -9,9 +9,11 @@
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import type { DeviceKv } from './kv';
+import type { DeviceKv } from './kvTypes';
 
-export type { DeviceKv, KvRead } from './kv';
+// From the suffix-free contract module, never from './kv': on a phone './kv'
+// IS this file, and the alias would be circular (src/storage/kvTypes.ts).
+export type { DeviceKv, KvRead } from './kvTypes';
 
 export const deviceKv: DeviceKv = {
   async getItem(key) {
