@@ -237,21 +237,41 @@ const NO_CONTEXT: JoinEventContext = { goalId: null, activity: null };
  * code, within the expiry.
  */
 export async function takeJoinEventContext(uid: string | null, joinCode: string): Promise<JoinEventContext> {
-  const context = await readJoinEventContext(uid, joinCode);
-  await discardJoinEventContext();
+  const { context, counts } = await readJoinEventContext(uid, joinCode);
+  // The context is used, so what the read saw is consumed.
+  await discardJoinEventContext(counts);
   return context;
 }
 
-/** The context for (uid, joinCode), after the native launch read. Reads only. */
-async function readJoinEventContext(uid: string | null, joinCode: string): Promise<JoinEventContext> {
-  await postAuthDestinationsReady();
-  const goalId = readPendingEventGoal(uid, joinCode);
-  const activity = goalId ? readPendingEventActivity(uid, joinCode, goalId) : null;
-  return { goalId, activity };
+/**
+ * The two records' write counts at a moment, as the baseline for the discard
+ * that ends a take. The discard removes only what was there at that moment
+ * (`discard({ since })`): anything written after it is newer and survives.
+ *   - A take whose context is USED discards what its read saw (the counts are
+ *     taken synchronously with the read), so a used context is consumed.
+ *   - A bounded take that gave up WITHOUT using it discards what was there
+ *     when the take started: a context stashed while the read was still
+ *     outstanding (a fresh scan) is not this take's, and survives.
+ */
+type ContextWriteCounts = { event: number; activity: number };
+function contextWriteCounts(): ContextWriteCounts {
+  return { event: pendingEvent.writeCount(), activity: pendingActivity.writeCount() };
 }
 
-function discardJoinEventContext(): Promise<unknown> {
-  return Promise.all([pendingEvent.discard(), pendingActivity.discard()]);
+/** The context for (uid, joinCode), after the native launch read, and the write counts it was read at. Reads only. */
+async function readJoinEventContext(
+  uid: string | null,
+  joinCode: string
+): Promise<{ context: JoinEventContext; counts: ContextWriteCounts }> {
+  await postAuthDestinationsReady();
+  const counts = contextWriteCounts();
+  const goalId = readPendingEventGoal(uid, joinCode);
+  const activity = goalId ? readPendingEventActivity(uid, joinCode, goalId) : null;
+  return { context: { goalId, activity }, counts };
+}
+
+function discardJoinEventContext(since: ContextWriteCounts): Promise<unknown> {
+  return Promise.all([pendingEvent.discard({ since: since.event }), pendingActivity.discard({ since: since.activity })]);
 }
 
 /**
@@ -284,10 +304,20 @@ export function takeJoinEventContextWithin(
       resolve(context);
     };
     const timer = setTimeout(() => finish(NO_CONTEXT), ms);
+    // Baselines (see `ContextWriteCounts`): what the read saw if its context
+    // is used; what was there at the start if the wait gave up first.
+    const started = contextWriteCounts();
+    let used: ContextWriteCounts | null = null;
     readJoinEventContext(uid, joinCode)
-      .then(finish, () => finish(NO_CONTEXT))
+      .then(
+        ({ context, counts }) => {
+          if (!settled) used = counts;
+          finish(context);
+        },
+        () => finish(NO_CONTEXT)
+      )
       .finally(() => {
-        void discardJoinEventContext();
+        void discardJoinEventContext(used ?? started);
       });
   });
 }

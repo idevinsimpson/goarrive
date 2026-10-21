@@ -71,7 +71,14 @@ export type PostAuthDestination<V> = {
    * cannot apply again after a relaunch. Resolves whether any of the three
    * steps was kept.
    */
-  discard(): Promise<boolean>;
+  discard(opts?: { since?: number }): Promise<boolean>;
+  /**
+   * Writes made to this record through the store in this process. Pass a
+   * value taken EARLIER as `discard({ since })` when the discard belongs to an
+   * operation that started then: a write that landed in between is newer than
+   * what that operation read, and is not discarded.
+   */
+  writeCount(): number;
 };
 
 /** What a record that could not be removed is overwritten with. Every codec decodes it as nothing. */
@@ -111,7 +118,10 @@ export function definePostAuthDestination<V>(codec: DestinationCodec<V>): PostAu
     clear() {
       return store.remove(codec.key);
     },
-    async discard() {
+    writeCount() {
+      return store.writeCount(codec.key);
+    },
+    async discard(opts) {
       // A write that lands while a removal is outstanding is NEWER than the
       // record being discarded (a fresh scan, say): once one has landed, the
       // retry and the overwrite would destroy it, so they stop.
@@ -129,13 +139,16 @@ export function definePostAuthDestination<V>(codec: DestinationCodec<V>): PostAu
       // newer, so the discard stops after one refused removal and the stale
       // record can apply once more after a relaunch (src/joinEventHandoff.ts,
       // ACCEPTED LIMITS).
-      const since = store.writeCount(codec.key);
+      const since = opts?.since ?? store.writeCount(codec.key);
       const discarding = store.read(codec.key);
       const newerLanded = () => {
         if (store.writeCount(codec.key) !== since) return true;
         const now = store.read(codec.key);
         return now !== null && now !== discarding;
       };
+      // A write since the caller's baseline replaced the record it meant to
+      // discard (same key): that newer record is not this call's to remove.
+      if (newerLanded()) return true;
       if (await store.remove(codec.key)) return true;
       if (newerLanded()) return true;
       if (await store.remove(codec.key)) return true;

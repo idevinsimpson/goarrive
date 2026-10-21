@@ -60,9 +60,8 @@ import {
   kioskMayFinishUnattended,
   kioskScreenSettled,
   kioskCountdownExpired,
-  kioskCountdownLabel,
+  kioskCountdownText,
   kioskRemainingMs,
-  kioskRemainingSeconds,
   runKioskFinish,
   type KioskOutcome,
 } from '../../src/kioskSession';
@@ -1542,6 +1541,7 @@ export default function ContributeToGoal() {
 
   const kioskRemaining =
     kioskStartedAt == null ? Number.POSITIVE_INFINITY : kioskRemainingMs(kioskStartedAt, kioskNow);
+  const kioskCountdown = kioskCountdownText(kioskStartedAt, kioskNow);
 
   useEffect(() => {
     if (!kioskTerminal) return;
@@ -1748,6 +1748,10 @@ export default function ContributeToGoal() {
         >
           Finish signs you out and returns this device to its start screen.
         </Text>
+        {/* Only while the session clock runs (`kioskCountdownText`): with no
+            clock — a request in flight, a restore being retried — the row
+            would read "Finishing now…" over a Stay that does nothing. */}
+        {kioskCountdown != null ? (
         <View style={styles.kioskCountdownRow}>
           {/* D-2. The countdown changes without anybody acting, so it
               announces itself politely rather than interrupting. */}
@@ -1756,7 +1760,7 @@ export default function ContributeToGoal() {
             testID="wsf-kiosk-countdown"
             aria-live="polite"
           >
-            {kioskCountdownLabel(kioskRemainingSeconds(kioskRemaining))}
+            {kioskCountdown}
           </Text>
           <Pressable
             onPress={() => setKioskStay((n) => n + 1)}
@@ -1772,6 +1776,7 @@ export default function ContributeToGoal() {
             </Text>
           </Pressable>
         </View>
+        ) : null}
         {/* The one string on a shared device that has to be read: the device
             did not sign the last visitor out. At #8A1C1C on navy it measured
             1.47:1 -- present, and barely readable. */}

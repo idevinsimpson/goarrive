@@ -11,28 +11,11 @@
  * that needs the record to exist before acting (a pending attempt before its
  * request) must check the result rather than assume it.
  */
-export type DeviceKv = {
-  /** The value, or null when absent OR UNREADABLE. Use `readItem` when the difference matters. */
-  getItem(key: string): Promise<string | null>;
-  /**
-   * The value, telling "nothing stored" (`{ ok: true, value: null }`) apart
-   * from "the device could not be read" (`{ ok: false }`). A caller that
-   * would overwrite or clear a record on "nothing stored" must use this: an
-   * unreadable record is not an absent one.
-   *
-   * `expiresAt` is set by a store whose values expire (the native session
-   * store), so an in-memory copy can honour the same expiry after it is read.
-   */
-  readItem(key: string): Promise<KvRead>;
-  setItem(key: string, value: string): Promise<boolean>;
-  removeItem(key: string): Promise<boolean>;
-  /** Keys starting with the prefix. Used to clear account-scoped records. */
-  keysWithPrefix(prefix: string): Promise<string[]>;
-  /** Set by a store whose writes expire after this long (the native session store). */
-  readonly ttlMs?: number;
-};
+import type { DeviceKv } from './kvTypes';
 
-export type KvRead = { ok: true; value: string | null; expiresAt?: number } | { ok: false };
+// The contract lives in a module with NO platform sibling (src/storage/kvTypes.ts):
+// re-exported here so every `from './kv'` importer is unchanged.
+export type { DeviceKv, KvRead } from './kvTypes';
 
 function webStorage(): Storage | null {
   try {
