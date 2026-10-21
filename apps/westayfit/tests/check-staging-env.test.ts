@@ -222,7 +222,9 @@ describe('check:staging-env refuses a file git could commit, and fails closed wi
     /** Outside every repository unless a case says otherwise. */
     const fake = (a: Answers) => {
       const calls: Array<[string, string[]]> = [];
-      const git = (args: string[], cwd?: string): Reply => {
+      // git's answer as the script reads it: stdout is always a string.
+      const git = (args: string[], cwd?: string) => ({ stdout: '', ...answer(args, cwd) });
+      const answer = (args: string[], cwd?: string): Reply => {
         const where = cwd === APP_ROOT ? 'app' : String(cwd);
         calls.push([where, args]);
         const app = where === 'app';
