@@ -16,8 +16,6 @@ import { describe, expect, it } from 'vitest';
  * no longer offends fails nothing; remove it then.
  */
 const ALLOWED_FOR_NOW: Record<string, string> = {
-  // MF-05 F-5 (member, W16-10): the invite QR moves to SvgMarkup.
-  'src/ui/JoinQrCode.tsx': 'W16-10',
   // MF-05 M-4 (motion, W14-3): the drawn figure moves to SvgMarkup.
   'src/ui/FollowAlongCard.tsx': 'W14-3',
   // Venue and kiosk surfaces: the handoff and station QR are null on native until INT-08 (W12-13) names an origin.
@@ -97,12 +95,14 @@ describe('MF-05: no SVG data URI reaches React Native\'s <Image> outside SvgMark
     expect(unexpected(USERS)).toEqual([]);
   });
 
-  it('a new data-URI <Image> site fails the scan; only the four ticketed files are tolerated', () => {
+  it('a new data-URI <Image> site fails the scan; only the three ticketed files are tolerated', () => {
     const fresh = { file: 'src/ui/NewQr.tsx', uses: svgDataUriUses('src/ui/NewQr.tsx', `<Image source={{ uri: qrSvgDataUriRaw(c) }} />`) };
     expect(fresh.uses).toEqual(['qrSvgDataUriRaw']);
-    const known = { file: 'src/ui/JoinQrCode.tsx', uses: ['qrSvgDataUriRaw'] };
+    const known = { file: 'src/ui/FollowAlongCard.tsx', uses: ['moveFigureSvgDataUriRaw'] };
     expect(unexpected([fresh, known])).toEqual([fresh]);
-    expect(Object.keys(ALLOWED_FOR_NOW).sort()).toEqual(['app/move/[goalId].tsx', 'app/station/[goalId].tsx', 'src/ui/FollowAlongCard.tsx', 'src/ui/JoinQrCode.tsx']);
+    // W16-10 (MF-05 F-5) moved the invite QR to SvgMarkup: JoinQrCode is no longer tolerated.
+    expect(Object.keys(ALLOWED_FOR_NOW).sort()).toEqual(['app/move/[goalId].tsx', 'app/station/[goalId].tsx', 'src/ui/FollowAlongCard.tsx']);
+    expect(unexpected([{ file: 'src/ui/JoinQrCode.tsx', uses: ['qrSvgDataUriRaw'] }])).toHaveLength(1);
   });
 
   for (const u of USERS.filter((x) => x.file in ALLOWED_FOR_NOW)) {
