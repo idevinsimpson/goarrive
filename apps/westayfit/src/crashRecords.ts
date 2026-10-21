@@ -4,6 +4,14 @@ import { WSF_BUILD_STAMP } from './buildStamp';
 import { deviceKv, type DeviceKv } from './storage/kv';
 
 /**
+ * The part of the device store the crash records use. Narrower than DeviceKv
+ * on purpose, so a store (or a test fake) needs only these three and the
+ * crash modules compile whatever else DeviceKv grows (#641 SH-4: the state
+ * lane adds a required `readItem`).
+ */
+export type CrashKv = Pick<DeviceKv, 'getItem' | 'setItem' | 'removeItem'>;
+
+/**
  * NATIVE-INTEGRATOR-1 (INT-01). THE CRASH RECORD: WHAT IS KEPT, AND WHAT NEVER IS.
  *
  * Written by the native global-handler wrapper (src/crashContainment.native.ts)
@@ -16,8 +24,15 @@ import { deviceKv, type DeviceKv } from './storage/kv';
  * URLs, email addresses, quoted text that is not a dotted code path, any token
  * containing a digit, and any 16+ character token, a join code's minimum
  * length) and then kept only if it has the shape of a known engine, React or
- * harness message (`recordMessage`); any other message is withheld. Stack
- * frames keep only a function name and a file basename with line and column.
+ * harness message (`recordMessage`); any other message is withheld. A message
+ * React builds from app data ("Objects are not valid as a React child (found:
+ * object with keys {…})") keeps only its fixed opening words. Stack frames
+ * keep only a function name and a file basename with line and column.
+ *
+ * BOUNDED WORK. The record is built synchronously while a fatal error waits
+ * to be passed on, so no input can make it slow: the message and the stack are
+ * cut to a fixed length BEFORE any pattern runs, and every pattern is linear
+ * (bounded quantifiers, one pass per token).
  */
 
 export const CRASH_RECORDS_KEY = 'wsfdiag.crashes.v1';
@@ -25,6 +40,11 @@ export const CRASH_RECORDS_KEY = 'wsfdiag.crashes.v1';
 export const MAX_CRASH_RECORDS = 5;
 const MAX_MESSAGE = 160;
 const MAX_FRAMES = 8;
+/** What of a raw message is looked at at all; cut before any pattern runs. */
+export const MAX_SCRUB_INPUT = 1000;
+/** What of a raw stack is looked at, and the longest line read as a frame. */
+const MAX_STACK_INPUT = 4000;
+const MAX_FRAME_LINE = 400;
 
 export type CrashKind = 'fatal' | 'error' | 'rejection' | 'boundary';
 
@@ -45,15 +65,21 @@ const CODE_PATH = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$/;
 /** The message, with anything that could identify a person or a community removed. */
 export function scrubMessage(raw: unknown): string {
   if (typeof raw !== 'string' || !raw) return '';
+  // Cut first: nothing below ever sees more than MAX_SCRUB_INPUT characters.
   let s = raw
-    .replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, '<url>')
-    .replace(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g, '<email>')
+    .slice(0, MAX_SCRUB_INPUT)
+    // A scheme is short; bounding it keeps a long dotted run linear.
+    .replace(/\b[a-z][a-z0-9+.-]{0,31}:\/\/\S+/gi, '<url>')
+    // RFC 5321 limits: a 64-character local part, 63-character labels. An
+    // address past them loses its tail here, and what is left must still
+    // have a safe shape to be kept at all (recordMessage).
+    .replace(/[\w.+-]{1,64}@[\w-]{1,63}(?:\.[\w-]{1,63}){1,8}/g, '<email>')
     // Quoted text: kept only when it is a dotted code path ('window.location.origin').
     .replace(/(["'`‘’“”])([^"'`‘’“”\n]{0,200})(["'`‘’“”])/g, (m, _o, inner: string) =>
       CODE_PATH.test(inner) ? m : '<text>',
     )
-    .replace(/[A-Za-z0-9_-]*\d[A-Za-z0-9_-]*/g, '<id>')
-    .replace(/[A-Za-z0-9_-]{16,}/g, '<id>')
+    // One pass per token: any token with a digit, and any 16+ character token.
+    .replace(/[A-Za-z0-9_-]+/g, (t) => (t.length >= 16 || /\d/.test(t) ? '<id>' : t))
     .replace(/\s+/g, ' ')
     .trim();
   if (s.length > MAX_MESSAGE) s = `${s.slice(0, MAX_MESSAGE - 1)}…`;
@@ -77,10 +103,19 @@ const SAFE_MESSAGES: RegExp[] = [
   new RegExp(String.raw`^Can't find variable: ${V}$`),
   new RegExp(String.raw`^${V} is not defined$`),
   /^Maximum call stack size exceeded\.?$/,
-  /^Maximum update depth exceeded\./,
-  /^Rendered (?:more|fewer) hooks than /,
   /^Text strings must be rendered within a <Text> component\.?$/,
-  /^Objects are not valid as a React child/,
+];
+/*
+  Messages React builds around app data or long fixed prose: only the fixed
+  opening words are kept, never the rest. "Objects are not valid as a React
+  child" goes on to quote `Object.keys(child)`, which can be a display name or
+  a goal title (#641 CS-1).
+*/
+const PREFIX_MESSAGES: string[] = [
+  'Objects are not valid as a React child',
+  'Maximum update depth exceeded',
+  'Rendered more hooks than',
+  'Rendered fewer hooks than',
 ];
 /*
   Fixed-vocabulary messages, kept as they are before the long-token rule would
@@ -95,7 +130,11 @@ export const WITHHELD_MESSAGE = '<withheld>';
 
 /** The scrubbed message when it has a known safe shape; otherwise `<withheld>`. */
 export function recordMessage(raw: unknown): string {
-  if (typeof raw === 'string' && RAW_SAFE_MESSAGES.some((re) => re.test(raw))) return raw;
+  if (typeof raw !== 'string' || !raw) return '';
+  // Each RAW_SAFE pattern is anchored and bounded, so this is constant work.
+  if (raw.length <= 120 && RAW_SAFE_MESSAGES.some((re) => re.test(raw))) return raw;
+  const prefix = PREFIX_MESSAGES.find((p) => raw.startsWith(p));
+  if (prefix) return `${prefix}…`;
   const s = scrubMessage(raw);
   if (!s) return '';
   return SAFE_MESSAGES.some((re) => re.test(s)) ? s : WITHHELD_MESSAGE;
@@ -111,8 +150,10 @@ function safeName(e: unknown): string {
 export function scrubFrames(stack: unknown): string[] {
   if (typeof stack !== 'string') return [];
   const out: string[] = [];
-  for (const rawLine of stack.split('\n')) {
+  for (const rawLine of stack.slice(0, MAX_STACK_INPUT).split('\n')) {
     const line = rawLine.trim();
+    // A real frame is short; a longer line (a message carried into the stack) is skipped unread.
+    if (line.length > MAX_FRAME_LINE) continue;
     let fn: string;
     let loc: string;
     let m = /^at (.+?) \((.+)\)$/.exec(line);
@@ -160,7 +201,7 @@ function isRecord(r: unknown): r is CrashRecord {
 }
 
 /** The records kept on this device, newest first. Never throws. */
-export async function readCrashRecords(kv: DeviceKv = deviceKv): Promise<CrashRecord[]> {
+export async function readCrashRecords(kv: CrashKv = deviceKv): Promise<CrashRecord[]> {
   try {
     const raw = await kv.getItem(CRASH_RECORDS_KEY);
     if (!raw) return [];
@@ -171,7 +212,7 @@ export async function readCrashRecords(kv: DeviceKv = deviceKv): Promise<CrashRe
   }
 }
 
-export async function clearCrashRecords(kv: DeviceKv = deviceKv): Promise<boolean> {
+export async function clearCrashRecords(kv: CrashKv = deviceKv): Promise<boolean> {
   return kv.removeItem(CRASH_RECORDS_KEY);
 }
 
@@ -181,7 +222,7 @@ export async function clearCrashRecords(kv: DeviceKv = deviceKv): Promise<boolea
   store that hangs once must not hold every later record back forever.
 */
 const WRITE_WAIT_MS = 2000;
-const writeChains = new WeakMap<DeviceKv, Promise<unknown>>();
+const writeChains = new WeakMap<CrashKv, Promise<unknown>>();
 
 function settledOrTimeout(p: Promise<unknown>, ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -200,7 +241,7 @@ function settledOrTimeout(p: Promise<unknown>, ms: number): Promise<void> {
 }
 
 /** Prepends a record (keeping the newest few). Resolves false on any failure; never throws. */
-export function persistCrash(record: CrashRecord, kv: DeviceKv = deviceKv): Promise<boolean> {
+export function persistCrash(record: CrashRecord, kv: CrashKv = deviceKv): Promise<boolean> {
   const previous = writeChains.get(kv);
   const ready = previous ? settledOrTimeout(previous, WRITE_WAIT_MS) : Promise.resolve();
   const write = ready.then(async () => {
@@ -216,7 +257,7 @@ export function persistCrash(record: CrashRecord, kv: DeviceKv = deviceKv): Prom
 }
 
 /** A render error a route boundary caught (not fatal: the fallback is on screen). */
-export function noteCaughtError(error: unknown, kv: DeviceKv = deviceKv): Promise<boolean> {
+export function noteCaughtError(error: unknown, kv: CrashKv = deviceKv): Promise<boolean> {
   try {
     return persistCrash(crashRecordOf(error, 'boundary'), kv);
   } catch {

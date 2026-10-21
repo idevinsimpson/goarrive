@@ -1,5 +1,7 @@
-// INT-01: first, so the global error handler is wrapped before any other
-// module of the app runs (src/crashContainment.ts).
+// INT-01: first in this file, so the global error handler is wrapped while
+// the route tree loads, before any timer, event or promise callback runs.
+// (expo-router evaluates some nested _layout files before this one, in the
+// same synchronous pass: src/crashContainment.native.ts.)
 import '../src/crashContainment';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
