@@ -156,6 +156,20 @@ const POLL_INTERVAL_MS = 2_000;
 // W12-2 (ST-06): how long a load waits for Auth to refresh a stale sign-in.
 const LOAD_SIGN_IN_REFRESH_MS = 8_000;
 
+/**
+ * RV12-641-4: the one failure a goal load acts on, of the reads that failed.
+ * "Unauthenticated" from either decides first (the public pulse's not-found
+ * is anonymous then), then a refusal, then the first failure.
+ */
+function loadFailure(reasons: unknown[]): unknown {
+  const code = (e: unknown) => (e instanceof FirebaseError ? e.code : null);
+  return (
+    reasons.find((e) => code(e) === 'functions/unauthenticated') ??
+    reasons.find((e) => code(e) === 'functions/not-found' || code(e) === 'functions/invalid-argument') ??
+    reasons[0]
+  );
+}
+
 // D-1. This screen is a sequence of whole-screen states, and each one states
 // what it is in a single sentence at the top. That sentence is the state's
 // heading, and until now it was not one programmatically. react-native-web
@@ -558,9 +572,14 @@ export default function ContributeToGoal() {
   const [pulseAt, setPulseAt] = useState<Date | null>(null);
   // W12-2 (INT-25, native): the last load failed while the screen was warm.
   const [refreshFailed, setRefreshFailed] = useState(false);
-  // The poll's catch reads it (RV11-641-1).
-  const refreshFailedRef = useRef(false);
-  refreshFailedRef.current = refreshFailed;
+  /*
+    RV12-641-5 (native): the last load failed because the sign-in could not be
+    refreshed (Auth unreachable), so every request since has gone out without
+    a token. Only then is a heal tick's refusal not a verdict (RV11-641-1);
+    after any other failure the ticks are authorized and a not-found stands.
+    Set with that failure, cleared by any authorized answer, like the note.
+  */
+  const signInOfflineRef = useRef(false);
   // W12-2 (ST-06, native): this load has already refreshed the sign-in once.
   const signInRetriedRef = useRef(false);
   const [context, setContext] = useState<ScreenContext>({ kind: 'none' });
@@ -826,6 +845,7 @@ export default function ContributeToGoal() {
     setPulseAt(null);
     // W12-2: a new context starts with no failed refresh and a fresh sign-in retry.
     setRefreshFailed(false);
+    signInOfflineRef.current = false;
     signInRetriedRef.current = false;
     setTimerBase(0);
     setTimerStartedAt(null);
@@ -904,11 +924,26 @@ export default function ContributeToGoal() {
         // authorized correction never shows a stale or invented number. It is
         // read through this account's record (src/memberReads.ts): fresh, and
         // the answer is then the record every surface opens on.
-        const [pulseRes, mineRes] = await Promise.all([
+        /*
+          RV12-641-4. Both answers, then one verdict. With a stale token and
+          Auth unreachable both calls go out without one: the public pulse
+          answers the anonymous "not found" and the own-credit read
+          "unauthenticated". Whichever landed first used to decide, so a fast
+          anonymous not-found could evict the screen and forget the community
+          without the sign-in ever being refreshed. Now "unauthenticated" from
+          either read decides first (refresh, ST-06); then a refusal (not found,
+          invalid id); then the first failure.
+        */
+        const [pulseSettled, mineSettled] = await Promise.allSettled([
           pulseFn({ goalId }),
           readOwnCredit(user.uid, goalId).then((data) => ({ data: data as unknown as MyContribution })),
         ]);
         if (cancelled) return;
+        if (pulseSettled.status === 'rejected' || mineSettled.status === 'rejected') {
+          throw loadFailure([pulseSettled, mineSettled].flatMap((r) => (r.status === 'rejected' ? [r.reason] : [])));
+        }
+        const pulseRes = pulseSettled.value;
+        const mineRes = mineSettled.value;
         const pulse = pulseRes.data;
         const ownCredit = mineRes.data.ownCredit;
         setActivityGuideKey(
@@ -917,6 +952,7 @@ export default function ContributeToGoal() {
         setRepeatPolicy(resolveRepeatPolicy(mineRes.data.repeatPolicy));
         setPulseAt(new Date());
         setRefreshFailed(false);
+        signInOfflineRef.current = false;
         signInRetriedRef.current = false;
         if (pulse.status !== 'active') {
           setState({ kind: 'closed', pulse, ownCredit });
@@ -970,6 +1006,8 @@ export default function ContributeToGoal() {
               return;
             }
             if (refreshed === 'offline') {
+              // RV12-641-5: until an authorized answer, the heal ticks go out token-less.
+              signInOfflineRef.current = true;
               failTransiently();
               return;
             }
@@ -984,6 +1022,8 @@ export default function ContributeToGoal() {
           setState(loadError);
           return;
         }
+        // RV12-641-5: no read said "unauthenticated", so the token was good; the ticks are authorized.
+        signInOfflineRef.current = false;
         failTransiently();
       }
     })();
@@ -1087,6 +1127,7 @@ export default function ContributeToGoal() {
         const pulse = result.data;
         setPulseAt(new Date());
         setRefreshFailed(false);
+        signInOfflineRef.current = false;
         setState((prev) => {
           if (prev.kind === 'ready') {
             return pulse.status === 'active'
@@ -1103,15 +1144,17 @@ export default function ContributeToGoal() {
       } catch (e) {
         if (cancelled) return;
         /*
-          RV11-641-1 (native). WHILE THE LAST LOAD FAILED, A TICK'S REFUSAL IS
-          NOT A VERDICT. After a sign-in refresh that could not reach Auth, the
-          SDK sends these ticks with no Authorization, and the public pulse
-          answers the anonymous "not found": evicting the warm screen and
-          forgetting the community on that would be ST-06's own scenario made
-          worse. No authorized read has landed since the failure, so the kept
+          RV11-641-1 (native). WHILE THE SIGN-IN COULD NOT BE REFRESHED, A
+          TICK'S REFUSAL IS NOT A VERDICT. After a sign-in refresh that could
+          not reach Auth, the SDK sends these ticks with no Authorization, and
+          the public pulse answers the anonymous "not found": evicting the warm
+          screen and forgetting the community on that would be ST-06's own
+          scenario made worse. No authorized read has landed since, so the kept
           figures and their note stay, and a Retry's full load decides.
+          RV12-641-5: only then. After any other failure the ticks carry a
+          token, and an authorized not-found ends the screen as below.
         */
-        if (Platform.OS !== 'web' && refreshFailedRef.current) return;
+        if (Platform.OS !== 'web' && signInOfflineRef.current) return;
         // A refusal is not transient: the server has decided this member no
         // longer has a route to the goal (membership lost, goal gone). The
         // screen must not keep painting a total it is no longer entitled to,
@@ -1264,6 +1307,7 @@ export default function ContributeToGoal() {
       });
       // RV11-641-5: these figures are confirmed now; the kept-figures note is no longer true.
       setRefreshFailed(false);
+      signInOfflineRef.current = false;
       // Ready for the next fresh attempt.
       attemptRef.current = null;
       setEntry('');
