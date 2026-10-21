@@ -19,7 +19,7 @@
  * from a rendered page. (The one default below reads the current origin; every
  * rule takes it as an argument.)
  */
-import { configuredInviteHosts, isPublicHost } from './joinInput';
+import { configuredInviteHosts } from './joinInput';
 import { currentOrigin } from './ui/kioskLink';
 
 /**
@@ -29,31 +29,8 @@ import { currentOrigin } from './ui/kioskLink';
  */
 export type ShareRoute = 'nativeShare' | 'webShare' | 'clipboard' | 'unavailable';
 
-/**
- * Domains that put a development server on a public-looking https name: the
- * ones `expo start --tunnel` uses (Expo's own tunnel host and the ngrok
- * domains it has used), the other common tunnel providers (Cloudflare quick
- * tunnels, localtunnel, localhost.run, serveo), and the wildcard DNS
- * services that name an IP address (nip.io, sslip.io). Never a public We Stay
- * Fit link, even though such an origin is https with no port.
- */
-export const DEV_TUNNEL_DOMAINS = [
-  'exp.direct',
-  'exp.host',
-  'ngrok.io',
-  'ngrok.app',
-  'ngrok-free.app',
-  'ngrok.dev',
-  'ngrok-free.dev',
-  'trycloudflare.com',
-  'loca.lt',
-  'localtunnel.me',
-  'lhr.life',
-  'localhost.run',
-  'serveo.net',
-  'nip.io',
-  'sslip.io',
-] as const;
+/** The development forwarders' domains (src/joinInput.ts), re-exported for the share rule's readers. */
+export { DEV_TUNNEL_DOMAINS } from './joinInput';
 
 /**
  * NATIVE-MEMBER-1 F-3 (MF-01). The only kind of link the app hands to the
@@ -65,23 +42,25 @@ export const DEV_TUNNEL_DOMAINS = [
  * origin has none at all (INT-08). These are refused, so the controls are not
  * offered rather than offered with a link that cannot work.
  *
- * HOST (reviews F3-N2, NB-1). The host must be a public DNS name
- * (`isPublicHost`): never a single label such as `localhost`, an IP literal
- * (`10.0.2.2`, a LAN address) or a special-use local name. Once the canonical
- * hosts are configured (`EXPO_PUBLIC_WSF_INVITE_HOSTS`, src/joinInput.ts) it
- * must be one of them, exactly. Until then -- today -- any public host is
- * allowed except a development tunnel's (DEV_TUNNEL_DOMAINS and their
- * subdomains).
+ * HOST: FAIL CLOSED (reviews F3-N2, NB-1, NB-A, NB-B). The host must be one
+ * of the canonical hosts configured in `EXPO_PUBLIC_WSF_INVITE_HOSTS`
+ * (`configuredInviteHosts`, src/joinInput.ts), exactly -- and those are only
+ * ever public host names that are not a local name or a development
+ * forwarder. With nothing configured (today), or a value none of whose
+ * entries is usable, NOTHING is shareable in the app. No list of tunnel,
+ * loopback-in-DNS or LAN names can be complete (localtest.me, *.devtunnels.ms,
+ * *.ts.net, a router's .lan ...), and a dev client loaded through any of them
+ * has an https origin with no port; a release build has no origin at all
+ * today, so failing closed costs nothing. Used only for the app: the web
+ * helper (shareLink.ts) never asks.
  */
 export function isShareableHttpsUrl(url: unknown): url is string {
   if (typeof url !== 'string') return false;
   const shape = /^https:\/\/([A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?)(?:\/[^\s]*)?$/.exec(url);
   if (!shape) return false;
   const host = shape[1]!.toLowerCase();
-  if (!isPublicHost(host)) return false;
   const canonical = configuredInviteHosts(process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS);
-  if (canonical.length > 0) return canonical.includes(host);
-  return !DEV_TUNNEL_DOMAINS.some((domain) => host === domain || host.endsWith(`.${domain}`));
+  return canonical !== null && canonical.includes(host);
 }
 
 /** The visible state of the fallback control, mirroring the invite control. */

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
  * NATIVE-MEMBER-1 F-3 (MF-01): the app's copy and share helper
@@ -24,10 +24,35 @@ const native = await import('../src/ui/shareLink.native');
 const INVITE = 'https://westayfit.app/join/Ab3_dE-fGh1JkLmN0pQrSt';
 const METRO = 'http://192.168.1.20:8081/join/Ab3_dE-fGh1JkLmN0pQrSt';
 
+// The canonical hosts these links are on (NB-A: with none configured the app
+// shares nothing; that case is below).
+const SAVED_HOSTS = process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS;
 beforeEach(() => {
   setStringAsync.mockReset();
   share.mockReset();
   platform.OS = 'ios';
+  process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS = 'westayfit.app, westayfit-staging.web.app';
+});
+afterEach(() => {
+  if (SAVED_HOSTS === undefined) delete process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS;
+  else process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS = SAVED_HOSTS;
+});
+
+describe('NB-A, NB-B: with no usable canonical host the app offers and does nothing', () => {
+  it.each([
+    ['nothing configured', undefined],
+    ['a blank value', '  '],
+    ['configured-but-empty (every entry ignored)', 'https://westayfit.app, westayfit.app:443, x.exp.direct'],
+  ])('%s', async (_l, value) => {
+    if (value === undefined) delete process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS;
+    else process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS = value;
+    setStringAsync.mockResolvedValue(true);
+    expect(native.offerableLink(INVITE)).toBe(false);
+    expect(await native.copyLink(INVITE)).toBe('failed');
+    await native.shareLinkSheet({ url: INVITE });
+    expect(setStringAsync).not.toHaveBeenCalled();
+    expect(share).not.toHaveBeenCalled();
+  });
 });
 
 describe('offerableLink: absolute https only (case 5)', () => {
