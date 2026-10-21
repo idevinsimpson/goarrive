@@ -530,9 +530,13 @@ export default function You() {
           began on, which a focus may have replaced since:
             · a member page is kept only while the fresh read still shows it
               (`keptPageStillShown`, RV15-639-N2);
-            · pick, none and failed pages are kept, as before; 'loading' never
-              is: a skeleton is never left up as a stale page (a refused
-              community's page dropped to loading, then a failed revalidation).
+            · pick, none and failed pages are kept only when NO community was
+              resolved, i.e. the membership read itself failed (W13-15,
+              heads-15 RV17-642-N1): once the fresh list resolved one whose
+              goals then failed, that community's failed page is the true
+              one. 'loading' is never kept: a skeleton is never left up as a
+              stale page (a refused community's page dropped to loading,
+              then a failed revalidation).
           Otherwise the failed page for the resolved community, with Retry,
           and nothing is marked stale. The condition is member's (W16-17),
           with the repainted page added: only this tree keeps it apart.
@@ -541,7 +545,7 @@ export default function You() {
         const shown = shownRef.current.uid === uid ? shownRef.current.screen : LOADING;
         if (
           (keep || (recorded && recorded.kind === 'member') || (painted && painted.kind === 'member')) &&
-          (shown.kind === 'member' ? keptPageStillShown(shown, community, communities) : shown.kind !== 'loading')
+          (shown.kind === 'member' ? keptPageStillShown(shown, community, communities) : shown.kind !== 'loading' && community === undefined)
         ) {
           if (shown.kind === 'member') {
             // RV16-C15-3. Its head: this load's read if it answered, else the
