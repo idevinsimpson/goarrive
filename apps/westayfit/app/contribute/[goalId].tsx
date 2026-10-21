@@ -27,6 +27,7 @@ import { AuthFlagOffPanel } from '../../src/AuthFlagOffPanel';
 import {
   ATTEMPT_CONFLICT_NOTICE,
   ATTEMPT_NOT_SENT_NOTICE,
+  NOT_SAVED_NOTICE,
   REPLAY_SIGN_IN_NOTICE,
   RESTORE_FAILED_BODY,
   RESTORE_FAILED_HEADING,
@@ -2542,7 +2543,7 @@ export default function ContributeToGoal() {
               </Text>
             ) : (
               <Text style={styles.stepBody} testID="wsf-contribute-not-saved">
-                This device couldn’t save this attempt, so it won’t be here if you leave this page. Confirm it here.
+                {NOT_SAVED_NOTICE}
               </Text>
             )}
           </View>

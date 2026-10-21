@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { classifyContributeError, isDefiniteRefusal, isSignInExpired } from '../src/contributionFlow';
+import { NOT_SAVED_NOTICE, classifyContributeError, isDefiniteRefusal, isSignInExpired } from '../src/contributionFlow';
 import type { PendingContribution, RequestContext } from '../src/pendingContribution';
 import { bootNative, createFakeAsyncStorage, flush, type FakeAsyncStorage } from './nativeStorageHarness';
 
@@ -957,5 +957,15 @@ describe('#635 follow-up: route wiring pinned exactly where meaning-changing edi
     expect(retry.indexOf('retryingRef.current = true;')).toBeLessThan(retry.indexOf('startRestore(goalId, uid);'));
     // Cleared by the answer, and by a context change.
     expect(restore).toMatch(/setRestoreSettled\(true\);\s*retryingRef\.current = false;\s*setRetrying\(false\);/);
+  });
+});
+
+describe('the owner-visible wording has one source', () => {
+  it('the "couldn\u2019t save" sentence is contributionFlow.ts\u2019s, word for word as the browser spec pins it', () => {
+    expect(NOT_SAVED_NOTICE).toBe(
+      'This device couldn\u2019t save this attempt, so it won\u2019t be here if you leave this page. Confirm it here.'
+    );
+    expect(ROUTE).toContain('testID="wsf-contribute-not-saved">\n                {NOT_SAVED_NOTICE}\n');
+    expect(ROUTE).not.toContain('This device couldn\u2019t save this attempt');
   });
 });
