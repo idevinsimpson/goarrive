@@ -91,6 +91,118 @@ describe('deviceModeMayBeRemembered (native)', () => {
   });
 });
 
+describe('heads-8 #639 N1–N3 (native)', () => {
+  it('N1: a forgetting the device refuses entirely (two removals and the overwrite) is not "remembered"', async () => {
+    const dm = await launch();
+    await dm.deviceModeReady();
+    expect(await dm.saveDeviceMode('shared')).toBe(true);
+    await flush();
+    expect(dm.deviceModeMayBeRemembered()).toBe(true);
+    const seen: boolean[] = [];
+    dm.subscribeDeviceModeMayBeRemembered(() => seen.push(dm.deviceModeMayBeRemembered()));
+    disk.state.failWrites = true;
+    expect(await dm.clearDeviceMode()).toBe(false);
+    await flush();
+    // The old answer is still on the device…
+    expect(disk.map.get('wsf.deviceMode')).toBe('shared');
+    // …so the question asked again may not say the next answer is remembered.
+    expect(dm.deviceModeMayBeRemembered()).toBe(false);
+    expect(seen.at(-1)).toBe(false);
+    disk.state.failWrites = false;
+  });
+
+  it('N1 control: a forgetting the device keeps changes nothing', async () => {
+    const dm = await launch();
+    await dm.deviceModeReady();
+    await dm.saveDeviceMode('shared');
+    expect(await dm.clearDeviceMode()).toBe(true);
+    await flush();
+    expect(dm.deviceModeMayBeRemembered()).toBe(true);
+  });
+
+  it('N2: a listener that throws does not keep the others from the flip, and nothing escapes', async () => {
+    const dm = await launch();
+    await dm.deviceModeReady();
+    const unhandled: unknown[] = [];
+    const onUnhandled = (e: unknown) => unhandled.push(e);
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      dm.subscribeDeviceModeMayBeRemembered(() => {
+        throw new Error('a broken subscriber');
+      });
+      const flips: boolean[] = [];
+      dm.subscribeDeviceModeMayBeRemembered(() => flips.push(dm.deviceModeMayBeRemembered()));
+      disk.state.failWrites = true;
+      expect(await dm.saveDeviceMode('shared')).toBe(false);
+      await flush();
+      expect(flips).toContain(false);
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+      disk.state.failWrites = false;
+    }
+  });
+
+  it('N3: over an unreadable answer, a save in flight is not "remembered" until the device answers it', async () => {
+    disk.map.set('wsf.deviceMode', 'shared');
+    disk.state.failReads = true;
+    const dm = await launch();
+    await dm.deviceModeReady();
+    disk.state.failReads = false;
+    expect(dm.deviceModeMayBeRemembered()).toBe(false);
+    const seen: boolean[] = [];
+    dm.subscribeDeviceModeMayBeRemembered(() => seen.push(dm.deviceModeMayBeRemembered()));
+
+    // Refused: false at every step, never an optimistic true.
+    const release = disk.hold();
+    disk.state.failWrites = true;
+    const refused = dm.saveDeviceMode('personal');
+    expect(dm.deviceModeMayBeRemembered()).toBe(false);
+    release();
+    expect(await refused).toBe(false);
+    await flush();
+    expect(dm.deviceModeMayBeRemembered()).toBe(false);
+    expect(seen).not.toContain(true);
+    disk.state.failWrites = false;
+  });
+
+  it('N3 control: over a readable answer, a save in flight stays "remembered" (no flicker)', async () => {
+    const dm = await launch();
+    await dm.deviceModeReady();
+    expect(await dm.saveDeviceMode('personal')).toBe(true);
+    await flush();
+    const seen: boolean[] = [];
+    dm.subscribeDeviceModeMayBeRemembered(() => seen.push(dm.deviceModeMayBeRemembered()));
+    const release = disk.hold();
+    const saving = dm.saveDeviceMode('shared');
+    expect(dm.deviceModeMayBeRemembered()).toBe(true);
+    release();
+    expect(await saving).toBe(true);
+    await flush();
+    expect(seen).not.toContain(false);
+    expect(dm.deviceModeMayBeRemembered()).toBe(true);
+  });
+
+  it('N3: …and once the device keeps it, true, and subscribers hear it', async () => {
+    disk.map.set('wsf.deviceMode', 'shared');
+    disk.state.failReads = true;
+    const dm = await launch();
+    await dm.deviceModeReady();
+    disk.state.failReads = false;
+    const seen: boolean[] = [];
+    dm.subscribeDeviceModeMayBeRemembered(() => seen.push(dm.deviceModeMayBeRemembered()));
+    const release = disk.hold();
+    const saving = dm.saveDeviceMode('personal');
+    expect(dm.deviceModeMayBeRemembered()).toBe(false);
+    expect(seen).not.toContain(true);
+    release();
+    expect(await saving).toBe(true);
+    await flush();
+    expect(dm.deviceModeMayBeRemembered()).toBe(true);
+    expect(seen.at(-1)).toBe(true);
+  });
+});
+
 describe('deviceModeMayBeRemembered (web)', () => {
   it('is always true, even when the browser refuses the save', async () => {
     vi.resetModules();

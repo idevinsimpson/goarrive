@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { bootNative, createFakeAsyncStorage, type FakeAsyncStorage } from './nativeStorageHarness';
 
@@ -136,6 +136,29 @@ const LOADING = 'wsf-community-index-loading';
 let disk: FakeAsyncStorage;
 let cleanup: Array<() => void> = [];
 
+/*
+  TIMING. The repo's vitest config keeps the default 5 s per test. Each test
+  boots a fresh process (vi.resetModules), so the first one used to pay the
+  cold transform and import of both route graphs (react-native-web and all)
+  inside its own time, and inside its held launch read. That is moved out:
+  `beforeAll` imports everything once, so each test only re-evaluates. Each
+  test also has an explicit budget, and `until` gives up well inside it with
+  a message, so a slow test can never leave an act loop running into the
+  next one.
+*/
+const TEST_MS = 20_000;
+const UNTIL_MS = 8_000;
+const itTimed = (name: string, fn: () => Promise<void>) => it(name, fn, TEST_MS);
+
+beforeAll(async () => {
+  disk = createFakeAsyncStorage();
+  await boot();
+  await import('react');
+  await import('react-dom/client');
+  await import('../app/(tabs)/community/index');
+  await import('../app/(tabs)/you');
+}, 60_000);
+
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   disk = createFakeAsyncStorage();
@@ -245,13 +268,15 @@ async function render(route: 'community' | 'you') {
         for (let i = 0; i < 10; i += 1) await tick();
       }),
     /**
-     * Settle until `done()` holds, up to ~10 s. A loaded worker can need more
-     * than one settle for the fresh load to land; only an outcome that never
-     * arrives fails.
+     * Settle until `done()` holds. A loaded worker can need more than one
+     * settle for the fresh load to land. Gives up after `UNTIL_MS`, well
+     * inside the test's own budget, with a message: an outcome that never
+     * arrives fails here and leaves nothing running.
      */
-    async until(done: () => boolean): Promise<void> {
-      const end = Date.now() + 10_000;
-      while (!done() && Date.now() < end) {
+    async until(done: () => boolean, what: string): Promise<void> {
+      const end = Date.now() + UNTIL_MS;
+      while (!done()) {
+        if (Date.now() >= end) throw new Error(`never happened within ${UNTIL_MS} ms: ${what}`);
         await React.act(async () => {
           for (let i = 0; i < 10; i += 1) await tick();
         });
@@ -261,7 +286,7 @@ async function render(route: 'community' | 'you') {
 }
 
 describe('ST-03: before the launch read answers, no warm frame says "none chosen"', () => {
-  it('Community: loading, never the chooser, then the remembered community', async () => {
+  itTimed('Community: loading, never the chooser, then the remembered community', async () => {
     disk.map.set(REMEMBERED_KEY, 'g2');
     const releaseReads = holdLaunchRead();
     const cc = await boot();
@@ -280,12 +305,12 @@ describe('ST-03: before the launch read answers, no warm frame says "none chosen
     expect(h.parityFrames).toEqual([]);
 
     h.fresh.land({ items: TWO });
-    await until(() => h.parityFrames.length > 0);
+    await until(() => h.parityFrames.length > 0, 'the Community view was drawn');
     expect(h.parityFrames.at(-1)).toBe('g2');
     expect(testIds().has(CHOOSER)).toBe(false);
   });
 
-  it('You: loading, never "Which community?", then the remembered community', async () => {
+  itTimed('You: loading, never "Which community?", then the remembered community', async () => {
     disk.map.set(REMEMBERED_KEY, 'g2');
     const releaseReads = holdLaunchRead();
     const cc = await boot();
@@ -301,12 +326,12 @@ describe('ST-03: before the launch read answers, no warm frame says "none chosen
     expect(h.youFrames).not.toContain('pickCommunity');
 
     h.fresh.land({ items: TWO });
-    await until(() => h.youFrames.at(-1) !== 'loading');
+    await until(() => h.youFrames.at(-1) !== 'loading', 'You left loading');
     expect(h.youFrames.at(-1)).toBe('member:g2');
     expect(h.youFrames).not.toContain('pickCommunity');
   });
 
-  it('You: a member of no community is still told so at once (the guard comes after that answer)', async () => {
+  itTimed('You: a member of no community is still told so at once (the guard comes after that answer)', async () => {
     h.record.mine = { items: [] };
     holdLaunchRead();
     const cc = await boot();
@@ -317,7 +342,7 @@ describe('ST-03: before the launch read answers, no warm frame says "none chosen
 });
 
 describe('ST-03 controls: once the read has answered, the warm frame is painted at once', () => {
-  it('Community and You open on the remembered community before any fresh read lands', async () => {
+  itTimed('Community and You open on the remembered community before any fresh read lands', async () => {
     disk.map.set(REMEMBERED_KEY, 'g2');
     const cc = await boot();
     await cc.currentCommunityReady();
@@ -329,7 +354,7 @@ describe('ST-03 controls: once the read has answered, the warm frame is painted 
     expect(h.youFrames[0]).toBe('member:g2');
   });
 
-  it('several communities and none remembered: the honest chooser is still painted warm', async () => {
+  itTimed('several communities and none remembered: the honest chooser is still painted warm', async () => {
     const cc = await boot();
     await cc.currentCommunityReady();
     const { testIds } = await render('community');

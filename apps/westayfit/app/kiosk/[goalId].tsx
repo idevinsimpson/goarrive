@@ -100,31 +100,33 @@ export default function KioskGoal() {
   // useFocusEffect ties the reset to the fact it is about: this device has
   // come to rest on its start screen.
   //
-  // THE KIOSK SESSION ENDS ONLY ONCE NOBODY IS SIGNED IN (ST-05). The durable
-  // marker (src/kioskSession.ts) is what brings a killed phone back here, so
-  // it is cleared only when auth has answered with no user: after this
-  // screen's sign-out has landed (the effect runs again with no user), never
-  // before it. A sign-out that fails, or a kill before it lands, keeps it.
-  //
   // NATIVE-MEMBER-1 F-4 (MF-08 interim). In the app this route can open on
   // somebody's own phone; there the account goes only after they say so
   // (src/kioskSignOutGuard.ts). On the web nothing changes.
   useFocusEffect(
     useCallback(() => {
       void resetSharedScreenHandoffs();
-      if (!ready) return;
       const decision = decideKioskStart(Platform.OS, !!user, goalIdRef.current);
       setAskSignOut(decision === 'ask');
-      if (!user) {
-        void clearKioskSession();
-        return;
-      }
       if (decision !== 'signOut') return;
       void signOut(getFirebaseAuth()).catch(() => {
         // Nothing useful to do here and nothing to claim: the start screen
         // shows no identity either way, and the next Contribute press lands on
-        // the sign-in gate. The kiosk session stays open (above).
+        // the sign-in gate. The kiosk session stays open (below).
       });
+    }, [user])
+  );
+
+  // THE KIOSK SESSION ENDS ONLY ONCE NOBODY IS SIGNED IN (ST-05). The durable
+  // marker (src/kioskSession.ts) is what brings a killed phone back here, so
+  // it is cleared only when auth has answered with no user: after the
+  // sign-out above has landed (this runs again with no user), never before
+  // it, and not before auth has answered at all. A sign-out that fails, or a
+  // kill before it lands, keeps it. Its own effect, so the reset above runs
+  // exactly when it always has (web keeps no marker: this is a no-op there).
+  useFocusEffect(
+    useCallback(() => {
+      if (ready && !user) void clearKioskSession();
     }, [ready, user])
   );
 
