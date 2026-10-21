@@ -233,6 +233,14 @@ describe('the privacy panel never puts a guess first on a phone', () => {
     await cc.rememberCurrentCommunity(A, 'g2');
 
     const release = disk.holdReads();
+    // Every storage call is bounded at 5 s on setTimeout. On a loaded machine
+    // the imports below can outlast that, and the bound would answer "nothing
+    // remembered" before the read is released. setTimeout is faked while the
+    // read is held; settling runs on setImmediate.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const settle = async () => {
+      for (let i = 0; i < 10; i += 1) await new Promise<void>((r) => setImmediate(r));
+    };
     bootNative(disk);
     const row = (groupId: string) => ({ groupId, displayName: groupId, role: 'member', nameVisibility: 'visible', activityVisibility: 'visible' });
     vi.doMock('../src/auth', () => ({ useWsfAuth: () => ({ user: { uid: A }, ready: true }) }));
@@ -256,7 +264,7 @@ describe('the privacy panel never puts a guess first on a phone', () => {
     try {
       await act(async () => {
         root.render(createElement(CommunityPrivacyControls));
-        await flush();
+        await settle();
       });
       // The communities have been read, but the remembered one has not: no
       // rows, and the panel says it is loading.
@@ -265,13 +273,14 @@ describe('the privacy panel never puts a guess first on a phone', () => {
       await act(async () => {
         release();
         await cc.currentCommunityReady();
-        await flush();
+        await settle();
       });
       expect(blocks()).toEqual(['g2', 'g1']);
     } finally {
       act(() => root.unmount());
       container.remove();
       for (const m of ['../src/auth', '../src/memberReads', 'firebase/functions']) vi.doUnmock(m);
+      vi.useRealTimers();
     }
   });
 });
