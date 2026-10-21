@@ -6,25 +6,14 @@
  */
 import { Platform } from 'react-native';
 
-import type { CameraFailure } from './orchestrator';
-import type { RawLandmark } from './visual';
+import type { TestPoseHook } from './testPoseHookType';
+
+/** The hook's shape lives in the suffix-free testPoseHookType.ts (shared with support.native.ts); re-exported for existing importers. */
+export type { TestPoseHook } from './testPoseHookType';
 
 // ── The synthetic test source (emulator + loopback only) ─────────────────────
 
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
-
-/**
- * What a test installs on `window.__WSF_TEST_POSE__`: a scene from
- * milliseconds-since-start to raw BlazePose landmark lists (one per person),
- * an optional failure to raise at start, and `active` / `starts`, which the
- * controller keeps truthful so a test can see the camera was released.
- */
-export interface TestPoseHook {
-  scene: (tMs: number) => RawLandmark[][];
-  fail?: CameraFailure;
-  active?: boolean;
-  starts?: number;
-}
 
 export function testPoseHook(
   emulatorFlag: string | undefined,
@@ -43,7 +32,7 @@ export function pageTestPoseHook(): TestPoseHook | null {
   return testPoseHook(process.env.EXPO_PUBLIC_WSF_USE_EMULATORS, win);
 }
 
-/** Whether this runtime can run the counter at all. Native: no (fail closed). */
+/** Whether this runtime can run the counter at all. Native uses support.native.ts instead (off until the telemetry gate is approved and the module is linked). */
 export function cameraCounterSupported(): boolean {
   if (pageTestPoseHook()) return true;
   return Platform.OS === 'web' && typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
