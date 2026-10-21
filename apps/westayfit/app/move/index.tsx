@@ -18,6 +18,7 @@ import {
   useSheetExit,
   useSheetFocusContainment,
 } from '../../src/ui/sheetMotion';
+import { modalPanelA11y } from '../../src/ui/modalA11y';
 import { SheetPanel, SheetScrim } from '../../src/ui/sheetMotionNative';
 import { useReducedMotionPreference } from '../../src/ui/useReducedMotion';
 import {
@@ -377,6 +378,8 @@ export default function MoveResolver() {
         ref={panelRef}
         style={[s.sheet, { paddingBottom: safeArea.bottom + 16 }]}
         testID="wsf-move-sheet"
+        // INT-17: VoiceOver stays in the sheet on iOS; nothing elsewhere.
+        {...modalPanelA11y}
         {...(sheetData('panel', phase) as object)}
         phase={phase}
         preference={motionPreference}

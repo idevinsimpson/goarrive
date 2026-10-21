@@ -187,7 +187,10 @@ function AppShell() {
                 ? {
                     presentation: 'transparentModal',
                     contentStyle: { backgroundColor: 'transparent' },
-                    animation: reduced ? 'none' : 'slide_from_right',
+                    // MO-03 (W14-5): without the stack's travel (on iOS it
+                    // rose from the bottom); the panel comes in from the side
+                    // itself (app/settings.tsx). The web ignores this option.
+                    animation: 'none',
                   }
                 : {}
             }

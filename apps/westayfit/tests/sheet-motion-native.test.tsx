@@ -34,6 +34,7 @@ const fx = vi.hoisted(() => ({
   values: [] as Array<{ v: number }>,
   timings: [] as FakeTiming[],
   styles: {} as Record<string, unknown>,
+  props: {} as Record<string, Record<string, unknown>>,
 }));
 
 vi.mock('react-native', async () => {
@@ -83,6 +84,7 @@ vi.mock('react-native', async () => {
       ref: React.Ref<HTMLDivElement>,
     ) {
       fx.styles[props.testID ?? kind] = props.style;
+      fx.props[props.testID ?? kind] = props as Record<string, unknown>;
       return React.createElement(
         'div',
         {
@@ -152,6 +154,12 @@ vi.mock('../src/ui/useReducedMotion', () => ({
   useReducedMotion: () => pref.current.reduced,
 }));
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
+// W14-5: modalPanelA11y routed as Metro resolves its twins (its values: focus-return-native).
+vi.mock('../src/ui/modalA11y', () => ({
+  get modalPanelA11y() {
+    return fx.os === 'ios' ? { accessibilityViewIsModal: true } : {};
+  },
+}));
 vi.mock('../src/auth', () => ({ useWsfAuth: () => ({ ready: false, user: null }) }));
 vi.mock('../src/memberReads', () => ({
   SAME_LOAD_MS: 0,
@@ -199,6 +207,7 @@ beforeEach(() => {
   fx.values.length = 0;
   fx.timings.length = 0;
   fx.styles = {};
+  fx.props = {};
   nav.back = [];
   pref.current = { reduced: false, known: true, failed: false };
   freshNavigation();
@@ -472,7 +481,7 @@ describe('the web keeps its own element and its CSS', () => {
   });
 
   it('the stub offers what screens import from the native module', () => {
-    expect(Object.keys(webStub).sort()).toEqual(['SheetPanel', 'SheetScrim', 'useNativeSheetMotion']);
+    expect(Object.keys(webStub).sort()).toEqual(['SheetPanel', 'SheetScrim', 'useNativeSheetMotion', 'useSideSwipeToClose']);
     for (const name of Object.keys(webStub)) expect(nativeModule).toHaveProperty(name);
   });
 });
@@ -625,6 +634,9 @@ describe('MOVE’s resolver', () => {
       expect(container.querySelector('[data-testid="wsf-move-scrim"]')!.getAttribute('data-animated')).toBe('pressable');
       expect(container.querySelector('[data-testid="wsf-move-sheet"]')!.getAttribute('data-animated')).toBe('view');
       expect(closeParentChildren()).toBe(1); // Close only: no grabber
+      // W14-5 (INT-17): VoiceOver stays in the sheet on iOS; nothing on Android.
+      if (os === 'ios') expect(fx.props['wsf-move-sheet']).toMatchObject({ accessibilityViewIsModal: true });
+      else expect(fx.props['wsf-move-sheet']).not.toHaveProperty('accessibilityViewIsModal');
       expect(fx.timings.filter((t) => t.config.toValue === 1)).toHaveLength(2); // scrim fade + panel rise
       act(() => (container.querySelector('[data-testid="wsf-move-scrim"]') as HTMLElement).click());
       act(() => (container.querySelector('[data-testid="wsf-move-scrim"]') as HTMLElement).click());
@@ -673,10 +685,11 @@ describe('app/_layout.tsx presents MOVE without the stack’s travel', () => {
     expect(block).not.toContain('slide_from_bottom');
   });
 
-  // 3b (integrator): the contribution sheet has swapped to SheetScrim/SheetPanel, so it too moves itself.
-  it('the contribution sheet: `animation: none` (its screen swapped); Settings keeps the stack’s travel until it swaps', () => {
+  // 3b (integrator) and W14-5 (motion): both sheets have swapped to SheetScrim/SheetPanel, so both move themselves.
+  it('the contribution sheet and Settings: `animation: none` (their screens swapped)', () => {
     expect(screen('contribute/[goalId]')).toMatch(/animation: 'none',/);
     expect(screen('contribute/[goalId]')).not.toContain('slide_from_bottom');
-    expect(screen('settings')).toContain("animation: reduced ? 'none' : 'slide_from_right'");
+    expect(screen('settings')).toMatch(/animation: 'none',/);
+    expect(screen('settings')).not.toContain('slide_from_right');
   });
 });
