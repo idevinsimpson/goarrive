@@ -130,7 +130,10 @@ export function claimNativeSheetExit(navigation: object): () => void {
  *     exit: the screen unmounts and the pending exit is cancelled with it;
  *   · something is presented OVER the sheet during the exit: it blurs, the
  *     exit is abandoned and the sheet is usable again underneath;
- *   · the timer fires but the sheet is no longer in front: it does nothing;
+ *   · the timer fires but the sheet is no longer in front: it does not
+ *     navigate, and abandons the exit as a blur does -- the blur may not have
+ *     been delivered yet, and without this the sheet stayed transparent, its
+ *     scrim swallowing taps and every later Close ignored (RV10-634-N2);
  *   · a second Close, Escape or scrim press during the exit: ignored.
  * During the exit the scrim still takes presses (they land on Close, which
  * is ignored), so the tab behind cannot be operated -- MOVE cannot be
@@ -182,7 +185,11 @@ export function useSheetExit(reducedMotion: boolean): {
     setPhase('out');
     timer.current = setTimeout(() => {
       timer.current = null;
-      if (!navigation.isFocused()) return;
+      if (!navigation.isFocused()) {
+        closing.current = false;
+        setPhase('rest');
+        return;
+      }
       go();
     }, SHEET_OUT_MS);
   };

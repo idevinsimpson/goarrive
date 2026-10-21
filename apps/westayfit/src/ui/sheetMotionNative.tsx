@@ -150,6 +150,14 @@ export function useNativeSheetMotion(
     if (!known) return;
     entryDecided.current = true;
     play(1);
+    // The entry belongs to the effect that starts it: re-run (React
+    // StrictMode's development double-invoke), unmounted, or overtaken by a
+    // new phase or preference while still running, it ends at rest -- never
+    // left part-way, with a transparent panel and a scrim swallowing taps
+    // (RV10-634-N1).
+    return () => {
+      if (running.current !== null) jump(1);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [native, phase, reduced, known, failed]);
 
