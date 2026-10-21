@@ -211,6 +211,16 @@ describe('W16-3 (INT-18): the stale-figure sentence is spoken once per failure, 
     await render(<StaleAnnouncer failed />);
     expect(spoken).toEqual([STALE_FIGURE_SENTENCE, STALE_FIGURE_SENTENCE]);
   });
+
+  // heads-9 N-3: a failure that predates the mount is not a new one.
+  it('mounting already failed says nothing; recovering and failing again then speaks', async () => {
+    await render(<StaleAnnouncer failed />);
+    await render(<StaleAnnouncer failed />);
+    expect(spoken).toEqual([]);
+    await render(<StaleAnnouncer failed={false} />);
+    await render(<StaleAnnouncer failed />);
+    expect(spoken).toEqual([STALE_FIGURE_SENTENCE]);
+  });
 });
 
 describe('W16-3 (b), (c), INT-18 in Community Home (wiring)', () => {
@@ -234,11 +244,13 @@ describe('W16-3 (b), (c), INT-18 in Community Home (wiring)', () => {
     const nbsp = src.indexOf("{'\\u00A0'}");
     expect(src.slice(nbsp - 400, nbsp)).toContain('{...nativeA11yHidden()}');
   });
-  it('INT-18: the stale status region spreads liveRegion and is spoken by StaleAnnouncer', () => {
+  it('INT-18: the stale status region spreads liveRegion; the page has ONE StaleAnnouncer, fed any stale figure (heads-9 N-3)', () => {
     const at = src.indexOf('testID={`wsf-community-goal-stale-status-${goal.goalId}`}');
     const block = src.slice(at, at + 500);
     expect(block).toContain('{...liveRegion}');
-    expect(block).toContain('<StaleAnnouncer failed={p.refreshFailed === true} />');
+    expect(block).not.toContain('<StaleAnnouncer');
+    expect(src.match(/<StaleAnnouncer /g)).toHaveLength(1);
+    expect(src).toContain('<StaleAnnouncer failed={anyStaleFigure} />');
     expect(src).not.toMatch(/'aria-live': 'polite' \} as Record<string, unknown>\)\}\s*>\s*\{p\.refreshFailed/);
   });
   it('nativeA11yHidden is empty on the web and hides on a phone', () => {

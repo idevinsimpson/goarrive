@@ -150,26 +150,40 @@ describe('W16-9 / MF-09: the Manage sheet on a phone', () => {
     expect(byId('wsf-community-manage-panel')).toBeNull();
   });
 
-  it('ios: the panel pads by the home indicator, then by the keyboard while it is up', async () => {
+  // heads-9 N-1: one keyboard mechanism on iOS. The scroll view's
+  // automaticallyAdjustKeyboardInsets takes the keyboard (wiring case below);
+  // the panel's bottom edge does not move, so that native inset stays exact.
+  it('ios: the panel pads by the home indicator only; with the keyboard up only its cap grows', async () => {
     await openSheet('ios');
     // 24 + the 34 pt home indicator with the keyboard down.
     expect(px(panel().style.paddingBottom)).toBe(58);
     expect(px(panel().style.maxHeight)).toBeCloseTo(Math.min(844 * 0.88, 760));
     expect(keyboard.keyboardWillShow, 'iOS listens for keyboardWillShow').toBeTypeOf('function');
     act(() => keyboard.keyboardWillShow!({ endCoordinates: { height: 336 } }));
-    // max(inset, keyboard) + 24.
-    expect(px(panel().style.paddingBottom)).toBe(360);
-    // Up to just below the top inset (the keyboard is already in the padding).
+    // Not 336 + 24: the keyboard is the scroll view's inset, never the panel's padding too.
+    expect(px(panel().style.paddingBottom)).toBe(58);
+    expect(sheetBottomPadding).toHaveBeenLastCalledWith(34, 0, 'ios', 24);
+    // Up to just below the top inset: the top edge rises, the bottom edge stays.
     expect(px(panel().style.maxHeight)).toBe(844 - 47 - 12);
     act(() => keyboard.keyboardWillHide!({}));
     expect(px(panel().style.paddingBottom)).toBe(58);
+    expect(px(panel().style.maxHeight)).toBeCloseTo(Math.min(844 * 0.88, 760));
+  });
+
+  it('ios keeps the scroll view inset the keyboard: keyboardScrollProps turns it on for iOS only', async () => {
+    const native = await vi.importActual<typeof import('../src/ui/keyboardAvoidance.native')>('../src/ui/keyboardAvoidance.native');
+    expect(native.keyboardScrollProps('ios')).toEqual({ automaticallyAdjustKeyboardInsets: true });
+    expect(native.keyboardScrollProps('android')).toEqual({});
   });
 
   it('android: the IME adds to the navigation-bar inset', async () => {
     await openSheet('android');
     expect(px(panel().style.paddingBottom)).toBe(58);
     act(() => keyboard.keyboardDidShow!({ endCoordinates: { height: 300 } }));
+    // Android has no automatic insets: the panel itself rises above the IME.
     expect(px(panel().style.paddingBottom)).toBe(34 + 300 + 24);
+    expect(sheetBottomPadding).toHaveBeenLastCalledWith(34, 300, 'android', 24);
+    expect(px(panel().style.maxHeight)).toBe(844 - 47 - 12);
   });
 
   it('native: the scrim is a press target only, neither focusable nor announced', async () => {

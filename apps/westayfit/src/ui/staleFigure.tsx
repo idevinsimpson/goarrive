@@ -18,15 +18,21 @@ export function nativeA11yHidden(): { accessible?: false; importantForAccessibil
 
 /**
  * NATIVE-MEMBER-1 W16-3 (INT-18). On a phone, speaks the stale-figure sentence
- * once each time a refresh fails (src/ui/announce: iOS ignores live regions,
- * and Android's would speak twice beside an announcement). On the web this
- * does nothing; the polite region beside it speaks.
+ * once each time `failed` turns true (src/ui/announce: iOS ignores live
+ * regions, and Android's would speak twice beside an announcement). On the web
+ * this does nothing; the polite region beside each figure speaks.
+ *
+ * heads-9 N-3: Community Home renders ONE of these for the page, fed whether
+ * any figure on it is stale, so a refresh round that fails every goal speaks
+ * once. A failure that predates the mount is not a new failure here and is
+ * not spoken: `wasFailed` starts from the first render.
  */
 export function StaleAnnouncer({ failed }: { failed: boolean }) {
   const failures = useRef(0);
-  const wasFailed = useRef(false);
+  const wasFailed = useRef(failed);
   if (failed && !wasFailed.current) failures.current += 1;
   wasFailed.current = failed;
-  useAnnounce(failed ? STALE_FIGURE_SENTENCE : null, failed ? failures.current : null);
+  const owed = failed && failures.current > 0;
+  useAnnounce(owed ? STALE_FIGURE_SENTENCE : null, owed ? failures.current : null);
   return null;
 }
