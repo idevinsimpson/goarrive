@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { bootNative, createFakeAsyncStorage, flush, type FakeAsyncStorage } from './nativeStorageHarness';
+import { bootNative, createFakeAsyncStorage, type FakeAsyncStorage } from './nativeStorageHarness';
 
 /**
  * ST-03 — THE WARM FIRST FRAME WAITS FOR THE REMEMBERED COMMUNITY.
@@ -119,7 +119,24 @@ beforeEach(() => {
 
 afterEach(() => {
   for (const c of cleanup.splice(0)) c();
+  vi.useRealTimers();
 });
+
+/**
+ * Hold the launch read (`getAllKeys`) until the returned release is called.
+ * Every storage call is bounded at 5 s on `setTimeout` (src/storage/keyQueue.ts),
+ * and on a loaded machine the boot and first render alone can take that long,
+ * so the bound would answer "nothing remembered" before the test releases the
+ * read. `setTimeout` is therefore faked while a read is held: the read has
+ * simply not answered yet. Settling runs on `setImmediate`, which stays real.
+ */
+function holdLaunchRead(): () => void {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  return disk.holdReads();
+}
+
+/** One turn of the event loop that fake `setTimeout` does not stop. */
+const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 /**
  * A fresh process over `disk`: the app was opened. Returns its currentCommunity
@@ -183,7 +200,10 @@ async function render(route: 'community' | 'you') {
       return seen;
     },
     /** Let queued work land, inside act. */
-    settle: () => React.act(() => flush()),
+    settle: () =>
+      React.act(async () => {
+        for (let i = 0; i < 10; i += 1) await tick();
+      }),
     /**
      * Settle until `done()` holds, up to ~10 s. A loaded worker can need more
      * than one settle for the fresh load to land; only an outcome that never
@@ -191,7 +211,11 @@ async function render(route: 'community' | 'you') {
      */
     async until(done: () => boolean): Promise<void> {
       const end = Date.now() + 10_000;
-      while (!done() && Date.now() < end) await React.act(() => flush());
+      while (!done() && Date.now() < end) {
+        await React.act(async () => {
+          for (let i = 0; i < 10; i += 1) await tick();
+        });
+      }
     },
   };
 }
@@ -199,7 +223,7 @@ async function render(route: 'community' | 'you') {
 describe('ST-03: before the launch read answers, no warm frame says "none chosen"', () => {
   it('Community: loading, never the chooser, then the remembered community', async () => {
     disk.map.set(REMEMBERED_KEY, 'g2');
-    const releaseReads = disk.holdReads();
+    const releaseReads = holdLaunchRead();
     const cc = await boot();
     const { testIds, settle, until } = await render('community');
 
@@ -223,7 +247,7 @@ describe('ST-03: before the launch read answers, no warm frame says "none chosen
 
   it('You: loading, never "Which community?", then the remembered community', async () => {
     disk.map.set(REMEMBERED_KEY, 'g2');
-    const releaseReads = disk.holdReads();
+    const releaseReads = holdLaunchRead();
     const cc = await boot();
     const { settle, until } = await render('you');
 
@@ -244,7 +268,7 @@ describe('ST-03: before the launch read answers, no warm frame says "none chosen
 
   it('You: a member of no community is still told so at once (the guard comes after that answer)', async () => {
     h.record.mine = { items: [] };
-    disk.holdReads();
+    holdLaunchRead();
     const cc = await boot();
     await render('you');
     expect(cc.isCurrentCommunityReady()).toBe(false);
