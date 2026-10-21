@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { BackHandler, Dimensions, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CARD_BORDER, CREAM, INK_QUIET, NAVY, TEXT_MUTED } from './kit';
@@ -79,6 +79,39 @@ export function MemberTopBar({
     wasOpen.current = menuOpen;
   }, [menuOpen]);
 
+  /*
+    NATIVE-INTEGRATOR-1 (INT-14). ON A PHONE THE OPEN MENU IS MODAL.
+    - The sheet hangs from the bar's hairline, which is `insets.top + 62`
+      down: an absolute child ignores the wrapper's padding, so `top: 62`
+      alone put the sheet over the bar itself on a notched phone, covering
+      the hamburger, and a second tap fired the first row.
+    - A transparent layer over everything else closes the menu, and the tap
+      that closes it activates nothing beneath it, the hamburger and wordmark
+      included. Tabs cannot be switched with the menu open, so a tab change
+      always finds it closed.
+    - Android Back closes it before any navigation.
+    On web none of this applies: the inset is 0, there is no layer and no
+    Back, so the menu behaves exactly as it did.
+  */
+  const native = Platform.OS !== 'web';
+  const { height: windowHeight } = useWindowDimensions();
+  /*
+    #641 NB-6: the layer is oversized so nothing below it can take the tap.
+    On Android edge-to-edge the window can be shorter than the screen it is
+    drawn on, and the tab bar sits in the difference; the layer starts at the
+    bar's top, so it reaches past the screen's bottom edge whatever the window
+    reports.
+  */
+  const layerHeight = Math.max(Dimensions.get('screen').height, windowHeight) + insets.top + insets.bottom;
+  useEffect(() => {
+    if (!menuOpen || Platform.OS !== 'android') return undefined;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      onMenuToggle(false);
+      return true;
+    });
+    return () => sub.remove();
+  }, [menuOpen, onMenuToggle]);
+
   return (
     <View
       // `zIndex` so the open menu sheet lies over the page body rather than
@@ -134,8 +167,20 @@ export function MemberTopBar({
         </Pressable>
       </View>
 
+      {menuOpen && native ? (
+        <Pressable
+          onPress={() => onMenuToggle(false)}
+          style={[styles.dismiss, { height: layerHeight }]}
+          accessible={false}
+          importantForAccessibility="no"
+          testID="wsf-member-topbar-menu-dismiss"
+        />
+      ) : null}
       {menuOpen ? (
-        <View style={styles.sheet} testID="wsf-member-topbar-menu">
+        <View
+          style={[styles.sheet, native && insets.top > 0 ? { top: insets.top + MEMBER_TOP_BAR_BODY } : null]}
+          testID="wsf-member-topbar-menu"
+        >
           {menu.map((item) => {
             if (item.kind === 'slot') {
               return (
@@ -220,7 +265,12 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.14,
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 8 },
+    // Android draws no shadow* props: the same lift as elevation (INT-14, INT-31).
+    ...(Platform.OS === 'android' ? { elevation: 8 } : null),
   },
+  // INT-14: the layer that closes the menu, under the sheet and over the bar
+  // and the page. Native only.
+  dismiss: { position: 'absolute', top: 0, left: 0, right: 0 },
   menuRow: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 14 },
   menuLabel: { color: NAVY, fontSize: 15, fontWeight: '600' },
   slotRow: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 14, paddingVertical: 6, gap: 1 },

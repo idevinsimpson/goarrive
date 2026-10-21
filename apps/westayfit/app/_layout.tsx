@@ -1,3 +1,8 @@
+// INT-01: first in this file, so the global error handler is wrapped while
+// the route tree loads, before any timer, event or promise callback runs.
+// (expo-router evaluates some nested _layout files before this one, in the
+// same synchronous pass: src/crashContainment.native.ts.)
+import '../src/crashContainment';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
@@ -8,13 +13,29 @@ import { WsfAuthProvider } from '../src/auth';
 import { getFirebaseApp } from '../src/firebase';
 import { InAppBrowserBanner } from '../src/InAppBrowserBanner';
 import { StagingBanner } from '../src/StagingBanner';
+import { STAGING_STRIP_UNDER_STATUS_BAR } from '../src/stagingStrip';
+import { StagingStackFrame, stagingScreenLayout } from '../src/stagingShell';
+import { statusBarStyleFor } from '../src/ui/statusBarPolicy';
+import { fireAsyncCrashFaults, injectedRenderFault } from '../src/crashHarness';
 import { wsfTheme } from '../src/theme';
 import { isMoveSheetRoute, isOverMemberTabs } from '../src/ui/moveSheetRoute';
+import { nativeErrorBoundary } from '../src/ui/RouteErrorFallback';
 import { useReducedMotion } from '../src/ui/useReducedMotion';
+
+/**
+ * INT-01. THE LAST-RESORT BOUNDARY. A throw anywhere in the shell that no
+ * route boundary below catches (the staging strip, the providers, the stack
+ * itself) renders this in place of the whole layout. It needs no provider:
+ * the safe-area and auth providers it would sit under are what just failed.
+ * Native only; web keeps its own behaviour (src/ui/RouteErrorFallback.tsx).
+ */
+export const ErrorBoundary = nativeErrorBoundary('root');
 
 export default function RootLayout() {
   useEffect(() => {
     getFirebaseApp();
+    // A test build's injected timer / rejection faults (src/crashHarness.ts).
+    fireAsyncCrashFaults();
   }, []);
 
   return (
@@ -22,7 +43,11 @@ export default function RootLayout() {
        guessing at a phone's home indicator, so the provider is above it. */
     <SafeAreaProvider>
       <WsfAuthProvider>
-        <StatusBar style="dark" />
+        {/* INT-09: the default for cream screens. A navy screen sets light
+            icons while it is focused (src/ui/useScreenTopInset ScreenStatusBar),
+            and over a native staging build's red strip they are light
+            everywhere (src/ui/statusBarPolicy.ts). Nothing on web. */}
+        <StatusBar style={statusBarStyleFor('cream', STAGING_STRIP_UNDER_STATUS_BAR)} />
         <AppShell />
       </WsfAuthProvider>
     </SafeAreaProvider>
@@ -68,12 +93,19 @@ export default function RootLayout() {
 function AppShell() {
   // Asked once, here, because both presented screens below answer to it.
   const reduced = useReducedMotion();
+  // A test build's root-shell fault (src/crashHarness.ts); inert otherwise.
+  injectedRenderFault('root-shell');
   return (
     <View style={{ flex: 1, backgroundColor: wsfTheme.colors.background }}>
       <StagingBanner />
       <InAppBrowserBanner />
-      <View style={{ flex: 1 }}>
+      {/* INT-10: on a native staging build, the stack's own safe-area provider
+          below the strip, and the strip repeated over iOS modals
+          (src/stagingShell.native.tsx). Otherwise, and on web, the same plain
+          frame and no layout as before. */}
+      <StagingStackFrame>
         <Stack
+          screenLayout={stagingScreenLayout}
           screenOptions={{
             headerShown: false,
             contentStyle: { backgroundColor: wsfTheme.colors.background },
@@ -85,11 +117,14 @@ function AppShell() {
             options={{
               presentation: 'transparentModal',
               contentStyle: { backgroundColor: 'transparent' },
-              // Restrained, native-feeling and short. A sheet that slides is
-              // legible as "this came up over what I was doing"; anything more
-              // decorative is motion for its own sake. A member who has asked
-              // for reduced motion gets the sheet with none of the travel.
-              animation: reduced ? 'none' : 'slide_from_bottom',
+              // MO-02. Presented without the stack's travel: its slide moved
+              // the whole screen, the scrim with it as one dark block. The
+              // sheet moves itself instead (src/ui/sheetMotionNative.tsx): the
+              // scrim fades in place, the panel rises 28 pt over 240 ms and
+              // leaves in 180 ms, and a member who asked for reduced motion
+              // gets none of the travel. The web ignores this option and plays
+              // the same motion in CSS (src/ui/sheetMotion.ts).
+              animation: 'none',
             }}
           />
           {/*
@@ -143,13 +178,16 @@ function AppShell() {
                 ? {
                     presentation: 'transparentModal',
                     contentStyle: { backgroundColor: 'transparent' },
-                    animation: reduced ? 'none' : 'slide_from_right',
+                    // MO-03 (W14-5): without the stack's travel (on iOS it
+                    // rose from the bottom); the panel comes in from the side
+                    // itself (app/settings.tsx). The web ignores this option.
+                    animation: 'none',
                   }
                 : {}
             }
           />
         </Stack>
-      </View>
+      </StagingStackFrame>
     </View>
   );
 }

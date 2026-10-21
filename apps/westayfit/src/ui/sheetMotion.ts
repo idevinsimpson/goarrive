@@ -24,7 +24,15 @@ import { Platform } from 'react-native';
  * appeared and vanished. The keyframes are a stylesheet keyed on `data-*`
  * attributes (react-native-web's `dataSet`), so no animation state lives in
  * React and a screen that re-renders mid-flight does not restart its entry.
- * Native keeps the stack's own `slide_from_bottom`.
+ *
+ * NATIVE (MO-02). The stack's own `slide_from_bottom` moved the whole screen,
+ * scrim and all, and left at once on Close. MOVE's resolver now plays the same
+ * numbers on iOS and Android itself (src/ui/sheetMotionNative.tsx: the scrim
+ * fades in place, the panel rises 28 pt, the exit takes 180 ms), presented
+ * without the stack's travel. Settings' side panel does the same (W14-5:
+ * app/settings.tsx), and so does any sheet whose screen makes the same swap
+ * to SheetScrim and SheetPanel; a sheet that has not keeps the stack's
+ * animation.
  */
 
 export const SHEET_IN_MS = 240;
@@ -84,6 +92,37 @@ export function takeSheetHandoff(): boolean {
 }
 
 /**
+ * MO-02. WHETHER A SHEET HOLDS STILL: no travel in, and no wait before Close
+ * navigates. On the web the preference is read synchronously, so only
+ * `reduced` counts there, as before. On iOS and Android it answers
+ * asynchronously, and until this mount has heard it the sheet does not travel:
+ * an unread preference is never permission to move.
+ */
+export function sheetHoldsStill(preference: { reduced: boolean; known: boolean }): boolean {
+  return preference.reduced || (Platform.OS !== 'web' && !preference.known);
+}
+
+/**
+ * MO-02. THE SCREENS WHOSE SHEET PLAYS ITS EXIT ON iOS AND ANDROID: those with
+ * a native SheetScrim or SheetPanel mounted (src/ui/sheetMotionNative.tsx),
+ * which claim their screen's navigation object while they are. Only those wait
+ * out the 180 ms there; any other sheet on native still navigates at once, so
+ * a Close never waits on an exit nobody sees. Never claimed on the web.
+ */
+const nativeExitScreens = new WeakMap<object, number>();
+export function claimNativeSheetExit(navigation: object): () => void {
+  nativeExitScreens.set(navigation, (nativeExitScreens.get(navigation) ?? 0) + 1);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const left = (nativeExitScreens.get(navigation) ?? 1) - 1;
+    if (left > 0) nativeExitScreens.set(navigation, left);
+    else nativeExitScreens.delete(navigation);
+  };
+}
+
+/**
  * ONE EXIT, AND ONLY WHILE THIS SHEET IS STILL THE SCREEN IN FRONT.
  *
  * The 180 ms exit is a window in which the world can move under the sheet,
@@ -93,7 +132,10 @@ export function takeSheetHandoff(): boolean {
  *     exit: the screen unmounts and the pending exit is cancelled with it;
  *   · something is presented OVER the sheet during the exit: it blurs, the
  *     exit is abandoned and the sheet is usable again underneath;
- *   · the timer fires but the sheet is no longer in front: it does nothing;
+ *   · the timer fires but the sheet is no longer in front: it does not
+ *     navigate, and abandons the exit as a blur does -- the blur may not have
+ *     been delivered yet, and without this the sheet stayed transparent, its
+ *     scrim swallowing taps and every later Close ignored (RV10-634-N2);
  *   · a second Close, Escape or scrim press during the exit: ignored.
  * During the exit the scrim still takes presses (they land on Close, which
  * is ignored), so the tab behind cannot be operated -- MOVE cannot be
@@ -102,6 +144,12 @@ export function takeSheetHandoff(): boolean {
  * `leaving()` lets a screen that has work in flight (the resolver's reads)
  * see that the member has already chosen to leave, so it does not navigate
  * somewhere else in the meantime.
+ *
+ * MO-02. On iOS and Android, a sheet that plays its exit there (its native
+ * parts claimed the screen: `claimNativeSheetExit`) waits the same 180 ms,
+ * with the same guards (MOVE, Settings since W14-5, and any screen swapped to
+ * SheetScrim and SheetPanel). A sheet whose screen has not swapped still
+ * navigates at once on native. The web is unchanged.
  */
 export function useSheetExit(reducedMotion: boolean): {
   phase: SheetPhase;
@@ -132,14 +180,18 @@ export function useSheetExit(reducedMotion: boolean): {
   const exit = (go: () => void) => {
     if (closing.current) return;
     closing.current = true;
-    if (reducedMotion || !onWeb()) {
+    if (reducedMotion || (!onWeb() && !nativeExitScreens.has(navigation))) {
       go();
       return;
     }
     setPhase('out');
     timer.current = setTimeout(() => {
       timer.current = null;
-      if (!navigation.isFocused()) return;
+      if (!navigation.isFocused()) {
+        closing.current = false;
+        setPhase('rest');
+        return;
+      }
       go();
     }, SHEET_OUT_MS);
   };

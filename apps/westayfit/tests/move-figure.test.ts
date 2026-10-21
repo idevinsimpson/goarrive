@@ -159,8 +159,16 @@ describe('the screens that draw a figure', () => {
     // The invariant is the RAW variant, not one particular argument list: the
     // venue screen also passes `accent`, because navy ink on a navy wall is no
     // ink. What must never appear is the pre-encoded function.
-    expect(card).toContain('moveFigureSvgDataUriRaw({ kind, pose');
-    expect(card).not.toMatch(/source=\{\{\s*uri:\s*moveFigureSvgDataUri\s*\(/);
+    //
+    // MF-05 (W14-3): the player hands SvgMarkup the RAW markup, which a phone
+    // draws with react-native-svg and the web shows as the same <Image> with
+    // the RAW data URI it had (SvgMarkup.tsx: the prefix, then the markup
+    // as is). Neither data-URI producer is called by the player any more.
+    expect(card).toContain('markup={moveFigureSvg({ kind, pose');
+    expect(card).not.toMatch(/moveFigureSvgDataUri(Raw)?\s*\(/);
+    const webTwin = readFileSync(join(root, 'src', 'ui', 'SvgMarkup.tsx'), 'utf8');
+    expect(webTwin).toContain('uri: `${SVG_DATA_URI_PREFIX}${markup}`');
+    expect(webTwin).not.toContain('encodeURIComponent');
   });
 
   // The figure is drawn in ONE place now, because the player runs in three:
@@ -169,8 +177,9 @@ describe('the screens that draw a figure', () => {
   // for the double-encoding bug to come back, so there must not be one.
   it('draws the figure in exactly one component', () => {
     const definition = join(root, 'src', 'ui', 'moveFigure.ts');
+    // Any of the figure's builders (MF-05: the player now calls the markup one).
     const drawing = sources.filter(
-      (file) => file !== definition && readFileSync(file, 'utf8').includes('moveFigureSvgDataUriRaw(')
+      (file) => file !== definition && /moveFigureSvg(DataUri)?(Raw)?\(/.test(readFileSync(file, 'utf8'))
     );
     expect(drawing.map((f) => f.slice(root.length + 1))).toEqual([
       join('src', 'ui', 'FollowAlongCard.tsx'),
