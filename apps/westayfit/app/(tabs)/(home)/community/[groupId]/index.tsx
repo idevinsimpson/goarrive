@@ -980,7 +980,8 @@ export default function CommunityPage() {
           // `0b460ce3`: a second wsfMyCommunities on every cold Home). An
           // answer read for this account within the same load is this read.
           const myResult = {
-            data: (await readMyCommunities(user.uid, SAME_LOAD_MS)) as unknown as MyCommunitiesResponse,
+            // INT-26: a Retry reads fresh, never joining a read that may hang.
+            data: (await readMyCommunities(user.uid, entryReload > 0 ? 0 : SAME_LOAD_MS)) as unknown as MyCommunitiesResponse,
           };
           if (cancelled) return;
           otherCommunityCount = Math.max(0, myResult.data.items.length - 1);
@@ -1050,11 +1051,15 @@ export default function CommunityPage() {
     NATIVE-INTEGRATOR-1 (INT-04). TRY AGAIN, IN PLACE. The entry error used to
     offer only "Back to home", which pushed a fresh Home over this errored
     screen. Retry re-runs the entry read on this same screen, so the page loads
-    where the member is, with one entry in the Home stack.
+    where the member is, with one entry in the Home stack. It re-reads the goal
+    list too (fresh, as its own Retry does): whatever failed the entry read
+    usually failed that one as well, and the page must not arrive showing
+    "Goals couldn't be loaded" and need a second tap.
   */
   const retryEntry = useCallback(() => {
     setState({ kind: 'loading' });
     setEntryReload((n) => n + 1);
+    setGoalsReloadToken((n) => n + 1);
   }, []);
 
   // The seam this package exists to add. Every other wsfGoals access is by
