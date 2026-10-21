@@ -12,10 +12,29 @@
  *   · a bare code: 16..128 of `[A-Za-z0-9_-]` (the server mints 22-character
  *     base64url codes; the same shape as `pendingJoinCode.ts` and
  *     `wsfPreviewCommunity`);
- *   · an `http:`, `https:` or `westayfit:` URL whose path is EXACTLY
- *     `/join/<code>`, optionally with one trailing slash. For the app scheme
- *     both `westayfit://join/<code>` and `westayfit:///join/<code>` are that
- *     path.
+ *   · a `westayfit:` URL whose path is EXACTLY `/join/<code>`, optionally
+ *     with one trailing slash. Both `westayfit://join/<code>` and
+ *     `westayfit:///join/<code>` are that path;
+ *   · an `http:` or `https:` URL with that same path, ONLY FROM ONE OF OUR
+ *     ORIGINS (`inviteOrigins()`, below): scheme, host and port exactly.
+ *
+ * OUR ORIGINS (review N3). A link from any other host is refused, even when
+ * its path is right: `https://evil.example/join/<code>` or a development
+ * build's Metro address is not an invite this product handed out.
+ *   · The canonical production and staging hosts come from
+ *     `EXPO_PUBLIC_WSF_INVITE_HOSTS`: host names, comma- or space-separated,
+ *     https only, no scheme, port or wildcard (an entry that is not a plain
+ *     public host name is ignored). IT IS NOT SET TODAY: no canonical public
+ *     origin is configured for the app yet (INT-08). Until it is, the app
+ *     reads only `westayfit:` links and bare codes, and an https invite link
+ *     pasted into the app is "not a valid code". Set it with the hosts INT-08
+ *     settles on.
+ *   · On the WEB the page's own origin is ours as well, exactly as
+ *     `currentOrigin()` reports it: the invite link a deployment hands out is
+ *     built on that origin (community detail's `${origin}/join/<code>`), so a
+ *     member pasting it back into the same deployment is always read. The app
+ *     has no origin of its own -- in a development build `window.location`
+ *     is the Metro server -- so this never applies there.
  *
  * FROM THE QUERY ONLY `event` AND `activity` ARE KEPT (the event QR's two
  * parameters), each decoded once and re-encoded with `encodeURIComponent`, so
@@ -27,9 +46,12 @@
  * partial (several getters throw "not implemented") and differs from the
  * browser's, so the same input could parse differently on the two platforms.
  * This is pure string work: the same answer on web, iOS and Android, and the
- * one tested here. The host is never navigated to, only checked for shape —
- * the code is looked up by the app, not by the address it came in.
+ * one tested here. The host is never navigated to, only compared with our
+ * origins — the code is looked up by the app, not by the address it came in.
  */
+import { Platform } from 'react-native';
+
+import { currentOrigin } from './ui/kioskLink';
 
 /** The longest input worth reading; an invite link is far shorter. */
 export const JOIN_INPUT_MAX = 2048;
@@ -40,6 +62,13 @@ const URL_SHAPE = /^([A-Za-z][A-Za-z0-9+.-]*):\/\/([^/?#]*)([^?#]*)(?:\?([^#]*))
 /** A DNS name or IPv4 literal, or a bracketed IPv6 literal, with an optional port. No userinfo. */
 const HOST = /^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\.?|\[[0-9A-Fa-f:.]{2,45}\])(?::\d{1,5})?$/;
 const JOIN_PATH = /^\/join\/([A-Za-z0-9_-]{16,128})\/?$/;
+/**
+ * A configured invite host: a plain public DNS name, at least two labels, the
+ * last starting with a letter. No port, IP literal, wildcard or trailing dot.
+ */
+const PUBLIC_HOST = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+/** A page origin as `location.origin` gives it: http(s), a host, an optional port, nothing else. */
+const PAGE_ORIGIN = /^https?:\/\/[^/?#@\s]+$/;
 const KEPT_PARAMS = ['event', 'activity'] as const;
 type KeptParam = (typeof KEPT_PARAMS)[number];
 
@@ -50,6 +79,28 @@ export type JoinInput = {
   event?: string;
   activity?: string;
 };
+
+/**
+ * Our origins, for `os`, the `EXPO_PUBLIC_WSF_INVITE_HOSTS` value and the
+ * page's own origin. Lower-cased, de-duplicated; empty when nothing is ours.
+ */
+export function inviteOriginsFor(os: string, configuredHosts: string | undefined, ownOrigin: string | null): string[] {
+  const origins = new Set<string>();
+  for (const entry of (configuredHosts ?? '').split(/[\s,]+/)) {
+    const host = entry.toLowerCase();
+    if (PUBLIC_HOST.test(host)) origins.add(`https://${host}`);
+  }
+  if (os === 'web' && typeof ownOrigin === 'string') {
+    const origin = ownOrigin.toLowerCase();
+    if (PAGE_ORIGIN.test(origin) && HOST.test(origin.slice(origin.indexOf('//') + 2))) origins.add(origin);
+  }
+  return [...origins];
+}
+
+/** Our origins here and now (see the module comment). */
+export function inviteOrigins(): string[] {
+  return inviteOriginsFor(Platform.OS, process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS, currentOrigin());
+}
 
 /** One query value, decoded the way a browser reads a query (`+` is a space); null if malformed or empty. */
 function decodeValue(raw: string): string | null {
@@ -91,9 +142,11 @@ function routeFor(code: string, kept: Partial<Record<KeptParam, string>>): JoinI
 
 /**
  * The join route for what the member typed or pasted, or null when it is not
- * a code or an invite link. Never throws.
+ * a code or one of our invite links. Never throws. `origins`: the http(s)
+ * origins that are ours (lower-case `scheme://host[:port]`); by default
+ * `inviteOrigins()`.
  */
-export function parseJoinInput(raw: unknown): JoinInput | null {
+export function parseJoinInput(raw: unknown, origins?: readonly string[]): JoinInput | null {
   if (typeof raw !== 'string') return null;
   const input = raw.trim();
   if (input === '' || input.length > JOIN_INPUT_MAX) return null;
@@ -108,6 +161,7 @@ export function parseJoinInput(raw: unknown): JoinInput | null {
   let path = url[3]!;
   if (scheme === 'http' || scheme === 'https') {
     if (!HOST.test(authority)) return null;
+    if (!(origins ?? inviteOrigins()).includes(`${scheme}://${authority.toLowerCase()}`)) return null;
   } else if (scheme === 'westayfit') {
     // `westayfit://join/<code>`: the first segment arrives as the authority.
     if (authority !== '') path = `/${authority}${path}`;

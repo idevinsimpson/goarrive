@@ -1,24 +1,29 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
-import { JOIN_INPUT_MAX, parseJoinInput } from '../src/joinInput';
+import { inviteOrigins, inviteOriginsFor, JOIN_INPUT_MAX, parseJoinInput } from '../src/joinInput';
 import { readActivityLabel } from '../src/eventActivity';
 import { readEventParam } from '../src/ui/eventLinks';
 
 /**
  * NATIVE-MEMBER-1 F-2 (MF-02): Home's "Join with a code" field reads a bare
  * code or the invite link members are given, and nothing else. Cases 1-4 of
- * MF-02, then hostile input.
+ * MF-02, then hostile input, then our origins (review N3): an http(s) link is
+ * read only from a configured invite host or, on the web, the page's own
+ * origin.
  */
 
 // The server mints 22-character base64url codes.
 const CODE = 'Ab3_dE-fGh1JkLmN0pQrSt';
-const href = (raw: unknown) => parseJoinInput(raw)?.href ?? null;
+/** The origins most cases are read against: production and staging, as INT-08 may configure them. */
+const OURS = ['https://westayfit.app', 'https://westayfit-staging.web.app'];
+const parse = (raw: unknown) => parseJoinInput(raw, OURS);
+const href = (raw: unknown) => parse(raw)?.href ?? null;
 
 describe('MF-02 case 1: the https invite link opens the join preview for its code', () => {
   it('reads https://<host>/join/<code>', () => {
-    expect(parseJoinInput(`https://westayfit.app/join/${CODE}`)).toEqual({ code: CODE, href: `/join/${CODE}` });
+    expect(parse(`https://westayfit.app/join/${CODE}`)).toEqual({ code: CODE, href: `/join/${CODE}` });
     expect(href(`https://westayfit-staging.web.app/join/${CODE}`)).toBe(`/join/${CODE}`);
   });
   it('still reads a bare code exactly as before', () => {
@@ -27,12 +32,15 @@ describe('MF-02 case 1: the https invite link opens the join preview for its cod
     expect(href('a1b2c3d4e5f6g7h8')).toBe('/join/a1b2c3d4e5f6g7h8');
     expect(href('x'.repeat(128))).toBe(`/join/${'x'.repeat(128)}`);
   });
-  it('accepts http, a port, an IP literal and any scheme or host case', () => {
-    expect(href(`http://localhost:8081/join/${CODE}`)).toBe(`/join/${CODE}`);
-    expect(href(`http://192.168.1.20:8081/join/${CODE}`)).toBe(`/join/${CODE}`);
-    expect(href(`http://[::1]:8081/join/${CODE}`)).toBe(`/join/${CODE}`);
+  it('accepts any scheme or host case for our origin', () => {
     expect(href(`HTTPS://WestayFit.App/join/${CODE}`)).toBe(`/join/${CODE}`);
-    expect(href(`https://westayfit.app./join/${CODE}`)).toBe(`/join/${CODE}`);
+    expect(href(`https://WESTAYFIT-STAGING.WEB.APP/join/${CODE}`)).toBe(`/join/${CODE}`);
+  });
+  it('accepts http, a port and an IP literal only when that exact origin is ours (a web dev server)', () => {
+    const dev = ['http://localhost:8081', 'http://192.168.1.20:8081', 'http://[::1]:8081'];
+    expect(parseJoinInput(`http://localhost:8081/join/${CODE}`, dev)?.href).toBe(`/join/${CODE}`);
+    expect(parseJoinInput(`http://192.168.1.20:8081/join/${CODE}`, dev)?.href).toBe(`/join/${CODE}`);
+    expect(parseJoinInput(`http://[::1]:8081/join/${CODE}`, dev)?.href).toBe(`/join/${CODE}`);
   });
 });
 
@@ -57,7 +65,7 @@ describe('MF-02 case 2: trailing slash, surrounding whitespace, the app scheme',
 
 describe('MF-02 case 3: the event parameters are kept', () => {
   it('keeps ?event=<goalId>', () => {
-    expect(parseJoinInput(`https://westayfit.app/join/${CODE}?event=goal_42`)).toEqual({
+    expect(parse(`https://westayfit.app/join/${CODE}?event=goal_42`)).toEqual({
       code: CODE,
       href: `/join/${CODE}?event=goal_42`,
       event: 'goal_42',
@@ -72,7 +80,7 @@ describe('MF-02 case 3: the event parameters are kept', () => {
     );
   });
   it('the kept values are what the join screen reads back', () => {
-    const p = parseJoinInput(`https://westayfit.app/join/${CODE}?event=g1&activity=Squats%20%C3%A0%20deux`)!;
+    const p = parse(`https://westayfit.app/join/${CODE}?event=g1&activity=Squats%20%C3%A0%20deux`)!;
     expect(readEventParam(p.event)).toBe('g1');
     expect(readActivityLabel(p.activity)).toBe('Squats à deux');
     expect(p.href).toBe(`/join/${CODE}?event=g1&activity=${encodeURIComponent('Squats à deux')}`);
@@ -84,7 +92,7 @@ describe('MF-02 case 3: the event parameters are kept', () => {
     expect(href(`https://westayfit.app/join/${CODE}?Event=g1&EVENT=g2`)).toBe(`/join/${CODE}`);
   });
   it('carries no other key, including prototype keys, in what it returns', () => {
-    const p = parseJoinInput(
+    const p = parse(
       `https://westayfit.app/join/${CODE}?__proto__=x&constructor=y&utm_source=sms&href=/admin&code=zzz&event=g1`,
     )!;
     expect(p).toEqual({ code: CODE, href: `/join/${CODE}?event=g1`, event: 'g1' });
@@ -99,7 +107,7 @@ describe('MF-02 case 3: the event parameters are kept', () => {
     expect(href(`https://westayfit.app/join/${CODE}?=g1&&`)).toBe(`/join/${CODE}`);
   });
   it('nothing in a value can add a parameter, a segment or a fragment to the route', () => {
-    const p = parseJoinInput(
+    const p = parse(
       `https://westayfit.app/join/${CODE}?event=g1%26kiosk%3D1%2F..%2F..%23x&activity=%3F%2F%23`,
     )!;
     expect(p.href).toBe(`/join/${CODE}?event=g1%26kiosk%3D1%2F..%2F..%23x&activity=%3F%2F%23`);
@@ -140,7 +148,7 @@ describe('MF-02 case 4: anything else is "not a valid code" and goes nowhere', (
     ['empty', ''],
     ['whitespace only', '   \n '],
   ])('%s', (_label, raw) => {
-    expect(parseJoinInput(raw)).toBeNull();
+    expect(parse(raw)).toBeNull();
   });
 });
 
@@ -175,19 +183,19 @@ describe('hostile input', () => {
     ['a code with a query', `${CODE}?event=g1`],
     ['two links pasted together', `https://westayfit.app/join/${CODE}https://westayfit.app/join/${CODE}`],
   ])('%s is refused', (_label, raw) => {
-    expect(parseJoinInput(raw)).toBeNull();
+    expect(parse(raw)).toBeNull();
   });
 
   it('refuses non-strings without throwing', () => {
     for (const raw of [undefined, null, 42, {}, [], ['x'], Symbol('x'), () => CODE, { toString: () => CODE }]) {
-      expect(parseJoinInput(raw)).toBeNull();
+      expect(parse(raw)).toBeNull();
     }
   });
 
   it('refuses input longer than the cap, and stays fast on long adversarial input', () => {
     const longQuery = `https://westayfit.app/join/${CODE}?${'a='.repeat(1000)}`;
     expect(longQuery.length).toBeGreaterThan(JOIN_INPUT_MAX);
-    expect(parseJoinInput(longQuery)).toBeNull();
+    expect(parse(longQuery)).toBeNull();
     const adversarial = [
       `https://${'a-'.repeat(1000)}/join/${CODE}`,
       `https://${'a.'.repeat(1000)}!`,
@@ -197,12 +205,12 @@ describe('hostile input', () => {
       `https://westayfit.app/join/${CODE}?${'event=%'.repeat(250)}`,
     ];
     const started = Date.now();
-    for (const raw of adversarial) parseJoinInput(raw.slice(0, JOIN_INPUT_MAX));
+    for (const raw of adversarial) parse(raw.slice(0, JOIN_INPUT_MAX));
     expect(Date.now() - started).toBeLessThan(250);
   });
 
   it('a kept value is always re-encoded, never forwarded raw', () => {
-    const p = parseJoinInput(`https://westayfit.app/join/${CODE}?activity=%0Aline%20two%3Cscript%3E`)!;
+    const p = parse(`https://westayfit.app/join/${CODE}?activity=%0Aline%20two%3Cscript%3E`)!;
     expect(p.activity).toBe('\nline two<script>');
     expect(p.href).toBe(`/join/${CODE}?activity=%0Aline%20two%3Cscript%3E`);
     // And the join screen's own screening still applies on arrival.
@@ -224,5 +232,98 @@ describe("Home's field is wired to the parser (static check of the MF-02 hunk)",
     expect(hunk).toContain("setJoinFieldError('That does not look like a valid code.')");
     expect(hunk).toContain('router.push(parsed.href as never)');
     expect(hunk).not.toContain('JOIN_CODE_SHAPE');
+  });
+});
+
+describe('N3: an http(s) link is read only from our origins', () => {
+  it.each([
+    ['another host', `https://evil.example/join/${CODE}`],
+    ["a development build's Metro address", `http://192.168.1.20:8081/join/${CODE}`],
+    ['Metro on localhost', `http://localhost:8081/join/${CODE}`],
+    ['an IPv6 literal', `http://[::1]:8081/join/${CODE}`],
+    ['our host over http', `http://westayfit.app/join/${CODE}`],
+    ['our host on another port', `https://westayfit.app:8443/join/${CODE}`],
+    ['our host with the default port spelled out', `https://westayfit.app:443/join/${CODE}`],
+    ['our host with a trailing dot', `https://westayfit.app./join/${CODE}`],
+    ['our host as a prefix', `https://westayfit.app.evil.example/join/${CODE}`],
+    ['our host as a suffix', `https://evilwestayfit.app/join/${CODE}`],
+    ['a hyphenated lookalike', `https://westayfit-app.example/join/${CODE}`],
+    ['a subdomain of ours', `https://evil.westayfit.app/join/${CODE}`],
+    ['a punycode lookalike', `https://xn--wstayfit-5za.app/join/${CODE}`],
+    ['a Cyrillic homoglyph host', `https://wеstayfit.app/join/${CODE}`],
+    ['userinfo naming our host', `https://westayfit.app@evil.example/join/${CODE}`],
+    ['our host after a backslash', `https://evil.example\\westayfit.app/join/${CODE}`],
+    ['an IPv4 literal', `https://203.0.113.7/join/${CODE}`],
+  ])('%s is refused', (_label, raw) => {
+    expect(parse(raw)).toBeNull();
+  });
+
+  it('with no origins at all (the app today), only bare codes and westayfit: links are read', () => {
+    expect(parseJoinInput(`https://westayfit.app/join/${CODE}`, [])).toBeNull();
+    expect(parseJoinInput(`http://192.168.1.20:8081/join/${CODE}`, [])).toBeNull();
+    expect(parseJoinInput(`westayfit://join/${CODE}`, [])?.href).toBe(`/join/${CODE}`);
+    expect(parseJoinInput(`westayfit:///join/${CODE}?event=g1`, [])?.href).toBe(`/join/${CODE}?event=g1`);
+    expect(parseJoinInput(CODE, [])?.href).toBe(`/join/${CODE}`);
+  });
+});
+
+describe('N3: inviteOriginsFor', () => {
+  it('configured hosts are https, lower-cased and de-duplicated; comma or space separated', () => {
+    expect(inviteOriginsFor('ios', ' westayfit.app, Staging.WeStayFit.app  westayfit.app ', null)).toEqual([
+      'https://westayfit.app',
+      'https://staging.westayfit.app',
+    ]);
+  });
+  it('an entry that is not a plain public host name is ignored', () => {
+    expect(
+      inviteOriginsFor(
+        'android',
+        'https://westayfit.app,*.westayfit.app,westayfit.app:443,localhost,192.168.1.20,westayfit.app.,u@westayfit.app,wеstayfit.app,-x.app,ok.example',
+        null,
+      ),
+    ).toEqual(['https://ok.example']);
+  });
+  it('nothing configured and no page: nothing is ours', () => {
+    expect(inviteOriginsFor('ios', undefined, null)).toEqual([]);
+    expect(inviteOriginsFor('ios', '', null)).toEqual([]);
+  });
+  it("on the web the page's own origin is ours, exactly", () => {
+    expect(inviteOriginsFor('web', undefined, 'https://goarrive.web.app')).toEqual(['https://goarrive.web.app']);
+    expect(inviteOriginsFor('web', undefined, 'http://localhost:8081')).toEqual(['http://localhost:8081']);
+    expect(inviteOriginsFor('web', 'westayfit.app', 'https://GoArrive.web.app')).toEqual([
+      'https://westayfit.app',
+      'https://goarrive.web.app',
+    ]);
+  });
+  it("in the app the page origin is never ours: a development build's location is Metro", () => {
+    expect(inviteOriginsFor('ios', undefined, 'http://192.168.1.20:8081')).toEqual([]);
+    expect(inviteOriginsFor('android', undefined, 'http://localhost:8081')).toEqual([]);
+    expect(inviteOriginsFor('android', 'westayfit.app', 'http://localhost:8081')).toEqual(['https://westayfit.app']);
+  });
+  it('a malformed page origin is not ours', () => {
+    for (const bad of ['null', 'file://', 'https://a@b', 'https://host/path', 'javascript:alert(1)', 'https://', '']) {
+      expect(inviteOriginsFor('web', undefined, bad), bad).toEqual([]);
+    }
+  });
+});
+
+describe('N3: the default origins here (vitest runs as the web)', () => {
+  const saved = process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS;
+    else process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS = saved;
+  });
+  it("with nothing configured, the page's own origin is read and any other host is not", () => {
+    delete process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS;
+    const own = window.location.origin;
+    expect(inviteOrigins()).toEqual([own.toLowerCase()]);
+    expect(parseJoinInput(`${own}/join/${CODE}`)?.href).toBe(`/join/${CODE}`);
+    expect(parseJoinInput(`https://westayfit.app/join/${CODE}`)).toBeNull();
+    expect(parseJoinInput(`westayfit://join/${CODE}`)?.href).toBe(`/join/${CODE}`);
+  });
+  it('a configured host is read once EXPO_PUBLIC_WSF_INVITE_HOSTS names it', () => {
+    process.env.EXPO_PUBLIC_WSF_INVITE_HOSTS = 'westayfit.app';
+    expect(parseJoinInput(`https://westayfit.app/join/${CODE}`)?.href).toBe(`/join/${CODE}`);
+    expect(parseJoinInput(`https://evil.example/join/${CODE}`)).toBeNull();
   });
 });
