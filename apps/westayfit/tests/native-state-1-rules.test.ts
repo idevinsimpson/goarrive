@@ -1048,6 +1048,10 @@ describe('W13-2 (ST-06): a native replay refreshes the sign-in first', () => {
     // replay's are the only two; Record still never refreshes.
     const load = ROUTE.slice(ROUTE.indexOf("e.code === 'functions/unauthenticated'"), ROUTE.indexOf("// A1. The server's sentence"));
     expect(load).toContain("const auth = Platform.OS === 'web' ? null : getFirebaseAuth();");
+    // ... and the refresh sits inside the native, once-only guard (W13's tightening).
+    const guard = load.indexOf('if (auth?.currentUser && !signInRetriedRef.current) {');
+    expect(guard).toBeGreaterThan(load.indexOf("const auth = Platform.OS === 'web' ? null : getFirebaseAuth();"));
+    expect(load.indexOf('await refreshSignIn(auth, LOAD_SIGN_IN_REFRESH_MS);')).toBeGreaterThan(guard);
     expect(load.match(/refreshSignIn\(/g)).toHaveLength(1);
     expect(ROUTE.match(/refreshSignIn\(/g)).toHaveLength(2);
   });
