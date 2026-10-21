@@ -279,7 +279,8 @@ export function MovementDemoSlot(props: MovementDemoMediaProps) {
     }, [player, mayPlay, usable])
   );
 
-  // The app leaving the foreground pauses; returning resumes only a round still running.
+  // The app leaving the foreground pauses; returning resumes only a round still running
+  // (MO-06: play() is re-asserted on 'active'; a round held meanwhile keeps its frame).
   useEffect(() => {
     const sub = AppState.addEventListener('change', (next) => {
       foreground.current = inForeground(next);
