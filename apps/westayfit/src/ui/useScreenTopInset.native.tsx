@@ -4,7 +4,6 @@ import { createContext, useCallback, useContext, useState, type ReactNode } from
 import { View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { STAGING_STRIP_UNDER_STATUS_BAR } from '../stagingStrip';
 import { statusBarStyleFor, type ScreenTone } from './statusBarPolicy';
 
 /**
@@ -24,9 +23,7 @@ import { statusBarStyleFor, type ScreenTone } from './statusBarPolicy';
  *                        screen is the focused one; leaving it hands the
  *                        status bar back to the screen beneath.
  *
- * The inset is the nearest SafeAreaProvider's. On a staging build the stack
- * sits in its own provider below the red strip (src/stagingShell.native.tsx),
- * so a screen there clears the strip, not the status bar a second time.
+ * The inset is the nearest SafeAreaProvider's.
  *
  * UNDER THE MEMBER TOP BAR THE TOP IS ALREADY CLEARED (#641 F1). The signed-in
  * shell (app/(tabs)/_layout.tsx) draws MemberTopBar, which pads the status bar
@@ -67,5 +64,5 @@ export function ScreenStatusBar({ tone }: { tone: ScreenTone }) {
   );
   // Under the member top bar the bar's own ground is behind the status bar: leave the icons to the shell.
   if (cleared) return null;
-  return focused ? <StatusBar style={statusBarStyleFor(tone, STAGING_STRIP_UNDER_STATUS_BAR)} /> : null;
+  return focused ? <StatusBar style={statusBarStyleFor(tone)} /> : null;
 }

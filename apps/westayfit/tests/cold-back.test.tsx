@@ -87,12 +87,7 @@ vi.mock('../src/crashContainment', () => ({}));
 vi.mock('../src/auth', () => ({ WsfAuthProvider: ({ children }: { children?: ReactNode }) => <>{children}</> }));
 vi.mock('../src/firebase', () => ({ getFirebaseApp: () => ({}), wsfIsStaging: false }));
 vi.mock('../src/InAppBrowserBanner', () => ({ InAppBrowserBanner: () => null }));
-vi.mock('../src/StagingBanner', () => ({ StagingBanner: () => null }));
 vi.mock('../src/kioskLaunchGuard', () => ({ useKioskLaunchGuard: () => undefined }));
-vi.mock('../src/stagingShell', () => ({
-  StagingStackFrame: ({ children }: { children?: ReactNode }) => <>{children}</>,
-  stagingScreenLayout: undefined,
-}));
 vi.mock('../src/crashHarness', () => ({ fireAsyncCrashFaults: () => undefined, injectedRenderFault: () => undefined }));
 vi.mock('../src/ui/RouteErrorFallback', () => ({ nativeErrorBoundary: () => undefined }));
 vi.mock('../src/ui/useReducedMotion', () => ({ useReducedMotion: () => false }));

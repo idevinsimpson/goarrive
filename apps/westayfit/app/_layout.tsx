@@ -13,9 +13,6 @@ import { WsfAuthProvider } from '../src/auth';
 import { getFirebaseApp } from '../src/firebase';
 import { InAppBrowserBanner } from '../src/InAppBrowserBanner';
 import { useKioskLaunchGuard } from '../src/kioskLaunchGuard';
-import { StagingBanner } from '../src/StagingBanner';
-import { STAGING_STRIP_UNDER_STATUS_BAR } from '../src/stagingStrip';
-import { StagingStackFrame, stagingScreenLayout } from '../src/stagingShell';
 import { statusBarStyleFor } from '../src/ui/statusBarPolicy';
 import { fireAsyncCrashFaults, injectedRenderFault } from '../src/crashHarness';
 import { wsfTheme } from '../src/theme';
@@ -64,7 +61,7 @@ export default function RootLayout() {
             icons while it is focused (src/ui/useScreenTopInset ScreenStatusBar),
             and over a native staging build's red strip they are light
             everywhere (src/ui/statusBarPolicy.ts). Nothing on web. */}
-        <StatusBar style={statusBarStyleFor('cream', STAGING_STRIP_UNDER_STATUS_BAR)} />
+        <StatusBar style={statusBarStyleFor('cream')} />
         <KioskLaunchGuard />
         <AppShell />
       </WsfAuthProvider>
@@ -129,15 +126,8 @@ function AppShell() {
   injectedRenderFault('root-shell');
   return (
     <View style={{ flex: 1, backgroundColor: wsfTheme.colors.background }}>
-      <StagingBanner />
       <InAppBrowserBanner />
-      {/* INT-10: on a native staging build, the stack's own safe-area provider
-          below the strip, and the strip repeated over iOS modals
-          (src/stagingShell.native.tsx). Otherwise, and on web, the same plain
-          frame and no layout as before. */}
-      <StagingStackFrame>
         <Stack
-          screenLayout={stagingScreenLayout}
           screenOptions={{
             headerShown: false,
             contentStyle: { backgroundColor: wsfTheme.colors.background },
@@ -223,7 +213,6 @@ function AppShell() {
             }
           />
         </Stack>
-      </StagingStackFrame>
     </View>
   );
 }

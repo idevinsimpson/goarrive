@@ -33,11 +33,14 @@ export default function Health() {
         <CrashRecordsCard />
         {wsfIsStaging ? (
           <>
-            <Text style={kit.eyebrow}>Environment</Text>
+            {/* W12-26 (the owner's UI-copy order): plain words, no environment jargon, still truthful that
+                this build uses test data and is not the live service. Wording pending the owner's sign-off
+                (queue item 18e). The rows above stay: they are the QA build marker. */}
+            <Text style={kit.eyebrow}>About this build</Text>
             <View style={kit.card} testID="wsf-health-environment">
               <Text style={kit.body}>
-                STAGING — TEST DATA ONLY. Not the live We Stay Fit service. Accounts, communities and totals here
-                are not real and may be deleted at any time.
+                This is a test build, not the live We Stay Fit service. Accounts, communities and totals here are
+                not real and may be removed at any time.
               </Text>
             </View>
           </>

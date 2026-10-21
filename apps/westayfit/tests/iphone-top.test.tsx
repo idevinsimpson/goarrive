@@ -9,7 +9,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 /**
  * NATIVE-INTEGRATOR-1 (I-7: INT-09, INT-10, INT-14). The top of the screen on
  * a notched phone: the shared top-inset helpers, the status-bar policy, the
- * staging strip and the frame below it, and the member menu. The native
+ * build stamp that feeds Build details, and the member menu (W12-26: the
+ * strip a test build used to draw is gone, by the owner's UI-copy order). The native
  * modules are rendered into jsdom with the safe-area, status-bar and router
  * modules mocked at their boundary; Platform.OS is set per case. No device:
  * where a pixel lands on an iPhone is Appendix C.
@@ -19,7 +20,6 @@ const WINDOW = { insets: { top: 59, bottom: 34, left: 0, right: 0 }, frame: { x:
 const state = {
   window: WINDOW as typeof WINDOW | null,
   top: 59,
-  strip: false,
   focused: true,
   builtAt: 'unknown',
   focusListeners: new Set<() => void>(),
@@ -66,11 +66,6 @@ vi.mock('expo-router', () => ({
     useEffect(() => (focused ? cb() : undefined), [focused, cb]);
   },
 }));
-vi.mock('../src/stagingStrip', () => ({
-  get STAGING_STRIP_UNDER_STATUS_BAR() {
-    return state.strip;
-  },
-}));
 vi.mock('../src/firebase', () => ({ wsfIsStaging: true }));
 vi.mock('../src/buildStamp', () => ({
   WSF_BUILD_STAMP: {
@@ -87,9 +82,6 @@ vi.mock('../src/ui/useScreenTopInset', async () => import('../src/ui/useScreenTo
 const native = await import('../src/ui/useScreenTopInset.native');
 // The real web module (this file mocks the import path to the native one, above).
 const web = await vi.importActual<typeof import('../src/ui/useScreenTopInset')>('../src/ui/useScreenTopInset');
-const webShell = await import('../src/stagingShell');
-const { frameFor, screenLayoutFor } = await import('../src/stagingShell.native');
-const { StagingBanner, builtAtLabel } = await import('../src/StagingBanner');
 const { statusBarStyleFor } = await import('../src/ui/statusBarPolicy');
 const { buildInfoFrom } = await import('../src/nativeBuildInfo.native');
 const { nativeBuildInfo: webBuildInfo } = await import('../src/nativeBuildInfo');
@@ -113,7 +105,6 @@ beforeEach(() => {
   os = Platform.OS;
   state.window = WINDOW;
   state.top = 59;
-  state.strip = false;
   state.focused = true;
   state.builtAt = 'unknown';
   container = document.createElement('div');
@@ -148,17 +139,15 @@ describe('INT-09: the top inset and the status bar', () => {
     );
     expect(byId('inset')!.textContent).toBe('59');
     expect(byId('wsf-screen-top-spacer')!.style.height).toBe('59px');
-    // Below a staging strip (or on a phone without a notch) the inset is 0 and nothing is drawn.
+    // On a phone without a notch the inset is 0 and nothing is drawn.
     state.top = 0;
     act(() => root.render(<native.ScreenTopSpacer />));
     expect(byId('wsf-screen-top-spacer')).toBeNull();
   });
 
-  it('the policy: light over navy, dark over cream, light everywhere over a native staging strip', () => {
-    expect(statusBarStyleFor('navy', false)).toBe('light');
-    expect(statusBarStyleFor('cream', false)).toBe('dark');
-    expect(statusBarStyleFor('cream', true)).toBe('light');
-    expect(statusBarStyleFor('navy', true)).toBe('light');
+  it('the policy: light over navy, dark over cream (W12-26: no strip, so the tone alone decides)', () => {
+    expect(statusBarStyleFor('navy')).toBe('light');
+    expect(statusBarStyleFor('cream')).toBe('dark');
   });
 
   it('a navy screen sets light icons only while focused; leaving it hands the status bar back', () => {
@@ -170,16 +159,13 @@ describe('INT-09: the top inset and the status bar', () => {
     expect(byId('status-bar')!.dataset.style).toBe('light');
     act(() => root.render(<native.ScreenStatusBar tone="cream" />));
     expect(byId('status-bar')!.dataset.style).toBe('dark');
-    state.strip = true;
-    act(() => root.render(<native.ScreenStatusBar tone="navy" key="again" />));
-    act(() => root.render(<native.ScreenStatusBar tone="cream" key="strip" />));
-    expect(byId('status-bar')!.dataset.style).toBe('light');
   });
 
-  it('the root StatusBar is the cream default (light over a native staging strip)', () => {
+  it('the root StatusBar is the cream default, by the policy alone (W12-26)', () => {
     const layout = read('app/_layout.tsx');
-    expect(layout).toContain("<StatusBar style={statusBarStyleFor('cream', STAGING_STRIP_UNDER_STATUS_BAR)} />");
+    expect(layout).toContain("<StatusBar style={statusBarStyleFor('cream')} />");
     expect(layout).not.toContain('<StatusBar style="dark" />');
+    expect(layout).not.toContain('STAGING_STRIP_UNDER_STATUS_BAR');
   });
 });
 
@@ -264,35 +250,7 @@ describe('#641 F1: under the signed-in member shell the top is already cleared',
   });
 });
 
-describe('INT-10: the staging strip', () => {
-  it('native: paints behind the status bar and starts its text below it', () => {
-    setOs('ios');
-    act(() => root.render(<StagingBanner />));
-    expect(byId('wsf-staging-banner')!.style.paddingTop).toBe('65px');
-    expect(byId('wsf-staging-banner-text')!.textContent).toBe('STAGING · TEST DATA · not the live service');
-  });
-
-  it('web: exactly the row it was (no padding change, the same text)', () => {
-    setOs('web');
-    state.top = 0;
-    state.builtAt = '2026-10-21T01:23:45Z';
-    act(() => root.render(<StagingBanner />));
-    expect(byId('wsf-staging-banner')!.style.paddingTop).toBe('');
-    expect(byId('wsf-staging-banner-build')!.textContent).toBe('build abc1234');
-  });
-
-  it('native: names the binary\'s commit and build time; a build with no stamp says nothing more', () => {
-    setOs('android');
-    state.builtAt = '2026-10-21T01:23:45Z';
-    act(() => root.render(<StagingBanner />));
-    expect(byId('wsf-staging-banner-build')!.textContent).toBe('build abc1234 · 2026-10-21 01:23Z');
-    state.builtAt = 'unknown';
-    act(() => root.render(<StagingBanner key="unstamped" />));
-    expect(byId('wsf-staging-banner-build')!.textContent).toBe('build abc1234');
-    expect(builtAtLabel('2026-10-21T01:23:45Z')).toBe(' · 2026-10-21 01:23Z');
-    expect(builtAtLabel('unknown')).toBe('');
-  });
-
+describe('INT-10: the build stamp (Build details)', () => {
   it('the binary\'s stamp is read from its app config, keeping only well-formed values; web has none', () => {
     expect(buildInfoFrom({ wsfBuild: { commit: '9f3c2ab', builtAt: '2026-10-21T01:23:45Z' } })).toEqual({
       commit: '9f3c2ab',
@@ -301,65 +259,6 @@ describe('INT-10: the staging strip', () => {
     expect(buildInfoFrom({ wsfBuild: { commit: 'not a sha', builtAt: 'yesterday' } })).toEqual({ commit: undefined, builtAt: undefined });
     expect(buildInfoFrom(undefined)).toEqual({ commit: undefined, builtAt: undefined });
     expect(webBuildInfo).toEqual({});
-  });
-
-  it('a staging stack gets its own provider below the strip; production and web keep the plain frame', () => {
-    const Staged = frameFor(true);
-    act(() => root.render(<Staged><Text testID="child">x</Text></Staged>));
-    expect(byId('wsf-staging-stack-frame')!.querySelector('[data-testid="child"]')).not.toBeNull();
-    // NB-5: it starts from what it will measure below the strip (top 0, the window's bottom), no first-frame jump.
-    expect(byId('wsf-staging-stack-frame')!.dataset.initialTop).toBe('0');
-    expect(byId('wsf-staging-stack-frame')!.dataset.initialBottom).toBe('34');
-    const Plain = frameFor(false);
-    act(() => root.render(<Plain><Text testID="child">x</Text></Plain>));
-    expect(byId('wsf-staging-stack-frame')).toBeNull();
-    const plainHtml = container.innerHTML;
-    act(() => root.render(<webShell.StagingStackFrame><Text testID="child">x</Text></webShell.StagingStackFrame>));
-    expect(container.innerHTML).toBe(plainHtml);
-    expect(webShell.stagingScreenLayout).toBeUndefined();
-  });
-
-  it('iOS staging: a transparent modal repeats the strip at its top, with its content in a provider below it', () => {
-    setOs('ios');
-    expect(screenLayoutFor(false, 'ios')).toBeUndefined();
-    expect(screenLayoutFor(true, 'android')).toBeUndefined();
-    const layout = screenLayoutFor(true, 'ios')!;
-    const child = <Text testID="screen">screen</Text>;
-    // A page is left exactly as it is.
-    expect(layout({ options: {}, children: child })).toBe(child);
-    expect(layout({ options: { presentation: 'card' }, children: child })).toBe(child);
-    act(() => root.render(layout({ options: { presentation: 'transparentModal' }, children: child })));
-    const frame = byId('wsf-staging-modal-frame')!;
-    const [banner, below] = Array.from(frame.children) as HTMLElement[];
-    expect(banner!.dataset.testid).toBe('wsf-staging-banner');
-    expect(banner!.style.paddingTop).toBe('65px');
-    expect(below!.dataset.provider).toBe('1');
-    expect(below!.querySelector('[data-testid="screen"]')).not.toBeNull();
-    // NB-5: the modal's frame starts at the top of the window; its content starts below the strip.
-    expect(frame.dataset.initialTop).toBe('59');
-    expect(below!.dataset.initialTop).toBe('0');
-    expect(below!.dataset.initialBottom).toBe('34');
-  });
-
-  it('RV8-641-I10-3: with no window metrics, the providers below the strip start from their parent (no zero frame)', () => {
-    setOs('ios');
-    state.window = null;
-    const Staged = frameFor(true);
-    act(() => root.render(<Staged><Text testID="child">x</Text></Staged>));
-    expect(byId('wsf-staging-stack-frame')!.dataset.initialTop).toBe('none');
-    const layout = screenLayoutFor(true, 'ios')!;
-    act(() => root.render(layout({ options: { presentation: 'transparentModal' }, children: <Text testID="screen">s</Text> })));
-    const frame = byId('wsf-staging-modal-frame')!;
-    expect(frame.dataset.initialTop).toBe('none');
-    const below = Array.from(frame.children)[1] as HTMLElement;
-    expect(below.dataset.provider).toBe('1');
-    expect(below.dataset.initialTop).toBe('none');
-  });
-
-  it('AppShell wires the frame and the layout around the stack', () => {
-    const layout = read('app/_layout.tsx');
-    expect(layout).toMatch(/<StagingStackFrame>\s*<Stack\s*screenLayout=\{stagingScreenLayout\}/);
-    expect(layout).toContain('</Stack>\n      </StagingStackFrame>');
   });
 });
 

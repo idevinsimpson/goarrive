@@ -89,7 +89,6 @@ vi.mock('../src/ui/focusReturn', () => ({
 }));
 vi.mock('../src/crashContainment', () => ({}));
 vi.mock('../src/crashHarness', () => ({ fireAsyncCrashFaults: () => undefined, injectedRenderFault: () => undefined }));
-vi.mock('../src/StagingBanner', () => ({ StagingBanner: () => null }));
 vi.mock('../src/InAppBrowserBanner', () => ({ InAppBrowserBanner: () => null }));
 vi.mock('../src/ui/RouteErrorFallback', () => ({ nativeErrorBoundary: () => undefined }));
 vi.mock('../src/featureFlags', () => ({ wsfAuthEnabled: true }));

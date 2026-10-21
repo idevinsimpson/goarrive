@@ -7,7 +7,7 @@ import Constants from 'expo-constants';
  * by the web build script. An EAS build now stamps `extra.wsfBuild` in its app
  * config (app.config.js, from EAS_BUILD_GIT_COMMIT_HASH and the time the
  * config was evaluated during the build), and the binary carries that config,
- * so the staging strip and Build details can say which build this is. A local
+ * so Build details can say which build this is. A local
  * development build has no stamp and keeps saying "dev".
  */
 type Stamp = { commit?: unknown; builtAt?: unknown };
