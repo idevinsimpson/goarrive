@@ -347,7 +347,16 @@ export default function You() {
   );
   const [signingOut, setSigningOut] = useState(false);
   const [reloads, setReloads] = useState(0);
+  // A page that came up before the phone's remembered community was read
+  // shows loading (youFromRecord above); once the read lands, the frame the
+  // record could not give then is given now. Not after a Retry, which reads
+  // everything fresh. The load below still replaces it.
   const communityReady = useCurrentCommunityReady();
+  useEffect(() => {
+    if (!communityReady || !ready || !user || reloads > 0) return;
+    const uid = user.uid;
+    setScreen((prev) => (prev.kind === 'loading' ? youFromRecord(uid) ?? prev : prev));
+  }, [communityReady, ready, user, reloads]);
   /** Guards a landed read against a newer one, and against an unmounted tree. */
   const live = useRef(0);
 
@@ -527,16 +536,6 @@ export default function You() {
       if (slow) clearTimeout(slow);
     };
   }, [ready, user, reloads, revalidate]);
-
-  // A page that came up before the phone's remembered community was read
-  // shows loading (youFromRecord above); once the read lands, the frame the
-  // record could not give then is given now. Not after a Retry, which reads
-  // everything fresh. The load above still replaces it.
-  useEffect(() => {
-    if (!communityReady || !ready || !user || reloads > 0) return;
-    const uid = user.uid;
-    setScreen((prev) => (prev.kind === 'loading' ? youFromRecord(uid) ?? prev : prev));
-  }, [communityReady, ready, user, reloads]);
 
   const onSignOut = useCallback(() => {
     setSigningOut(true);
