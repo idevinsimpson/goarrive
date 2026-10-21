@@ -11,11 +11,13 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
  * now export `ErrorBoundary = nativeErrorBoundary('screen')`, so on a phone a
  * render error there shows the contained screen fallback instead of ending
  * the process: Try again remounts the route, Go to Home is the way out, and
- * the error's own text is never shown (CS-6). The web module returns
- * undefined, so the web gets no boundary. Not here: you.tsx (W13), join,
- * verify-email, profile-setup and settings.tsx (W14).
+ * the error's own text is never shown (CS-6). You (app/(tabs)/you.tsx) exports
+ * the 'tab' variant, as Progress does: it sits below the shell's top bar, so
+ * its fallback adds no status-bar inset. The web module returns undefined, so
+ * the web gets no boundary. Not here: join, verify-email, profile-setup and
+ * settings.tsx (W14).
  *
- * The scan holds the seven files to the exact export. The render imports one
+ * The scan holds the eight files to the exact export. The render imports one
  * of them (reset-password) with the NATIVE fallback module and Platform.OS
  * 'ios', and wraps a throwing child the way expo-router wraps a route that
  * exports ErrorBoundary (`{ error, retry }`; the harness is
@@ -24,20 +26,21 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
  */
 
 const APP_ROOT = join(__dirname, '..');
-const ROUTES = [
-  'app/signin.tsx',
-  'app/signup.tsx',
-  'app/reset-password.tsx',
-  'app/goals/new.tsx',
-  'app/settings/privacy.tsx',
-  'app/go/[markerSlug].tsx',
-  'app/start-community.tsx',
+const ROUTES: [file: string, variant: 'screen' | 'tab'][] = [
+  ['app/signin.tsx', 'screen'],
+  ['app/signup.tsx', 'screen'],
+  ['app/reset-password.tsx', 'screen'],
+  ['app/goals/new.tsx', 'screen'],
+  ['app/settings/privacy.tsx', 'screen'],
+  ['app/go/[markerSlug].tsx', 'screen'],
+  ['app/start-community.tsx', 'screen'],
+  ['app/(tabs)/you.tsx', 'tab'],
 ];
 
-describe('W16-13: the member routes export the screen boundary', () => {
-  it.each(ROUTES)('%s exports ErrorBoundary = nativeErrorBoundary(screen), from RouteErrorFallback', (file) => {
+describe('W16-13: the member routes export their boundary', () => {
+  it.each(ROUTES)('%s exports ErrorBoundary = nativeErrorBoundary(%s), from RouteErrorFallback', (file, variant) => {
     const src = readFileSync(join(APP_ROOT, file), 'utf8');
-    expect(src).toContain("export const ErrorBoundary = nativeErrorBoundary('screen');");
+    expect(src).toContain(`export const ErrorBoundary = nativeErrorBoundary('${variant}');`);
     expect(src).toMatch(/import \{ nativeErrorBoundary \} from '(\.\.\/)+src\/ui\/RouteErrorFallback';/);
     expect(src.match(/export const ErrorBoundary\b/g)).toHaveLength(1);
   });
