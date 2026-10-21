@@ -27,7 +27,12 @@ vi.mock('../src/featureFlags', () => ({ wsfAuthEnabled: true }));
 vi.mock('../src/ui/useReducedMotion', () => ({ useReducedMotion: () => true }));
 const USER = { uid: 'u1', email: 'member@example.com', displayName: 'Member' };
 vi.mock('../src/auth', () => ({ useWsfAuth: () => ({ ready: true, user: USER }) }));
-vi.mock('../src/currentCommunity', () => ({ resolveCurrentCommunity: () => 'oak' }));
+// `currentCommunityReady` is the state lane's (wsf-native-state-3): resolved
+// at once on web. Listed so this mock serves the merged tree as well as this one.
+vi.mock('../src/currentCommunity', () => ({
+  resolveCurrentCommunity: () => 'oak',
+  currentCommunityReady: () => Promise.resolve(),
+}));
 const readMyCommunities = vi.fn();
 const readGoals = vi.fn();
 vi.mock('../src/memberReads', () => ({
