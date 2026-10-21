@@ -308,10 +308,16 @@ export function clearPending(goalId: string, uid: string): Promise<boolean> {
  * camera and new-attempt entry closed. It is never copied into this
  * account's slot.
  *
- * `readFailed` — the slot could not be read (or the read did not answer in
- * time). The screen settles with nothing restored; a record it could not see
- * is protected by `savePendingNew`, which will not overwrite an unreadable
- * slot.
+ * `readFailed` — the slot could not be read: the device refused the read,
+ * or did not answer within the storage bound. That is NOT "nothing stored":
+ * the slot may hold an unresolved attempt nobody has seen. The screen FAILS
+ * CLOSED on it — no new attempt (Record, the camera) may begin until a retry
+ * reads the slot (`mayBeginNewAttempt`'s `restoreFailed`), and it says so
+ * with Try again. Behind that, a new attempt's write is create-only, so even
+ * a write that got through could not replace a different attempt's record.
+ * (A browser with no Storage object at all is not this case: there nothing is
+ * stored, the read answers "nothing", and recording proceeds as not durable —
+ * src/storage/kv.ts.)
  *
  * NEVER REJECTS. The screen holds Record and the camera closed until this
  * answers, so a rejection would hold them closed for good.

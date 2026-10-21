@@ -357,7 +357,7 @@ describe('F1d: the contribute route is wired to those rules', () => {
     expect(settles).toHaveLength(1);
     expect(settles[0]).toBeGreaterThan(then);
     // Retry is the same restore, for the same context.
-    expect(ROUTE).toContain('if (goalId) startRestore(goalId, uid);');
+    expect(ROUTE).toContain('    startRestore(goalId, uid);\n  }, [goalId, uid, startRestore]);');
   });
 });
 
@@ -950,6 +950,12 @@ describe('#635 follow-up: route wiring pinned exactly where meaning-changing edi
     expect(restore).not.toContain('setRestoreFailed(false)');
     expect(restore).toContain('setRestoreFailed(!!readFailed);');
     const failed = ROUTE.slice(ROUTE.indexOf('if (restoreFailed && beforeWrite) {'), ROUTE.indexOf("// ---- review ----"));
-    expect(failed).toContain('onPress={onRetryRestore}\n                disabled={!restoreSettled}');
+    expect(failed).toContain('onPress={onRetryRestore}\n                disabled={retrying || !restoreSettled}');
+    // A second tap in the same task is refused before it can start a second restore.
+    const retry = ROUTE.slice(ROUTE.indexOf('const onRetryRestore = useCallback'), ROUTE.indexOf('}, [goalId, uid, startRestore]);'));
+    expect(retry).toContain('if (!goalId || retryingRef.current) return;');
+    expect(retry.indexOf('retryingRef.current = true;')).toBeLessThan(retry.indexOf('startRestore(goalId, uid);'));
+    // Cleared by the answer, and by a context change.
+    expect(restore).toMatch(/setRestoreSettled\(true\);\s*retryingRef\.current = false;\s*setRetrying\(false\);/);
   });
 });
