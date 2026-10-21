@@ -1,6 +1,6 @@
 # GoArrive Known Issues & Lessons Learned
 
-_Last refreshed: 2026-08-14._
+_Last refreshed: 2026-08-15._
 
 ## Resolved Issues (Reference for Future Work)
 The following issues were encountered and resolved during development. They are documented here as institutional knowledge to prevent regression and inform future decisions.
@@ -107,6 +107,13 @@ The Phase 4 onboarding wizard and checkout page needed to read `playbook_folders
 ### iOS Safari Canvas PiP: Hidden Canvas Does Not Populate MediaStream
 During Phase 2 PiP QA (PR #251), it was discovered that a canvas element with `display:none` or `visibility:hidden` does not produce frames in its `captureStream()` MediaStream on iOS Safari's WKWebView — the stream exists but carries no video. The capture canvas therefore remains off-screen but present in the rendering tree. PR #271 later removed the visible green debug thumbnail and its rAF mirror from `WorkoutPlayer` while preserving the off-screen capture canvas, hidden video handoff, and PiP stream; the current `usePipCanvasStream` API has no debug-visibility flag. Lesson: keep the capture source renderable for iOS, but separate that requirement from temporary user-visible QA overlays and remove those overlays after verification.
 
+### Canvas Hook on Foreground Hot Path Starves Audio Graph
+`usePipCanvasStream` ran unconditionally on every player mount when the staging PiP flag was enabled — spinning a 30fps rAF loop and a hidden `<video srcObject={mediaStream}>` even during foreground workouts with no PiP active. Device testing on Devin's iPhone (2026-08-15, PR #289 pass-1 gate) confirmed the hook silently starved `musicGain→destination`: foreground music stopped playing as soon as the hook mounted. The mechanism was not isolated (no definitive root cause — candidate paths included `createMediaStreamSource` side effects or the `srcObject` assignment interfering with the Web Audio routing graph).
+
+The fix (PR #289) gates the hook on `isPiP`: `enabled: pipEnabled && Platform.OS === 'web' && isPiP`. The rAF loop and hidden video now only spin up once the `enterpictureinpicture` event fires; they tear down on `leavepictureinpicture`. `isPiP` is wired from those two event listeners.
+
+Lesson: any hook that does continuous media processing (rAF loops, live canvas capture, hidden media elements with active MediaStreams) must be gated on the user state that actually requires it — "staging flag enabled" is not a sufficient gate if the hook runs on the foreground hot path. Even a muted `<video srcObject>` can interfere with the Web Audio graph.
+
 ### `/ship` Still Mandates a Retired Relay Smoke Test — Documented Deadlock
 **`.claude/commands/ship.md` and `.claude/relay-handoff.md` directly contradict each other, and following the former as written cannot terminate.** Found 2026-08-15; **not fixed here**, because editing a command that governs deploys is a process change.
 
@@ -121,6 +128,8 @@ In practice the requirement is already dead: the 2026-08-14/15 staging deploys w
 **Lesson: retiring a workflow means removing it from the files that execute it, not only from the files that describe it.** The retirement note landed in the handoff doc, which is read for context; it never reached the command file, which is read for instructions. When a decision retires a step, grep for the step's identifying token — here `U0B1YQS8L12` — and fix every hit, or the retirement is only half-applied.
 
 ### The Canvas PiP Path Is Not Gated on iOS — It Is Unfinished
+**Status as of PR #289 (2026-08-15):** The unconditional-on-mount issue described in this entry is resolved. `enabled` now includes `&& isPiP`, so the rAF loop and hidden video only run during active PiP. What remains accurate: `hasWorkingCaptureStream` is still dead code (zero consumers), the canvas stream is still not passed to `requestPictureInPicture()`, and the iOS `captureStream` capability assessment stands. The "What actually runs today" section below describes the pre-#289 state; after #289 the hook exits early on `isPiP === false` and nothing runs on player mount.
+
 Recorded 2026-08-15 while deciding between the canvas-PiP and pre-rendered-video architectures. An earlier version of this entry claimed `usePipCanvasStream` disables itself on iOS through two independent gates. **That was wrong, and the correction inverts the conclusion:** the hook is not disabled on iOS at all. It runs, on every environment we device-test in, and the composite it produces is simply never shown to anyone.
 
 **There is exactly one gate, and it passes.** `usePipCanvasStream.ts:87` feature-detects: `if (!('captureStream' in HTMLCanvasElement.prototype)) return;`. PR #236's description states the rationale — *"iOS Safari (no captureStream) silently no-ops and falls through to existing behavior."* That premise appears to be false: Safari release notes from 16.4 through 27 contain no *introduction* of `captureStream`, only *fixes* in Safari 17 (*"Fixed MediaStream from a canvas (captureStream) to be able to render into a different canvas"*) and further work in 17.4. A fix implies pre-existence. (Bounded claim: the release-note set consulted starts at 16.4, so the introducing version could not be named.)
