@@ -22,9 +22,11 @@ import {
   type MemberProfileAnswer,
 } from '../../src/memberReads';
 import { formatEndedOn, formatEndsAt, hasWindowEnded } from '../../src/ui/dates';
+// W16-5 (INT-17): on a phone the native twin names the opener focus returns to.
+import { armTabsFocusReturnTo } from '../../src/ui/focusReturn';
 import { MOVE_HREF } from '../../src/ui/MemberTabBar';
 import { signOutToSignedOutHome } from '../../src/ui/signOutReset';
-import { YouParityView } from '../../src/ui/YouParityView';
+import { YOU_SETTINGS_TARGET, YouParityView } from '../../src/ui/YouParityView';
 import { RESUME_MIN_AWAY_MS, useResumeRefresh } from '../../src/useResumeRefresh';
 import type { YouGoal } from '../../src/youParity';
 
@@ -627,7 +629,14 @@ export default function You() {
       signingOut={signingOut}
       refresh={{ checking, stale, onRetry: reload }}
       actions={{
-        onSettings: () => router.push('/settings'),
+        onSettings: () => {
+          // W16-5 (INT-17). On a phone, when Settings closes the screen
+          // reader's focus comes back to this row (YouHead registers it), not
+          // to the top bar's menu button. The web finds its own opener in the
+          // document and is left exactly as it was.
+          if (Platform.OS !== 'web') armTabsFocusReturnTo(YOU_SETTINGS_TARGET);
+          router.push('/settings');
+        },
         onSignOut,
         onSignIn: () => router.push('/signin'),
         onCommunity: () => router.push('/community'),

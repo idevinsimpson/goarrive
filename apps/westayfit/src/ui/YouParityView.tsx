@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
 import { memberCountLabel, roleCardLabel } from '../labels';
@@ -21,6 +21,7 @@ import { ACTION_GREEN, NAVY, PROGRESS_GREEN, SURFACE, elevation } from './kit';
 import { LivingWeProgress } from './LivingWeProgress';
 import { MEMBER_TAB_BAR_BODY, MEMBER_TAB_MOVE_OVERHANG } from './MemberTabBar';
 import { RefreshNote, type RefreshState } from './RefreshNote';
+import { registerFocusTarget } from './focusTarget';
 import { fillRatio, percentLabel } from './progressFormat';
 // W16-4 (MF-17): the one text-scale policy (W12-8) for the two large numerals.
 import { numeralTextProps } from './textScale';
@@ -255,6 +256,13 @@ function Member({
 }
 
 /**
+ * W16-5 (INT-17). The Settings row's testID, and the name it is registered
+ * under as a control focus returns to on a phone (src/ui/focusTarget, the
+ * native registry; a no-op on the web). The You route arms it on open.
+ */
+export const YOU_SETTINGS_TARGET = 'wsf-you-settings';
+
+/**
  * THE HEAD: who you are, first. Avatar, name, member-since, and Settings as a
  * working affordance on the right — the accepted reference's `you-head`. The
  * side panel itself is W9's; this only opens Settings.
@@ -279,6 +287,9 @@ export function YouHead({
 }) {
   const name = profile?.displayName ?? null;
   const initials = initialsOf(name);
+  const settingsRef = useRef<View>(null);
+  const hasSettings = onSettings !== null;
+  useEffect(() => (hasSettings ? registerFocusTarget(YOU_SETTINGS_TARGET, settingsRef) : undefined), [hasSettings]);
   return (
     <View style={[s.head, compact && s.headCompact]} testID={resolved ? 'wsf-you-identity' : undefined}>
       <View style={s.avatar} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
@@ -299,9 +310,10 @@ export function YouHead({
       </View>
       {onSettings ? (
         <Pressable
+          ref={settingsRef}
           onPress={onSettings}
           style={s.settings}
-          testID="wsf-you-settings"
+          testID={YOU_SETTINGS_TARGET}
           accessibilityRole="button"
           accessibilityLabel="Settings"
         >
