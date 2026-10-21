@@ -31,6 +31,7 @@ import {
 } from '../src/authDestination';
 import { routeAfterAuth } from '../src/pendingJoinCode';
 import { landAfterAuth } from '../src/ui/authLanding';
+import { nativeErrorBoundary } from '../src/ui/RouteErrorFallback';
 import { usePostAuthDestinationsReady } from '../src/postAuthDestination';
 
 type ExistingProfile = {
@@ -38,6 +39,9 @@ type ExistingProfile = {
   acceptedTermsVersion?: string;
   acceptedPrivacyVersion?: string;
 };
+
+/** INT-01: a render error here shows the contained screen fallback on iOS and Android (nothing on the web). */
+export const ErrorBoundary = nativeErrorBoundary('screen');
 
 export default function ProfileSetup() {
   const { ready, user } = useWsfAuth();
