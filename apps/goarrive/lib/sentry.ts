@@ -10,6 +10,7 @@
  *   captureMessage('Something notable happened', 'info');
  */
 import * as Sentry from '@sentry/react-native';
+import { filterResetPasswordTelemetry } from './resetPasswordPrivacy';
 
 const SENTRY_DSN = process.env.EXPO_PUBLIC_SENTRY_DSN ?? '';
 
@@ -32,6 +33,11 @@ export function initSentry(): void {
     enableAutoSessionTracking: true,
     // Attach user context when available (set via setSentryUser)
     attachStacktrace: true,
+    // Never retain reset-link breadcrumbs or send reset credentials in errors
+    // or performance transactions (including delayed records after navigation).
+    beforeBreadcrumb: filterResetPasswordTelemetry,
+    beforeSend: filterResetPasswordTelemetry,
+    beforeSendTransaction: filterResetPasswordTelemetry,
   });
 }
 
