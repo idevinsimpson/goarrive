@@ -233,6 +233,9 @@ export interface SessionInstance {
   playbookTitle?: string;             // Denormalized playbook name for display
   sessionKind?: PlaybookSessionKind;
   recordingEnabled?: boolean;         // false = Zoom auto-recording off
+  workoutCompletedAt?: Timestamp;
+  pinnedWorkoutIndex?: number;
+  pinnedWorkoutSequence?: string;
   pinnedWorkoutId?: string;           // Coach-pinned workout for this occurrence (else auto next-in-sequence)
   startUtc?: Timestamp;               // UTC instant (DST-safe overlap math)
   endUtc?: Timestamp;

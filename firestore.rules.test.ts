@@ -32,6 +32,7 @@ import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import {
   collection,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -540,5 +541,94 @@ describe('workoutMusicFeedback', () => {
         { merge: true }
       )
     );
+  });
+});
+
+
+describe('Playbook roster identity', () => {
+  beforeEach(async () => {
+    await testEnv.withSecurityRulesDisabled(async ctx => {
+      await setDoc(doc(ctx.firestore(), 'session_instances', 'roster-session'), { memberId: 'roster-member', coachId: COACH_A_UID, status: 'scheduled' });
+    });
+  });
+  test('linked member can query and stream own session and write live state', async () => {
+    const db = testEnv.authenticatedContext('auth-member', { role: 'member', coachId: COACH_A_UID, memberId: 'roster-member' }).firestore();
+    await assertSucceeds(getDocs(query(collection(db, 'session_instances'), where('memberId', '==', 'roster-member'), where('coachId', '==', COACH_A_UID))));
+    await assertSucceeds(getDoc(doc(db, 'session_instances', 'roster-session')));
+    await assertSucceeds(setDoc(doc(db, 'session_instances', 'roster-session', 'live', 'state'), { phase: 'work' }));
+  });
+  test('another member of the same coach cannot read or write the session', async () => {
+    const db = testEnv.authenticatedContext('other-auth', { role: 'member', coachId: COACH_A_UID, memberId: 'other-roster' }).firestore();
+    await assertFails(getDoc(doc(db, 'session_instances', 'roster-session')));
+    await assertFails(setDoc(doc(db, 'session_instances', 'roster-session', 'live', 'state'), { phase: 'work' }));
+  });
+});
+
+
+test('linked member retains historical UID and current roster sessions without exposing others', async () => {
+  await testEnv.withSecurityRulesDisabled(async ctx => {
+    for (const [id, memberId, coachId] of [['legacy', 'auth-member', COACH_A_UID], ['current', 'roster-member', COACH_A_UID], ['other-member', 'other', COACH_A_UID], ['other-coach', 'roster-member', COACH_B_UID]]) {
+      await setDoc(doc(ctx.firestore(), 'session_instances', id), { memberId, coachId });
+    }
+  });
+  const db = testEnv.authenticatedContext('auth-member', { role: 'member', coachId: COACH_A_UID, memberId: 'roster-member' }).firestore();
+  const result = await assertSucceeds(getDocs(query(collection(db, 'session_instances'), where('memberId', 'in', ['auth-member', 'roster-member']), where('coachId', '==', COACH_A_UID))));
+  expect(result.docs.map(d => d.id).sort()).toEqual(['current', 'legacy']);
+});
+
+// Deployed WSF access policy: users have no GoArrive custom role claims.
+describe('shared WSF data access', () => {
+  const profile = { displayName: 'Synthetic adult', adultConfirmation: true, acceptedTermsVersion: 'v1', acceptedPrivacyVersion: 'v1' };
+  const wsf = (uid: string, verified = true) => testEnv.authenticatedContext(uid, { email_verified: verified }).firestore();
+  const adminDb = () => testEnv.authenticatedContext('wsf-admin', { role: 'platformAdmin' }).firestore();
+  beforeEach(async () => {
+    await testEnv.withSecurityRulesDisabled(async ctx => {
+      const db = ctx.firestore();
+      await setDoc(doc(db, 'wsfMemberProfiles', 'owner'), profile);
+      await setDoc(doc(db, 'wsfCommunityGroups', 'group'), { name: 'Synthetic group' });
+      for (const [uid, status] of [['owner', 'active'], ['removed', 'removed'], ['pending', 'pending']]) {
+        await setDoc(doc(db, 'wsfMemberships', 'group_' + uid), { userId: uid, communityGroupId: 'group', membershipStatus: status });
+      }
+    });
+  });
+  test('verified adult owner can create a profile without role claims', async () => {
+    await assertSucceeds(setDoc(doc(wsf('new'), 'wsfMemberProfiles', 'new'), profile));
+  });
+  test('creation rejects unverified, non-adult, missing terms and another owner', async () => {
+    await assertFails(setDoc(doc(wsf('new', false), 'wsfMemberProfiles', 'new'), profile));
+    await assertFails(setDoc(doc(wsf('new'), 'wsfMemberProfiles', 'new'), { ...profile, adultConfirmation: false }));
+    const { acceptedTermsVersion, ...missingTerms } = profile;
+    await assertFails(setDoc(doc(wsf('new'), 'wsfMemberProfiles', 'new'), missingTerms));
+    await assertFails(setDoc(doc(wsf('new'), 'wsfMemberProfiles', 'another'), profile));
+  });
+  test('profiles allow owner/admin reads and reject other/anonymous readers', async () => {
+    for (const db of [wsf('owner'), adminDb()]) await assertSucceeds(getDoc(doc(db, 'wsfMemberProfiles', 'owner')));
+    for (const db of [wsf('other'), testEnv.unauthenticatedContext().firestore()]) await assertFails(getDoc(doc(db, 'wsfMemberProfiles', 'owner')));
+  });
+  test('profile updates retain verification/adult invariants and reject admin writes/deletes', async () => {
+    await assertSucceeds(updateDoc(doc(wsf('owner'), 'wsfMemberProfiles', 'owner'), { displayName: 'Updated' }));
+    await assertFails(updateDoc(doc(wsf('owner', false), 'wsfMemberProfiles', 'owner'), { displayName: 'Unverified' }));
+    await assertFails(updateDoc(doc(wsf('owner'), 'wsfMemberProfiles', 'owner'), { adultConfirmation: false }));
+    await assertFails(updateDoc(doc(adminDb(), 'wsfMemberProfiles', 'owner'), { displayName: 'Admin update' }));
+    await assertFails(deleteDoc(doc(wsf('owner'), 'wsfMemberProfiles', 'owner')));
+  });
+  test('groups allow active-member/admin reads, not removed/pending/other/anonymous', async () => {
+    for (const db of [wsf('owner'), adminDb()]) await assertSucceeds(getDoc(doc(db, 'wsfCommunityGroups', 'group')));
+    for (const db of [wsf('removed'), wsf('pending'), wsf('other'), testEnv.unauthenticatedContext().firestore()]) await assertFails(getDoc(doc(db, 'wsfCommunityGroups', 'group')));
+  });
+  test('membership ownership uses userId and allows retained removed rows', async () => {
+    await assertSucceeds(getDoc(doc(wsf('owner'), 'wsfMemberships', 'group_owner')));
+    await assertSucceeds(getDoc(doc(wsf('removed'), 'wsfMemberships', 'group_removed')));
+    await assertSucceeds(getDoc(doc(adminDb(), 'wsfMemberships', 'group_owner')));
+    await assertFails(getDoc(doc(wsf('other'), 'wsfMemberships', 'group_owner')));
+  });
+  test('group and membership writes remain server-only, even for owner/admin', async () => {
+    for (const db of [wsf('owner'), adminDb()]) {
+      for (const [collectionName, id, data] of [['wsfCommunityGroups', 'group', { name: 'Client' }], ['wsfMemberships', 'group_owner', { userId: 'owner', membershipStatus: 'active' }]] as const) {
+        await assertFails(setDoc(doc(db, collectionName, 'new'), data));
+        await assertFails(updateDoc(doc(db, collectionName, id), data));
+        await assertFails(deleteDoc(doc(db, collectionName, id)));
+      }
+    }
   });
 });

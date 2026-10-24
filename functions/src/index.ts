@@ -1,3 +1,5 @@
+import { prepareMemberInvite } from './memberInvite';
+import { ownsSessionMember } from './sessionIdentity';
 /**
  * GoArrive Cloud Functions
  *
@@ -102,6 +104,8 @@ export {
   bookViaBookingToken,
   playbookBookingIcs,
   getSessionWorkout,
+  getPlaybookRescheduleSlots,
+  completePlaybookSession,
 } from './playbookBooking';
 import { CloudTasksClient } from '@google-cloud/tasks';
 import { sanitizePlayerWorkout } from './workoutPlayerSanitizer';
@@ -3011,7 +3015,7 @@ export const inviteCoach = onCall(
       await admin.auth().getUserByEmail(email.trim().toLowerCase());
       throw new HttpsError('already-exists', 'A user with this email already exists.');
     } catch (err: any) {
-      if (err.code === 'functions/already-exists') throw err;
+      if (err instanceof HttpsError) throw err;
       if (err.code !== 'auth/user-not-found') {
         throw new HttpsError('internal', err.message ?? 'Failed to check email');
       }
@@ -3025,14 +3029,13 @@ export const inviteCoach = onCall(
       .get();
     const batch = db.batch();
     existingSnap.forEach(doc => batch.update(doc.ref, { status: 'superseded' }));
-    await batch.commit();
 
     // Generate a secure random token
     const crypto = require('crypto');
     const inviteToken: string = crypto.randomBytes(24).toString('hex');
     const expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000; // 7 days
 
-    await db.collection('coachInvites').doc(inviteToken).set({
+    batch.set(db.collection('coachInvites').doc(inviteToken), {
       token: inviteToken,
       email: email.trim().toLowerCase(),
       displayName: displayName.trim(),
@@ -3045,6 +3048,8 @@ export const inviteCoach = onCall(
     const appUrl = process.env.APP_BASE_URL || 'https://goarrive.fit';
     const inviteUrl = `${appUrl}/coach-signup?token=${inviteToken}`;
 
+    // Keep prior invitations valid if creation fails.
+    await batch.commit();
     console.log('[inviteCoach] Invite created by', callerUid);
     return { inviteUrl, token: inviteToken, expiresAt };
   }
@@ -3295,57 +3300,9 @@ export const sendMemberInvite = onCall(
       );
     }
 
-    // Ensure a Firebase Auth user exists for this email
-    let userRecord: admin.auth.UserRecord;
-    let authCreated = false;
-    try {
-      userRecord = await admin.auth().getUserByEmail(email);
-    } catch (err: any) {
-      if (err.code !== 'auth/user-not-found') {
-        throw new HttpsError('internal', err.message ?? 'Failed to look up user');
-      }
-      const cryptoMod = require('crypto');
-      const tempPassword = cryptoMod.randomBytes(24).toString('base64');
-      userRecord = await admin.auth().createUser({
-        email,
-        password: tempPassword,
-        displayName: member.displayName || member.name || '',
-      });
-      authCreated = true;
-    }
-
-    // Set member custom claims so role-gated UI and rules resolve correctly
-    await admin.auth().setCustomUserClaims(userRecord.uid, {
-      role: 'member',
-      coachId: member.coachId,
-      tenantId: member.tenantId ?? member.coachId,
-      memberId: memberId,
+    return prepareMemberInvite(admin.auth(), memberId, member, process.env.APP_BASE_URL || 'https://goarrive.fit', async (uid, normalizedEmail) => {
+      await memberRef.update({ uid, hasAccount: true, email: normalizedEmail, updatedAt: FieldValue.serverTimestamp() });
     });
-
-    // Link the auth account to the member doc if not already linked
-    if (!member.uid || member.uid !== userRecord.uid || member.hasAccount !== true) {
-      await memberRef.update({
-        uid: userRecord.uid,
-        hasAccount: true,
-        email,
-        updatedAt: FieldValue.serverTimestamp(),
-      });
-    }
-
-    const appUrl = process.env.APP_BASE_URL || 'https://goarrive.fit';
-    const actionCodeSettings = { url: appUrl, handleCodeInApp: false };
-    const resetLink = await admin.auth().generatePasswordResetLink(email, actionCodeSettings);
-
-    console.log(
-      `[sendMemberInvite] ${authCreated ? 'Created' : 'Found'} auth for ${email} memberId=${memberId} by ${callerUid}`
-    );
-
-    return {
-      success: true,
-      resetLink,
-      email,
-      authCreated,
-    };
   }
 );
 
@@ -4767,10 +4724,10 @@ export const rescheduleInstance = onCall(
     if (!instanceSnap.exists) throw new HttpsError('not-found', 'Session instance not found');
 
     const instance = instanceSnap.data()!;
-    if (instance.coachId !== callerUid && instance.memberId !== callerUid) {
+    if (instance.coachId !== callerUid && !ownsSessionMember(callerUid, request.auth!.token, instance)) {
       throw new HttpsError('permission-denied', 'You can only reschedule your own sessions');
     }
-    const rescheduleSource = (instance.memberId === callerUid) ? 'member_action' : 'coach_action';
+    const rescheduleSource = (ownsSessionMember(callerUid, request.auth!.token, instance)) ? 'member_action' : 'coach_action';
 
     if (!['scheduled', 'allocated', 'allocation_failed'].includes(instance.status as string)) {
       throw new HttpsError('failed-precondition', `Cannot reschedule instance in status "${instance.status}"`);
@@ -4884,10 +4841,10 @@ export const cancelInstance = onCall(
     if (!instanceSnap.exists) throw new HttpsError('not-found', 'Session instance not found');
 
     const instance = instanceSnap.data()!;
-    if (instance.coachId !== callerUid && instance.memberId !== callerUid) {
+    if (instance.coachId !== callerUid && !ownsSessionMember(callerUid, request.auth!.token, instance)) {
       throw new HttpsError('permission-denied', 'You can only cancel your own sessions');
     }
-    const cancelSource = (instance.memberId === callerUid) ? 'member_action' : 'coach_action';
+    const cancelSource = (ownsSessionMember(callerUid, request.auth!.token, instance)) ? 'member_action' : 'coach_action';
 
     // Playbook sessions: member self-cancel reuses the skip auto-approval
     // window — inside the window the member must go through a skip request.
@@ -7464,7 +7421,7 @@ export const requestSkipInstance = onCall(
     if (!instSnap.exists) throw new HttpsError('not-found', 'Session instance not found');
 
     const inst = instSnap.data()!;
-    if (inst.memberId !== callerUid) {
+    if (!ownsSessionMember(callerUid, request.auth!.token, inst)) {
       throw new HttpsError('permission-denied', 'You can only request skips for your own sessions');
     }
     if (!['scheduled', 'allocated', 'allocation_failed'].includes(inst.status)) {
@@ -11221,7 +11178,7 @@ export const getEmbeddedSessionJoinConfig = onCall(
     // Coach live-view: the session's coach may also join as a participant to
     // observe the member (still role 0 — host-start remains future work).
     const callerIsCoach = callerUid === instance.coachId;
-    const callerIsMember = callerUid === instance.memberId;
+    const callerIsMember = ownsSessionMember(callerUid, callerToken || {}, instance);
     if (!callerIsAdmin && !callerIsMember && !callerIsCoach) {
       throw new HttpsError(
         'permission-denied',

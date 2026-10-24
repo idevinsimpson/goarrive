@@ -46,6 +46,13 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == uid;
     }
 
+    function ownsSessionMember(data) {
+      return isOwnDoc(data.memberId) || (
+        isMemberOfCoach(data.coachId)
+        && request.auth.token.get('memberId', '') == data.memberId
+      );
+    }
+
     function isOwnTenant(coachId) {
       return isAuthenticated() && getTenantId() == coachId;
     }
@@ -706,7 +713,7 @@ service cloud.firestore {
     match /session_instances/{instanceId} {
       allow read: if isAuthenticated() && (
         isCoachOrBootstrap(resource.data.coachId)
-        || isOwnDoc(resource.data.memberId)
+        || ownsSessionMember(resource.data)
         || isPlatformAdmin()
       );
       allow create: if isCoachOrBootstrap(request.resource.data.coachId) || isPlatformAdmin();
@@ -719,11 +726,11 @@ service cloud.firestore {
       match /live/{docId} {
         allow read: if isAuthenticated() && (
           isCoachOrBootstrap(get(/databases/$(database)/documents/session_instances/$(instanceId)).data.coachId)
-          || isOwnDoc(get(/databases/$(database)/documents/session_instances/$(instanceId)).data.memberId)
+          || ownsSessionMember(get(/databases/$(database)/documents/session_instances/$(instanceId)).data)
           || isPlatformAdmin()
         );
         allow write: if isAuthenticated() && (
-          isOwnDoc(get(/databases/$(database)/documents/session_instances/$(instanceId)).data.memberId)
+          ownsSessionMember(get(/databases/$(database)/documents/session_instances/$(instanceId)).data)
           || isPlatformAdmin()
         );
       }
@@ -1191,6 +1198,66 @@ service cloud.firestore {
     // ─────────────────────────────────────────────
     match /drip_email_queue/{queueId} {
       allow read: if isAuthenticated() && (isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin());
+      allow create, update, delete: if false;
+    }
+
+    // ─────────────────────────────────────────────
+    // WE STAY FIT (WSF) — universal communities app
+    // Append-only section; MUST stay before the catch-all deny.
+    // Rules for the parallel WSF app (apps/westayfit) — collections are
+    // wsf-prefixed so they cannot collide with GoArrive documents.
+    // Zero custom claims: WSF gates use uid + email_verified + owner-checked
+    // Firestore state, never token.role or token.coachId.
+    // ─────────────────────────────────────────────
+
+    function wsfEmailVerified() {
+      return isAuthenticated() && request.auth.token.email_verified == true;
+    }
+
+    function wsfIsGroupMember(groupId) {
+      // Current members only: a membership row survives removal and departure
+      // with its status changed, so existence alone is not membership.
+      return isAuthenticated()
+        && exists(/databases/$(database)/documents/wsfMemberships/$(groupId + '_' + request.auth.uid))
+        && get(/databases/$(database)/documents/wsfMemberships/$(groupId + '_' + request.auth.uid)).data.membershipStatus == 'active';
+    }
+
+    // wsfMemberProfiles/{uid} — owner-only; platform admin read-only.
+    // Adult-confirmation invariant is enforced at create AND kept true on update.
+    match /wsfMemberProfiles/{uid} {
+      allow read: if (isAuthenticated() && request.auth.uid == uid) || isPlatformAdmin();
+
+      allow create: if isAuthenticated()
+        && request.auth.uid == uid
+        && wsfEmailVerified()
+        && request.resource.data.adultConfirmation == true
+        && request.resource.data.displayName is string
+        && request.resource.data.acceptedTermsVersion is string
+        && request.resource.data.acceptedPrivacyVersion is string;
+
+      allow update: if isAuthenticated()
+        && request.auth.uid == uid
+        && wsfEmailVerified()
+        && request.resource.data.adultConfirmation == true
+        && request.resource.data.acceptedTermsVersion is string
+        && request.resource.data.acceptedPrivacyVersion is string;
+
+      allow delete: if false;
+    }
+
+    // wsfCommunityGroups/{groupId} — server-only writes (via wsfCreateCommunity).
+    // Reads: current members only, plus platform admin read-only.
+    match /wsfCommunityGroups/{groupId} {
+      allow read: if wsfIsGroupMember(groupId) || isPlatformAdmin();
+      allow create, update, delete: if false;
+    }
+
+    // wsfMemberships/{membershipId} — server-only writes (via wsfCreateCommunity
+    // and future invite-accept flows). Reads: owner-only + platform admin read-only.
+    // The membership doc's `userId` field is the truth (doc ID is never parsed).
+    match /wsfMemberships/{membershipId} {
+      allow read: if (isAuthenticated() && resource.data.userId == request.auth.uid)
+        || isPlatformAdmin();
       allow create, update, delete: if false;
     }
 

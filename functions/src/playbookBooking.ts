@@ -1,3 +1,4 @@
+import { ownsSessionMember } from './sessionIdentity';
 /**
  * Playbook Booking — Phase B (3b)
  *
@@ -595,14 +596,16 @@ export const bookViaBookingToken = onCall(
     const callerClaims = (request.auth?.token || {}) as Record<string, any>;
     const callerIsCoach = !!authUid && (
       authUid === tokenData.coachId
-      || callerClaims.coachId === tokenData.coachId
+      || (callerClaims.role === 'coach' && callerClaims.coachId === tokenData.coachId)
       || callerClaims.role === 'platformAdmin' || callerClaims.admin === true
     );
     const onBehalfMemberId = tokenData.memberId || memberIds[0] || null;
 
-    if (authUid && (authUid === tokenData.memberId || memberIds.includes(authUid))) {
-      memberId = authUid;
-      memberKey = authUid;
+    const assignedIds = tokenData.memberId ? [tokenData.memberId] : memberIds;
+    const ownMemberId = authUid && assignedIds.find((id: string) => ownsSessionMember(authUid, callerClaims, { memberId: id, coachId: tokenData.coachId }));
+    if (ownMemberId) {
+      memberId = ownMemberId;
+      memberKey = ownMemberId;
       const memberSnap = await db.collection('members').doc(memberId).get();
       memberName = (memberSnap.data()?.name as string) || playbook.assignedMemberName || 'Member';
       bookerEmail = normalizeEmail(memberSnap.data()?.email) || normalizeEmail(request.auth?.token?.email);
@@ -845,9 +848,9 @@ async function loadInstanceForCaller(instanceId: string, auth: { uid: string; to
   if (!snap.exists) throw new HttpsError('not-found', 'Session not found');
   const inst = snap.data()!;
   const claims = auth.token || {};
-  const isCoach = auth.uid === inst.coachId || claims.coachId === inst.coachId;
+  const isCoach = auth.uid === inst.coachId || (claims.role === 'coach' && claims.coachId === inst.coachId);
   const isAdmin = claims.role === 'platformAdmin' || claims.admin === true;
-  if (auth.uid !== inst.memberId && !isCoach && !isAdmin) {
+  if (!ownsSessionMember(auth.uid, claims, inst) && !isCoach && !isAdmin) {
     throw new HttpsError('permission-denied', 'This session does not belong to you');
   }
   return inst;
@@ -922,24 +925,77 @@ export const getSessionWorkout = onCall(
       coachName = c.displayName || c.name || null;
     } catch { /* branding only */ }
 
-    let workoutId: string | null = (inst.pinnedWorkoutId as string) || null;
-    if (!workoutId && inst.playbookId) {
-      try {
-        const playbookSnap = await db.collection('playbooks').doc(inst.playbookId).get();
-        const p = playbookSnap.data() || {};
-        const ids: string[] = Array.isArray(p.workoutIds) ? p.workoutIds : [];
-        if (ids.length > 0) {
-          const idx = Number.isInteger(p.nextWorkoutIndex) ? p.nextWorkoutIndex : 0;
-          workoutId = ids[((idx % ids.length) + ids.length) % ids.length];
-        }
-      } catch (err: any) {
-        console.warn(`[getSessionWorkout] playbook lookup failed for ${sessionInstanceId}: ${err.message}`);
+    const ref = db.collection('session_instances').doc(sessionInstanceId);
+    const workout = await db.runTransaction(async (tx) => {
+      const current = (await tx.get(ref)).data();
+      if (!current) throw new HttpsError('not-found', 'Session not found');
+      const claims = request.auth!.token;
+      const isCoach = request.auth!.uid === current.coachId || (claims.role === 'coach' && claims.coachId === current.coachId);
+      if (!ownsSessionMember(request.auth!.uid, claims, current) && !isCoach && claims.role !== 'platformAdmin' && claims.admin !== true) {
+        throw new HttpsError('permission-denied', 'This session does not belong to you');
       }
-    }
-    if (!workoutId) return { workout: null, coachName };
-
-    const workoutSnap = await db.collection('workouts').doc(workoutId).get();
-    if (!workoutSnap.exists) return { workout: null, coachName };
-    return { workout: { id: workoutSnap.id, ...workoutSnap.data() }, coachName };
+      const playbook = current.playbookId ? (await tx.get(db.collection('playbooks').doc(current.playbookId))).data() : null;
+      if (playbook && playbook.coachId !== current.coachId) throw new HttpsError('permission-denied', 'Playbook belongs to a different coach');
+      const ids: string[] = Array.isArray(playbook?.workoutIds) ? playbook!.workoutIds : [];
+      const index = Number.isInteger(playbook?.nextWorkoutIndex) ? playbook!.nextWorkoutIndex : 0;
+      const selectedId = ids.length ? ids[((index % ids.length) + ids.length) % ids.length] : null;
+      const workoutId = current.pinnedWorkoutId || selectedId;
+      if (!workoutId) return null;
+      const workoutSnap = await tx.get(db.collection('workouts').doc(workoutId));
+      if (!workoutSnap.exists) return null;
+      if (workoutSnap.data()?.coachId !== current.coachId) throw new HttpsError('permission-denied', 'Workout belongs to a different coach');
+      const updates: Record<string, any> = {};
+      if (!current.pinnedWorkoutId) updates.pinnedWorkoutId = workoutId;
+      // Record assignment position and ordered sequence together. A second
+      // session opened at this same position may finish, but cannot skip ahead.
+      if (current.pinnedWorkoutIndex === undefined && workoutId === selectedId) {
+        updates.pinnedWorkoutIndex = index;
+        updates.pinnedWorkoutSequence = JSON.stringify(ids);
+      }
+      if (Object.keys(updates).length) tx.update(ref, updates);
+      return { id: workoutSnap.id, ...workoutSnap.data() };
+    });
+    return { workout, coachName };
   }
+);
+
+/** Completion and sequence advancement commit together; retries are harmless. */
+export const completePlaybookSession = onCall(
+  { region: 'us-central1', invoker: 'public' },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'Must be signed in');
+    const { sessionInstanceId, workoutId } = request.data || {};
+    await loadInstanceForCaller(sessionInstanceId, request.auth as any);
+    const db = getDb();
+    const ref = db.collection('session_instances').doc(sessionInstanceId);
+    return db.runTransaction(async (tx) => {
+      const inst = (await tx.get(ref)).data()!;
+      if (!ownsSessionMember(request.auth!.uid, request.auth!.token, inst)) {
+        throw new HttpsError('permission-denied', 'Only the assigned member can complete this session');
+      }
+      if (!workoutId || inst.pinnedWorkoutId !== workoutId) {
+        throw new HttpsError('failed-precondition', 'Complete the assigned workout');
+      }
+      if (inst.workoutCompletedAt) return { completed: true };
+      if (!['scheduled', 'allocated', 'in_progress', 'allocation_failed', 'completed'].includes(inst.status)) {
+        throw new HttpsError('failed-precondition', 'Session cannot be completed');
+      }
+      if (!inst.startUtc?.toMillis || Date.now() < inst.startUtc.toMillis() - 300000) {
+        throw new HttpsError('failed-precondition', 'Session has not started');
+      }
+      const playbookRef = inst.playbookId ? db.collection('playbooks').doc(inst.playbookId) : null;
+      const playbook = playbookRef ? (await tx.get(playbookRef)).data() : null;
+      if (playbook && playbook.coachId !== inst.coachId) {
+        throw new HttpsError('permission-denied', 'Playbook belongs to a different coach');
+      }
+      tx.update(ref, { status: 'completed', workoutCompletedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
+      if (playbookRef && playbook && Array.isArray(playbook.workoutIds) && playbook.workoutIds.length &&
+          Number.isInteger(inst.pinnedWorkoutIndex) &&
+          inst.pinnedWorkoutIndex === (Number.isInteger(playbook.nextWorkoutIndex) ? playbook.nextWorkoutIndex : 0) &&
+          inst.pinnedWorkoutSequence === JSON.stringify(playbook.workoutIds)) {
+        tx.update(playbookRef, { nextWorkoutIndex: (Number.isInteger(playbook.nextWorkoutIndex) ? playbook.nextWorkoutIndex : 0) + 1, updatedAt: FieldValue.serverTimestamp() });
+      }
+      return { completed: true };
+    });
+  },
 );

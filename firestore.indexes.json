@@ -4,6 +4,15 @@
       "collectionGroup": "session_instances",
       "queryScope": "COLLECTION",
       "fields": [
+        { "fieldPath": "coachId", "order": "ASCENDING" },
+        { "fieldPath": "memberId", "order": "ASCENDING" },
+        { "fieldPath": "scheduledDate", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "session_instances",
+      "queryScope": "COLLECTION",
+      "fields": [
         { "fieldPath": "memberId", "order": "ASCENDING" },
         { "fieldPath": "scheduledDate", "order": "ASCENDING" }
       ]
@@ -399,12 +408,51 @@
         { "fieldPath": "status", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "wsfContributions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "communityGroupId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "__name__",
+          "order": "DESCENDING"
+        }
+      ],
+      "density": "SPARSE_ALL"
+    },
+    {
+      "collectionGroup": "wsfGoalMemberTotals",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "__name__",
+          "order": "DESCENDING"
+        }
+      ],
+      "density": "SPARSE_ALL"
     }
   ],
   "fieldOverrides": [
     {
       "collectionGroup": "ledgerEntries",
       "fieldPath": "stripeInvoiceId",
+      "ttl": false,
       "indexes": [
         { "order": "ASCENDING", "queryScope": "COLLECTION" },
         { "order": "DESCENDING", "queryScope": "COLLECTION" }
@@ -413,6 +461,7 @@
     {
       "collectionGroup": "memberSubscriptions",
       "fieldPath": "subscriptionId",
+      "ttl": false,
       "indexes": [
         { "order": "ASCENDING", "queryScope": "COLLECTION" },
         { "order": "DESCENDING", "queryScope": "COLLECTION" }

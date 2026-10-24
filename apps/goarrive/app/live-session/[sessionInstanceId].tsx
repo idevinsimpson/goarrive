@@ -12,7 +12,7 @@
  *  3. RECORDED sessions (recordingEnabled) gate the player behind an in-app
  *     Zoom join (SessionZoomTile) that stays as a PiP tile during playback.
  */
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -112,6 +112,13 @@ export default function LiveSessionScreen() {
 
   const [workout, setWorkout] = useState<any | null>(null);
   const [workoutLoaded, setWorkoutLoaded] = useState(false);
+  const [workoutError, setWorkoutError] = useState('');
+  const completingRef = useRef(false);
+  const [completionError, setCompletionError] = useState('');
+  const [completing, setCompleting] = useState(false);
+  const operationGenerationRef = useRef(0);
+  const activeSessionRef = useRef(sessionInstanceId);
+  activeSessionRef.current = sessionInstanceId;
   const [coachName, setCoachName] = useState<string | null>(null);
 
   const [playerVisible, setPlayerVisible] = useState(false);
@@ -120,6 +127,16 @@ export default function LiveSessionScreen() {
   const [showReschedule, setShowReschedule] = useState(false);
   const [actionError, setActionError] = useState('');
   const [cancelling, setCancelling] = useState(false);
+
+  useEffect(() => {
+    setInst(null); setLoading(true); setLoadError('');
+    setWorkout(null); setWorkoutLoaded(false); setWorkoutError('');
+    setCoachName(null); setPlayerVisible(false); setWorkoutDone(false);
+    setShowReschedule(false); setActionError(''); setCancelling(false);
+    completingRef.current = false;
+    setCompletionError(''); setCompleting(false);
+    return () => { operationGenerationRef.current += 1; };
+  }, [sessionInstanceId, user?.uid]);
 
   // Live session doc — status flips (allocation, cancellation) arrive in
   // real time so the page reacts without a refresh.
@@ -150,10 +167,12 @@ export default function LiveSessionScreen() {
     return () => clearInterval(t);
   }, []);
 
+  const readyForWorkout = !!inst && now >= sessionWindowMs(inst).startMs - EARLY_JOIN_GRACE_MS;
+
   // Server-resolved workout + coach name (members can't read those docs).
   useEffect(() => {
     if (!user || !sessionInstanceId || workoutLoaded) return;
-    if (!inst) return;
+    if (!inst || inst.id !== sessionInstanceId || !readyForWorkout) return;
     let cancelled = false;
     (async () => {
       try {
@@ -168,36 +187,39 @@ export default function LiveSessionScreen() {
         setWorkoutLoaded(true);
       } catch (err) {
         console.error('[LiveSession] getSessionWorkout failed:', err);
-        if (!cancelled) setWorkoutLoaded(true);
+        if (!cancelled) { setWorkoutError('Unable to load your workout. Please try again.'); setWorkoutLoaded(true); }
       }
     })();
     return () => { cancelled = true; };
-  }, [user, sessionInstanceId, inst, workoutLoaded]);
+  }, [user, sessionInstanceId, inst, workoutLoaded, readyForWorkout]);
 
   const window_ = useMemo(() => (inst ? sessionWindowMs(inst) : null), [inst]);
 
   const handleCancel = useCallback(() => {
     if (!inst) return;
+    const generation = operationGenerationRef.current;
+    const isCurrent = () => activeSessionRef.current === inst.id && operationGenerationRef.current === generation;
     confirmDialog(
       'Cancel Session',
       `Cancel your ${friendlyDate(inst.scheduledDate)} session at ${friendlyTime(inst.scheduledStartTime)}?`,
       async () => {
+        if (!isCurrent()) return;
         setCancelling(true);
         setActionError('');
         try {
           const fn = httpsCallable(functions, 'cancelInstance');
           await fn({ instanceId: inst.id });
         } catch (err: any) {
-          setActionError(err?.message || 'Unable to cancel — please try again or contact your coach.');
+          if (isCurrent()) setActionError(err?.message || 'Unable to cancel — please try again or contact your coach.');
         } finally {
-          setCancelling(false);
+          if (isCurrent()) setCancelling(false);
         }
       },
     );
   }, [inst]);
 
   // ── Guards ─────────────────────────────────────────────────────────────────
-  if (authLoading || loading) {
+  if (authLoading || (user && loading)) {
     return (
       <View style={s.center}>
         <ActivityIndicator size="large" color={GOLD} />
@@ -222,7 +244,7 @@ export default function LiveSessionScreen() {
   const whenLine = formatInTimezone(startMs, inst.timezone);
 
   const isCancelled = inst.status === 'cancelled';
-  const isDoneStatus = ['completed', 'missed', 'skipped'].includes(inst.status);
+  const isDoneStatus = !!inst.workoutCompletedAt || ['missed', 'skipped'].includes(inst.status);
   const isPre = now < startMs - EARLY_JOIN_GRACE_MS;
   const isLive = now >= startMs - EARLY_JOIN_GRACE_MS && now <= endMs;
 
@@ -236,7 +258,7 @@ export default function LiveSessionScreen() {
       />
     );
   }
-  if (isDoneStatus || (!isPre && !isLive) || workoutDone) {
+  if (isDoneStatus || (!isPre && !isLive && !playerVisible) || workoutDone) {
     return (
       <TerminalCard
         title={workoutDone || inst.status === 'completed' ? 'Session complete — great work!' : 'This session has ended'}
@@ -331,11 +353,13 @@ export default function LiveSessionScreen() {
 
           {!needsZoomGate && workoutLoaded && !workout && (
             <View style={s.innerCard}>
-              <Text style={s.innerCardTitle}>Workout not assigned yet</Text>
+              <Text style={s.innerCardTitle}>{workoutError ? 'Workout could not load' : 'Workout not assigned yet'}</Text>
               <Text style={s.innerCardText}>
-                Your coach hasn&apos;t assigned the workout for this session yet.
-                Hang tight — it will appear here as soon as it&apos;s ready.
+                {workoutError || 'Your coach has not assigned a workout yet. Try again after your coach updates the session.'}
               </Text>
+              <Pressable style={s.secondaryBtn} onPress={() => { setWorkoutError(''); setWorkoutLoaded(false); }}>
+                <Text style={s.secondaryBtnText}>Try again</Text>
+              </Pressable>
             </View>
           )}
 
@@ -362,10 +386,27 @@ export default function LiveSessionScreen() {
           visible={playerVisible}
           workout={workout}
           sessionInstanceId={sessionInstanceId}
+          completionError={completionError}
+          completing={completing}
           onClose={() => setPlayerVisible(false)}
-          onComplete={() => {
-            setPlayerVisible(false);
-            setWorkoutDone(true);
+          onComplete={async () => {
+            if (completingRef.current) return;
+            completingRef.current = true;
+            setCompleting(true);
+            setCompletionError('');
+            const completingSessionId = sessionInstanceId;
+            const generation = operationGenerationRef.current;
+            const isCurrent = () => activeSessionRef.current === completingSessionId && operationGenerationRef.current === generation;
+            try {
+              await httpsCallable(functions, 'completePlaybookSession')({ sessionInstanceId, workoutId: workout.id });
+              if (!isCurrent()) return;
+              setPlayerVisible(false);
+              setWorkoutDone(true);
+            } catch {
+              if (isCurrent()) setCompletionError('Completion could not be confirmed. Retry saving to check and finish safely.');
+            } finally {
+              if (isCurrent()) { completingRef.current = false; setCompleting(false); }
+            }
           }}
         />
       )}

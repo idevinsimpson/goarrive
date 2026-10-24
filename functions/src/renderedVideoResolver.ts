@@ -1,3 +1,4 @@
+import { ownsSessionMember } from './sessionIdentity';
 import * as admin from 'firebase-admin';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import {
@@ -126,7 +127,7 @@ async function hasSessionAccess(
 ): Promise<boolean> {
   if (!input.sessionInstanceId) return false;
   const session = await dependencies.loadSessionInstance(input.sessionInstanceId);
-  if (!session || session.memberId !== auth.uid ||
+  if (!session || !ownsSessionMember(auth.uid, auth.token, session) ||
       typeof workout.coachId !== 'string' || workout.coachId.length === 0 ||
       session.coachId !== workout.coachId) {
     return false;

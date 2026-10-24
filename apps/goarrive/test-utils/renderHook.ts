@@ -53,3 +53,19 @@ export function renderHook<Result, Props = undefined>(
     unmount,
   };
 }
+
+/** DOM render companion for tests that need React commit/layout effects. */
+export function render(element: React.ReactNode) {
+  const root = createRoot(document.createElement('div'));
+  let mounted = true;
+  function rerender(next: React.ReactNode) { act(() => root.render(next)); }
+  function unmount() {
+    if (!mounted) return;
+    act(() => root.unmount());
+    mounted = false;
+    mountedHooks.delete(unmount);
+  }
+  mountedHooks.add(unmount);
+  rerender(element);
+  return { rerender, unmount };
+}

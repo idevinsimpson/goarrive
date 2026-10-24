@@ -14,7 +14,7 @@
 
 import { vi } from 'vitest';
 import { Platform, Image } from 'react-native';
-import { renderHook } from '../../test-utils/renderHook';
+import { act, renderHook } from '../../test-utils/renderHook';
 import { useMediaPrefetch } from '../useMediaPrefetch';
 
 const originalOS = Platform.OS;
@@ -100,7 +100,7 @@ describe('useMediaPrefetch — web platform', () => {
 
     // Pass-21 B: speculativeAllowed flips 2.5s after mount, gating the
     // aggressive next-video preload — advance timers to release it.
-    vi.advanceTimersByTime(2500);
+    act(() => vi.advanceTimersByTime(2500));
 
     expect(createdVideos.length).toBeGreaterThan(0);
     const videoEl = createdVideos[0];
@@ -113,11 +113,11 @@ describe('useMediaPrefetch — web platform', () => {
     expect(removedBodyElements).not.toContain(videoEl);
 
     // 4.9 s — still alive.
-    vi.advanceTimersByTime(4900);
+    act(() => vi.advanceTimersByTime(4900));
     expect(removedBodyElements).not.toContain(videoEl);
 
     // > 5 s — cleanup fires.
-    vi.advanceTimersByTime(200);
+    act(() => vi.advanceTimersByTime(200));
     expect(removedBodyElements).toContain(videoEl);
   });
 
@@ -130,7 +130,7 @@ describe('useMediaPrefetch — web platform', () => {
     );
 
     // Pass-21 B: same speculative-gate release as the sibling test above.
-    vi.advanceTimersByTime(2500);
+    act(() => vi.advanceTimersByTime(2500));
 
     expect(appendedBodyElements).toContain(createdVideos[0]);
   });
