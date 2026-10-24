@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "repository": "idevinsimpson/goarrive",
+  "minimumClaudeVersion": "2.1.284",
+  "inspectedMain": "9ca268d2500c60dddc3aba8d490a67f24b97a2cb",
+  "inspectedDevelopment": "ab77fbfce97e60c1c22492397b2ab6b491f9e0db",
+  "currentTransport": "existing Claude sessions + App-written canonical inbox wakes",
+  "automaticCutover": false,
+  "workers": {
+    "L0": {
+      "inbox": 365,
+      "role": "Single program integrator / Director; configuration reference only",
+      "model": "claude-opus-5-5",
+      "effort": "high",
+      "ultracode": false,
+      "maxTurns": 20,
+      "executeAllowed": false,
+      "why": "Cross-lane authority, exact integration and release judgments. Never create a second integrator.",
+      "timeoutMinutes": 30
+    },
+    "W3": {
+      "inbox": 396,
+      "role": "Staging operations and bounded backend implementation",
+      "model": "claude-sonnet-5-5",
+      "effort": "high",
+      "ultracode": false,
+      "maxTurns": 30,
+      "executeAllowed": true,
+      "why": "Precise source/test work; explicitly select deep for auth, concurrency, permission-boundary or deployment investigations.",
+      "timeoutMinutes": 30
+    },
+    "W4": {
+      "inbox": 394,
+      "role": "Independent operations/source and member-journey review",
+      "model": "claude-sonnet-5-5",
+      "effort": "high",
+      "ultracode": false,
+      "maxTurns": 20,
+      "executeAllowed": true,
+      "why": "Reproduce failures and test changes independently without automatic review-agent multiplication. Escalate ambiguous correctness.",
+      "timeoutMinutes": 30
+    },
+    "W5": {
+      "inbox": 395,
+      "role": "Independent security/privacy/authorization review",
+      "model": "claude-opus-5-5",
+      "effort": "xhigh",
+      "ultracode": false,
+      "maxTurns": 30,
+      "executeAllowed": true,
+      "why": "Threat modeling, enumeration, recipient binding, race conditions, secrets and cross-account isolation warrant deeper review. No cheap fallback.",
+      "timeoutMinutes": 30
+    },
+    "W7": {
+      "inbox": 434,
+      "role": "Independent journey QA and multi-device proof",
+      "model": "claude-sonnet-5-5",
+      "effort": "high",
+      "ultracode": true,
+      "maxTurns": 25,
+      "executeAllowed": true,
+      "why": "Preserve Devin's requested Ultracode preference for bounded cross-checks. Use economy to turn orchestration off; deep for idempotency/cross-device release adjudication.",
+      "timeoutMinutes": 30
+    },
+    "W9": {
+      "inbox": 497,
+      "role": "Member-shell and expo account-entry/UI implementation",
+      "model": "claude-sonnet-5-5",
+      "effort": "high",
+      "ultracode": true,
+      "maxTurns": 35,
+      "executeAllowed": true,
+      "why": "Bounded UI implementation plus screenshots and focused tests can benefit from orchestration. No extra external workers; economy disables fan-out.",
+      "timeoutMinutes": 30
+    }
+  }
+}

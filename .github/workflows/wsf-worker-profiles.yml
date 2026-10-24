@@ -1,0 +1,103 @@
+# Source/opt-in smoke only. Does NOT consume inbox wakes or replace phone sessions.
+name: WSF worker profiles
+on:
+  workflow_dispatch:
+    inputs:
+      worker:
+        description: Worker profile (L0 is configuration reference only)
+        required: true
+        type: choice
+        options: [L0, W3, W4, W5, W7, W9]
+        default: W7
+      tier:
+        description: Explicit profile choice; no automatic expensive escalation
+        required: true
+        type: choice
+        options: [default, economy, deep, ultracode]
+        default: default
+      mode:
+        description: plan is free of model calls; smoke requires owner-enabled OAuth gate
+        required: true
+        type: choice
+        options: [plan, smoke]
+        default: plan
+permissions:
+  contents: read
+# Not the live control-writer concurrency group. No inbox or cron event triggers.
+concurrency:
+  group: wsf-profile-smoke-${{ inputs.worker }}
+  cancel-in-progress: false
+jobs:
+  plan:
+    if: >-
+      github.repository == 'idevinsimpson/goarrive' &&
+      github.ref == 'refs/heads/main' && github.actor == 'idevinsimpson'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      settings: ${{ steps.profile.outputs.settings }}
+      model: ${{ steps.profile.outputs.model }}
+      effort: ${{ steps.profile.outputs.effort }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 20
+      - name: Validate all profiles and safety contracts
+        run: node --test .github/wsf-workers/profiles.test.mjs
+      - id: profile
+        name: Resolve the saved role profile
+        env:
+          WSF_WORKER: ${{ inputs.worker }}
+          WSF_TIER: ${{ inputs.tier }}
+        run: node .github/wsf-workers/launch.mjs plan "$WSF_WORKER" --tier "$WSF_TIER" --github-output
+      - name: Explain the boundary
+        run: |
+          printf '%s\n' 'Profiles resolved. Existing phone/cloud workers are unchanged.' 'A green plan is not runtime persistence proof. Smoke is opt-in and never performs a worker task.' >> "$GITHUB_STEP_SUMMARY"
+  smoke:
+    needs: plan
+    if: >-
+      github.repository == 'idevinsimpson/goarrive' && github.ref == 'refs/heads/main' &&
+      github.actor == 'idevinsimpson' && inputs.mode == 'smoke' &&
+      inputs.worker != 'L0' && vars.WSF_WORKER_PROFILE_SMOKE == 'enabled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: wsf-worker-profile-smoke
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Require explicitly supplied subscription authentication
+        env:
+          WSF_SUBSCRIPTION_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          if [ -z "$WSF_SUBSCRIPTION_TOKEN" ]; then
+            echo 'Subscription OAuth secret is missing. No API-key fallback is permitted.' >&2
+            exit 1
+          fi
+      - name: One tool-free runtime smoke, not a worker launch
+        id: claude
+        # v1.0.240; this exact action installs CLI 2.1.288 (>=2.1.284).
+        uses: anthropics/claude-code-action@ed670b4cf9de2a5a570d130d2f6197b9e543cd64
+        with:
+          github_token: ${{ github.token }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          settings: ${{ needs.plan.outputs.settings }}
+          claude_args: >-
+            --model ${{ needs.plan.outputs.model }}
+            --effort ${{ needs.plan.outputs.effort }}
+            --max-turns 1 --tools ""
+          prompt: Return exactly WSF_PROFILE_SMOKE_OK. Do not use tools, start workflows or agents, inspect repository contents, or perform a worker assignment.
+          show_full_output: 'false'
+          display_report: 'false'
+      - name: Safe runtime model readback
+        env:
+          WSF_EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+          WSF_EXPECTED_MODEL: ${{ needs.plan.outputs.model }}
+        run: node .github/wsf-workers/report-smoke.mjs "$WSF_EXECUTION_FILE" "$WSF_EXPECTED_MODEL"
