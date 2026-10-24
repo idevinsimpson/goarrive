@@ -6,12 +6,13 @@
  * displayed as h:mm AM/PM, never military), a per-day Coach-Guided vs
  * Self-Guided selector, and the workout that falls on that day (derived from
  * playbook order). Workout tiles drag between day modules to reorder the
- * playbook. Repeat control removed — schedules repeat weekly by definition;
- * only the horizon remains. Public payloads still show the playbook TITLE
+ * playbook. Coaches can book a weekly series or one upcoming occurrence.
+ * Public payloads still show the playbook TITLE
  * only — never workout names.
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { bookingRecurrence, BookingRecurrence } from '../lib/bookingRecurrence';
 import {
   Keyboard, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View,
 } from 'react-native';
@@ -214,6 +215,7 @@ interface PlaybookDocLite {
   scheduleStartTime?: string;
   scheduleDaySettings?: Array<{ dayOfWeek: number; startTime: string; sessionKind?: PlaybookSessionKind; durationMinutes?: number | null }>;
   repeatHorizonWeeks?: number;
+  repeatFrequency?: string;
 }
 
 interface UpcomingSession {
@@ -243,6 +245,7 @@ export default function PlaybookSchedulePanel({
   const [dayConfigs, setDayConfigs] = useState<Record<number, DayConfig>>({});
   const [recordingEnabled, setRecordingEnabled] = useState(true);
   const [horizonWeeks, setHorizonWeeks] = useState(4);
+  const [repeatFrequency, setRepeatFrequency] = useState<BookingRecurrence>('weekly');
   const [weeklyCap, setWeeklyCap] = useState<number | null>(null);
   const [booking, setBooking] = useState(false);
   const [checkingStatus, setCheckingStatus] = useState(false);
@@ -338,6 +341,7 @@ export default function PlaybookSchedulePanel({
           if (data.weeklySessionCap !== undefined) setWeeklyCap(data.weeklySessionCap ?? null);
         }
         if (!prefilledRef.current) {
+          if (!pendingRequestIdRef.current) setRepeatFrequency(data.repeatFrequency === 'none' ? 'none' : 'weekly');
           prefilledRef.current = true;
           const fallbackDuration = String(data.sessionDurationMinutes || 45);
           const saved = data.scheduleDaySettings;
@@ -795,7 +799,8 @@ export default function PlaybookSchedulePanel({
 
   const timesValid = sortedDays.length > 0
     && sortedDays.every((d) => !!dayConfigs[d]?.time && parseDuration(dayConfigs[d]?.duration ?? '') !== null);
-  const canBook = hasMember && timesValid && !booking;
+  const recurrenceValid = repeatFrequency !== 'none' || sortedDays.length === 1;
+  const canBook = hasMember && timesValid && recurrenceValid && !booking;
 
   const book = useCallback(async () => {
     if (!canBook) return;
@@ -825,7 +830,7 @@ export default function PlaybookSchedulePanel({
         durationMinutes: daySettings[0].durationMinutes,
         sessionKind: daySettings[0].sessionKind,
         recordingEnabled,
-        repeatFrequency: 'weekly',
+        ...bookingRecurrence(repeatFrequency, sortedDays),
         repeatHorizonWeeks: horizonWeeks,
         weeklySessionCap: weeklyCap,
         clientRequestId,
@@ -863,7 +868,7 @@ export default function PlaybookSchedulePanel({
       setBooking(false);
       setCheckingStatus(false);
     }
-  }, [canBook, playbookId, sortedDays, dayConfigs, timezone, recordingEnabled, horizonWeeks, weeklyCap]);
+  }, [canBook, playbookId, sortedDays, dayConfigs, timezone, recordingEnabled, horizonWeeks, weeklyCap, repeatFrequency]);
 
   const hasAnySlot = daySlots.some((list) => list.length > 0);
   const windowsValid = hasAnySlot && daySlots.every((list) => list.every(
@@ -1371,7 +1376,22 @@ export default function PlaybookSchedulePanel({
               />
             </View>
 
-            <View style={s.stepperRow}>
+            <View style={s.switchRow}>
+              <Text style={s.switchLabel}>Book one session only</Text>
+              <Switch
+                accessibilityLabel="Book one session only"
+                value={repeatFrequency === 'none'}
+                disabled={booking || pendingRequestIdRef.current !== null}
+                onValueChange={(value) => setRepeatFrequency(value ? 'none' : 'weekly')}
+              />
+            </View>
+            {repeatFrequency === 'none' && (
+              <Text style={s.hint}>
+                Choose exactly one day. This books its next upcoming time only, with no weekly repeats.
+                A time already passed today books next week.
+              </Text>
+            )}
+            {repeatFrequency === 'weekly' && <View style={s.stepperRow}>
               <Text style={s.switchLabel}>Book ahead</Text>
               <View style={s.stepper}>
                 <Pressable style={s.stepBtn} onPress={() => { sessionCfgDirtyRef.current = true; setHorizonWeeks((w) => Math.max(2, w - 1)); }}>
@@ -1382,7 +1402,7 @@ export default function PlaybookSchedulePanel({
                   <Text style={s.stepBtnText}>+</Text>
                 </Pressable>
               </View>
-            </View>
+            </View>}
 
             <View style={s.stepperRow}>
               <Text style={s.switchLabel}>Weekly session cap</Text>
@@ -1614,7 +1634,7 @@ export default function PlaybookSchedulePanel({
                 disabled={!canBook}
               >
                 <Text style={{ color: '#0E1117', fontWeight: '700', fontFamily: FH }}>
-                  {booking ? (checkingStatus ? 'Checking status…' : 'Booking…') : 'Book Sessions'}
+                  {booking ? (checkingStatus ? 'Checking status…' : 'Booking…') : repeatFrequency === 'none' ? 'Book One Session' : 'Book Sessions'}
                 </Text>
               </Pressable>
             </View>
