@@ -114,6 +114,9 @@ export default function LiveSessionScreen() {
   const [workoutLoaded, setWorkoutLoaded] = useState(false);
   const [workoutError, setWorkoutError] = useState('');
   const completingRef = useRef(false);
+  const [completionError, setCompletionError] = useState('');
+  const [completing, setCompleting] = useState(false);
+  const operationGenerationRef = useRef(0);
   const activeSessionRef = useRef(sessionInstanceId);
   activeSessionRef.current = sessionInstanceId;
   const [coachName, setCoachName] = useState<string | null>(null);
@@ -131,6 +134,8 @@ export default function LiveSessionScreen() {
     setCoachName(null); setPlayerVisible(false); setWorkoutDone(false);
     setShowReschedule(false); setActionError(''); setCancelling(false);
     completingRef.current = false;
+    setCompletionError(''); setCompleting(false);
+    return () => { operationGenerationRef.current += 1; };
   }, [sessionInstanceId, user?.uid]);
 
   // Live session doc — status flips (allocation, cancellation) arrive in
@@ -192,10 +197,13 @@ export default function LiveSessionScreen() {
 
   const handleCancel = useCallback(() => {
     if (!inst) return;
+    const generation = operationGenerationRef.current;
+    const isCurrent = () => activeSessionRef.current === inst.id && operationGenerationRef.current === generation;
     confirmDialog(
       'Cancel Session',
       `Cancel your ${friendlyDate(inst.scheduledDate)} session at ${friendlyTime(inst.scheduledStartTime)}?`,
       async () => {
+        if (!isCurrent()) return;
         setCancelling(true);
         setActionError('');
         try {
@@ -204,7 +212,7 @@ export default function LiveSessionScreen() {
         } catch (err: any) {
           setActionError(err?.message || 'Unable to cancel — please try again or contact your coach.');
         } finally {
-          setCancelling(false);
+          if (isCurrent()) setCancelling(false);
         }
       },
     );
@@ -378,20 +386,26 @@ export default function LiveSessionScreen() {
           visible={playerVisible}
           workout={workout}
           sessionInstanceId={sessionInstanceId}
+          completionError={completionError}
+          completing={completing}
           onClose={() => setPlayerVisible(false)}
           onComplete={async () => {
             if (completingRef.current) return;
             completingRef.current = true;
+            setCompleting(true);
+            setCompletionError('');
             const completingSessionId = sessionInstanceId;
+            const generation = operationGenerationRef.current;
+            const isCurrent = () => activeSessionRef.current === completingSessionId && operationGenerationRef.current === generation;
             try {
               await httpsCallable(functions, 'completePlaybookSession')({ sessionInstanceId, workoutId: workout.id });
-              if (activeSessionRef.current !== completingSessionId) return;
+              if (!isCurrent()) return;
               setPlayerVisible(false);
               setWorkoutDone(true);
             } catch {
-              if (activeSessionRef.current === completingSessionId) Alert.alert('Completion not saved', 'Please try finishing again. Your session is not marked complete yet.');
+              if (isCurrent()) setCompletionError('Completion could not be confirmed. Retry saving to check and finish safely.');
             } finally {
-              if (activeSessionRef.current === completingSessionId) completingRef.current = false;
+              if (isCurrent()) { completingRef.current = false; setCompleting(false); }
             }
           }}
         />

@@ -126,6 +126,8 @@ interface WorkoutPlayerProps {
   workout: any;
   onClose: () => void;
   onComplete: () => void;
+  completionError?: string;
+  completing?: boolean;
   onSwapLog?: (swaps: any[]) => void;
   onHeartRateSummary?: (stats: HeartRateSessionStats | null) => void;
   isPreview?: boolean;
@@ -170,6 +172,8 @@ export default function WorkoutPlayer({
   workout,
   onClose,
   onComplete,
+  completionError,
+  completing = false,
   onSwapLog,
   onHeartRateSummary,
   isPreview = false,
@@ -3043,8 +3047,9 @@ export default function WorkoutPlayer({
                   </Text>
                 </View>
               )}
-              <TouchableOpacity style={st.bigStartBtn} onPress={isPreview ? onClose : handleFinish}>
-                <Text style={st.bigStartText}>{isPreview ? 'End Preview' : 'Continue'}</Text>
+              {!!completionError && <Text accessibilityRole="alert" style={[st.completeMeta, { color: '#E05252' }]}>{completionError}</Text>}
+              <TouchableOpacity style={st.bigStartBtn} disabled={completing} onPress={isPreview ? onClose : handleFinish}>
+                <Text style={st.bigStartText}>{isPreview ? 'End Preview' : completing ? 'Saving...' : completionError ? 'Retry saving' : 'Continue'}</Text>
               </TouchableOpacity>
             </View>
           </>
