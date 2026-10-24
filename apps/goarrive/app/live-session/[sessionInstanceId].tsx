@@ -210,7 +210,7 @@ export default function LiveSessionScreen() {
           const fn = httpsCallable(functions, 'cancelInstance');
           await fn({ instanceId: inst.id });
         } catch (err: any) {
-          setActionError(err?.message || 'Unable to cancel — please try again or contact your coach.');
+          if (isCurrent()) setActionError(err?.message || 'Unable to cancel — please try again or contact your coach.');
         } finally {
           if (isCurrent()) setCancelling(false);
         }
