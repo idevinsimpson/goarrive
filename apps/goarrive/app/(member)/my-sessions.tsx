@@ -1,3 +1,4 @@
+import { sessionMemberIds } from '../../lib/sessionMemberIds';
 /**
  * My Sessions — Member-facing session center
  *
@@ -155,7 +156,7 @@ export default function MySessionsScreen() {
       setError(null);
       const q = query(
         collection(db, 'session_instances'),
-        where('memberId', '==', memberId),
+        where('memberId', 'in', sessionMemberIds(effectiveUid, memberId)),
         ...(claims?.coachId ? [where('coachId', '==', claims.coachId)] : []),
         orderBy('scheduledDate', 'asc'),
       );
@@ -169,7 +170,7 @@ export default function MySessionsScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [user, memberId, claims?.coachId]);
+  }, [user, memberId, effectiveUid, claims?.coachId]);
 
   useEffect(() => { fetchSessions(); }, [fetchSessions]);
 

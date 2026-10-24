@@ -562,3 +562,15 @@ describe('Playbook roster identity', () => {
     await assertFails(setDoc(doc(db, 'session_instances', 'roster-session', 'live', 'state'), { phase: 'work' }));
   });
 });
+
+
+test('linked member retains historical UID and current roster sessions without exposing others', async () => {
+  await testEnv.withSecurityRulesDisabled(async ctx => {
+    for (const [id, memberId, coachId] of [['legacy', 'auth-member', COACH_A_UID], ['current', 'roster-member', COACH_A_UID], ['other-member', 'other', COACH_A_UID], ['other-coach', 'roster-member', COACH_B_UID]]) {
+      await setDoc(doc(ctx.firestore(), 'session_instances', id), { memberId, coachId });
+    }
+  });
+  const db = testEnv.authenticatedContext('auth-member', { role: 'member', coachId: COACH_A_UID, memberId: 'roster-member' }).firestore();
+  const result = await assertSucceeds(getDocs(query(collection(db, 'session_instances'), where('memberId', 'in', ['auth-member', 'roster-member']), where('coachId', '==', COACH_A_UID))));
+  expect(result.docs.map(d => d.id).sort()).toEqual(['current', 'legacy']);
+});

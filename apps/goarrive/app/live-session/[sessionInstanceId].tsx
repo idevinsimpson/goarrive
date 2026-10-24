@@ -224,7 +224,7 @@ export default function LiveSessionScreen() {
   const whenLine = formatInTimezone(startMs, inst.timezone);
 
   const isCancelled = inst.status === 'cancelled';
-  const isDoneStatus = ['completed', 'missed', 'skipped'].includes(inst.status);
+  const isDoneStatus = !!inst.workoutCompletedAt || ['missed', 'skipped'].includes(inst.status);
   const isPre = now < startMs - EARLY_JOIN_GRACE_MS;
   const isLive = now >= startMs - EARLY_JOIN_GRACE_MS && now <= endMs;
 
@@ -238,7 +238,7 @@ export default function LiveSessionScreen() {
       />
     );
   }
-  if (isDoneStatus || (!isPre && !isLive) || workoutDone) {
+  if (isDoneStatus || (!isPre && !isLive && !playerVisible) || workoutDone) {
     return (
       <TerminalCard
         title={workoutDone || inst.status === 'completed' ? 'Session complete — great work!' : 'This session has ended'}

@@ -925,48 +925,37 @@ export const getSessionWorkout = onCall(
       coachName = c.displayName || c.name || null;
     } catch { /* branding only */ }
 
-    let workoutId: string | null = (inst.pinnedWorkoutId as string) || null;
-    if (!workoutId && inst.playbookId) {
-      try {
-        const playbookSnap = await db.collection('playbooks').doc(inst.playbookId).get();
-        const p = playbookSnap.data() || {};
-        if (p.coachId !== inst.coachId) throw new HttpsError('permission-denied', 'Playbook belongs to a different coach');
-        const ids: string[] = Array.isArray(p.workoutIds) ? p.workoutIds : [];
-        if (ids.length > 0) {
-          const idx = Number.isInteger(p.nextWorkoutIndex) ? p.nextWorkoutIndex : 0;
-          workoutId = ids[((idx % ids.length) + ids.length) % ids.length];
-        }
-      } catch (err: any) {
-        console.warn(`[getSessionWorkout] playbook lookup failed for ${sessionInstanceId}: ${err.message}`);
-      }
-    }
-    if (!workoutId) return { workout: null, coachName };
-
-    const workoutSnap = await db.collection('workouts').doc(workoutId).get();
-    if (!workoutSnap.exists) return { workout: null, coachName };
-    if (workoutSnap.data()?.coachId !== inst.coachId) {
-      throw new HttpsError('permission-denied', 'Workout belongs to a different coach');
-    }
-    // Freeze the resolved workout so progression cannot change an open player.
     const ref = db.collection('session_instances').doc(sessionInstanceId);
-    const pinnedId = await db.runTransaction(async (tx) => {
-      const current = (await tx.get(ref)).data()!;
+    const workout = await db.runTransaction(async (tx) => {
+      const current = (await tx.get(ref)).data();
+      if (!current) throw new HttpsError('not-found', 'Session not found');
       const claims = request.auth!.token;
-      if (!ownsSessionMember(request.auth!.uid, claims, current) && request.auth!.uid !== current.coachId && !(claims.role === 'coach' && claims.coachId === current.coachId) && claims.role !== 'platformAdmin' && claims.admin !== true) {
+      const isCoach = request.auth!.uid === current.coachId || (claims.role === 'coach' && claims.coachId === current.coachId);
+      if (!ownsSessionMember(request.auth!.uid, claims, current) && !isCoach && claims.role !== 'platformAdmin' && claims.admin !== true) {
         throw new HttpsError('permission-denied', 'This session does not belong to you');
       }
-      if (current.pinnedWorkoutId) return current.pinnedWorkoutId as string;
-      tx.update(ref, { pinnedWorkoutId: workoutId });
-      return workoutId;
-    });
-    if (pinnedId !== workoutId) {
-      const pinned = await db.collection('workouts').doc(pinnedId!).get();
-      if (!pinned.exists || pinned.data()?.coachId !== inst.coachId) {
-        throw new HttpsError('failed-precondition', 'Assigned workout is unavailable');
+      const playbook = current.playbookId ? (await tx.get(db.collection('playbooks').doc(current.playbookId))).data() : null;
+      if (playbook && playbook.coachId !== current.coachId) throw new HttpsError('permission-denied', 'Playbook belongs to a different coach');
+      const ids: string[] = Array.isArray(playbook?.workoutIds) ? playbook!.workoutIds : [];
+      const index = Number.isInteger(playbook?.nextWorkoutIndex) ? playbook!.nextWorkoutIndex : 0;
+      const selectedId = ids.length ? ids[((index % ids.length) + ids.length) % ids.length] : null;
+      const workoutId = current.pinnedWorkoutId || selectedId;
+      if (!workoutId) return null;
+      const workoutSnap = await tx.get(db.collection('workouts').doc(workoutId));
+      if (!workoutSnap.exists) return null;
+      if (workoutSnap.data()?.coachId !== current.coachId) throw new HttpsError('permission-denied', 'Workout belongs to a different coach');
+      const updates: Record<string, any> = {};
+      if (!current.pinnedWorkoutId) updates.pinnedWorkoutId = workoutId;
+      // Record assignment position and ordered sequence together. A second
+      // session opened at this same position may finish, but cannot skip ahead.
+      if (current.pinnedWorkoutIndex === undefined && workoutId === selectedId) {
+        updates.pinnedWorkoutIndex = index;
+        updates.pinnedWorkoutSequence = JSON.stringify(ids);
       }
-      return { workout: { id: pinned.id, ...pinned.data() }, coachName };
-    }
-    return { workout: { id: workoutSnap.id, ...workoutSnap.data() }, coachName };
+      if (Object.keys(updates).length) tx.update(ref, updates);
+      return { id: workoutSnap.id, ...workoutSnap.data() };
+    });
+    return { workout, coachName };
   }
 );
 
@@ -988,7 +977,7 @@ export const completePlaybookSession = onCall(
         throw new HttpsError('failed-precondition', 'Complete the assigned workout');
       }
       if (inst.workoutCompletedAt) return { completed: true };
-      if (!['scheduled', 'allocated', 'in_progress', 'allocation_failed'].includes(inst.status)) {
+      if (!['scheduled', 'allocated', 'in_progress', 'allocation_failed', 'completed'].includes(inst.status)) {
         throw new HttpsError('failed-precondition', 'Session cannot be completed');
       }
       if (!inst.startUtc?.toMillis || Date.now() < inst.startUtc.toMillis() - 300000) {
@@ -1000,7 +989,10 @@ export const completePlaybookSession = onCall(
         throw new HttpsError('permission-denied', 'Playbook belongs to a different coach');
       }
       tx.update(ref, { status: 'completed', workoutCompletedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
-      if (playbookRef && playbook && Array.isArray(playbook.workoutIds) && playbook.workoutIds.length) {
+      if (playbookRef && playbook && Array.isArray(playbook.workoutIds) && playbook.workoutIds.length &&
+          Number.isInteger(inst.pinnedWorkoutIndex) &&
+          inst.pinnedWorkoutIndex === (Number.isInteger(playbook.nextWorkoutIndex) ? playbook.nextWorkoutIndex : 0) &&
+          inst.pinnedWorkoutSequence === JSON.stringify(playbook.workoutIds)) {
         tx.update(playbookRef, { nextWorkoutIndex: (Number.isInteger(playbook.nextWorkoutIndex) ? playbook.nextWorkoutIndex : 0) + 1, updatedAt: FieldValue.serverTimestamp() });
       }
       return { completed: true };

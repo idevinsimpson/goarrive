@@ -1,3 +1,4 @@
+import { isTemplateCandidate, subscriptionPathOptions } from '../lib/playbookTemplates';
 /**
  * PlaybookFolderPage — Subscription-program folder drill-in
  *
@@ -155,7 +156,7 @@ export default function PlaybookFolderPage({ folderId, onBack, onOpenPlaybook }:
           .filter(d => ids.includes(d.id))
           .map(d => ({ id: d.id, name: d.data().name || 'Untitled Playbook' }));
         setTemplatePlaybooks(found);
-        setAvailableTemplates(snap.docs.filter(d => !ids.includes(d.id) && !d.data().isArchived && !d.data().assignedMemberId && !d.data().sourcePlaybookId).map(d => ({ id: d.id, name: d.data().name || 'Untitled Playbook' })));
+        setAvailableTemplates(snap.docs.filter(d => !ids.includes(d.id) && isTemplateCandidate(d.data())).map(d => ({ id: d.id, name: d.data().name || 'Untitled Playbook' })));
       })
       .catch(e => console.error('[PlaybookFolderPage] Load templates error:', e));
   }, [folder?.templatePlaybookIds, coachId]);
@@ -255,7 +256,7 @@ export default function PlaybookFolderPage({ folderId, onBack, onOpenPlaybook }:
   }, []);
 
   const addSubscriptionPath = useCallback(async () => {
-    if (!folderId || !newPathLabel.trim()) return;
+    if (!folderId || !newPathLabel.trim() || !templatePlaybooks.some(pb => pb.id === newPathTemplateId)) return;
     setSavingPath(true);
     try {
       const existing: PlaybookFolderSubscriptionPath[] = folder?.subscriptionPaths ?? [];
@@ -269,8 +270,7 @@ export default function PlaybookFolderPage({ folderId, onBack, onOpenPlaybook }:
           : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
         label: newPathLabel.trim(),
         templatePlaybookId: newPathTemplateId,
-        musicStyle: newPathMusicStyle || undefined,
-        pricePerMonthCents,
+        ...subscriptionPathOptions(newPathMusicStyle, pricePerMonthCents),
       };
       await updateDoc(doc(db, 'playbook_folders', folderId), {
         subscriptionPaths: [...existing, newPath],
@@ -286,7 +286,7 @@ export default function PlaybookFolderPage({ folderId, onBack, onOpenPlaybook }:
     } finally {
       setSavingPath(false);
     }
-  }, [folderId, folder?.subscriptionPaths, newPathLabel, newPathTemplateId, newPathMusicStyle, newPathPriceDollars]);
+  }, [folderId, folder?.subscriptionPaths, templatePlaybooks, newPathLabel, newPathTemplateId, newPathMusicStyle, newPathPriceDollars]);
 
   const deleteSubscriptionPath = useCallback(async (pathId: string) => {
     if (!folderId) return;

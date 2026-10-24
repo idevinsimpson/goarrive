@@ -1,3 +1,4 @@
+import { prepareMemberInvite } from './memberInvite';
 import { ownsSessionMember } from './sessionIdentity';
 /**
  * GoArrive Cloud Functions
@@ -3299,57 +3300,9 @@ export const sendMemberInvite = onCall(
       );
     }
 
-    // Ensure a Firebase Auth user exists for this email
-    let userRecord: admin.auth.UserRecord;
-    let authCreated = false;
-    try {
-      userRecord = await admin.auth().getUserByEmail(email);
-    } catch (err: any) {
-      if (err.code !== 'auth/user-not-found') {
-        throw new HttpsError('internal', err.message ?? 'Failed to look up user');
-      }
-      const cryptoMod = require('crypto');
-      const tempPassword = cryptoMod.randomBytes(24).toString('base64');
-      userRecord = await admin.auth().createUser({
-        email,
-        password: tempPassword,
-        displayName: member.displayName || member.name || '',
-      });
-      authCreated = true;
-    }
-
-    // Set member custom claims so role-gated UI and rules resolve correctly
-    await admin.auth().setCustomUserClaims(userRecord.uid, {
-      role: 'member',
-      coachId: member.coachId,
-      tenantId: member.tenantId ?? member.coachId,
-      memberId: memberId,
+    return prepareMemberInvite(admin.auth(), memberId, member, process.env.APP_BASE_URL || 'https://goarrive.fit', async (uid, normalizedEmail) => {
+      await memberRef.update({ uid, hasAccount: true, email: normalizedEmail, updatedAt: FieldValue.serverTimestamp() });
     });
-
-    // Link the auth account to the member doc if not already linked
-    if (!member.uid || member.uid !== userRecord.uid || member.hasAccount !== true) {
-      await memberRef.update({
-        uid: userRecord.uid,
-        hasAccount: true,
-        email,
-        updatedAt: FieldValue.serverTimestamp(),
-      });
-    }
-
-    const appUrl = process.env.APP_BASE_URL || 'https://goarrive.fit';
-    const actionCodeSettings = { url: appUrl, handleCodeInApp: false };
-    const resetLink = await admin.auth().generatePasswordResetLink(email, actionCodeSettings);
-
-    console.log(
-      `[sendMemberInvite] ${authCreated ? 'Created' : 'Found'} auth for ${email} memberId=${memberId} by ${callerUid}`
-    );
-
-    return {
-      success: true,
-      resetLink,
-      email,
-      authCreated,
-    };
   }
 );
 
