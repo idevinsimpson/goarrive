@@ -12,7 +12,7 @@
  *  3. RECORDED sessions (recordingEnabled) gate the player behind an in-app
  *     Zoom join (SessionZoomTile) that stays as a PiP tile during playback.
  */
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -112,6 +112,10 @@ export default function LiveSessionScreen() {
 
   const [workout, setWorkout] = useState<any | null>(null);
   const [workoutLoaded, setWorkoutLoaded] = useState(false);
+  const [workoutError, setWorkoutError] = useState('');
+  const completingRef = useRef(false);
+  const activeSessionRef = useRef(sessionInstanceId);
+  activeSessionRef.current = sessionInstanceId;
   const [coachName, setCoachName] = useState<string | null>(null);
 
   const [playerVisible, setPlayerVisible] = useState(false);
@@ -120,6 +124,14 @@ export default function LiveSessionScreen() {
   const [showReschedule, setShowReschedule] = useState(false);
   const [actionError, setActionError] = useState('');
   const [cancelling, setCancelling] = useState(false);
+
+  useEffect(() => {
+    setInst(null); setLoading(true); setLoadError('');
+    setWorkout(null); setWorkoutLoaded(false); setWorkoutError('');
+    setCoachName(null); setPlayerVisible(false); setWorkoutDone(false);
+    setShowReschedule(false); setActionError(''); setCancelling(false);
+    completingRef.current = false;
+  }, [sessionInstanceId, user?.uid]);
 
   // Live session doc — status flips (allocation, cancellation) arrive in
   // real time so the page reacts without a refresh.
@@ -155,7 +167,7 @@ export default function LiveSessionScreen() {
   // Server-resolved workout + coach name (members can't read those docs).
   useEffect(() => {
     if (!user || !sessionInstanceId || workoutLoaded) return;
-    if (!inst || !readyForWorkout) return;
+    if (!inst || inst.id !== sessionInstanceId || !readyForWorkout) return;
     let cancelled = false;
     (async () => {
       try {
@@ -170,7 +182,7 @@ export default function LiveSessionScreen() {
         setWorkoutLoaded(true);
       } catch (err) {
         console.error('[LiveSession] getSessionWorkout failed:', err);
-        if (!cancelled) setWorkoutLoaded(true);
+        if (!cancelled) { setWorkoutError('Unable to load your workout. Please try again.'); setWorkoutLoaded(true); }
       }
     })();
     return () => { cancelled = true; };
@@ -333,11 +345,13 @@ export default function LiveSessionScreen() {
 
           {!needsZoomGate && workoutLoaded && !workout && (
             <View style={s.innerCard}>
-              <Text style={s.innerCardTitle}>Workout not assigned yet</Text>
+              <Text style={s.innerCardTitle}>{workoutError ? 'Workout could not load' : 'Workout not assigned yet'}</Text>
               <Text style={s.innerCardText}>
-                Your coach hasn&apos;t assigned the workout for this session yet.
-                Hang tight — it will appear here as soon as it&apos;s ready.
+                {workoutError || 'Your coach has not assigned a workout yet. Try again after your coach updates the session.'}
               </Text>
+              <Pressable style={s.secondaryBtn} onPress={() => { setWorkoutError(''); setWorkoutLoaded(false); }}>
+                <Text style={s.secondaryBtnText}>Try again</Text>
+              </Pressable>
             </View>
           )}
 
@@ -366,12 +380,18 @@ export default function LiveSessionScreen() {
           sessionInstanceId={sessionInstanceId}
           onClose={() => setPlayerVisible(false)}
           onComplete={async () => {
+            if (completingRef.current) return;
+            completingRef.current = true;
+            const completingSessionId = sessionInstanceId;
             try {
               await httpsCallable(functions, 'completePlaybookSession')({ sessionInstanceId, workoutId: workout.id });
+              if (activeSessionRef.current !== completingSessionId) return;
               setPlayerVisible(false);
               setWorkoutDone(true);
             } catch {
-              Alert.alert('Completion not saved', 'Please try finishing again. Your session is not marked complete yet.');
+              if (activeSessionRef.current === completingSessionId) Alert.alert('Completion not saved', 'Please try finishing again. Your session is not marked complete yet.');
+            } finally {
+              if (activeSessionRef.current === completingSessionId) completingRef.current = false;
             }
           }}
         />

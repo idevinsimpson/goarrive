@@ -13,8 +13,13 @@ import {
   persistentMultipleTabManager,
   connectFirestoreEmulator,
 } from 'firebase/firestore';
-import { getFunctions } from 'firebase/functions';
+import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
 import { getStorage } from 'firebase/storage';
+
+const useLocalEmulators = typeof __DEV__ !== 'undefined' && __DEV__ && process.env.EXPO_PUBLIC_USE_FIREBASE_EMULATORS === 'true';
+if (useLocalEmulators && typeof window !== 'undefined' && !['localhost', '127.0.0.1'].includes(window.location.hostname)) {
+  throw new Error('Firebase emulators are restricted to localhost development');
+}
 
 const firebaseConfig = {
   apiKey: 'AIzaSyBgLIP0uvGJ98fde3aZthZjILTg6unkkX0',
@@ -27,7 +32,7 @@ const firebaseConfig = {
 };
 
 // Initialize Firebase (prevent duplicate initialization)
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+const app = getApps().length === 0 ? initializeApp(useLocalEmulators ? { ...firebaseConfig, projectId: 'demo-playbook-repair', apiKey: 'demo-key', authDomain: 'localhost', storageBucket: 'demo-playbook-repair.appspot.com' } : firebaseConfig) : getApp();
 
 export const auth = getAuth(app);
 // Persistent local cache (IndexedDB, web only): after a reload or PWA resume,
@@ -48,20 +53,16 @@ if (typeof window !== 'undefined' && typeof indexedDB !== 'undefined') {
 }
 export const db = firestoreDb;
 export const functions = getFunctions(app);
+export const functionsHttpOrigin = useLocalEmulators
+  ? 'http://127.0.0.1:5001/demo-playbook-repair/us-central1'
+  : 'https://us-central1-goarrive.cloudfunctions.net';
 export const storage = getStorage(app);
 
-// Connect to emulators in development
-if (typeof window !== 'undefined') {
-  try {
-    const isDev = typeof __DEV__ !== 'undefined' && __DEV__;
-    const useEmulator = false; // Set to true when running local emulators
-    if (isDev && useEmulator) {
-      connectAuthEmulator(auth, 'http://localhost:9099');
-      connectFirestoreEmulator(db, 'localhost', 8080);
-    }
-  } catch (err) {
-    console.warn('[Firebase] Emulator connection failed:', err);
-  }
+// Explicit local development only; never redirects deployed builds.
+if (useLocalEmulators) {
+  connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+  connectFirestoreEmulator(db, '127.0.0.1', 8080);
+  connectFunctionsEmulator(functions, '127.0.0.1', 5001);
 }
 
 export default app;

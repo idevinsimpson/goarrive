@@ -17,11 +17,11 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { httpsCallable } from 'firebase/functions';
-import { functions } from '../../lib/firebase';
+import { functions, functionsHttpOrigin } from '../../lib/firebase';
 import { useAuth } from '../../lib/AuthContext';
 import { BG, CARD, BORDER, FG, MUTED, GOLD, GREEN, RED, FH, FB } from '../../lib/theme';
 
-const RESOLVE_URL = 'https://us-central1-goarrive.cloudfunctions.net/resolvePlaybookBookingToken';
+const RESOLVE_URL = `${functionsHttpOrigin}/resolvePlaybookBookingToken`;
 
 // Brand tokens from .claude/design-system.md — "GO" sage / "ARRIVE" steel blue
 const GO = '#7BA05B';
