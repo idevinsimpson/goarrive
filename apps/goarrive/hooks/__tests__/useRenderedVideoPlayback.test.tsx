@@ -12,8 +12,9 @@
  */
 
 import React from 'react';
-import { vi, type Mock } from 'vitest';
-import { act, render, renderHook } from '../../test-utils/renderHook';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, vi, type Mock } from 'vitest';
+import { act, renderHook } from '../../test-utils/renderHook';
 import {
   lookupBlockAtVideoTime,
   validateMeta,
@@ -29,6 +30,20 @@ import {
 import type { RenderedVideoSegmentMetadata } from '../../utils/renderedVideoSegmentIdentity';
 import { useRenderedVideoPlayback } from '../useRenderedVideoPlayback';
 import type { UseRenderedVideoPlaybackParams } from '../useRenderedVideoPlayback';
+
+// This is a web-video hook suite run by Vitest, not the Jest/native renderer.
+// Retain a real React commit for the stable-ref replacement regression below.
+let componentRoot: Root | undefined;
+afterEach(() => {
+  if (componentRoot) act(() => componentRoot!.unmount());
+  componentRoot = undefined;
+});
+function render(element: React.ReactElement) {
+  componentRoot = createRoot(document.createElement('div'));
+  const root = componentRoot;
+  act(() => root.render(element));
+  return { rerender: (next: React.ReactElement) => act(() => root.render(next)) };
+}
 
 // ---------------------------------------------------------------------------
 // Mock video element factory

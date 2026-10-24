@@ -9,7 +9,7 @@
  * even when the app tab is not open.
  */
 
-const CACHE_VERSION = '20260401-141500';
+const CACHE_VERSION = '20261023-reset-password';
 const CACHE_NAME = `goarrive-${CACHE_VERSION}`;
 const STATIC_ASSETS = [
   '/',
@@ -55,6 +55,18 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
+
+  // Reset links are bearer credentials: never intercept, persist, or log them.
+  // Keep Firebase's reserved auth endpoints network-only on custom domains too.
+  if (
+    url.pathname === '/reset-password' ||
+    url.pathname === '/reset-password.html' ||
+    url.pathname.startsWith('/reset-password/') ||
+    url.searchParams.has('oobCode') ||
+    url.pathname.startsWith('/__/auth/')
+  ) {
+    return;
+  }
 
   // Skip non-GET requests
   if (request.method !== 'GET') {

@@ -15,6 +15,14 @@ const DIST_DIR = path.join(__dirname, '..', 'apps', 'goarrive', 'dist');
 const SW_PATH = path.join(DIST_DIR, 'service-worker.js');
 const CACHE_NAME = 'goarrive-v1-' + Date.now();
 
+// Reset pages must always load online; neither their URLs nor action codes
+// belong in the service worker's persistent cache.
+function isPasswordResetPath(pathname) {
+  return pathname === '/reset-password' ||
+    pathname === '/reset-password.html' ||
+    pathname.startsWith('/reset-password/');
+}
+
 // Recursively list all files in a directory
 function listFiles(dir, base = '') {
   const entries = [];
@@ -38,7 +46,7 @@ function main() {
   }
 
   const files = listFiles(DIST_DIR).filter(
-    (f) => !f.endsWith('service-worker.js') && !f.includes('.map')
+    (f) => !f.endsWith('service-worker.js') && !f.includes('.map') && !isPasswordResetPath(f)
   );
 
   const sw = `/**
@@ -50,6 +58,8 @@ function main() {
 
 const CACHE_NAME = '${CACHE_NAME}';
 const PRE_CACHE = ${JSON.stringify(files, null, 2)};
+
+${isPasswordResetPath.toString()}
 
 // Install event: cache static assets
 self.addEventListener('install', (event) => {
@@ -90,6 +100,17 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
+
+  // Never intercept, cache, or log reset links. Also leave Firebase's reserved
+  // action handler alone, including when it is served on our custom domain.
+  // This guard precedes every cache lookup, write, fallback, and URL log.
+  if (
+    isPasswordResetPath(url.pathname) ||
+    url.searchParams.has('oobCode') ||
+    url.pathname.startsWith('/__/auth/')
+  ) {
+    return;
+  }
 
   // Skip non-GET requests
   if (request.method !== 'GET') {
