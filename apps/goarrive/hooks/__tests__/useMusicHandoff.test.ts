@@ -10,6 +10,7 @@ vi.mock('../useWorkoutTTS', () => ({
   createBlessedMusicPlayer: vi.fn(),
   getAudioContextState: vi.fn(() => 'running'),
   resumeAudioGraph: vi.fn(),
+  subscribeMainCtxStatechange: vi.fn(() => () => {}),
 }));
 
 vi.mock('../../utils/musicHandoffVariant', () => ({
@@ -134,7 +135,8 @@ describe('useMusicHandoff v3 shadow controls', () => {
   test('propagates pause, mute, and effective volume while v3 is background-audible', () => {
     const { audible, shadow, rerender, unmount } = setup();
 
-    expect(shadow.play).toHaveBeenCalled();
+    // Existing source warm-up plays once muted; the hide seam plays once.
+    expect(shadow.play).toHaveBeenCalledTimes(2);
     expect(shadow.currentTime).toBe(12);
     expect(shadow.muted).toBe(false);
     expect(shadow.volume).toBe(0.25);
@@ -142,9 +144,10 @@ describe('useMusicHandoff v3 shadow controls', () => {
 
     act(() => rerender({ isPaused: true, isMuted: false, volume: 0.25 }));
     expect(shadow.pause).toHaveBeenCalled();
+    expect(shadow.play).toHaveBeenCalledTimes(2);
 
     act(() => rerender({ isPaused: false, isMuted: true, volume: 0.09 }));
-    expect(shadow.play).toHaveBeenCalledTimes(2);
+    expect(shadow.play).toHaveBeenCalledTimes(3);
     expect(shadow.muted).toBe(true);
     expect(shadow.volume).toBe(0.09);
 

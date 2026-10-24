@@ -12,7 +12,8 @@
  */
 
 import React from 'react';
-import { act, render, renderHook } from '@testing-library/react-native';
+import { vi, type Mock } from 'vitest';
+import { act, render, renderHook } from '../../test-utils/renderHook';
 import {
   lookupBlockAtVideoTime,
   validateMeta,
@@ -36,32 +37,32 @@ import type { UseRenderedVideoPlaybackParams } from '../useRenderedVideoPlayback
 type MockVideo = {
   currentTime: number;
   paused: boolean;
-  play: jest.Mock;
-  pause: jest.Mock;
-  addEventListener: jest.Mock;
-  removeEventListener: jest.Mock;
+  play: Mock;
+  pause: Mock;
+  addEventListener: Mock<(event: string, handler: (...args: unknown[]) => void) => void>;
+  removeEventListener: Mock<(event: string, handler: (...args: unknown[]) => void) => void>;
   /** Synchronously invoke all registered listeners for this event. */
   _fire: (event: string) => void;
   /** Spy on the currentTime setter. */
-  _currentTimeSetter: jest.Mock;
+  _currentTimeSetter: Mock;
 };
 
 function makeMockVideo(initialTimeMs = 0): MockVideo {
   let _currentTime = initialTimeMs / 1000;
-  const currentTimeSetter = jest.fn((v: number) => {
+  const currentTimeSetter = vi.fn((v: number) => {
     _currentTime = v;
   });
   const listeners: Record<string, ((...args: unknown[]) => void)[]> = {};
 
   const video: Partial<MockVideo> = {
     paused: true,
-    play: jest.fn().mockResolvedValue(undefined),
-    pause: jest.fn(),
-    addEventListener: jest.fn((event: string, handler: (...args: unknown[]) => void) => {
+    play: vi.fn().mockResolvedValue(undefined),
+    pause: vi.fn(),
+    addEventListener: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
       if (!listeners[event]) listeners[event] = [];
       listeners[event].push(handler);
     }),
-    removeEventListener: jest.fn((event: string, handler: (...args: unknown[]) => void) => {
+    removeEventListener: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
       if (listeners[event]) {
         listeners[event] = listeners[event].filter((h) => h !== handler);
       }
@@ -276,7 +277,7 @@ describe('cross-contract: renderer-derived segments (Phase 2 ↔ Phase 3 ↔ Pha
   it('PiP emits the opaque id and it relocates through the identity catalog', () => {
     const restOffset = rendererSegmentCatalog.find((block) => block.phase === 'block-rest')!;
     const video = makeMockVideo(restOffset.startMs);
-    const onPosition = jest.fn();
+    const onPosition = vi.fn();
 
     renderHook(
       (p: UseRenderedVideoPlaybackParams) => useRenderedVideoPlayback(p),
@@ -426,7 +427,7 @@ describe('pip mode — video-driven position callbacks', () => {
   it('timeupdate fires → onVideoDrivenPositionChange called with derived block/offset', () => {
     const video = makeMockVideo(5000); // 5000ms → b1, offset 5000
     const videoRef = makeVideoRef(video);
-    const onPositionChange = jest.fn();
+    const onPositionChange = vi.fn();
 
     renderHook(
       (p: UseRenderedVideoPlaybackParams) => useRenderedVideoPlayback(p),
@@ -453,7 +454,7 @@ describe('pip mode — video-driven position callbacks', () => {
   it('seeked fires → onVideoDrivenPositionChange called', () => {
     const video = makeMockVideo(25000); // 25000ms → b2, offset 5000
     const videoRef = makeVideoRef(video);
-    const onPositionChange = jest.fn();
+    const onPositionChange = vi.fn();
 
     renderHook(
       (p: UseRenderedVideoPlaybackParams) => useRenderedVideoPlayback(p),
@@ -480,7 +481,7 @@ describe('pip mode — video-driven position callbacks', () => {
   it('play event fires → onVideoDrivenPlayStateChange(true) called', () => {
     const video = makeMockVideo(0);
     const videoRef = makeVideoRef(video);
-    const onPlayState = jest.fn();
+    const onPlayState = vi.fn();
 
     renderHook(
       (p: UseRenderedVideoPlaybackParams) => useRenderedVideoPlayback(p),
@@ -507,7 +508,7 @@ describe('pip mode — video-driven position callbacks', () => {
   it('pause event fires → onVideoDrivenPlayStateChange(false) called', () => {
     const video = makeMockVideo(0);
     const videoRef = makeVideoRef(video);
-    const onPlayState = jest.fn();
+    const onPlayState = vi.fn();
 
     renderHook(
       (p: UseRenderedVideoPlaybackParams) => useRenderedVideoPlayback(p),
@@ -561,7 +562,7 @@ describe('pip mode — video-driven position callbacks', () => {
   it('bounds ordinary timeupdate callbacks while seeked remains immediate', () => {
     const video = makeMockVideo(5000);
     const videoRef = makeVideoRef(video);
-    const onPositionChange = jest.fn();
+    const onPositionChange = vi.fn();
 
     renderHook(
       (p: UseRenderedVideoPlaybackParams) => useRenderedVideoPlayback(p),
@@ -606,7 +607,7 @@ describe('pip mode — video-driven position callbacks', () => {
     const firstVideo = makeMockVideo(5000);
     const secondVideo = makeMockVideo(25000);
     const videoRef = makeVideoRef(firstVideo);
-    const onPositionChange = jest.fn();
+    const onPositionChange = vi.fn();
     const params: UseRenderedVideoPlaybackParams = {
       meta: simpleMeta,
       videoRef,
@@ -647,7 +648,7 @@ describe('pip mode — video-driven position callbacks', () => {
   it('reattaches after React replaces the committed element under a stable ref', () => {
     const firstVideo = makeMockVideo(5000);
     const secondVideo = makeMockVideo(25000);
-    const onPositionChange = jest.fn();
+    const onPositionChange = vi.fn();
 
     const view = render(
       <CommitTimeVideoSwapHarness
@@ -689,7 +690,7 @@ describe('pip mode — video-driven position callbacks', () => {
   it('resets position dedup when re-entering PiP at the same position', () => {
     const video = makeMockVideo(5000);
     const videoRef = makeVideoRef(video);
-    const onPositionChange = jest.fn();
+    const onPositionChange = vi.fn();
     let params: UseRenderedVideoPlaybackParams = {
       meta: simpleMeta,
       videoRef,
@@ -725,7 +726,7 @@ describe('pip mode — video-driven position callbacks', () => {
   it('resets position dedup when rendered metadata changes', () => {
     const video = makeMockVideo(5000);
     const videoRef = makeVideoRef(video);
-    const onPositionChange = jest.fn();
+    const onPositionChange = vi.fn();
     let params: UseRenderedVideoPlaybackParams = {
       meta: simpleMeta,
       videoRef,
@@ -765,7 +766,7 @@ describe('mode transitions', () => {
   it('normal → pip: onPipExitReconcile is NOT called', () => {
     const video = makeMockVideo(5000);
     const videoRef = makeVideoRef(video);
-    const onPipExit = jest.fn();
+    const onPipExit = vi.fn();
 
     let params: UseRenderedVideoPlaybackParams = {
       meta: simpleMeta,
@@ -791,7 +792,7 @@ describe('mode transitions', () => {
   it('pip → normal: onPipExitReconcile fires once with current video position', () => {
     const video = makeMockVideo(25000); // 25000ms → b2, offset 5000
     const videoRef = makeVideoRef(video);
-    const onPipExit = jest.fn();
+    const onPipExit = vi.fn();
 
     let params: UseRenderedVideoPlaybackParams = {
       meta: simpleMeta,
@@ -819,8 +820,8 @@ describe('mode transitions', () => {
     const video = makeMockVideo(25000);
     video.paused = false;
     const videoRef = makeVideoRef(video);
-    const onPipExit = jest.fn();
-    const onPlayState = jest.fn();
+    const onPipExit = vi.fn();
+    const onPlayState = vi.fn();
     let params: UseRenderedVideoPlaybackParams = {
       meta: simpleMeta,
       videoRef,
@@ -869,7 +870,7 @@ describe('mode transitions', () => {
     const video = makeMockVideo(25000);
     video.paused = false;
     const videoRef = makeVideoRef(video);
-    const onPipExit = jest.fn();
+    const onPipExit = vi.fn();
     let params: UseRenderedVideoPlaybackParams = {
       meta: simpleMeta,
       videoRef,
