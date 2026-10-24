@@ -1,4 +1,5 @@
 import { sessionMemberIds } from '../../lib/sessionMemberIds';
+import { isPastSession } from '../../lib/sessionTiming';
 /**
  * My Sessions — Member-facing session center
  *
@@ -179,12 +180,16 @@ export default function MySessionsScreen() {
     fetchSessions();
   }, [fetchSessions]);
 
-  const today = todayStr();
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
   const upcoming = sessions.filter(
-    (s) => s.scheduledDate >= today && !['cancelled', 'completed', 'missed', 'skipped'].includes(s.status)
+    (s) => !isPastSession(s, now)
   );
   const past = sessions.filter(
-    (s) => s.scheduledDate < today || ['completed', 'missed', 'cancelled', 'skipped'].includes(s.status)
+    (s) => isPastSession(s, now)
   ).reverse(); // most recent first
 
   const displayList = tab === 'upcoming' ? upcoming : past;
