@@ -16,7 +16,8 @@ function generatedWorker() {
     fs.mkdirSync(scripts, { recursive: true });
     fs.mkdirSync(path.join(dist, 'reset-password'), { recursive: true });
     fs.copyFileSync(path.join(__dirname, '..', 'generate_sw.js'), path.join(scripts, 'generate_sw.js'));
-    for (const name of ['index.html', 'bundle.js', 'reset-password.html', 'reset-password/index.html']) {
+    for (const name of ['index.html', 'bundle.js', 'reset-password.html', 'reset-password/index.html', '(auth)/reset-password.html', '(auth)/reset-password/index.html', '%28auth%29/reset-password.html']) {
+      fs.mkdirSync(path.dirname(path.join(dist, name)), { recursive: true });
       fs.writeFileSync(path.join(dist, name), '<!-- synthetic test fixture -->');
     }
     execFileSync(process.execPath, [path.join(scripts, 'generate_sw.js')], { stdio: 'pipe' });
@@ -93,6 +94,12 @@ for (const suffix of [
   '/reset-password/',
   '/reset-password.html',
   '/reset-password/index.html',
+  '/(auth)/reset-password',
+  '/(auth)/reset-password/',
+  '/(auth)/reset-password.html',
+  '/(auth)/reset-password/index.html',
+  '/%28auth%29/reset-password',
+  '/%28auth%29/reset-password.html',
   '/reset-password?mode=resetPassword&oobCode=synthetic-code-not-valid',
   '/anywhere?oobCode=synthetic-code-not-valid',
   '/anywhere?oobCode=',
@@ -115,10 +122,11 @@ for (const suffix of [
   });
 }
 
-test(`${kind}: ordinary HTML retains network-first caching`, async () => {
+for (const ordinaryPath of ['/login', '/(auth)/login']) {
+test(`${kind}: ordinary HTML retains network-first caching: ${ordinaryPath}`, async () => {
   const { handlers, calls } = worker(source);
   const request = {
-    url: 'https://example.test/login',
+    url: `https://example.test${ordinaryPath}`,
     method: 'GET',
     headers: { get: () => 'text/html' },
   };
@@ -130,4 +138,5 @@ test(`${kind}: ordinary HTML retains network-first caching`, async () => {
   assert.equal(calls.put.length, 1);
   assert.equal(calls.put[0][0], request);
 });
+}
 }

@@ -18,9 +18,11 @@ const CACHE_NAME = 'goarrive-v1-' + Date.now();
 // Reset pages must always load online; neither their URLs nor action codes
 // belong in the service worker's persistent cache.
 function isPasswordResetPath(pathname) {
-  return pathname === '/reset-password' ||
-    pathname === '/reset-password.html' ||
-    pathname.startsWith('/reset-password/');
+  // Expo also exports the auth-group alias; browsers may encode its parentheses.
+  const routePath = pathname.replace(/^\/(?:\(auth\)|%28auth%29)(?=\/)/i, '');
+  return routePath === '/reset-password' ||
+    routePath === '/reset-password.html' ||
+    routePath.startsWith('/reset-password/');
 }
 
 // Recursively list all files in a directory
