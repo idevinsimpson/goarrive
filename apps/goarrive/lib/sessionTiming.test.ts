@@ -48,4 +48,17 @@ describe('session list time classification', () => {
     expect(isPastSession(session, Date.parse('2026-10-25T04:15:00Z'))).toBe(false);
     expect(isPastSession(session, Date.parse('2026-10-25T04:30:01Z'))).toBe(true);
   });
+  it('uses the later legacy fall-back end and never returns from Past to Upcoming', () => {
+    const session = fixture({startUtc: undefined, endUtc: undefined, scheduledDate: '2026-11-01', scheduledStartTime: '01:00', scheduledEndTime: '01:30'});
+    for (const time of ['05:45:00', '06:15:00', '06:30:00']) {
+      expect(isPastSession(session, Date.parse(`2026-11-01T${time}Z`))).toBe(false);
+    }
+    expect(isPastSession(session, Date.parse('2026-11-01T06:30:00.001Z'))).toBe(true);
+  });
+  it('shifts a nonexistent legacy spring end forward by the DST gap', () => {
+    const session = fixture({startUtc: undefined, endUtc: undefined, scheduledDate: '2026-03-08', scheduledStartTime: '01:45', scheduledEndTime: '02:30'});
+    expect(isPastSession(session, Date.parse('2026-03-08T07:15:00Z'))).toBe(false);
+    expect(isPastSession(session, Date.parse('2026-03-08T07:30:00Z'))).toBe(false);
+    expect(isPastSession(session, Date.parse('2026-03-08T07:30:00.001Z'))).toBe(true);
+  });
 });
