@@ -542,3 +542,23 @@ describe('workoutMusicFeedback', () => {
     );
   });
 });
+
+
+describe('Playbook roster identity', () => {
+  beforeEach(async () => {
+    await testEnv.withSecurityRulesDisabled(async ctx => {
+      await setDoc(doc(ctx.firestore(), 'session_instances', 'roster-session'), { memberId: 'roster-member', coachId: COACH_A_UID, status: 'scheduled' });
+    });
+  });
+  test('linked member can query and stream own session and write live state', async () => {
+    const db = testEnv.authenticatedContext('auth-member', { role: 'member', coachId: COACH_A_UID, memberId: 'roster-member' }).firestore();
+    await assertSucceeds(getDocs(query(collection(db, 'session_instances'), where('memberId', '==', 'roster-member'), where('coachId', '==', COACH_A_UID))));
+    await assertSucceeds(getDoc(doc(db, 'session_instances', 'roster-session')));
+    await assertSucceeds(setDoc(doc(db, 'session_instances', 'roster-session', 'live', 'state'), { phase: 'work' }));
+  });
+  test('another member of the same coach cannot read or write the session', async () => {
+    const db = testEnv.authenticatedContext('other-auth', { role: 'member', coachId: COACH_A_UID, memberId: 'other-roster' }).firestore();
+    await assertFails(getDoc(doc(db, 'session_instances', 'roster-session')));
+    await assertFails(setDoc(doc(db, 'session_instances', 'roster-session', 'live', 'state'), { phase: 'work' }));
+  });
+});

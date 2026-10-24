@@ -229,6 +229,12 @@ describe('rendered-video read-time authorization', () => {
     expect(fake.calls.playbooks).toEqual([]);
   });
 
+  test('linked roster member resolves session video but a sibling member cannot', async () => {
+    const fake = fakeResolver({ sessions: { 'session-1': { memberId: 'roster-1', coachId: 'coach-1', pinnedWorkoutId: WORKOUT_ID } } });
+    await expect(resolveRenderedVideoForCaller(request('auth-1', { role: 'member', coachId: 'coach-1', memberId: 'roster-1' }, { workoutId: WORKOUT_ID, sessionInstanceId: 'session-1' }), fake.dependencies)).resolves.toMatchObject({ version: 4 });
+    await expect(resolveRenderedVideoForCaller(request('auth-2', { role: 'member', coachId: 'coach-1', memberId: 'roster-2' }, { workoutId: WORKOUT_ID, sessionInstanceId: 'session-1' }), fake.dependencies)).rejects.toMatchObject({ code: 'permission-denied' });
+  });
+
   test('a playbook session resolves only its current sequence workout', async () => {
     const fake = fakeResolver({
       sessions: {

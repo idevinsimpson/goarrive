@@ -137,7 +137,8 @@ function canRequestSkip(inst: SessionInstance): boolean {
 // ─── Main Component ─────────────────────────────────────────────────────────
 
 export default function MySessionsScreen() {
-  const { user } = useAuth();
+  const { user, claims, effectiveUid } = useAuth();
+  const memberId = claims?.role === 'member' && typeof claims.memberId === 'string' ? claims.memberId : effectiveUid;
   const router = useRouter();
   const [sessions, setSessions] = useState<SessionInstance[]>([]);
   const [loading, setLoading] = useState(true);
@@ -154,7 +155,8 @@ export default function MySessionsScreen() {
       setError(null);
       const q = query(
         collection(db, 'session_instances'),
-        where('memberId', '==', user.uid),
+        where('memberId', '==', memberId),
+        ...(claims?.coachId ? [where('coachId', '==', claims.coachId)] : []),
         orderBy('scheduledDate', 'asc'),
       );
       const snap = await getDocs(q);
@@ -167,7 +169,7 @@ export default function MySessionsScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [user]);
+  }, [user, memberId, claims?.coachId]);
 
   useEffect(() => { fetchSessions(); }, [fetchSessions]);
 
@@ -211,7 +213,7 @@ export default function MySessionsScreen() {
   // Opens the full-screen WorkoutPlayer with the session's Zoom meeting riding
   // along as a camera-on PiP tile, and streams player state to the coach.
   function handleStartWorkout(inst: SessionInstance) {
-    if (!canJoin(inst) || !inst.pinnedWorkoutId) return;
+    if (!['scheduled', 'allocated', 'in_progress', 'allocation_failed'].includes(inst.status) || !(inst.playbookId || inst.pinnedWorkoutId)) return;
     router.push(`/live-session/${inst.id}` as any);
   }
 
@@ -784,7 +786,7 @@ function SessionDetailModal({
 
             {/* Actions */}
             <View style={s.actionSection}>
-              {showJoin && inst.pinnedWorkoutId && (
+              {['scheduled', 'allocated', 'in_progress', 'allocation_failed'].includes(inst.status) && (inst.playbookId || inst.pinnedWorkoutId) && (
                 <Pressable style={s.primaryBtn} onPress={onStartWorkout}>
                   <Icon name="play" size={18} color="#FFF" />
                   <Text style={s.primaryBtnText}>Start Workout</Text>

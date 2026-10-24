@@ -150,10 +150,12 @@ export default function LiveSessionScreen() {
     return () => clearInterval(t);
   }, []);
 
+  const readyForWorkout = !!inst && now >= sessionWindowMs(inst).startMs - EARLY_JOIN_GRACE_MS;
+
   // Server-resolved workout + coach name (members can't read those docs).
   useEffect(() => {
     if (!user || !sessionInstanceId || workoutLoaded) return;
-    if (!inst) return;
+    if (!inst || !readyForWorkout) return;
     let cancelled = false;
     (async () => {
       try {
@@ -172,7 +174,7 @@ export default function LiveSessionScreen() {
       }
     })();
     return () => { cancelled = true; };
-  }, [user, sessionInstanceId, inst, workoutLoaded]);
+  }, [user, sessionInstanceId, inst, workoutLoaded, readyForWorkout]);
 
   const window_ = useMemo(() => (inst ? sessionWindowMs(inst) : null), [inst]);
 
@@ -197,7 +199,7 @@ export default function LiveSessionScreen() {
   }, [inst]);
 
   // ── Guards ─────────────────────────────────────────────────────────────────
-  if (authLoading || loading) {
+  if (authLoading || (user && loading)) {
     return (
       <View style={s.center}>
         <ActivityIndicator size="large" color={GOLD} />
@@ -363,9 +365,14 @@ export default function LiveSessionScreen() {
           workout={workout}
           sessionInstanceId={sessionInstanceId}
           onClose={() => setPlayerVisible(false)}
-          onComplete={() => {
-            setPlayerVisible(false);
-            setWorkoutDone(true);
+          onComplete={async () => {
+            try {
+              await httpsCallable(functions, 'completePlaybookSession')({ sessionInstanceId, workoutId: workout.id });
+              setPlayerVisible(false);
+              setWorkoutDone(true);
+            } catch {
+              Alert.alert('Completion not saved', 'Please try finishing again. Your session is not marked complete yet.');
+            }
           }}
         />
       )}

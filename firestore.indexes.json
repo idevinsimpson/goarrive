@@ -4,6 +4,15 @@
       "collectionGroup": "session_instances",
       "queryScope": "COLLECTION",
       "fields": [
+        { "fieldPath": "coachId", "order": "ASCENDING" },
+        { "fieldPath": "memberId", "order": "ASCENDING" },
+        { "fieldPath": "scheduledDate", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "session_instances",
+      "queryScope": "COLLECTION",
+      "fields": [
         { "fieldPath": "memberId", "order": "ASCENDING" },
         { "fieldPath": "scheduledDate", "order": "ASCENDING" }
       ]

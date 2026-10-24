@@ -85,6 +85,10 @@ export default function PlaybookFolderPage({ folderId, onBack, onOpenPlaybook }:
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
 
+  const [availableTemplates, setAvailableTemplates] = useState<{ id: string; name: string }[]>([]);
+  const [showTemplatePicker, setShowTemplatePicker] = useState(false);
+  const [templateError, setTemplateError] = useState('');
+
   // Settings panel
   const [showSettings, setShowSettings] = useState(false);
   const [syncEnabled, setSyncEnabled] = useState(true);
@@ -143,14 +147,15 @@ export default function PlaybookFolderPage({ folderId, onBack, onOpenPlaybook }:
 
   // Load template playbook names
   useEffect(() => {
-    if (!folder?.templatePlaybookIds?.length) { setTemplatePlaybooks([]); return; }
-    const ids = folder.templatePlaybookIds;
+    if (!folder || !coachId) return;
+    const ids = folder.templatePlaybookIds || [];
     getDocs(query(collection(db, 'playbooks'), where('coachId', '==', coachId)))
       .then(snap => {
         const found = snap.docs
           .filter(d => ids.includes(d.id))
           .map(d => ({ id: d.id, name: d.data().name || 'Untitled Playbook' }));
         setTemplatePlaybooks(found);
+        setAvailableTemplates(snap.docs.filter(d => !ids.includes(d.id) && !d.data().isArchived && !d.data().assignedMemberId && !d.data().sourcePlaybookId).map(d => ({ id: d.id, name: d.data().name || 'Untitled Playbook' })));
       })
       .catch(e => console.error('[PlaybookFolderPage] Load templates error:', e));
   }, [folder?.templatePlaybookIds, coachId]);
@@ -341,6 +346,28 @@ export default function PlaybookFolderPage({ folderId, onBack, onOpenPlaybook }:
         {/* Template Playbooks section */}
         <View style={s.section}>
           <Text style={s.sectionLabel}>Template Playbooks</Text>
+          <Pressable onPress={() => setShowTemplatePicker(v => !v)} accessibilityRole="button">
+            <Text style={s.templateName}>Add template playbook</Text>
+          </Pressable>
+          {!!templateError && <Text style={s.emptyText}>{templateError}</Text>}
+          {showTemplatePicker && (
+            <View>
+              {availableTemplates.length === 0 && <Text style={s.emptyText}>Create an unassigned playbook in Build first, then add it here.</Text>}
+              {availableTemplates.map(pb => (
+                <Pressable key={pb.id} style={s.templateRow} onPress={async () => {
+                  setTemplateError('');
+                  try {
+                    await updateDoc(doc(db, 'playbook_folders', folderId), { templatePlaybookIds: arrayUnion(pb.id), updatedAt: serverTimestamp() });
+                    setShowTemplatePicker(false);
+                  } catch {
+                    setTemplateError('Unable to add this template. Please try again.');
+                  }
+                }}>
+                  <Text style={s.templateName}>{pb.name}</Text>
+                </Pressable>
+              ))}
+            </View>
+          )}
           {templatePlaybooks.length === 0 ? (
             <Text style={s.emptyText}>No template playbooks yet.</Text>
           ) : (

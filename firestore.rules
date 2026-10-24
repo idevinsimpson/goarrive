@@ -46,6 +46,13 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == uid;
     }
 
+    function ownsSessionMember(data) {
+      return isOwnDoc(data.memberId) || (
+        isMemberOfCoach(data.coachId)
+        && request.auth.token.get('memberId', '') == data.memberId
+      );
+    }
+
     function isOwnTenant(coachId) {
       return isAuthenticated() && getTenantId() == coachId;
     }
@@ -706,7 +713,7 @@ service cloud.firestore {
     match /session_instances/{instanceId} {
       allow read: if isAuthenticated() && (
         isCoachOrBootstrap(resource.data.coachId)
-        || isOwnDoc(resource.data.memberId)
+        || ownsSessionMember(resource.data)
         || isPlatformAdmin()
       );
       allow create: if isCoachOrBootstrap(request.resource.data.coachId) || isPlatformAdmin();
@@ -719,11 +726,11 @@ service cloud.firestore {
       match /live/{docId} {
         allow read: if isAuthenticated() && (
           isCoachOrBootstrap(get(/databases/$(database)/documents/session_instances/$(instanceId)).data.coachId)
-          || isOwnDoc(get(/databases/$(database)/documents/session_instances/$(instanceId)).data.memberId)
+          || ownsSessionMember(get(/databases/$(database)/documents/session_instances/$(instanceId)).data)
           || isPlatformAdmin()
         );
         allow write: if isAuthenticated() && (
-          isOwnDoc(get(/databases/$(database)/documents/session_instances/$(instanceId)).data.memberId)
+          ownsSessionMember(get(/databases/$(database)/documents/session_instances/$(instanceId)).data)
           || isPlatformAdmin()
         );
       }
