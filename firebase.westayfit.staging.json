@@ -13,6 +13,12 @@
     "cannot reach GoArrive's functions even by mistake. firestore and storage are",
     "deliberately absent: rules and indexes are not part of any WSF deploy.",
     "",
+    "database (KIOSK-LIVE-POSE-2) names the candidate's database.westayfit.rules.json,",
+    "the Realtime Database rules for the live pose a station turn shows. The",
+    "workflow's `--only database` step publishes them to this project's default",
+    "instance before the functions that use it. The instance is created by the",
+    "owner, not by this file or the workflow.",
+    "",
     "hosting mirrors firebase.westayfit.json exactly except for the site. Keep the",
     "two in sync; a rewrite that differs here is a staging build that does not test",
     "what ships.",
@@ -21,6 +27,9 @@
     "writes its credentials file into GITHUB_WORKSPACE. Neither upload path should",
     "reach the workspace root, and this makes that structural rather than incidental."
   ],
+  "database": {
+    "rules": "database.westayfit.rules.json"
+  },
   "functions": [
     {
       "source": "functions-westayfit",

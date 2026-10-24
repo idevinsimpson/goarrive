@@ -38,9 +38,13 @@ function run({ from, out = TARGET, project = PROJECT, appUrl = APP_URL, handler 
   };
 }
 
-test('a supplied sender writes exactly the three nonsecret values', () => {
+test('a supplied sender writes exactly the four nonsecret values', () => {
   const r = run({ from: 'We Stay Fit <no-reply@example.test>' });
   assert.equal(r.status, 0, r.stderr);
+  // Exactly these value lines, in this order: the three mail values and
+  // KIOSK-LIVE-POSE-2's switch. A fifth line is a reviewed change, not a drift.
+  const keys = r.body.split('\n').filter((l) => l && !l.startsWith('#')).map((l) => l.split('=')[0]);
+  assert.deepEqual(keys, ['WSF_EMAIL_FROM', 'WSF_APP_URL', 'WSF_AUTH_ACTION_HANDLER', 'WSF_LIVE_POSE']);
   assert.match(r.body, /^WSF_EMAIL_FROM=We Stay Fit <no-reply@example\.test>$/m);
   assert.match(r.body, new RegExp(`^WSF_APP_URL=${APP_URL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'));
   assert.match(r.body, /^WSF_AUTH_ACTION_HANDLER=https:\/\/westayfit-staging\.firebaseapp\.com\/__\/auth\/action$/m);
@@ -48,6 +52,37 @@ test('a supplied sender writes exactly the three nonsecret values', () => {
   assert.equal(/WSF_EMAIL_API_KEY/.test(r.body.replace(/^#.*$/gm, '')), false,
     'the generated env must not carry the API key name as a value line');
   assert.equal(r.mode, 0o600, 'the generated env file must not be world-readable');
+});
+
+test('KIOSK-LIVE-POSE-2: staging turns live pose on, exactly "1", and the environment cannot change it', () => {
+  const r = run({ from: 'a@b.test' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.body, /^WSF_LIVE_POSE=1$/m);
+  assert.match(r.stdout, /^WSF_LIVE_POSE_CONFIGURED=1$/m);
+  // A constant in the writer, not an input: a runner variable does not reach
+  // the deployed function's environment.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-env-lp-'));
+  fs.mkdirSync(path.join(dir, 'functions-westayfit'), { recursive: true });
+  const forced = spawnSync(process.execPath, [path.resolve(SCRIPT), TARGET, PROJECT, APP_URL, HANDLER], {
+    cwd: dir,
+    encoding: 'utf8',
+    env: { ...process.env, WSF_EMAIL_FROM: 'a@b.test', WSF_LIVE_POSE: '0' },
+  });
+  assert.equal(forced.status, 0, forced.stderr);
+  assert.match(fs.readFileSync(path.join(dir, TARGET), 'utf8'), /^WSF_LIVE_POSE=1$/m);
+});
+
+test('KIOSK-LIVE-POSE-2: a refused project writes no switch either', () => {
+  const r = run({
+    from: 'a@b.test',
+    project: 'goarrive',
+    out: 'functions-westayfit/.env.goarrive',
+    appUrl: 'https://goarrive.web.app',
+    handler: 'https://goarrive.firebaseapp.com/__/auth/action',
+  });
+  assert.equal(r.status, 1);
+  assert.equal(r.exists, false);
+  assert.equal(/WSF_LIVE_POSE/.test(r.stdout), false);
 });
 
 test('a missing sender fails the deploy instead of deploying a silent refusal', () => {

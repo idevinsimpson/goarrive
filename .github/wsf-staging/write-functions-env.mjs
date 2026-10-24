@@ -10,6 +10,10 @@
  *   WSF_APP_URL               the origin a minted action link returns to
  *   WSF_AUTH_ACTION_HANDLER   the handler that actually serves that link
  *
+ * And one switch that is not mail's (KIOSK-LIVE-POSE-2):
+ *
+ *   WSF_LIVE_POSE             "1": station turns get a live-pose key
+ *
  * WHY A FILE AND NOT AN EXPORT. An outer `export WSF_EMAIL_FROM=…` in the
  * deploy step configures the RUNNER, not the deployed function: Cloud
  * Functions gets its runtime environment from the project-specific dotenv
@@ -64,6 +68,16 @@ const ALLOWED_PROJECT = 'westayfit-staging';
 const ALLOWED_TARGET = 'functions-westayfit/.env.westayfit-staging';
 const ALLOWED_APP_URL = 'https://westayfit-staging--staging-4a616y5m.web.app';
 const ALLOWED_ACTION_HANDLER = 'https://westayfit-staging.firebaseapp.com/__/auth/action';
+
+/**
+ * KIOSK-LIVE-POSE-2: THE LIVE-POSE SWITCH, ON FOR STAGING ONLY.
+ *
+ * The functions mint a live-pose key, and touch the Realtime Database at all,
+ * only when WSF_LIVE_POSE is exactly "1". Staging turns it on here, as a
+ * constant rather than an input, because this writer configures staging and
+ * nothing else. Production ships dark: nothing on its path writes this value.
+ */
+const LIVE_POSE_SWITCH = '1';
 
 function die(message) {
   console.error(`::error::${message}`);
@@ -149,6 +163,7 @@ const body = [
   `WSF_EMAIL_FROM=${from.trim()}`,
   `WSF_APP_URL=${appUrl}`,
   `WSF_AUTH_ACTION_HANDLER=${actionHandler}`,
+  `WSF_LIVE_POSE=${LIVE_POSE_SWITCH}`,
   '',
 ].join('\n');
 
@@ -162,3 +177,4 @@ console.log(`WSF_FUNCTIONS_ENV=${outPath}`);
 console.log(`WSF_EMAIL_FROM_CONFIGURED=${from.trim()}`);
 console.log(`WSF_APP_URL_CONFIGURED=${appUrl}`);
 console.log(`WSF_AUTH_ACTION_HANDLER_CONFIGURED=${actionHandler}`);
+console.log(`WSF_LIVE_POSE_CONFIGURED=${LIVE_POSE_SWITCH}`);

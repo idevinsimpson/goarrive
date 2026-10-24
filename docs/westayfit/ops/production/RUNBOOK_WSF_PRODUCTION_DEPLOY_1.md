@@ -22,7 +22,7 @@
 - **Operator:** Devin, or whoever holds production rights on `goarrive`, using **their own** credentials. No worker or L0 session holds a production credential, and none may use one.
 - **What licenses a run:** two things, before any step past 1:
   1. the readbacks and captures of step 0;
-  2. **L0's acceptance line on #365, naming one exact candidate SHA and its record** (A or G).
+  2. **L0's acceptance line on #365, naming one exact candidate SHA and its record** (A, G or L).
 
   This document alone does not.
 
@@ -35,6 +35,10 @@
 | **A:** launch now, the gate as a fast-follow packet | `A` | `ec162d17a0540e936741027f9b8f90dd372cfaf4` | the launch backend, **ungated**: an anonymous token can save a profile and join (see "Security review item") |
 | **B:** launch gated | `G` | `e65bfee9eecb2370f602d09880da604709fba58a` | A plus ANON-GATE-1 (#601): exactly four paths over A, and an anonymous token is refused at all 42 signed-in callables (`wsfHealth`, which reads and writes nothing, is the one exemption) |
 
+- **Record L** (`a6eaf0be95cb0a81de4f24bc6d7f30ac82ce922f`) is G plus KIOSK-TURN-LIFECYCLE-1 (#606) and KIOSK-LIVE-POSE-2 (#622): the `claude/wsf-app-shell` merge of #622.
+  - It is exactly fifteen paths over G.
+  - Its exports (59, of which 17 are public), Firestore rules, indexes and consent constants are A's.
+  - It is the candidate for the section "Live pose (production)", and it can also be the main run's record.
 - **The operator types the record and the SHA from L0's acceptance line, never from this table.** The table only shows what each record admits. The pre-flight refuses any SHA that is not its record's anchor.
 - **"Record B" is not the owner's option B.** Record B is the legal-consent record ("Candidate records", below), and it is off the launch path.
 
@@ -236,7 +240,7 @@ The line `capture_rules` prints is the **rules rollback anchor**. Today it shoul
 - **B11 passes, or the owner has recorded step 5.5's decision on #365** (run the opt-out, or decline it).
 - **B4c is recorded.** It predicts whether step 6 needs S2's interactive form.
 - **The org policy still permits `allUsers`.** If it does not, no WSF callable is reachable from the web: **stop and escalate**.
-- **L0's acceptance line on #365 names the record (A or G) and the 40-character SHA.**
+- **L0's acceptance line on #365 names the record (A, G or L) and the 40-character SHA.**
 
 ## Step 1: checkout and pre-flight (no credential needed)
 
@@ -245,7 +249,7 @@ This needs `firebase.westayfit.production.json` and `.github/wsf-production/` on
 Fill in the two values from L0's acceptance line. Left empty, the checkout fails and the pre-flight never runs. A record and SHA that do not belong together are refused by the pre-flight.
 
 ```sh
-RECORD=''      # A or G, copied from L0's acceptance line on #365
+RECORD=''      # A, G or L, copied from L0's acceptance line on #365
 CANDIDATE=''   # the 40-character SHA from the same line
 cd ~/wsf-prod
 git clone --branch main https://github.com/idevinsimpson/goarrive.git src
@@ -264,7 +268,7 @@ cd "$CAND" && PF
 - **Exit 1:** a check refused. Do not continue. The `checks[].detail` lines name what.
 - **Exit 2:** the inputs were unusable: an empty or unknown record, a SHA that is not fetched, an unreadable or malformed file, or an empty live ruleset. Its `usage` line says which. Fix the inputs, then re-run.
 
-**Check these values in the verdict, for either record:**
+**Check these values in the verdict, for any record:**
 
 | Field | Expected |
 |---|---|
@@ -281,7 +285,8 @@ cd "$CAND" && PF
 The pre-flight also checks:
 - that the worktree is at the candidate, with nothing added but the config and, from step 3, the env file. Ignored files count too, except `functions-westayfit/node_modules/` and `functions-westayfit/lib/`;
 - that the config equals `main`'s reviewed file, predeploy included;
-- for record G, that the candidate descends from A and changes exactly the four gate paths.
+- for record G, that the candidate descends from A and changes exactly the four gate paths;
+- for record L, that the candidate descends from G and changes exactly its fifteen paths.
 
 ## Step 2: indexes (additive, WSF-only, before any function)
 
@@ -329,6 +334,7 @@ ENV
 - **Both lines are required.** `firebase-tools` replaces each function's whole env with this file.
 - **Quote the sender.** It has spaces and angle brackets. Quoted and unquoted forms both parse, and quoting avoids surprises.
 - **Never put a key here, and write no other env file.** `firebase-tools` loads `functions-westayfit/.env` before `.env.goarrive`. The pre-flight refuses any such file, ignored or not, and any key but the reviewed ones. It checks `WSF_APP_URL` and the `westay.fit` sender without printing a value.
+- **`WSF_LIVE_POSE`:** leave it out, except in the section "Live pose (production)" below, which adds exactly the line `WSF_LIVE_POSE=1`. The pre-flight admits only that bare line; any other value, quoted ones included, is refused. Absent means live pose is off.
 - **`WSF_AUTH_ACTION_HANDLER`:** leave it unset. The callables then use `https://goarrive.firebaseapp.com/__/auth/action` (#599 2.3). If it is set at all, the pre-flight accepts only that exact value, because the action links go to it.
 - **One plain `KEY=value` per line,** as above: no key twice, no `export`, no trailing comment, and no quote left open across lines. The pre-flight also reads the file with `firebase-tools` 15.30.1's own parser and refuses it unless both readings agree, so no multi-line or escaped value can carry a different handler or URL past it.
 
@@ -527,7 +533,7 @@ Run every capture from `~/wsf-prod`.
    - `wsfHealth` answers a signed-in operator account.
    - `wsfPreviewCommunity` answers a signed-out call with its uniform not-found.
 9. **The post-go journey on `app.westay.fit`** (the former step 7.6, aligned to the candidate). It runs **after** the step-9 receipt and the owner's go, in the order of the appendix "The go". It is not a deploy step, and nothing here changes the backend.
-   - **Which backend it proves:** the candidate the receipt names, `ec162d17` (record A) or `e65bfee9` (record G). Both serve the same journey. Under A, the anonymous exposure stays open until the gate's fast-follow lands.
+   - **Which backend it proves:** the candidate the receipt names, `ec162d17` (record A), `e65bfee9` (record G) or `a6eaf0be95cb0a81de4f24bc6d7f30ac82ce922f` (record L). All three serve the same journey. Under A, the anonymous exposure stays open until the gate's fast-follow lands.
    - **Twin step 1 (connected, sign-up closed).** Signed out, open an approved community link: the preview loads, and the Twin offers no sign-up, because `productionSignupOpen` is closed.
    - **Twin step 2 (sign-up open): a two-account journey,** in two separate browsers, each with its own real, owner-controlled address:
      1. Account 1 signs up and receives the verification email.
@@ -555,12 +561,12 @@ Run every capture from `~/wsf-prod`.
 ```text
 WSF PRODUCTION DEPLOY RECEIPT (no tokens, no keys)
 operator: <name>    utc start/end: <..>/<..>    firebase-tools: 15.30.1    before 2026-10-30: yes
-L0 acceptance: #365 <comment id>    record: A | G    candidate sha: <40>    main sha compared: <40>
+L0 acceptance: #365 <comment id>    record: A | G | L    candidate sha: <40>    main sha compared: <40>
 preflight: steps 1, 6, 7 ok=true (paste the JSON verdicts; step 6: non-interactive | interactive minimum-bill)
 rules hashes (verdict): candidate 58ef038e… / 1261 lines; outside-WSF = main f261a8af… (yes/no); live before <sha256 prefix> / <lines>
 readbacks owed: B3b <verified yes/no>  B4c <n>  B4d <labels>  B11 <policy | opt-out>  B12 <total/active/other>  B13 <pass | ABSENT>  (B4b, B5 captured)
 indexes: wsfContributions READY, wsfGoalMemberTotals READY; every pre-run index still READY (yes/no)
-secret WSF_EMAIL_API_KEY: version pinned <n>   env: WSF_EMAIL_FROM set, WSF_APP_URL=https://app.westay.fit
+secret WSF_EMAIL_API_KEY: version pinned <n>   env: WSF_EMAIL_FROM set, WSF_APP_URL=https://app.westay.fit, WSF_LIVE_POSE=1 | unset
 auth: app.westay.fit present (added 2026-10-09 by the owner, not by this run); Email/Password enabled (console)
 rules: prior <ruleset name> -> new <ruleset name>; new source sha256 58ef038e… / 1261 lines (yes/no)
 orphan wsfListCommunityGoals: decision <id>; 14-day requests <n>; label <..>; deleted | kept
@@ -571,7 +577,7 @@ revisions (service, latestReadyRevisionName): paste wsf-run-after.txt
 goarrive: functions, revisions, service IAM, indexes unchanged (yes/no); coach/member/admin sign-in ok; share link ok; hosting untouched
 consent: pending-approval-2026-08-25 (owner decision #365 6075884941)
 mail: runtime SA <email>, roles <list>, verification-link permission present|ABSENT (owner decision <comment id>)
-anonymous tokens: refused at 42 callables (record G) | admitted until the gate's fast-follow (record A)
+anonymous tokens: refused at 42 callables (record G or L) | admitted until the gate's fast-follow (record A)
 ```
 
 L0 records this as the DEPLOYMENT RECEIPT. It is not acceptance, and it is not a hosted proof.
@@ -630,6 +636,157 @@ L0 records this as the DEPLOYMENT RECEIPT. It is not acceptance, and it is not a
 - Any GoArrive function, revision, service IAM, index, rule or hosting release changing.
 - A missing permission. Never widen IAM mid-run to make a step pass; escalate.
 
+## Live pose (production): KIOSK-LIVE-POSE-2
+
+**Status: reviewed procedure. NOTHING in this section has been executed.**
+
+**Authority:**
+- The owner's approval and L0's decisions D1 and D2, #365 `6109245392`.
+- D3′, #365 `6109490508`, which replaces D3.
+- The KIOSK-LIVE-POSE-PROD-1 release, #365 `6109578489`.
+- The record-L pin, #365 `6127217055`: the merge of #622 into `claude/wsf-app-shell`, parents `8a067b29` and `87b48fa8`.
+- The owner's choice to take live pose straight to production, without staging, #365 `6127197090`.
+- The feature and its privacy notes: `docs/westayfit/ops/security/KIOSK-LIVE-POSE-2.md`.
+
+**What it turns on.** The WSF functions mint a key for each station turn and write that key's `meta` to goarrive's default Realtime Database, `goarrive-default-rtdb` in us-central1 (D1). GoArrive itself uses no Realtime Database. The functions derive that URL from the project id, so no code or config changes for production.
+
+**Before this section, in order:**
+1. **KIOSK-LIVE-POSE-2 is accepted** at subject `87b48fa852174311bef1b8c337e2be0f505ad280` (#365 `6109907167`) and integrated as record L, `a6eaf0be95cb0a81de4f24bc6d7f30ac82ce922f`.
+2. **OP-PROD-RTDB-CREATE-1 is done and verified** (#365 `6109456026`): the instance exists in locked mode, and the runtime account has its access.
+3. **The operator pastes the rules by hand in the console** (D2):
+   - from `database.westayfit.rules.json` at that subject;
+   - the file is byte-identical at record L;
+   - with the readback in step 1 below.
+
+The production config declares no `database` target, and the pre-flight refuses one. No `firebase deploy` here touches the database rules.
+
+**The candidate is record L.**
+- The pre-flight admits it only as exactly `a6eaf0be95cb0a81de4f24bc6d7f30ac82ce922f`, descending from G and changing exactly its fifteen reviewed paths.
+- Step 1's table holds for it: its `record`, `candidate`, `rulesHashes.candidate` and `main` rows are A's values.
+
+**Which run:**
+- **If production does not yet run a candidate from this runbook,** record L can be the main run's own record:
+  - run the whole runbook with `RECORD=L`, step 0 included;
+  - add this section's env line in step 3;
+  - run this section's step 1 before step 6, and its step 4 after step 8.
+- **Otherwise, run this section on its own, with a fresh step 0 first,** in a new `~/wsf-prod`:
+  - **run step 0.1 and the captures of 0.4.** This gives step 1's pre-flight its `live-firestore.rules`, and gives step 8 its `*-before.txt` baseline;
+  - **the baseline is the earlier run's receipt (step 9), not #599**, for 0.5's go-checks and for the stop conditions:
+    - the live WSF set is that run's 59, or 60 with the orphan kept, not the 17;
+    - B12's counts are whatever members have done since.
+  - These 0.5 go-checks still apply unchanged:
+    - the date and the CLI;
+    - the `allUsers` org policy;
+    - L0's acceptance line naming record L.
+  - **Expect these differences from the main run:**
+    - `rulesHashes.live` reads the candidate's `58ef038e…` and 1261 lines, because the earlier run released them; `rules.live-outside-wsf-equals-main` must still pass;
+    - in step 8, every WSF function is updated and none is created, so item 3's "43 created" does not apply;
+    - steps 2, 4, 5 and 7 are skipped, because nothing in them changes.
+
+**Never deploy without the pre-flight** (rule 5).
+
+### 1. Precheck (read-only)
+
+From `~/wsf-prod`, after step 0.1's shell and with `src` cloned as in step 1:
+
+```sh
+cd ~/wsf-prod
+ACCEPTED=87b48fa852174311bef1b8c337e2be0f505ad280   # KIOSK-LIVE-POSE-2's accepted subject (#365 6109907167)
+git -C src fetch origin claude/wsf-app-shell
+git -C src show "$ACCEPTED":database.westayfit.rules.json > live-pose-rules.accepted.json || echo "STOP: no rules file at that SHA"
+# The instance exists, and it is not open: an unauthenticated read is refused (401), not missing (404).
+curl -s -o /dev/null -w '%{http_code}\n' https://goarrive-default-rtdb.firebaseio.com/.json
+# The live rules, read with the operator's token. The token never reaches the screen or a file.
+live_pose_rules() {   # $1 = output file
+  local TOKEN
+  TOKEN="$(gcloud auth print-access-token)" || { echo "STOP: no token"; return 1; }
+  curl -sSf --oauth2-bearer "$TOKEN" https://goarrive-default-rtdb.firebaseio.com/.settings/rules.json > "$1" \
+    || { echo "STOP: rules read failed"; return 1; }
+}
+canon() { node -e 'process.stdout.write(JSON.stringify(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))))' "$1" | sha256sum | cut -c1-64; }
+live_pose_rules live-pose-rules.live.json \
+  && echo "file sha256 $(sha256sum live-pose-rules.accepted.json | cut -c1-64)" \
+  && echo "accepted $(canon live-pose-rules.accepted.json)  live $(canon live-pose-rules.live.json)"
+```
+
+**Pass only if all of these hold:**
+- the status is `401`;
+- the file's sha256 is `b461baaa3f9b96839885db7e242e8d0dbcf89110a2ff6a98d955beacb092da99` (1476 bytes, 30 lines);
+- both canonical hashes are `fe43a7d2c71ee233b2ecc151a2854f4a11dbe36822678dd2fc81dcb912acd44a`.
+
+The canonical hashes are taken over the parsed JSON, because the console may store the rules with its own whitespace.
+
+**Otherwise stop:**
+- `404` means there is no instance.
+- `200` means the database is readable without credentials.
+- Different hashes mean the live rules are not the accepted file.
+
+If the rules read itself is refused with your token, open console › Realtime Database › Rules. Save the text shown there as `live-pose-rules.live.json`, and compare the same way.
+
+**Receipt:** the status, the file's sha256, and the two canonical hashes.
+
+### 2. The env line
+
+Run steps 1 and 3 as written, with `RECORD=L` and `CANDIDATE=a6eaf0be95cb0a81de4f24bc6d7f30ac82ce922f`. In step 3's heredoc, add one line:
+
+```sh
+cat > "$CAND/functions-westayfit/.env.goarrive" <<'ENV'
+WSF_EMAIL_FROM="<the B3 value: the display-name noreply sender on westay.fit>"
+WSF_APP_URL=https://app.westay.fit
+WSF_LIVE_POSE=1
+ENV
+```
+
+The pre-flight admits `WSF_LIVE_POSE` only as that bare line. The functions read the switch as the exact string `1`.
+
+### 3. Deploy `functions:westayfit` from the accepted candidate
+
+This is step 6, unchanged, from the candidate worktree, with every failure rule step 6 gives:
+
+```sh
+cd "$CAND"
+npm --prefix functions-westayfit ci
+PF --command "firebase deploy --only functions:westayfit --project goarrive --config firebase.westayfit.production.json --non-interactive" \
+  && firebase deploy --only functions:westayfit --project goarrive --config firebase.westayfit.production.json --non-interactive
+```
+
+Then run step 8's items 1–3, 6 and 7: functions, revisions, invokers, env, and the GoArrive regression.
+
+### 4. Readback
+
+- **Env.** Run `gcloud run services describe wsfturnstate --region=us-central1 --project=goarrive --format="yaml(spec.template.spec.containers[0].env)"`. It must list `WSF_LIVE_POSE` with the value `1`, beside `WSF_APP_URL` and `WSF_EMAIL_FROM`. Paste the names and this one value only.
+- **One real turn.** At a paired station, a member joins, is called, taps ready and starts.
+  - The member's `wsfMyTurn` answer carries a non-null `livePose`.
+  - The station's `wsfTurnState` answer carries one too.
+  - The phone writes a frame, and the kiosk draws the stick figure.
+  - The turn is recorded as before.
+- **Logs.** During that turn, Cloud Logging has no `[wsfLivePose] … failed` line for the WSF functions.
+  - `arm failed PERMISSION_DENIED` means the runtime role is missing: turn it off (step 5) and escalate.
+  - No line carries a key.
+- **The clients.** The frame check needs the live-pose clients on production.
+  - Until they ship, record the two `livePose` answers, and write the frame line as "not run".
+  - **The readback is complete only when the frame line passes.** Post it as a second receipt once the clients ship. The owner's publish go for live pose waits for it.
+
+**Receipt on #365:** pass or fail for each line above. Never a key, a uid, or a link that holds one.
+
+### 5. Emergency off
+
+1. **First, in the console:** Realtime Database › Rules. Publish:
+   ```json
+   {"rules":{".read":false,".write":false}}
+   ```
+   It takes effect at once. Every frame read and write is refused, and nothing can be watched.
+2. **Then the switch:** remove the line `WSF_LIVE_POSE=1` from the env file, and redeploy `functions:westayfit` exactly as in step 3.
+   - Until that deploy, the functions still mint keys and write `meta`, but no client can read or write under them.
+   - After it, no key is minted, and the functions make no Realtime Database call.
+   - **From 2026-10-30T00:00Z this deploy is refused** (S1: Node.js 20).
+     - The locked rules of 5.1 are then the whole off.
+     - The switch stays set, and the functions keep minting keys and writing `meta`, until a record on a newer runtime ships.
+     - Record that on #365 and escalate to the owner.
+     - The functions read the switch on every call, so the switch could also be changed on the services themselves, without a code deploy. That is an owner decision and not part of this procedure.
+3. **Leave the locked rules in place.** Turning live pose back on means this section again: the accepted rules, then the env line. If the env line could not be removed (5.2 after the deadline), the accepted rules alone turn it back on.
+4. **Record it on #365,** with the reason and the times.
+
 ## Appendix: Web Twin production handoff (values by reference only)
 
 **Evidence.** Read-only, verified on 2026-10-09 from:
@@ -679,7 +836,7 @@ Each change also updates the Twin's own test that asserts both checked-in switch
 
 **What the Twin needs before step 1.** It all comes from the step-9 receipt:
 - **The callable names, with their new revisions and update times:** all 59, from the receipt's `wsf-functions-after.txt` and `wsf-run-after.txt`. That includes the 11 Phase-1 journey callables: `wsfSendVerificationEmail`, `wsfSaveProfile`, `wsfPreviewCommunity`, `wsfJoinCommunity`, `wsfMyCommunities`, `wsfListGoals`, `wsfContribute`, `wsfMyContribution`, `wsfGoalPulse`, `wsfGoalRecentAdditions` and `wsfSendPasswordResetEmail`.
-- **The record and SHA deployed**, A or G, because under G an anonymous session gets "Sign in with an email account." from all 42 signed-in callables.
+- **The record and SHA deployed**, A, G or L, because under G and L an anonymous session gets "Sign in with an email account." from all 42 signed-in callables.
 - **The Firestore rules release name.**
 - **Both WSF indexes READY.**
 - **An authorized-domain readback showing `app.westay.fit`.**

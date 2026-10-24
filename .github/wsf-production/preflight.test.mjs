@@ -22,7 +22,9 @@ import test from 'node:test';
 import {
   ANCHOR_A,
   ANCHOR_G,
+  ANCHOR_L,
   CANDIDATE_G_DELTA_PATHS,
+  CANDIDATE_L_DELTA_PATHS,
   PRODUCTION_ACTION_HANDLER,
   CANDIDATE_A_EXPORTS,
   CANDIDATE_A_PUBLIC,
@@ -31,6 +33,7 @@ import {
   checkConsent,
   checkEnvFile,
   firebaseToolsEnvParse,
+  LIVE_POSE_SWITCH,
   checkExports,
   checkIndexes,
   checkRules,
@@ -173,6 +176,17 @@ function gatedSuccessor(h, extra = {}) {
     'docs/westayfit/ops/security/ANON-GATE-1.md': '# synthetic\n',
     ...extra,
   }, 'G: the gate');
+}
+
+/**
+ * L over G: KIOSK-TURN-LIFECYCLE-1 and KIOSK-LIVE-POSE-2, exactly the fifteen
+ * reviewed paths, with A's 59 exports, rules, indexes and consent unchanged.
+ */
+function livePoseSuccessor(h, g, extra = {}, names = undefined) {
+  git(h.dir, 'checkout', '-q', '-b', `l-${Object.keys(extra).length}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`, g);
+  const files = Object.fromEntries(CANDIDATE_L_DELTA_PATHS.map((p) => [p, `// synthetic ${p}\n`]));
+  files['functions-westayfit/src/index.ts'] = indexTs(names, undefined, undefined, "// import { armPoseKey } from './live-pose';");
+  return commit(h.dir, { ...files, ...extra }, 'L: live pose over G');
 }
 
 // ── exports ─────────────────────────────────────────────────────────────────
@@ -474,6 +488,9 @@ test('git: a deploy needs the worktree, at the candidate, with nothing but the c
   const notGit = fs.mkdtempSync(path.join(os.tmpdir(), 'wsf-preflight-notgit-'));
   assert.deepEqual(failed(run(h, { worktree: notGit }).checks).sort(), ['worktree.at-candidate', 'worktree.clean']);
   assert.deepEqual(failed(run(h, { envFile: 'WSF_APP_URL=https://app.westay.fit\n' }).checks), ['worktree.env-file']);
+  // KIOSK-LIVE-POSE-2: the switch on is a passing deploy; any other value is not.
+  assert.deepEqual(failed(run(h, { envFile: `${GOOD_ENV}WSF_LIVE_POSE=1\n` }).checks), []);
+  assert.deepEqual(failed(run(h, { envFile: `${GOOD_ENV}WSF_LIVE_POSE=true\n` }).checks), ['worktree.env-file']);
 });
 
 test('git: the interactive form is recorded in the verdict, and a reason without a command is refused', () => {
@@ -564,7 +581,7 @@ test('git: short or unknown SHAs and an unknown record are usage errors, never v
   const h = history();
   assert.match(run(h, { candidate: h.anchor.slice(0, 8) }).usage, /40-character/);
   assert.match(run(h, { main: 'f'.repeat(40) }).usage, /not a commit/);
-  assert.match(run(h, { record: 'C' }).usage, /A, B or G/);
+  assert.match(run(h, { record: 'C' }).usage, /A, B, G or L/);
 });
 
 // ── the CLI and its purity ──────────────────────────────────────────────────
@@ -652,6 +669,92 @@ test('record G: the CLI compares with the reviewed e65bfee9, which a synthetic c
   assert.equal(r.verdict.usage, `gated anchor ${ANCHOR_G} is not a commit in this clone (fetch it first; this guard never fetches)`);
 });
 
+// ── record L: KIOSK-LIVE-POSE-2 integrated (KIOSK-LIVE-POSE-PROD-1) ──────────
+
+test('record L is pinned to KIOSK-LIVE-POSE-2\'s integrated commit, and names its fifteen paths', () => {
+  // Pinned to the #622 merge (#365 6127217055); a placeholder fails here.
+  assert.match(ANCHOR_L, /^[0-9a-f]{40}$/);
+  assert.equal(ANCHOR_L, 'a6eaf0be95cb0a81de4f24bc6d7f30ac82ce922f');
+  assert.notEqual(ANCHOR_L, ANCHOR_G);
+  assert.deepEqual([...CANDIDATE_L_DELTA_PATHS].sort(), [
+    'database.westayfit.rules.json',
+    'docs/westayfit/ops/security/KIOSK-TURN-LIFECYCLE-1.md',
+    'firebase.westayfit.emulators.json',
+    'functions-westayfit/src/index.ts',
+    'functions-westayfit/src/live-pose.ts',
+    'functions-westayfit/tests/callable/wsf-kiosk-expected-turn.test.ts',
+    'functions-westayfit/tests/callable/wsf-station-turn-lifecycle.test.ts',
+    'functions-westayfit/tests/callable/wsf-turn.test.ts',
+    'functions-westayfit/tests/deploy-config/live-pose-config.test.ts',
+    'functions-westayfit/tests/emulator-isolation.setup.ts',
+    'functions-westayfit/tests/live-pose/harness.ts',
+    'functions-westayfit/tests/live-pose/jest.config.cjs',
+    'functions-westayfit/tests/live-pose/live-pose-callables.test.ts',
+    'functions-westayfit/tests/live-pose/live-pose-isolation.setup.ts',
+    'functions-westayfit/tests/live-pose/live-pose-rules.test.ts',
+  ]);
+  // No production config, rules, indexes or consent file is in L's delta.
+  for (const p of ['firebase.westayfit.production.json', 'firestore.rules', 'firestore.indexes.json', 'apps/westayfit/src/profileConstants.ts', 'firebase.json']) {
+    assert.ok(!CANDIDATE_L_DELTA_PATHS.includes(p), p);
+  }
+});
+
+test('record L: live pose over G passes; it must be exactly the L anchor, descend from G and change exactly its paths', () => {
+  const h = history();
+  const g = gatedSuccessor(h);
+  const l = livePoseSuccessor(h, g);
+  const ok = run(h, { record: 'L', candidate: l, anchorG: g, anchorL: l });
+  assert.deepEqual(failed(ok.checks), []);
+  assert.equal(ok.anchorG, g);
+  assert.equal(ok.anchorL, l);
+  assert.equal(ok.exports, 59);
+  assert.equal(ok.consentVersionPending, true);
+  // The switch on is a passing L deploy; any other value is not.
+  assert.deepEqual(failed(run(h, { record: 'L', candidate: l, anchorG: g, anchorL: l, envFile: `${GOOD_ENV}WSF_LIVE_POSE=1\n` }).checks), []);
+  assert.deepEqual(failed(run(h, { record: 'L', candidate: l, anchorG: g, anchorL: l, envFile: `${GOOD_ENV}WSF_LIVE_POSE="1"\n` }).checks), ['worktree.env-file']);
+  // G offered as L.
+  assert.deepEqual(failed(run(h, { record: 'L', candidate: g, anchorG: g, anchorL: l }).checks).sort(), ['candidate.L-is-live-pose-over-G', 'candidate.is-anchor-L']);
+  // An L that changes one path more, or one fewer.
+  const wider = livePoseSuccessor(h, g, { 'docs/westayfit/ops/unreviewed.md': '# synthetic\n' });
+  assert.deepEqual(failed(run(h, { record: 'L', candidate: wider, anchorG: g, anchorL: wider }).checks), ['candidate.L-is-live-pose-over-G']);
+  const widerRules = livePoseSuccessor(h, g, { 'firestore.rules': withWsf(GOARRIVE_RULES) + '\n' });
+  assert.ok(failed(run(h, { record: 'L', candidate: widerRules, anchorG: g, anchorL: widerRules }).checks).includes('candidate.L-is-live-pose-over-G'));
+  git(h.dir, 'checkout', '-q', '-b', `l-narrow-${Date.now().toString(36)}`, g);
+  const fourteen = Object.fromEntries(CANDIDATE_L_DELTA_PATHS.filter((p) => p !== 'database.westayfit.rules.json').map((p) => [p, `// synthetic ${p}\n`]));
+  fourteen['functions-westayfit/src/index.ts'] = indexTs(undefined, undefined, undefined, "// import { armPoseKey } from './live-pose';");
+  const narrower = commit(h.dir, fourteen, 'L without one of its paths');
+  assert.ok(failed(run(h, { record: 'L', candidate: narrower, anchorG: g, anchorL: narrower }).checks).includes('candidate.L-is-live-pose-over-G'));
+  // L's tree straight over A, not over G.
+  const overA = git(h.dir, 'commit-tree', `${l}^{tree}`, '-p', h.anchor, '-m', 'live pose over A, not G');
+  assert.deepEqual(failed(run(h, { record: 'L', candidate: overA, anchorG: g, anchorL: overA }).checks), ['candidate.L-is-live-pose-over-G']);
+  // index.ts is in L's delta, so the export manifest still guards it: a 60th export fails.
+  const sixty = livePoseSuccessor(h, g, {}, [...CANDIDATE_A_EXPORTS, 'wsfLivePoseExtra']);
+  assert.deepEqual(failed(run(h, { record: 'L', candidate: sixty, anchorG: g, anchorL: sixty }).checks), ['exports.match-manifest']);
+  // L is not G, and G is not L.
+  assert.ok(failed(run(h, { record: 'G', candidate: l, anchorG: g }).checks).includes('candidate.is-anchor-G'));
+  assert.ok(failed(run(h, { record: 'A', candidate: l }).checks).includes('candidate.is-anchor-A'));
+  // No production database target for L either.
+  assert.ok(failed(run(h, { record: 'L', candidate: l, anchorG: g, anchorL: l, command: REVIEWED.replace('functions:westayfit', 'database') }).checks).includes('command.reviewed-shape'));
+});
+
+test('record L: the CLI compares with the reviewed L anchor, which a synthetic clone lacks; an unknown record is refused', () => {
+  const h = history();
+  const g = gatedSuccessor(h);
+  const wt = worktreeAt(h, h.anchor);
+  const r = cli(['--repo', h.dir, '--config', path.join(wt, 'firebase.westayfit.production.json'), '--record', 'L', '--main', h.main, '--candidate', h.anchor], { anchor: h.anchor, anchorG: g, cwd: wt });
+  assert.equal(r.code, 2);
+  assert.match(r.verdict.usage, /^live-pose anchor /);
+  // L checks its G anchor too: a G anchor that is not a commit here is a usage error before any verdict.
+  const l = livePoseSuccessor(h, g);
+  const noG = run(h, { record: 'L', candidate: l, anchorG: 'f'.repeat(40), anchorL: l });
+  assert.equal(noG.usage, `gated anchor ${'f'.repeat(40)} is not a commit in this clone (fetch it first; this guard never fetches)`);
+  assert.equal(run(h, { record: 'L', candidate: l, anchorG: 'e65bfee9', anchorL: l }).usage, 'gated anchor must be a full 40-character SHA');
+  assert.equal(run(h, { record: 'L', candidate: l, anchorG: g, anchorL: '@ANCHOR_L@' }).usage, 'live-pose anchor must be a full 40-character SHA');
+  const x = cli(['--repo', h.dir, '--config', path.join(wt, 'firebase.westayfit.production.json'), '--record', 'X', '--main', h.main, '--candidate', h.anchor], { anchor: h.anchor, cwd: wt });
+  assert.equal(x.code, 2);
+  assert.equal(x.verdict.usage, 'record must be A, B, G or L');
+});
+
 // ── non-blocking hardening (W3 #396 6078906904) ─────────────────────────────
 
 test('command: --only names exactly one target, never two and never one twice', () => {
@@ -671,6 +774,34 @@ test('env file: WSF_AUTH_ACTION_HANDLER, when set, must be the production defaul
   for (const v of ['', 'https://evil.example.invalid/__/auth/action', 'https://westayfit-staging.firebaseapp.com/__/auth/action']) {
     assert.deepEqual(failed(checkEnvFile(`${GOOD_ENV}WSF_AUTH_ACTION_HANDLER=${v}\n`)), ['worktree.env-file'], v);
   }
+});
+
+test('env file: WSF_LIVE_POSE (KIOSK-LIVE-POSE-PROD-1, #365 6109578489 item a) is admitted as exactly 1, or absent', () => {
+  assert.equal(LIVE_POSE_SWITCH, 'WSF_LIVE_POSE');
+  // Absent: live pose off, and the file is valid as before.
+  assert.deepEqual(failed(checkEnvFile(GOOD_ENV)), []);
+  // Present as the bare line WSF_LIVE_POSE=1: on. firebase-tools uploads '1',
+  // the exact string the functions' switch reads.
+  const on = checkEnvFile(`${GOOD_ENV}WSF_LIVE_POSE=1\n`);
+  assert.deepEqual(failed(on), []);
+  assert.match(on[0].detail, /WSF_LIVE_POSE/);
+  assert.equal(firebaseToolsEnvParse(`${GOOD_ENV}WSF_LIVE_POSE=1\n`).envs.WSF_LIVE_POSE, '1');
+  // Any other value is refused, quoted '1' included.
+  for (const v of ['0', 'true', 'TRUE', 'yes', 'on', '', ' 1', '01', '1.0', '2', '"1"', "'1'"]) {
+    const [c] = checkEnvFile(`${GOOD_ENV}WSF_LIVE_POSE=${v}\n`);
+    assert.equal(c.ok, false, v);
+    assert.match(c.detail, /WSF_LIVE_POSE, when set, must be exactly WSF_LIVE_POSE=1, unquoted/, v);
+  }
+  // Set twice, even to 1.
+  assert.match(checkEnvFile(`${GOOD_ENV}WSF_LIVE_POSE=1\nWSF_LIVE_POSE=1\n`)[0].detail, /WSF_LIVE_POSE is set more than once/);
+  assert.deepEqual(failed(checkEnvFile(`${GOOD_ENV}WSF_LIVE_POSE=0\nWSF_LIVE_POSE=1\n`)), ['worktree.env-file']);
+  // An export prefix, a lower-case key, or a trailing comment is not the reviewed line.
+  for (const t of [`${GOOD_ENV}export WSF_LIVE_POSE=1\n`, `${GOOD_ENV}wsf_live_pose=1\n`, `${GOOD_ENV}WSF_LIVE_POSE=1 # on\n`]) {
+    assert.deepEqual(failed(checkEnvFile(t)), ['worktree.env-file'], t);
+  }
+  // The deploy targets are unchanged: no database target is reviewed.
+  assert.equal(PROD_CONFIG.database, undefined);
+  assert.deepEqual(failed(checkCommand(REVIEWED.replace('functions:westayfit', 'database'))), ['command.reviewed-shape']);
 });
 
 test('env file: a value firebase-tools would read differently is refused (multi-line, escaped, repeated, exported)', () => {

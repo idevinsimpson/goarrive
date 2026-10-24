@@ -30,6 +30,7 @@ const suites = [
   'journey-activation.test.mjs',
   'token-dependency.test.mjs',
   'committed-secrets.test.mjs',
+  'live-pose-deploy.test.mjs',
 ];
 let failed = 0;
 for (const s of suites) {
