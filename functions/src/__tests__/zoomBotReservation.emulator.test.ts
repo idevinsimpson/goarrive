@@ -1,15 +1,16 @@
 import * as admin from 'firebase-admin';
+import { isRegisteredBotRoom } from '../zoomBotLegacyGuard';
 import { reserveBotHost, beginBotMeeting, botHostKey, peakConcurrent } from '../zoomBotReservation';
 jest.setTimeout(30000); // Real transaction contention includes Firestore retry backoff.
 if(process.env.FIRESTORE_EMULATOR_HOST!=='127.0.0.1:8080')throw Error('Local emulator required');
 admin.initializeApp({projectId:'demo-zoom-bot-pool'});const db=admin.firestore(), now=1000000, emails=['hmti2@example.invalid','maia@example.invalid'];
 async function session(id:string,start=now){await db.doc('session_instances/'+id).set({coachId:'coach',memberId:'member',playbookId:'plan',roomSource:'shared_pool',status:'scheduled',startUtc:admin.firestore.Timestamp.fromMillis(start),endUtc:admin.firestore.Timestamp.fromMillis(start+2700000),recordingEnabled:true});}
-beforeEach(async()=>{for(const col of ['zoom_bot_hosts','zoom_bot_host_leases','zoom_bot_allocation_jobs','zoom_bot_pool_state','session_instances']){const snap=await db.collection(col).get();const batch=db.batch();snap.docs.forEach(x=>batch.delete(x.ref));await batch.commit();}for(const email of emails)await db.doc('zoom_bot_hosts/'+botHostKey(email)).set({email,reconciled:true,legacyRoomIds:[],providerUserId:email,poolId:'hmti',isBot:true,verified:true,providerMode:'live',status:'active',maxConcurrentMeetings:1});});
+beforeEach(async()=>{for(const col of ['zoom_bot_hosts','zoom_bot_host_leases','zoom_bot_allocation_jobs','zoom_bot_pool_state','session_instances','zoom_rooms','zoom_bot_legacy_releases']){const snap=await db.collection(col).get();const batch=db.batch();snap.docs.forEach(x=>batch.delete(x.ref));await batch.commit();}for(const email of emails)await db.doc('zoom_bot_hosts/'+botHostKey(email)).set({email,reconciled:true,mappingVersion:1,roomId:botHostKey(email),legacyRoomIds:[],providerUserId:email,poolId:'hmti',isBot:true,verified:true,providerMode:'live',status:'active',maxConcurrentMeetings:1});for(const email of emails)await db.doc('zoom_rooms/'+botHostKey(email)).set({poolId:'hmti',status:'active',zoomAccountEmail:email,zoomUserId:email});});
 afterAll(()=>admin.app().delete());
 test('case normalization prevents duplicate hosts',()=>expect(botHostKey(' Maia@Example.Invalid ')).toBe(botHostKey('maia@example.invalid')));
 test('concurrent sessions enforce two-host capacity',async()=>{await Promise.all(['a','b','c'].map(x=>session(x)));const results=await Promise.allSettled(['a','b','c'].map(x=>reserveBotHost(db,x,'coach',now)));const winners=results.filter(x=>x.status==='fulfilled') as PromiseFulfilledResult<any>[];expect(winners).toHaveLength(2);expect(new Set(winners.map(x=>x.value.hostId)).size).toBe(2);expect(results.filter(x=>x.status==='rejected')).toHaveLength(1);});
 test('duplicate and ambiguous retries cannot start provider twice',async()=>{await session('same');const claims=await Promise.all([reserveBotHost(db,'same','coach',now),reserveBotHost(db,'same','coach',now)]);expect(claims.filter(x=>x.create)).toHaveLength(1);const starts=await Promise.all(claims.map(x=>beginBotMeeting(db,x,now)));expect(starts.filter(Boolean)).toHaveLength(1);expect((await reserveBotHost(db,'same','coach',now)).create).toBe(false);expect(await beginBotMeeting(db,claims[0],now)).toBe(false);});
-test('sequential nonoverlapping reservations rotate fairly',async()=>{const selected=[];for(let i=0;i<6;i++){await session('s'+i,now+i*2700000);selected.push((await reserveBotHost(db,'s'+i,'coach',now)).hostId);}expect(selected[0]).not.toBe(selected[1]);expect(selected[0]).toBe(selected[2]);expect(selected[1]).toBe(selected[3]);});
+test('sequential nonoverlapping reservations rotate fairly',async()=>{const selected=[];for(let i=0;i<6;i++){await session('s'+i,now+i*3000000);selected.push((await reserveBotHost(db,'s'+i,'coach',now)).hostId);}expect(selected[0]).not.toBe(selected[1]);expect(selected[0]).toBe(selected[2]);expect(selected[1]).toBe(selected[3]);});
 test('unverified hosts deny without job writes',async()=>{for(const email of emails)await db.doc('zoom_bot_hosts/'+botHostKey(email)).update({verified:false});await session('s');await expect(reserveBotHost(db,'s','coach',now)).rejects.toMatchObject({code:'resource-exhausted'});expect((await db.doc('zoom_bot_allocation_jobs/s').get()).exists).toBe(false);});
 test.each([{status:'cancelled'},{memberId:'other'},{recordingEnabled:false},{coachId:'other'}])('changed assignment quarantines claim %j',async patch=>{await session('s');const claim=await reserveBotHost(db,'s','coach',now);await db.doc('session_instances/s').update(patch);expect(await beginBotMeeting(db,claim,now)).toBe(false);expect((await db.doc('zoom_bot_allocation_jobs/s').get()).data()?.state).toBe('needs_reconciliation');});
 test('wrong coach and expired session denied',async()=>{await session('s');await expect(reserveBotHost(db,'s','other',now)).rejects.toMatchObject({code:'permission-denied'});await expect(reserveBotHost(db,'s','coach',now+2700000)).rejects.toMatchObject({code:'failed-precondition'});});
@@ -19,13 +20,58 @@ test('capacity uses peak overlap rather than summing disjoint intervals',()=>{ex
 
 test('legacy room occupancy blocks capacity without persisting legacy leases',async()=>{
   for(const email of emails)await db.doc('zoom_bot_hosts/'+botHostKey(email)).update({legacyRoomIds:['old-room']});
-  await session('legacy');await db.doc('session_instances/legacy').update({status:'allocated',zoomRoomId:'old-room'});
+  await session('legacy');await db.doc('session_instances/legacy').update({status:'allocated',zoomRoomId:'old-room',zoomMeetingId:'old-meeting'});
   await session('next');await expect(reserveBotHost(db,'next','coach',now)).rejects.toMatchObject({code:'resource-exhausted'});
   await db.doc('session_instances/legacy').update({status:'cancelled'});
+  await expect(reserveBotHost(db,'next','coach',now)).rejects.toMatchObject({code:'resource-exhausted'});
+  await db.doc('zoom_bot_legacy_releases/legacy').set({meetingId:'old-meeting',providerUserId:emails[0],verifiedReleasedAtMs:now});
   const result=await reserveBotHost(db,'next','coach',now);
   expect((await db.doc('zoom_bot_host_leases/'+result.hostId).get()).data()?.windows.map((w:any)=>w.sessionId)).toEqual(['next']);
 });
 test('expired reservation cannot begin provider creation',async()=>{
   await session('s');const claim=await reserveBotHost(db,'s','coach',now);
   expect(await beginBotMeeting(db,claim,now+2700000)).toBe(false);
+});
+test('five-minute early entry reserves capacity before the nominal start',async()=>{
+  await db.doc('zoom_bot_hosts/'+botHostKey(emails[1])).update({status:'inactive'});
+  await session('a');await reserveBotHost(db,'a','coach',now);
+  await session('early',now+2700000+240000);await expect(reserveBotHost(db,'early','coach',now)).rejects.toMatchObject({code:'resource-exhausted'});
+  await session('boundary',now+2700000+300000);await expect(reserveBotHost(db,'boundary','coach',now)).resolves.toMatchObject({create:true});
+});
+test('unknown provider hold remains occupied beyond its scheduled end',async()=>{
+  await db.doc('zoom_bot_hosts/'+botHostKey(emails[1])).update({status:'inactive'});
+  await session('a');const claim=await reserveBotHost(db,'a','coach',now);await beginBotMeeting(db,claim,now);
+  await session('later',now+7200000);await expect(reserveBotHost(db,'later','coach',now+3600000)).rejects.toMatchObject({code:'resource-exhausted'});
+});
+test('room metadata change after reservation prevents provider start',async()=>{
+  await session('a');const claim=await reserveBotHost(db,'a','coach',now);await db.doc('zoom_rooms/'+claim.hostId).update({zoomAccountEmail:'other@example.invalid'});
+  expect(await beginBotMeeting(db,claim,now)).toBe(false);
+});
+
+test('registered email case variants, provider IDs and room aliases are fenced from legacy allocation',async()=>{expect(await isRegisteredBotRoom(db,{zoomAccountEmail:' HMTI2@EXAMPLE.INVALID '})).toBe(true);expect(await isRegisteredBotRoom(db,{zoomAccountEmail:'alias@example.invalid',zoomUserId:emails[0]})).toBe(true);expect(await isRegisteredBotRoom(db,{},botHostKey(emails[0]))).toBe(true);await db.doc('zoom_bot_hosts/'+botHostKey(emails[0])).update({status:'inactive'});expect(await isRegisteredBotRoom(db,{zoomAccountEmail:emails[0]})).toBe(true);expect(await isRegisteredBotRoom(db,{zoomAccountEmail:'unregistered@example.invalid'})).toBe(false);});
+
+test('legacy alias IDs stay fenced even when editable room identity fields change',async()=>{
+  await db.doc('zoom_bot_hosts/'+botHostKey(emails[0])).update({legacyRoomIds:['retired-alias']});
+  expect(await isRegisteredBotRoom(db,{zoomAccountEmail:'different@example.invalid',zoomUserId:'different'},'retired-alias')).toBe(true);
+});
+
+test('provider-start deadline is checked after the final asynchronous room read',async()=>{
+  await session('deadline');const claim=await reserveBotHost(db,'deadline','coach',now);
+  let clock=now;
+  const date=jest.spyOn(Date,'now').mockImplementation(()=>clock);
+  const wrapped={doc:db.doc.bind(db),runTransaction:(callback:any)=>db.runTransaction(tx=>callback(new Proxy(tx,{get(target,key){if(key==='get')return async(ref:any)=>{const result=await target.get(ref);if(ref.path===`zoom_rooms/${claim.hostId}`)clock=now+2700000;return result;};const value=(target as any)[key];return typeof value==='function'?value.bind(target):value;}})))} as any;
+  try{expect(await beginBotMeeting(wrapped,claim)).toBe(false);expect((await db.doc('zoom_bot_allocation_jobs/deadline').get()).data()?.state).toBe('needs_reconciliation');}finally{date.mockRestore();}
+});
+
+test('a concurrent schedule mutation and allocation cannot both win admission',async()=>{
+  const {beginBotSessionMutation}=await import('../zoomBotMutation');
+  await session('race');
+  const results=await Promise.allSettled([reserveBotHost(db,'race','coach',now),beginBotSessionMutation(db,'race',{uid:'coach',token:{}})]);
+  const job=(await db.doc('zoom_bot_allocation_jobs/race').get()).data()!;
+  if(job.state==='mutation_lock'){
+    expect(results[1].status).toBe('fulfilled');
+    if(results[0].status==='fulfilled')expect(results[0].value).toMatchObject({create:false});
+  }else{
+    expect(job.state).toBe('reserved');expect(results[0].status).toBe('fulfilled');expect(results[1].status).toBe('rejected');
+  }
 });

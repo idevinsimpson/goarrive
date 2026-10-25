@@ -103,6 +103,8 @@ export { setPlaybookWorkoutPolicy } from './playbookWorkoutPolicy';
 export { getSessionVideoAvailability, setWorkoutVideoPolicy, getWorkoutVideoRollout } from './sessionVideoPolicy';
 import { sessionVideoAvailability } from './sessionVideoPolicy';
 import { allocateVerifiedBotSession } from './zoomBotAllocation';
+import { isRegisteredBotRoom } from './zoomBotLegacyGuard';
+import { beginBotSessionMutation, finishBotSessionMutation } from './zoomBotMutation';
 import { saveVideoReceipt } from './videoAllocationReceipt';
 import { enrollmentCloneFields } from './playbookClone';
 export {
@@ -4406,6 +4408,7 @@ export const allocateSessionInstance = onCall(
 
     for (const roomDoc of candidateRooms) {
       const room = roomDoc.data();
+        if (await isRegisteredBotRoom(db, room, roomDoc.id)) continue;
 
       // Check for overlapping instances already allocated to this room
       const conflictsSnap = await db.collection('session_instances')
@@ -4591,8 +4594,10 @@ export const allocateAllPendingInstances = onCall(
     const botDocs = process.env.ZOOM_VERIFIED_BOT_POOL_ENABLED === 'true' ? pendingSnap.docs.filter(d => d.data().roomSource === 'shared_pool') : [];
     let botAllocated = 0, botFailed = 0;
     for (const d of botDocs) {
-      const result = await allocateVerifiedBotSession(db, getZoomProvider({ accountId: zoomAccountId.value(), clientId: zoomClientId.value(), clientSecret: zoomClientSecret.value() }), d.id, callerUid);
-      if (result.success) botAllocated++; else botFailed++;
+      try {
+        const result = await allocateVerifiedBotSession(db, getZoomProvider({ accountId: zoomAccountId.value(), clientId: zoomClientId.value(), clientSecret: zoomClientSecret.value() }), d.id, callerUid);
+        if (result.success) botAllocated++; else botFailed++;
+      } catch { botFailed++; } // Preserve prior successes and continue; never retry this session here.
     }
     const remainingDocs = pendingSnap.docs.filter(d => !botDocs.some(b => b.id === d.id));
     if (!remainingDocs.length) return { success: botFailed === 0, allocated: botAllocated, failed: botFailed, total: pendingSnap.size };
@@ -4636,6 +4641,7 @@ export const allocateAllPendingInstances = onCall(
 
       for (const roomDoc of roomsSnap.docs) {
         const room = roomDoc.data();
+        if (await isRegisteredBotRoom(db, room, roomDoc.id)) continue;
 
         // Check for conflicts
         const conflictsSnap = await db.collection('session_instances')
@@ -4774,6 +4780,8 @@ export const rescheduleInstance = onCall(
       throw new HttpsError('failed-precondition', `Cannot reschedule instance in status "${instance.status}"`);
     }
 
+    const botMutation = await beginBotSessionMutation(db, instanceId, request.auth!);
+    try {
     // Playbook sessions: member self-reschedule reuses the skip auto-approval
     // window — inside the window the member must go through a skip request.
     if (instance.playbookId && rescheduleSource === 'member_action') {
@@ -4804,6 +4812,7 @@ export const rescheduleInstance = onCall(
           payload: { reason: 'reschedule' },
         });
       } catch (err: any) {
+        await finishBotSessionMutation(db, instanceId, botMutation, true);
         console.warn(`[rescheduleInstance] Failed to delete Zoom meeting ${existingMeetingId}: ${err.message}`);
       }
     }
@@ -4865,6 +4874,8 @@ export const rescheduleInstance = onCall(
     });
 
     return { success: true };
+    } catch (error) { await finishBotSessionMutation(db, instanceId, botMutation, true); throw error; }
+    finally { await finishBotSessionMutation(db, instanceId, botMutation); }
   }
 );
 
@@ -4888,6 +4899,8 @@ export const cancelInstance = onCall(
     }
     const cancelSource = (ownsSessionMember(callerUid, request.auth!.token, instance)) ? 'member_action' : 'coach_action';
 
+    const botMutation = await beginBotSessionMutation(db, instanceId, request.auth!);
+    try {
     // Playbook sessions: member self-cancel reuses the skip auto-approval
     // window — inside the window the member must go through a skip request.
     if (instance.playbookId && cancelSource === 'member_action') {
@@ -4910,6 +4923,7 @@ export const cancelInstance = onCall(
           payload: { reason: 'cancellation' },
         });
       } catch (err: any) {
+        await finishBotSessionMutation(db, instanceId, botMutation, true);
         console.warn(`[cancelInstance] Failed to delete Zoom meeting ${cancelMeetingId}: ${err.message}`);
       }
     }
@@ -4948,6 +4962,8 @@ export const cancelInstance = onCall(
     });
 
     return { success: true };
+    } catch (error) { await finishBotSessionMutation(db, instanceId, botMutation, true); throw error; }
+    finally { await finishBotSessionMutation(db, instanceId, botMutation); }
   }
 );
 
