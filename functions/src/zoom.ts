@@ -151,7 +151,7 @@ export class RealZoomProvider implements ZoomProvider {
         auto_recording: request.autoRecording ?? 'cloud',
         mute_upon_entry: true,
         participant_video: false,
-        approval_type: 0, // Automatically approve
+        approval_type: 2, // GoArrive authorizes assigned members; no separate Zoom registration flow.
       },
     });
 
