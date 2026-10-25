@@ -1,0 +1,128 @@
+{
+  "at": "2026-10-25T05:48:35.153Z",
+  "project": "goarrive",
+  "function": "stripeConnectWebhook",
+  "allowedDeltasFromReviewedRelease": [
+    "Remove invoice.payment_succeeded dispatch alias",
+    "Restore deployed handleInvoicePaymentFailed",
+    "Restore deployed handleSubscriptionUpsert"
+  ],
+  "allNineDispatchAndHandlersEqualLive": true,
+  "enrollmentEqualsReviewedRelease": true,
+  "syntheticDispatchCases": 44,
+  "liveHandlerSha256": "04dc06cfa8691c101ca67ab4168e88d3069ba1e439d1f2ac483e5bbb24b28885",
+  "candidateIndexSha256": "8115e602ff680e340cf61626257e87cd639af2a9bd04a27d84914b7dac1446d8",
+  "compatibilityIndexSha256": "0cf38cd72c88b6fe2978da158c17effb76f92b5a7567c380161c1df4635d934e",
+  "captureTimestamp": "2026-10-25T05:17:49.831Z",
+  "deployed": {
+    "name": "projects/goarrive/locations/us-central1/functions/stripeConnectWebhook",
+    "state": "ACTIVE",
+    "updateTime": "2026-08-11T21:52:48.156741628Z",
+    "labels": {
+      "deployment-tool": "cli-firebase",
+      "firebase-functions-hash": "2cc1389e45f8982b520eccdc79c19a9bb4ca8eaf"
+    },
+    "runtime": "nodejs20",
+    "entryPoint": "stripeConnectWebhook",
+    "source": {
+      "storageSource": {
+        "bucket": "gcf-v2-sources-413741232388-us-central1",
+        "object": "stripeConnectWebhook/function-source.zip",
+        "generation": "1786485135051438"
+      }
+    },
+    "service": "projects/goarrive/locations/us-central1/services/stripeconnectwebhook",
+    "revision": "stripeconnectwebhook-00021-woj"
+  },
+  "cloneContractsPassed": 4,
+  "typescriptBuildPassed": true,
+  "notDeployed": true,
+  "capturedDependencies": {
+    "@google-cloud/functions-framework": "^5.0.2",
+    "@google-cloud/tasks": "^6.2.1",
+    "ffmpeg-static": "^5.3.0",
+    "firebase-admin": "^12.7.0",
+    "firebase-functions": "^4.9.0",
+    "googleapis": "^171.4.0",
+    "sharp": "^0.35.3",
+    "stripe": "^20.4.1",
+    "ws": "^8.20.0"
+  },
+  "capturedRuntime": {
+    "node": "20"
+  },
+  "reachableDeclarations": [
+    {
+      "name": "stripeConnectWebhook",
+      "equal": true
+    },
+    {
+      "name": "stripeSecretKey",
+      "equal": true
+    },
+    {
+      "name": "stripeWebhookSecretConnect",
+      "equal": true
+    },
+    {
+      "name": "getStripe",
+      "equal": true
+    },
+    {
+      "name": "processStripeEvent",
+      "equal": true
+    },
+    {
+      "name": "db",
+      "equal": true
+    },
+    {
+      "name": "handleCheckoutSessionCompleted",
+      "equal": true
+    },
+    {
+      "name": "handleInvoicePaid",
+      "equal": true
+    },
+    {
+      "name": "handleInvoicePaymentFailed",
+      "equal": true
+    },
+    {
+      "name": "handleSubscriptionUpsert",
+      "equal": true
+    },
+    {
+      "name": "handleSubscriptionDeleted",
+      "equal": true
+    },
+    {
+      "name": "handleChargeRefunded",
+      "equal": true
+    },
+    {
+      "name": "handleChargeDisputeCreated",
+      "equal": true
+    },
+    {
+      "name": "handlePaymentIntentFailed",
+      "equal": true
+    },
+    {
+      "name": "enrollSubscriber",
+      "equal": false
+    }
+  ],
+  "enrollmentHelperSha256": "816962d5c9caba9112bcbe29d51e33e8d7d578f62ec6ba145ad448ec4012e3e9",
+  "fullCapturedSourceSha256": "6ded9684d75b9f4840e639a55ddc8d4c067a5ca17171029a9709268eee855e5c",
+  "generatedAt": "2026-10-25T06:10:56.339Z",
+  "signatureWrapperCasesPassed": 4,
+  "productionDependencyVersionsUnchanged": true,
+  "lockfileVersionDelta": {
+    "package": "ffprobe-static",
+    "version": "3.1.0",
+    "devOnly": true,
+    "previouslyAbsent": true
+  },
+  "candidateManifestSha256": "90b981123ac9263a9e9357d0c7a9fe4981205b2f4c858beb7c2b3a9b737bc9e7"
+}

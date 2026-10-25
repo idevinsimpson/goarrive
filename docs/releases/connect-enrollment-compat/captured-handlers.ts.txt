@@ -1,0 +1,828 @@
+async function processStripeEvent(tag: string, event: Stripe.Event, res: any) {
+  // ── Idempotency: transactional create() so concurrent retries fail fast ──
+  const eventRef = db.collection('billingEvents').doc(event.id);
+  const billingEvent = {
+    eventId: event.id,
+    stripeEventId: event.id,
+    stripeEventType: event.type,
+    rawPayload: event as unknown as Record<string, unknown>,
+    processedAt: FieldValue.serverTimestamp(),
+  };
+
+  try {
+    const isDuplicate = await db.runTransaction(async (tx) => {
+      const existing = await tx.get(eventRef);
+      if (existing.exists) return true;
+      tx.create(eventRef, billingEvent);
+      return false;
+    });
+    if (isDuplicate) {
+      console.log(`[${tag}] Already processed event`, event.id, '— skipping');
+      res.status(200).send('Already processed');
+      return;
+    }
+  } catch (err) {
+    const code = (err as { code?: number | string }).code;
+    // ALREADY_EXISTS from a concurrent create() race — also a duplicate
+    if (code === 6 || code === 'already-exists') {
+      console.log(`[${tag}] Duplicate concurrent event`, event.id, '— skipping');
+      res.status(200).send('Already processed');
+      return;
+    }
+    console.error(`[${tag}] Failed to store billing event:`, err);
+    res.status(500).send('Failed to store event');
+    return;
+  }
+
+  // ── Process event ──
+  try {
+    switch (event.type) {
+      case 'checkout.session.completed':
+        await handleCheckoutSessionCompleted(event.data.object as Stripe.Checkout.Session, event.id);
+        break;
+      case 'invoice.paid':
+        await handleInvoicePaid(event.data.object as Stripe.Invoice, event.id);
+        break;
+      case 'invoice.payment_failed':
+        await handleInvoicePaymentFailed(event.data.object as Stripe.Invoice, event.id);
+        break;
+      case 'customer.subscription.created':
+      case 'customer.subscription.updated':
+        await handleSubscriptionUpsert(event.data.object as Stripe.Subscription, event.id);
+        break;
+      case 'customer.subscription.deleted':
+        await handleSubscriptionDeleted(event.data.object as Stripe.Subscription, event.id);
+        break;
+      case 'charge.refunded':
+        await handleChargeRefunded(event.data.object as Stripe.Charge, event.id);
+        break;
+      case 'charge.dispute.created':
+        await handleChargeDisputeCreated(event.data.object as Stripe.Dispute, event.id);
+        break;
+      case 'payment_intent.payment_failed':
+        await handlePaymentIntentFailed(event.data.object as Stripe.PaymentIntent, event.id);
+        break;
+      default:
+        console.log(`[${tag}] Unhandled event type:`, event.type);
+    }
+  } catch (err) {
+    console.error(`[${tag}] Error processing event`, event.id, ':', err);
+    res.status(500).send('Internal error — Stripe will retry');
+    return;
+  }
+
+  res.status(200).send('OK');
+}
+
+async function handleCheckoutSessionCompleted(
+  session: Stripe.Checkout.Session,
+  eventId: string
+) {
+  const { intentId, planId, snapshotId, memberId, coachId: _coachId, submissionId, funnelCheckout, discountCodeUsed } = session.metadata ?? {};
+
+  // ── Funnel checkout path (PR-H bookkeeping + PR-I enrollSubscriber) ──
+  // Composed: PR-H's payment bookkeeping (mark submission paid, increment
+  // discount usesCount) runs first, then PR-I's enrollSubscriber duplicates
+  // the template playbook + creates the playbook_folder_members doc. Because
+  // funnel checkouts don't create a member up-front (visitor is anonymous),
+  // we create the Firebase Auth user here from the submission fields before
+  // handing memberId to enrollSubscriber.
+  if (funnelCheckout === 'true' && submissionId) {
+    const funnelCoachId = session.metadata?.coachId;
+    const subRef = db.collection('onboarding_submissions').doc(submissionId);
+    const customerId = typeof session.customer === 'string' ? session.customer : (session.customer as any)?.id;
+    const funnelSubscriptionId = typeof session.subscription === 'string' ? session.subscription : (session.subscription as any)?.id;
+
+    // 1. PR-H bookkeeping: mark submission paid + record Stripe IDs
+    await subRef.update({
+      status: 'paid',
+      stripeCustomerId: customerId ?? null,
+      stripeSubscriptionId: funnelSubscriptionId ?? null,
+      paidAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+
+    // 2. PR-H bookkeeping: increment discount code usesCount if one was applied
+    if (discountCodeUsed && funnelCoachId) {
+      try {
+        const codeQuery = await db.collection('discount_codes')
+          .where('coachId', '==', funnelCoachId)
+          .where('code', '==', discountCodeUsed)
+          .limit(1)
+          .get();
+        if (!codeQuery.empty) {
+          await codeQuery.docs[0].ref.update({
+            usesCount: FieldValue.increment(1),
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+        }
+      } catch (err) {
+        console.error('[handleCheckoutSessionCompleted] Failed to increment discount usesCount:', err);
+      }
+    }
+    console.log('[handleCheckoutSessionCompleted] Funnel submission marked paid:', submissionId);
+
+    // 3. Create the member Firebase Auth user (funnel visitors are anonymous
+    //    until payment succeeds). If the email already exists, reuse the
+    //    existing uid — enrollSubscriber is idempotent per submissionId.
+    let funnelMemberId: string | null = null;
+    try {
+      const submSnap = await subRef.get();
+      const subm = submSnap.data() || {};
+      const submEmail = (subm.email as string | undefined)?.trim().toLowerCase();
+      const submFirst = (subm.firstName as string | undefined) ?? '';
+      const submLast = (subm.lastName as string | undefined) ?? '';
+      if (!submEmail || !funnelCoachId) {
+        console.warn('[handleCheckoutSessionCompleted] Funnel submission missing email or coachId — skipping enrollSubscriber', submissionId);
+        return;
+      }
+      const displayName = `${submFirst} ${submLast}`.trim() || submEmail;
+      let userRecord;
+      try {
+        userRecord = await admin.auth().getUserByEmail(submEmail);
+      } catch (lookupErr: any) {
+        if (lookupErr?.code !== 'auth/user-not-found') throw lookupErr;
+        const tempPassword = `GA-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+        userRecord = await admin.auth().createUser({
+          email: submEmail,
+          displayName,
+          password: tempPassword,
+        });
+        await admin.auth().setCustomUserClaims(userRecord.uid, {
+          role: 'member',
+          coachId: funnelCoachId,
+          tenantId: funnelCoachId,
+        });
+        await db.collection('users').doc(userRecord.uid).set({
+          uid: userRecord.uid,
+          email: submEmail,
+          displayName,
+          role: 'member',
+          coachId: funnelCoachId,
+          tenantId: funnelCoachId,
+          createdAt: FieldValue.serverTimestamp(),
+          createdVia: 'funnel_checkout',
+          submissionId,
+        }, { merge: true });
+      }
+      funnelMemberId = userRecord.uid;
+
+      // 4. PR-I: duplicate template playbook + create playbook_folder_members
+      await enrollSubscriber({
+        submissionId,
+        memberId: funnelMemberId,
+        stripeSubscriptionId: funnelSubscriptionId ?? '',
+        stripeCustomerId: customerId ?? '',
+      });
+    } catch (err) {
+      console.error('[handleCheckoutSessionCompleted] Funnel enrollment failed for submission', submissionId, err);
+    }
+    return;
+  }
+
+  void _coachId; // coachId is stored in snapshot; not needed here directly
+  if (!intentId || !planId || !memberId) {
+    console.warn('[handleCheckoutSessionCompleted] Missing metadata on session', session.id);
+    return;
+  }
+
+  const paymentOption = session.metadata?.paymentOption ?? 'monthly';
+
+  // Update checkoutIntent
+  await db.collection('checkoutIntents').doc(intentId).update({
+    status: 'completed',
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  // Load snapshot for contract dates
+  const snapshotSnap = snapshotId
+    ? await db.collection('acceptedPlanSnapshots').doc(snapshotId).get()
+    : null;
+  const snapshot = snapshotSnap?.data();
+  const contractMonths = snapshot?.contractLengthMonths ?? 12;
+  const now = Timestamp.now();
+  const contractStartAt = now;
+  const contractEndAt = Timestamp.fromMillis(now.toMillis() + contractMonths * 30.44 * 24 * 60 * 60 * 1000);
+
+  // Update plan status.
+  // amount_total === 0 → $0 + Commit to Save checkout (card-on-file only).
+  await db.collection('member_plans').doc(planId).update({
+    status: 'active',
+    checkoutStatus: session.amount_total === 0
+      ? 'free_active'
+      : (paymentOption === 'pay_in_full' ? 'pay_in_full_paid' : 'paid'),
+    acceptedAt: now,
+    contractStartAt,
+    contractEndAt,
+    acceptedSnapshotId: snapshotId ?? null,
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  // Update snapshot with billing event reference
+  if (snapshotId) {
+    await db.collection('acceptedPlanSnapshots').doc(snapshotId).update({
+      checkoutSessionId: session.id,
+      checkoutCompletedAt: now,
+    });
+  }
+
+  // ── Make the collected card the customer's invoice default ──
+  // CTS missed-session fees are charged via standalone auto-collected invoices
+  // (enforceCtsAccountability), which only charge the CUSTOMER's
+  // invoice_settings.default_payment_method. Checkout sets the SUBSCRIPTION's
+  // default only, so without this copy those invoices could never collect —
+  // including on $0 + Commit to Save plans where the card exists solely for this.
+  if (session.mode === 'subscription' && session.subscription && snapshot?.coachId) {
+    try {
+      const coachAccountSnap = await db.collection('coachStripeAccounts').doc(snapshot.coachId as string).get();
+      const stripeAccountId = coachAccountSnap.data()?.stripeAccountId as string | undefined;
+      const customerId = typeof session.customer === 'string' ? session.customer : (session.customer as any)?.id;
+      if (stripeAccountId && customerId) {
+        const stripe = getStripe(stripeSecretKey.value());
+        const subscriptionId = typeof session.subscription === 'string'
+          ? session.subscription
+          : (session.subscription as any).id;
+        const sub = await stripe.subscriptions.retrieve(subscriptionId, {}, { stripeAccount: stripeAccountId });
+        const defaultPm = typeof sub.default_payment_method === 'string'
+          ? sub.default_payment_method
+          : (sub.default_payment_method as any)?.id;
+        if (defaultPm) {
+          await stripe.customers.update(
+            customerId,
+            { invoice_settings: { default_payment_method: defaultPm } },
+            { stripeAccount: stripeAccountId }
+          );
+          console.log('[handleCheckoutSessionCompleted] Customer', customerId, 'invoice default payment method set');
+        } else {
+          console.warn('[handleCheckoutSessionCompleted] Subscription', subscriptionId, 'has no default_payment_method to copy');
+        }
+      }
+    } catch (err) {
+      // Non-fatal: the plan is already activated; CTS fee charging will surface
+      // any missing payment method when an invoice fails to collect.
+      console.error('[handleCheckoutSessionCompleted] Failed to set customer default payment method:', err);
+    }
+  }
+
+  // ── Commit to Save chosen at checkout: record the consent ──
+  // enforceCtsAccountability only processes members with an active consent doc;
+  // without this write, checkout-time CTS would never be enforced.
+  if (snapshot?.ctsActive === true) {
+    try {
+      const existing = await db.collection('commitToSaveConsents')
+        .where('memberId', '==', memberId)
+        .where('planId', '==', planId)
+        .limit(1)
+        .get();
+      if (existing.empty) {
+        await db.collection('commitToSaveConsents').add({
+          memberId,
+          planId,
+          coachId: snapshot.coachId ?? null,
+          ctsMonthlyRate: snapshot.displayMonthlyPrice ?? null,
+          standardMonthlyRate: snapshot.baseMonthlyPrice ?? null,
+          missedSessionFee: (snapshot.ctsMissedSessionFee as number | null) ?? 50,
+          agreedVia: 'checkout',
+          agreedAt: now,
+          status: 'active',
+        });
+        console.log('[handleCheckoutSessionCompleted] CTS consent recorded for member', memberId, 'plan', planId);
+      } else if (existing.docs[0].data().status !== 'active') {
+        await existing.docs[0].ref.update({ status: 'active', updatedAt: FieldValue.serverTimestamp() });
+      }
+    } catch (err) {
+      console.error('[handleCheckoutSessionCompleted] Failed to record CTS consent:', err);
+    }
+  }
+
+  // ── Pay-in-full: create deferred continuation subscription ──
+  // The contract period is paid upfront. We create a Stripe subscription
+  // with trial_end = contractEndAt so billing begins automatically when
+  // the contract ends, without any further action from the member.
+  //
+  // RISK-001: CTS discount is NOT applied here. The continuation subscription
+  // starts at the full continuationMonthlyPrice. CTS opt-in (a separate flow)
+  // will update the subscription price if the member later commits.
+  if (paymentOption === 'pay_in_full' && snapshot) {
+    const continuationMonthlyPrice = snapshot.continuationMonthlyPrice as number | undefined;
+    const coachId = snapshot.coachId as string | undefined;
+    const tierSplit = (snapshot.tierSplit ?? 40) as 40 | 35 | 30;
+
+    if (continuationMonthlyPrice && coachId) {
+      try {
+        // Look up the coach's connected Stripe account
+        const coachAccountSnap = await db.collection('coachStripeAccounts').doc(coachId).get();
+        const stripeAccountId = coachAccountSnap.data()?.stripeAccountId as string | undefined;
+
+        if (stripeAccountId) {
+          const stripe = getStripe(stripeSecretKey.value());
+
+          // Get the member's Stripe customer ID from the plan doc
+          const planSnap = await db.collection('member_plans').doc(planId).get();
+          const stripeCustomerId = planSnap.data()?.stripeCustomerId as string | undefined;
+
+          if (stripeCustomerId) {
+            // Create a price object for the continuation monthly amount
+            const continuationPrice = await stripe.prices.create(
+              {
+                currency: 'usd',
+                unit_amount: Math.round(continuationMonthlyPrice * 100),
+                recurring: { interval: 'month' },
+                product_data: {
+                  name: `GoArrive Coaching — Ongoing Support`,
+                  metadata: { planId, snapshotId: snapshotId ?? '', type: 'continuation' },
+                },
+              },
+              { stripeAccount: stripeAccountId }
+            );
+
+            // Create subscription with trial_end = contractEndAt
+            // The subscription will not charge until trial ends.
+            const continuationSub = await stripe.subscriptions.create(
+              {
+                customer: stripeCustomerId,
+                items: [{ price: continuationPrice.id }],
+                trial_end: contractEndAt.seconds,
+                application_fee_percent: tierSplit,
+                metadata: {
+                  planId,
+                  snapshotId: snapshotId ?? '',
+                  memberId: memberId ?? '',
+                  coachId,
+                  type: 'continuation',
+                  contractEndAtMs: String(contractEndAt.toMillis()),
+                },
+              },
+              { stripeAccount: stripeAccountId }
+            );
+
+            // Record the deferred subscription in memberSubscriptions
+            await db.collection('memberSubscriptions').doc(continuationSub.id).set(
+              {
+                subscriptionId: continuationSub.id,
+                planId,
+                snapshotId: snapshotId ?? '',
+                memberId: memberId ?? '',
+                coachId,
+                stripeAccountId,
+                stripeCustomerId,
+                paymentOption: 'pay_in_full_continuation',
+                phase: 'continuation',
+                contractStartAt,
+                contractEndAt,
+                status: continuationSub.status,
+                currentPeriodEnd: Timestamp.fromMillis((continuationSub as any).current_period_end * 1000),
+                tierSnapshot: tierSplit,
+                createdAt: FieldValue.serverTimestamp(),
+                updatedAt: FieldValue.serverTimestamp(),
+              },
+              { merge: true }
+            );
+
+            console.log(
+              '[handleCheckoutSessionCompleted] Deferred continuation subscription',
+              continuationSub.id,
+              'created for pay-in-full plan', planId,
+              '— billing starts at', contractEndAt.toDate().toISOString()
+            );
+          } else {
+            console.warn('[handleCheckoutSessionCompleted] No stripeCustomerId on plan', planId, '— skipping deferred sub');
+          }
+        } else {
+          console.warn('[handleCheckoutSessionCompleted] No stripeAccountId for coach', coachId, '— skipping deferred sub');
+        }
+      } catch (err) {
+        // Log but do not rethrow — the plan is already activated.
+        // A failed deferred sub creation should not roll back plan activation.
+        // The billing dashboard Tasks section will surface this as a missing subscription.
+        console.error('[handleCheckoutSessionCompleted] Failed to create deferred continuation subscription:', err);
+      }
+    }
+  }
+
+  // ── Monthly: convert subscription to subscription schedule with two phases ──
+  // Stripe Checkout creates a regular subscription. We convert it to a
+  // subscription schedule with Phase 1 (contract rate) and Phase 2 (continuation rate).
+  // This ensures the price automatically transitions at contractEndAt.
+  if (paymentOption === 'monthly' && session.subscription && snapshot) {
+    const subscriptionId = typeof session.subscription === 'string'
+      ? session.subscription
+      : (session.subscription as any).id;
+    const continuationMonthlyPrice = snapshot.continuationMonthlyPrice as number | undefined;
+    const coachId = snapshot.coachId as string | undefined;
+    const tierSplit = (snapshot.tierSplit ?? 40) as 40 | 35 | 30;
+    // Calculate Phase 1 end date from the snapshot's contractEndAt
+    const contractEndAtSnap = snapshot.contractEndAt as any;
+    const contractEndMs = contractEndAtSnap?._seconds
+      ? contractEndAtSnap._seconds * 1000
+      : (contractEndAtSnap?.seconds ? contractEndAtSnap.seconds * 1000 : Number(snapshot.contractEndAtMs ?? 0));
+    const phase1EndUnix = Math.floor(contractEndMs / 1000);
+
+    if (continuationMonthlyPrice && coachId) {
+      try {
+        const coachAccountSnap = await db.collection('coachStripeAccounts').doc(coachId).get();
+        const stripeAccountId = coachAccountSnap.data()?.stripeAccountId as string | undefined;
+
+        if (stripeAccountId) {
+          const stripe = getStripe(stripeSecretKey.value());
+
+          // Create a continuation price on the coach's connected account
+          const continuationPrice = await stripe.prices.create(
+            {
+              currency: 'usd',
+              unit_amount: Math.round(continuationMonthlyPrice * 100),
+              recurring: { interval: 'month' },
+              product_data: {
+                name: `GoArrive Coaching — Ongoing Support`,
+                metadata: { planId, snapshotId: snapshotId ?? '', type: 'continuation' },
+              },
+            },
+            { stripeAccount: stripeAccountId }
+          );
+
+          // Convert the subscription to a subscription schedule with two phases:
+          // Phase 1: current price for contractMonths iterations
+          // Phase 2: continuation price indefinitely
+          const schedule = await stripe.subscriptionSchedules.create(
+            {
+              from_subscription: subscriptionId,
+            },
+            { stripeAccount: stripeAccountId }
+          );
+
+          // Get the current phase's items to preserve the existing price
+          const currentPhase = schedule.phases[0];
+          const currentItems = currentPhase.items;
+
+          // Update the schedule with two explicit phases
+          await stripe.subscriptionSchedules.update(
+            schedule.id,
+            {
+              end_behavior: 'release', // After Phase 2, subscription continues as normal
+              phases: [
+                {
+                  // Phase 1: contract period at initial rate
+                  items: currentItems.map(item => ({
+                    price: typeof item.price === 'string' ? item.price : item.price.id,
+                    quantity: item.quantity ?? 1,
+                  })),
+                  end_date: phase1EndUnix,
+                  application_fee_percent: tierSplit,
+                  metadata: {
+                    phase: 'contract',
+                    planId,
+                    snapshotId: snapshotId ?? '',
+                  },
+                },
+                {
+                  // Phase 2: continuation at new rate, indefinite
+                  items: [{ price: continuationPrice.id, quantity: 1 }],
+                  application_fee_percent: tierSplit,
+                  metadata: {
+                    phase: 'continuation',
+                    planId,
+                    snapshotId: snapshotId ?? '',
+                  },
+                },
+              ],
+            },
+            { stripeAccount: stripeAccountId }
+          );
+
+          console.log(
+            '[handleCheckoutSessionCompleted] Subscription schedule',
+            schedule.id,
+            'created for monthly plan', planId,
+            '— Phase 1:', contractMonths, 'months at', snapshot.displayMonthlyPrice,
+            '— Phase 2: continuation at', continuationMonthlyPrice
+          );
+        }
+      } catch (err) {
+        // Log but do not rethrow — the plan is already activated.
+        // A failed schedule conversion means the subscription stays at the initial rate.
+        // The billing dashboard Tasks section will surface this.
+        console.error('[handleCheckoutSessionCompleted] Failed to create subscription schedule:', err);
+      }
+    }
+  }
+
+  console.log('[handleCheckoutSessionCompleted] Plan', planId, 'activated for member', memberId);
+
+  // ── Subscription-path enrollment (PR-I) ──────────────────────────────────
+  // When the checkout was created from a funnel onboarding submission (PR-G),
+  // submissionId is present in metadata. Duplicate the template playbook and
+  // create a playbook_folder_members doc for the new subscriber.
+  if (submissionId) {
+    try {
+      const stripeSubscriptionId = typeof session.subscription === 'string'
+        ? session.subscription
+        : (session.subscription as any)?.id ?? null;
+      const stripeCustomerId = typeof session.customer === 'string'
+        ? session.customer
+        : (session.customer as any)?.id ?? null;
+      await enrollSubscriber({
+        submissionId,
+        memberId,
+        stripeSubscriptionId: stripeSubscriptionId ?? '',
+        stripeCustomerId: stripeCustomerId ?? '',
+      });
+    } catch (err) {
+      console.error('[handleCheckoutSessionCompleted] enrollSubscriber failed:', err);
+    }
+  }
+}
+
+async function handleInvoicePaid(invoice: Stripe.Invoice, eventId: string) {
+  const sub = (invoice as any).subscription as string | null;
+  if (!sub) return;
+
+  // $0 invoices (free plans with card on file) generate no earnings — no ledger entry.
+  if (!invoice.amount_paid) return;
+
+  // Find memberSubscription by subscriptionId
+  const subSnap = await db.collection('memberSubscriptions')
+    .where('subscriptionId', '==', sub)
+    .limit(1)
+    .get();
+
+  if (subSnap.empty) {
+    console.log('[handleInvoicePaid] No memberSubscription found for', sub, '— may be first invoice before subscription.created fires');
+    return;
+  }
+
+  const subDoc = subSnap.docs[0];
+  const subData = subDoc.data();
+
+  // Determine phase: contract or continuation
+  const contractEndAt = subData.contractEndAt as Timestamp | null;
+  const now = Timestamp.now();
+  const phase: 'contract' | 'continuation' =
+    contractEndAt && now.toMillis() > contractEndAt.toMillis() ? 'continuation' : 'contract';
+
+  const grossAmountCents = invoice.amount_paid;
+  const tierSnapshot = (subData.tierSnapshot ?? 40) as 40 | 35 | 30;
+  const applicationFeePercent = tierSnapshot;
+  const goArriveShareCents = Math.round(grossAmountCents * applicationFeePercent / 100);
+  const coachShareCents = grossAmountCents - goArriveShareCents;
+
+  // Append ledger entry
+  const ledgerRef = db.collection('ledgerEntries').doc();
+  await ledgerRef.set({
+    entryId: ledgerRef.id,
+    billingEventId: eventId,
+    memberId: subData.memberId,
+    coachId: subData.coachId,
+    planId: subData.planId,
+    snapshotId: subData.snapshotId,
+    phase,
+    grossAmountCents,
+    coachShareCents,
+    goArriveShareCents,
+    tierSnapshot,
+    applicationFeePercent,
+    stripeInvoiceId: invoice.id,
+    stripeChargeId: (invoice as any).charge as string | null,
+    contractStartAt: subData.contractStartAt ?? null,
+    contractEndAt: subData.contractEndAt ?? null,
+    pricingSnapshotId: subData.snapshotId ?? '',
+    ruleSnapshot: {
+      tierSplit: tierSnapshot,
+      applicationFeePercent,
+      resolvedAt: now.toDate().toISOString(),
+    },
+    createdAt: FieldValue.serverTimestamp(),
+  });
+
+  console.log('[handleInvoicePaid] Ledger entry created for invoice', invoice.id, 'phase:', phase);
+}
+
+async function handleInvoicePaymentFailed(invoice: Stripe.Invoice, eventId: string) {
+  const sub = (invoice as any).subscription as string | null;
+  if (!sub) return;
+
+  const subSnap = await db.collection('memberSubscriptions')
+    .where('subscriptionId', '==', sub)
+    .limit(1)
+    .get();
+
+  if (!subSnap.empty) {
+    const planId = subSnap.docs[0].data().planId as string;
+    await db.collection('member_plans').doc(planId).update({
+      checkoutStatus: 'failed',
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    console.log('[handleInvoicePaymentFailed] Plan', planId, 'marked payment_failed');
+  }
+}
+
+async function handleSubscriptionUpsert(sub: Stripe.Subscription, eventId: string) {
+  const metadata = sub.metadata ?? {};
+  const { planId, snapshotId, memberId, coachId, contractMonths, tierSplit } = metadata;
+  if (!planId || !memberId) {
+    console.log('[handleSubscriptionUpsert] Missing metadata on subscription', sub.id);
+    return;
+  }
+
+  const contractMonthsNum = parseInt(contractMonths ?? '12', 10);
+  const tierSplitNum = parseInt(tierSplit ?? '40', 10) as 40 | 35 | 30;
+
+  // Determine contractStartAt and contractEndAt from subscription
+  const contractStartAt = Timestamp.fromMillis((sub.start_date ?? Date.now() / 1000) * 1000);
+  const contractEndAt = Timestamp.fromMillis(
+    contractStartAt.toMillis() + contractMonthsNum * 30.44 * 24 * 60 * 60 * 1000
+  );
+
+  const subRef = db.collection('memberSubscriptions').doc(sub.id);
+  await subRef.set(
+    {
+      subscriptionId: sub.id,
+      memberId,
+      coachId: coachId ?? '',
+      planId,
+      snapshotId: snapshotId ?? '',
+      stripeAccountId: (sub as any).account ?? '',
+      stripeCustomerId: sub.customer as string,
+      paymentOption: 'monthly',
+      phase: 'contract',
+      contractStartAt,
+      contractEndAt,
+      status: sub.status,
+      currentPeriodEnd: Timestamp.fromMillis((sub as any).current_period_end * 1000),
+      tierSnapshot: tierSplitNum,
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+
+  console.log('[handleSubscriptionUpsert] memberSubscription upserted for', sub.id);
+}
+
+async function handleSubscriptionDeleted(sub: Stripe.Subscription, eventId: string) {
+  const subRef = db.collection('memberSubscriptions').doc(sub.id);
+  const subSnap = await subRef.get();
+  if (!subSnap.exists) return;
+
+  await subRef.update({
+    status: 'canceled',
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  const planId = subSnap.data()?.planId as string | undefined;
+  if (planId) {
+    await db.collection('member_plans').doc(planId).update({
+      checkoutStatus: 'failed',
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+  }
+
+  console.log('[handleSubscriptionDeleted] Subscription', sub.id, 'canceled');
+}
+
+async function handleChargeRefunded(charge: Stripe.Charge, eventId: string) {
+  // Refund policy (documented):
+  // For direct charges, Stripe automatically refunds the application fee proportionally.
+  // Coaches are not harmed — the platform fee portion is returned to the platform,
+  // and the coach's share is returned to the member from the coach's connected account.
+  // We record the refund in the ledger as a negative entry.
+
+  const invoiceId = (charge as any).invoice as string | null;
+  if (!invoiceId) {
+    console.log('[handleChargeRefunded] Charge', charge.id, 'has no invoice — skipping ledger entry');
+    return;
+  }
+
+  // Find original ledger entry for this charge
+  const originalEntrySnap = await db.collection('ledgerEntries')
+    .where('stripeChargeId', '==', charge.id)
+    .limit(1)
+    .get();
+
+  if (originalEntrySnap.empty) {
+    console.log('[handleChargeRefunded] No ledger entry found for charge', charge.id);
+    return;
+  }
+
+  const original = originalEntrySnap.docs[0].data();
+  const refundedAmountCents = charge.amount_refunded;
+  const tierSnapshot = original.tierSnapshot as 40 | 35 | 30;
+  const applicationFeePercent = tierSnapshot;
+  const goArriveShareCents = -Math.round(refundedAmountCents * applicationFeePercent / 100);
+  const coachShareCents = -(refundedAmountCents + goArriveShareCents); // negative
+
+  const ledgerRef = db.collection('ledgerEntries').doc();
+  await ledgerRef.set({
+    entryId: ledgerRef.id,
+    billingEventId: eventId,
+    memberId: original.memberId,
+    coachId: original.coachId,
+    planId: original.planId,
+    snapshotId: original.snapshotId,
+    phase: original.phase,
+    grossAmountCents: -refundedAmountCents,
+    coachShareCents,
+    goArriveShareCents,
+    tierSnapshot,
+    applicationFeePercent,
+    stripeInvoiceId: invoiceId,
+    stripeChargeId: charge.id,
+    refundOf: originalEntrySnap.docs[0].id,
+    contractStartAt: original.contractStartAt ?? null,
+    contractEndAt: original.contractEndAt ?? null,
+    pricingSnapshotId: original.pricingSnapshotId ?? '',
+    ruleSnapshot: {
+      ...original.ruleSnapshot,
+      refundPolicy: 'Stripe auto-refunds application fee proportionally on direct charge refunds. Coach share returned from connected account.',
+    },
+    createdAt: FieldValue.serverTimestamp(),
+  });
+
+  console.log('[handleChargeRefunded] Refund ledger entry created for charge', charge.id);
+}
+
+async function handleChargeDisputeCreated(dispute: Stripe.Dispute, eventId: string) {
+  // A chargeback reverses funds out-of-band; record a negative ledger entry so
+  // coach earnings and the GoArrive ledger stay in sync with Stripe reality.
+  // Split math mirrors handleChargeRefunded.
+  const chargeId = typeof dispute.charge === 'string' ? dispute.charge : dispute.charge?.id;
+  if (!chargeId) {
+    console.warn('[handleChargeDisputeCreated] Dispute', dispute.id, 'has no charge — skipping');
+    return;
+  }
+
+  const originalEntrySnap = await db.collection('ledgerEntries')
+    .where('stripeChargeId', '==', chargeId)
+    .limit(1)
+    .get();
+
+  if (originalEntrySnap.empty) {
+    console.warn('[handleChargeDisputeCreated] No ledger entry found for disputed charge', chargeId, '— dispute', dispute.id, 'not recorded in ledger');
+    return;
+  }
+
+  const original = originalEntrySnap.docs[0].data();
+  const disputedAmountCents = dispute.amount;
+  const tierSnapshot = original.tierSnapshot as 40 | 35 | 30;
+  const applicationFeePercent = tierSnapshot;
+  const goArriveShareCents = -Math.round(disputedAmountCents * applicationFeePercent / 100);
+  const coachShareCents = -(disputedAmountCents + goArriveShareCents); // negative
+
+  const ledgerRef = db.collection('ledgerEntries').doc();
+  await ledgerRef.set({
+    entryId: ledgerRef.id,
+    billingEventId: eventId,
+    memberId: original.memberId,
+    coachId: original.coachId,
+    planId: original.planId,
+    snapshotId: original.snapshotId,
+    phase: original.phase,
+    grossAmountCents: -disputedAmountCents,
+    coachShareCents,
+    goArriveShareCents,
+    tierSnapshot,
+    applicationFeePercent,
+    stripeInvoiceId: original.stripeInvoiceId ?? null,
+    stripeChargeId: chargeId,
+    stripeDisputeId: dispute.id,
+    disputeStatus: dispute.status,
+    disputeOf: originalEntrySnap.docs[0].id,
+    contractStartAt: original.contractStartAt ?? null,
+    contractEndAt: original.contractEndAt ?? null,
+    pricingSnapshotId: original.pricingSnapshotId ?? '',
+    ruleSnapshot: {
+      ...original.ruleSnapshot,
+      disputePolicy: 'Chargeback recorded as negative ledger entry. Stripe reverses funds and application fee out-of-band on direct charges.',
+    },
+    createdAt: FieldValue.serverTimestamp(),
+  });
+
+  console.log('[handleChargeDisputeCreated] Dispute ledger entry created for charge', chargeId, 'dispute', dispute.id);
+}
+
+async function handlePaymentIntentFailed(pi: Stripe.PaymentIntent, eventId: string) {
+  // Invoice-tied PI failures are already handled by invoice.payment_failed.
+  // This covers orphaned PIs (e.g. pay-in-full checkout) so failures aren't silent.
+  const invoiceId = (pi as any).invoice as string | null;
+  if (invoiceId) {
+    console.log('[handlePaymentIntentFailed] PI', pi.id, 'is invoice-tied (', invoiceId, ') — handled by invoice.payment_failed, skipping');
+    return;
+  }
+
+  const planId = pi.metadata?.planId;
+  console.warn('[handlePaymentIntentFailed] Orphaned PI failed:', pi.id, 'planId:', planId ?? 'unknown', 'lastError:', pi.last_payment_error?.message ?? 'none');
+
+  if (!planId) return;
+
+  const planRef = db.collection('member_plans').doc(planId);
+  const planSnap = await planRef.get();
+  if (!planSnap.exists) {
+    console.warn('[handlePaymentIntentFailed] member_plan', planId, 'not found for failed PI', pi.id);
+    return;
+  }
+
+  await planRef.update({
+    checkoutStatus: 'failed',
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+  console.log('[handlePaymentIntentFailed] Plan', planId, 'marked checkoutStatus failed');
+}
