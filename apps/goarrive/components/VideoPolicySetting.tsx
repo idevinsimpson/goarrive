@@ -10,10 +10,10 @@ export default function VideoPolicySetting({ kind, id, policy }: { kind: 'playbo
   const generation = useRef(0);
   const [rollout, setRollout] = useState(false);
   useEffect(() => {
-    let alive = true;
-    void httpsCallable<any, { enabled: boolean }>(functions, 'getWorkoutVideoRollout')({}).then(({ data }) => { if (alive) setRollout(data.enabled === true); }).catch(() => { if (alive) setRollout(false); });
+    let alive = true; setRollout(false);
+    void httpsCallable<any, { enabled: boolean }>(functions, 'getWorkoutVideoRollout')({ kind, id }).then(({ data }) => { if (alive) setRollout(data.enabled === true); }).catch(() => { if (alive) setRollout(false); });
     return () => { alive = false; };
-  }, []);
+  }, [kind, id]);
   useEffect(() => { generation.current++; setChoice(saved); setBusy(false); setError(''); return () => { generation.current++; }; }, [kind, id, saved]);
   const save = async () => {
     if (busy || !rollout) return; const current = generation.current; setBusy(true); setError('');
