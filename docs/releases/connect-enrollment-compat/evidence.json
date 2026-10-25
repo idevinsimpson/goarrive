@@ -36,5 +36,93 @@
   },
   "cloneContractsPassed": 4,
   "typescriptBuildPassed": true,
-  "notDeployed": true
+  "notDeployed": true,
+  "capturedDependencies": {
+    "@google-cloud/functions-framework": "^5.0.2",
+    "@google-cloud/tasks": "^6.2.1",
+    "ffmpeg-static": "^5.3.0",
+    "firebase-admin": "^12.7.0",
+    "firebase-functions": "^4.9.0",
+    "googleapis": "^171.4.0",
+    "sharp": "^0.35.3",
+    "stripe": "^20.4.1",
+    "ws": "^8.20.0"
+  },
+  "capturedRuntime": {
+    "node": "20"
+  },
+  "reachableDeclarations": [
+    {
+      "name": "stripeConnectWebhook",
+      "equal": true
+    },
+    {
+      "name": "stripeSecretKey",
+      "equal": true
+    },
+    {
+      "name": "stripeWebhookSecretConnect",
+      "equal": true
+    },
+    {
+      "name": "getStripe",
+      "equal": true
+    },
+    {
+      "name": "processStripeEvent",
+      "equal": true
+    },
+    {
+      "name": "db",
+      "equal": true
+    },
+    {
+      "name": "handleCheckoutSessionCompleted",
+      "equal": true
+    },
+    {
+      "name": "handleInvoicePaid",
+      "equal": true
+    },
+    {
+      "name": "handleInvoicePaymentFailed",
+      "equal": true
+    },
+    {
+      "name": "handleSubscriptionUpsert",
+      "equal": true
+    },
+    {
+      "name": "handleSubscriptionDeleted",
+      "equal": true
+    },
+    {
+      "name": "handleChargeRefunded",
+      "equal": true
+    },
+    {
+      "name": "handleChargeDisputeCreated",
+      "equal": true
+    },
+    {
+      "name": "handlePaymentIntentFailed",
+      "equal": true
+    },
+    {
+      "name": "enrollSubscriber",
+      "equal": false
+    }
+  ],
+  "enrollmentHelperSha256": "816962d5c9caba9112bcbe29d51e33e8d7d578f62ec6ba145ad448ec4012e3e9",
+  "fullCapturedSourceSha256": "6ded9684d75b9f4840e639a55ddc8d4c067a5ca17171029a9709268eee855e5c",
+  "generatedAt": "2026-10-25T06:10:56.339Z",
+  "signatureWrapperCasesPassed": 4,
+  "productionDependencyVersionsUnchanged": true,
+  "lockfileVersionDelta": {
+    "package": "ffprobe-static",
+    "version": "3.1.0",
+    "devOnly": true,
+    "previouslyAbsent": true
+  },
+  "candidateManifestSha256": "90b981123ac9263a9e9357d0c7a9fe4981205b2f4c858beb7c2b3a9b737bc9e7"
 }
