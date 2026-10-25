@@ -1,7 +1,7 @@
 import React, { act } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
-import SessionZoomTile from '../SessionZoomTile';
+import SessionZoomTile from '../WorkoutVideoOverlay';
 const m = vi.hoisted(() => ({ available: vi.fn(), config: vi.fn(), load: vi.fn(), init: vi.fn(), join: vi.fn(), leave: vi.fn(), destroy: vi.fn(), user: { uid: 'member' } as any, capture: vi.fn() }));
 vi.mock('../../lib/firebase', () => ({ functions: {} }));
 vi.mock('../../lib/AuthContext', () => ({ useAuth: () => ({ user: m.user }) }));

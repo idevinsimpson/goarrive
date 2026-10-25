@@ -32,6 +32,7 @@ import { db, functions } from '../../lib/firebase';
 import { SessionInstance } from '../../lib/schedulingTypes';
 import WorkoutPlayer from '../../components/WorkoutPlayer';
 import SessionZoomTile from '../../components/SessionZoomTile';
+import WorkoutVideoOverlay from '../../components/WorkoutVideoOverlay';
 import { BG, CARD, BORDER, FG, MUTED, GOLD, GREEN, RED, FH, FB } from '../../lib/theme';
 
 import { sessionWindowMs } from '../../lib/sessionTiming';
@@ -324,6 +325,13 @@ export default function LiveSessionScreen() {
             {coachName ? ` · with Coach ${coachName}` : ''}
           </Text>
 
+          {inst.recordingEnabled === true && (
+            <SessionZoomTile
+              sessionInstanceId={inst.id}
+              variant={playerVisible ? 'pip' : 'pane'}
+            />
+          )}
+
           {!needsZoomGate && !workoutLoaded && (
             <View style={s.innerCard}>
               <ActivityIndicator color={GOLD} />
@@ -366,7 +374,7 @@ export default function LiveSessionScreen() {
           visible={playerVisible}
           workout={workout}
           sessionInstanceId={sessionInstanceId}
-          zoomOverlay={!completing && !workoutDone ? <View pointerEvents="box-none" style={{ position: 'absolute', top: 40, right: 8 }}><SessionZoomTile key={`${user?.uid}:${sessionInstanceId}`} sessionInstanceId={sessionInstanceId} variant="pip" /></View> : null}
+          zoomOverlay={inst.recordingEnabled === false && !completing && !workoutDone ? <View pointerEvents="box-none" style={{ position: 'absolute', top: 40, right: 8 }}><WorkoutVideoOverlay key={`${user?.uid}:${sessionInstanceId}`} sessionInstanceId={sessionInstanceId} variant="pip" /></View> : null}
           completionError={completionError}
           completing={completing}
           onClose={() => setPlayerVisible(false)}
