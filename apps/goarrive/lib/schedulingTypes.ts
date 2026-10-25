@@ -249,7 +249,6 @@ export interface SessionInstance {
   zoomMeetingId?: string;           // Zoom meeting ID (for join URL)
   zoomMeetingUuid?: string;         // Zoom meeting UUID (for API lookups)
   zoomJoinUrl?: string;             // Member join URL
-  zoomStartUrl?: string;            // Host start URL
   zoomMeetingPassword?: string;     // Meeting password
   zoomProviderMode?: 'mock' | 'live'; // Which provider created this meeting
   allocatedAt?: Timestamp;
@@ -348,7 +347,6 @@ export interface ZoomMeetingResponse {
   meetingId: string;
   uuid?: string;                    // Zoom meeting UUID (live provider only)
   joinUrl: string;
-  startUrl: string;
   password: string;
   hostEmail: string;
 }

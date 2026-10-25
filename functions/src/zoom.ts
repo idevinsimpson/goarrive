@@ -31,7 +31,6 @@ export interface ZoomMeetingRequest {
 export interface ZoomMeetingResponse {
   meetingId: string;       // Zoom meeting ID (numeric string for real, "mock-..." for mock)
   joinUrl: string;
-  startUrl: string;
   password: string;
   hostEmail: string;
   uuid?: string;           // Zoom meeting UUID (real only)
@@ -162,7 +161,6 @@ export class RealZoomProvider implements ZoomProvider {
       id: number;
       uuid: string;
       join_url: string;
-      start_url: string;
       password: string;
       host_email: string;
     };
@@ -173,7 +171,6 @@ export class RealZoomProvider implements ZoomProvider {
       meetingId: String(data.id),
       uuid: data.uuid,
       joinUrl: data.join_url,
-      startUrl: data.start_url,
       password: data.password,
       hostEmail: data.host_email,
     };
@@ -204,7 +201,6 @@ export class RealZoomProvider implements ZoomProvider {
       id: number;
       uuid: string;
       join_url: string;
-      start_url: string;
       password: string;
       host_email: string;
     };
@@ -213,7 +209,6 @@ export class RealZoomProvider implements ZoomProvider {
       meetingId: String(data.id),
       uuid: data.uuid,
       joinUrl: data.join_url,
-      startUrl: data.start_url,
       password: data.password,
       hostEmail: data.host_email,
     };
@@ -253,7 +248,6 @@ export class MockZoomProvider implements ZoomProvider {
     return {
       meetingId,
       joinUrl: `https://zoom.us/j/${meetingId}?pwd=${password}`,
-      startUrl: `https://zoom.us/s/${meetingId}?zak=mock_host_token`,
       password,
       hostEmail: request.hostEmail,
       uuid: `mock-uuid-${meetingId}`,
@@ -270,7 +264,6 @@ export class MockZoomProvider implements ZoomProvider {
     return {
       meetingId,
       joinUrl: `https://zoom.us/j/${meetingId}`,
-      startUrl: `https://zoom.us/s/${meetingId}`,
       password: 'mock123',
       hostEmail: 'mock@goarrive.fit',
       uuid: `mock-uuid-${meetingId}`,

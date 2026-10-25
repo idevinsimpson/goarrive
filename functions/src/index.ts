@@ -4489,7 +4489,8 @@ export const allocateSessionInstance = onCall(
       zoomMeetingId: meeting.meetingId,
       zoomMeetingUuid: meeting.uuid || null,
       zoomJoinUrl: meeting.joinUrl,
-      zoomStartUrl: meeting.startUrl,
+      // Host start URLs must never be stored in member-readable documents.
+      zoomStartUrl: FieldValue.delete(),
       zoomMeetingPassword: meeting.password ?? null,
       zoomProviderMode: zoomProvider.mode,
       allocatedAt: FieldValue.serverTimestamp(),
@@ -4644,7 +4645,8 @@ export const allocateAllPendingInstances = onCall(
               zoomMeetingId: meeting.meetingId,
               zoomMeetingUuid: meeting.uuid || null,
               zoomJoinUrl: meeting.joinUrl,
-              zoomStartUrl: meeting.startUrl,
+              // Also remove a stale host capability when this occurrence is reallocated.
+              zoomStartUrl: FieldValue.delete(),
               zoomMeetingPassword: meeting.password,
               zoomProviderMode: batchProvider.mode,
               allocatedAt: FieldValue.serverTimestamp(),
