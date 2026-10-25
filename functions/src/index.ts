@@ -101,6 +101,7 @@ export { getMemberPlaybookSessions } from './memberPlaybookLink';
 export { setPlaybookWorkoutPolicy } from './playbookWorkoutPolicy';
 export { getSessionVideoAvailability, setWorkoutVideoPolicy, getWorkoutVideoRollout } from './sessionVideoPolicy';
 import { sessionVideoAvailability } from './sessionVideoPolicy';
+import { saveVideoReceipt } from './videoAllocationReceipt';
 import { enrollmentCloneFields } from './playbookClone';
 export {
   createPlaybookBookingLink,
@@ -4501,13 +4502,13 @@ export const allocateSessionInstance = onCall(
     });
 
     // Default-denied collection: clients cannot forge provider recording receipts.
-    await db.collection('session_video_receipts').doc(instanceRef.id).set({
+    await saveVideoReceipt(() => db.collection('session_video_receipts').doc(instanceRef.id).set({
       coachId: instance.coachId, roomId: allocatedRoom.id, meetingId: meeting.meetingId,
       memberId: instance.memberId, playbookId: instance.playbookId || null, providerMode: zoomProvider.mode,
       startMs: instance.startUtc?.toMillis?.() ?? null, endMs: instance.endUtc?.toMillis?.() ?? null,
       participantVideoOff: meeting.participantVideoOff === true,
       recordingMode: meeting.recordingMode || 'unknown', observedAt: FieldValue.serverTimestamp(),
-    });
+    }));
 
     // Advance the round-robin cursor: every successful allocation stamps
     // lastUsedAt; pool rooms also keep lastAllocatedAt for older readers.
@@ -4639,6 +4640,7 @@ export const allocateAllPendingInstances = onCall(
 
         if (!hasConflict) {
           const batchProvider = getZoomProvider({ accountId: zoomAccountId.value(), clientId: zoomClientId.value(), clientSecret: zoomClientSecret.value() });
+          let providerCreated = false;
           try {
             const meeting = await batchProvider.createMeeting({
               topic: `GoArrive Session: ${instance.memberName || 'Member'}`,
@@ -4649,6 +4651,7 @@ export const allocateAllPendingInstances = onCall(
               autoRecording: instance.recordingEnabled === false ? 'none' : 'cloud',
             });
 
+            providerCreated = true;
             await db.collection('session_instances').doc(instance.id).update({
               status: 'allocated',
               zoomRoomId: roomDoc.id,
@@ -4665,13 +4668,13 @@ export const allocateAllPendingInstances = onCall(
               updatedAt: FieldValue.serverTimestamp(),
             });
 
-            await db.collection('session_video_receipts').doc(instance.id).set({
+            await saveVideoReceipt(() => db.collection('session_video_receipts').doc(instance.id).set({
               coachId: instance.coachId, roomId: roomDoc.id, meetingId: meeting.meetingId,
               memberId: instance.memberId, playbookId: instance.playbookId || null, providerMode: batchProvider.mode,
               startMs: instance.startUtc?.toMillis?.() ?? null, endMs: instance.endUtc?.toMillis?.() ?? null,
               participantVideoOff: meeting.participantVideoOff === true,
               recordingMode: meeting.recordingMode || 'unknown', observedAt: FieldValue.serverTimestamp(),
-            });
+            }));
 
             await writeSessionEvent({
               occurrenceId: instance.id,
@@ -4687,6 +4690,8 @@ export const allocateAllPendingInstances = onCall(
             allocated++;
             roomFound = true;
           } catch (err: any) {
+            // Provider success must never fall through to another room or overwrite status.
+            if (providerCreated) throw new HttpsError('unavailable', 'Meeting creation succeeded but allocation confirmation failed. Reconcile the existing meeting before retrying.');
             await writeSessionEvent({
               occurrenceId: instance.id,
               eventType: 'meeting_creation_failed',
