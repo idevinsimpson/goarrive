@@ -484,22 +484,25 @@ service cloud.firestore {
       );
       // Coach can create members, OR a new user can create their own member doc during intake
       // IMPORTANT: Allow authenticated intake form submissions (just-created users)
-      allow create: if isCoachOrBootstrap(request.resource.data.coachId)
+      allow create: if !request.resource.data.keys().hasAny(['guestIdentityLocked']) && (isCoachOrBootstrap(request.resource.data.coachId)
                     || (isAuthenticated() && request.auth.uid == request.resource.data.uid
                         && request.resource.data.keys().hasOnly([
                           'uid', 'coachId', 'email', 'displayName', 'phone',
                           'gender', 'dateOfBirth', 'height', 'weight', 'createdAt', 'isArchived', 'role', 'hasAccount'
-                        ]));
+                        ])));
       // Members can update their own safe profile fields
       // Coaches can update members they own OR reassign members to themselves
-      allow update: if isCoachOrBootstrap(resource.data.coachId)
+      allow update: if !request.resource.data.diff(resource.data).affectedKeys().hasAny(['guestIdentityLocked'])
+                    && (resource.data.get('guestIdentityLocked', false) != true
+                        || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['uid', 'coachId', 'isArchived']))
+                    && (isCoachOrBootstrap(resource.data.coachId)
                     || isPlatformAdmin()
                     || (isAuthenticated() && isOwnDoc(resource.data.uid)
                         && request.resource.data.diff(resource.data).affectedKeys()
                             .hasOnly(['displayName', 'phone', 'photoURL', 'updatedAt', 'hrDeviceName', 'hrEnabled']))
                     || (isAuthenticated() && request.auth.uid == request.resource.data.coachId
                         && request.resource.data.diff(resource.data).affectedKeys()
-                            .hasOnly(['coachId', 'updatedAt']));
+                            .hasOnly(['coachId', 'updatedAt'])));
       allow delete: if false; // archive only
     }
 

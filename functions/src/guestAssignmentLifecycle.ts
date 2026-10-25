@@ -1,8 +1,9 @@
 import * as admin from 'firebase-admin';
 import { randomUUID } from 'crypto';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
+import { validGuestRoster } from './guestRosterLifecycle';
 
-/** Disabled draft endpoint: not exported from index.ts until media/privacy review. */
+/** First activation is disabled unless explicitly configured; issuance remains unavailable. */
 export const guestAssignmentGate = () => process.env.GUEST_WORKOUT_ROLLOUT_ENABLED === 'true';
 
 export async function changeGuestAssignmentMembers(db: admin.firestore.Firestore, coachId: string, playbookId: string, memberIds: string[]) {
@@ -17,8 +18,15 @@ export async function changeGuestAssignmentMembers(db: admin.firestore.Firestore
     // activation is gated; existing membership edits still invalidate grants.
     if (!guestAssignmentGate() && plan.guestAssignmentLocked !== true) throw new HttpsError('failed-precondition', 'Guest access is not available yet.');
     const members = await Promise.all(memberIds.map(id => tx.get(db.collection('members').doc(id))));
-    if (members.some(m => !m.exists || m.data()?.coachId !== coachId)) throw new HttpsError('permission-denied', 'Member is unavailable.');
+    if (members.some(m => !m.exists || m.data()?.coachId !== coachId || m.data()?.isArchived === true)) throw new HttpsError('permission-denied', 'Member is unavailable.');
     const version = db.collection('guest_assignment_versions').doc(playbookId);
+    const rosterVersions = await Promise.all(memberIds.map(id => tx.get(db.doc('guest_roster_versions/' + id))));
+    members.forEach((m, i) => {
+      if (!validGuestRoster(m, rosterVersions[i])) {
+        tx.set(db.doc('guest_roster_versions/' + m.id), { generation: randomUUID(), createdAt: m.createTime, coachId, uid: m.data()?.uid || null });
+        tx.update(m.ref, { guestIdentityLocked: true });
+      }
+    });
     // One atomic write changes both membership and its private version. Any prior
     // grant remains invalid after remove/re-add, regardless of trigger latency.
     const generation = randomUUID(); // assignment version only, never a credential
@@ -45,8 +53,8 @@ export async function readGuestAssignment(db: admin.firestore.Firestore, playboo
     if (!plan || !version || plan.guestAssignmentLocked !== true || version.coachId !== plan.coachId ||
       !p.createTime?.isEqual(version.playbookCreatedAt) || !Array.isArray(plan.memberIds) || !plan.memberIds.includes(memberId) ||
       !Array.isArray(version.memberIds) || JSON.stringify(plan.memberIds) !== JSON.stringify(version.memberIds)) return undefined;
-    const member = (await tx.get(db.collection('members').doc(memberId))).data();
-    if (!member || member.coachId !== plan.coachId) return undefined;
-    return { coachId: plan.coachId, playbookId, memberId, generation: version.generation, active: true };
+    const [member, roster] = await Promise.all([tx.get(db.collection('members').doc(memberId)), tx.get(db.doc('guest_roster_versions/' + memberId))]);
+    if (!validGuestRoster(member, roster) || member.data()?.coachId !== plan.coachId) return undefined;
+    return { coachId: plan.coachId, playbookId, memberId, generation: version.generation + ':' + roster.data()!.generation, active: true };
   });
 }

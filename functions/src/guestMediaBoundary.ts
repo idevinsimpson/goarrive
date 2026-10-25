@@ -17,3 +17,17 @@ export function boundedGuestMediaRange(range: unknown, size: number): { start: n
   if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || end >= size || end - start + 1 > maxChunk) return undefined;
   return { start, end };
 }
+
+/** Parse a stored Firebase URL only; never request it. Bucket is trusted config. */
+export function storedGuestMediaPath(value: unknown, bucket: string, coachId: string): string | undefined {
+  if (typeof value !== 'string' || value.length > 4096) return undefined;
+  const direct = guestMediaObjectPath(value, coachId);
+  if (direct) return direct;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'https:' || url.hostname !== 'firebasestorage.googleapis.com' || url.port || url.username || url.password || url.hash) return undefined;
+    const match = /^\/v0\/b\/([^/]+)\/o\/([^/]+)$/.exec(url.pathname);
+    if (!match || decodeURIComponent(match[1]) !== bucket) return undefined;
+    return guestMediaObjectPath(decodeURIComponent(match[2]), coachId);
+  } catch { return undefined; }
+}

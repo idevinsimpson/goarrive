@@ -1,3 +1,4 @@
+import { updateRosterIdentity } from './guestRosterLifecycle';
 import { prepareMemberInvite } from './memberInvite';
 import { ownsSessionMember } from './sessionIdentity';
 /**
@@ -3231,13 +3232,13 @@ export const claimMemberAccount = onCall(
     });
 
     // Update the member doc to link the auth account
-    await memberRef.update({
+    await updateRosterIdentity(db, memberId, {
       uid: callerUid,
       hasAccount: true,
       email: userEmail || member.email || '',
       displayName: userRecord.displayName || member.name || '',
       updatedAt: FieldValue.serverTimestamp(),
-    });
+    }, member.coachId);
 
     console.log('[claimMemberAccount] Member claimed:', callerUid, memberId);
     return { success: true };
@@ -3301,7 +3302,7 @@ export const sendMemberInvite = onCall(
     }
 
     return prepareMemberInvite(admin.auth(), memberId, member, process.env.APP_BASE_URL || 'https://goarrive.fit', async (uid, normalizedEmail) => {
-      await memberRef.update({ uid, hasAccount: true, email: normalizedEmail, updatedAt: FieldValue.serverTimestamp() });
+      await updateRosterIdentity(db, memberId, { uid, hasAccount: true, email: normalizedEmail, updatedAt: FieldValue.serverTimestamp() }, member.coachId);
     });
   }
 );
@@ -13247,3 +13248,5 @@ export const onScenarioWriteMirrorSharedView = onDocumentWritten(
 // Guest issuance/playback remain unavailable; revocation is independent of rollout.
 export { setGuestAssignmentMembers } from './guestAssignmentLifecycle';
 export { getGuestWorkoutAccess, revokeGuestWorkoutLink } from './guestWorkoutAccess';
+
+export { updateGuestRosterArchive } from './guestRosterLifecycle';

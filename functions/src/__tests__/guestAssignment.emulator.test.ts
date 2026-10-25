@@ -7,6 +7,7 @@ import { changeGuestAssignmentMembers, readGuestAssignment } from '../guestAssig
 import { FirestoreGuestCapabilityStore } from '../guestCapabilityStore';
 import { GuestWorkoutCapabilities } from '../guestWorkoutCapability';
 import { getGuestWorkoutAccess, revokeGuestWorkoutLink } from '../guestWorkoutAccess';
+import { updateRosterIdentity } from '../guestRosterLifecycle';
 if (process.env.FIRESTORE_EMULATOR_HOST !== '127.0.0.1:8080') throw new Error('Local emulator required');
 const projectId = 'demo-guest-capability', app = admin.initializeApp({ projectId }), db = app.firestore();
 let env: RulesTestEnvironment;
@@ -107,5 +108,22 @@ test.each(['cancel', 'complete', 'reschedule', 'workout'])('final transaction re
         { startUtc: admin.firestore.Timestamp.fromMillis(now + 86400000) } : { scheduledWorkoutId: 'B' });
     return snapshot;
   });
+  await expect(f.service.resolve(f.token)).rejects.toThrow('unavailable');
+});
+test.each(['coachId', 'uid', 'isArchived'])('roster identity A-to-B-to-A never revives old grant: %s', async field => {
+  const f = await fixture(), old = field === 'coachId' ? 'coach' : field === 'uid' ? 'uid' : false;
+  await updateRosterIdentity(db, 'member', { [field]: field === 'isArchived' ? true : 'other' });
+  await expect(f.service.resolve(f.token)).rejects.toThrow('unavailable');
+  await updateRosterIdentity(db, 'member', { [field]: old });
+  await expect(f.service.resolve(f.token)).rejects.toThrow('unavailable');
+});
+test('roster recreation cannot revive private identity binding and safe profile edits preserve it', async () => {
+  const f = await fixture(), client = env.authenticatedContext('coach', { role: 'coach', coachId: 'coach' }).firestore();
+  await assertSucceeds(updateDoc(doc(client, 'members/member'), { name: 'Profile edit' }));
+  expect((await f.service.resolve(f.token)).workoutId).toBe('A');
+  for (const patch of [{ uid: 'other' }, { coachId: 'other' }, { isArchived: true }, { guestIdentityLocked: false }]) await assertFails(updateDoc(doc(client, 'members/member'), patch));
+  await assertFails(setDoc(doc(client, 'guest_roster_versions/member'), { generation: 'forged' }));
+  const m = (await db.doc('members/member').get()).data()!;
+  await db.doc('members/member').delete(); await db.doc('members/member').set(m);
   await expect(f.service.resolve(f.token)).rejects.toThrow('unavailable');
 });
