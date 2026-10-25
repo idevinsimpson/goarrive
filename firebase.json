@@ -10,6 +10,10 @@
     "trailingSlash": false,
     "rewrites": [
       {
+        "source": "/playbook/**",
+        "destination": "/playbook/[playbookId].html"
+      },
+      {
         "source": "/service-worker.js",
         "destination": "/service-worker.js"
       },

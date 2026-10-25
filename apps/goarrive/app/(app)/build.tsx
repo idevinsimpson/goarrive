@@ -44,6 +44,7 @@ import {
   doc,
   updateDoc,
   addDoc,
+  setDoc,
   serverTimestamp,
   writeBatch,
   arrayUnion,
@@ -57,6 +58,7 @@ import { useNavigation, router } from 'expo-router';
 import { useAuth } from '../../lib/AuthContext';
 import { ModuleGate } from '../../lib/useCoachModules';
 import { db, functions } from '../../lib/firebase';
+import { duplicatePlaybookFields } from '../../lib/playbookClone';
 import { httpsCallable } from 'firebase/functions';
 import { TAB_BAR_STYLE, CONTENT_BOTTOM_CLEARANCE } from '../../lib/tabBarStyle';
 import { AppHeader } from '../../components/AppHeader';
@@ -1082,14 +1084,9 @@ function BuildScreenInner() {
     if (!pbDoc || !coachId) return;
     try {
       // Members are intentionally not copied — a duplicate is a template, not a roster.
-      await addDoc(collection(db, 'playbooks'), {
-        coachId,
-        name: `${pbDoc.name} (Copy)`,
-        description: pbDoc.description || '',
-        workoutIds: Array.isArray(pbDoc.workoutIds) ? pbDoc.workoutIds : [],
-        parentId: pbDoc.parentId ?? null,
-        memberIds: [],
-        isArchived: false,
+      const copyRef = doc(collection(db, 'playbooks'));
+      await setDoc(copyRef, {
+        ...duplicatePlaybookFields(pbDoc, coachId, copyRef.id),
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
@@ -1123,6 +1120,20 @@ function BuildScreenInner() {
       return snap.empty ? null : snap.docs[0].id;
     } catch { return null; }
   }, [coachId]);
+
+  const copyPbMemberLink = useCallback(async () => {
+    const pb = currentPlaybookRef.current;
+    if (!pb) return;
+    const origin = Platform.OS === 'web' && typeof window !== 'undefined'
+      ? window.location.origin : 'https://goarrive.fit';
+    const url = `${origin}/playbook/${encodeURIComponent(pb.id)}`;
+    try {
+      if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(url);
+        window.alert('Member workout link copied. This link stays the same as scheduled workouts change.');
+      } else await Share.share({ message: url });
+    } catch { Alert.alert('Member Workout Link', url); }
+  }, []);
 
   const copyPbBookingLink = useCallback(async () => {
     const token = await fetchPbBookingToken();
@@ -3126,6 +3137,7 @@ function BuildScreenInner() {
         {currentPlaybook && (
           <Pressable
             style={[s.toolBtn, showPlaybookSchedule && s.toolBtnActive]}
+            accessibilityLabel="Playbook schedule settings"
             onPress={() => setShowPlaybookSchedule(true)}
           >
             <Icon name="calendar" size={20} color={showPlaybookSchedule ? '#F5A623' : '#F0F4F8'} />
@@ -3151,6 +3163,10 @@ function BuildScreenInner() {
       {currentPlaybook && showPbMenu && (
         <Pressable style={s.pbMenuOverlay} onPress={() => setShowPbMenu(false)}>
           <View style={s.pbMenuDropdown} onStartShouldSetResponder={() => true}>
+            <Pressable style={s.pbMenuItem} onPress={() => { setShowPbMenu(false); copyPbMemberLink(); }}>
+              <Icon name="share" size={16} color="#F5A623" />
+              <Text style={[s.pbMenuItemText, { color: '#F5A623' }]}>Copy Member Workout Link</Text>
+            </Pressable>
             <Pressable
               style={s.pbMenuItem}
               onPress={() => { setShowPbMenu(false); copyPbBookingLink(); }}

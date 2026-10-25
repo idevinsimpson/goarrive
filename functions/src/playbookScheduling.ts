@@ -27,6 +27,7 @@ import * as admin from 'firebase-admin';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { Timestamp, FieldValue, Transaction } from 'firebase-admin/firestore';
+import { prepareScheduledBooking } from './playbookWorkoutPolicy';
 
 const getDb = () => admin.firestore();
 
@@ -417,7 +418,13 @@ export async function bookOccurrence(p: BookOccurrenceParams): Promise<{ instanc
       }
     }
 
-    // 3. Reservation — deterministic ID, create() collides on races
+    const assignment = await prepareScheduledBooking(txn, p.playbookId, { id: instRef.id, data: {
+      coachId: p.coachId, memberId: p.memberId, memberKey: p.memberKey,
+      startUtc: Timestamp.fromDate(startUtc), status: 'scheduled',
+    } });
+    for (const update of assignment.updates) txn.update(db.collection('session_instances').doc(update.id), update.fields);
+
+    // 3. Reservation - deterministic ID, create() collides on races
     txn.create(db.collection('member_time_reservations').doc(resId), {
       memberKey: p.memberKey,
       memberId: p.memberId,
@@ -454,6 +461,7 @@ export async function bookOccurrence(p: BookOccurrenceParams): Promise<{ instanc
       guestEmail: p.guestEmail,
       bookedVia: p.bookedVia || 'coach_panel',
       location: p.location || null,
+      ...assignment.candidateFields,
       ...hostingFieldsFor(p.sessionKind),
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
@@ -632,7 +640,6 @@ export const bookPlaybookSession = onCall(
       repeatFrequency,
       repeatHorizonWeeks,
       memberIds,
-      nextWorkoutIndex: typeof playbook.nextWorkoutIndex === 'number' ? playbook.nextWorkoutIndex : 0,
       updatedAt: FieldValue.serverTimestamp(),
     });
 

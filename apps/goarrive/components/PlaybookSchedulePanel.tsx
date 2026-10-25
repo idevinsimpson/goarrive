@@ -34,6 +34,7 @@ import {
   todayInTz,
 } from '../lib/schedulingTypes';
 import { WorkoutMosaic, WORKOUT_CARD_BG } from './WorkoutMosaic';
+import WorkoutPolicySetting from './WorkoutPolicySetting';
 
 const FH = Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
 const FB = Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
@@ -200,6 +201,7 @@ interface DayConfig {
 }
 
 interface PlaybookDocLite {
+  workoutPolicy?: 'carry_forward' | 'scheduled';
   name?: string;
   description?: string;
   assignedMemberId?: string | null;
@@ -1359,13 +1361,14 @@ export default function PlaybookSchedulePanel({
             })}
             {sortedDays.length > 0 && workoutIds.length > 0 && (
               <Text style={s.hint}>
-                Workouts follow your playbook order — hold and drag a workout card to another day to
-                rearrange.{ROTATE_AT_END && sortedDays.length > workoutIds.length
+                These tiles show your Playbook order. Sessions use the missed-workout setting below.
+                Hold and drag a card to rearrange the order.{ROTATE_AT_END && sortedDays.length > workoutIds.length
                   ? ' Extra days rotate back to the first workout.'
                   : ''}
               </Text>
             )}
 
+            <WorkoutPolicySetting playbookId={playbookId} policy={playbook?.workoutPolicy} disabled={booking || pendingRequestIdRef.current !== null} />
             <View style={s.switchRow}>
               <Text style={s.switchLabel}>Record sessions</Text>
               <Switch

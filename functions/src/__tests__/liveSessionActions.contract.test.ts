@@ -2,6 +2,8 @@ import fs from 'fs';
 import path from 'path';
 import vm from 'vm';
 import ts from 'typescript';
+import * as sessionTiming from '../../../apps/goarrive/lib/sessionTiming';
+import * as workoutReturnPath from '../../../apps/goarrive/lib/workoutReturnPath';
 
 // Execute the actual screen with retained hook slots to model Expo reusing a
 // mounted dynamic-route component. No Firebase/network calls are made.
@@ -30,6 +32,9 @@ function screenHarness() {
     '../../lib/AuthContext': { useAuth: () => ({ user, loading: false }) },
     '../../lib/firebase': { db: {}, functions: {} },
     '../../lib/theme': {},
+    '../../lib/sessionTiming': sessionTiming,
+    '../../lib/workoutReturnPath': workoutReturnPath,
+    '../../hooks/useSessionServerTime': { useSessionServerTime: () => ({ now: Date.now(), refreshTime: () => {} }) },
     '../../components/WorkoutPlayer': { default: 'WorkoutPlayer' },
     '../../components/SessionZoomTile': { default: 'SessionZoomTile' },
   };
