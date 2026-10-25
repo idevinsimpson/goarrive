@@ -177,11 +177,19 @@ export default function SessionZoomTile({
   const [errorMsg, setErrorMsg] = useState('');
   const containerRef = useRef<HTMLDivElement | null>(null);
   const clientRef = useRef<any>(null);
+  const joinPending = useRef(false);
+  const joinGeneration = useRef(0);
+  const mounted = useRef(false);
 
   // Leave the meeting when the tile unmounts so the participant doesn't
   // linger as a ghost in the room.
   useEffect(() => {
+    mounted.current = true;
+    joinGeneration.current++;
+    joinPending.current = false;
     return () => {
+      mounted.current = false;
+      joinGeneration.current++;
       const client = clientRef.current;
       if (client) {
         try {
@@ -190,14 +198,19 @@ export default function SessionZoomTile({
         clientRef.current = null;
       }
     };
-  }, []);
+  }, [sessionInstanceId]);
 
   const handleJoin = useCallback(async () => {
-    if (Platform.OS !== 'web') return;
+    if (Platform.OS !== 'web' || joinPending.current || !mounted.current) return;
+    joinPending.current = true;
+    const generation = joinGeneration.current;
+    const current = () => mounted.current && generation === joinGeneration.current;
+    try {
     if (beforeJoin) {
       try { if (!await beforeJoin()) return; }
-      catch { setErrorMsg('Video status could not be verified. Refresh and try again.'); return; }
+      catch { if (current()) setErrorMsg('Video status could not be verified. Refresh and try again.'); return; }
     }
+    if (!current()) return;
     setPhase('joining');
     setErrorMsg('');
 
@@ -212,6 +225,7 @@ export default function SessionZoomTile({
       console.warn('[SessionZoomTile] camera/mic pre-warm failed:', err);
     }
 
+    if (!current()) { prewarmStream?.getTracks().forEach(t => t.stop()); return; }
     try {
       const getConfig = httpsCallable<{ sessionInstanceId: string }, JoinConfig>(
         functions,
@@ -229,6 +243,7 @@ export default function SessionZoomTile({
         prewarmStream = null;
       }
 
+      if (!current()) return;
       const root = containerRef.current;
       if (!root) throw new Error('Zoom container not mounted');
 
@@ -253,6 +268,7 @@ export default function SessionZoomTile({
         },
       });
 
+      if (!current()) { try { await client.leaveMeeting?.(); } catch {} return; }
       await client.join({
         sdkKey: joinConfig.sdkKey,
         signature: joinConfig.signature,
@@ -263,6 +279,7 @@ export default function SessionZoomTile({
         ...(joinConfig.zak ? { zak: joinConfig.zak } : {}),
       });
 
+      if (!current()) { try { await client.leaveMeeting?.(); } catch {} return; }
       autoStartMediaViaToolbar(root, autoStartCamera);
       setPhase('in-meeting');
     } catch (err: any) {
@@ -271,10 +288,12 @@ export default function SessionZoomTile({
           prewarmStream.getTracks().forEach((t) => t.stop());
         } catch {}
       }
+      if (!current()) return;
       console.error('[SessionZoomTile] join failed:', err);
       setErrorMsg(err?.reason || err?.message || 'Could not join the video session.');
       setPhase('error');
     }
+    } finally { if (generation === joinGeneration.current) joinPending.current = false; }
   }, [sessionInstanceId, variant, autoStartCamera, beforeJoin]);
 
   const isPip = variant === 'pip';
