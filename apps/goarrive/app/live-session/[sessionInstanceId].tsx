@@ -36,6 +36,7 @@ import { BG, CARD, BORDER, FG, MUTED, GOLD, GREEN, RED, FH, FB } from '../../lib
 
 import { sessionWindowMs } from '../../lib/sessionTiming';
 import { workoutReturnPath } from '../../lib/workoutReturnPath';
+import { useSessionServerTime } from '../../hooks/useSessionServerTime';
 const EARLY_JOIN_GRACE_MS = 5 * 60 * 1000;
 
 interface Slot {
@@ -92,7 +93,8 @@ export default function LiveSessionScreen() {
   const [inst, setInst] = useState<SessionInstance | null>(null);
   const [loadError, setLoadError] = useState('');
   const [loading, setLoading] = useState(true);
-  const [now, setNow] = useState(Date.now());
+  const { now: serverNow, refreshTime } = useSessionServerTime(sessionInstanceId, user?.uid);
+  const now = serverNow ?? NaN;
 
   const [workout, setWorkout] = useState<any | null>(null);
   const [workoutLoaded, setWorkoutLoaded] = useState(false);
@@ -144,12 +146,6 @@ export default function LiveSessionScreen() {
     );
     return () => unsub();
   }, [authLoading, user, sessionInstanceId]);
-
-  // Ticking clock for the countdown + state transitions.
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, []);
 
   const readyForWorkout = !!inst && now >= sessionWindowMs(inst).startMs - EARLY_JOIN_GRACE_MS;
 
@@ -223,6 +219,13 @@ export default function LiveSessionScreen() {
     );
   }
 
+  if (serverNow === null && !playerVisible) return (
+    <View style={s.center}>
+      <Text style={s.errorTitle}>Checking session time</Text>
+      <Text style={s.errorBody}>A current connection is needed before opening your workout.</Text>
+      <Pressable style={s.secondaryBtn} onPress={refreshTime}><Text style={s.secondaryBtnText}>Retry time check</Text></Pressable>
+    </View>
+  );
   const { startMs, endMs } = window_;
   const title = inst.playbookTitle || 'Your Session';
   const whenLine = formatInTimezone(startMs, inst.timezone);

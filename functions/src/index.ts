@@ -105,6 +105,7 @@ export {
   bookViaBookingToken,
   playbookBookingIcs,
   getSessionWorkout,
+  getSessionTime,
   getPlaybookRescheduleSlots,
   completePlaybookSession,
 } from './playbookBooking';

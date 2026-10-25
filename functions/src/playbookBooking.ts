@@ -902,6 +902,13 @@ export const getPlaybookRescheduleSlots = onCall(
   }
 );
 
+/** Authenticated read-only clock observation, including direct session links. */
+export const getSessionTime = onCall({ region: 'us-central1', invoker: 'public' }, async request => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Must be signed in');
+  await loadInstanceForCaller(request.data?.sessionInstanceId, request.auth as any);
+  return { serverNow: Date.now() };
+});
+
 /**
  * getSessionWorkout — resolves and returns the workout for a session so the
  * member session page can launch the normal WorkoutPlayer. Members cannot

@@ -34,6 +34,7 @@ function screenHarness() {
     '../../lib/theme': {},
     '../../lib/sessionTiming': sessionTiming,
     '../../lib/workoutReturnPath': workoutReturnPath,
+    '../../hooks/useSessionServerTime': { useSessionServerTime: () => ({ now: Date.now(), refreshTime: () => {} }) },
     '../../components/WorkoutPlayer': { default: 'WorkoutPlayer' },
     '../../components/SessionZoomTile': { default: 'SessionZoomTile' },
   };

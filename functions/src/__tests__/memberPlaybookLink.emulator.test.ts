@@ -1,5 +1,6 @@
 import * as admin from 'firebase-admin';
 import { getMemberPlaybookSessions } from '../memberPlaybookLink';
+import { getSessionWorkout } from '../playbookBooking';
 if (process.env.FIRESTORE_EMULATOR_HOST !== '127.0.0.1:8080') throw new Error('Local Firestore emulator required');
 admin.initializeApp({ projectId: 'demo-member-playbook-link' });
 const db = admin.firestore();
@@ -35,4 +36,25 @@ test('reflects cancellation and reassignment without changing the link', async (
   expect((await call()).sessions.find((s: any) => s.id === 'current').status).toBe('cancelled');
   await db.doc('playbooks/plan').update({ memberIds: ['stranger'] });
   await expect(call()).rejects.toMatchObject({ code: 'permission-denied' });
+});
+
+test.each(['missed', 'scheduled'])('characterizes the next session after an uncompleted past %s session: workout A repeats', async status => {
+  const now = Date.now();
+  await db.doc('playbooks/plan').update({ workoutIds: ['a', 'b'], nextWorkoutIndex: 0 });
+  for (const id of ['a', 'b']) await db.doc('workouts/' + id).set({ coachId: 'coach', name: id });
+  await db.doc('session_instances/legacy').update({ status,
+    scheduledDate: new Date(now - 86400000).toISOString().slice(0, 10),
+    startUtc: admin.firestore.Timestamp.fromMillis(now - 86400000),
+    endUtc: admin.firestore.Timestamp.fromMillis(now - 83700000) });
+  await db.doc('session_instances/current').update({
+    scheduledDate: new Date(now).toISOString().slice(0, 10),
+    startUtc: admin.firestore.Timestamp.fromMillis(now - 60000),
+    endUtc: admin.firestore.Timestamp.fromMillis(now + 2640000) });
+  const result = await call();
+  expect(result.sessions.find((s: any) => s.id === 'current').status).toBe('scheduled');
+  expect((await db.doc('session_instances/current').get()).data()?.pinnedWorkoutId).toBeUndefined();
+  const opened = await (getSessionWorkout as any).run({ auth, data: { sessionInstanceId: 'current' } });
+  expect(opened.workout.id).toBe('a');
+  expect((await db.doc('playbooks/plan').get()).data()?.nextWorkoutIndex).toBe(0);
+  expect((await db.doc('session_instances/legacy').get()).data()?.workoutCompletedAt).toBeUndefined();
 });

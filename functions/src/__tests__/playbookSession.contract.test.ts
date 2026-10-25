@@ -18,7 +18,7 @@ jest.mock('firebase-functions/v2/https', () => ({
   onCall: (_: any, fn: any) => fn, onRequest: (_: any, fn: any) => fn,
   HttpsError: class extends Error { code: string; constructor(code: string, message: string) { super(message); this.code = code; } },
 }));
-import { completePlaybookSession, getSessionWorkout } from '../playbookBooking';
+import { completePlaybookSession, getSessionWorkout, getSessionTime } from '../playbookBooking';
 const auth = { uid: 'auth-member', token: { role: 'member', memberId: 'roster-member', coachId: 'coach' } };
 const invoke = (fn: any, data: any, caller = auth) => fn({ auth: caller, data });
 beforeEach(() => {
@@ -33,6 +33,12 @@ test('signed roster identity is coach scoped and rejects another roster member',
   expect(ownsSessionMember('other', { ...auth.token, memberId: 'other' }, session)).toBe(false);
   expect(ownsSessionMember(auth.uid, { ...auth.token, coachId: 'other' }, session)).toBe(false);
   expect(ownsSessionMember('legacy', {}, { memberId: 'legacy' })).toBe(true);
+});
+test('direct session time check is owned and read-only', async () => {
+  const before = JSON.stringify(records);
+  expect((await invoke(getSessionTime, { sessionInstanceId: 'session' })).serverNow).toEqual(expect.any(Number));
+  expect(JSON.stringify(records)).toBe(before);
+  await expect(invoke(getSessionTime, { sessionInstanceId: 'session' }, { uid: 'other', token: { ...auth.token, memberId: 'other' } })).rejects.toMatchObject({ code: 'permission-denied' });
 });
 test('assigned member resolves and pins the assigned workout', async () => {
   await expect(invoke(getSessionWorkout, { sessionInstanceId: 'session' })).resolves.toMatchObject({ workout: { id: 'workout' } });
