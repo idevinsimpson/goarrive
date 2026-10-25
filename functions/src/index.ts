@@ -70,6 +70,7 @@ import { google } from 'googleapis';
 const execFileAsync = promisify(execFile);
 import {
   getZoomProvider,
+  RealZoomProvider,
   verifyWebhookSignature,
   generateCrcResponse,
   buildMeetingSdkSignature,
@@ -13274,4 +13275,22 @@ export const onScenarioWriteMirrorSharedView = onDocumentWritten(
     // Rebuild projection — the plan doc has the authoritative presentedScenarioId
     await buildAndWriteSharedPlanProjection(planId);
   }
+);
+
+// Read-only inspection of explicitly supplied bot identities, never a registration or grant.
+export const inspectZoomBotHosts = onCall(
+  { region: 'us-central1', secrets: [zoomAccountId, zoomClientId, zoomClientSecret], invoker: 'public' },
+  async request => {
+    if (!request.auth || request.auth.token.role !== 'platformAdmin') throw new HttpsError('permission-denied', 'Platform admin role required');
+    const emails = request.data?.emails;
+    if (!Array.isArray(emails) || emails.length < 1 || emails.length > 10 || emails.some(e => typeof e !== 'string' || e.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim()))) throw new HttpsError('invalid-argument', 'Provide one to ten host email addresses');
+    const provider = getZoomProvider({ accountId: zoomAccountId.value(), clientId: zoomClientId.value(), clientSecret: zoomClientSecret.value() });
+    if (!(provider instanceof RealZoomProvider)) throw new HttpsError('failed-precondition', 'Live Zoom provider is not configured');
+    const results = [];
+    for (const email of [...new Set<string>(emails.map(e => e.trim().toLowerCase()))]) {
+      try { results.push({ ok: true, ...await provider.inspectHost(email) }); }
+      catch (error) { results.push({ ok: false, email, reason: error instanceof Error ? error.message : 'Host inspection failed' }); }
+    }
+    return { results };
+  },
 );
