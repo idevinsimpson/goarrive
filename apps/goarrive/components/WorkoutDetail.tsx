@@ -24,6 +24,7 @@ import {
   Share,
 } from 'react-native';
 import ModalSheet from './ModalSheet';
+import VideoPolicySetting from './VideoPolicySetting';
 import { db, functions } from '../lib/firebase';
 import { doc, onSnapshot, updateDoc, addDoc, collection, Timestamp, query, where, getDocs } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
@@ -51,6 +52,7 @@ interface ShareSettingsState {
 
 // ── Typed workout data interface (suggestion 9) ─────────────────────────────
 export interface WorkoutDetailData {
+  videoPolicy?: 'inherit' | 'on' | 'off';
   id: string;
   name: string;
   description?: string;
@@ -119,6 +121,7 @@ export default function WorkoutDetail({
           blocks: data.blocks ?? [],
           coachId: data.coachId ?? '',
           tenantId: data.tenantId ?? '',
+          videoPolicy: data.videoPolicy ?? 'inherit',
           isTemplate: data.isTemplate ?? false,
           isShared: data.isShared ?? false,
           isArchived: data.isArchived ?? false,
@@ -385,6 +388,7 @@ export default function WorkoutDetail({
             contentContainerStyle={styles.bodyContent}
             showsVerticalScrollIndicator={false}
           >
+            {workout && <VideoPolicySetting kind="workout" id={workout.id} policy={currentWorkout?.videoPolicy} />}
             {/* Metadata badges row */}
             {(category || difficulty || duration) && (
               <View style={styles.section}>

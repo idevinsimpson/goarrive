@@ -99,6 +99,8 @@ export { getMemberPlaybookSessions } from './memberPlaybookLink';
 // Playbook booking links (Phase 3b): coach availability windows + public
 // Calendly-style token page + guest-by-email bookings.
 export { setPlaybookWorkoutPolicy } from './playbookWorkoutPolicy';
+export { getSessionVideoAvailability, setWorkoutVideoPolicy } from './sessionVideoPolicy';
+import { sessionVideoAvailability } from './sessionVideoPolicy';
 import { enrollmentCloneFields } from './playbookClone';
 export {
   createPlaybookBookingLink,
@@ -4491,6 +4493,7 @@ export const allocateSessionInstance = onCall(
       zoomJoinUrl: meeting.joinUrl,
       // Host start URLs must never be stored in member-readable documents.
       zoomStartUrl: FieldValue.delete(),
+      zoomRecordingMode: meeting.recordingMode || 'unknown',
       zoomMeetingPassword: meeting.password ?? null,
       zoomProviderMode: zoomProvider.mode,
       allocatedAt: FieldValue.serverTimestamp(),
@@ -4647,6 +4650,7 @@ export const allocateAllPendingInstances = onCall(
               zoomJoinUrl: meeting.joinUrl,
               // Also remove a stale host capability when this occurrence is reallocated.
               zoomStartUrl: FieldValue.delete(),
+              zoomRecordingMode: meeting.recordingMode || 'unknown',
               zoomMeetingPassword: meeting.password,
               zoomProviderMode: batchProvider.mode,
               allocatedAt: FieldValue.serverTimestamp(),
@@ -4784,6 +4788,7 @@ export const rescheduleInstance = onCall(
       zoomRoomId: FieldValue.delete(),
       zoomRoomLabel: FieldValue.delete(),
       zoomMeetingId: FieldValue.delete(),
+      zoomRecordingMode: FieldValue.delete(),
       zoomMeetingUuid: FieldValue.delete(),
       zoomJoinUrl: FieldValue.delete(),
       zoomStartUrl: FieldValue.delete(),
@@ -11200,6 +11205,11 @@ export const getEmbeddedSessionJoinConfig = onCall(
         'failed-precondition',
         `Session is in status "${instance.status}", cannot join`
       );
+    }
+
+    if (instance.playbookId) {
+      const availability = await sessionVideoAvailability(sessionInstanceId, request.auth!, Date.now(), instance);
+      if (!availability.enabled) throw new HttpsError('failed-precondition', availability.reason);
     }
 
     // Display identity: coach callers join under their own name so the member

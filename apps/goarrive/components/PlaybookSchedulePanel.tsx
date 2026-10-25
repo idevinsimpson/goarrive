@@ -35,6 +35,7 @@ import {
 } from '../lib/schedulingTypes';
 import { WorkoutMosaic, WORKOUT_CARD_BG } from './WorkoutMosaic';
 import WorkoutPolicySetting from './WorkoutPolicySetting';
+import VideoPolicySetting from './VideoPolicySetting';
 
 const FH = Platform.OS === 'web' ? "'Space Grotesk', sans-serif" : 'SpaceGrotesk-Bold';
 const FB = Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
@@ -201,6 +202,7 @@ interface DayConfig {
 }
 
 interface PlaybookDocLite {
+  videoEnabled?: boolean;
   workoutPolicy?: 'carry_forward' | 'scheduled';
   name?: string;
   description?: string;
@@ -1368,6 +1370,7 @@ export default function PlaybookSchedulePanel({
               </Text>
             )}
 
+            <VideoPolicySetting kind="playbook" id={playbookId} policy={playbook?.videoEnabled === true ? 'on' : 'off'} />
             <WorkoutPolicySetting playbookId={playbookId} policy={playbook?.workoutPolicy} disabled={booking || pendingRequestIdRef.current !== null} />
             <View style={s.switchRow}>
               <Text style={s.switchLabel}>Record sessions</Text>

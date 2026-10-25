@@ -311,7 +311,7 @@ export default function LiveSessionScreen() {
 
   // ── LIVE ───────────────────────────────────────────────────────────────────
   const needsZoomGate = false;
-  const zoomActive = inst.recordingEnabled === true;
+
 
   return (
     <View style={{ flex: 1, backgroundColor: BG }}>
@@ -323,13 +323,6 @@ export default function LiveSessionScreen() {
             {whenLine} ({inst.timezone})
             {coachName ? ` · with Coach ${coachName}` : ''}
           </Text>
-
-          {inst.recordingEnabled === true && (
-            <SessionZoomTile
-              sessionInstanceId={inst.id}
-              variant={playerVisible ? 'pip' : 'pane'}
-            />
-          )}
 
           {!needsZoomGate && !workoutLoaded && (
             <View style={s.innerCard}>
@@ -373,6 +366,7 @@ export default function LiveSessionScreen() {
           visible={playerVisible}
           workout={workout}
           sessionInstanceId={sessionInstanceId}
+          zoomOverlay={!completing && !workoutDone ? <View pointerEvents="box-none" style={{ position: 'absolute', top: 40, right: 8 }}><SessionZoomTile key={`${user?.uid}:${sessionInstanceId}`} sessionInstanceId={sessionInstanceId} variant="pip" /></View> : null}
           completionError={completionError}
           completing={completing}
           onClose={() => setPlayerVisible(false)}
@@ -397,8 +391,8 @@ export default function LiveSessionScreen() {
           }}
         />
       )}
-      {/* zoomActive keeps the PiP tile mounted during playback via pip prop */}
-      {zoomActive && null}
+
+
     </View>
   );
 }

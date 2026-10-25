@@ -29,6 +29,7 @@ export interface ZoomMeetingRequest {
 }
 
 export interface ZoomMeetingResponse {
+  recordingMode?: 'none' | 'cloud' | 'local' | 'unknown';
   meetingId: string;       // Zoom meeting ID (numeric string for real, "mock-..." for mock)
   joinUrl: string;
   password: string;
@@ -163,6 +164,7 @@ export class RealZoomProvider implements ZoomProvider {
       join_url: string;
       password: string;
       host_email: string;
+      settings?: { auto_recording?: string };
     };
 
     console.log(`[Zoom Real] Meeting created: ${data.id} for ${request.hostEmail}`);
@@ -173,6 +175,7 @@ export class RealZoomProvider implements ZoomProvider {
       joinUrl: data.join_url,
       password: data.password,
       hostEmail: data.host_email,
+      recordingMode: data.settings?.auto_recording === 'none' ? 'none' : data.settings?.auto_recording === 'cloud' ? 'cloud' : data.settings?.auto_recording === 'local' ? 'local' : 'unknown',
     };
   }
 
@@ -203,6 +206,7 @@ export class RealZoomProvider implements ZoomProvider {
       join_url: string;
       password: string;
       host_email: string;
+      settings?: { auto_recording?: string };
     };
 
     return {
@@ -211,6 +215,7 @@ export class RealZoomProvider implements ZoomProvider {
       joinUrl: data.join_url,
       password: data.password,
       hostEmail: data.host_email,
+      recordingMode: data.settings?.auto_recording === 'none' ? 'none' : data.settings?.auto_recording === 'cloud' ? 'cloud' : data.settings?.auto_recording === 'local' ? 'local' : 'unknown',
     };
   }
 
