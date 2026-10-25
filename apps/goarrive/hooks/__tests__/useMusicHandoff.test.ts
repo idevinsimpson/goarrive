@@ -3,14 +3,25 @@
 import { vi, describe, test, expect, beforeEach, afterEach } from 'vitest';
 import { act, renderHook } from '../../test-utils/renderHook';
 import { Platform } from 'react-native';
-import { createBlessedMusicPlayer, getAudioContextState } from '../useWorkoutTTS';
+import {
+  createBlessedMusicPlayer, getAudioContextState, resumeAudioGraph,
+  subscribeMainCtxStatechange, type AudioGraphState,
+} from '../useWorkoutTTS';
 import { useMusicHandoff, pickNearestBucket, buildVariantGcsUri } from '../useMusicHandoff';
+
+// Match useWorkoutTTS's fan-out contract: registrations can precede the audio
+// graph, state changes reach active subscribers, and cleanup removes them.
+// A no-op subscription would hide regressions in the PiP lifecycle path.
+const mainCtxSubscribers = vi.hoisted(() => new Set<(state: AudioGraphState) => void>());
 
 vi.mock('../useWorkoutTTS', () => ({
   createBlessedMusicPlayer: vi.fn(),
   getAudioContextState: vi.fn(() => 'running'),
   resumeAudioGraph: vi.fn(),
-  subscribeMainCtxStatechange: vi.fn(() => () => {}),
+  subscribeMainCtxStatechange: vi.fn((handler: (state: AudioGraphState) => void) => {
+    mainCtxSubscribers.add(handler);
+    return vi.fn(() => { mainCtxSubscribers.delete(handler); });
+  }),
 }));
 
 vi.mock('../../utils/musicHandoffVariant', () => ({
@@ -25,6 +36,17 @@ vi.mock('../../utils/handoffLog', () => ({
 
 const originalOS = Platform.OS;
 const originalVisibility = Object.getOwnPropertyDescriptor(document, 'visibilityState');
+
+beforeEach(() => {
+  mainCtxSubscribers.clear();
+  vi.mocked(subscribeMainCtxStatechange).mockClear();
+  vi.mocked(resumeAudioGraph).mockClear();
+});
+
+function emitMainCtxState(state: AudioGraphState) {
+  vi.mocked(getAudioContextState).mockReturnValue(state);
+  for (const handler of [...mainCtxSubscribers]) handler(state);
+}
 
 function makeAudio() {
   const listeners: Record<string, Array<(ev?: Event) => void>> = {};
@@ -97,7 +119,7 @@ describe('useMusicHandoff v3 shadow controls', () => {
     }
   });
 
-  function setup() {
+  function setup({ background = true, isPiP = false } = {}) {
     const shadow = makeAudio() as HTMLAudioElement & { dispatch: (event: string) => void };
     const audible = makeAudio() as HTMLAudioElement & { dispatch: (event: string) => void };
     audible.src = 'https://example.com/music.mp3';
@@ -105,6 +127,7 @@ describe('useMusicHandoff v3 shadow controls', () => {
     const musicPausedRef = { current: false };
     const musicHoldRef = { current: false };
     const musicOffRef = { current: false };
+    const isPiPRef = { current: isPiP };
     const advance = vi.fn();
     const advanceRef = { current: advance };
     vi.mocked(createBlessedMusicPlayer).mockReturnValue(shadow);
@@ -117,6 +140,7 @@ describe('useMusicHandoff v3 shadow controls', () => {
           musicPausedRef,
           musicHoldRef,
           musicOffRef,
+          isPiPRef,
           advanceRef,
         }),
       { initialProps: { isPaused: false, isMuted: false, volume: 0.25 } },
@@ -125,17 +149,128 @@ describe('useMusicHandoff v3 shadow controls', () => {
     act(() => {
       hook.result.current.primeShadow(audible);
       hook.result.current.swapTrack(audible.src);
-      visibilityState = 'hidden';
-      document.dispatchEvent(new Event('visibilitychange'));
+      if (background) {
+        visibilityState = 'hidden';
+        document.dispatchEvent(new Event('visibilitychange'));
+      }
     });
 
     return { ...hook, audible, shadow, musicPausedRef, advance };
   }
 
+  test.each([false, true])('warm-up completion preserves playback ownership (background=%s)', async (background) => {
+    const { shadow, unmount } = setup({ background: false });
+    expect(shadow.play).toHaveBeenCalledTimes(1);
+    expect(shadow.muted).toBe(true);
+    expect(shadow.paused).toBe(false);
+    // play() is asynchronous. Its resolution installs the canplaythrough
+    // listener; model that actual media lifecycle rather than stubbing warm.
+    await act(async () => { await Promise.resolve(); });
+    expect(shadow.addEventListener).toHaveBeenCalledWith('canplaythrough', expect.any(Function), { once: true });
+    if (background) {
+      act(() => {
+        visibilityState = 'hidden';
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+    }
+    const pausesBeforeCompletion = vi.mocked(shadow.pause).mock.calls.length;
+    act(() => shadow.dispatch('canplaythrough'));
+    await act(async () => { await Promise.resolve(); });
+
+    // Foreground warm-up parks the muted shadow. A late completion after
+    // handoff must neither pause nor remute the now-audible background source.
+    expect(shadow.paused).toBe(!background);
+    expect(shadow.muted).toBe(!background);
+    expect(shadow.pause).toHaveBeenCalledTimes(pausesBeforeCompletion + (background ? 0 : 1));
+    unmount();
+  });
+
+  test.each(['suspended', 'interrupted'] as const)(
+    'iOS PiP %s hands off without a visibility event; running restores the graph once',
+    (state) => {
+      vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (iPhone) AppleWebKit/605.1.15 Safari/604.1');
+      const { shadow, audible, unmount } = setup({ background: false, isPiP: true });
+      expect(document.visibilityState).toBe('visible');
+      // Current v3 starts one muted foreground warm-up on swapTrack. Only
+      // the subsequent statechange may promote that shadow to audible.
+      expect(shadow.play).toHaveBeenCalledTimes(1);
+      expect(shadow.muted).toBe(true);
+
+      act(() => emitMainCtxState(state));
+      expect(shadow.play).toHaveBeenCalledTimes(2);
+      expect(shadow.currentTime).toBe(12);
+      expect(shadow.muted).toBe(false);
+      expect(audible.pause).toHaveBeenCalledTimes(1);
+
+      // Repeated context notifications must not start a second audible source.
+      act(() => emitMainCtxState(state));
+      expect(shadow.play).toHaveBeenCalledTimes(2);
+      expect(audible.pause).toHaveBeenCalledTimes(1);
+
+      shadow.currentTime = 21;
+      vi.mocked(shadow.pause).mockClear();
+      act(() => emitMainCtxState('running'));
+      expect(resumeAudioGraph).toHaveBeenCalledTimes(1);
+      expect(audible.currentTime).toBe(21);
+      expect(audible.play).toHaveBeenCalledTimes(1);
+      expect(shadow.pause).toHaveBeenCalledTimes(1);
+      act(() => emitMainCtxState('running'));
+      expect(audible.play).toHaveBeenCalledTimes(1);
+      expect(shadow.pause).toHaveBeenCalledTimes(1);
+      unmount();
+    },
+  );
+
+  test('context suspension without PiP does not bypass normal visibility handling', () => {
+    const { shadow, audible, unmount } = setup({ background: false });
+    act(() => emitMainCtxState('suspended'));
+    expect(shadow.play).toHaveBeenCalledTimes(1); // muted foreground warm only
+    expect(shadow.muted).toBe(true);
+    expect(audible.pause).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  test('desktop PiP keeps its existing stream as the only audible source', () => {
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Macintosh) AppleWebKit/605.1.15 Safari/605.1.15');
+    const { shadow, audible, unmount } = setup({ background: false, isPiP: true });
+    act(() => emitMainCtxState('suspended'));
+    expect(shadow.play).toHaveBeenCalledTimes(1); // muted foreground warm only
+    expect(shadow.muted).toBe(true);
+    expect(audible.pause).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  test('PiP context suspension respects the member pause guard', () => {
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (iPhone) AppleWebKit/605.1.15 Safari/604.1');
+    const { shadow, audible, musicPausedRef, unmount } = setup({ background: false, isPiP: true });
+    musicPausedRef.current = true;
+    act(() => emitMainCtxState('interrupted'));
+    expect(shadow.play).toHaveBeenCalledTimes(1); // muted foreground warm only
+    expect(shadow.muted).toBe(true);
+    expect(audible.pause).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  test('statechange subscription stays singular across rerenders and is removed on unmount', () => {
+    const { shadow, rerender, unmount } = setup({ background: false, isPiP: true });
+    expect(subscribeMainCtxStatechange).toHaveBeenCalledTimes(1);
+    expect(mainCtxSubscribers.size).toBe(1);
+    const unsubscribe = vi.mocked(subscribeMainCtxStatechange).mock.results[0].value;
+    rerender({ isPaused: false, isMuted: true, volume: 0.25 });
+    expect(subscribeMainCtxStatechange).toHaveBeenCalledTimes(1);
+    unmount();
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+    expect(mainCtxSubscribers.size).toBe(0);
+    vi.mocked(shadow.play).mockClear();
+    act(() => emitMainCtxState('suspended'));
+    expect(shadow.play).not.toHaveBeenCalled();
+  });
+
   test('propagates pause, mute, and effective volume while v3 is background-audible', () => {
     const { audible, shadow, rerender, unmount } = setup();
 
-    // Existing source warm-up plays once muted; the hide seam plays once.
+    // swapTrack first warms the shadow muted; the hide seam then plays it
+    // audibly. Resuming below must add exactly one further play call.
     expect(shadow.play).toHaveBeenCalledTimes(2);
     expect(shadow.currentTime).toBe(12);
     expect(shadow.muted).toBe(false);

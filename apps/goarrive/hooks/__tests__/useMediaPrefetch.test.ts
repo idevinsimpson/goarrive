@@ -100,24 +100,27 @@ describe('useMediaPrefetch — web platform', () => {
 
     // Pass-21 B: speculativeAllowed flips 2.5s after mount, gating the
     // aggressive next-video preload — advance timers to release it.
-    act(() => vi.advanceTimersByTime(2500));
+    expect(createdVideos).toHaveLength(0);
+    act(() => { vi.advanceTimersByTime(2499); });
+    expect(createdVideos).toHaveLength(0);
+    act(() => { vi.advanceTimersByTime(1); });
 
     expect(createdVideos.length).toBeGreaterThan(0);
     const videoEl = createdVideos[0];
     expect(videoEl).toBeDefined();
 
     // Fire the loadeddata event — schedules a 5 s cleanup.
-    videoEl.dispatchEvent(new Event('loadeddata'));
+    act(() => { videoEl.dispatchEvent(new Event('loadeddata')); });
 
     // Immediately after: video must still be in DOM.
     expect(removedBodyElements).not.toContain(videoEl);
 
     // 4.9 s — still alive.
-    act(() => vi.advanceTimersByTime(4900));
+    act(() => { vi.advanceTimersByTime(4900); });
     expect(removedBodyElements).not.toContain(videoEl);
 
     // > 5 s — cleanup fires.
-    act(() => vi.advanceTimersByTime(200));
+    act(() => { vi.advanceTimersByTime(200); });
     expect(removedBodyElements).toContain(videoEl);
   });
 
@@ -130,8 +133,9 @@ describe('useMediaPrefetch — web platform', () => {
     );
 
     // Pass-21 B: same speculative-gate release as the sibling test above.
-    act(() => vi.advanceTimersByTime(2500));
+    act(() => { vi.advanceTimersByTime(2500); });
 
+    expect(createdVideos).toHaveLength(1);
     expect(appendedBodyElements).toContain(createdVideos[0]);
   });
 });
@@ -145,8 +149,6 @@ describe('useMediaPrefetch — non-web platform', () => {
   let appendBodySpy: ReturnType<typeof vi.spyOn>;
   let imagePrefetchSpy: ReturnType<typeof vi.spyOn>;
 
-  let fetchSpy: { mockRestore: () => void };
-
   beforeEach(() => {
     Object.defineProperty(Platform, 'OS', { value: 'ios', configurable: true, writable: true });
     createElementSpy = vi.spyOn(document, 'createElement');
@@ -154,15 +156,16 @@ describe('useMediaPrefetch — non-web platform', () => {
     // Image.prefetch must return a promise on native.
     imagePrefetchSpy = vi.spyOn(Image, 'prefetch').mockResolvedValue(true);
     // fetch is used as the native cache-warmer; define it if missing (jsdom may not have it).
-    (global as any).fetch = vi.fn().mockResolvedValue({});
-    fetchSpy = { mockRestore: () => { delete (global as any).fetch; } } as any;
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({}));
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   });
 
   afterEach(() => {
     createElementSpy.mockRestore();
     appendBodySpy.mockRestore();
     imagePrefetchSpy.mockRestore();
-    fetchSpy.mockRestore();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
     Object.defineProperty(Platform, 'OS', { value: originalOS, configurable: true, writable: true });
   });
 
@@ -175,9 +178,11 @@ describe('useMediaPrefetch — non-web platform', () => {
     renderHook(() =>
       useMediaPrefetch(movements, 0, false, true, false, false),
     );
+    act(() => { vi.advanceTimersByTime(2500); });
 
     const videoCalls = createElementSpy.mock.calls.filter((c: any[]) => c[0] === 'video');
     expect(videoCalls).toHaveLength(0);
     expect(appendBodySpy).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledWith('https://x.com/next.mp4', { method: 'GET' });
   });
 });
