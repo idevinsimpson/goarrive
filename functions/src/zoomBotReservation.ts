@@ -27,7 +27,7 @@ export async function reserveBotHost(db: Firestore, sessionId: string, coachId: 
     if (!['scheduled', 'allocation_failed'].includes(s.status)) throw new HttpsError('failed-precondition', 'Session is already allocated or not bookable');
     const eligible = hosts.docs.filter(d => {
       const h = d.data();
-      return h.poolId === 'hmti' && typeof h.roomId === 'string' && h.roomId.length > 0 && Number.isSafeInteger(h.mappingVersion) && h.mappingVersion > 0 && h.reconciled === true && Array.isArray(h.legacyRoomIds) && h.legacyRoomIds.length <= 20 && h.verified === true && h.providerMode === 'live' && h.isBot === true &&
+      return h.poolId === 'hmti' && Array.isArray(h.inventory) && Number.isFinite(h.inventoryObservedAtMs) && now >= h.inventoryObservedAtMs && now - h.inventoryObservedAtMs < 30000 && typeof h.roomId === 'string' && h.roomId.length > 0 && Number.isSafeInteger(h.mappingVersion) && h.mappingVersion > 0 && h.reconciled === true && Array.isArray(h.legacyRoomIds) && h.legacyRoomIds.length <= 20 && h.verified === true && h.providerMode === 'live' && h.isBot === true &&
         typeof h.providerUserId === 'string' && !!h.providerUserId && typeof h.email === 'string' &&
         h.email === normalizeBotEmail(h.email) && d.id === botHostKey(h.email) &&
         Number.isInteger(h.maxConcurrentMeetings) && h.maxConcurrentMeetings === 1;
@@ -44,7 +44,8 @@ export async function reserveBotHost(db: Firestore, sessionId: string, coachId: 
     const cursor = cursorDoc.data() || {}, order = cursor.lastSelected || {};
     const candidates = eligible.map((h, i) => {
       const own: Window[] = (leases[i].data()?.windows || []).filter((w: Window) => w.released !== true);
-      const windows = [...new Map([...legacy[i], ...own].map(w => [w.sessionId, w])).values()];
+      const external: Window[] = h.data().inventory.map((m:any)=>({sessionId:'provider:'+m.meetingId,startMs:m.startMs??0,endMs:m.endMs??Number.MAX_SAFE_INTEGER,unresolved:m.live||m.startMs===null||m.endMs===null}));
+      const windows = [...new Map([...legacy[i], ...own].map(w => [w.sessionId, w])).values(),...external];
       return { h, room: roomDocs[i], windows: own, load: peakConcurrent(windows.map(w => occupancy(w, now)), startMs - BOT_EARLY_JOIN_MS, endMs) };
     }).filter(x => {const r=x.room.data();return r?.status==='active'&&r.poolId==='hmti'&&r.zoomAccountEmail===x.h.data().email&&r.zoomUserId===x.h.data().providerUserId&&x.load < x.h.data().maxConcurrentMeetings;}).sort((a,b) => (order[a.h.id] || 0) - (order[b.h.id] || 0) || a.h.id.localeCompare(b.h.id));
     const selected = candidates[0];
@@ -66,7 +67,7 @@ export async function beginBotMeeting(db: Firestore, reservation: BotReservation
     const job = jobDoc.data(), session = sessionDoc.data(), host = hostDoc.data();
     if (!job || job.attemptId !== reservation.attemptId || job.state !== 'reserved') return false;
     const roomDoc=await tx.get(db.doc(`zoom_rooms/${job.roomId}`));
-    if (roomDoc.updateTime?.toMillis() !== job.roomVersionMs || job.endMs <= (now ?? Date.now()) || !session || !host || host.reconciled !== true || host.roomId !== job.roomId || host.mappingVersion !== job.mappingVersion || host.status !== 'active' || host.verified !== true || host.providerMode !== 'live' || host.isBot !== true || host.poolId !== 'hmti' || host.email !== job.hostEmail || host.providerUserId !== job.providerUserId ||
+    if (roomDoc.updateTime?.toMillis() !== job.roomVersionMs || job.endMs <= (now ?? Date.now()) || !session || !host || host.reconciled !== true || !Number.isFinite(host.inventoryObservedAtMs) || (now ?? Date.now()) - host.inventoryObservedAtMs >= 30000 || host.roomId !== job.roomId || host.mappingVersion !== job.mappingVersion || host.status !== 'active' || host.verified !== true || host.providerMode !== 'live' || host.isBot !== true || host.poolId !== 'hmti' || host.email !== job.hostEmail || host.providerUserId !== job.providerUserId ||
       session.coachId !== job.coachId || session.memberId !== job.memberId || (session.playbookId || null) !== job.playbookId || session.roomSource !== 'shared_pool' ||
       !['scheduled','allocation_failed'].includes(session.status) || session.startUtc?.toMillis?.() !== job.startMs || session.endUtc?.toMillis?.() !== job.endMs || (session.recordingEnabled === true) !== job.recordingEnabled) {
       tx.update(ref, { state: 'needs_reconciliation' }); return false;

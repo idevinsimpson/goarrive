@@ -1,47 +1,39 @@
 # HMTI bot pool integration — disabled draft
 
-The read-only inspection endpoint at 78bb3c68019b0724bf976a81149505eb906a3d4e was deployed independently. On October 25 at 16:19 UTC it verified both requested hosts as active, type 2, same account. No registry, room, meeting, recording, or new credential was created.
+The separately reviewed read-only `inspectZoomBotHosts` endpoint was deployed at 78bb3c6. All allocator, registry, reconciliation, and lifecycle changes in this branch remain undeployed. The active single-host MVP is independent and untouched.
 
-## Integration delta
+## Implemented paths
 
-Both allocateSessionInstance and allocateAllPendingInstances call the same allocateVerifiedBotSession flow for shared_pool sessions only when ZOOM_VERIFIED_BOT_POOL_ENABLED is exactly true. The absent/false gate retains legacy allocation for unregistered hosts; any private registered host is fenced from legacy allocation, including inactive records and legacy aliases. No production gate change is included. Personal rooms remain on the existing path.
+- Both single and batch shared-pool allocation use the same allocator only when `ZOOM_VERIFIED_BOT_POOL_ENABLED=true`. Capacity remains one meeting per verified host.
+- Registry management (`reconcileZoomBotHost`) requires platform-admin authentication and a separate `ZOOM_BOT_MANAGEMENT_ENABLED=true` flag. It verifies existing provider identity/account/license, checks actual room mapping, and writes no credentials. Neither flag is enabled by this code.
+- Registration first quiesces the host. Legacy provider creation and registration transact on the same host fence. In-flight or unknown legacy requests block registration. Registered email/provider/room aliases cannot use the legacy allocator. Busy mappings cannot be silently replaced.
+- Bounded, GET-only provider inventory projects meeting IDs and timing; no join URL, password, host capability, or profile is returned. Allocation refreshes inventory, fails on stale/incomplete observations, and counts external/unknown occupancy. Recurring or untimed external meetings block conservatively.
+- Reservations include the existing five-minute early window. Unknown and overdue occupancy persists pending provider reconciliation. Fair host selection uses a transaction cursor and per-host leases.
+- Before creating a meeting, the job rechecks assignment, room version, mapping, inventory freshness and deadline. Provider outcome and session/receipt/reminder writes are attempt-fenced. Receipt/commit failure cannot create another meeting; a known provider ID is retained for reconciliation.
+- Join signing performs fresh provider occupancy checks for bot receipts, even on the omitted-purpose legacy signer path. An earlier live or unknown meeting prevents joining a later allocated session. Final session/job/assignment checks follow the provider read.
+- Managed cancellation/rescheduling is serialized against allocation. Member-policy denial occurs before locking. A transactional overlap rejection releases only its own lock. Rescheduling holds both old and proposed member slots until verified provider deletion and atomic session commit. Uncertain deletion keeps holds and stops the mutation.
+- Known provider outcomes can be reconciled by a separate disabled-by-default admin callable. Only confirmed provider absence releases capacity and unused proposed slots. An unknown meeting ID is never guessed or automatically released.
+- Reminder jobs are created in the allocation transaction with deterministic attempt/type IDs and UTC instants. Retry cannot duplicate them. Existing reminder processing performs delivery; tests never send messages.
 
-The private verified registry, per-host leases, allocation jobs and shared cursor serialize least-recently-selected host choice and peak concurrent capacity. Same-session retries reuse the job. Provider creation begins once; uncertain failures are quarantined rather than retried on another host. Session assignment, recording choice, timing and host identity are rechecked before creation and after provider response. Successful allocation and the private video receipt commit atomically. A receipt persistence failure leaves the attempt locked, preventing duplicate creation.
+## Verified host identities, not new registrations
 
-Legacy room IDs must be explicitly reconciled. All legacy documents with a meeting ID count alongside private leases, deduplicated by session ID; cancelled/completed status alone is not evidence of provider release. Canonical UTC timestamps take precedence, with the existing timezone conversion for legacy wall times. Only a server-owned release proof bound to the same meeting/provider identity removes legacy occupancy. No release-proof writer is implemented yet. Invalid timing or more than 200 records per legacy room fails closed. Existing sessions cannot be silently rescheduled across a provider attempt.
+HMTI2 (`hmti2@goa.fit`) and Maia (`maia@goa.fit`) were previously verified as active licensed users on the existing account. Licensed status does not establish more than one simultaneous meeting. No private registry record or Maia room was created by this work. The separate approved HMTI2 coach-owned MVP room must be reconciled explicitly before future registry activation.
 
-## Proposed registration — NOT executed
+## Validation and limits
 
-Create no records until the management path, room relationship, external meeting reconciliation and exact registration changes are reviewed. Private record keys are SHA256 of normalized email; they are identifiers, not credentials.
+The main local lifecycle run passed 48 emulator cases; two additional registry regressions passed on the final registry rerun (8 cases). Three rules tests deny member, coach and client-side platform-admin reads/writes to all new private coordination collections. Provider requests are synthetic in these tests. The full Functions contract suite passed 115 tests across 18 suites, and Functions type checking passed. The existing screen test harness gained its missing overlay stub; cancellation assertions were preserved.
 
-| Field | HMTI2 | Maia |
-|---|---|---|
-| email | hmti2@goa.fit | maia@goa.fit |
-| providerUserId | Ci-5tmwMSE6IiZG5wU_QLw | faqYhkgPQJO6ruQ9Re8odg |
-| poolId | hmti | hmti |
-| providerMode | live | live |
-| isBot | true | true |
-| maxConcurrentMeetings | 1 | 1 |
-| status | inactive until reconciliation | inactive until reconciliation |
-| reconciled | false until reconciliation | false until reconciliation |
+Real Zoom inventory permissions have not been exercised under this local-only task. No new OAuth scope, credentials, host license, live room, recording, email, WSF, billing, runtime or rules deployment is included. Provider-side activity can change after an observation; application admission does not revoke already-issued Zoom signatures or direct provider join URLs. This must be part of controlled acceptance rather than a claim of universal provider enforcement.
 
-Licensed status does not prove additional concurrent-meeting entitlement. Use one meeting per host unless verified otherwise. roomId and legacyRoomIds are deliberately unset here: these must reference reviewed real mappings, not fabricated IDs. The earlier inventory found no bot room records. The separate approved MVP subsequently registered one coach-owned HMTI2 room; that live room and test are outside this draft and must be reconciled before any registry activation. coach_zoom_connections are email scaffolds, not allocator configuration. The private registry must never trust coach-writable room metadata as proof of host identity.
+Both allocator and management flags remain off. Registration needs verified actual mappings and current provider inventory, including existing MVP and external meetings. Unknown provider outcomes without an identifiable meeting require operator/provider investigation; automatic release would risk duplicate meetings.
 
-## Remaining release gates
+This branch is based on the earlier video candidate. Before any deployment it must be reconciled with the newer released PR655 recording/owner-admin compatibility code and exact live Functions inventory. Never deploy this branch wholesale over production or unrelated Connect/WSF functions.
 
-The code and provider are tested with synthetic fixtures only. External/provider meetings must be reconciled before activation, including how their reservations remain authoritative; this draft does not prove capacity against independently created Zoom meetings. A supported authenticated registry-management path and reviewed room mapping are still required. No registry writer or activation is included. Future bot additions must repeat provider identity/account/status verification and reconciliation. Unknown provider outcomes require read-only reconciliation before any retry or lease release.
+## New timing request (separate pending source work)
 
-The new allocation path does not create reminder/email jobs; those integrations must be deliberately reviewed before replacing existing production scheduling behavior. No live meeting, media, recording, migration, runtime upgrade, global rules change, WSF or billing change is included.
+The user now requests coach-configurable scheduled-time-only/up-to-15-minute early entry, post-end grace for both late joining and finishing, and an upcoming-workout/countdown waiting screen. The complete host reservation must span start minus early allowance through end plus grace. Existing no-show grace is an attendance policy, not access grace. This draft still uses the existing five-minute access window; the new settings have not been activated or silently applied to any booking.
 
-## Validation
+## Provider references
 
-The final remediation checks passed 36 Firestore emulator cases across three suites (20 reservation cases on the corrected rerun, plus 16 allocation/mutation cases) and 10 actual-handler contracts, plus Functions type checking. Final regressions cover legacy alias IDs after editable identity changes, deadline expiry during the last room read, and concurrent mutation/allocation admission. Provider calls remain synthetic; no live provider or media test is represented by these checks.
-
-## Review remediation and remaining activation blockers
-
-Capacity starts five minutes before the scheduled start. Unknown provider outcomes and overdue holds remain occupied until explicit reconciliation. Capacity is restricted to one simultaneous meeting per host. A reserved job snapshots the room ID, mapping version and Firestore room version; creation rechecks the deadline after asynchronous preparation. Post-provider writes are attempt-fenced, and a successful stale provider response is recorded privately as an orphan instead of overwriting a replacement job. Existing completed jobs must still match the current session and private meeting receipt before reporting success.
-
-Shared-session cancel/reschedule obtains a transaction lock before reservation moves or provider/session writes. An existing allocation job rejects the edit before mutation; uncertain deletion retains its lock. This is deliberately fail-closed, not a completed managed cancellation/rescheduling workflow. Batch managed allocation preserves earlier successes and continues after a later failure.
-
-Still required before activation: authenticated registry management, quiescing/reconciling in-flight legacy allocation during registration, provider-authoritative external meeting inventory and release proofs, safe managed cancellation/reschedule reconciliation, and reminder parity. No code here proves capacity against meetings created outside GoArrive. No automatic lease expiration or live registry writes are included. The parent requested local-only remediation while the separate MVP is being tested; this branch must not be deployed as a bundle over the newer live source.
+Inventory uses the documented user meetings `scheduled` and `live` views with bounded `next_page_token` pagination: https://developers.zoom.us/docs/api/meetings/ and https://developers.zoom.us/docs/api/pagination/ . Absence from a list alone is never proof of deletion; release uses the existing provider GET returning not-found.
 

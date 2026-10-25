@@ -11,3 +11,20 @@ test('uncertain provider deletion retains the hold through final cleanup',async(
 test('safe completion releases only its own lock',async()=>{const id=await beginBotSessionMutation(db,'s',{uid:'coach',token:{}});await finishBotSessionMutation(db,'s',id);expect((await db.doc('zoom_bot_allocation_jobs/s').get()).exists).toBe(false);});
 test('stale cleanup cannot delete a replacement lock',async()=>{const id=await beginBotSessionMutation(db,'s',{uid:'coach',token:{}});await db.doc('zoom_bot_allocation_jobs/s').update({attemptId:'replacement'});await finishBotSessionMutation(db,'s',id);expect((await db.doc('zoom_bot_allocation_jobs/s').get()).data()?.attemptId).toBe('replacement');});
 test('wrong account cannot create a mutation lock',async()=>{await expect(beginBotSessionMutation(db,'s',{uid:'other',token:{}})).rejects.toMatchObject({code:'permission-denied'});expect((await db.doc('zoom_bot_allocation_jobs/s').get()).exists).toBe(false);});
+
+test('completed managed allocation can be cancelled only after verified provider deletion',async()=>{
+ const {confirmBotMeetingDeleted,applyBotSessionUpdate}=await import('../zoomBotMutation');
+ await db.doc('session_instances/s').update({zoomMeetingId:'meeting',zoomRoomId:'room'});
+ await db.doc('zoom_bot_allocation_jobs/s').set({state:'completed',attemptId:'allocation',meetingId:'meeting',roomId:'room',hostId:'host',coachId:'coach',memberId:'member'});
+ await db.doc('zoom_bot_host_leases/host').set({windows:[{sessionId:'s',attemptId:'allocation',unresolved:false}]});
+ const mutation=await beginBotSessionMutation(db,'s',{uid:'coach',token:{}});
+ await expect(applyBotSessionUpdate(db,'s',mutation!,{status:'cancelled'})).rejects.toMatchObject({code:'failed-precondition'});
+ await confirmBotMeetingDeleted(db,'s',mutation,'meeting');await applyBotSessionUpdate(db,'s',mutation!,{status:'cancelled'});await finishBotSessionMutation(db,'s',mutation);
+ expect((await db.doc('session_instances/s').get()).data()?.status).toBe('cancelled');expect((await db.doc('zoom_bot_host_leases/host').get()).data()?.windows[0].released).toBe(true);expect((await db.doc('zoom_bot_allocation_jobs/s').get()).exists).toBe(false);
+});
+test('known pre-operation failure restores completed job without releasing its occupancy',async()=>{
+ await db.doc('session_instances/s').update({zoomMeetingId:'meeting',zoomRoomId:'room'});
+ await db.doc('zoom_bot_allocation_jobs/s').set({state:'completed',attemptId:'allocation',meetingId:'meeting',roomId:'room',hostId:'host',coachId:'coach',memberId:'member'});
+ const mutation=await beginBotSessionMutation(db,'s',{uid:'coach',token:{}});await finishBotSessionMutation(db,'s',mutation);
+ expect((await db.doc('zoom_bot_allocation_jobs/s').get()).data()?.state).toBe('completed');
+});

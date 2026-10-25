@@ -1,3 +1,7 @@
+import {reconcileBotAttempt} from './zoomBotReconciliation';
+import {prepareBotRescheduleReservation} from './playbookScheduling';
+import {reconcileBotHost, assertBotJoinCapacity} from './zoomBotRegistry';
+import { createFencedLegacyMeeting } from './zoomBotLegacyFence';
 import { prepareMemberInvite } from './memberInvite';
 import { ownsSessionMember } from './sessionIdentity';
 /**
@@ -104,7 +108,7 @@ export { getSessionVideoAvailability, setWorkoutVideoPolicy, getWorkoutVideoRoll
 import { sessionVideoAvailability } from './sessionVideoPolicy';
 import { allocateVerifiedBotSession } from './zoomBotAllocation';
 import { isRegisteredBotRoom } from './zoomBotLegacyGuard';
-import { beginBotSessionMutation, finishBotSessionMutation } from './zoomBotMutation';
+import { beginBotSessionMutation, finishBotSessionMutation, confirmBotMeetingDeleted, applyBotSessionUpdate } from './zoomBotMutation';
 import { saveVideoReceipt } from './videoAllocationReceipt';
 import { enrollmentCloneFields } from './playbookClone';
 export {
@@ -4464,7 +4468,7 @@ export const allocateSessionInstance = onCall(
     const zoomProvider = getZoomProvider({ accountId: zoomAccountId.value(), clientId: zoomClientId.value(), clientSecret: zoomClientSecret.value() });
     let meeting;
     try {
-      meeting = await zoomProvider.createMeeting({
+      meeting = await createFencedLegacyMeeting(db, zoomProvider, {
         topic: `GoArrive Session: ${memberName}`,
         startTime: `${scheduledDate}T${scheduledStartTime}:00`,
         duration: instance.durationMinutes as number,
@@ -4663,7 +4667,7 @@ export const allocateAllPendingInstances = onCall(
           const batchProvider = getZoomProvider({ accountId: zoomAccountId.value(), clientId: zoomClientId.value(), clientSecret: zoomClientSecret.value() });
           let providerCreated = false;
           try {
-            const meeting = await batchProvider.createMeeting({
+            const meeting = await createFencedLegacyMeeting(db, batchProvider, {
               topic: `GoArrive Session: ${instance.memberName || 'Member'}`,
               startTime: `${instance.scheduledDate}T${instance.scheduledStartTime}:00`,
               duration: instance.durationMinutes,
@@ -4780,18 +4784,27 @@ export const rescheduleInstance = onCall(
       throw new HttpsError('failed-precondition', `Cannot reschedule instance in status "${instance.status}"`);
     }
 
-    const botMutation = await beginBotSessionMutation(db, instanceId, request.auth!);
-    try {
     // Playbook sessions: member self-reschedule reuses the skip auto-approval
     // window — inside the window the member must go through a skip request.
     if (instance.playbookId && rescheduleSource === 'member_action') {
       await assertWithinSkipAutoApprovalWindow(instance, 'reschedule');
     }
 
+    const botMutation = await beginBotSessionMutation(db, instanceId, request.auth!);
+    let botMutationEffectsStarted = false;
+    try {
+
     // Playbook sessions hold a member_time_reservations doc. Move it first —
     // transactionally re-runs the overlap guard, throws already-exists on
     // conflict — so a failed reschedule never tears down the Zoom meeting.
-    const movedReservation = await moveReservationForInstance(instanceId, instance, newDate, newStartTime);
+    let movedReservation;
+    botMutationEffectsStarted = true;
+    try { movedReservation = botMutation ? await prepareBotRescheduleReservation(instanceId, instance, newDate, newStartTime, botMutation) : await moveReservationForInstance(instanceId, instance, newDate, newStartTime); }
+    catch (error: any) {
+      // Transactional overlap rejection performs no writes; release only our lock.
+      if (error?.code === 'already-exists') botMutationEffectsStarted = false;
+      throw error;
+    }
 
     const originalDate = instance.scheduledDate;
     const originalTime = instance.scheduledStartTime;
@@ -4801,7 +4814,12 @@ export const rescheduleInstance = onCall(
     if (existingMeetingId) {
       const provider = getZoomProvider({ accountId: zoomAccountId.value(), clientId: zoomClientId.value(), clientSecret: zoomClientSecret.value() });
       try {
+        botMutationEffectsStarted = true;
         await provider.deleteMeeting(existingMeetingId);
+        if(botMutation){
+          if(await provider.getMeeting(existingMeetingId))throw new HttpsError('unavailable','Meeting deletion is not yet verified');
+          await confirmBotMeetingDeleted(db,instanceId,botMutation,existingMeetingId);
+        }
         await writeSessionEvent({
           occurrenceId: instanceId,
           eventType: 'meeting_deleted',
@@ -4813,6 +4831,7 @@ export const rescheduleInstance = onCall(
         });
       } catch (err: any) {
         await finishBotSessionMutation(db, instanceId, botMutation, true);
+        if(botMutation)throw new HttpsError('unavailable','Video deletion needs reconciliation; session change is pending');
         console.warn(`[rescheduleInstance] Failed to delete Zoom meeting ${existingMeetingId}: ${err.message}`);
       }
     }
@@ -4824,7 +4843,8 @@ export const rescheduleInstance = onCall(
     const endM = endMinutes % 60;
     const newEndTime = `${endH.toString().padStart(2, '0')}:${endM.toString().padStart(2, '0')}`;
 
-    await instanceRef.update({
+    botMutationEffectsStarted = true;
+    const sessionPatch = {
       scheduledDate: newDate,
       scheduledStartTime: newStartTime,
       scheduledEndTime: newEndTime,
@@ -4846,7 +4866,9 @@ export const rescheduleInstance = onCall(
         endUtc: Timestamp.fromDate(movedReservation.endUtc),
       } : {}),
       updatedAt: FieldValue.serverTimestamp(),
-    });
+    };
+    if(botMutation)await applyBotSessionUpdate(db,instanceId,botMutation,sessionPatch);
+    else await instanceRef.update(sessionPatch);
 
     await writeSessionEvent({
       occurrenceId: instanceId,
@@ -4874,7 +4896,7 @@ export const rescheduleInstance = onCall(
     });
 
     return { success: true };
-    } catch (error) { await finishBotSessionMutation(db, instanceId, botMutation, true); throw error; }
+    } catch (error) { await finishBotSessionMutation(db, instanceId, botMutation, botMutationEffectsStarted); throw error; }
     finally { await finishBotSessionMutation(db, instanceId, botMutation); }
   }
 );
@@ -4899,20 +4921,27 @@ export const cancelInstance = onCall(
     }
     const cancelSource = (ownsSessionMember(callerUid, request.auth!.token, instance)) ? 'member_action' : 'coach_action';
 
-    const botMutation = await beginBotSessionMutation(db, instanceId, request.auth!);
-    try {
     // Playbook sessions: member self-cancel reuses the skip auto-approval
     // window — inside the window the member must go through a skip request.
     if (instance.playbookId && cancelSource === 'member_action') {
       await assertWithinSkipAutoApprovalWindow(instance, 'cancel');
     }
 
+    const botMutation = await beginBotSessionMutation(db, instanceId, request.auth!);
+    let botMutationEffectsStarted = false;
+    try {
+
     // Delete existing Zoom meeting if one was allocated
     const cancelMeetingId = instance.zoomMeetingId as string | undefined;
     if (cancelMeetingId) {
       const provider = getZoomProvider({ accountId: zoomAccountId.value(), clientId: zoomClientId.value(), clientSecret: zoomClientSecret.value() });
       try {
+        botMutationEffectsStarted = true;
         await provider.deleteMeeting(cancelMeetingId);
+        if(botMutation){
+          if(await provider.getMeeting(cancelMeetingId))throw new HttpsError('unavailable','Meeting deletion is not yet verified');
+          await confirmBotMeetingDeleted(db,instanceId,botMutation,cancelMeetingId);
+        }
         await writeSessionEvent({
           occurrenceId: instanceId,
           eventType: 'meeting_deleted',
@@ -4924,14 +4953,18 @@ export const cancelInstance = onCall(
         });
       } catch (err: any) {
         await finishBotSessionMutation(db, instanceId, botMutation, true);
+        if(botMutation)throw new HttpsError('unavailable','Video deletion needs reconciliation; session change is pending');
         console.warn(`[cancelInstance] Failed to delete Zoom meeting ${cancelMeetingId}: ${err.message}`);
       }
     }
 
-    await instanceRef.update({
+    botMutationEffectsStarted = true;
+    const sessionPatch = {
       status: 'cancelled',
       updatedAt: FieldValue.serverTimestamp(),
-    });
+    };
+    if(botMutation)await applyBotSessionUpdate(db,instanceId,botMutation,sessionPatch);
+    else await instanceRef.update(sessionPatch);
 
     // Playbook sessions: free the member's time window for rebooking
     await releaseReservationForInstance(instance);
@@ -4962,7 +4995,7 @@ export const cancelInstance = onCall(
     });
 
     return { success: true };
-    } catch (error) { await finishBotSessionMutation(db, instanceId, botMutation, true); throw error; }
+    } catch (error) { await finishBotSessionMutation(db, instanceId, botMutation, botMutationEffectsStarted); throw error; }
     finally { await finishBotSessionMutation(db, instanceId, botMutation); }
   }
 );
@@ -11207,7 +11240,7 @@ export const batchGenerateVoice = onCall(
 export const getEmbeddedSessionJoinConfig = onCall(
   {
     region: 'us-central1',
-    secrets: [zoomMeetingSdkKey, zoomMeetingSdkSecret],
+    secrets: [zoomMeetingSdkKey, zoomMeetingSdkSecret, zoomAccountId, zoomClientId, zoomClientSecret],
     invoker: 'public',
   },
   async (request) => {
@@ -11288,6 +11321,8 @@ export const getEmbeddedSessionJoinConfig = onCall(
         'Meeting SDK credentials are not configured'
       );
     }
+
+    await assertBotJoinCapacity(db, getZoomProvider({accountId:zoomAccountId.value(),clientId:zoomClientId.value(),clientSecret:zoomClientSecret.value()}) as RealZoomProvider, sessionInstanceId, meetingNumber, instance);
 
     // Final admission follows every awaited identity lookup; no asynchronous
     // work may intervene before signing an expiring workout-video scope.
@@ -13323,4 +13358,28 @@ export const inspectZoomBotHosts = onCall(
     }
     return { results };
   },
+);
+
+
+
+// Kept off independently of allocation. This changes only the verified private registry.
+export const reconcileZoomBotHost = onCall(
+ {region:'us-central1',secrets:[zoomAccountId,zoomClientId,zoomClientSecret],invoker:'public'},
+ async request=>{
+  if(!request.auth||request.auth.token.role!=='platformAdmin')throw new HttpsError('permission-denied','Platform admin role required');
+  if(process.env.ZOOM_BOT_MANAGEMENT_ENABLED!=='true')throw new HttpsError('failed-precondition','Bot management is disabled');
+  const provider=getZoomProvider({accountId:zoomAccountId.value(),clientId:zoomClientId.value(),clientSecret:zoomClientSecret.value()});
+  if(!(provider instanceof RealZoomProvider))throw new HttpsError('failed-precondition','Live provider required');
+  return reconcileBotHost(db,provider,request.auth,request.data);
+ }
+);
+
+export const reconcileZoomBotAttempt = onCall(
+ {region:'us-central1',secrets:[zoomAccountId,zoomClientId,zoomClientSecret],invoker:'public'},
+ async request=>{
+  if(!request.auth||request.auth.token.role!=='platformAdmin')throw new HttpsError('permission-denied','Platform admin role required');
+  if(process.env.ZOOM_BOT_MANAGEMENT_ENABLED!=='true')throw new HttpsError('failed-precondition','Bot management is disabled');
+  const provider=getZoomProvider({accountId:zoomAccountId.value(),clientId:zoomClientId.value(),clientSecret:zoomClientSecret.value()});
+  return reconcileBotAttempt(db,provider,request.auth,request.data?.sessionInstanceId);
+ }
 );

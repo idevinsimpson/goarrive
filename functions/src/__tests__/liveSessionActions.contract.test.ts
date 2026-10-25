@@ -36,6 +36,7 @@ function screenHarness() {
     '../../lib/workoutReturnPath': workoutReturnPath,
     '../../hooks/useSessionServerTime': { useSessionServerTime: () => ({ now: Date.now(), refreshTime: () => {} }) },
     '../../components/WorkoutPlayer': { default: 'WorkoutPlayer' },
+    '../../components/WorkoutVideoOverlay': { default: 'WorkoutVideoOverlay' },
     '../../components/SessionZoomTile': { default: 'SessionZoomTile' },
   };
   const source = fs.readFileSync(path.resolve(__dirname, '../../../apps/goarrive/app/live-session/[sessionInstanceId].tsx'), 'utf8');

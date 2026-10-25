@@ -1,9 +1,13 @@
+import {refreshBotInventories} from './zoomBotRegistry';
+import { createBotReminderJobs } from './zoomBotReminders';
 import { FieldValue, Firestore } from 'firebase-admin/firestore';
 import { HttpsError } from 'firebase-functions/v2/https';
 import { ZoomProvider } from './zoom';
 import { reserveBotHost, beginBotMeeting } from './zoomBotReservation';
 export async function allocateVerifiedBotSession(db: Firestore, provider: ZoomProvider, sessionId: string, coachId: string) {
   if (provider.mode !== 'live') throw new HttpsError('failed-precondition', 'Verified bot allocation requires a live provider');
+  if(typeof (provider as any).inspectHostOccupancy!=='function')throw new HttpsError('failed-precondition','Provider inventory is required');
+  await refreshBotInventories(db,provider as any);
   const reservation = await reserveBotHost(db, sessionId, coachId);
   const jobRef = db.doc(`zoom_bot_allocation_jobs/${sessionId}`);
   if (!reservation.create) {
@@ -34,8 +38,13 @@ export async function allocateVerifiedBotSession(db: Firestore, provider: ZoomPr
     if(!valid){tx.update(jobRef,{state:'needs_reconciliation',meetingId:meeting.meetingId,failure:'post_creation_state_changed'});return false;}
     tx.update(sessionRef,{status:'allocated',zoomRoomId:h.roomId,zoomRoomLabel:'Workout video',zoomMeetingId:meeting.meetingId,zoomMeetingUuid:meeting.uuid||null,zoomJoinUrl:meeting.joinUrl,zoomMeetingPassword:meeting.password||'',zoomProviderMode:'live',zoomStartUrl:FieldValue.delete(),allocatedAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp()});
     tx.set(db.doc(`session_video_receipts/${sessionId}`),{coachId,memberId:job.memberId,playbookId:job.playbookId,roomId:h.roomId,meetingId:meeting.meetingId,providerMode:'live',participantVideoOff:true,recordingMode:meeting.recordingMode,startMs:job.startMs,endMs:job.endMs,botHostId:reservation.hostId,observedAt:FieldValue.serverTimestamp()});
+    createBotReminderJobs(tx,db,sessionId,reservation.attemptId,s,meeting.joinUrl);
     tx.update(jobRef,{state:'completed',meetingId:meeting.meetingId});
     tx.update(leaseRef,{windows:(leaseDoc.data()?.windows||[]).map((w:any)=>w.sessionId===sessionId&&w.attemptId===reservation.attemptId?{...w,unresolved:false}:w)});return true;
+  }).catch(async error=>{
+    // Preserve a known provider result even if the atomic session/receipt commit failed.
+    await db.runTransaction(async tx=>{const current=(await tx.get(jobRef)).data();if(current?.attemptId===reservation.attemptId&&current.state==='provider_started')tx.update(jobRef,{state:'needs_reconciliation',meetingId:meeting.meetingId,failure:'allocation_commit_failed'});});
+    throw error;
   });
   return {success:finalized,pending:!finalized,reason:finalized?'':'Meeting exists; reconciliation required',providerMode:provider.mode};
 }
