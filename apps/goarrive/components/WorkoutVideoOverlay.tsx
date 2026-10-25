@@ -12,6 +12,7 @@ export default function WorkoutVideoOverlay({ sessionInstanceId, variant, joinLa
 }) {
   const { user } = useAuth();
   const [available, setAvailable] = useState(false);
+  const [admission, setAdmission] = useState<{ recordingMode?: string; binding?: string }>({});
   const [phase, setPhase] = useState<'idle' | 'joining' | 'joined' | 'error'>('idle');
   const [error, setError] = useState('');
   const [minimized, setMinimized] = useState(false);
@@ -26,14 +27,14 @@ export default function WorkoutVideoOverlay({ sessionInstanceId, variant, joinLa
   }, []);
   useEffect(() => {
     let binding: string | undefined;
-    setAvailable(false); setPhase('idle'); setError(''); setMinimized(false);
-    const deny = () => { setAvailable(false); setPhase('idle'); void close(); };
+    setAvailable(false); setAdmission({}); setPhase('idle'); setError(''); setMinimized(false);
+    const deny = () => { setAdmission({}); setAvailable(false); setPhase('idle'); void close(); };
     if (!user || Platform.OS !== 'web') return () => { void close(); };
     const stop = watchVideoAdmission(
-      () => bounded(httpsCallable<any, { enabled: boolean; binding?: string; validForMs?: number }>(functions, 'getSessionVideoAvailability')({ sessionInstanceId })),
+      () => bounded(httpsCallable<any, { enabled: boolean; binding?: string; recordingMode?: string; validForMs?: number }>(functions, 'getSessionVideoAvailability')({ sessionInstanceId })),
       ({ data }) => {
         if (binding && binding !== data.binding) { setPhase('idle'); void close(); }
-        binding = data.binding; setAvailable(data.enabled);
+        binding = data.binding; setAdmission({ binding: data.binding, recordingMode: data.recordingMode }); setAvailable(data.enabled);
         if (!data.enabled) deny();
       }, deny, 15000, 25000, value => value.data.validForMs ?? 0,
     );
@@ -47,7 +48,7 @@ export default function WorkoutVideoOverlay({ sessionInstanceId, variant, joinLa
     let owned: ReturnType<typeof createZoomLease> | null = null;
     try {
       // Admission is rechecked before signing; no meeting is allocated by this request.
-      const { data: config } = await bounded(httpsCallable<any, any>(functions, 'getEmbeddedSessionJoinConfig')({ sessionInstanceId, purpose: 'workout_video' }));
+      const { data: config } = await bounded(httpsCallable<any, any>(functions, 'getEmbeddedSessionJoinConfig')({ sessionInstanceId, purpose: 'workout_video', ...(admission.recordingMode === 'cloud' ? { recordingConsentBinding: admission.binding } : {}) }));
       if (!isCurrent()) return;
       const sdk = await loadZoomEmbedded();
       if (!isCurrent() || !root.current) return;
@@ -75,8 +76,9 @@ export default function WorkoutVideoOverlay({ sessionInstanceId, variant, joinLa
     {phase !== 'joined' && <View style={{ gap: 8, padding: 8 }}>
       <Text style={{ color: '#F0F4F8' }}>Optional live video</Text>
       <Text style={{ color: '#A0AEC0' }}>Choose your camera and microphone separately using Zoom's controls. Your workout works without video.</Text>
+      {admission.recordingMode === 'cloud' && <Text style={{ color: '#FCD34D' }}>This session is cloud recorded. Joining may start recording and capture shared audio and video. Choose Agree and join recorded video to consent, or continue your workout without video.</Text>}
       {!!error && <Text accessibilityRole="alert" style={{ color: '#FCA5A5' }}>{error}</Text>}
-      {phase === 'joining' ? <ActivityIndicator accessibilityLabel="Connecting video" /> : <Pressable accessibilityRole="button" onPress={join}><Text style={{ color: '#F5A623' }}>{phase === 'error' ? 'Retry video' : joinLabel || 'Join video'}</Text></Pressable>}
+      {phase === 'joining' ? <ActivityIndicator accessibilityLabel="Connecting video" /> : <Pressable accessibilityRole="button" onPress={join}><Text style={{ color: '#F5A623' }}>{admission.recordingMode === 'cloud' ? 'Agree and join recorded video' : phase === 'error' ? 'Retry video' : joinLabel || 'Join video'}</Text></Pressable>}
     </View>}
     {(phase === 'joining' || phase === 'joined') && <Pressable accessibilityRole="button" onPress={() => { const stopping = close(); const current = generation.current; void stopping.then(() => { if (current === generation.current) setPhase('idle'); }); }} style={{ padding: 8 }}><Text style={{ color: '#F5A623' }}>{phase === 'joining' ? 'Cancel video connection' : 'Leave video'}</Text></Pressable>}
   </View>;

@@ -32,6 +32,7 @@ import { db, functions } from '../../lib/firebase';
 import { SessionInstance } from '../../lib/schedulingTypes';
 import WorkoutPlayer from '../../components/WorkoutPlayer';
 import SessionZoomTile from '../../components/SessionZoomTile';
+import RecordedSessionVideoEntry from '../../components/RecordedSessionVideoEntry';
 import WorkoutVideoOverlay from '../../components/WorkoutVideoOverlay';
 import { BG, CARD, BORDER, FG, MUTED, GOLD, GREEN, RED, FH, FB } from '../../lib/theme';
 
@@ -326,7 +327,7 @@ export default function LiveSessionScreen() {
           </Text>
 
           {inst.recordingEnabled === true && (
-            <SessionZoomTile
+            <RecordedSessionVideoEntry
               sessionInstanceId={inst.id}
               variant={playerVisible ? 'pip' : 'pane'}
             />
@@ -374,7 +375,7 @@ export default function LiveSessionScreen() {
           visible={playerVisible}
           workout={workout}
           sessionInstanceId={sessionInstanceId}
-          zoomOverlay={inst.recordingEnabled === false && !completing && !workoutDone ? <View pointerEvents="box-none" style={{ position: 'absolute', top: 40, right: 8 }}><WorkoutVideoOverlay key={`${user?.uid}:${sessionInstanceId}`} sessionInstanceId={sessionInstanceId} variant="pip" /></View> : null}
+          zoomOverlay={!completing && !workoutDone ? <View pointerEvents="box-none" style={{ position: 'absolute', top: 40, right: 8 }}><WorkoutVideoOverlay key={`${user?.uid}:${sessionInstanceId}`} sessionInstanceId={sessionInstanceId} variant="pip" /></View> : null}
           completionError={completionError}
           completing={completing}
           onClose={() => setPlayerVisible(false)}

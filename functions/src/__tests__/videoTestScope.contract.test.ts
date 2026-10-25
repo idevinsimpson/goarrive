@@ -1,4 +1,4 @@
-import { videoRolloutDecision, videoPolicyInScope } from '../videoTestScope';
+import { videoRolloutDecision, videoPolicyInScope, isRecordedTestRoute } from '../videoTestScope';
 const now = 1000000, member = { uid: 'uid', token: { role: 'member' } }, coach = { uid: 'coach', token: { role: 'coach' } };
 const scope = { sessionId: 'session', memberUid: 'uid', memberId: 'roster', coachId: 'coach', playbookId: 'plan', workoutId: 'workout', startsAt: now, expiresAt: now + 3600000 };
 beforeEach(() => { delete process.env.WORKOUT_VIDEO_TEST_SCOPE; process.env.WORKOUT_VIDEO_ROLLOUT_ENABLED = 'false'; });
@@ -25,4 +25,22 @@ test('scope enables only the owning coach exact policy targets', () => {
   expect(videoPolicyInScope(decision, coach, 'playbook', 'plan')).toBe(true); expect(videoPolicyInScope(decision, coach, 'workout', 'workout')).toBe(true);
   expect(videoPolicyInScope(decision, coach, 'playbook', 'other')).toBe(false); expect(videoPolicyInScope(decision, coach, undefined, undefined)).toBe(false);
   expect(videoPolicyInScope(decision, member, 'playbook', 'plan')).toBe(false);
+});
+
+test('owning platformAdmin supported without impersonated or cross-owner access', () => {
+  process.env.WORKOUT_VIDEO_TEST_SCOPE = JSON.stringify(scope);
+  const owner = { uid: 'coach', token: { role: 'platformAdmin', coachId: 'other' } };
+  expect(videoPolicyInScope(videoRolloutDecision(owner, now), owner, 'playbook', 'plan')).toBe(true);
+  const other = { uid: 'other', token: { role: 'platformAdmin', coachId: 'coach' } };
+  expect(videoRolloutDecision(other, now).enabled).toBe(false);
+});
+test('recording is explicit, bounded, and never reverts expired tests to the legacy UI', () => {
+  process.env.WORKOUT_VIDEO_TEST_SCOPE = JSON.stringify({ ...scope, recordingMode: 'cloud' });
+  expect(videoRolloutDecision(member, now).scope?.recordingMode).toBe('cloud');
+  expect(videoRolloutDecision(member, scope.expiresAt).enabled).toBe(false);
+  expect(isRecordedTestRoute(member, 'session')).toBe(true);
+  expect(isRecordedTestRoute(member, 'other')).toBe(false);
+  process.env.WORKOUT_VIDEO_TEST_SCOPE = JSON.stringify({ ...scope, recordingMode: 'local' });
+  expect(videoRolloutDecision(member, now).enabled).toBe(false);
+  expect(isRecordedTestRoute(member, 'session')).toBe(false);
 });

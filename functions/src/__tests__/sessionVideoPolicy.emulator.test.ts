@@ -128,3 +128,26 @@ test('test scope expiring during admission I/O is rejected before returning a le
   testScope(); const clock = jest.spyOn(Date, 'now').mockReturnValueOnce(now).mockReturnValue(now + 700000);
   try { expect((await read()).enabled).toBe(false); } finally { clock.mockRestore(); }
 });
+
+test('explicit cloud test requires matching private receipt and changes consent binding', async () => {
+  testScope(); const unrecorded = await read();
+  process.env.WORKOUT_VIDEO_TEST_SCOPE = JSON.stringify({ ...JSON.parse(process.env.WORKOUT_VIDEO_TEST_SCOPE!), recordingMode: 'cloud' });
+  expect((await read()).enabled).toBe(false);
+  await db.doc('session_instances/session').update({ recordingEnabled: true });
+  expect((await read()).enabled).toBe(false);
+  await db.doc('session_video_receipts/session').update({ recordingMode: 'cloud' });
+  const recorded = await read(); expect(recorded).toMatchObject({ enabled: true, recordingMode: 'cloud' });
+  expect(recorded.binding).not.toBe(unrecorded.binding);
+  await db.doc('session_video_receipts/session').update({ providerMode: 'mock' });
+  expect((await read()).enabled).toBe(false);
+});
+test('owning admin can set exact scoped policy but unrelated admin cannot', async () => {
+  testScope(); const at = jest.spyOn(Date, 'now').mockReturnValue(now);
+  try {
+    const data = { kind: 'playbook', id: 'plan', policy: 'on' };
+    await expect((setWorkoutVideoPolicy as any).run({ auth: { uid: 'other', token: { role: 'platformAdmin', coachId: 'coach' } }, data })).rejects.toMatchObject({ code: 'failed-precondition' });
+    await expect((setWorkoutVideoPolicy as any).run({ auth: { uid: 'coach', token: { role: 'platformAdmin' } }, data })).resolves.toEqual({ saved: true });
+    await db.doc('playbooks/plan').update({ coachId: 'other' });
+    await expect((setWorkoutVideoPolicy as any).run({ auth: { uid: 'coach', token: { role: 'platformAdmin' } }, data })).rejects.toMatchObject({ code: 'permission-denied' });
+  } finally { at.mockRestore(); }
+});

@@ -1,0 +1,17 @@
+import React, { act } from 'react';
+import { createRoot } from 'react-dom/client';
+import { beforeEach, afterEach, expect, it, vi } from 'vitest';
+import Entry from '../RecordedSessionVideoEntry';
+const m = vi.hoisted(() => ({ read: vi.fn(), legacy: vi.fn() }));
+vi.mock('../../lib/firebase', () => ({ functions: {} }));
+vi.mock('../../lib/AuthContext', () => ({ useAuth: () => ({ user: { uid: 'member' } }) }));
+vi.mock('firebase/functions', () => ({ httpsCallable: () => m.read }));
+vi.mock('../SessionZoomTile', () => ({ default: () => { m.legacy(); return <div>Legacy entry</div>; } }));
+let host: HTMLDivElement, root: ReturnType<typeof createRoot>;
+beforeEach(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); vi.clearAllMocks(); host=document.createElement('div'); document.body.append(host); root=createRoot(host); });
+afterEach(async () => { await act(async()=>root.unmount()); host.remove(); vi.unstubAllGlobals(); });
+const render=(id='session')=>act(async()=>root.render(<Entry sessionInstanceId={id} variant="pane"/>));
+it('does not mount legacy SDK while routing is unknown, or for recorded test',async()=>{ let done!: (x:any)=>void; m.read.mockReturnValue(new Promise(r=>{done=r;})); await render();expect(m.legacy).not.toHaveBeenCalled();await act(async()=>done({data:{recordingConsentRequired:true}}));expect(m.legacy).not.toHaveBeenCalled();expect(host.textContent).toContain('review recording'); });
+it('preserves legacy route only after explicit non-test response',async()=>{m.read.mockResolvedValue({data:{recordingConsentRequired:false}});await render();expect(host.textContent).toContain('Legacy entry');});
+it('failed lookup never falls through to legacy',async()=>{m.read.mockRejectedValue(new Error('offline'));await render();expect(m.legacy).not.toHaveBeenCalled();expect(host.textContent).toContain('Refresh');});
+it('old response cannot select legacy after navigation',async()=>{let done!:(x:any)=>void;m.read.mockReturnValueOnce(new Promise(r=>{done=r;})).mockResolvedValue({data:{recordingConsentRequired:true}});await render();await render('next');await act(async()=>done({data:{recordingConsentRequired:false}}));expect(m.legacy).not.toHaveBeenCalled();});

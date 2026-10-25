@@ -54,3 +54,12 @@ it('a changed server room/schedule binding closes the old client without another
   await act(async () => { await vi.advanceTimersByTimeAsync(15000); });
   expect(m.destroy).toHaveBeenCalledOnce(); expect(host.textContent).not.toContain('Leave video');
 });
+
+it('recorded admission discloses recording and needs its explicit consent click', async () => {
+  m.available.mockResolvedValue({ data: { enabled: true, validForMs: 25000, recordingMode: 'cloud', binding: 'recorded-v1' } });
+  await render(); expect(host.textContent).toContain('This session is cloud recorded');
+  expect(m.config).not.toHaveBeenCalled(); expect(m.capture).not.toHaveBeenCalled();
+  await click('Agree and join recorded video');
+  expect(m.config).toHaveBeenCalledWith({ sessionInstanceId: 'session', purpose: 'workout_video', recordingConsentBinding: 'recorded-v1' });
+  expect(m.join).toHaveBeenCalledOnce(); expect(m.capture).not.toHaveBeenCalled();
+});

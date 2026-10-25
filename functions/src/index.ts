@@ -11263,6 +11263,9 @@ export const getEmbeddedSessionJoinConfig = onCall(
     if (request.data?.purpose === 'workout_video') {
       const availability = await sessionVideoAvailability(sessionInstanceId, request.auth!, Date.now(), instance);
       if (!availability.enabled) throw new HttpsError('failed-precondition', availability.reason);
+      if (availability.recordingMode === 'cloud' && (!availability.binding || request.data?.recordingConsentBinding !== availability.binding)) {
+        throw new HttpsError('failed-precondition', 'Accept cloud recording for this session before joining.');
+      }
     }
 
     const signature = buildMeetingSdkSignature({
