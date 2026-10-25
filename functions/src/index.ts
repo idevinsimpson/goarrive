@@ -101,6 +101,7 @@ export { getMemberPlaybookSessions } from './memberPlaybookLink';
 export { setPlaybookWorkoutPolicy } from './playbookWorkoutPolicy';
 export { getSessionVideoAvailability, setWorkoutVideoPolicy, getWorkoutVideoRollout } from './sessionVideoPolicy';
 import { sessionVideoAvailability } from './sessionVideoPolicy';
+import { isRecordedTestRoute } from './videoTestScope';
 import { saveVideoReceipt } from './videoAllocationReceipt';
 import { enrollmentCloneFields } from './playbookClone';
 export {
@@ -11260,7 +11261,7 @@ export const getEmbeddedSessionJoinConfig = onCall(
 
     // Final admission follows every awaited identity lookup; no asynchronous
     // work may intervene before signing an expiring workout-video scope.
-    if (request.data?.purpose === 'workout_video') {
+    if (request.data?.purpose === 'workout_video' || isRecordedTestRoute(request.auth!, sessionInstanceId)) {
       const availability = await sessionVideoAvailability(sessionInstanceId, request.auth!, Date.now(), instance);
       if (!availability.enabled) throw new HttpsError('failed-precondition', availability.reason);
       if (availability.recordingMode === 'cloud' && (!availability.binding || request.data?.recordingConsentBinding !== availability.binding)) {

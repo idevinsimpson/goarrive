@@ -163,12 +163,14 @@ export default function SessionZoomTile({
   sessionInstanceId,
   variant,
   autoStartCamera = true,
+  beforeJoin,
   joinLabel,
 }: {
   sessionInstanceId: string;
   variant: 'pip' | 'pane';
   /** Auto-click Zoom's start-video button after join (member PiP default). */
   autoStartCamera?: boolean;
+  beforeJoin?: () => Promise<boolean>;
   joinLabel?: string;
 }) {
   const [phase, setPhase] = useState<'idle' | 'joining' | 'in-meeting' | 'error'>('idle');
@@ -192,6 +194,10 @@ export default function SessionZoomTile({
 
   const handleJoin = useCallback(async () => {
     if (Platform.OS !== 'web') return;
+    if (beforeJoin) {
+      try { if (!await beforeJoin()) return; }
+      catch { setErrorMsg('Video status could not be verified. Refresh and try again.'); return; }
+    }
     setPhase('joining');
     setErrorMsg('');
 
@@ -269,7 +275,7 @@ export default function SessionZoomTile({
       setErrorMsg(err?.reason || err?.message || 'Could not join the video session.');
       setPhase('error');
     }
-  }, [sessionInstanceId, variant, autoStartCamera]);
+  }, [sessionInstanceId, variant, autoStartCamera, beforeJoin]);
 
   const isPip = variant === 'pip';
 

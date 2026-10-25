@@ -14,7 +14,7 @@ function handler(recorded = false) {
   const statement = sf.statements.find(n => ts.isVariableStatement(n) && n.declarationList.declarations.some(d => ts.isIdentifier(d.name) && d.name.text === 'getEmbeddedSessionJoinConfig'))!;
   const js = ts.transpileModule(statement.getText(sf), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
   const scope: any = { exports: {}, onCall: (_options: any, run: any) => run, HttpsError, Date: { now: () => now }, ownsSessionMember: (uid: string, _token: any, value: any) => uid === value.memberId,
-    sessionVideoAvailability: admission, buildMeetingSdkSignature: sign, zoomMeetingSdkKey: { value: () => 'synthetic-key' }, zoomMeetingSdkSecret: { value: () => 'synthetic-secret' },
+    isRecordedTestRoute: () => recorded, sessionVideoAvailability: admission, buildMeetingSdkSignature: sign, zoomMeetingSdkKey: { value: () => 'synthetic-key' }, zoomMeetingSdkSecret: { value: () => 'synthetic-secret' },
     db: { collection: (name: string) => ({ doc: () => ({ get: async () => { if (name === 'users') await identity; return { exists: true, data: () => name === 'session_instances' ? instance : { displayName: 'Synthetic' } }; } }) }) } };
   vm.runInNewContext(js, scope);
   return { run: (purpose?: string, recordingConsentBinding?: string) => scope.exports.getEmbeddedSessionJoinConfig({ auth, data: { sessionInstanceId: 'session', recordingConsentBinding, ...(purpose ? { purpose } : {}) } }), release: (at: number) => { now = at; releaseIdentity(); }, sign, admission };
@@ -41,4 +41,9 @@ test.each([undefined, 'other-session-binding'])('recorded signer refuses absent 
 test('recorded signer accepts only the fresh recording binding, with participant authority', async () => {
   const h = handler(true), result = h.run('workout_video', 'recording-version-1'); h.release(base + 100);
   expect(await result).toMatchObject({ role: 0, zak: null }); expect(h.sign).toHaveBeenCalledTimes(1);
+});
+
+test('a stale legacy client cannot omit purpose to bypass a newly enabled recorded test', async () => {
+  const h = handler(true), result = h.run(); h.release(base + 100);
+  await expect(result).rejects.toMatchObject({ code: 'failed-precondition' }); expect(h.sign).not.toHaveBeenCalled();
 });

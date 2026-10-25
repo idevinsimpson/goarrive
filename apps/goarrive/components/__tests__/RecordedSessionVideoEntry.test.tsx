@@ -2,11 +2,11 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import Entry from '../RecordedSessionVideoEntry';
-const m = vi.hoisted(() => ({ read: vi.fn(), legacy: vi.fn() }));
+const m = vi.hoisted(() => ({ read: vi.fn(), legacy: vi.fn(), beforeJoin: undefined as undefined | (()=>Promise<boolean>) }));
 vi.mock('../../lib/firebase', () => ({ functions: {} }));
 vi.mock('../../lib/AuthContext', () => ({ useAuth: () => ({ user: { uid: 'member' } }) }));
 vi.mock('firebase/functions', () => ({ httpsCallable: () => m.read }));
-vi.mock('../SessionZoomTile', () => ({ default: () => { m.legacy(); return <div>Legacy entry</div>; } }));
+vi.mock('../SessionZoomTile', () => ({ default: (props:any) => { m.beforeJoin=props.beforeJoin; m.legacy(); return <div>Legacy entry</div>; } }));
 let host: HTMLDivElement, root: ReturnType<typeof createRoot>;
 beforeEach(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); vi.clearAllMocks(); host=document.createElement('div'); document.body.append(host); root=createRoot(host); });
 afterEach(async () => { await act(async()=>root.unmount()); host.remove(); vi.unstubAllGlobals(); });
@@ -15,3 +15,6 @@ it('does not mount legacy SDK while routing is unknown, or for recorded test',as
 it('preserves legacy route only after explicit non-test response',async()=>{m.read.mockResolvedValue({data:{recordingConsentRequired:false}});await render();expect(host.textContent).toContain('Legacy entry');});
 it('failed lookup never falls through to legacy',async()=>{m.read.mockRejectedValue(new Error('offline'));await render();expect(m.legacy).not.toHaveBeenCalled();expect(host.textContent).toContain('Refresh');});
 it('old response cannot select legacy after navigation',async()=>{let done!:(x:any)=>void;m.read.mockReturnValueOnce(new Promise(r=>{done=r;})).mockResolvedValue({data:{recordingConsentRequired:true}});await render();await render('next');await act(async()=>done({data:{recordingConsentRequired:false}}));expect(m.legacy).not.toHaveBeenCalled();});
+
+it('an already-open legacy entry rechecks a newly activated recorded scope before joining',async()=>{m.read.mockResolvedValueOnce({data:{recordingConsentRequired:false}}).mockResolvedValue({data:{recordingConsentRequired:true}});await render();let permitted=true;await act(async()=>{permitted=await m.beforeJoin!();});expect(permitted).toBe(false);expect(host.textContent).toContain('review recording');});
+it('legacy join fails closed when fresh route verification fails',async()=>{m.read.mockResolvedValueOnce({data:{recordingConsentRequired:false}}).mockRejectedValue(new Error('offline'));await render();let permitted=true;await act(async()=>{permitted=await m.beforeJoin!();});expect(permitted).toBe(false);expect(host.textContent).toContain('Refresh');});

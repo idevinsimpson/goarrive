@@ -44,3 +44,9 @@ test('recording is explicit, bounded, and never reverts expired tests to the leg
   expect(videoRolloutDecision(member, now).enabled).toBe(false);
   expect(isRecordedTestRoute(member, 'session')).toBe(false);
 });
+test('recorded-test route is protected even for an unrelated legacy admin', () => {
+  process.env.WORKOUT_VIDEO_TEST_SCOPE = JSON.stringify({ ...scope, recordingMode: 'cloud' });
+  const unrelated = { uid: 'other-admin', token: { role: 'platformAdmin' } };
+  expect(isRecordedTestRoute(unrelated, 'session')).toBe(true);
+  expect(videoRolloutDecision(unrelated, now).enabled).toBe(false);
+});

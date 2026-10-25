@@ -30,11 +30,13 @@ export function videoPolicyInScope(decision: VideoRolloutDecision, auth: VideoAu
 
 /** UI routing only, never an admission grant. Keep the consent path selected
  * after expiry so an expired recorded test cannot fall back to the legacy tile. */
-export function isRecordedTestRoute(auth: VideoAuth, sessionId: unknown): boolean {
+export function isRecordedTestRoute(_auth: VideoAuth, sessionId: unknown): boolean {
   try {
     const raw = JSON.parse(process.env.WORKOUT_VIDEO_TEST_SCOPE || 'null');
     if (!raw || raw.recordingMode !== 'cloud' || raw.sessionId !== sessionId) return false;
-    const decision = videoRolloutDecision(auth, raw.startsAt);
+    // Routing applies to every caller of this session, including legacy admins.
+    // This synthetic identity validates configuration only; admission still checks the real caller.
+    const decision = videoRolloutDecision({ uid: raw.memberUid, token: { role: 'member' } }, raw.startsAt);
     return decision.enabled && decision.scope?.recordingMode === 'cloud';
   } catch { return false; }
 }

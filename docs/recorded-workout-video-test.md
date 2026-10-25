@@ -21,3 +21,6 @@ Existing getSystemHealth rejected the legitimate platformAdmin-role account beca
 ## Release boundary
 
 Review first. Named functions only from reconciled source; do not deploy main wholesale, Connect, WSF, rules or indexes. Preserve PR650 merge hold. Any recorded test requires an explicitly authorized time window, verified host, recorded session/receipt, and manual participant consent. Real Android/Zoom recording acceptance remains pending and cannot be inferred from mocked UI or emulator tests.
+
+Review correction: legacy entry rechecks routing immediately before joining and fails closed on errors or navigation. The signer enforces scoped recorded consent even when purpose is omitted, for every caller. The legacy tile has only an optional pre-join hook; unrelated callers and /join keep their behavior. Focused verification: 12 UI tests, 25 backend contracts, and both application and Functions type checks passed. No deployment performed.
+
