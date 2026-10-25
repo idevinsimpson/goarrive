@@ -1512,6 +1512,7 @@ export default function WorkoutFolderPage({
         outroCropScale: original.outroCropScale ?? 1,
         outroCropTranslateX: original.outroCropTranslateX ?? 0,
         outroCropTranslateY: original.outroCropTranslateY ?? 0,
+        videoPolicy: original.videoPolicy === 'on' || original.videoPolicy === 'off' ? original.videoPolicy : 'inherit',
         workoutMusicEnabled: original.workoutMusicEnabled ?? false,
         workoutMusicStyle: original.workoutMusicStyle ?? 'workout',
         workoutMusicVolume: original.workoutMusicVolume ?? 0.35,

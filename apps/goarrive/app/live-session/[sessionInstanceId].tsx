@@ -32,6 +32,7 @@ import { db, functions } from '../../lib/firebase';
 import { SessionInstance } from '../../lib/schedulingTypes';
 import WorkoutPlayer from '../../components/WorkoutPlayer';
 import SessionZoomTile from '../../components/SessionZoomTile';
+import WorkoutVideoOverlay from '../../components/WorkoutVideoOverlay';
 import { BG, CARD, BORDER, FG, MUTED, GOLD, GREEN, RED, FH, FB } from '../../lib/theme';
 
 import { sessionWindowMs } from '../../lib/sessionTiming';
@@ -311,7 +312,7 @@ export default function LiveSessionScreen() {
 
   // ── LIVE ───────────────────────────────────────────────────────────────────
   const needsZoomGate = false;
-  const zoomActive = inst.recordingEnabled === true;
+
 
   return (
     <View style={{ flex: 1, backgroundColor: BG }}>
@@ -373,6 +374,7 @@ export default function LiveSessionScreen() {
           visible={playerVisible}
           workout={workout}
           sessionInstanceId={sessionInstanceId}
+          zoomOverlay={inst.recordingEnabled === false && !completing && !workoutDone ? <View pointerEvents="box-none" style={{ position: 'absolute', top: 40, right: 8 }}><WorkoutVideoOverlay key={`${user?.uid}:${sessionInstanceId}`} sessionInstanceId={sessionInstanceId} variant="pip" /></View> : null}
           completionError={completionError}
           completing={completing}
           onClose={() => setPlayerVisible(false)}
@@ -397,8 +399,8 @@ export default function LiveSessionScreen() {
           }}
         />
       )}
-      {/* zoomActive keeps the PiP tile mounted during playback via pip prop */}
-      {zoomActive && null}
+
+
     </View>
   );
 }

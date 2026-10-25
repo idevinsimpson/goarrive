@@ -29,9 +29,10 @@ export interface ZoomMeetingRequest {
 }
 
 export interface ZoomMeetingResponse {
+  participantVideoOff?: boolean;
+  recordingMode?: 'none' | 'cloud' | 'local' | 'unknown';
   meetingId: string;       // Zoom meeting ID (numeric string for real, "mock-..." for mock)
   joinUrl: string;
-  startUrl: string;
   password: string;
   hostEmail: string;
   uuid?: string;           // Zoom meeting UUID (real only)
@@ -149,6 +150,7 @@ export class RealZoomProvider implements ZoomProvider {
         waiting_room: false,
         auto_recording: request.autoRecording ?? 'cloud',
         mute_upon_entry: true,
+        participant_video: false,
         approval_type: 0, // Automatically approve
       },
     });
@@ -162,9 +164,9 @@ export class RealZoomProvider implements ZoomProvider {
       id: number;
       uuid: string;
       join_url: string;
-      start_url: string;
       password: string;
       host_email: string;
+      settings?: { auto_recording?: string; participant_video?: boolean };
     };
 
     console.log(`[Zoom Real] Meeting created: ${data.id} for ${request.hostEmail}`);
@@ -173,9 +175,10 @@ export class RealZoomProvider implements ZoomProvider {
       meetingId: String(data.id),
       uuid: data.uuid,
       joinUrl: data.join_url,
-      startUrl: data.start_url,
       password: data.password,
       hostEmail: data.host_email,
+      participantVideoOff: data.settings?.participant_video === false,
+      recordingMode: data.settings?.auto_recording === 'none' ? 'none' : data.settings?.auto_recording === 'cloud' ? 'cloud' : data.settings?.auto_recording === 'local' ? 'local' : 'unknown',
     };
   }
 
@@ -204,18 +207,19 @@ export class RealZoomProvider implements ZoomProvider {
       id: number;
       uuid: string;
       join_url: string;
-      start_url: string;
       password: string;
       host_email: string;
+      settings?: { auto_recording?: string; participant_video?: boolean };
     };
 
     return {
       meetingId: String(data.id),
       uuid: data.uuid,
       joinUrl: data.join_url,
-      startUrl: data.start_url,
       password: data.password,
       hostEmail: data.host_email,
+      participantVideoOff: data.settings?.participant_video === false,
+      recordingMode: data.settings?.auto_recording === 'none' ? 'none' : data.settings?.auto_recording === 'cloud' ? 'cloud' : data.settings?.auto_recording === 'local' ? 'local' : 'unknown',
     };
   }
 
@@ -253,7 +257,6 @@ export class MockZoomProvider implements ZoomProvider {
     return {
       meetingId,
       joinUrl: `https://zoom.us/j/${meetingId}?pwd=${password}`,
-      startUrl: `https://zoom.us/s/${meetingId}?zak=mock_host_token`,
       password,
       hostEmail: request.hostEmail,
       uuid: `mock-uuid-${meetingId}`,
@@ -270,7 +273,6 @@ export class MockZoomProvider implements ZoomProvider {
     return {
       meetingId,
       joinUrl: `https://zoom.us/j/${meetingId}`,
-      startUrl: `https://zoom.us/s/${meetingId}`,
       password: 'mock123',
       hostEmail: 'mock@goarrive.fit',
       uuid: `mock-uuid-${meetingId}`,

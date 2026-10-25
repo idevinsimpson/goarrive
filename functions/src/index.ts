@@ -99,6 +99,9 @@ export { getMemberPlaybookSessions } from './memberPlaybookLink';
 // Playbook booking links (Phase 3b): coach availability windows + public
 // Calendly-style token page + guest-by-email bookings.
 export { setPlaybookWorkoutPolicy } from './playbookWorkoutPolicy';
+export { getSessionVideoAvailability, setWorkoutVideoPolicy, getWorkoutVideoRollout } from './sessionVideoPolicy';
+import { sessionVideoAvailability } from './sessionVideoPolicy';
+import { saveVideoReceipt } from './videoAllocationReceipt';
 import { enrollmentCloneFields } from './playbookClone';
 export {
   createPlaybookBookingLink,
@@ -4489,13 +4492,23 @@ export const allocateSessionInstance = onCall(
       zoomMeetingId: meeting.meetingId,
       zoomMeetingUuid: meeting.uuid || null,
       zoomJoinUrl: meeting.joinUrl,
-      zoomStartUrl: meeting.startUrl,
+      // Host start URLs must never be stored in member-readable documents.
+      zoomStartUrl: FieldValue.delete(),
       zoomMeetingPassword: meeting.password ?? null,
       zoomProviderMode: zoomProvider.mode,
       allocatedAt: FieldValue.serverTimestamp(),
       allocationAttempts: (instance.allocationAttempts || 0) + 1,
       updatedAt: FieldValue.serverTimestamp(),
     });
+
+    // Default-denied collection: clients cannot forge provider recording receipts.
+    await saveVideoReceipt(() => db.collection('session_video_receipts').doc(instanceRef.id).set({
+      coachId: instance.coachId, roomId: allocatedRoom.id, meetingId: meeting.meetingId,
+      memberId: instance.memberId, playbookId: instance.playbookId || null, providerMode: zoomProvider.mode,
+      startMs: instance.startUtc?.toMillis?.() ?? null, endMs: instance.endUtc?.toMillis?.() ?? null,
+      participantVideoOff: meeting.participantVideoOff === true,
+      recordingMode: meeting.recordingMode || 'unknown', observedAt: FieldValue.serverTimestamp(),
+    }));
 
     // Advance the round-robin cursor: every successful allocation stamps
     // lastUsedAt; pool rooms also keep lastAllocatedAt for older readers.
@@ -4627,6 +4640,7 @@ export const allocateAllPendingInstances = onCall(
 
         if (!hasConflict) {
           const batchProvider = getZoomProvider({ accountId: zoomAccountId.value(), clientId: zoomClientId.value(), clientSecret: zoomClientSecret.value() });
+          let providerCreated = false;
           try {
             const meeting = await batchProvider.createMeeting({
               topic: `GoArrive Session: ${instance.memberName || 'Member'}`,
@@ -4637,6 +4651,7 @@ export const allocateAllPendingInstances = onCall(
               autoRecording: instance.recordingEnabled === false ? 'none' : 'cloud',
             });
 
+            providerCreated = true;
             await db.collection('session_instances').doc(instance.id).update({
               status: 'allocated',
               zoomRoomId: roomDoc.id,
@@ -4644,13 +4659,22 @@ export const allocateAllPendingInstances = onCall(
               zoomMeetingId: meeting.meetingId,
               zoomMeetingUuid: meeting.uuid || null,
               zoomJoinUrl: meeting.joinUrl,
-              zoomStartUrl: meeting.startUrl,
+              // Also remove a stale host capability when this occurrence is reallocated.
+              zoomStartUrl: FieldValue.delete(),
               zoomMeetingPassword: meeting.password,
               zoomProviderMode: batchProvider.mode,
               allocatedAt: FieldValue.serverTimestamp(),
               allocationAttempts: (instance.allocationAttempts || 0) + 1,
               updatedAt: FieldValue.serverTimestamp(),
             });
+
+            await saveVideoReceipt(() => db.collection('session_video_receipts').doc(instance.id).set({
+              coachId: instance.coachId, roomId: roomDoc.id, meetingId: meeting.meetingId,
+              memberId: instance.memberId, playbookId: instance.playbookId || null, providerMode: batchProvider.mode,
+              startMs: instance.startUtc?.toMillis?.() ?? null, endMs: instance.endUtc?.toMillis?.() ?? null,
+              participantVideoOff: meeting.participantVideoOff === true,
+              recordingMode: meeting.recordingMode || 'unknown', observedAt: FieldValue.serverTimestamp(),
+            }));
 
             await writeSessionEvent({
               occurrenceId: instance.id,
@@ -4666,6 +4690,8 @@ export const allocateAllPendingInstances = onCall(
             allocated++;
             roomFound = true;
           } catch (err: any) {
+            // Provider success must never fall through to another room or overwrite status.
+            if (providerCreated) throw new HttpsError('unavailable', 'Meeting creation succeeded but allocation confirmation failed. Reconcile the existing meeting before retrying.');
             await writeSessionEvent({
               occurrenceId: instance.id,
               eventType: 'meeting_creation_failed',
@@ -4782,6 +4808,7 @@ export const rescheduleInstance = onCall(
       zoomRoomId: FieldValue.delete(),
       zoomRoomLabel: FieldValue.delete(),
       zoomMeetingId: FieldValue.delete(),
+      zoomRecordingMode: FieldValue.delete(),
       zoomMeetingUuid: FieldValue.delete(),
       zoomJoinUrl: FieldValue.delete(),
       zoomStartUrl: FieldValue.delete(),
@@ -11198,6 +11225,11 @@ export const getEmbeddedSessionJoinConfig = onCall(
         'failed-precondition',
         `Session is in status "${instance.status}", cannot join`
       );
+    }
+
+    if (request.data?.purpose === 'workout_video') {
+      const availability = await sessionVideoAvailability(sessionInstanceId, request.auth!, Date.now(), instance);
+      if (!availability.enabled) throw new HttpsError('failed-precondition', availability.reason);
     }
 
     // Display identity: coach callers join under their own name so the member

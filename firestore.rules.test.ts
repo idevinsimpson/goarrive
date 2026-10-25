@@ -33,6 +33,7 @@ import { resolve } from 'path';
 import {
   collection,
   deleteDoc,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -564,6 +565,27 @@ describe('Playbook roster identity', () => {
   });
 });
 
+test('allocated session stays queryable by its member without a host capability; unrelated member remains denied', async () => {
+  await testEnv.withSecurityRulesDisabled(async ctx => {
+    const ref = doc(ctx.firestore(), 'session_instances', 'safe-allocation');
+    await setDoc(ref, { coachId: COACH_A_UID, memberId: 'roster-member', status: 'scheduled', zoomStartUrl: 'synthetic-old-host-marker' });
+    // Same deletion transform used by both allocator updates; no historical/live sweep.
+    await updateDoc(ref, { status: 'allocated', zoomJoinUrl: 'https://example.invalid/participant', zoomStartUrl: deleteField() });
+  });
+  const memberDb = testEnv.authenticatedContext('auth-member', { role: 'member', coachId: COACH_A_UID, memberId: 'roster-member' }).firestore();
+  const result = await assertSucceeds(getDocs(query(collection(memberDb, 'session_instances'), where('memberId', '==', 'roster-member'), where('coachId', '==', COACH_A_UID))));
+  expect(result.size).toBe(1);
+  expect(result.docs[0].data()).toMatchObject({ status: 'allocated', zoomJoinUrl: 'https://example.invalid/participant' });
+  expect(result.docs[0].data()).not.toHaveProperty('zoomStartUrl');
+  await assertFails(getDoc(doc(testEnv.authenticatedContext('other', { role: 'member', memberId: 'other', coachId: COACH_A_UID }).firestore(), 'session_instances', 'safe-allocation')));
+});
+
+test('legacy host field is not redacted by full-document rules: separate historical remediation is still needed', async () => {
+  await testEnv.withSecurityRulesDisabled(ctx => setDoc(doc(ctx.firestore(), 'session_instances', 'legacy-host-field'), { coachId: COACH_A_UID, memberId: MEMBER_A_UID, zoomStartUrl: 'synthetic-legacy-marker' }));
+  const snapshot = await assertSucceeds(getDoc(doc(testEnv.authenticatedContext(MEMBER_A_UID, { role: 'member', coachId: COACH_A_UID }).firestore(), 'session_instances', 'legacy-host-field')));
+  expect(snapshot.data()?.zoomStartUrl).toBe('synthetic-legacy-marker');
+});
+
 
 test('linked member retains historical UID and current roster sessions without exposing others', async () => {
   await testEnv.withSecurityRulesDisabled(async ctx => {
@@ -631,4 +653,12 @@ describe('shared WSF data access', () => {
       }
     }
   });
+});
+
+test('allocation receipts reject client read/write even for the owning coach or admin', async () => {
+  await testEnv.withSecurityRulesDisabled(async ctx => { await setDoc(doc(ctx.firestore(), 'session_video_receipts', 'synthetic'), { coachId: COACH_A_UID, recordingMode: 'none', meetingId: 'synthetic' }); });
+  for (const db of [asCoachA(), asMemberA(), asPlatformAdmin(), asUnauthenticated()]) {
+    await assertFails(getDoc(doc(db, 'session_video_receipts', 'synthetic')));
+    await assertFails(setDoc(doc(db, 'session_video_receipts', 'synthetic'), { recordingMode: 'none' }));
+  }
 });

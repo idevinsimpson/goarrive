@@ -5,7 +5,7 @@ export function duplicatePlaybookFields(source: Record<string, any>, coachId: st
   return {
     coachId, name: `${source.name} (Copy)`, description: source.description || '',
     workoutIds, parentId: source.parentId ?? null, memberIds: [], isArchived: false,
-    workoutPolicy, nextWorkoutIndex: 0,
+    workoutPolicy, videoEnabled: source.videoEnabled === true, nextWorkoutIndex: 0,
     ...(workoutPolicy === 'scheduled' ? { scheduledWorkoutPlan: { version: newId, workoutIds: [...workoutIds], startIndex: 0 } } : {}),
   };
 }
