@@ -429,11 +429,15 @@ service cloud.firestore {
 
     match /playbooks/{playbookId} {
       allow read: if isAuthenticated() && (isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin() || request.auth.uid == resource.data.memberId || request.auth.uid == resource.data.assignedMemberId);
-      allow create: if isCoachOrBootstrap(request.resource.data.coachId) || isPlatformAdmin();
-      allow update: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin()
+      allow create: if !request.resource.data.keys().hasAny(['guestAssignmentLocked'])
+        && (isCoachOrBootstrap(request.resource.data.coachId) || isPlatformAdmin());
+      allow update: if !request.resource.data.diff(resource.data).affectedKeys().hasAny(['guestAssignmentLocked'])
+        && (!(resource.data.get('guestAssignmentLocked', false) == true)
+          || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['memberIds', 'assignedMemberId', 'memberId', 'coachId']))
+        && (isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin()
         // Member can only flip the unsynced flag on their own assigned playbook copy
         || (isAuthenticated() && (request.auth.uid == resource.data.memberId || request.auth.uid == resource.data.assignedMemberId)
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['unsynced', 'updatedAt']));
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['unsynced', 'updatedAt'])));
       allow delete: if isCoachOrBootstrap(resource.data.coachId) || isPlatformAdmin();
     }
 

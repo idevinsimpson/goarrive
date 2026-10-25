@@ -18,6 +18,7 @@ function fixture(gate = { enabled: true, mediaReady: true, assignmentGenerationR
     read: jest.fn(async (digest: string) => grants.get(digest)),
     assignment: jest.fn(async () => current),
     schedule: jest.fn(async () => ({ plan, sessions })),
+    refresh: jest.fn(async (digest: string) => ({ grant: grants.get(digest), assignment: current, plan, sessions })),
   };
   // Fixed synthetic bytes only. No production capability is created by these tests.
   const service = new GuestWorkoutCapabilities(store, gate, () => clock, () => Buffer.alloc(32, ++serial));
@@ -74,8 +75,19 @@ describe('guest capability offline security contract', () => {
   it('fails closed for malformed, unknown and guessed resource IDs with uniform error', async () => {
     const f = fixture(); for (const token of ['plan', '', 'x'.repeat(43), 'https://example.invalid']) await expect(f.service.resolve(token)).rejects.toThrow('This workout link is unavailable.');
   });
-  it.each(['cancelled', 'completed'])('rejects %s sessions', async status => {
+  it.each(['cancelled', 'missed'])('rejects %s sessions', async status => {
     const f = fixture(), { token } = await f.issue(); f.sessions[0].status = status; await expect(f.service.resolve(token)).rejects.toThrow('unavailable');
+  });
+  it('permits Zoom-ended lifecycle until actual workout completion or time end', async () => {
+    const f = fixture(), { token } = await f.issue(); f.sessions[0].status = 'completed';
+    expect((await f.service.resolve(token)).workoutId).toBe('A'); f.sessions[0].completed = true;
+    await expect(f.service.resolve(token)).rejects.toThrow('unavailable');
+  });
+  it.each(['cancel', 'complete', 'reschedule', 'workout'])('rejects late session change: %s', async kind => {
+    const f = fixture(), { token } = await f.issue();
+    f.store.refresh.mockImplementationOnce(async digest => ({ grant: f.grants.get(digest), assignment,
+      plan: f.plan, sessions: [{ ...f.sessions[0], ...(kind === 'cancel' ? { status: 'cancelled' } : kind === 'complete' ? { completed: true } : kind === 'reschedule' ? { start: now + 999999 } : { scheduledWorkoutId: 'B' }) }] }));
+    await expect(f.service.resolve(token)).rejects.toThrow('unavailable');
   });
   it('uses absolute times across DST, excludes early/ended and overlapping sessions', async () => {
     const f = fixture(), { token } = await f.issue();

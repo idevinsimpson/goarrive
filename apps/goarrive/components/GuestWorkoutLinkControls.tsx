@@ -5,12 +5,13 @@ type Props = {
   assignmentKey: string;
   memberLabel: string;
   available?: boolean;
+  canRevoke?: boolean;
   onConfirm?: (action: 'replace' | 'revoke') => Promise<void>;
 };
 
 /** Draft controls. Production wiring stays unavailable until the private media
  * and server-owned assignment generation adapters pass independent review. */
-export default function GuestWorkoutLinkControls({ assignmentKey, memberLabel, available = false, onConfirm }: Props) {
+export default function GuestWorkoutLinkControls({ assignmentKey, memberLabel, available = false, canRevoke = false, onConfirm }: Props) {
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -19,9 +20,9 @@ export default function GuestWorkoutLinkControls({ assignmentKey, memberLabel, a
   useEffect(() => {
     generation.current += 1; inFlight.current = false; setConfirmed(false); setBusy(false); setMessage('');
     return () => { generation.current += 1; };
-  }, [assignmentKey, available]);
+  }, [assignmentKey, available, canRevoke]);
   const run = async (action: 'replace' | 'revoke') => {
-    if (inFlight.current || !available || !onConfirm || (action === 'replace' && !confirmed)) return;
+    if (inFlight.current || !onConfirm || (action === 'replace' ? !available || !confirmed : !canRevoke)) return;
     const current = generation.current; inFlight.current = true; setBusy(true); setMessage('');
     try {
       await onConfirm(action);
@@ -39,7 +40,7 @@ export default function GuestWorkoutLinkControls({ assignmentKey, memberLabel, a
       <Text>{confirmed ? '☑' : '☐'} I understand and want to create a guest link for this member.</Text>
     </Pressable>
     <Pressable accessibilityRole="button" disabled={!available || !confirmed || busy} accessibilityState={{ disabled: !available || !confirmed || busy }} onPress={() => run('replace')}><Text>Create or replace guest link</Text></Pressable>
-    <Pressable accessibilityRole="button" disabled={!available || busy} accessibilityState={{ disabled: !available || busy }} onPress={() => run('revoke')}><Text>Disable guest access</Text></Pressable>
+    <Pressable accessibilityRole="button" disabled={!canRevoke || busy} accessibilityState={{ disabled: !canRevoke || busy }} onPress={() => run('revoke')}><Text>Disable guest access</Text></Pressable>
     {!!message && <Text accessibilityRole="alert">{message}</Text>}
   </View>;
 }

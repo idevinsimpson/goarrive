@@ -13243,3 +13243,7 @@ export const onScenarioWriteMirrorSharedView = onDocumentWritten(
     await buildAndWriteSharedPlanProjection(planId);
   }
 );
+
+// Guest issuance/playback remain unavailable; revocation is independent of rollout.
+export { setGuestAssignmentMembers } from './guestAssignmentLifecycle';
+export { getGuestWorkoutAccess, revokeGuestWorkoutLink } from './guestWorkoutAccess';

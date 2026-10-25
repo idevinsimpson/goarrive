@@ -11,10 +11,13 @@
  */
 import * as Sentry from '@sentry/react-native';
 import { filterResetPasswordTelemetry } from './resetPasswordPrivacy';
+import { containsGuestWorkoutLink, filterGuestWorkoutTelemetry } from './guestWorkoutPrivacy';
+const privateTelemetry = <T,>(record: T) => filterGuestWorkoutTelemetry(filterResetPasswordTelemetry(record));
 
 const SENTRY_DSN = process.env.EXPO_PUBLIC_SENTRY_DSN ?? '';
 
 export function initSentry(): void {
+  if (typeof window !== 'undefined' && containsGuestWorkoutLink(window.location.href)) return;
   if (!SENTRY_DSN) {
     if (__DEV__) {
       console.warn('[Sentry] EXPO_PUBLIC_SENTRY_DSN is not set — error reporting disabled.');
@@ -35,9 +38,9 @@ export function initSentry(): void {
     attachStacktrace: true,
     // Never retain reset-link breadcrumbs or send reset credentials in errors
     // or performance transactions (including delayed records after navigation).
-    beforeBreadcrumb: filterResetPasswordTelemetry,
-    beforeSend: filterResetPasswordTelemetry,
-    beforeSendTransaction: filterResetPasswordTelemetry,
+    beforeBreadcrumb: privateTelemetry,
+    beforeSend: privateTelemetry,
+    beforeSendTransaction: privateTelemetry,
   });
 }
 

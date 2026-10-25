@@ -26,6 +26,8 @@ export interface CapabilityStore {
   read(digest: string): Promise<Grant | undefined>;
   assignment(grant: Grant): Promise<Assignment | undefined>;
   schedule(assignment: Assignment): Promise<{ plan: Plan; sessions: Session[] }>;
+  /** Final grant, assignment and schedule must come from one read transaction. */
+  refresh(digest: string): Promise<{ grant?: Grant; assignment?: Assignment; plan: Plan; sessions: Session[] }>;
 }
 
 export class GuestWorkoutCapabilities {
@@ -58,16 +60,20 @@ export class GuestWorkoutCapabilities {
     if (!assignment?.active || !sameAssignment(grant, assignment)) throw unavailable();
     const { plan, sessions } = await this.store.schedule(assignment);
     if (plan.coachId !== assignment.coachId) throw unavailable();
-    const candidates = sessions.filter(s => s.coachId === assignment.coachId && s.playbookId === assignment.playbookId &&
-      s.memberId === assignment.memberId && !s.completed && ['scheduled', 'allocated', 'in_progress', 'allocation_failed'].includes(s.status) &&
-      Number.isFinite(s.start) && Number.isFinite(s.end) && s.end > s.start && now >= s.start - 300000 && now < s.end);
+    const eligible = (rows: Session[], at: number) => rows.filter(s => s.coachId === assignment.coachId && s.playbookId === assignment.playbookId &&
+      s.memberId === assignment.memberId && !s.completed && ['scheduled', 'allocated', 'in_progress', 'allocation_failed', 'completed'].includes(s.status) &&
+      Number.isFinite(s.start) && Number.isFinite(s.end) && s.end > s.start && at >= s.start - 300000 && at < s.end);
+    const candidates = eligible(sessions, now);
     if (candidates.length !== 1) throw unavailable();
     const session = candidates[0], ids = plan.workoutIds;
     const index = Number.isInteger(plan.nextWorkoutIndex) ? plan.nextWorkoutIndex : 0;
     const workoutId = session.pinnedWorkoutId || session.scheduledWorkoutId || (ids.length ? ids[((index % ids.length) + ids.length) % ids.length] : undefined);
     if (!workoutId) throw unavailable();
-    const fresh = await this.store.read(grant.digest), current = await this.store.assignment(grant), finishedAt = this.clock();
-    if (!fresh || fresh.revoked || finishedAt >= fresh.expiresAt || !current?.active || !sameAssignment(grant, current) || finishedAt >= session.end) throw unavailable();
+    const final = await this.store.refresh(grant.digest), fresh = final.grant, current = final.assignment, finishedAt = this.clock();
+    const latest = eligible(final.sessions, finishedAt);
+    if (!fresh || fresh.revoked || !fresh.active || finishedAt >= fresh.expiresAt || !current?.active || !sameAssignment(grant, current) ||
+      final.plan.coachId !== plan.coachId || JSON.stringify(final.plan) !== JSON.stringify(plan) || latest.length !== 1 ||
+      JSON.stringify(latest[0]) !== JSON.stringify(session)) throw unavailable();
     // Internal selection only, never a public response. Media adapter must revalidate
     // this admission and ownership before explicit field projection/stream delivery.
     return { sessionId: session.id, workoutId, coachId: assignment.coachId,

@@ -1,3 +1,4 @@
+import { updatePlaybookMembers } from '../../lib/updatePlaybookMembers';
 /**
  * Build screen — Unified Creative Workspace
  *
@@ -1405,7 +1406,7 @@ function BuildScreenInner() {
         patch.assignedMemberId = memberId;
         patch.assignedMemberName = name;
       }
-      await updateDoc(doc(db, 'playbooks', pb.id), patch);
+      await updatePlaybookMembers(pb.id, patch);
     } catch (e) { console.error('[Build] Add member to playbook error:', e); }
   }, [pbMembers]);
 
@@ -1425,7 +1426,7 @@ function BuildScreenInner() {
           ? (pbMembers.find(m => m.id === next[0])?.name ?? null)
           : null;
       }
-      await updateDoc(doc(db, 'playbooks', pb.id), patch);
+      await updatePlaybookMembers(pb.id, patch);
     } catch (e) { console.error('[Build] Remove member from playbook error:', e); }
   }, [pbMembers]);
 
@@ -3166,6 +3167,9 @@ function BuildScreenInner() {
             <Pressable style={s.pbMenuItem} onPress={() => { setShowPbMenu(false); copyPbMemberLink(); }}>
               <Icon name="share" size={16} color="#F5A623" />
               <Text style={[s.pbMenuItemText, { color: '#F5A623' }]}>Copy Member Workout Link</Text>
+            </Pressable>
+            <Pressable style={s.pbMenuItem} disabled accessibilityState={{ disabled: true }}>
+              <Text style={[s.pbMenuItemText, { color: '#7A8795' }]}>Guest workout link: unavailable</Text>
             </Pressable>
             <Pressable
               style={s.pbMenuItem}

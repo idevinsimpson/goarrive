@@ -19,7 +19,7 @@ it('requires explicit confirmation before issuing; never issues on mount', async
   expect(host.textContent).toContain('cannot be retrieved later');
 });
 it('allows revocation without re-consenting to issuance', async () => {
-  const callback = vi.fn().mockResolvedValue(undefined); await render({ available: true, onConfirm: callback });
+  const callback = vi.fn().mockResolvedValue(undefined); await render({ available: false, canRevoke: true, onConfirm: callback });
   await click('button', 'Disable guest access'); expect(callback).toHaveBeenCalledExactlyOnceWith('revoke');
 });
 it('shows failure without leaking the underlying error and permits retry', async () => {

@@ -1,3 +1,4 @@
+import { updatePlaybookMembers } from '../lib/updatePlaybookMembers';
 /**
  * PlaybookSchedulePanel — scheduling inside the playbook drill-in.
  *
@@ -572,7 +573,7 @@ export default function PlaybookSchedulePanel({
     setMemberBusy(true);
     try {
       // assignedMemberId stays in sync for legacy single-member reads
-      await updateDoc(doc(db, 'playbooks', playbookId), {
+      await updatePlaybookMembers(playbookId, {
         memberIds: newIds,
         assignedMemberId: newIds[0] || null,
         assignedMemberName: newIds[0] ? nameOf(newIds[0]) : null,
