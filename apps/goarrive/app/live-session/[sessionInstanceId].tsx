@@ -36,6 +36,7 @@ import RecordedSessionVideoEntry from '../../components/RecordedSessionVideoEntr
 import WorkoutVideoOverlay from '../../components/WorkoutVideoOverlay';
 import { BG, CARD, BORDER, FG, MUTED, GOLD, GREEN, RED, FH, FB } from '../../lib/theme';
 
+import { memberSessionState } from '../../lib/memberPlaybookSessions';
 import { sessionWindowMs } from '../../lib/sessionTiming';
 import { workoutReturnPath } from '../../lib/workoutReturnPath';
 import { useSessionServerTime } from '../../hooks/useSessionServerTime';
@@ -88,7 +89,7 @@ function confirmDialog(title: string, message: string, onConfirm: () => void) {
 const CANCELABLE_STATUSES = ['scheduled', 'allocated', 'allocation_failed'];
 
 export default function LiveSessionScreen() {
-  const { sessionInstanceId } = useLocalSearchParams<{ sessionInstanceId: string }>();
+  const { sessionInstanceId, openWorkout } = useLocalSearchParams<{ sessionInstanceId: string; openWorkout?: string }>();
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
 
@@ -109,6 +110,7 @@ export default function LiveSessionScreen() {
   activeSessionRef.current = sessionInstanceId;
   const [coachName, setCoachName] = useState<string | null>(null);
 
+  const automaticPlayer = useRef('');
   const [playerVisible, setPlayerVisible] = useState(false);
   const [workoutDone, setWorkoutDone] = useState(false);
 
@@ -119,7 +121,7 @@ export default function LiveSessionScreen() {
   useEffect(() => {
     setInst(null); setLoading(true); setLoadError('');
     setWorkout(null); setWorkoutLoaded(false); setWorkoutError('');
-    setCoachName(null); setPlayerVisible(false); setWorkoutDone(false);
+    setCoachName(null); setPlayerVisible(false); setWorkoutDone(false); automaticPlayer.current = '';
     setShowReschedule(false); setActionError(''); setCancelling(false);
     completingRef.current = false;
     setCompletionError(''); setCompleting(false);
@@ -174,6 +176,13 @@ export default function LiveSessionScreen() {
     })();
     return () => { cancelled = true; };
   }, [user, sessionInstanceId, inst, workoutLoaded, readyForWorkout]);
+
+  useEffect(() => {
+    const key = `${user?.uid}/${sessionInstanceId}`;
+    if (openWorkout !== '1' || !user || !inst || inst.id !== sessionInstanceId || !workout || !workoutLoaded || workoutDone || !Number.isFinite(now)) return;
+    if (automaticPlayer.current === key || memberSessionState(inst, now) !== 'active') return;
+    automaticPlayer.current = key; setPlayerVisible(true);
+  }, [openWorkout, user?.uid, sessionInstanceId, inst, workout, workoutLoaded, workoutDone, now]);
 
   const window_ = useMemo(() => (inst ? sessionWindowMs(inst) : null), [inst]);
 
