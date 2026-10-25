@@ -80,3 +80,14 @@ No rules/index change. Preserve current Hosting and named-function rollback refe
 backend compatibility first, Hosting preview before public promotion. Keep live video off
 where any admission/recording/room/capability gate is unverified. Real media acceptance needs
 separate consent and an actual device; synthetic tests cannot substitute for that claim.
+
+## Review corrections (local, not released)
+The new in-workout feature has a separate server environment gate `WORKOUT_VIDEO_ROLLOUT_ENABLED`, closed unless exactly `true`; settings UI queries the gate and fails closed. Do not enable it until authorized real-device SDK media verification. Policy settings are defaults/overrides, not release controls.
+
+Recording/camera observations move to default-denied `session_video_receipts`, bound to session member, coach, Playbook, time range, live provider, room and meeting. Client session fields cannot forge this receipt. This is an allocation-time observation, not a guarantee that an external Zoom host cannot later change recording settings. Real-media activation remains blocked pending that residual-risk decision.
+
+SDK operations and cleanup are bounded; a hung generation is quarantined until late cleanup or page reload. Single-flight admission checks expire independently, including the explicit session-end deadline. No new owner can race a quarantined old SDK.
+
+The legacy beta join page is restored byte-for-byte to the prior released source, and its existing signing contract is retained. Its old SDK/media behavior is not newly validated or advertised as fixed; it must not be conflated with the gated new workout video path. No new media tests were run against that legacy route.
+
+Revision validation: 533 app tests across 42 files; 72 Functions contracts across 10 suites; 25 local policy emulator cases; 60 shared GoArrive/WSF rules cases; app/Functions TypeScript checks passed. Three focused admission deadline tests reran after conservative network-latency subtraction and passed. These are synthetic/provider-mocked checks; no real camera/microphone/recording or new live media acceptance.

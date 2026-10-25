@@ -8,6 +8,8 @@ const member = { uid: 'uid', token: { role: 'member', memberId: 'roster', coachI
 const coach = { uid: 'coach', token: { role: 'coach' } };
 const read = (auth = member, at = now) => sessionVideoAvailability('session', auth, at);
 beforeEach(async () => {
+  process.env.WORKOUT_VIDEO_ROLLOUT_ENABLED = 'true';
+  await db.doc('session_video_receipts/session').set({ coachId: 'coach', roomId: 'room', meetingId: 'synthetic', recordingMode: 'none', memberId: 'roster', playbookId: 'plan', providerMode: 'live', participantVideoOff: true, startMs: now, endMs: now + 2700000 });
   await db.doc('playbooks/plan').set({ coachId: 'coach', memberIds: ['roster'], videoEnabled: true });
   await db.doc('workouts/workout').set({ coachId: 'coach', videoPolicy: 'inherit' });
   await db.doc('zoom_rooms/room').set({ coachId: 'coach', status: 'active' });
@@ -37,8 +39,8 @@ test.each([
   ['playbooks/plan', { memberIds: ['other'] }], ['playbooks/plan', { coachId: 'other' }],
   ['workouts/workout', { coachId: 'other' }], ['workouts/workout', { videoPolicy: 'off' }],
   ['session_instances/session', { status: 'cancelled' }], ['session_instances/session', { recordingEnabled: true }],
-  ['session_instances/session', { zoomRecordingMode: 'cloud' }], ['session_instances/session', { workoutCompletedAt: true }], ['session_instances/session', { zoomRoomId: 'missing' }],
-  ['zoom_rooms/room', { coachId: 'other' }], ['zoom_rooms/room', { status: 'disabled' }],
+  ['session_video_receipts/session', { recordingMode: 'cloud' }], ['session_instances/session', { workoutCompletedAt: true }], ['session_instances/session', { zoomRoomId: 'missing' }],
+  ['session_video_receipts/session', { providerMode: 'mock' }], ['session_video_receipts/session', { participantVideoOff: false }], ['session_video_receipts/session', { memberId: 'other' }], ['zoom_rooms/room', { coachId: 'other' }], ['zoom_rooms/room', { status: 'disabled' }],
 ])('denies changed assignment/state %s %j', async (path, update) => {
   await db.doc(path as string).update(update as any); expect((await read()).enabled).toBe(false);
 });
@@ -67,7 +69,22 @@ test('a room changed between initial lookup and admission cannot sign the stale 
 test('rescheduling or reallocating changes the non-secret client binding', async () => {
   const first = await read();
   await db.doc('session_instances/session').update({ zoomMeetingId: 'new-room-meeting' });
+  await db.doc('session_video_receipts/session').update({ meetingId: 'new-room-meeting' });
   const second = await read();
   expect(second.enabled).toBe(true); expect(second.binding).not.toBe(first.binding);
   expect(second.binding).toMatch(/^[a-f0-9]{64}$/);
+});
+
+test('rollout absent/false blocks admission and policy writes even with workout override', async () => {
+  await db.doc('workouts/workout').update({ videoPolicy: 'on' });
+  for (const value of [undefined, 'false', 'TRUE']) {
+    if (value === undefined) delete process.env.WORKOUT_VIDEO_ROLLOUT_ENABLED; else process.env.WORKOUT_VIDEO_ROLLOUT_ENABLED = value;
+    expect((await read()).enabled).toBe(false);
+    await expect((setWorkoutVideoPolicy as any).run({ auth: coach, data: { kind: 'playbook', id: 'plan', policy: 'on' } })).rejects.toMatchObject({ code: 'failed-precondition' });
+  }
+});
+test('coach-writable recording fields cannot forge server recording observation', async () => {
+  await db.doc('session_video_receipts/session').delete();
+  await db.doc('session_instances/session').update({ zoomRecordingMode: 'none', recordingEnabled: false });
+  expect((await read()).enabled).toBe(false);
 });

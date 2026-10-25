@@ -18,3 +18,13 @@ describe('video lease', () => {
     await Promise.all([lease.close(), lease.close()]); expect(destroy).toHaveBeenCalledOnce();
   });
 });
+
+it('bounds a hung join teardown and quarantines its owner until late cleanup', async () => {
+  vi.useFakeTimers(); const join = deferred(); const destroy = vi.fn();
+  const lease = createZoomLease(() => ({ client: { leaveMeeting: vi.fn().mockResolvedValue(undefined) }, destroy }));
+  const run = lease.run(async () => join.promise); const observed = run.catch(() => {});
+  const closing = lease.close(); await vi.advanceTimersByTimeAsync(2100); await closing;
+  expect(destroy).toHaveBeenCalledOnce(); expect(() => createZoomLease(() => ({ client: {}, destroy: () => {} }))).toThrow(/still closing/);
+  join.resolve(); await observed; await vi.advanceTimersByTimeAsync(0);
+  const next = createZoomLease(() => ({ client: {}, destroy: () => {} })); await next.close(); vi.useRealTimers();
+});

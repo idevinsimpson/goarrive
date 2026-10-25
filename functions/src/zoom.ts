@@ -29,6 +29,7 @@ export interface ZoomMeetingRequest {
 }
 
 export interface ZoomMeetingResponse {
+  participantVideoOff?: boolean;
   recordingMode?: 'none' | 'cloud' | 'local' | 'unknown';
   meetingId: string;       // Zoom meeting ID (numeric string for real, "mock-..." for mock)
   joinUrl: string;
@@ -149,6 +150,7 @@ export class RealZoomProvider implements ZoomProvider {
         waiting_room: false,
         auto_recording: request.autoRecording ?? 'cloud',
         mute_upon_entry: true,
+        participant_video: false,
         approval_type: 0, // Automatically approve
       },
     });
@@ -164,7 +166,7 @@ export class RealZoomProvider implements ZoomProvider {
       join_url: string;
       password: string;
       host_email: string;
-      settings?: { auto_recording?: string };
+      settings?: { auto_recording?: string; participant_video?: boolean };
     };
 
     console.log(`[Zoom Real] Meeting created: ${data.id} for ${request.hostEmail}`);
@@ -175,6 +177,7 @@ export class RealZoomProvider implements ZoomProvider {
       joinUrl: data.join_url,
       password: data.password,
       hostEmail: data.host_email,
+      participantVideoOff: data.settings?.participant_video === false,
       recordingMode: data.settings?.auto_recording === 'none' ? 'none' : data.settings?.auto_recording === 'cloud' ? 'cloud' : data.settings?.auto_recording === 'local' ? 'local' : 'unknown',
     };
   }
@@ -206,7 +209,7 @@ export class RealZoomProvider implements ZoomProvider {
       join_url: string;
       password: string;
       host_email: string;
-      settings?: { auto_recording?: string };
+      settings?: { auto_recording?: string; participant_video?: boolean };
     };
 
     return {
@@ -215,6 +218,7 @@ export class RealZoomProvider implements ZoomProvider {
       joinUrl: data.join_url,
       password: data.password,
       hostEmail: data.host_email,
+      participantVideoOff: data.settings?.participant_video === false,
       recordingMode: data.settings?.auto_recording === 'none' ? 'none' : data.settings?.auto_recording === 'cloud' ? 'cloud' : data.settings?.auto_recording === 'local' ? 'local' : 'unknown',
     };
   }

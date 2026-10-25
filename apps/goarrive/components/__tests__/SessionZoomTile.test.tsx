@@ -14,7 +14,7 @@ beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); vi.clearAllMocks(); m.user = { uid: 'member' };
   Object.defineProperty(window, 'isSecureContext', { configurable: true, value: true });
   Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: m.capture } });
-  m.available.mockResolvedValue({ data: { enabled: true } }); m.config.mockResolvedValue({ data: { signature: 'synthetic', meetingNumber: 'synthetic' } });
+  m.available.mockResolvedValue({ data: { enabled: true, validForMs: 25000 } }); m.config.mockResolvedValue({ data: { signature: 'synthetic', meetingNumber: 'synthetic' } });
   m.init.mockResolvedValue(undefined); m.join.mockResolvedValue(undefined); m.leave.mockResolvedValue(undefined);
   m.load.mockResolvedValue({ createClient: () => ({ init: m.init, join: m.join, leaveMeeting: m.leave }), destroyClient: m.destroy });
   host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host);
@@ -49,7 +49,7 @@ it('navigation while join is pending cannot resurrect a previous meeting', async
 
 it('a changed server room/schedule binding closes the old client without another click', async () => {
   vi.useFakeTimers();
-  m.available.mockResolvedValueOnce({ data: { enabled: true, binding: 'original' } }).mockResolvedValue({ data: { enabled: true, binding: 'replacement' } });
+  m.available.mockResolvedValueOnce({ data: { enabled: true, validForMs: 25000, binding: 'original' } }).mockResolvedValue({ data: { enabled: true, validForMs: 25000, binding: 'replacement' } });
   await render(); await click('Join video');
   await act(async () => { await vi.advanceTimersByTimeAsync(15000); });
   expect(m.destroy).toHaveBeenCalledOnce(); expect(host.textContent).not.toContain('Leave video');

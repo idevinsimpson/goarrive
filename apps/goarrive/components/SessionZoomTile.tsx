@@ -3,8 +3,9 @@ import { ActivityIndicator, Platform, Pressable, Text, View } from 'react-native
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../lib/firebase';
 import { useAuth } from '../lib/AuthContext';
+import { watchVideoAdmission } from '../lib/videoAdmissionWatch';
 import { loadZoomEmbedded } from '../lib/zoomEmbeddedLoader';
-import { createZoomLease, videoCapability } from '../lib/zoomClientLifecycle';
+import { bounded, createZoomLease, videoCapability } from '../lib/zoomClientLifecycle';
 
 export default function SessionZoomTile({ sessionInstanceId, variant, joinLabel }: {
   sessionInstanceId: string; variant: 'pip' | 'pane'; autoStartCamera?: boolean; joinLabel?: string;
@@ -24,23 +25,19 @@ export default function SessionZoomTile({ sessionInstanceId, variant, joinLabel 
     if (previous) { try { await previous.close(); } catch { /* local ownership still releases */ } }
   }, []);
   useEffect(() => {
-    let alive = true; let observation = 0;
     let binding: string | undefined;
     setAvailable(false); setPhase('idle'); setError(''); setMinimized(false);
-    const refresh = async () => {
-      if (!user || Platform.OS !== 'web') return;
-      const request = ++observation;
-      try {
-        const { data } = await httpsCallable<any, { enabled: boolean; binding?: string }>(functions, 'getSessionVideoAvailability')({ sessionInstanceId });
-        if (!alive || request !== observation) return;
+    const deny = () => { setAvailable(false); setPhase('idle'); void close(); };
+    if (!user || Platform.OS !== 'web') return () => { void close(); };
+    const stop = watchVideoAdmission(
+      () => bounded(httpsCallable<any, { enabled: boolean; binding?: string; validForMs?: number }>(functions, 'getSessionVideoAvailability')({ sessionInstanceId })),
+      ({ data }) => {
         if (binding && binding !== data.binding) { setPhase('idle'); void close(); }
-        binding = data.binding;
-        setAvailable(data.enabled);
-        if (!data.enabled) { setPhase('idle'); await close(); }
-      } catch { if (alive && request === observation) { setAvailable(false); setPhase('idle'); await close(); } }
-    };
-    void refresh(); const timer = setInterval(() => { void refresh(); }, 15000);
-    return () => { alive = false; clearInterval(timer); void close(); };
+        binding = data.binding; setAvailable(data.enabled);
+        if (!data.enabled) deny();
+      }, deny, 15000, 25000, value => value.data.validForMs ?? 0,
+    );
+    return () => { stop(); void close(); };
   }, [sessionInstanceId, user?.uid, close]);
   const join = async () => {
     if (busy.current || !available || !user) return;
@@ -50,7 +47,7 @@ export default function SessionZoomTile({ sessionInstanceId, variant, joinLabel 
     let owned: ReturnType<typeof createZoomLease> | null = null;
     try {
       // Admission is rechecked before signing; no meeting is allocated by this request.
-      const { data: config } = await httpsCallable<any, any>(functions, 'getEmbeddedSessionJoinConfig')({ sessionInstanceId, purpose: 'workout_video' });
+      const { data: config } = await bounded(httpsCallable<any, any>(functions, 'getEmbeddedSessionJoinConfig')({ sessionInstanceId, purpose: 'workout_video' }));
       if (!isCurrent()) return;
       const sdk = await loadZoomEmbedded();
       if (!isCurrent() || !root.current) return;

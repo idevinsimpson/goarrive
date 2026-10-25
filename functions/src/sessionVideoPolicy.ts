@@ -3,6 +3,14 @@ import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { ownsSessionMember } from './sessionIdentity';
 import { createHash } from 'crypto';
 
+// Fail closed unless explicitly enabled by a separately reviewed server deployment.
+export function videoRolloutEnabled(): boolean { return process.env.WORKOUT_VIDEO_ROLLOUT_ENABLED === 'true'; }
+
+export const getWorkoutVideoRollout = onCall({ region: 'us-central1', invoker: 'public' }, async request => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Please sign in.');
+  return { enabled: videoRolloutEnabled() };
+});
+
 export function videoEnabled(playbook: Record<string, any>, workout: Record<string, any>): boolean {
   if (workout.videoPolicy === 'off') return false;
   if (workout.videoPolicy === 'on') return true;
@@ -12,6 +20,7 @@ export function videoEnabled(playbook: Record<string, any>, workout: Record<stri
 /** No allocation, provider call, signing, recording or progression side effects. */
 export async function sessionVideoAvailability(id: unknown, auth: { uid: string; token: Record<string, any> }, now = Date.now(), expected?: Record<string, any>) {
   if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) throw new HttpsError('invalid-argument', 'Invalid session');
+  if (!videoRolloutEnabled()) return { enabled: false, reason: 'In-workout video is not available yet.', serverNow: now };
   const db = admin.firestore();
   const session = (await db.collection('session_instances').doc(id).get()).data();
   if (!session || (!ownsSessionMember(auth.uid, auth.token, session) && auth.uid !== session.coachId)) {
@@ -35,12 +44,13 @@ export async function sessionVideoAvailability(id: unknown, auth: { uid: string;
   const start = session.startUtc?.toMillis?.(); const end = session.endUtc?.toMillis?.();
   if (!Number.isFinite(start) || !Number.isFinite(end) || now < start - 300000 || now > end) return unavailable('Video is available only during this session.');
   // Joining an auto-recorded room can start recording; do not treat camera consent as recording consent.
-  if (session.recordingEnabled !== false || session.zoomRecordingMode !== 'none') return unavailable('In-workout video requires a session with recording turned off.');
+  const receipt = (await db.collection('session_video_receipts').doc(id).get()).data();
+  if (session.recordingEnabled !== false || !receipt || receipt.recordingMode !== 'none' || receipt.meetingId !== session.zoomMeetingId || receipt.roomId !== session.zoomRoomId || receipt.coachId !== session.coachId || receipt.memberId !== session.memberId || receipt.playbookId !== session.playbookId || receipt.providerMode !== 'live' || receipt.participantVideoOff !== true || receipt.startMs !== start || receipt.endMs !== end) return unavailable('In-workout video requires a session with recording turned off.');
   if (!session.zoomRoomId || !session.zoomMeetingId || !session.zoomJoinUrl) return unavailable('No video room has been allocated.');
   const room = (await db.collection('zoom_rooms').doc(session.zoomRoomId).get()).data();
   if (!room || room.status !== 'active' || !(room.coachId === session.coachId || (session.roomSource === 'shared_pool' && room.poolId === 'hmti'))) return unavailable('The assigned video room is unavailable.');
   const binding = createHash('sha256').update(JSON.stringify([session.coachId, session.memberId, session.playbookId, session.pinnedWorkoutId, session.zoomRoomId, session.zoomMeetingId, start, end])).digest('hex');
-  return { enabled: true, reason: '', serverNow: now, binding };
+  return { enabled: true, reason: '', serverNow: now, binding, validForMs: Math.max(0, Math.min(25000, end - now)) };
 }
 
 export const getSessionVideoAvailability = onCall({ region: 'us-central1', invoker: 'public' }, async request => {
@@ -50,6 +60,7 @@ export const getSessionVideoAvailability = onCall({ region: 'us-central1', invok
 
 export const setWorkoutVideoPolicy = onCall({ region: 'us-central1', invoker: 'public' }, async request => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Please sign in.');
+  if (!videoRolloutEnabled()) throw new HttpsError('failed-precondition', 'In-workout video is not available yet.');
   const { kind, id, policy } = request.data || {};
   if (!['playbook', 'workout'].includes(kind) || typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(id) || !(kind === 'playbook' ? ['on', 'off'] : ['inherit', 'on', 'off']).includes(policy)) throw new HttpsError('invalid-argument', 'Invalid video setting.');
   const ref = admin.firestore().collection(kind === 'playbook' ? 'playbooks' : 'workouts').doc(id);

@@ -99,7 +99,7 @@ export { getMemberPlaybookSessions } from './memberPlaybookLink';
 // Playbook booking links (Phase 3b): coach availability windows + public
 // Calendly-style token page + guest-by-email bookings.
 export { setPlaybookWorkoutPolicy } from './playbookWorkoutPolicy';
-export { getSessionVideoAvailability, setWorkoutVideoPolicy } from './sessionVideoPolicy';
+export { getSessionVideoAvailability, setWorkoutVideoPolicy, getWorkoutVideoRollout } from './sessionVideoPolicy';
 import { sessionVideoAvailability } from './sessionVideoPolicy';
 import { enrollmentCloneFields } from './playbookClone';
 export {
@@ -4493,12 +4493,20 @@ export const allocateSessionInstance = onCall(
       zoomJoinUrl: meeting.joinUrl,
       // Host start URLs must never be stored in member-readable documents.
       zoomStartUrl: FieldValue.delete(),
-      zoomRecordingMode: meeting.recordingMode || 'unknown',
       zoomMeetingPassword: meeting.password ?? null,
       zoomProviderMode: zoomProvider.mode,
       allocatedAt: FieldValue.serverTimestamp(),
       allocationAttempts: (instance.allocationAttempts || 0) + 1,
       updatedAt: FieldValue.serverTimestamp(),
+    });
+
+    // Default-denied collection: clients cannot forge provider recording receipts.
+    await db.collection('session_video_receipts').doc(instanceRef.id).set({
+      coachId: instance.coachId, roomId: allocatedRoom.id, meetingId: meeting.meetingId,
+      memberId: instance.memberId, playbookId: instance.playbookId || null, providerMode: zoomProvider.mode,
+      startMs: instance.startUtc?.toMillis?.() ?? null, endMs: instance.endUtc?.toMillis?.() ?? null,
+      participantVideoOff: meeting.participantVideoOff === true,
+      recordingMode: meeting.recordingMode || 'unknown', observedAt: FieldValue.serverTimestamp(),
     });
 
     // Advance the round-robin cursor: every successful allocation stamps
@@ -4650,12 +4658,19 @@ export const allocateAllPendingInstances = onCall(
               zoomJoinUrl: meeting.joinUrl,
               // Also remove a stale host capability when this occurrence is reallocated.
               zoomStartUrl: FieldValue.delete(),
-              zoomRecordingMode: meeting.recordingMode || 'unknown',
               zoomMeetingPassword: meeting.password,
               zoomProviderMode: batchProvider.mode,
               allocatedAt: FieldValue.serverTimestamp(),
               allocationAttempts: (instance.allocationAttempts || 0) + 1,
               updatedAt: FieldValue.serverTimestamp(),
+            });
+
+            await db.collection('session_video_receipts').doc(instance.id).set({
+              coachId: instance.coachId, roomId: roomDoc.id, meetingId: meeting.meetingId,
+              memberId: instance.memberId, playbookId: instance.playbookId || null, providerMode: batchProvider.mode,
+              startMs: instance.startUtc?.toMillis?.() ?? null, endMs: instance.endUtc?.toMillis?.() ?? null,
+              participantVideoOff: meeting.participantVideoOff === true,
+              recordingMode: meeting.recordingMode || 'unknown', observedAt: FieldValue.serverTimestamp(),
             });
 
             await writeSessionEvent({
@@ -11207,7 +11222,7 @@ export const getEmbeddedSessionJoinConfig = onCall(
       );
     }
 
-    if (instance.playbookId) {
+    if (request.data?.purpose === 'workout_video') {
       const availability = await sessionVideoAvailability(sessionInstanceId, request.auth!, Date.now(), instance);
       if (!availability.enabled) throw new HttpsError('failed-precondition', availability.reason);
     }

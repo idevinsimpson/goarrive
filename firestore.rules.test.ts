@@ -654,3 +654,11 @@ describe('shared WSF data access', () => {
     }
   });
 });
+
+test('allocation receipts reject client read/write even for the owning coach or admin', async () => {
+  await testEnv.withSecurityRulesDisabled(async ctx => { await setDoc(doc(ctx.firestore(), 'session_video_receipts', 'synthetic'), { coachId: COACH_A_UID, recordingMode: 'none', meetingId: 'synthetic' }); });
+  for (const db of [asCoachA(), asMemberA(), asPlatformAdmin(), asUnauthenticated()]) {
+    await assertFails(getDoc(doc(db, 'session_video_receipts', 'synthetic')));
+    await assertFails(setDoc(doc(db, 'session_video_receipts', 'synthetic'), { recordingMode: 'none' }));
+  }
+});
