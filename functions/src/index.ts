@@ -1,3 +1,4 @@
+import { noShowEligible } from './noShowTiming';
 import { prepareMemberInvite } from './memberInvite';
 import { ownsSessionMember } from './sessionIdentity';
 /**
@@ -7350,9 +7351,7 @@ export const detectNoShows = onSchedule(
       for (const doc of snap.docs) {
         checked++;
         const inst = doc.data();
-        const [h, m] = (inst.scheduledStartTime as string || '00:00').split(':').map(Number);
-        const [year, month, day] = dateStr.split('-').map(Number);
-        const scheduledTime = new Date(year, month - 1, day, h, m);
+
 
         // Configurable no-show grace period: plan-level > coach-level > default 15 min
         let gracePeriodMinutes = 15;
@@ -7385,10 +7384,10 @@ export const detectNoShows = onSchedule(
         } catch (err: any) {
           console.warn(`[detectNoShows] Failed to read grace period for ${inst.coachId}/${inst.memberId}: ${err.message}`);
         }
-        const graceDeadline = new Date(scheduledTime.getTime() + gracePeriodMinutes * 60 * 1000);
+
 
         // Only mark as missed if grace period has passed
-        if (now < graceDeadline) {
+        if (!noShowEligible(inst, now.getTime(), gracePeriodMinutes)) {
           skipped++;
           continue;
         }
@@ -7405,13 +7404,23 @@ export const detectNoShows = onSchedule(
           continue;
         }
 
-        // No meeting started — mark as missed
-        await doc.ref.update({
-          status: 'missed',
-          missedReason: 'auto_no_show',
-          missedAt: FieldValue.serverTimestamp(),
-          updatedAt: FieldValue.serverTimestamp(),
+        // Recheck after asynchronous reads: cancellation, rescheduling, completion
+        // or a meeting-start event must not be overwritten by this stale scan.
+        const updated = await db.runTransaction(async tx => {
+          const latest = await tx.get(doc.ref);
+          if (!latest.exists || !noShowEligible(latest.data(), Date.now(), gracePeriodMinutes)) return false;
+          const started = await tx.get(db.collection('session_events')
+            .where('instanceId', '==', doc.id).where('eventType', '==', 'meeting.started').limit(1));
+          if (!started.empty) return false;
+          tx.update(doc.ref, {
+            status: 'missed',
+            missedReason: 'auto_no_show',
+            missedAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+          return true;
         });
+        if (!updated) { skipped++; continue; }
         marked++;
 
         // Write audit log
