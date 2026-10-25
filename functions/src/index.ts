@@ -11227,11 +11227,6 @@ export const getEmbeddedSessionJoinConfig = onCall(
       );
     }
 
-    if (request.data?.purpose === 'workout_video') {
-      const availability = await sessionVideoAvailability(sessionInstanceId, request.auth!, Date.now(), instance);
-      if (!availability.enabled) throw new HttpsError('failed-precondition', availability.reason);
-    }
-
     // Display identity: coach callers join under their own name so the member
     // sees "Coach <name>" — everyone else keeps the member identity.
     const identityUid =
@@ -11261,6 +11256,13 @@ export const getEmbeddedSessionJoinConfig = onCall(
         'failed-precondition',
         'Meeting SDK credentials are not configured'
       );
+    }
+
+    // Final admission follows every awaited identity lookup; no asynchronous
+    // work may intervene before signing an expiring workout-video scope.
+    if (request.data?.purpose === 'workout_video') {
+      const availability = await sessionVideoAvailability(sessionInstanceId, request.auth!, Date.now(), instance);
+      if (!availability.enabled) throw new HttpsError('failed-precondition', availability.reason);
     }
 
     const signature = buildMeetingSdkSignature({
