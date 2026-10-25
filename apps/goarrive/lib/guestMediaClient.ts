@@ -18,6 +18,9 @@ export class GuestMediaClient {
     for (const url of this.urls) URL.revokeObjectURL(url);
     this.urls.clear(); this.onUnavailable();
   }
+  release(url: string) {
+    if (this.urls.delete(url)) URL.revokeObjectURL(url);
+  }
   private async request(action: 'manifest' | 'chunk', body: object, range?: string) {
     if (this.closed) throw new Error('Workout unavailable.');
     const controller = new AbortController(), abort = () => controller.abort();
