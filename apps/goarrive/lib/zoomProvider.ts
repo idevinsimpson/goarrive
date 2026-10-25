@@ -33,7 +33,6 @@ export class MockZoomProvider implements ZoomProvider {
     return {
       meetingId,
       joinUrl: `https://zoom.us/j/${meetingId}?pwd=${password}`,
-      startUrl: `https://zoom.us/s/${meetingId}?zak=mock_host_token_${meetingId}`,
       password,
       hostEmail: request.zoomUserId || 'mock@goarrive.fit',
     };
