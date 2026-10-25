@@ -29,6 +29,7 @@ export interface ZoomMeetingRequest {
 }
 
 export interface ZoomMeetingResponse {
+  unattendedReady?: boolean;
   participantVideoOff?: boolean;
   recordingMode?: 'none' | 'cloud' | 'local' | 'unknown';
   meetingId: string;       // Zoom meeting ID (numeric string for real, "mock-..." for mock)
@@ -81,8 +82,7 @@ async function getS2SAccessToken(
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Zoom S2S OAuth token request failed (${response.status}): ${errorText}`);
+    throw new Error(`Zoom S2S OAuth token request failed (${response.status})`);
   }
 
   const data = await response.json() as {
@@ -139,9 +139,11 @@ export class RealZoomProvider implements ZoomProvider {
   }
 
   async createMeeting(request: ZoomMeetingRequest): Promise<ZoomMeetingResponse> {
+    const password = crypto.randomBytes(5).toString('hex');
     const response = await this.apiRequest('POST', `/users/${encodeURIComponent(request.hostEmail)}/meetings`, {
       topic: request.topic,
       type: 2, // Scheduled meeting
+      password, // Meeting-only security; avoids Zoom automatic Waiting Room fallback.
       start_time: request.startTime,
       duration: request.duration,
       timezone: request.timezone,
@@ -156,8 +158,7 @@ export class RealZoomProvider implements ZoomProvider {
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Zoom create meeting failed (${response.status}): ${errorText}`);
+      throw new Error(`Zoom create meeting failed (${response.status})`);
     }
 
     const data = await response.json() as {
@@ -166,7 +167,7 @@ export class RealZoomProvider implements ZoomProvider {
       join_url: string;
       password: string;
       host_email: string;
-      settings?: { auto_recording?: string; participant_video?: boolean };
+      settings?: { auto_recording?: string; participant_video?: boolean; waiting_room?: boolean; join_before_host?: boolean; approval_type?: number };
     };
 
     console.log(`[Zoom Real] Meeting created: ${data.id} for ${request.hostEmail}`);
@@ -176,6 +177,7 @@ export class RealZoomProvider implements ZoomProvider {
       uuid: data.uuid,
       joinUrl: data.join_url,
       password: data.password,
+      unattendedReady: typeof data.password === 'string' && data.password.length > 0 && data.settings?.waiting_room === false && data.settings?.join_before_host === true && data.settings?.approval_type === 2,
       hostEmail: data.host_email,
       participantVideoOff: data.settings?.participant_video === false,
       recordingMode: data.settings?.auto_recording === 'none' ? 'none' : data.settings?.auto_recording === 'cloud' ? 'cloud' : data.settings?.auto_recording === 'local' ? 'local' : 'unknown',
@@ -209,7 +211,7 @@ export class RealZoomProvider implements ZoomProvider {
       join_url: string;
       password: string;
       host_email: string;
-      settings?: { auto_recording?: string; participant_video?: boolean };
+      settings?: { auto_recording?: string; participant_video?: boolean; waiting_room?: boolean; join_before_host?: boolean; approval_type?: number };
     };
 
     return {
@@ -217,6 +219,7 @@ export class RealZoomProvider implements ZoomProvider {
       uuid: data.uuid,
       joinUrl: data.join_url,
       password: data.password,
+      unattendedReady: typeof data.password === 'string' && data.password.length > 0 && data.settings?.waiting_room === false && data.settings?.join_before_host === true && data.settings?.approval_type === 2,
       hostEmail: data.host_email,
       participantVideoOff: data.settings?.participant_video === false,
       recordingMode: data.settings?.auto_recording === 'none' ? 'none' : data.settings?.auto_recording === 'cloud' ? 'cloud' : data.settings?.auto_recording === 'local' ? 'local' : 'unknown',
