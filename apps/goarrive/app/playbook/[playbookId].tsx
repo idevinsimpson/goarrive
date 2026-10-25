@@ -27,6 +27,7 @@ export default function MemberPlaybookLink() {
   const [opening, setOpening] = useState(false);
   const openingRef = useRef(false);
   const generation = useRef(0);
+  const automaticAttempt = useRef('');
 
   useEffect(() => {
     const timer = setInterval(() => setNow(serverClockNow(clock.current) ?? NaN), 1000);
@@ -38,6 +39,7 @@ export default function MemberPlaybookLink() {
     let busy = false;
     generation.current++;
     openingRef.current = false;
+    automaticAttempt.current = '';
     clock.current = null; setNow(NaN);
     setResult(null); setError(''); setLoadedIdentity(''); setOpening(false);
     if (loading || !user || !destination) return;
@@ -66,7 +68,7 @@ export default function MemberPlaybookLink() {
     return () => { stopped = true; generation.current++; clearInterval(timer); subscription.remove(); if (typeof window !== 'undefined') window.removeEventListener('focus', focus); };
   }, [identity, loading, destination, retry]);
 
-  async function open(id: string) {
+  async function open(id: string, automatic = false) {
     if (openingRef.current) return;
     openingRef.current = true;
     setOpening(true);
@@ -83,11 +85,25 @@ export default function MemberPlaybookLink() {
       const currentTime = serverClockNow(clock.current)!;
       setResult(response.data); setNow(currentTime);
       const session = response.data.sessions.find(s => s.id === id);
-      if (session && memberSessionState(session, currentTime) === 'active') router.push(`/live-session/${id}` as any);
+      const active = selectMemberSessions(response.data.sessions, currentTime).active;
+      if (session && memberSessionState(session, currentTime) === 'active' && (!automatic || active.length === 1)) {
+        const target = `/live-session/${id}?openWorkout=1`;
+        if (automatic) router.replace(target as any); else router.push(target as any);
+      }
       else setError('Your schedule changed. Please check the sessions below.');
     } catch { if (current === generation.current) { setResult(null); setError('Unable to confirm this session. Please refresh your schedule.'); } }
     finally { if (current === generation.current) { openingRef.current = false; setOpening(false); } }
   }
+
+  useEffect(() => {
+    if (!user || loading || loadedIdentity !== identity || !result || !Number.isFinite(now) || error) return;
+    const active = selectMemberSessions(result.sessions, now).active;
+    if (active.length !== 1) return;
+    const attempt = `${identity}/${active[0].id}`;
+    if (automaticAttempt.current === attempt) return;
+    automaticAttempt.current = attempt;
+    void open(active[0].id, true);
+  }, [identity, loadedIdentity, loading, result, now, error]);
 
   if (!destination) return <Text>Invalid Playbook link.</Text>;
   if (loading) return <ActivityIndicator accessibilityLabel="Loading account" />;

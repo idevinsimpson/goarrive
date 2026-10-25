@@ -17,7 +17,8 @@ export default function WorkoutVideoOverlay({ sessionInstanceId, variant, joinLa
   const [admission, setAdmission] = useState<{ recordingMode?: string; binding?: string }>({});
   const [phase, setPhase] = useState<'idle' | 'joining' | 'joined' | 'error'>('idle');
   const [error, setError] = useState('');
-  const [cameraOn, setCameraOn] = useState<boolean | null>(null);
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [, setCameraOn] = useState<boolean | null>(null);
   const selfView = useRef<ReturnType<typeof watchZoomSelfView> | null>(null);
   const [minimized, setMinimized] = useState(false);
   const root = useRef<HTMLDivElement | null>(null);
@@ -32,7 +33,7 @@ export default function WorkoutVideoOverlay({ sessionInstanceId, variant, joinLa
   }, []);
   useEffect(() => {
     let binding: string | undefined;
-    setAvailable(false); setAdmission({}); setPhase('idle'); setError(''); setMinimized(false);
+    setAvailable(false); setAdmission({}); setPhase('idle'); setError(''); setMinimized(false); setPanelOpen(false);
     const deny = () => { setAdmission({}); setAvailable(false); setPhase('idle'); void close(); };
     if (!user || Platform.OS !== 'web') return () => { void close(); };
     const stop = watchVideoAdmission(
@@ -49,6 +50,7 @@ export default function WorkoutVideoOverlay({ sessionInstanceId, variant, joinLa
   const join = async () => {
     if (busy.current || !available || !user) return;
     if (!videoCapability()) { setError('This browser cannot use live video. You can continue your workout.'); setPhase('error'); return; }
+    setPanelOpen(true);
     const current = generation.current; busy.current = true; setPhase('joining'); setError(''); setMinimized(false);
     const isCurrent = () => current === generation.current;
     let owned: ReturnType<typeof createZoomLease> | null = null;
@@ -80,23 +82,24 @@ export default function WorkoutVideoOverlay({ sessionInstanceId, variant, joinLa
     } finally { if (isCurrent()) busy.current = false; }
   };
   if (!available || Platform.OS !== 'web') return null;
-  return <View style={{ width: variant === 'pip' ? minimized ? 170 : 330 : '100%', minHeight: minimized ? 0 : 120, backgroundColor: '#151B26', borderRadius: 10, padding: 6 }}>
-    <div ref={root} style={{ display: minimized ? 'none' : 'block', width: '100%', height: phase === 'joined' || phase === 'joining' ? (variant === 'pip' ? 240 : 420) : 0 }} />
-    {phase === 'joined' && variant === 'pip' && <View style={{ gap: 8, padding: 8 }}>
-      {minimized && <Text style={{ color: '#F0F4F8' }}>Zoom connected</Text>}
-      <Pressable accessibilityRole="button" onPress={() => setMinimized(value => !value)}><Text style={{ color: '#F5A623' }}>{minimized ? 'Show video controls' : 'Minimize video'}</Text></Pressable>
+  const joined = phase === 'joined';
+  const buttonStyle = { minHeight: 48, minWidth: 48, padding: 12, borderRadius: 10, backgroundColor: '#263244', alignItems: 'center' as const, justifyContent: 'center' as const };
+  if (!panelOpen && phase === 'idle') return <Pressable accessibilityRole="button" accessibilityLabel="Open camera and microphone controls" style={buttonStyle} onPress={() => { setPanelOpen(true); if (admission.recordingMode !== 'cloud') void join(); }}><Text style={{ color: '#F5A623', fontSize: 20 }}>Camera</Text></Pressable>;
+  return <View style={{ width: variant === 'pip' ? minimized ? 156 : 332 : '100%', backgroundColor: '#151B26', borderRadius: 12, padding: 6 }}>
+    <View style={{ width: variant === 'pip' ? minimized ? 144 : 320 : '100%', height: joined || phase === 'joining' ? (variant === 'pip' ? minimized ? 108 : 240 : 420) : 0 }}>
+      <div ref={root} inert={minimized || undefined} style={{ display: 'block', width: variant === 'pip' ? 320 : '100%', height: joined || phase === 'joining' ? (variant === 'pip' ? 240 : 420) : 0, transform: minimized ? 'scale(0.45)' : undefined, transformOrigin: 'top left' }} />
+      {joined && minimized && <Pressable accessibilityRole="button" accessibilityLabel="Expand live video and controls" onPress={() => setMinimized(false)} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} />}
+    </View>
+    {joined && <View style={{ gap: 6, paddingTop: 6 }}>
+      {variant === 'pip' && <Pressable accessibilityRole="button" accessibilityLabel={minimized ? 'Expand live video and controls' : 'Make live video small'} style={buttonStyle} onPress={() => setMinimized(value => !value)}><Text style={{ color: '#F5A623' }}>{minimized ? 'Expand' : 'Small view'}</Text></Pressable>}
+      {!minimized && <Pressable accessibilityRole="button" style={buttonStyle} onPress={() => selfView.current?.refresh()}><Text style={{ color: '#F5A623' }}>Refresh video view</Text></Pressable>}
     </View>}
-    {phase === 'joined' && !minimized && <View style={{ gap: 6, padding: 8 }}>
-      {cameraOn !== null && <Text style={{ color: '#F0F4F8' }}>{cameraOn ? 'Camera on in Zoom' : 'Camera off in Zoom'}</Text>}
-      <Pressable accessibilityRole="button" onPress={() => selfView.current?.refresh()}><Text style={{ color: '#F5A623' }}>Refresh video view</Text></Pressable>
-    </View>}
-    {phase !== 'joined' && <View style={{ gap: 8, padding: 8 }}>
-      <Text style={{ color: '#F0F4F8' }}>Optional live video</Text>
-      <Text style={{ color: '#A0AEC0' }}>Choose your camera and microphone separately using Zoom's controls. Your workout works without video.</Text>
-      {admission.recordingMode === 'cloud' && <Text style={{ color: '#FCD34D' }}>This session is cloud recorded. Joining may start recording and capture shared audio and video. Choose Agree and join recorded video to consent, or continue your workout without video.</Text>}
+    {phase !== 'joined' && <View style={{ gap: 10, padding: 8 }}>
+      {admission.recordingMode === 'cloud' && <Text style={{ color: '#FCD34D' }}>Cloud recording: audio and video you share will be recorded. Joining may start recording.</Text>}
       {!!error && <Text accessibilityRole="alert" style={{ color: '#FCA5A5' }}>{error}</Text>}
-      {phase === 'joining' ? <ActivityIndicator accessibilityLabel="Connecting video" /> : <Pressable accessibilityRole="button" onPress={join}><Text style={{ color: '#F5A623' }}>{admission.recordingMode === 'cloud' ? 'Agree and join recorded video' : phase === 'error' ? 'Retry video' : joinLabel || 'Join video'}</Text></Pressable>}
+      {phase === 'joining' ? <ActivityIndicator accessibilityLabel="Connecting video" /> : <Pressable accessibilityRole="button" style={buttonStyle} onPress={join}><Text style={{ color: '#F5A623', fontSize: 18 }}>{admission.recordingMode === 'cloud' ? 'Agree and join recorded video' : phase === 'error' ? 'Retry video' : joinLabel || 'Join video'}</Text></Pressable>}
+      {phase === 'idle' && <Pressable accessibilityRole="button" style={buttonStyle} onPress={() => setPanelOpen(false)}><Text style={{ color: '#F0F4F8' }}>Continue without video</Text></Pressable>}
     </View>}
-    {(phase === 'joining' || phase === 'joined') && <Pressable accessibilityRole="button" onPress={() => { const stopping = close(); const current = generation.current; void stopping.then(() => { if (current === generation.current) setPhase('idle'); }); }} style={{ padding: 8 }}><Text style={{ color: '#F5A623' }}>{phase === 'joining' ? 'Cancel video connection' : 'Leave video'}</Text></Pressable>}
+    {(phase === 'joining' || phase === 'joined') && <Pressable accessibilityRole="button" style={buttonStyle} onPress={() => { const stopping = close(); const current = generation.current; void stopping.then(() => { if (current === generation.current) { setPhase('idle'); setPanelOpen(false); } }); }}><Text style={{ color: '#F5A623' }}>{phase === 'joining' ? 'Cancel video connection' : 'Leave video'}</Text></Pressable>}
   </View>;
 }

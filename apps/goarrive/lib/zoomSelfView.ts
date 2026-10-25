@@ -9,7 +9,9 @@ export function watchZoomSelfView(client: any, root: HTMLElement, reportCamera: 
     frame = requestAnimationFrame(() => {
       frame = null;
       if (closed || !root.isConnected || root.getClientRects().length === 0) return;
-      const { width, height } = root.getBoundingClientRect();
+      const bounds = root.getBoundingClientRect();
+      const width = root.clientWidth || bounds.width;
+      const height = root.clientHeight || bounds.height;
       if (width <= 0 || height <= 0) return;
       try {
         client.updateVideoOptions?.({ viewSizes: { default: { width: Math.round(width), height: Math.round(height) } } });
@@ -23,7 +25,9 @@ export function watchZoomSelfView(client: any, root: HTMLElement, reportCamera: 
     if (next !== camera) { camera = next; reportCamera(next); if (next === true) refresh(); }
   };
   const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => {
-    const { width, height } = root.getBoundingClientRect();
+    const bounds = root.getBoundingClientRect();
+      const width = root.clientWidth || bounds.width;
+      const height = root.clientHeight || bounds.height;
     const size = `${width}:${height}`;
     if (size !== lastSize) { lastSize = size; refresh(); }
   });
