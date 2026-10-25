@@ -26,3 +26,14 @@ it('rollout denial or failure shows no setting controls or write path', async ()
   m.rollout.mockResolvedValue({ data: { enabled: false } }); await render('playbook');
   expect(host.textContent).toContain('not available yet'); expect(host.querySelector('[role=radio]')).toBeNull(); expect(m.call).not.toHaveBeenCalled();
 });
+
+
+it('checks the exact policy target and ignores stale approval after navigation', async () => {
+  let resolveOld!: (value: any) => void;
+  m.rollout.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve; })).mockResolvedValue({ data: { enabled: false } });
+  await render('playbook'); expect(m.rollout).toHaveBeenCalledWith({ kind: 'playbook', id: 'resource' });
+  await act(async () => root.render(<VideoPolicySetting kind="workout" id="other" />));
+  expect(m.rollout).toHaveBeenLastCalledWith({ kind: 'workout', id: 'other' });
+  await act(async () => resolveOld({ data: { enabled: true } }));
+  expect(host.textContent).toContain('not available yet'); expect(host.querySelector('[role=radio]')).toBeNull(); expect(m.call).not.toHaveBeenCalled();
+});

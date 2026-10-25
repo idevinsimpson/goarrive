@@ -1,5 +1,5 @@
 import * as admin from 'firebase-admin';
-import { sessionVideoAvailability, setWorkoutVideoPolicy, videoEnabled } from '../sessionVideoPolicy';
+import { sessionVideoAvailability, setWorkoutVideoPolicy, getWorkoutVideoRollout, videoEnabled } from '../sessionVideoPolicy';
 if (process.env.FIRESTORE_EMULATOR_HOST !== '127.0.0.1:8080') throw new Error('Local emulator required');
 admin.initializeApp({ projectId: 'demo-session-video-policy' });
 const db = admin.firestore();
@@ -8,6 +8,7 @@ const member = { uid: 'uid', token: { role: 'member', memberId: 'roster', coachI
 const coach = { uid: 'coach', token: { role: 'coach' } };
 const read = (auth = member, at = now) => sessionVideoAvailability('session', auth, at);
 beforeEach(async () => {
+  delete process.env.WORKOUT_VIDEO_TEST_SCOPE;
   process.env.WORKOUT_VIDEO_ROLLOUT_ENABLED = 'true';
   await db.doc('session_video_receipts/session').set({ coachId: 'coach', roomId: 'room', meetingId: 'synthetic', recordingMode: 'none', memberId: 'roster', playbookId: 'plan', providerMode: 'live', participantVideoOff: true, startMs: now, endMs: now + 2700000 });
   await db.doc('playbooks/plan').set({ coachId: 'coach', memberIds: ['roster'], videoEnabled: true });
@@ -87,4 +88,43 @@ test('coach-writable recording fields cannot forge server recording observation'
   await db.doc('session_video_receipts/session').delete();
   await db.doc('session_instances/session').update({ zoomRecordingMode: 'none', recordingEnabled: false });
   expect((await read()).enabled).toBe(false);
+});
+
+
+const testScope = () => {
+  process.env.WORKOUT_VIDEO_ROLLOUT_ENABLED = 'false';
+  process.env.WORKOUT_VIDEO_TEST_SCOPE = JSON.stringify({ sessionId: 'session', memberUid: 'uid', memberId: 'roster', coachId: 'coach', playbookId: 'plan', workoutId: 'workout', startsAt: now, expiresAt: now + 600000 });
+};
+test('single-session scope keeps others off and bounds admission to test expiry without writes', async () => {
+  testScope(); const before = (await db.doc('session_instances/session').get()).data();
+  expect((await read()).enabled).toBe(true);
+  const nearEnd = await read(member, now + 595000); expect(nearEnd.enabled).toBe(true); expect((nearEnd as any).validForMs).toBeGreaterThan(0); expect((nearEnd as any).validForMs).toBeLessThanOrEqual(5000);
+  expect((await read(member, now + 600000)).enabled).toBe(false);
+  expect((await sessionVideoAvailability('other-session', member, now)).enabled).toBe(false);
+  expect((await read({ uid: 'other', token: { role: 'member', memberId: 'roster', coachId: 'coach' } })).enabled).toBe(false);
+  expect((await db.doc('session_instances/session').get()).data()).toEqual(before);
+});
+test.each([{ pinnedWorkoutId: 'other' }, { playbookId: 'other' }, { memberId: 'other' }, { recordingEnabled: true }, { status: 'cancelled' }])('test scope never overrides assignment/recording/lifecycle: %j', async patch => {
+  testScope(); await db.doc('session_instances/session').update(patch);
+  const outcome = await read().catch(() => ({ enabled: false })); expect(outcome.enabled).toBe(false);
+});
+test('scoped test still requires server receipt and explicit workout policy', async () => {
+  testScope(); await db.doc('workouts/workout').update({ videoPolicy: 'off' }); expect((await read()).enabled).toBe(false);
+  await db.doc('workouts/workout').update({ videoPolicy: 'on' }); await db.doc('session_video_receipts/session').delete(); expect((await read()).enabled).toBe(false);
+});
+test('scope exposes and updates only exact coach policy target while global rollout stays off', async () => {
+  testScope(); const clock = jest.spyOn(Date, 'now').mockReturnValue(now);
+  try {
+    const status = (auth: any, kind: string, id: string) => (getWorkoutVideoRollout as any).run({ auth, data: { kind, id } });
+    expect(await status(coach, 'playbook', 'plan')).toEqual({ enabled: true }); expect(await status(coach, 'playbook', 'other')).toEqual({ enabled: false });
+    expect(await status(member, 'workout', 'workout')).toEqual({ enabled: false });
+    await expect((setWorkoutVideoPolicy as any).run({ auth: coach, data: { kind: 'workout', id: 'other', policy: 'on' } })).rejects.toMatchObject({ code: 'permission-denied' });
+    await (setWorkoutVideoPolicy as any).run({ auth: coach, data: { kind: 'workout', id: 'workout', policy: 'off' } });
+    expect((await db.doc('workouts/workout').get()).data()?.videoPolicy).toBe('off'); expect(process.env.WORKOUT_VIDEO_ROLLOUT_ENABLED).toBe('false');
+  } finally { clock.mockRestore(); delete process.env.WORKOUT_VIDEO_TEST_SCOPE; }
+});
+
+test('test scope expiring during admission I/O is rejected before returning a lease', async () => {
+  testScope(); const clock = jest.spyOn(Date, 'now').mockReturnValueOnce(now).mockReturnValue(now + 700000);
+  try { expect((await read()).enabled).toBe(false); } finally { clock.mockRestore(); }
 });
