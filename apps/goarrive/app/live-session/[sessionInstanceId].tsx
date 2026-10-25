@@ -34,6 +34,8 @@ import WorkoutPlayer from '../../components/WorkoutPlayer';
 import SessionZoomTile from '../../components/SessionZoomTile';
 import { BG, CARD, BORDER, FG, MUTED, GOLD, GREEN, RED, FH, FB } from '../../lib/theme';
 
+import { sessionWindowMs } from '../../lib/sessionTiming';
+import { workoutReturnPath } from '../../lib/workoutReturnPath';
 const EARLY_JOIN_GRACE_MS = 5 * 60 * 1000;
 
 interface Slot {
@@ -55,24 +57,6 @@ function friendlyDate(dateStr: string): string {
   return new Date(Date.UTC(y, m - 1, d, 12)).toLocaleDateString(undefined, {
     weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC',
   });
-}
-
-/** Start/end millis for the session — UTC timestamps when present (playbook
- * bookings always write them), else the wall-clock fields in device time. */
-function sessionWindowMs(inst: SessionInstance): { startMs: number; endMs: number } {
-  const startTs: any = (inst as any).startUtc;
-  const endTs: any = (inst as any).endUtc;
-  if (startTs?.toMillis) {
-    const startMs = startTs.toMillis();
-    const endMs = endTs?.toMillis
-      ? endTs.toMillis()
-      : startMs + (inst.durationMinutes || 45) * 60 * 1000;
-    return { startMs, endMs };
-  }
-  const [y, m, d] = inst.scheduledDate.split('-').map(Number);
-  const [h, min] = (inst.scheduledStartTime || '00:00').split(':').map(Number);
-  const startMs = new Date(y, m - 1, d, h, min).getTime();
-  return { startMs, endMs: startMs + (inst.durationMinutes || 45) * 60 * 1000 };
 }
 
 function formatInTimezone(ms: number, timezone: string): string {
@@ -226,7 +210,7 @@ export default function LiveSessionScreen() {
       </View>
     );
   }
-  if (!user) return <Redirect href="/(auth)/login" />;
+  if (!user) return <Redirect href={{ pathname: '/(auth)/login', params: { returnTo: workoutReturnPath(`/live-session/${sessionInstanceId}`) || '' } }} />;
   if (loadError || !inst || !window_) {
     return (
       <View style={s.center}>

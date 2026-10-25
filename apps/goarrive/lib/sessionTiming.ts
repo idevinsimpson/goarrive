@@ -16,7 +16,7 @@ function legacyEndMillis(date: string, time: string, timezone: string): number |
       const part = (type: string) => parts.find(p => p.type === type)?.value;
       return Date.parse(`${part('year')}-${part('month')}-${part('day')}T${part('hour')}:${part('minute')}:${part('second')}Z`);
     };
-    if (Number.isFinite(desired)) {
+    if (Number.isFinite(desired) && new Date(desired).toISOString().slice(0, 16) === `${date}T${time}`) {
       const offsets = new Set<number>();
       for (let hours = -36; hours <= 36; hours += 6) {
         const sample = desired + hours * 3600000;
@@ -45,6 +45,15 @@ function timestampMillis(value: unknown): number | null {
   const millis = typeof timestamp.toMillis === 'function' ? timestamp.toMillis()
     : typeof timestamp.seconds === 'number' ? timestamp.seconds * 1000 + (timestamp.nanoseconds || 0) / 1e6 : NaN;
   return Number.isFinite(millis) ? millis : null;
+}
+
+/** Shared by the stable link and player. Invalid times never unlock a workout. */
+export function sessionWindowMs(session: SessionInstance): { startMs: number; endMs: number } {
+  const startMs = timestampMillis(session.startUtc) ?? legacyEndMillis(
+    session.scheduledDate, session.scheduledStartTime, session.timezone || 'America/New_York',
+  ) ?? NaN;
+  const endMs = timestampMillis(session.endUtc) ?? startMs + (session.durationMinutes || 45) * 60000;
+  return { startMs, endMs };
 }
 
 /** Absolute timestamps preserve elapsed duration across DST and viewer timezones. */

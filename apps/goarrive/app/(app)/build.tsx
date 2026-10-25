@@ -1124,6 +1124,20 @@ function BuildScreenInner() {
     } catch { return null; }
   }, [coachId]);
 
+  const copyPbMemberLink = useCallback(async () => {
+    const pb = currentPlaybookRef.current;
+    if (!pb) return;
+    const origin = Platform.OS === 'web' && typeof window !== 'undefined'
+      ? window.location.origin : 'https://goarrive.fit';
+    const url = `${origin}/playbook/${encodeURIComponent(pb.id)}`;
+    try {
+      if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(url);
+        window.alert('Member workout link copied. This link stays the same as scheduled workouts change.');
+      } else await Share.share({ message: url });
+    } catch { Alert.alert('Member Workout Link', url); }
+  }, []);
+
   const copyPbBookingLink = useCallback(async () => {
     const token = await fetchPbBookingToken();
     if (!token) { setShowPlaybookSchedule(true); return; }
@@ -3151,6 +3165,10 @@ function BuildScreenInner() {
       {currentPlaybook && showPbMenu && (
         <Pressable style={s.pbMenuOverlay} onPress={() => setShowPbMenu(false)}>
           <View style={s.pbMenuDropdown} onStartShouldSetResponder={() => true}>
+            <Pressable style={s.pbMenuItem} onPress={() => { setShowPbMenu(false); copyPbMemberLink(); }}>
+              <Icon name="share" size={16} color="#F5A623" />
+              <Text style={[s.pbMenuItemText, { color: '#F5A623' }]}>Copy Member Workout Link</Text>
+            </Pressable>
             <Pressable
               style={s.pbMenuItem}
               onPress={() => { setShowPbMenu(false); copyPbBookingLink(); }}

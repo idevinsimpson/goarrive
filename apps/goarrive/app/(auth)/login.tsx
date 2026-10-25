@@ -20,7 +20,8 @@ import {
   Animated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
+import { workoutReturnPath } from '../../lib/workoutReturnPath';
 import {
   signInWithEmailAndPassword,
   sendPasswordResetEmail,
@@ -36,6 +37,7 @@ const FONT_BODY =
   Platform.OS === 'web' ? "'DM Sans', sans-serif" : 'DMSans-Regular';
 
 export default function LoginScreen() {
+  const { returnTo } = useLocalSearchParams<{ returnTo?: string }>();
   const insets = useSafeAreaInsets();
   const { claims } = useAuth();
   const [email, setEmail] = useState('');
@@ -87,6 +89,11 @@ export default function LoginScreen() {
         }
       }
 
+      const destination = workoutReturnPath(returnTo);
+      if (destination) {
+        router.replace(destination as any);
+        return;
+      }
       if (typeof window !== 'undefined') {
         const pendingShare = sessionStorage.getItem('pendingShareId');
         if (pendingShare) {
