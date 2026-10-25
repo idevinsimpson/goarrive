@@ -119,7 +119,7 @@ export class RealZoomProvider implements ZoomProvider {
   private async apiRequest(
     method: string,
     path: string,
-    body?: Record<string, unknown>
+    body?: Record<string, unknown>, signal?: AbortSignal
   ): Promise<Response> {
     const token = await this.getToken();
     const url = `https://api.zoom.us/v2${path}`;
@@ -132,10 +132,51 @@ export class RealZoomProvider implements ZoomProvider {
     const response = await fetch(url, {
       method,
       headers,
-      body: body ? JSON.stringify(body) : undefined,
+      body: body ? JSON.stringify(body) : undefined, signal,
     });
 
     return response;
+  }
+
+  /** Read-only host inspection using existing S2S authorization; never changes licenses or scopes. */
+  async inspectHost(email: string): Promise<{ email: string; providerUserId: string; active: boolean; userType: number | null; sameAccount: boolean }> {
+    const normalized = email.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) throw new Error('Invalid host email');
+    let response: Response;
+    try { response = await this.apiRequest('GET', `/users/${encodeURIComponent(normalized)}`); }
+    catch { throw new Error('Zoom host verification unavailable'); }
+    if (!response.ok) throw new Error(`Zoom host inspection rejected (HTTP ${response.status}); existing account permissions may not allow this read.`);
+    const data = await response.json() as { id?: unknown; email?: unknown; status?: unknown; type?: unknown; account_id?: unknown };
+    if (typeof data.id !== 'string' || typeof data.email !== 'string' || data.email.toLowerCase() !== normalized) throw new Error('Zoom host identity did not match');
+    return { email: normalized, providerUserId: data.id, active: data.status === 'active', userType: typeof data.type === 'number' ? data.type : null, sameAccount: data.account_id === this.accountId };
+  }
+
+  /** Bounded, read-only inventory. Never returns participant URLs, passwords or host capabilities. */
+  async inspectHostOccupancy(providerUserId: string): Promise<{meetingId:string;startMs:number|null;endMs:number|null;live:boolean}[]> {
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(providerUserId)) throw new Error('Invalid host identifier');
+    const items = new Map<string,{meetingId:string;startMs:number|null;endMs:number|null;live:boolean}>();
+    try {
+      for (const type of ['scheduled','live']) {
+        let token=''; const seen=new Set<string>();
+        for(let page=0;page<10;page++) {
+          const query=new URLSearchParams({type,page_size:'100',...(token?{next_page_token:token}:{})});
+          const response=await this.apiRequest('GET',`/users/${encodeURIComponent(providerUserId)}/meetings?${query}`, undefined, AbortSignal.timeout(5000));
+          if(!response.ok)throw new Error('inventory unavailable');
+          const data=await response.json() as any;
+          if(!Array.isArray(data.meetings)||data.meetings.length>100||typeof data.next_page_token!=='string')throw new Error('invalid inventory');
+          for(const m of data.meetings){
+            if(!/^\d+$/.test(String(m.id))||m.host_id!==providerUserId)throw new Error('invalid meeting identity');
+            const start=typeof m.start_time==='string'?Date.parse(m.start_time):NaN;
+            const timed=m.type===2&&Number.isFinite(start)&&Number.isFinite(m.duration)&&m.duration>0;
+            const prior=items.get(String(m.id));
+            items.set(String(m.id),{meetingId:String(m.id),startMs:timed?start:null,endMs:timed?start+m.duration*60000:null,live:type==='live'||prior?.live===true});
+          }
+          token=data.next_page_token;if(!token)break;
+          if(seen.has(token)||page===9)throw new Error('incomplete inventory');seen.add(token);
+        }
+      }
+      return [...items.values()];
+    }catch {throw new Error('Zoom host inventory unavailable');}
   }
 
   async createMeeting(request: ZoomMeetingRequest): Promise<ZoomMeetingResponse> {

@@ -132,6 +132,7 @@ async function findOverlapInTxn(
   memberId: string | null,
   startUtc: Date,
   endUtc: Date,
+  excludeSessionId?: string,
 ): Promise<string | null> {
   const db = getDb();
 
@@ -143,6 +144,7 @@ async function findOverlapInTxn(
   );
   for (const doc of resSnap.docs) {
     const r = doc.data();
+    if(excludeSessionId && r.sessionInstanceId===excludeSessionId)continue;
     const rStart = (r.startUtc as Timestamp).toMillis();
     const rEnd = (r.endUtc as Timestamp).toMillis();
     if (rStart < endUtc.getTime() && rEnd > startUtc.getTime()) {
@@ -163,6 +165,7 @@ async function findOverlapInTxn(
     );
     for (const doc of legacySnap.docs) {
       const inst = doc.data();
+      if(doc.id===excludeSessionId)continue;
       if (inst.reservationId) continue; // reservation-backed — already checked above
       if (!BLOCKING_STATUSES.includes(inst.status)) continue;
       const instTz = inst.timezone || 'America/New_York';
@@ -756,3 +759,22 @@ export const bookPlaybookSession = onCall(
     return response;
   }
 );
+
+
+/** Hold both old and proposed slots until provider deletion and session commit succeed. */
+export async function prepareBotRescheduleReservation(instanceId:string, instance:Record<string,any>, newDate:string,newStartTime:string,attemptId:string){
+ const db=getDb(),startUtc=wallTimeToUtc(newDate,newStartTime,instance.timezone||'America/New_York');
+ const endUtc=new Date(startUtc.getTime()+(instance.durationMinutes||30)*60000),memberKey=instance.memberKey||instance.memberId;
+ const newResId=reservationId(memberKey,startUtc);
+ await db.runTransaction(async tx=>{
+  const jobRef=db.doc(`zoom_bot_allocation_jobs/${instanceId}`),job=(await tx.get(jobRef)).data();
+  if((job?.mutationAttemptId||job?.attemptId)!==attemptId||job?.state!=='mutation_lock')throw new HttpsError('aborted','Mutation changed');
+  const conflict=await findOverlapInTxn(tx,memberKey,instance.memberId||null,startUtc,endUtc,instanceId);
+  if(conflict)throw new HttpsError('already-exists','Requested time overlaps another session');
+  const target=db.doc(`member_time_reservations/${newResId}`),existing=await tx.get(target);
+  if(existing.exists&&existing.data()?.sessionInstanceId!==instanceId)throw new HttpsError('already-exists','Requested time is reserved');
+  if(!existing.exists)tx.create(target,{memberKey,memberId:instance.memberId||null,coachId:instance.coachId,playbookId:instance.playbookId||null,sessionInstanceId:instanceId,startUtc:Timestamp.fromDate(startUtc),endUtc:Timestamp.fromDate(endUtc),createdAt:FieldValue.serverTimestamp()});
+  tx.update(jobRef,{pendingReservationId:newResId,oldReservationId:instance.reservationId||null});
+ });
+ return {reservationId:newResId,startUtc,endUtc};
+}
