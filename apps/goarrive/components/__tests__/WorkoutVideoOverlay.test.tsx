@@ -3,6 +3,7 @@ import { createRoot, Root } from 'react-dom/client';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import SessionZoomTile from '../WorkoutVideoOverlay';
 const m = vi.hoisted(() => ({ available: vi.fn(), config: vi.fn(), load: vi.fn(), init: vi.fn(), join: vi.fn(), leave: vi.fn(), destroy: vi.fn(), user: { uid: 'member' } as any, capture: vi.fn(), redraw: vi.fn() }));
+vi.mock('react-native', async importOriginal => ({ ...await importOriginal<any>(), useWindowDimensions: () => ({ width: 430, height: 932, scale: 1, fontScale: 1 }) }));
 vi.mock('../../lib/firebase', () => ({ functions: {} }));
 vi.mock('../../lib/AuthContext', () => ({ useAuth: () => ({ user: m.user }) }));
 vi.mock('firebase/functions', () => ({ httpsCallable: (_: any, name: string) => name === 'getSessionVideoAvailability' ? m.available : m.config }));
@@ -105,12 +106,57 @@ it('refreshes only the existing view and cancels a queued refresh on leave', asy
 it('small view keeps the SDK root rendered and expands without rejoining or capture', async () => {
   await render(); await click('Camera'); const sdkRoot = m.init.mock.calls[0][0].zoomAppRoot as HTMLElement;
   await click('Small view');
-  expect(sdkRoot.isConnected).toBe(true); expect(sdkRoot.style.display).toBe('block'); expect(sdkRoot.style.transform).toBe('scale(0.45)');
+  expect(sdkRoot.isConnected).toBe(true); expect(sdkRoot.style.display).toBe('block'); expect(sdkRoot.style.zoom).toBe('0.45');
   expect(sdkRoot.hasAttribute('inert')).toBe(true);
-  await click('Expand'); expect(sdkRoot.style.transform).toBe(''); expect(sdkRoot.hasAttribute('inert')).toBe(false);
+  await click('Expand'); expect(Number(sdkRoot.style.zoom)).toBeGreaterThan(0.45); expect(sdkRoot.hasAttribute('inert')).toBe(false);
   expect(m.join).toHaveBeenCalledOnce(); expect(m.capture).not.toHaveBeenCalled();
 });
-it('does not auto-shrink merely because a join resolves or Zoom reports camera on', async () => {
+it('does not auto-shrink merely because a join resolves', async () => {
   await render(); await click('Camera');
   expect(host.textContent).toContain('Small view'); expect(host.textContent).not.toContain('Expand');
+});
+
+it('magnifies the complete SDK root rather than resizing only its video canvas', async () => {
+  await render(); await click('Camera');
+  const sdkRoot = m.init.mock.calls[0][0].zoomAppRoot as HTMLElement;
+  expect(sdkRoot.style.width).toBe('320px');
+  expect(sdkRoot.style.transform).toBe('');
+  expect(Number(sdkRoot.style.zoom)).toBeGreaterThan(1);
+  expect(Number(sdkRoot.style.zoom)).toBeLessThanOrEqual(1.5);
+  expect(sdkRoot.parentElement!.style.overflow).not.toBe('hidden');
+});
+it('compacts once after six seconds of camera-on and permits lasting manual expansion', async () => {
+  vi.useFakeTimers();
+  m.load.mockResolvedValue({ createClient: () => ({ init: m.init, join: m.join, leaveMeeting: m.leave, getCurrentUser: () => ({ video: true }) }), destroyClient: m.destroy });
+  await render(); await click('Camera');
+  await act(async () => { await vi.advanceTimersByTimeAsync(5999); });
+  expect(host.textContent).toContain('Small view');
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+  expect(host.textContent).toContain('Expand');
+  await click('Expand');
+  await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+  expect(host.textContent).toContain('Small view');
+  expect(m.join).toHaveBeenCalledOnce(); expect(m.capture).not.toHaveBeenCalled();
+});
+
+it('manual size choice cancels a pending automatic compact action', async () => {
+  vi.useFakeTimers();
+  m.load.mockResolvedValue({ createClient: () => ({ init: m.init, join: m.join, leaveMeeting: m.leave, getCurrentUser: () => ({ video: true }) }), destroyClient: m.destroy });
+  await render(); await click('Camera'); await click('Small view'); await click('Expand');
+  await act(async () => { await vi.advanceTimersByTimeAsync(7000); });
+  expect(host.textContent).toContain('Small view');
+});
+
+it('camera-off cancels pending compact and navigation does not compact the next session', async () => {
+  vi.useFakeTimers(); let camera = true; let update: (() => void) | undefined;
+  m.load.mockResolvedValue({ createClient: () => ({ init: m.init, join: m.join, leaveMeeting: m.leave, getCurrentUser: () => ({ video: camera }), on: (_: string, fn: () => void) => { update = fn; }, off: () => { update = undefined; } }), destroyClient: m.destroy });
+  await render(); await click('Camera');
+  await act(async () => { await vi.advanceTimersByTimeAsync(3000); camera = false; update?.(); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+  expect(host.textContent).toContain('Small view');
+  await act(async () => { camera = true; update?.(); });
+  await render('next-session');
+  await act(async () => { await vi.advanceTimersByTimeAsync(7000); });
+  expect(host.textContent).not.toContain('Expand');
+  expect(m.capture).not.toHaveBeenCalled();
 });
