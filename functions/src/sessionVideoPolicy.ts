@@ -2,7 +2,7 @@ import * as admin from 'firebase-admin';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { ownsSessionMember } from './sessionIdentity';
 import { createHash } from 'crypto';
-import { videoRolloutDecision, videoPolicyInScope } from './videoTestScope';
+import { videoRolloutDecision, videoPolicyInScope, isRecordedTestRoute } from './videoTestScope';
 
 export const getWorkoutVideoRollout = onCall({ region: 'us-central1', invoker: 'public' }, async request => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Please sign in.');
@@ -47,9 +47,10 @@ export async function sessionVideoAvailability(id: unknown, auth: { uid: string;
   if (!['allocated', 'in_progress'].includes(session.status) || session.workoutCompletedAt) return unavailable('This session is not live.');
   const start = session.startUtc?.toMillis?.(); const end = session.endUtc?.toMillis?.();
   if (!Number.isFinite(start) || !Number.isFinite(end) || now < start - 300000 || now > end) return unavailable('Video is available only during this session.');
-  // Joining an auto-recorded room can start recording; do not treat camera consent as recording consent.
+  // Cloud recording is available only in an explicit bounded recording test scope.
+  const recordingMode = scope?.recordingMode || 'none';
   const receipt = (await db.collection('session_video_receipts').doc(id).get()).data();
-  if (session.recordingEnabled !== false || !receipt || receipt.recordingMode !== 'none' || receipt.meetingId !== session.zoomMeetingId || receipt.roomId !== session.zoomRoomId || receipt.coachId !== session.coachId || receipt.memberId !== session.memberId || receipt.playbookId !== session.playbookId || receipt.providerMode !== 'live' || receipt.participantVideoOff !== true || receipt.startMs !== start || receipt.endMs !== end) return unavailable('In-workout video requires a session with recording turned off.');
+  if (session.recordingEnabled !== (recordingMode === 'cloud') || !receipt || receipt.recordingMode !== recordingMode || receipt.meetingId !== session.zoomMeetingId || receipt.roomId !== session.zoomRoomId || receipt.coachId !== session.coachId || receipt.memberId !== session.memberId || receipt.playbookId !== session.playbookId || receipt.providerMode !== 'live' || receipt.participantVideoOff !== true || receipt.startMs !== start || receipt.endMs !== end) return unavailable('The session recording configuration has not been verified.');
   if (!session.zoomRoomId || !session.zoomMeetingId || !session.zoomJoinUrl) return unavailable('No video room has been allocated.');
   const room = (await db.collection('zoom_rooms').doc(session.zoomRoomId).get()).data();
   if (!room || room.status !== 'active' || !(room.coachId === session.coachId || (session.roomSource === 'shared_pool' && room.poolId === 'hmti'))) return unavailable('The assigned video room is unavailable.');
@@ -58,13 +59,13 @@ export async function sessionVideoAvailability(id: unknown, auth: { uid: string;
     const fresh = videoRolloutDecision(auth, admittedAt);
     if (admittedAt >= end || !fresh.enabled || JSON.stringify(fresh.scope) !== JSON.stringify(scope)) return unavailable('The video test window has ended or changed.');
   }
-  const binding = createHash('sha256').update(JSON.stringify([session.coachId, session.memberId, session.playbookId, session.pinnedWorkoutId, session.zoomRoomId, session.zoomMeetingId, start, end])).digest('hex');
-  return { enabled: true, reason: '', serverNow: admittedAt, binding, validForMs: Math.max(0, Math.min(25000, end - admittedAt, scope ? scope.expiresAt - admittedAt : Infinity)) };
+  const binding = createHash('sha256').update(JSON.stringify([session.coachId, session.memberId, session.playbookId, session.pinnedWorkoutId, session.zoomRoomId, session.zoomMeetingId, start, end, recordingMode])).digest('hex');
+  return { enabled: true, reason: '', recordingMode, serverNow: admittedAt, binding, validForMs: Math.max(0, Math.min(25000, end - admittedAt, scope ? scope.expiresAt - admittedAt : Infinity)) };
 }
 
 export const getSessionVideoAvailability = onCall({ region: 'us-central1', invoker: 'public' }, async request => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Please sign in.');
-  return sessionVideoAvailability(request.data?.sessionInstanceId, request.auth);
+  return { ...await sessionVideoAvailability(request.data?.sessionInstanceId, request.auth), recordingConsentRequired: isRecordedTestRoute(request.auth, request.data?.sessionInstanceId) };
 });
 
 export const setWorkoutVideoPolicy = onCall({ region: 'us-central1', invoker: 'public' }, async request => {
