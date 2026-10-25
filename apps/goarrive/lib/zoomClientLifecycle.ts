@@ -15,10 +15,10 @@ export function createZoomLease(create: () => { client: any; destroy: () => void
   const dispose = async () => { try { await bounded(Promise.resolve().then(destroy), 2000); return true; } catch { return false; } };
   return {
     get cancelled() { return cancelled; },
-    run(operation: (isCurrent: () => boolean) => Promise<void>) {
+    run(operation: (isCurrent: () => boolean) => Promise<void>, timeoutMs = SDK_TIMEOUT_MS) {
       if (cancelled) return Promise.reject(new Error('Video session has closed.'));
       pending = Promise.resolve().then(() => operation(() => !cancelled));
-      return bounded(pending).catch(error => { cancelled = true; throw error; });
+      return bounded(pending, timeoutMs).catch(error => { cancelled = true; throw error; });
     },
     close() {
       cancelled = true;
