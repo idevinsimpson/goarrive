@@ -13247,6 +13247,6 @@ export const onScenarioWriteMirrorSharedView = onDocumentWritten(
 
 // Guest issuance/playback remain unavailable; revocation is independent of rollout.
 export { setGuestAssignmentMembers } from './guestAssignmentLifecycle';
-export { getGuestWorkoutAccess, revokeGuestWorkoutLink } from './guestWorkoutAccess';
+export { getGuestWorkoutAccess, revokeGuestWorkoutLink, issueGuestWorkoutLink, guestWorkoutMedia } from './guestWorkoutAccess';
 
 export { updateGuestRosterArchive } from './guestRosterLifecycle';

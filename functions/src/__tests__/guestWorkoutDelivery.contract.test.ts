@@ -122,3 +122,16 @@ test('final unified snapshot denial cannot be superseded by a later content read
   await expect(f.service.manifest('synthetic')).rejects.toThrow('unavailable');
   expect(calls).toBe(2); expect(f.d.readRange).not.toHaveBeenCalled();
 });
+
+
+test('deduplicates repeated assets and rejects more than 32 unique objects before metadata I/O', async () => {
+  const repeated = fixture();
+  repeated.workout.blocks[0].movements = Array.from({ length: 40 }, () => ({ ...repeated.workout.blocks[0].movements[0] }));
+  const manifest = await repeated.service.manifest('synthetic');
+  expect(manifest.workout.blocks[0].movements.every((m: any) => m.videoAsset === 'asset-0')).toBe(true);
+  expect(repeated.d.metadata).toHaveBeenCalledTimes(1);
+  const unique = fixture();
+  unique.workout.blocks[0].movements = Array.from({ length: 33 }, (_, i) => ({ restSec: 0, videoUrl: url('movements/coach/video/' + i + '.mp4') }));
+  await expect(unique.service.manifest('synthetic')).rejects.toThrow('unavailable');
+  expect(unique.d.metadata).not.toHaveBeenCalled();
+});

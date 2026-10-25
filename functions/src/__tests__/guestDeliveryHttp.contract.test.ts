@@ -25,3 +25,8 @@ test('valid internal fixture only returns projection with private no-store heade
   expect(f.service.manifest).toHaveBeenCalledWith('a'.repeat(43)); expect(f.res.status).toHaveBeenCalledWith(200);
   expect(f.res.set).toHaveBeenCalledWith(expect.objectContaining({ 'Cache-Control': expect.stringContaining('no-store') }));
 });
+test('oversized body is rejected before data access', async () => {
+  const f = fixture(); f.req.body = { padding: 'x'.repeat(1025) };
+  await guestDeliveryHttp(f.service, f.headers.origin, true)(f.req, f.res);
+  expect(f.res.status).toHaveBeenCalledWith(404); expect(f.service.manifest).not.toHaveBeenCalled();
+});

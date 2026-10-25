@@ -11,9 +11,21 @@ export async function changeGuestAssignmentMembers(db: admin.firestore.Firestore
     memberIds.some(id => typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) || new Set(memberIds).size !== memberIds.length) {
     throw new HttpsError('invalid-argument', 'Invalid assignment.');
   }
+  return writeAssignment(db, coachId, playbookId, memberIds);
+}
+
+/** First-time lock snapshots current membership inside the transaction; it
+ * never overwrites membership from a stale browser read. */
+export async function initializeGuestAssignment(db: admin.firestore.Firestore, coachId: string, playbookId: string) {
+  return writeAssignment(db, coachId, playbookId);
+}
+async function writeAssignment(db: admin.firestore.Firestore, coachId: string, playbookId: string, requestedMembers?: string[]) {
   return db.runTransaction(async tx => {
     const ref = db.collection('playbooks').doc(playbookId), snap = await tx.get(ref), plan = snap.data();
     if (!plan || plan.coachId !== coachId) throw new HttpsError('permission-denied', 'Only the owning coach can change this assignment.');
+    if (!requestedMembers && plan.guestAssignmentLocked === true) return { saved: true };
+    const memberIds: string[] = requestedMembers || plan.memberIds;
+    if (!Array.isArray(memberIds) || memberIds.length > 100 || memberIds.some(id => typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) || new Set(memberIds).size !== memberIds.length) throw new HttpsError('invalid-argument', 'Invalid assignment.');
     // A shutdown must not strand existing protected plans. Only first-time
     // activation is gated; existing membership edits still invalidate grants.
     if (!guestAssignmentGate() && plan.guestAssignmentLocked !== true) throw new HttpsError('failed-precondition', 'Guest access is not available yet.');
@@ -31,9 +43,9 @@ export async function changeGuestAssignmentMembers(db: admin.firestore.Firestore
     // grant remains invalid after remove/re-add, regardless of trigger latency.
     const generation = randomUUID(); // assignment version only, never a credential
     tx.set(version, { coachId, generation, playbookCreatedAt: snap.createTime, memberIds });
-    tx.update(ref, { guestAssignmentLocked: true, memberIds, assignedMemberId: memberIds[0] || null,
+    tx.update(ref, requestedMembers ? { guestAssignmentLocked: true, memberIds, assignedMemberId: memberIds[0] || null,
       assignedMemberName: members[0]?.data()?.name || members[0]?.data()?.displayName || null,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+      updatedAt: admin.firestore.FieldValue.serverTimestamp() } : { guestAssignmentLocked: true });
     return { saved: true };
   });
 }

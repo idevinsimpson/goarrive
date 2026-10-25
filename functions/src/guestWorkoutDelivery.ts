@@ -34,6 +34,9 @@ export class GuestWorkoutDelivery {
       if (!value) return null;
       const path = storedGuestMediaPath(value, this.d.bucket, admission.coachId);
       if (!path) throw unavailable();
+      const existing = assets.find(a => a.path === path && a.kind === kind);
+      if (existing) return existing.id;
+      if (assets.length >= 32) throw unavailable();
       const id = 'asset-' + assets.length; assets.push({ id, path, kind }); return id;
     };
     let count = 0;

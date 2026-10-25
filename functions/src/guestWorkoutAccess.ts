@@ -1,22 +1,15 @@
 import * as admin from 'firebase-admin';
-import { HttpsError, onCall } from 'firebase-functions/v2/https';
-import { FirestoreGuestCapabilityStore } from './guestCapabilityStore';
+import { onCall, onRequest } from 'firebase-functions/v2/https';
+import { createGuestRuntime } from './guestRuntime';
+import { guestDeliveryHttp } from './guestDeliveryHttp';
 
-function owner(auth: any): string {
-  if (!auth || auth.token.role !== 'coach') throw new HttpsError('permission-denied', 'Only the owning coach can manage guest links.');
-  return String(auth.token.coachId || auth.uid);
-}
-export const getGuestWorkoutAccess = onCall({ region: 'us-central1', invoker: 'public' }, async request => {
-  owner(request.auth);
-  // Deliberately cannot be enabled by setting an environment variable alone.
-  // No media delivery adapter or guest response projection has been approved.
-  return { canIssue: false, reason: 'Guest playback is not available yet.' };
-});
-export const revokeGuestWorkoutLink = onCall({ region: 'us-central1', invoker: 'public' }, async request => {
-  const coachId = owner(request.auth), { playbookId, memberId } = request.data || {};
-  if (![playbookId, memberId].every(id => typeof id === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(id))) throw new HttpsError('invalid-argument', 'Invalid assignment.');
-  // Caller-derived coach namespace; revocation remains possible after deletion,
-  // removal, rollout shutdown or media failure. No token enters this request.
-  await new FirestoreGuestCapabilityStore(admin.firestore()).revoke({ coachId, playbookId, memberId, generation: '', active: false });
-  return { revoked: true };
+const options = { region: 'us-central1', invoker: 'public' as const, maxInstances: 2, concurrency: 2, timeoutSeconds: 30 };
+const runtime = () => createGuestRuntime(admin.app());
+export const getGuestWorkoutAccess = onCall(options, async request => runtime().status(request.auth));
+export const revokeGuestWorkoutLink = onCall(options, async request => runtime().revoke(request.auth, request.data));
+export const issueGuestWorkoutLink = onCall(options, async request => runtime().issue(request.auth, request.data));
+let handler: ReturnType<typeof guestDeliveryHttp> | undefined;
+export const guestWorkoutMedia = onRequest({ ...options, cors: false }, async (req, res) => {
+  if (!handler) { const current = runtime(); handler = guestDeliveryHttp(current.delivery, 'https://goarrive.fit', current.enabled); }
+  await handler(req, res);
 });

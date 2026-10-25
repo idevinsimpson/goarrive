@@ -1,4 +1,5 @@
 import { updatePlaybookMembers } from '../../lib/updatePlaybookMembers';
+import GuestWorkoutLinkManager from '../../components/GuestWorkoutLinkManager';
 /**
  * Build screen — Unified Creative Workspace
  *
@@ -614,6 +615,7 @@ function BuildScreenInner() {
   const [editingPlaybookTitle, setEditingPlaybookTitle] = useState(false);
   const [playbookTitleDraft, setPlaybookTitleDraft] = useState('');
   const [showPbMenu, setShowPbMenu] = useState(false);
+  const [showGuestLinks, setShowGuestLinks] = useState(false);
   const [showPbDeleteConfirm, setShowPbDeleteConfirm] = useState(false);
   const [showPbDescEdit, setShowPbDescEdit] = useState(false);
   const [pbDescDraft, setPbDescDraft] = useState('');
@@ -3161,6 +3163,7 @@ function BuildScreenInner() {
       </View>
 
       {/* Playbook settings menu — mirrors the workout three-dot dropdown */}
+      {currentPlaybook && showGuestLinks && <GuestWorkoutLinkManager key={currentPlaybook.id} playbookId={currentPlaybook.id} onClose={() => setShowGuestLinks(false)} />}
       {currentPlaybook && showPbMenu && (
         <Pressable style={s.pbMenuOverlay} onPress={() => setShowPbMenu(false)}>
           <View style={s.pbMenuDropdown} onStartShouldSetResponder={() => true}>
@@ -3168,8 +3171,8 @@ function BuildScreenInner() {
               <Icon name="share" size={16} color="#F5A623" />
               <Text style={[s.pbMenuItemText, { color: '#F5A623' }]}>Copy Member Workout Link</Text>
             </Pressable>
-            <Pressable style={s.pbMenuItem} disabled accessibilityState={{ disabled: true }}>
-              <Text style={[s.pbMenuItemText, { color: '#7A8795' }]}>Guest workout link: unavailable</Text>
+            <Pressable style={s.pbMenuItem} onPress={() => { setShowPbMenu(false); setShowGuestLinks(true); }}>
+              <Text style={[s.pbMenuItemText, { color: '#7A8795' }]}>Manage guest workout links</Text>
             </Pressable>
             <Pressable
               style={s.pbMenuItem}

@@ -1,8 +1,7 @@
 import { createHash, randomBytes } from 'crypto';
 
-/** Offline core only: deliberately not exported from the Functions entry point.
- * No production store/media adapter exists yet. Never substitute share-token access.
- */
+/** Internal capability core, used by the hard-disabled runtime and local fixtures.
+ * Never substitute booking/share-token access for a guest capability. */
 export type Assignment = { coachId: string; playbookId: string; memberId: string; generation: string; active: boolean };
 export type Grant = Assignment & { digest: string; expiresAt: number; revoked: boolean };
 export type Session = { id: string; coachId: string; playbookId: string; memberId: string; start: number; end: number;

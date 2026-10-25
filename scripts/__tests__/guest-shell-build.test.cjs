@@ -16,3 +16,15 @@ test('test-only generator switch does not alter endpoint paths or normal app dep
   assert(!html.includes('httpsCallable')); assert(!html.includes('getUserMedia(')); assert(!html.includes('localStorage.'));
   assert(!html.includes('completePlaybookSession')); assert(!html.includes('firebaseapp.com'));
 });
+
+
+test('Hosting routes only the two fixed media actions and sets private response headers', () => {
+  const config = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../firebase.json'), 'utf8'));
+  const hosting = Array.isArray(config.hosting) ? config.hosting.find(h => h.target === 'goarrive' || h.site === 'goarrive') : config.hosting;
+  const actions = hosting.rewrites.filter(r => r.function?.functionId === 'guestWorkoutMedia');
+  assert.deepEqual(actions.map(r => r.source).sort(), ['/guest-workout-api/chunk', '/guest-workout-api/manifest']);
+  const headers = hosting.headers.find(h => h.source === '/guest-workout-api/{manifest,chunk}').headers;
+  assert(headers.some(h => h.key === 'Cache-Control' && h.value.includes('no-store')));
+  assert(headers.some(h => h.key === 'Referrer-Policy' && h.value === 'no-referrer'));
+  assert(headers.some(h => h.key === 'Content-Security-Policy' && h.value.includes("default-src 'none'")));
+});
