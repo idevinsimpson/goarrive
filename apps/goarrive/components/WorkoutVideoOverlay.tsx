@@ -6,6 +6,7 @@ import { useAuth } from '../lib/AuthContext';
 import { watchVideoAdmission } from '../lib/videoAdmissionWatch';
 import { loadZoomEmbedded } from '../lib/zoomEmbeddedLoader';
 import { bounded, createZoomLease, videoCapability } from '../lib/zoomClientLifecycle';
+import { watchZoomSelfView } from '../lib/zoomSelfView';
 import { videoJoinError, VideoJoinStage } from '../lib/videoJoinError';
 
 export default function WorkoutVideoOverlay({ sessionInstanceId, variant, joinLabel }: {
@@ -16,6 +17,8 @@ export default function WorkoutVideoOverlay({ sessionInstanceId, variant, joinLa
   const [admission, setAdmission] = useState<{ recordingMode?: string; binding?: string }>({});
   const [phase, setPhase] = useState<'idle' | 'joining' | 'joined' | 'error'>('idle');
   const [error, setError] = useState('');
+  const [cameraOn, setCameraOn] = useState<boolean | null>(null);
+  const selfView = useRef<ReturnType<typeof watchZoomSelfView> | null>(null);
   const [minimized, setMinimized] = useState(false);
   const root = useRef<HTMLDivElement | null>(null);
   const generation = useRef(0);
@@ -23,6 +26,7 @@ export default function WorkoutVideoOverlay({ sessionInstanceId, variant, joinLa
   const lease = useRef<ReturnType<typeof createZoomLease> | null>(null);
   const close = useCallback(async () => {
     generation.current++; busy.current = false;
+    selfView.current?.close(); selfView.current = null; setCameraOn(null);
     const previous = lease.current; lease.current = null;
     if (previous) { try { await previous.close(); } catch { /* local ownership still releases */ } }
   }, []);
@@ -41,6 +45,7 @@ export default function WorkoutVideoOverlay({ sessionInstanceId, variant, joinLa
     );
     return () => { stop(); void close(); };
   }, [sessionInstanceId, user?.uid, close]);
+  useEffect(() => { if (phase === 'joined' && !minimized) selfView.current?.refresh(); }, [phase, minimized, variant]);
   const join = async () => {
     if (busy.current || !available || !user) return;
     if (!videoCapability()) { setError('This browser cannot use live video. You can continue your workout.'); setPhase('error'); return; }
@@ -65,7 +70,10 @@ export default function WorkoutVideoOverlay({ sessionInstanceId, variant, joinLa
         stage = 'join';
         await client.join({ signature: config.signature, meetingNumber: config.meetingNumber, password: config.password || '', userName: config.userName || 'Member', userEmail: config.userEmail || '' });
       }, 60000);
-      if (isCurrent() && !owned.cancelled) setPhase('joined');
+      if (isCurrent() && !owned.cancelled && root.current) {
+        selfView.current = watchZoomSelfView(client, root.current, setCameraOn);
+        setPhase('joined');
+      }
     } catch (failure) {
       if (owned) { try { await owned.close(); } catch {} if (lease.current === owned) lease.current = null; }
       if (isCurrent()) { setError(videoJoinError(stage, failure)); setPhase('error'); }
@@ -75,8 +83,12 @@ export default function WorkoutVideoOverlay({ sessionInstanceId, variant, joinLa
   return <View style={{ width: variant === 'pip' ? minimized ? 170 : 330 : '100%', minHeight: minimized ? 0 : 120, backgroundColor: '#151B26', borderRadius: 10, padding: 6 }}>
     <div ref={root} style={{ display: minimized ? 'none' : 'block', width: '100%', height: phase === 'joined' || phase === 'joining' ? (variant === 'pip' ? 240 : 420) : 0 }} />
     {phase === 'joined' && variant === 'pip' && <View style={{ gap: 8, padding: 8 }}>
-      {minimized && <Text style={{ color: '#F0F4F8' }}>Video connected</Text>}
+      {minimized && <Text style={{ color: '#F0F4F8' }}>Zoom connected</Text>}
       <Pressable accessibilityRole="button" onPress={() => setMinimized(value => !value)}><Text style={{ color: '#F5A623' }}>{minimized ? 'Show video controls' : 'Minimize video'}</Text></Pressable>
+    </View>}
+    {phase === 'joined' && !minimized && <View style={{ gap: 6, padding: 8 }}>
+      {cameraOn !== null && <Text style={{ color: '#F0F4F8' }}>{cameraOn ? 'Camera on in Zoom' : 'Camera off in Zoom'}</Text>}
+      <Pressable accessibilityRole="button" onPress={() => selfView.current?.refresh()}><Text style={{ color: '#F5A623' }}>Refresh video view</Text></Pressable>
     </View>}
     {phase !== 'joined' && <View style={{ gap: 8, padding: 8 }}>
       <Text style={{ color: '#F0F4F8' }}>Optional live video</Text>
