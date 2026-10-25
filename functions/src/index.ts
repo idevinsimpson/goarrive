@@ -102,6 +102,7 @@ export { getMemberPlaybookSessions } from './memberPlaybookLink';
 export { setPlaybookWorkoutPolicy } from './playbookWorkoutPolicy';
 export { getSessionVideoAvailability, setWorkoutVideoPolicy, getWorkoutVideoRollout } from './sessionVideoPolicy';
 import { sessionVideoAvailability } from './sessionVideoPolicy';
+import { allocateVerifiedBotSession } from './zoomBotAllocation';
 import { saveVideoReceipt } from './videoAllocationReceipt';
 import { enrollmentCloneFields } from './playbookClone';
 export {
@@ -4301,6 +4302,10 @@ export const allocateSessionInstance = onCall(
       throw new HttpsError('failed-precondition', `Instance is in status "${instance.status}", cannot allocate`);
     }
 
+    if (process.env.ZOOM_VERIFIED_BOT_POOL_ENABLED === 'true' && instance.roomSource === 'shared_pool') {
+      return allocateVerifiedBotSession(db, getZoomProvider({ accountId: zoomAccountId.value(), clientId: zoomClientId.value(), clientSecret: zoomClientSecret.value() }), instanceId, callerUid);
+    }
+
     // Phase-aware room routing:
     //   coach_personal → use coach's personal Zoom room (tagged isPersonal: true)
     //   shared_pool    → platform HMTI pool rooms (poolId == 'hmti'), LRU round-robin;
@@ -4583,6 +4588,15 @@ export const allocateAllPendingInstances = onCall(
       return { success: true, allocated: 0, failed: 0, message: 'No pending instances to allocate' };
     }
 
+    const botDocs = process.env.ZOOM_VERIFIED_BOT_POOL_ENABLED === 'true' ? pendingSnap.docs.filter(d => d.data().roomSource === 'shared_pool') : [];
+    let botAllocated = 0, botFailed = 0;
+    for (const d of botDocs) {
+      const result = await allocateVerifiedBotSession(db, getZoomProvider({ accountId: zoomAccountId.value(), clientId: zoomClientId.value(), clientSecret: zoomClientSecret.value() }), d.id, callerUid);
+      if (result.success) botAllocated++; else botFailed++;
+    }
+    const remainingDocs = pendingSnap.docs.filter(d => !botDocs.some(b => b.id === d.id));
+    if (!remainingDocs.length) return { success: botFailed === 0, allocated: botAllocated, failed: botFailed, total: pendingSnap.size };
+
     // Get all active Zoom rooms for this coach
     let roomsSnap = await db.collection('zoom_rooms')
       .where('coachId', '==', callerUid)
@@ -4601,14 +4615,14 @@ export const allocateAllPendingInstances = onCall(
     }
 
     if (roomsSnap.empty) {
-      return { success: false, allocated: 0, failed: pendingSnap.size, message: 'No active Zoom rooms available' };
+      return { success: false, allocated: botAllocated, failed: botFailed + remainingDocs.length, message: 'No active Zoom rooms available' };
     }
 
-    let allocated = 0;
-    let failed = 0;
+    let allocated = botAllocated;
+    let failed = botFailed;
 
     // Sort instances by date/time for orderly allocation
-    const instances = pendingSnap.docs
+    const instances = remainingDocs
       .map(d => ({ id: d.id, ...d.data() }))
       .sort((a: any, b: any) => {
         const dateCompare = (a.scheduledDate as string).localeCompare(b.scheduledDate as string);
@@ -4725,7 +4739,7 @@ export const allocateAllPendingInstances = onCall(
     });
 
     console.log(`[allocateAllPendingInstances] Coach ${callerUid}: ${allocated} allocated, ${failed} failed`);
-    return { success: true, allocated, failed, total: instances.length };
+    return { success: true, allocated, failed, total: pendingSnap.size };
   }
 );
 

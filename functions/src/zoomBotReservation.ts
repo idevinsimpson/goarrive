@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'crypto';
 import { Firestore } from 'firebase-admin/firestore';
+import { wallTimeToUtc } from './playbookScheduling';
 import { HttpsError } from 'firebase-functions/v2/https';
 export function normalizeBotEmail(value: unknown): string {
   if (typeof value !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())) throw new HttpsError('invalid-argument', 'Valid host email required');
@@ -24,16 +25,22 @@ export async function reserveBotHost(db: Firestore, sessionId: string, coachId: 
     if (!['scheduled', 'allocation_failed'].includes(s.status)) throw new HttpsError('failed-precondition', 'Session is already allocated or not bookable');
     const eligible = hosts.docs.filter(d => {
       const h = d.data();
-      return h.poolId === 'hmti' && h.verified === true && h.providerMode === 'live' && h.isBot === true &&
+      return h.poolId === 'hmti' && h.reconciled === true && Array.isArray(h.legacyRoomIds) && h.legacyRoomIds.length <= 20 && h.verified === true && h.providerMode === 'live' && h.isBot === true &&
         typeof h.providerUserId === 'string' && !!h.providerUserId && typeof h.email === 'string' &&
         h.email === normalizeBotEmail(h.email) && d.id === botHostKey(h.email) &&
         Number.isInteger(h.maxConcurrentMeetings) && h.maxConcurrentMeetings >= 1 && h.maxConcurrentMeetings <= 10;
     });
     const leases = await Promise.all(eligible.map(h => tx.get(db.doc(`zoom_bot_host_leases/${h.id}`))));
+    const legacy = await Promise.all(eligible.map(async h => {
+      const snapshots = await Promise.all((h.data().legacyRoomIds as string[]).map(id => tx.get(db.collection('session_instances').where('zoomRoomId', '==', id).where('status', 'in', ['allocated', 'in_progress']).limit(201))));
+      if (snapshots.some(x => x.size > 200)) throw new HttpsError('failed-precondition', 'Legacy room history needs reconciliation');
+      return snapshots.flatMap(x => x.docs.map(d => legacyWindow(d.id, d.data())));
+    }));
     const cursor = cursorDoc.data() || {}, order = cursor.lastSelected || {};
     const candidates = eligible.map((h, i) => {
-      const windows: Window[] = (leases[i].data()?.windows || []).filter((w: Window) => w.endMs > now);
-      return { h, windows, load: peakConcurrent(windows, startMs, endMs) };
+      const own: Window[] = (leases[i].data()?.windows || []).filter((w: Window) => w.endMs > now);
+      const windows = [...new Map([...legacy[i], ...own].map(w => [w.sessionId, w])).values()];
+      return { h, windows: own, load: peakConcurrent(windows, startMs, endMs) };
     }).filter(x => x.load < x.h.data().maxConcurrentMeetings).sort((a,b) => (order[a.h.id] || 0) - (order[b.h.id] || 0) || a.h.id.localeCompare(b.h.id));
     const selected = candidates[0];
     if (!selected) throw new HttpsError('resource-exhausted', 'No verified bot host has capacity for this time');
@@ -46,13 +53,13 @@ export async function reserveBotHost(db: Firestore, sessionId: string, coachId: 
   });
 }
 /** One irreversible provider attempt per reserved session. Ambiguous outcomes stay quarantined. */
-export async function beginBotMeeting(db: Firestore, reservation: BotReservation): Promise<boolean> {
+export async function beginBotMeeting(db: Firestore, reservation: BotReservation, now = Date.now()): Promise<boolean> {
   return db.runTransaction(async tx => {
     const ref = db.doc(`zoom_bot_allocation_jobs/${reservation.sessionId}`);
     const [jobDoc, sessionDoc, hostDoc] = await Promise.all([tx.get(ref), tx.get(db.doc(`session_instances/${reservation.sessionId}`)), tx.get(db.doc(`zoom_bot_hosts/${reservation.hostId}`))]);
     const job = jobDoc.data(), session = sessionDoc.data(), host = hostDoc.data();
     if (!job || job.attemptId !== reservation.attemptId || job.state !== 'reserved') return false;
-    if (!session || !host || host.status !== 'active' || host.verified !== true || host.providerMode !== 'live' || host.isBot !== true || host.poolId !== 'hmti' || host.email !== job.hostEmail || host.providerUserId !== job.providerUserId ||
+    if (job.endMs <= now || !session || !host || host.reconciled !== true || host.status !== 'active' || host.verified !== true || host.providerMode !== 'live' || host.isBot !== true || host.poolId !== 'hmti' || host.email !== job.hostEmail || host.providerUserId !== job.providerUserId ||
       session.coachId !== job.coachId || session.memberId !== job.memberId || (session.playbookId || null) !== job.playbookId || session.roomSource !== 'shared_pool' ||
       !['scheduled','allocation_failed'].includes(session.status) || session.startUtc?.toMillis?.() !== job.startMs || session.endUtc?.toMillis?.() !== job.endMs || (session.recordingEnabled === true) !== job.recordingEnabled) {
       tx.update(ref, { state: 'needs_reconciliation' }); return false;
@@ -65,4 +72,12 @@ export function peakConcurrent(windows: Window[], startMs: number, endMs: number
   const events = windows.filter(w => w.startMs < endMs && startMs < w.endMs).flatMap(w => [[Math.max(startMs, w.startMs), 1], [Math.min(endMs, w.endMs), -1]]);
   events.sort((a,b) => a[0]-b[0] || a[1]-b[1]);
   let count=0, peak=0; for(const [,change] of events){count+=change;peak=Math.max(peak,count);} return peak;
+}
+
+function legacyWindow(sessionId: string, s: Record<string, any>): Window {
+  let startMs = s.startUtc?.toMillis?.(), endMs = s.endUtc?.toMillis?.();
+  if (!Number.isFinite(startMs) && s.scheduledDate && s.scheduledStartTime && s.timezone) startMs = wallTimeToUtc(s.scheduledDate, s.scheduledStartTime, s.timezone).getTime();
+  if (!Number.isFinite(endMs) && Number.isFinite(startMs) && Number.isFinite(s.durationMinutes) && s.durationMinutes > 0) endMs = startMs + s.durationMinutes * 60000;
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) throw new HttpsError('failed-precondition', 'Legacy meeting timing needs reconciliation');
+  return { sessionId, startMs, endMs };
 }
