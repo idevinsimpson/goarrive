@@ -87,6 +87,18 @@ assignment once, and reopening/reloading preserves it. The scheduled-mode tests 
 synthetic missed Monday/current Wednesday fixtures; these are distinct from the
 previous completion-driven A-to-B acceptance.
 
+### Duplication and enrollment
+
+Build duplication retains the selected workout policy but creates an unassigned
+Playbook with progression at zero. Enrollment retains template configuration but
+replaces all prior member identities with the enrolling member and clears inherited
+assignment/pin/progression fields. Scheduled clones snapshot the current workout
+order with the new Playbook ID as their fresh version, starting at workout A.
+Template content synchronization still updates only workout IDs, music and description;
+it does not overwrite an enrolled member's chosen policy or progression snapshot.
+Synthetic tests cover legacy/default and both explicit policies, source immutability,
+and an enrolled scheduled clone resolving its first session through the permanent link.
+
 ### Existing archive behavior
 
 The coach's Archive action only toggles `playbooks.isArchived` and exits the
@@ -114,7 +126,7 @@ destination is supplied. No persistent return-path storage is introduced.
    WSF. New callables: `getMemberPlaybookSessions`, read-only `getSessionTime`,
    coach-only `setPlaybookWorkoutPolicy`. Changed callables: `bookPlaybookSession`,
    `bookViaBookingToken`, `getSessionWorkout`, `completePlaybookSession`.
-   Only an explicitly reviewed named-function deployment may release these.
+   The enrollment clone correction also affects `stripeWebhook` and `stripeConnectWebhook`; these require their own fresh deployed-source comparison before inclusion. No payment configuration or provider calls are part of acceptance. Only an explicitly reviewed named-function deployment may release these.
    No rules or indexes are changed.
 2. Validate the Hosting preview and `/playbook/**` rewrite with those callables.
    A preview uses the live backend and is not an isolated staging environment.

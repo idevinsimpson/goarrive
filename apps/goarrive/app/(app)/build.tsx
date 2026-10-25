@@ -44,6 +44,7 @@ import {
   doc,
   updateDoc,
   addDoc,
+  setDoc,
   serverTimestamp,
   writeBatch,
   arrayUnion,
@@ -57,6 +58,7 @@ import { useNavigation, router } from 'expo-router';
 import { useAuth } from '../../lib/AuthContext';
 import { ModuleGate } from '../../lib/useCoachModules';
 import { db, functions } from '../../lib/firebase';
+import { duplicatePlaybookFields } from '../../lib/playbookClone';
 import { httpsCallable } from 'firebase/functions';
 import { TAB_BAR_STYLE, CONTENT_BOTTOM_CLEARANCE } from '../../lib/tabBarStyle';
 import { AppHeader } from '../../components/AppHeader';
@@ -1082,14 +1084,9 @@ function BuildScreenInner() {
     if (!pbDoc || !coachId) return;
     try {
       // Members are intentionally not copied — a duplicate is a template, not a roster.
-      await addDoc(collection(db, 'playbooks'), {
-        coachId,
-        name: `${pbDoc.name} (Copy)`,
-        description: pbDoc.description || '',
-        workoutIds: Array.isArray(pbDoc.workoutIds) ? pbDoc.workoutIds : [],
-        parentId: pbDoc.parentId ?? null,
-        memberIds: [],
-        isArchived: false,
+      const copyRef = doc(collection(db, 'playbooks'));
+      await setDoc(copyRef, {
+        ...duplicatePlaybookFields(pbDoc, coachId, copyRef.id),
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });

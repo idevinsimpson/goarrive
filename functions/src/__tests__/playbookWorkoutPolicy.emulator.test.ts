@@ -3,6 +3,7 @@ import { setPlaybookWorkoutPolicy } from '../playbookWorkoutPolicy';
 import { bookOccurrence, bookPlaybookSession, wallTimeToUtc } from '../playbookScheduling';
 import { getSessionWorkout, completePlaybookSession } from '../playbookBooking';
 import { getMemberPlaybookSessions } from '../memberPlaybookLink';
+import { enrollmentCloneFields } from '../playbookClone';
 if (process.env.FIRESTORE_EMULATOR_HOST !== '127.0.0.1:8080') throw new Error('Local emulator required');
 admin.initializeApp({ projectId: 'demo-workout-policy' });
 const db = admin.firestore();
@@ -134,4 +135,17 @@ test('booking concurrently with carry completion never resets the completion poi
   expect(booked.bookedCount).toBe(1);
   expect((await read('playbooks/plan')).nextWorkoutIndex).toBe(1);
   expect((await read('session_instances/' + booked.results[0].instanceId)).scheduledWorkoutId).toBeUndefined();
+});
+
+test('enrolled scheduled clone books from its own fresh order, not the source snapshot or member cursor', async () => {
+  const source = { ...(await read('playbooks/plan')), workoutPolicy: 'scheduled', memberIds: ['old-member'], nextWorkoutIndex: 8, scheduledWorkoutPlan: { version: 'source-version', workoutIds: ['c'], startIndex: 8 } };
+  const clone = enrollmentCloneFields(source, 'clone', 'roster');
+  await db.doc('playbooks/clone').set(clone);
+  const result = await bookOccurrence({ playbookId: 'clone', playbook: clone, coachId: 'coach', memberKey: 'roster', memberId: 'roster', guestEmail: null, memberName: 'Synthetic Member', dateStr: '2026-11-06', startTime: '09:00', timezone: 'America/New_York', durationMinutes: 45, sessionKind: 'coach_review', recordingEnabled: false, weeklySessionCap: null });
+  expect((await read('session_instances/' + result.instanceId)).scheduledWorkoutId).toBe('a');
+  expect((await read('session_instances/' + result.instanceId)).scheduledWorkoutVersion).toBe('clone');
+  const memberSessions = await invoke(getMemberPlaybookSessions, { playbookId: 'clone' });
+  expect(memberSessions.sessions.map((s: any) => s.id)).toEqual([result.instanceId]);
+  expect((await read('playbooks/clone')).nextWorkoutIndex).toBe(0);
+  expect(source.nextWorkoutIndex).toBe(8);
 });

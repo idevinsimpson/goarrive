@@ -99,6 +99,7 @@ export { getMemberPlaybookSessions } from './memberPlaybookLink';
 // Playbook booking links (Phase 3b): coach availability windows + public
 // Calendly-style token page + guest-by-email bookings.
 export { setPlaybookWorkoutPolicy } from './playbookWorkoutPolicy';
+import { enrollmentCloneFields } from './playbookClone';
 export {
   createPlaybookBookingLink,
   revokePlaybookBookingLink,
@@ -1750,11 +1751,7 @@ async function enrollSubscriber(params: {
   // Clone playbook doc
   const memberName = `${firstName ?? ''} ${lastName ?? ''}`.trim() || email;
   const newPlaybookRef = db.collection('playbooks').doc();
-  const clonedFields: Record<string, unknown> = { ...template };
-  // Remove server-generated fields that must be overridden
-  delete clonedFields.createdAt;
-  delete clonedFields.updatedAt;
-  delete clonedFields.assignedAt;
+  const clonedFields = enrollmentCloneFields(template, newPlaybookRef.id, memberId);
   await newPlaybookRef.set({
     ...clonedFields,
     name: `${template.name ?? 'Playbook'} (${memberName})`,
