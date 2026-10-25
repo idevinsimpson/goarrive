@@ -8,6 +8,7 @@ import { FirestoreGuestCapabilityStore } from '../guestCapabilityStore';
 import { GuestWorkoutCapabilities } from '../guestWorkoutCapability';
 import { getGuestWorkoutAccess, revokeGuestWorkoutLink } from '../guestWorkoutAccess';
 import { updateRosterIdentity } from '../guestRosterLifecycle';
+import { readGuestAuthorizedSnapshot } from '../guestAuthorizedSnapshot';
 if (process.env.FIRESTORE_EMULATOR_HOST !== '127.0.0.1:8080') throw new Error('Local emulator required');
 const projectId = 'demo-guest-capability', app = admin.initializeApp({ projectId }), db = app.firestore();
 let env: RulesTestEnvironment;
@@ -126,4 +127,36 @@ test('roster recreation cannot revive private identity binding and safe profile 
   const m = (await db.doc('members/member').get()).data()!;
   await db.doc('members/member').delete(); await db.doc('members/member').set(m);
   await expect(f.service.resolve(f.token)).rejects.toThrow('unavailable');
+});
+
+test.each(['revoke', 'cancel', 'reschedule'])('authorization and final content read serialize against concurrent %s', async change => {
+  const f = await fixture();
+  await db.doc('workouts/A').set({ coachId: 'coach', blocks: [{ type: 'Strength', movements: [{ name: 'Synthetic', restSec: 0 }] }] });
+  let release!: () => void, reached!: () => void, paused = false;
+  const contentRead = new Promise<void>(r => { reached = r; }), continueRead = new Promise<void>(r => { release = r; });
+  const hooked = { doc: db.doc.bind(db), collection: db.collection.bind(db), runTransaction: (callback: any) => db.runTransaction(tx => callback(new Proxy(tx, {
+    get(target, key) {
+      if (key === 'get') return async (ref: any) => {
+        if (ref.path === 'workouts/A' && !paused) { paused = true; reached(); await continueRead; }
+        return target.get(ref);
+      };
+      const value = (target as any)[key]; return typeof value === 'function' ? value.bind(target) : value;
+    },
+  }))) } as unknown as admin.firestore.Firestore;
+  const pending = readGuestAuthorizedSnapshot(hooked, f.token, () => now).then(value => ({ value }), error => ({ error }));
+  await contentRead;
+  let mutationFinished = false;
+  const mutation = (change === 'revoke' ? f.service.revoke(owner, f.assignment) : db.doc('session_instances/session').update(change === 'cancel' ?
+    { status: 'cancelled' } : { startUtc: admin.firestore.Timestamp.fromMillis(now + 86400000) })).then(() => { mutationFinished = true; });
+  // The real emulator must hold the authorization reads through the later
+  // content read, or abort/retry the transaction. No mixed old/new snapshot.
+  await new Promise(r => setTimeout(r, 100));
+  const finishedWhileContentPaused = mutationFinished; release();
+  const result = await pending; await mutation;
+  if ('value' in result) {
+    expect(finishedWhileContentPaused).toBe(false);
+    expect(result.value.admission.workoutId).toBe('A');
+    expect(result.value.content.workout?.coachId).toBe('coach');
+  } else expect(result.error.message).toContain('unavailable');
+  await expect(readGuestAuthorizedSnapshot(db, f.token, () => now)).rejects.toThrow('unavailable');
 });

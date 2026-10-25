@@ -5,12 +5,12 @@ function fixture() {
   const workout: any = { coachId: 'coach', memberId: 'PRIVATE_MEMBER', notes: 'PRIVATE_NOTE', zoomJoinUrl: 'PRIVATE_ZOOM', blocks: [{ type: 'Strength', movements: [{ movementId: 'm', movementName: 'Squat', notes: 'PRIVATE_NOTE', sets: 3, reps: '10', restSec: 0 }] }] };
   const movement: any = { coachId: 'coach', name: 'Squat', videoUrl: url('movements/coach/videos/a.mp4'), notes: 'PRIVATE_NOTE' };
   const admission = { sessionId: 's', workoutId: 'w', coachId: 'coach', validUntil: now + 25000, digest: 'private-digest' };
-  const d: GuestDeliveryDependencies = { enabled: true, bucket, now: () => now, admit: jest.fn(async () => admission), content: jest.fn(async () => structuredClone({ workout, movements: { m: movement }, version: 'fixture' })),
+  const d: GuestDeliveryDependencies = { enabled: true, bucket, now: () => now, snapshot: jest.fn(async () => ({ admission: { ...admission }, content: structuredClone({ workout, movements: { m: movement }, version: 'fixture' }) })),
     metadata: jest.fn(async () => ({ size: 10, contentType: 'video/mp4', generation: '1' })), readRange: jest.fn(async (_p, r) => Buffer.alloc(r.end - r.start + 1, 7)) };
   return { d, workout, movement, admission, service: new GuestWorkoutDelivery(d) };
 }
 test('defaults disabled before database or provider access', async () => {
-  const f = fixture(); f.d.enabled = undefined; await expect(f.service.manifest('synthetic')).rejects.toThrow('unavailable'); expect(f.d.admit).not.toHaveBeenCalled();
+  const f = fixture(); f.d.enabled = undefined; await expect(f.service.manifest('synthetic')).rejects.toThrow('unavailable'); expect(f.d.snapshot).not.toHaveBeenCalled();
 });
 test('manifest only exposes allowlisted prescription and opaque asset IDs', async () => {
   const f = fixture(), manifest = await f.service.manifest('synthetic'); const text = JSON.stringify(manifest);
@@ -37,7 +37,7 @@ test('range reads are generation-pinned, bounded and private', async () => {
 });
 test('revocation during provider read discards bytes', async () => {
   const f = fixture(), m = await f.service.manifest('synthetic');
-  f.d.readRange = jest.fn(async () => { f.d.admit = async () => { throw new Error('This workout link is unavailable.'); }; return Buffer.alloc(10); });
+  f.d.readRange = jest.fn(async () => { f.d.snapshot = async () => { throw new Error('This workout link is unavailable.'); }; return Buffer.alloc(10); });
   await expect(f.service.chunk('synthetic', 'asset-0', m.revision, 'bytes=0-9')).rejects.toThrow('unavailable');
 });
 test('asset removed or replaced during provider read cannot return stale bytes', async () => {
@@ -80,9 +80,9 @@ test.each(['generation', 'size', 'contentType'])('same-path metadata changes dur
 });
 
 test.each(['delete', 'archive', 'owner', 'workout-owner'])('late content change during metadata I/O rejects projection: %s', async change => {
-  const f = fixture(), original = f.d.content;
+  const f = fixture(), original = f.d.snapshot;
   f.d.metadata = async () => {
-    if (change === 'delete') f.d.content = async id => ({ ...await original(id), movements: {} });
+    if (change === 'delete') f.d.snapshot = async token => { const s = await original(token); return { ...s, content: { ...s.content, movements: {} } }; };
     if (change === 'archive') f.movement.isArchived = true;
     if (change === 'owner') f.movement.coachId = 'other';
     if (change === 'workout-owner') f.workout.coachId = 'other';
@@ -107,4 +107,18 @@ test.each(['rounds', 'sets', 'between-round-rest', 'weight', 'sides', 'automatic
   if (kind === 'invalid-reps') m.reps = NaN;
   if (kind === 'negative-reps') m.reps = -1;
   await expect(f.service.manifest('synthetic')).rejects.toThrow('unavailable');
+});
+
+test.each(['swapSides', 'swapMode', 'swapWindowSec'])('rejects unsupported canonical hydration fallthrough: %s', async field => {
+  const f = fixture(); f.workout.blocks[0].movements[0].swapSides = false;
+  f.movement[field] = field === 'swapSides' ? true : field === 'swapMode' ? 'split' : 5;
+  await expect(f.service.manifest('synthetic')).rejects.toThrow('unavailable');
+});
+
+test('final unified snapshot denial cannot be superseded by a later content read', async () => {
+  const f = fixture(), first = f.d.snapshot;
+  let calls = 0;
+  f.d.snapshot = async token => { if (++calls === 2) throw new Error('This workout link is unavailable.'); return first(token); };
+  await expect(f.service.manifest('synthetic')).rejects.toThrow('unavailable');
+  expect(calls).toBe(2); expect(f.d.readRange).not.toHaveBeenCalled();
 });

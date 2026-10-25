@@ -1,4 +1,4 @@
-import { readGuestWorkoutContent } from '../guestWorkoutContent';
+import { readGuestAuthorizedSnapshot } from '../guestAuthorizedSnapshot';
 import * as admin from 'firebase-admin';
 import { guestStorageReader } from '../guestStorageReader';
 import { GuestWorkoutDelivery } from '../guestWorkoutDelivery';
@@ -23,8 +23,7 @@ beforeAll(async () => {
   await changeGuestAssignmentMembers(db, 'coach', 'plan', ['member']);
   service = new GuestWorkoutCapabilities(new FirestoreGuestCapabilityStore(db), { enabled: true, mediaReady: true, assignmentGenerationReady: true }, () => now, () => Buffer.alloc(32, 42));
   token = (await service.issue({ uid: 'coach', role: 'coach' }, (await readGuestAssignment(db, 'plan', 'member'))!, true, now + 60000)).token;
-  delivery = new GuestWorkoutDelivery({ enabled: true, bucket: bucketName, now: () => now, admit: value => service.resolve(value),
-    content: id => readGuestWorkoutContent(db, id), ...guestStorageReader(bucket) });
+  delivery = new GuestWorkoutDelivery({ enabled: true, bucket: bucketName, now: () => now, snapshot: value => readGuestAuthorizedSnapshot(db, value, () => now), ...guestStorageReader(bucket) });
 });
 afterAll(async () => { delete process.env.GUEST_WORKOUT_ROLLOUT_ENABLED; await bucket.file(path).delete({ ignoreNotFound: true }); await db.terminate(); await app.delete(); });
 
@@ -43,8 +42,7 @@ test('real Storage range delivery is opaque, bounded, and never writes session/p
   await expect(delivery.chunk(token, 'asset-0', manifest.revision, 'bytes=0-8')).rejects.toThrow('unavailable');
   const changed = await delivery.manifest(token); expect(changed.revision).not.toBe(manifest.revision);
   const reader = guestStorageReader(bucket);
-  const racing = new GuestWorkoutDelivery({ enabled: true, bucket: bucketName, now: () => now, admit: value => service.resolve(value),
-    content: id => readGuestWorkoutContent(db, id), ...reader, readRange: async (p, range, generation) => {
+  const racing = new GuestWorkoutDelivery({ enabled: true, bucket: bucketName, now: () => now, snapshot: value => readGuestAuthorizedSnapshot(db, value, () => now), ...reader, readRange: async (p, range, generation) => {
       const bytes = await reader.readRange(p, range, generation);
       await bucket.file(path).save(payload, { resumable: false, metadata: { contentType: 'video/mp4' } });
       return bytes;
@@ -52,8 +50,7 @@ test('real Storage range delivery is opaque, bounded, and never writes session/p
   await expect(racing.chunk(token, 'asset-0', changed.revision, 'bytes=0-8')).rejects.toThrow('unavailable');
   for (const mutation of ['delete', 'archive', 'owner']) {
     const original = (await db.doc('movements/movement').get()).data()!;
-    const contentRace = new GuestWorkoutDelivery({ enabled: true, bucket: bucketName, now: () => now, admit: value => service.resolve(value),
-      content: id => readGuestWorkoutContent(db, id), ...reader, metadata: async p => {
+    const contentRace = new GuestWorkoutDelivery({ enabled: true, bucket: bucketName, now: () => now, snapshot: value => readGuestAuthorizedSnapshot(db, value, () => now), ...reader, metadata: async p => {
         const meta = await reader.metadata(p);
         if (mutation === 'delete') await db.doc('movements/movement').delete();
         else await db.doc('movements/movement').update(mutation === 'archive' ? { isArchived: true } : { coachId: 'other' });
@@ -62,8 +59,7 @@ test('real Storage range delivery is opaque, bounded, and never writes session/p
     await expect(contentRace.manifest(token)).rejects.toThrow('unavailable');
     await db.doc('movements/movement').set(original);
     const beforeRead = await delivery.manifest(token);
-    const lateRead = new GuestWorkoutDelivery({ enabled: true, bucket: bucketName, now: () => now, admit: value => service.resolve(value),
-      content: id => readGuestWorkoutContent(db, id), ...reader, readRange: async (p, range, generation) => {
+    const lateRead = new GuestWorkoutDelivery({ enabled: true, bucket: bucketName, now: () => now, snapshot: value => readGuestAuthorizedSnapshot(db, value, () => now), ...reader, readRange: async (p, range, generation) => {
         const bytes = await reader.readRange(p, range, generation);
         if (mutation === 'delete') await db.doc('movements/movement').delete();
         else await db.doc('movements/movement').update(mutation === 'archive' ? { isArchived: true } : { coachId: 'other' });

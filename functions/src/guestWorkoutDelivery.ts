@@ -8,9 +8,8 @@ export interface GuestDeliveryDependencies {
   enabled?: boolean;
   bucket: string;
   now(): number;
-  admit(token: string): Promise<GuestAdmission>;
-  /** One consistent transaction over the workout and all referenced movements. */
-  content(id: string): Promise<GuestContentSnapshot>;
+  /** One authoritative transaction over authorization AND referenced content. */
+  snapshot(token: string): Promise<{ admission: GuestAdmission; content: GuestContentSnapshot }>;
   metadata(path: string): Promise<{ size: number; contentType: string; generation: string }>;
   readRange(path: string, range: { start: number; end: number }, generation: string): Promise<Buffer>;
 }
@@ -23,9 +22,9 @@ export class GuestWorkoutDelivery {
   constructor(private d: GuestDeliveryDependencies) {}
   private async selection(token: string) {
     if (this.d.enabled !== true) throw unavailable();
-    const admission = await this.d.admit(token);
+    const initial = await this.d.snapshot(token), admission = initial.admission;
     if (this.d.now() >= admission.validUntil) throw unavailable();
-    const snapshot = await this.d.content(admission.workoutId), workout = snapshot.workout;
+    const snapshot = initial.content, workout = snapshot.workout;
     if (!workout || workout.coachId !== admission.coachId || workout.isGlobal === true || workout.isArchived === true || !Array.isArray(workout.blocks) || workout.blocks.length > 60) throw unavailable();
     // Deliberately limited until full authenticated timeline parity is shared.
     // Never flatten rounds, rests, side switches or special phases away.
@@ -64,7 +63,11 @@ export class GuestWorkoutDelivery {
           }
           library = canonical.get(m.movementId)!;
         }
-        movements.push({ name: text(m.movementName || m.name || 'Movement'), sets: m.sets ?? null, reps: text(m.reps == null ? '' : String(m.reps), 30),
+        // useMovementHydrate applies canonical side-switch fallthrough even when
+        // the block's swapSides is false. Reject unsupported effective fields.
+        if (library.swapSides === true || ['split', 'duplicate'].includes(library.swapMode) || typeof library.swapWindowSec === 'number') throw unavailable();
+        const canonicalName = typeof library.name === 'string' && library.name.trim() ? library.name : undefined;
+        movements.push({ name: text(canonicalName || m.movementName || m.name || 'Movement'), sets: m.sets ?? null, reps: text(m.reps == null ? '' : String(m.reps), 30),
           workSec: duration, restSec: 0,
           videoAsset: asset(m.videoUrl || m.mediaUrl || library.videoUrl || library.mediaUrl, 'video'),
           thumbnailAsset: asset(m.thumbnailUrl || library.thumbnailUrl, 'image') });
@@ -84,10 +87,9 @@ export class GuestWorkoutDelivery {
     // Explicitly omit all identity, notes, URLs, voice/music, Zoom and write state.
     const view = { title: 'Your workout', blocks, unsupportedFeatures: ['generated voice', 'background music', 'coach notes', 'video calls'] };
     const revision = createHash('sha256').update(JSON.stringify({ view, assets, contentVersion: snapshot.version })).digest('hex');
-    const finalAdmission = await this.d.admit(token);
+    const final = await this.d.snapshot(token), finalAdmission = final.admission;
     if (!same(admission, finalAdmission) || this.d.now() >= finalAdmission.validUntil) throw unavailable();
-    const latestContent = await this.d.content(admission.workoutId);
-    if (JSON.stringify(latestContent) !== JSON.stringify(snapshot) || this.d.now() >= finalAdmission.validUntil) throw unavailable();
+    if (JSON.stringify(final.content) !== JSON.stringify(snapshot) || this.d.now() >= finalAdmission.validUntil) throw unavailable();
     return { admission: finalAdmission, view, assets, revision };
   }
   async manifest(token: string) {

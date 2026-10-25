@@ -35,27 +35,29 @@ export class FirestoreGuestCapabilityStore implements CapabilityStore {
   async read(digest: string) { return (await this.db.doc('guest_workout_grants/' + digest).get()).data() as Grant | undefined; }
   async assignment(g: Grant) { return readGuestAssignment(this.db, g.playbookId, g.memberId); }
   async refresh(digest: string) {
-    return this.db.runTransaction(async tx => {
-      const g = (await tx.get(this.db.doc('guest_workout_grants/' + digest))).data() as Grant | undefined;
-      const denied = { grant: g, assignment: undefined, plan: { coachId: '', workoutIds: [] as string[], nextWorkoutIndex: 0 }, sessions: [] as Session[] };
-      if (!g) return denied;
-      const [p, v, m, rows, roster] = await Promise.all([
-        tx.get(this.db.doc('playbooks/' + g.playbookId)), tx.get(this.db.doc('guest_assignment_versions/' + g.playbookId)),
-        tx.get(this.db.doc('members/' + g.memberId)), tx.get(this.db.collection('session_instances').where('playbookId', '==', g.playbookId).limit(401)),
-        tx.get(this.db.doc('guest_roster_versions/' + g.memberId)),
-      ]);
-      const plan = p.data(), version = v.data(), member = m.data();
-      if (!plan || !version || plan.guestAssignmentLocked !== true || plan.coachId !== g.coachId || version.coachId !== g.coachId ||
-        !p.createTime?.isEqual(version.playbookCreatedAt) || !plan.memberIds?.includes(g.memberId) || member?.coachId !== g.coachId || !validGuestRoster(m, roster) ||
-        JSON.stringify(plan.memberIds) !== JSON.stringify(version.memberIds) || rows.size > 400) return denied;
-      const sessions = rows.docs.filter(d => d.data().coachId === g.coachId && [g.memberId, member.uid].filter(Boolean).includes(d.data().memberId)).map(d => {
-        const s = d.data(); return { id: d.id, coachId: s.coachId, memberId: g.memberId, playbookId: s.playbookId,
-          start: s.startUtc?.toMillis?.(), end: s.endUtc?.toMillis?.(), status: s.status, completed: !!s.workoutCompletedAt,
-          pinnedWorkoutId: s.pinnedWorkoutId, scheduledWorkoutId: s.scheduledWorkoutId };
-      });
-      return { grant: g, assignment: { coachId: g.coachId, playbookId: g.playbookId, memberId: g.memberId, generation: version.generation + ':' + roster.data()!.generation, active: true },
-        plan: { coachId: plan.coachId, workoutIds: Array.isArray(plan.workoutIds) ? plan.workoutIds : [], nextWorkoutIndex: plan.nextWorkoutIndex }, sessions };
+    return this.db.runTransaction(tx => this.snapshot(tx, digest));
+  }
+  /** Allows content to join the SAME transaction, never nested rereads. */
+  async snapshot(tx: admin.firestore.Transaction, digest: string) {
+    const g = (await tx.get(this.db.doc('guest_workout_grants/' + digest))).data() as Grant | undefined;
+    const denied = { grant: g, assignment: undefined, plan: { coachId: '', workoutIds: [] as string[], nextWorkoutIndex: 0 }, sessions: [] as Session[] };
+    if (!g) return denied;
+    const [p, v, m, rows, roster] = await Promise.all([
+      tx.get(this.db.doc('playbooks/' + g.playbookId)), tx.get(this.db.doc('guest_assignment_versions/' + g.playbookId)),
+      tx.get(this.db.doc('members/' + g.memberId)), tx.get(this.db.collection('session_instances').where('playbookId', '==', g.playbookId).limit(401)),
+      tx.get(this.db.doc('guest_roster_versions/' + g.memberId)),
+    ]);
+    const plan = p.data(), version = v.data(), member = m.data();
+    if (!plan || !version || plan.guestAssignmentLocked !== true || plan.coachId !== g.coachId || version.coachId !== g.coachId ||
+      !p.createTime?.isEqual(version.playbookCreatedAt) || !plan.memberIds?.includes(g.memberId) || member?.coachId !== g.coachId || !validGuestRoster(m, roster) ||
+      JSON.stringify(plan.memberIds) !== JSON.stringify(version.memberIds) || rows.size > 400) return denied;
+    const sessions = rows.docs.filter(d => d.data().coachId === g.coachId && [g.memberId, member.uid].filter(Boolean).includes(d.data().memberId)).map(d => {
+      const s = d.data(); return { id: d.id, coachId: s.coachId, memberId: g.memberId, playbookId: s.playbookId,
+        start: s.startUtc?.toMillis?.(), end: s.endUtc?.toMillis?.(), status: s.status, completed: !!s.workoutCompletedAt,
+        pinnedWorkoutId: s.pinnedWorkoutId, scheduledWorkoutId: s.scheduledWorkoutId };
     });
+    return { grant: g, assignment: { coachId: g.coachId, playbookId: g.playbookId, memberId: g.memberId, generation: version.generation + ':' + roster.data()!.generation, active: true },
+      plan: { coachId: plan.coachId, workoutIds: Array.isArray(plan.workoutIds) ? plan.workoutIds : [], nextWorkoutIndex: plan.nextWorkoutIndex }, sessions };
   }
   async schedule(a: Assignment) {
     const [planSnap, memberSnap, rows] = await Promise.all([

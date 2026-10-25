@@ -56,7 +56,7 @@ function isStoredVoiceCurrent(cached: any): boolean {
   return true;
 }
 
-function mergeFromCache(fm: FlatMovement, cached: any): FlatMovement {
+export function mergeFromCache(fm: FlatMovement, cached: any): FlatMovement {
   // Canonical wins for identity + audio so a rename always propagates.
   // For voiceUrl specifically: if the canonical doc has been cleared (e.g.
   // mid-regeneration after a rename), we WANT '' so the player stays silent
