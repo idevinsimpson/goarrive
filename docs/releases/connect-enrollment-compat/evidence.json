@@ -1,0 +1,40 @@
+{
+  "at": "2026-10-25T05:48:35.153Z",
+  "project": "goarrive",
+  "function": "stripeConnectWebhook",
+  "allowedDeltasFromReviewedRelease": [
+    "Remove invoice.payment_succeeded dispatch alias",
+    "Restore deployed handleInvoicePaymentFailed",
+    "Restore deployed handleSubscriptionUpsert"
+  ],
+  "allNineDispatchAndHandlersEqualLive": true,
+  "enrollmentEqualsReviewedRelease": true,
+  "syntheticDispatchCases": 44,
+  "liveHandlerSha256": "04dc06cfa8691c101ca67ab4168e88d3069ba1e439d1f2ac483e5bbb24b28885",
+  "candidateIndexSha256": "8115e602ff680e340cf61626257e87cd639af2a9bd04a27d84914b7dac1446d8",
+  "compatibilityIndexSha256": "0cf38cd72c88b6fe2978da158c17effb76f92b5a7567c380161c1df4635d934e",
+  "captureTimestamp": "2026-10-25T05:17:49.831Z",
+  "deployed": {
+    "name": "projects/goarrive/locations/us-central1/functions/stripeConnectWebhook",
+    "state": "ACTIVE",
+    "updateTime": "2026-08-11T21:52:48.156741628Z",
+    "labels": {
+      "deployment-tool": "cli-firebase",
+      "firebase-functions-hash": "2cc1389e45f8982b520eccdc79c19a9bb4ca8eaf"
+    },
+    "runtime": "nodejs20",
+    "entryPoint": "stripeConnectWebhook",
+    "source": {
+      "storageSource": {
+        "bucket": "gcf-v2-sources-413741232388-us-central1",
+        "object": "stripeConnectWebhook/function-source.zip",
+        "generation": "1786485135051438"
+      }
+    },
+    "service": "projects/goarrive/locations/us-central1/services/stripeconnectwebhook",
+    "revision": "stripeconnectwebhook-00021-woj"
+  },
+  "cloneContractsPassed": 4,
+  "typescriptBuildPassed": true,
+  "notDeployed": true
+}
