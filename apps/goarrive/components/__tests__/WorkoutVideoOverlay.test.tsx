@@ -63,3 +63,20 @@ it('recorded admission discloses recording and needs its explicit consent click'
   expect(m.config).toHaveBeenCalledWith({ sessionInstanceId: 'session', purpose: 'workout_video', recordingConsentBinding: 'recorded-v1' });
   expect(m.join).toHaveBeenCalledOnce(); expect(m.capture).not.toHaveBeenCalled();
 });
+
+it('allows a slow SDK join beyond the network timeout without starting capture', async () => {
+  vi.useFakeTimers(); let finish!: () => void;
+  m.join.mockReturnValueOnce(new Promise<void>(resolve => { finish = resolve; }));
+  await render(); await click('Join video');
+  await act(async () => { await vi.advanceTimersByTimeAsync(12000); });
+  expect(m.leave).not.toHaveBeenCalled(); expect(host.textContent).not.toContain('Video could not connect');
+  await act(async () => { finish(); });
+  expect(host.textContent).toContain('Leave video'); expect(m.capture).not.toHaveBeenCalled();
+});
+
+it('shows a sanitized join code without exposing the raw provider error', async () => {
+  m.join.mockRejectedValueOnce({ errorCode: 3000, message: 'PRIVATE_TOKEN' });
+  await render(); await click('Join video');
+  expect(host.textContent).toContain('joining Zoom (code 3000)');
+  expect(host.textContent).not.toContain('PRIVATE_TOKEN'); expect(m.destroy).toHaveBeenCalledOnce();
+});

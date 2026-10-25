@@ -6,6 +6,7 @@ import { useAuth } from '../lib/AuthContext';
 import { watchVideoAdmission } from '../lib/videoAdmissionWatch';
 import { loadZoomEmbedded } from '../lib/zoomEmbeddedLoader';
 import { bounded, createZoomLease, videoCapability } from '../lib/zoomClientLifecycle';
+import { videoJoinError, VideoJoinStage } from '../lib/videoJoinError';
 
 export default function WorkoutVideoOverlay({ sessionInstanceId, variant, joinLabel }: {
   sessionInstanceId: string; variant: 'pip' | 'pane'; autoStartCamera?: boolean; joinLabel?: string;
@@ -46,24 +47,28 @@ export default function WorkoutVideoOverlay({ sessionInstanceId, variant, joinLa
     const current = generation.current; busy.current = true; setPhase('joining'); setError(''); setMinimized(false);
     const isCurrent = () => current === generation.current;
     let owned: ReturnType<typeof createZoomLease> | null = null;
+    let stage: VideoJoinStage = 'access';
     try {
       // Admission is rechecked before signing; no meeting is allocated by this request.
       const { data: config } = await bounded(httpsCallable<any, any>(functions, 'getEmbeddedSessionJoinConfig')({ sessionInstanceId, purpose: 'workout_video', ...(admission.recordingMode === 'cloud' ? { recordingConsentBinding: admission.binding } : {}) }));
       if (!isCurrent()) return;
+      stage = 'download';
       const sdk = await loadZoomEmbedded();
       if (!isCurrent() || !root.current) return;
       let client: any;
       owned = createZoomLease(() => { client = sdk.createClient(); return { client, destroy: () => sdk.destroyClient() }; });
       lease.current = owned;
+      stage = 'initialize';
       await owned.run(async active => {
         await client.init({ zoomAppRoot: root.current, language: 'en-US', patchJsMedia: true, leaveOnPageUnload: true, customize: { meetingInfo: [], video: { isResizable: false, viewSizes: { default: variant === 'pip' ? { width: 320, height: 240 } : { width: 640, height: 420 } } } } });
         if (!active() || !isCurrent()) return;
+        stage = 'join';
         await client.join({ signature: config.signature, meetingNumber: config.meetingNumber, password: config.password || '', userName: config.userName || 'Member', userEmail: config.userEmail || '' });
-      });
+      }, 60000);
       if (isCurrent() && !owned.cancelled) setPhase('joined');
-    } catch {
+    } catch (failure) {
       if (owned) { try { await owned.close(); } catch {} if (lease.current === owned) lease.current = null; }
-      if (isCurrent()) { setError('Video could not connect. Retry or continue your workout.'); setPhase('error'); }
+      if (isCurrent()) { setError(videoJoinError(stage, failure)); setPhase('error'); }
     } finally { if (isCurrent()) busy.current = false; }
   };
   if (!available || Platform.OS !== 'web') return null;
