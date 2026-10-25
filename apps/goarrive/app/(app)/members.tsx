@@ -1,3 +1,4 @@
+import { updateRosterArchive } from '../../lib/updateRosterArchive';
 /**
  * Members screen — GoArrive Member Roster
  *
@@ -380,7 +381,7 @@ function MembersScreenInner() {
     );
     setConfirmDestructive(!isArchived);
     setConfirmAction(() => async () => {
-      await updateDoc(doc(db, 'members', m.id), {
+      await updateRosterArchive(m.id, {
         isArchived: !isArchived,
         updatedAt: Timestamp.now(),
       });
@@ -454,7 +455,7 @@ function MembersScreenInner() {
 
   async function handleUndoArchive() {
     if (!undoTarget) return;
-    await updateDoc(doc(db, 'members', undoTarget.id), {
+    await updateRosterArchive(undoTarget.id, {
       isArchived: false,
       updatedAt: Timestamp.now(),
     });

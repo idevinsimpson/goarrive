@@ -20,7 +20,8 @@ const CACHE_NAME = 'goarrive-v1-' + Date.now();
 function isPasswordResetPath(pathname) {
   // Expo also exports the auth-group alias; browsers may encode its parentheses.
   const routePath = pathname.replace(/^\/(?:\(auth\)|%28auth%29)(?=\/)/i, '');
-  return routePath === '/reset-password' ||
+  return routePath === '/guest-workout' || routePath === '/guest-workout.html' || routePath.startsWith('/guest-workout/') ||
+    routePath === '/reset-password' ||
     routePath === '/reset-password.html' ||
     routePath.startsWith('/reset-password/');
 }

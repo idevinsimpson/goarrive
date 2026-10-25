@@ -16,7 +16,7 @@ function generatedWorker() {
     fs.mkdirSync(scripts, { recursive: true });
     fs.mkdirSync(path.join(dist, 'reset-password'), { recursive: true });
     fs.copyFileSync(path.join(__dirname, '..', 'generate_sw.js'), path.join(scripts, 'generate_sw.js'));
-    for (const name of ['index.html', 'bundle.js', 'reset-password.html', 'reset-password/index.html', '(auth)/reset-password.html', '(auth)/reset-password/index.html', '%28auth%29/reset-password.html']) {
+    for (const name of ['index.html', 'bundle.js', 'guest-workout.html', 'guest-workout/index.html', 'reset-password.html', 'reset-password/index.html', '(auth)/reset-password.html', '(auth)/reset-password/index.html', '%28auth%29/reset-password.html']) {
       fs.mkdirSync(path.dirname(path.join(dist, name)), { recursive: true });
       fs.writeFileSync(path.join(dist, name), '<!-- synthetic test fixture -->');
     }
@@ -90,6 +90,10 @@ test(`${kind}: activation removes the previous cache generation`, async () => {
 });
 
 for (const suffix of [
+  '/guest-workout',
+  '/guest-workout.html',
+  '/guest-workout/index.html',
+  '/guest-workout#synthetic-fixture',
   '/reset-password',
   '/reset-password/',
   '/reset-password.html',

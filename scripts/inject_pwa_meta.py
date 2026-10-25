@@ -429,6 +429,10 @@ def main():
         for name in files:
             if not name.endswith('.html'):
                 continue
+            # The isolated guest shell must not register workers, load app code,
+            # or gain logging scripts; preserve its restrictive hash-based CSP.
+            if name == 'guest-workout.html':
+                continue
             path = os.path.join(root, name)
             if os.path.abspath(path) == os.path.abspath(INDEX):
                 continue

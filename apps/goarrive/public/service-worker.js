@@ -9,7 +9,7 @@
  * even when the app tab is not open.
  */
 
-const CACHE_VERSION = '20261024-reset-password-alias';
+const CACHE_VERSION = '20261025-guest-private-route';
 const CACHE_NAME = `goarrive-${CACHE_VERSION}`;
 const STATIC_ASSETS = [
   '/',
@@ -61,6 +61,7 @@ self.addEventListener('fetch', (event) => {
   // Reset links are bearer credentials: never intercept, persist, or log them.
   // Keep Firebase's reserved auth endpoints network-only on custom domains too.
   if (
+    resetPath === '/guest-workout' || resetPath === '/guest-workout.html' || resetPath.startsWith('/guest-workout/') ||
     resetPath === '/reset-password' ||
     resetPath === '/reset-password.html' ||
     resetPath.startsWith('/reset-password/') ||

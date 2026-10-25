@@ -1,0 +1,360 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><meta name="robots" content="noindex,nofollow,noarchive"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-F4RIxNIiN3ddxmCyNozMYGCaFRR77X0yHgw1ZLcdnx4='; style-src 'sha256-4eh4pGbVHEIxH3USnRXv+JcxrBrZmN82dUxmxxECvKs='; connect-src 'self'; media-src blob:; img-src blob:; base-uri 'none'; form-action 'none'"><title>Guest workout</title><style>body{font:18px system-ui,sans-serif;max-width:800px;margin:2rem auto;padding:1rem;color:#18222b;background:#fafafa}button{font:inherit;padding:.75rem;margin:.25rem}video,img{width:100%;max-height:65vh;object-fit:contain}button:focus-visible{outline:3px solid #176b88}[hidden]{display:none!important}</style></head><body><main id="workout"></main><script>(() => {
+/** Draft-only adapter. No production endpoint or issuance UI is wired to it.
+ * Capabilities stay in memory and headers; media is never fetched from a URL in
+ * workout data. No authentication cookies, persistence, telemetry or writes. */
+class GuestMediaClient {
+    constructor(token, transport = fetch, clock = () => performance.now(), onUnavailable = () => { }) {
+        this.token = token;
+        this.transport = transport;
+        this.clock = clock;
+        this.onUnavailable = onUnavailable;
+        this.closed = false;
+        this.controller = new AbortController();
+        this.urls = new Set();
+        this.deadline = 0;
+        this.revision = '';
+    }
+    close() {
+        if (this.closed)
+            return;
+        this.closed = true;
+        this.token = '';
+        this.controller.abort();
+        if (this.timer)
+            clearTimeout(this.timer);
+        for (const url of this.urls)
+            URL.revokeObjectURL(url);
+        this.urls.clear();
+        this.onUnavailable();
+    }
+    release(url) {
+        if (this.urls.delete(url))
+            URL.revokeObjectURL(url);
+    }
+    async request(action, body, range) {
+        if (this.closed)
+            throw new Error('Workout unavailable.');
+        const controller = new AbortController(), abort = () => controller.abort();
+        this.controller.signal.addEventListener('abort', abort, { once: true });
+        const timeout = setTimeout(abort, 10000);
+        try {
+            const transport = this.transport;
+            const response = await transport('/guest-workout-api/' + action, {
+                method: 'POST', mode: 'same-origin', credentials: 'omit', redirect: 'error', cache: 'no-store', referrerPolicy: 'no-referrer',
+                signal: controller.signal, headers: { Authorization: 'Bearer ' + this.token, 'Content-Type': 'application/json', ...(range ? { Range: range } : {}) }, body: JSON.stringify(body),
+            });
+            if (!response.ok || this.closed)
+                throw new Error('Workout unavailable.');
+            const reader = response.body?.getReader();
+            if (!reader)
+                throw new Error('Workout unavailable.');
+            const chunks = [];
+            let size = 0;
+            try {
+                for (;;) {
+                    const part = await reader.read();
+                    if (part.done)
+                        break;
+                    size += part.value.byteLength;
+                    if (size > (action === 'chunk' ? 1024 * 1024 : 128 * 1024) || this.closed || controller.signal.aborted)
+                        throw new Error();
+                    chunks.push(part.value);
+                }
+            }
+            finally {
+                await reader.cancel().catch(() => { });
+            }
+            if (this.closed || controller.signal.aborted)
+                throw new Error();
+            const bytes = new Uint8Array(size);
+            let offset = 0;
+            for (const chunk of chunks) {
+                bytes.set(chunk, offset);
+                offset += chunk.byteLength;
+            }
+            return new Response(bytes, { status: response.status, headers: response.headers });
+        }
+        catch {
+            this.close();
+            throw new Error('Workout unavailable.');
+        }
+        finally {
+            clearTimeout(timeout);
+            this.controller.signal.removeEventListener('abort', abort);
+        }
+    }
+    /** Single-flight renewal; old expiry timer continues while requests are slow. */
+    manifest() {
+        if (this.checking)
+            return this.checking;
+        const started = this.clock();
+        this.checking = (async () => {
+            try {
+                const value = await (await this.request('manifest', {})).json();
+                const remaining = Math.min(25000, value.validUntil - value.serverNow) - (this.clock() - started);
+                if (this.closed || !Number.isFinite(remaining) || remaining <= 0 || !/^[a-f0-9]{64}$/.test(value.revision) || (this.revision && this.revision !== value.revision))
+                    throw new Error();
+                this.revision = value.revision;
+                this.deadline = this.clock() + remaining;
+                if (this.timer)
+                    clearTimeout(this.timer);
+                this.timer = setTimeout(() => this.close(), remaining);
+                return value;
+            }
+            catch {
+                this.close();
+                throw new Error('Workout unavailable.');
+            }
+            finally {
+                this.checking = undefined;
+            }
+        })();
+        return this.checking;
+    }
+    async asset(id) {
+        if (!/^asset-\d{1,4}$/.test(id) || !this.revision || this.clock() >= this.deadline) {
+            this.close();
+            throw new Error('Workout unavailable.');
+        }
+        try {
+            const parts = [];
+            let total = 1, start = 0, contentType = '';
+            while (start < total) {
+                const end = start === 0 ? 0 : Math.min(total - 1, start + 1024 * 1024 - 1);
+                const response = await this.request('chunk', { assetId: id, revision: this.revision }, `bytes=${start}-${end}`);
+                const match = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(response.headers.get('Content-Range') || '');
+                const type = response.headers.get('Content-Type') || '';
+                if (!match || +match[1] !== start || +match[2] !== end || +match[3] < 1 || +match[3] > 25 * 1024 * 1024 ||
+                    (start > 0 && (+match[3] !== total || type !== contentType)) || !/^(video\/(mp4|webm)|image\/(png|jpeg|gif|webp))$/.test(type))
+                    throw new Error();
+                total = +match[3];
+                contentType = type;
+                const bytes = await response.arrayBuffer();
+                if (bytes.byteLength !== end - start + 1 || this.closed || this.clock() >= this.deadline)
+                    throw new Error();
+                parts.push(bytes);
+                start = end + 1;
+            }
+            const url = URL.createObjectURL(new Blob(parts, { type: contentType }));
+            this.urls.add(url);
+            return url;
+        }
+        catch {
+            this.close();
+            throw new Error('Workout unavailable.');
+        }
+    }
+}
+/** Isolated DOM player: no Expo, Firebase, analytics, completion, voice or Zoom.
+ * Enabled is only supplied by the local fixture build; shipped shell is false. */
+function mountGuestWorkoutShell(root, options = {}) {
+    let token = /^#key=([A-Za-z0-9_-]{43})$/.exec(location.hash)?.[1] || '';
+    // Synchronous and before constructing the client, rendering or making requests.
+    history.replaceState(null, '', location.pathname);
+    root.replaceChildren();
+    const element = (tag, text = '') => {
+        const node = document.createElement(tag);
+        node.textContent = text;
+        return node;
+    };
+    root.append(element('h1', 'Guest workout'));
+    const status = element('p');
+    status.setAttribute('role', 'status');
+    root.append(status);
+    const panel = element('section');
+    root.append(panel);
+    if (!options.enabled || !token) {
+        token = '';
+        status.textContent = options.enabled ? 'This workout link is unavailable. Open the original link from your coach.' : 'Guest playback is not available yet. Use your Member Workout Link and sign in.';
+        return () => { };
+    }
+    let closed = false, generation = 0, index = 0, busy = false;
+    let renewal;
+    let client;
+    let mediaUrl;
+    const video = element('video');
+    video.controls = true;
+    video.playsInline = true;
+    video.preload = 'none';
+    video.setAttribute('aria-label', 'Workout movement video');
+    video.setAttribute('controlsList', 'nodownload noremoteplayback');
+    video.disablePictureInPicture = true;
+    const image = element('img');
+    image.alt = 'Movement preview';
+    image.hidden = true;
+    const clearMedia = () => {
+        video.pause();
+        video.removeAttribute('src');
+        video.load();
+        video.hidden = true;
+        image.removeAttribute('src');
+        image.hidden = true;
+        if (mediaUrl)
+            client?.release(mediaUrl);
+        mediaUrl = undefined;
+    };
+    const close = () => {
+        if (closed)
+            return;
+        closed = true;
+        generation++;
+        token = '';
+        if (renewal)
+            clearTimeout(renewal);
+        clearMedia();
+        client?.close();
+        panel.replaceChildren();
+        status.textContent = 'Workout closed or access unavailable. Open the original link from your coach to try again.';
+        window.removeEventListener('pagehide', close);
+        window.removeEventListener('popstate', navigate);
+        window.removeEventListener('hashchange', navigate);
+        document.removeEventListener('visibilitychange', visibility);
+    };
+    const navigate = () => { history.replaceState(null, '', location.pathname); close(); };
+    const visibility = () => { if (document.hidden)
+        close(); };
+    window.addEventListener('pagehide', close);
+    window.addEventListener('popstate', navigate);
+    window.addEventListener('hashchange', navigate);
+    document.addEventListener('visibilitychange', visibility);
+    client = new GuestMediaClient(token, fetch, () => performance.now(), close);
+    token = '';
+    status.textContent = 'Loading your scheduled workout…';
+    const parse = (manifest) => {
+        if (!Array.isArray(manifest.assets) || manifest.assets.length > 700 || !Array.isArray(manifest.workout?.blocks) || manifest.workout.blocks.length > 60)
+            throw new Error();
+        const assets = new Map();
+        for (const a of manifest.assets) {
+            if (!a || !/^asset-\d{1,4}$/.test(a.id) || !['video', 'image'].includes(a.kind) || assets.has(a.id))
+                throw new Error();
+            assets.set(a.id, a.kind);
+        }
+        const asset = (id, kind) => { if (id == null)
+            return undefined; if (typeof id !== 'string' || assets.get(id) !== kind)
+            throw new Error(); return id; };
+        const label = (value) => typeof value === 'string' ? value.slice(0, 120) : '';
+        const number = (value) => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 3600 ? value : 0;
+        const steps = [];
+        for (const block of manifest.workout.blocks) {
+            if (!block || !Array.isArray(block.movements))
+                throw new Error();
+            if (block.videoAsset)
+                steps.push({ name: label(block.type), prescription: `${number(block.durationSec)} seconds`, video: asset(block.videoAsset, 'video') });
+            for (const m of block.movements) {
+                if (!m || steps.length >= 360)
+                    throw new Error();
+                steps.push({ name: label(m.name) || 'Movement', prescription: `${m.sets == null ? '' : number(m.sets) + ' sets · '}${label(m.reps) ? label(m.reps) + ' reps · ' : ''}${number(m.workSec)} seconds · ${number(m.restSec)} seconds rest`, video: asset(m.videoAsset, 'video'), thumbnail: asset(m.thumbnailAsset, 'image') });
+            }
+            if (!block.videoAsset && !block.movements.length)
+                steps.push({ name: label(block.type), prescription: `${number(block.durationSec)} seconds` });
+        }
+        if (!steps.length || steps.length > 360)
+            throw new Error();
+        return steps;
+    };
+    const renew = async () => {
+        try {
+            await client.manifest();
+            if (!closed)
+                renewal = setTimeout(renew, 10000);
+        }
+        catch {
+            close();
+        }
+    };
+    void (async () => {
+        try {
+            const steps = parse(await client.manifest());
+            if (closed)
+                return;
+            renewal = setTimeout(renew, 10000);
+            const heading = element('h2'), prescription = element('p'), count = element('p');
+            const play = element('button', 'Play movement video'), previous = element('button', 'Previous movement'), next = element('button', 'Next movement'), exit = element('button', 'Close workout');
+            const notice = element('p', 'Read-only workout. Completion is not saved. Voice, music and video calls are unavailable.');
+            panel.append(count, heading, prescription, image, video, play, previous, next, exit, notice);
+            const show = async () => {
+                const current = ++generation;
+                clearMedia();
+                busy = false;
+                const step = steps[index];
+                count.textContent = `Movement ${index + 1} of ${steps.length}`;
+                heading.textContent = step.name;
+                prescription.textContent = step.prescription;
+                previous.disabled = index === 0;
+                next.disabled = index === steps.length - 1;
+                play.disabled = !step.video;
+                status.textContent = 'Ready. Choose Play movement video when you are ready.';
+                if (step.thumbnail) {
+                    try {
+                        const url = await client.asset(step.thumbnail);
+                        if (closed || current !== generation) {
+                            client.release(url);
+                            return;
+                        }
+                        mediaUrl = url;
+                        image.src = url;
+                        image.hidden = false;
+                    }
+                    catch {
+                        close();
+                    }
+                }
+            };
+            play.onclick = async () => {
+                if (closed || busy || !steps[index].video)
+                    return;
+                busy = true;
+                play.disabled = true;
+                const current = ++generation;
+                clearMedia();
+                status.textContent = 'Loading movement video…';
+                try {
+                    const url = await client.asset(steps[index].video);
+                    if (closed || current !== generation) {
+                        client.release(url);
+                        return;
+                    }
+                    mediaUrl = url;
+                    video.src = url;
+                    video.hidden = false;
+                    status.textContent = 'Use the video controls to pause or seek.';
+                    try {
+                        await video.play();
+                    }
+                    catch {
+                        if (!closed && current === generation)
+                            status.textContent = 'Press Play in the video controls to begin.';
+                    }
+                }
+                catch {
+                    close();
+                }
+                finally {
+                    if (!closed && current === generation) {
+                        busy = false;
+                        play.disabled = false;
+                    }
+                }
+            };
+            video.onerror = () => { if (!closed && video.hasAttribute('src'))
+                close(); };
+            previous.onclick = () => { if (index > 0) {
+                index--;
+                void show();
+            } };
+            next.onclick = () => { if (index < steps.length - 1) {
+                index++;
+                void show();
+            } };
+            exit.onclick = close;
+            await show();
+        }
+        catch {
+            close();
+        }
+    })();
+    return close;
+}
+
+mountGuestWorkoutShell(document.getElementById('workout'), { enabled: false });
+})();</script></body></html>
