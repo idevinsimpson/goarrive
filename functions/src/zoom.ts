@@ -142,7 +142,9 @@ export class RealZoomProvider implements ZoomProvider {
   async inspectHost(email: string): Promise<{ email: string; providerUserId: string; active: boolean; userType: number | null; sameAccount: boolean }> {
     const normalized = email.trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) throw new Error('Invalid host email');
-    const response = await this.apiRequest('GET', `/users/${encodeURIComponent(normalized)}`);
+    let response: Response;
+    try { response = await this.apiRequest('GET', `/users/${encodeURIComponent(normalized)}`); }
+    catch { throw new Error('Zoom host verification unavailable'); }
     if (!response.ok) throw new Error(`Zoom host inspection rejected (HTTP ${response.status}); existing account permissions may not allow this read.`);
     const data = await response.json() as { id?: unknown; email?: unknown; status?: unknown; type?: unknown; account_id?: unknown };
     if (typeof data.id !== 'string' || typeof data.email !== 'string' || data.email.toLowerCase() !== normalized) throw new Error('Zoom host identity did not match');

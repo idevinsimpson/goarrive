@@ -13289,7 +13289,7 @@ export const inspectZoomBotHosts = onCall(
     const results = [];
     for (const email of [...new Set<string>(emails.map(e => e.trim().toLowerCase()))]) {
       try { results.push({ ok: true, ...await provider.inspectHost(email) }); }
-      catch (error) { results.push({ ok: false, email, reason: error instanceof Error ? error.message : 'Host inspection failed' }); }
+      catch { results.push({ ok: false, email, reason: 'Host verification unavailable. Check existing Zoom account permissions.' }); }
     }
     return { results };
   },
