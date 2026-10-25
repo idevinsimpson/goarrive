@@ -4496,6 +4496,7 @@ export const allocateSessionInstance = onCall(
       // Host start URLs must never be stored in member-readable documents.
       zoomStartUrl: FieldValue.delete(),
       zoomMeetingPassword: meeting.password ?? null,
+      zoomUnattendedReady: meeting.unattendedReady === true,
       zoomProviderMode: zoomProvider.mode,
       allocatedAt: FieldValue.serverTimestamp(),
       allocationAttempts: (instance.allocationAttempts || 0) + 1,
@@ -4503,7 +4504,9 @@ export const allocateSessionInstance = onCall(
     });
 
     // Default-denied collection: clients cannot forge provider recording receipts.
-    await saveVideoReceipt(() => db.collection('session_video_receipts').doc(instanceRef.id).set({
+    await saveVideoReceipt(() => zoomProvider.mode === 'live' && meeting.unattendedReady !== true
+      ? db.collection('session_video_receipts').doc(instanceRef.id).delete()
+      : db.collection('session_video_receipts').doc(instanceRef.id).set({
       coachId: instance.coachId, roomId: allocatedRoom.id, meetingId: meeting.meetingId,
       memberId: instance.memberId, playbookId: instance.playbookId || null, providerMode: zoomProvider.mode,
       startMs: instance.startUtc?.toMillis?.() ?? null, endMs: instance.endUtc?.toMillis?.() ?? null,
@@ -4528,7 +4531,7 @@ export const allocateSessionInstance = onCall(
       zoomMeetingId: meeting.meetingId,
       zoomMeetingUuid: meeting.uuid,
       timestamp: FieldValue.serverTimestamp(),
-      payload: { roomId: allocatedRoom.id, roomLabel: allocatedRoom.label, joinUrl: meeting.joinUrl },
+      payload: { roomId: allocatedRoom.id, roomLabel: allocatedRoom.label },
     });
 
     await writeAuditLog({
@@ -4562,7 +4565,7 @@ export const allocateSessionInstance = onCall(
     }
 
     console.log(`[allocateSessionInstance] Allocated room ${allocatedRoom.id} to instance ${instanceId} [${zoomProvider.mode}]`);
-    return { success: true, roomLabel: allocatedRoom.label, meetingId: meeting.meetingId, providerMode: zoomProvider.mode };
+    return { success: true, unattendedReady: meeting.unattendedReady === true, roomLabel: allocatedRoom.label, meetingId: meeting.meetingId, providerMode: zoomProvider.mode };
   }
 );
 
@@ -4662,14 +4665,17 @@ export const allocateAllPendingInstances = onCall(
               zoomJoinUrl: meeting.joinUrl,
               // Also remove a stale host capability when this occurrence is reallocated.
               zoomStartUrl: FieldValue.delete(),
-              zoomMeetingPassword: meeting.password,
+              zoomMeetingPassword: meeting.password ?? null,
+              zoomUnattendedReady: meeting.unattendedReady === true,
               zoomProviderMode: batchProvider.mode,
               allocatedAt: FieldValue.serverTimestamp(),
               allocationAttempts: (instance.allocationAttempts || 0) + 1,
               updatedAt: FieldValue.serverTimestamp(),
             });
 
-            await saveVideoReceipt(() => db.collection('session_video_receipts').doc(instance.id).set({
+            await saveVideoReceipt(() => batchProvider.mode === 'live' && meeting.unattendedReady !== true
+              ? db.collection('session_video_receipts').doc(instance.id).delete()
+              : db.collection('session_video_receipts').doc(instance.id).set({
               coachId: instance.coachId, roomId: roomDoc.id, meetingId: meeting.meetingId,
               memberId: instance.memberId, playbookId: instance.playbookId || null, providerMode: batchProvider.mode,
               startMs: instance.startUtc?.toMillis?.() ?? null, endMs: instance.endUtc?.toMillis?.() ?? null,
