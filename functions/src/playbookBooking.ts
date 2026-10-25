@@ -946,16 +946,17 @@ export const getSessionWorkout = onCall(
       const ids: string[] = Array.isArray(playbook?.workoutIds) ? playbook!.workoutIds : [];
       const index = Number.isInteger(playbook?.nextWorkoutIndex) ? playbook!.nextWorkoutIndex : 0;
       const selectedId = ids.length ? ids[((index % ids.length) + ids.length) % ids.length] : null;
-      const workoutId = current.pinnedWorkoutId || selectedId;
+      const workoutId = current.pinnedWorkoutId || current.scheduledWorkoutId || selectedId;
       if (!workoutId) return null;
       const workoutSnap = await tx.get(db.collection('workouts').doc(workoutId));
       if (!workoutSnap.exists) return null;
       if (workoutSnap.data()?.coachId !== current.coachId) throw new HttpsError('permission-denied', 'Workout belongs to a different coach');
       const updates: Record<string, any> = {};
       if (!current.pinnedWorkoutId) updates.pinnedWorkoutId = workoutId;
+      if (!current.pinnedWorkoutId) updates.pinnedWorkoutPolicy = current.scheduledWorkoutId ? 'scheduled' : 'carry_forward';
       // Record assignment position and ordered sequence together. A second
       // session opened at this same position may finish, but cannot skip ahead.
-      if (current.pinnedWorkoutIndex === undefined && workoutId === selectedId) {
+      if (!current.scheduledWorkoutId && current.pinnedWorkoutPolicy !== 'scheduled' && current.pinnedWorkoutIndex === undefined && workoutId === selectedId) {
         updates.pinnedWorkoutIndex = index;
         updates.pinnedWorkoutSequence = JSON.stringify(ids);
       }
@@ -996,7 +997,7 @@ export const completePlaybookSession = onCall(
         throw new HttpsError('permission-denied', 'Playbook belongs to a different coach');
       }
       tx.update(ref, { status: 'completed', workoutCompletedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
-      if (playbookRef && playbook && Array.isArray(playbook.workoutIds) && playbook.workoutIds.length &&
+      if (inst.pinnedWorkoutPolicy !== 'scheduled' && !inst.scheduledWorkoutId && playbookRef && playbook && Array.isArray(playbook.workoutIds) && playbook.workoutIds.length &&
           Number.isInteger(inst.pinnedWorkoutIndex) &&
           inst.pinnedWorkoutIndex === (Number.isInteger(playbook.nextWorkoutIndex) ? playbook.nextWorkoutIndex : 0) &&
           inst.pinnedWorkoutSequence === JSON.stringify(playbook.workoutIds)) {

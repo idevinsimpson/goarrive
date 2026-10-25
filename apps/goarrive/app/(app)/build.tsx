@@ -3140,6 +3140,7 @@ function BuildScreenInner() {
         {currentPlaybook && (
           <Pressable
             style={[s.toolBtn, showPlaybookSchedule && s.toolBtnActive]}
+            accessibilityLabel="Playbook schedule settings"
             onPress={() => setShowPlaybookSchedule(true)}
           >
             <Icon name="calendar" size={20} color={showPlaybookSchedule ? '#F5A623' : '#F0F4F8'} />

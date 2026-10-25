@@ -43,19 +43,49 @@ observations older than sixty seconds, and later clock jumps fail closed before
 workout entry. Refresh/resume obtains another observation. An already-running
 workout is not discarded when connectivity temporarily fails.
 
-### Progression policy awaiting product clarification
+### Coach-controlled missed-workout policy
 
-This link selects the current **session** by its scheduled time. It does not
-assign a different **workout** merely because the calendar day changed. Existing
-`getSessionWorkout` uses a pinned workout when present, otherwise the Playbook's
-`nextWorkoutIndex`. Completion advances that index; an uncompleted or missed
-earlier session does not. Consequently, a later session currently repeats workout
-A if the previous session was missed and the index remains zero. Emulator
-characterization covers both explicit `missed` and elapsed-but-still-`scheduled`
-previous sessions. The A-to-B browser acceptance used completion and is not proof
-of date-based workout progression. Whether missed Monday should repeat Monday's
-unfinished workout or move to Wednesday's planned workout remains a user decision;
-this PR does not change that policy.
+Build → open Playbook → calendar (Playbook schedule settings) exposes two choices:
+**Carry unfinished workouts forward** and **Follow the scheduled workout**, with
+an explicit Save workout setting button. Missing legacy values mean carry forward.
+Only the owning coach or existing platform admin may save the setting through
+`setPlaybookWorkoutPolicy`; the transaction validates workout ownership too.
+
+Carry forward retains the existing completion-driven `nextWorkoutIndex`. A missed
+Monday repeats its unfinished workout on Wednesday. Scheduled mode snapshots the
+ordered workout IDs and current carry index when enabled, then stores a workout
+assignment on each future unopened occurrence, independently for each member.
+Roster IDs and linked Auth UIDs share the same ordering. Monday gets A and Wednesday
+gets B even if Monday is missed or incomplete. Completion does not advance the
+carry pointer for a scheduled assignment, including after switching back. Neither
+mode fabricates completion; duplicate completion retains existing idempotency.
+
+Saving a different policy affects only scheduled/allocated/allocation-failed sessions
+more than five minutes away, with no pinned workout or completion. Started,
+in-progress, completed, cancelled and pinned occurrences remain unchanged.
+Legacy occurrences without an absolute start timestamp are also left unchanged;
+the setting does not guess or migrate their scheduling data. Switching
+to carry removes planned assignments from those editable future sessions; switching
+to scheduled snapshots the current order again. Saving the same choice is idempotent.
+To adopt a subsequently changed workout order, save carry then save scheduled again.
+Deleted or foreign workout documents never fall through to a different private workout.
+
+Coach recurrence, one-off booking and public booking all use the same transactional
+assignment helper. Assignment order uses absolute UTC instants produced by the
+existing timezone-aware booking conversion, with document ID as a tie-breaker.
+Stored original order survives rescheduling, so moving an occurrence preserves its
+workout. Missed/cancelled occurrences within an assignment version retain their place;
+failed/conflicting bookings consume no place. Inserting an earlier new occurrence
+can reorder later **unopened** assignments. Already pinned or started assignments
+remain fixed even if that means a repeated workout. Each policy version keeps its
+workout-order snapshot; no background migration or GET advances a sequence counter.
+The explicit setting/booking transactions fail with a review message beyond 400
+existing occurrences rather than partially applying an oversized assignment batch.
+
+The permanent resolver remains read-only. The existing player pins the resolved
+assignment once, and reopening/reloading preserves it. The scheduled-mode tests use
+synthetic missed Monday/current Wednesday fixtures; these are distinct from the
+previous completion-driven A-to-B acceptance.
 
 ### Existing archive behavior
 
@@ -81,10 +111,12 @@ destination is supplied. No persistent return-path storage is introduced.
    and Function inventory immediately before any separately approved deployment.
    Operational main is not approved WSF production source. Never deploy all
    Functions, use the package's broad deployment script, accept deletions or touch
-   WSF. The new callables are `getMemberPlaybookSessions` and read-only
-   `getSessionTime`; use an explicitly
-   reviewed named-function deployment. No rules or indexes are changed.
-2. Validate the Hosting preview and `/playbook/**` rewrite with that callable.
+   WSF. New callables: `getMemberPlaybookSessions`, read-only `getSessionTime`,
+   coach-only `setPlaybookWorkoutPolicy`. Changed callables: `bookPlaybookSession`,
+   `bookViaBookingToken`, `getSessionWorkout`, `completePlaybookSession`.
+   Only an explicitly reviewed named-function deployment may release these.
+   No rules or indexes are changed.
+2. Validate the Hosting preview and `/playbook/**` rewrite with those callables.
    A preview uses the live backend and is not an isolated staging environment.
    No Node runtime migration belongs in this feature change; the runtime
    decommission warning is a separate release blocker to resolve before deployment.

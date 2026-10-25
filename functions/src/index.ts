@@ -98,6 +98,7 @@ export { bookPlaybookSession, cleanupExpiredBookingRequests } from './playbookSc
 export { getMemberPlaybookSessions } from './memberPlaybookLink';
 // Playbook booking links (Phase 3b): coach availability windows + public
 // Calendly-style token page + guest-by-email bookings.
+export { setPlaybookWorkoutPolicy } from './playbookWorkoutPolicy';
 export {
   createPlaybookBookingLink,
   revokePlaybookBookingLink,
