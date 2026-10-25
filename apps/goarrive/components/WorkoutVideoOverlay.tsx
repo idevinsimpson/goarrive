@@ -7,6 +7,7 @@ import { watchVideoAdmission } from '../lib/videoAdmissionWatch';
 import { loadZoomEmbedded } from '../lib/zoomEmbeddedLoader';
 import { bounded, createZoomLease, videoCapability } from '../lib/zoomClientLifecycle';
 import { videoJoinError, VideoJoinStage } from '../lib/videoJoinError';
+import { createMobileZoomClient, needsMobileZoomClient } from '../lib/zoomMobileClient';
 
 export default function WorkoutVideoOverlay({ sessionInstanceId, variant, joinLabel }: {
   sessionInstanceId: string; variant: 'pip' | 'pane'; autoStartCamera?: boolean; joinLabel?: string;
@@ -18,6 +19,7 @@ export default function WorkoutVideoOverlay({ sessionInstanceId, variant, joinLa
   const [error, setError] = useState('');
   const [minimized, setMinimized] = useState(false);
   const root = useRef<HTMLDivElement | null>(null);
+  const mobile = needsMobileZoomClient();
   const generation = useRef(0);
   const busy = useRef(false);
   const lease = useRef<ReturnType<typeof createZoomLease> | null>(null);
@@ -53,10 +55,16 @@ export default function WorkoutVideoOverlay({ sessionInstanceId, variant, joinLa
       const { data: config } = await bounded(httpsCallable<any, any>(functions, 'getEmbeddedSessionJoinConfig')({ sessionInstanceId, purpose: 'workout_video', ...(admission.recordingMode === 'cloud' ? { recordingConsentBinding: admission.binding } : {}) }));
       if (!isCurrent()) return;
       stage = 'download';
-      const sdk = await loadZoomEmbedded();
+      const sdk = mobile ? null : await loadZoomEmbedded();
       if (!isCurrent() || !root.current) return;
       let client: any;
-      owned = createZoomLease(() => { client = sdk.createClient(); return { client, destroy: () => sdk.destroyClient() }; });
+      owned = createZoomLease(() => {
+        if (mobile) {
+          const owner = createMobileZoomClient(root.current!, () => { if (isCurrent()) { void close(); setPhase('idle'); } });
+          client = owner.client; return owner;
+        }
+        client = sdk.createClient(); return { client, destroy: () => sdk.destroyClient() };
+      });
       lease.current = owned;
       stage = 'initialize';
       await owned.run(async active => {
@@ -73,8 +81,8 @@ export default function WorkoutVideoOverlay({ sessionInstanceId, variant, joinLa
   };
   if (!available || Platform.OS !== 'web') return null;
   return <View style={{ width: variant === 'pip' ? minimized ? 170 : 330 : '100%', minHeight: minimized ? 0 : 120, backgroundColor: '#151B26', borderRadius: 10, padding: 6 }}>
-    <div ref={root} style={{ display: minimized ? 'none' : 'block', width: '100%', height: phase === 'joined' || phase === 'joining' ? (variant === 'pip' ? 240 : 420) : 0 }} />
-    {phase === 'joined' && variant === 'pip' && <View style={{ gap: 8, padding: 8 }}>
+    <div ref={root} style={{ display: minimized ? 'none' : 'block', width: '100%', height: phase === 'joined' || phase === 'joining' ? (mobile ? 380 : variant === 'pip' ? 240 : 420) : 0 }} />
+    {phase === 'joined' && variant === 'pip' && !mobile && <View style={{ gap: 8, padding: 8 }}>
       {minimized && <Text style={{ color: '#F0F4F8' }}>Video connected</Text>}
       <Pressable accessibilityRole="button" onPress={() => setMinimized(value => !value)}><Text style={{ color: '#F5A623' }}>{minimized ? 'Show video controls' : 'Minimize video'}</Text></Pressable>
     </View>}

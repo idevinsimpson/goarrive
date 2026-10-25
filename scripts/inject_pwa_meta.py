@@ -430,6 +430,10 @@ def main():
             if not name.endswith('.html'):
                 continue
             path = os.path.join(root, name)
+            # The isolated Zoom browsing context must not register/reload the app SW.
+            # Its parent owns lifecycle and removes the frame on leave/admission expiry.
+            if os.path.relpath(path, DIST_DIR) in ('workout-zoom-client.html', 'workout-zoom-left.html'):
+                continue
             if os.path.abspath(path) == os.path.abspath(INDEX):
                 continue
             with open(path, 'r') as f:
