@@ -19,7 +19,7 @@ beforeEach(() => {
   m.load.mockResolvedValue({ createClient: () => ({ init: m.init, join: m.join, leaveMeeting: m.leave }), destroyClient: m.destroy });
   host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host);
 });
-afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 it('disabled and signed-out mounting never loads SDK, signs a join, or requests media', async () => {
   m.available.mockResolvedValue({ data: { enabled: false } }); await render();
   expect(m.load).not.toHaveBeenCalled(); expect(m.config).not.toHaveBeenCalled(); expect(m.capture).not.toHaveBeenCalled();
@@ -79,4 +79,16 @@ it('shows a sanitized join code without exposing the raw provider error', async 
   await render(); await click('Join video');
   expect(host.textContent).toContain('joining Zoom (code 3000)');
   expect(host.textContent).not.toContain('PRIVATE_TOKEN'); expect(m.destroy).toHaveBeenCalledOnce();
+});
+
+it('mobile explicit join uses isolated Client View and navigation destroys it without media automation', async () => {
+  vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('iPhone Safari');
+  await render(); expect(host.querySelector('iframe')).toBeNull();
+  await click('Join video');
+  const frame = host.querySelector('iframe')!; expect(frame).not.toBeNull();
+  expect(m.load).not.toHaveBeenCalled(); expect(m.capture).not.toHaveBeenCalled();
+  await act(async () => { window.dispatchEvent(new MessageEvent('message', { source: frame.contentWindow, origin: window.location.origin, data: { type: 'workout-zoom-ready' } })); });
+  await act(async () => { window.dispatchEvent(new MessageEvent('message', { source: frame.contentWindow, origin: window.location.origin, data: { type: 'workout-zoom-joined' } })); });
+  expect(host.textContent).toContain('Leave video');
+  await render('new-session'); expect(frame.isConnected).toBe(false); expect(m.capture).not.toHaveBeenCalled();
 });
